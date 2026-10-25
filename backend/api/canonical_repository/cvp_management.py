@@ -17,6 +17,7 @@ from .knowledge_models import KNOWLEDGE_COLLECTIONS, evidence_fragment_ids
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 
 VERSION = 'wang_cvp_management_v2'
+SUMMARY_ENRICHMENT_CONTRACT = 'new_link_target_summary_metadata_v1'
 MATERIAL_VERSION = 'wang_cvp_common_material_v1'
 COLLECTIONS = {'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_links', 'viewpoint_relations'}
 PREFIXES = {'canonical_viewpoints': 'v', 'viewpoint_revisions': 'r',
@@ -399,6 +400,21 @@ def _maintenance_scope(col, payload, records):
 
 def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=()):
     request = _request(request)
+    if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
+            and previous.get('material_sha256')!=bundle.get('artifact_sha256')
+            and bundle.get('summary_enrichment_contract')==SUMMARY_ENRICHMENT_CONTRACT):
+        # A historical expansion rebound the candidate before task contracts
+        # were attached. Recover only an exact preimage differing in these two
+        # program declarations; records, source text and findings cannot drift.
+        for removed in [('summary_enrichment_contract',),('link_evidence_contract',),
+                        ('summary_enrichment_contract','link_evidence_contract')]:
+            if any(k not in bundle for k in removed):continue
+            if ('link_evidence_contract' in removed
+                    and bundle['link_evidence_contract']!='source_fragment_refs_v1'):continue
+            before=seal({k:v for k,v in bundle.items() if k not in {*removed,'artifact_sha256'}})
+            if before['artifact_sha256']==previous['material_sha256']:
+                return rebind_candidate(request,before,bundle,previous,
+                    replacement_raw=raw,prior_findings=prior_findings)
     if previous is not None and previous.get('schema_version') == VERSION + '_rebase_frame':
         verify(previous, VERSION + '_rebase_frame')
         expected = prepare_rebase_frame(request, previous['old_bundle'], bundle,

@@ -100,3 +100,12 @@ def test_exact_job_recovery_cannot_retry_another_exception(tmp_path):
         retry_exceptions=True,job_id=jobs[1]['job_id'])
     assert chosen==jobs[1]
     assert json.loads((q.states/(jobs[0]['job_id']+'.json')).read_text())['status']=='exception'
+
+
+def test_saved_retired_route_head_is_history_not_an_extra_active_route(saved):
+    store,root,_,rows,_,_=saved
+    rows['argument_routes','old-route']={'payload':{'route_status':'retired'}}
+    assert worker.resume_applied_cvp_route(store,'V1',root)['status']=='applied_readback_verified'
+    rows['argument_routes','old-route']['payload']['route_status']='active'
+    with pytest.raises(ValueError,match='route population changed'):
+        worker.resume_applied_cvp_route(store,'V1',root)

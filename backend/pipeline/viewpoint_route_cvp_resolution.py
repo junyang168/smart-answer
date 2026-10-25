@@ -138,6 +138,7 @@ def run_cvp_route_scope(
     reconsiderer: Any,
     max_correction_rounds: int,
     recovery_seed: dict[str, Any] | None = None,
+    connection_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Review the entire replacement set on every round, then stop at a pass.
 
@@ -191,7 +192,42 @@ def run_cvp_route_scope(
     write_immutable(output_dir / "route-packet.json", route_packet)
     last_reconsideration = None
     consumed_corrections = 0
-    if recovery_seed is None:
+    if recovery_seed is not None and connection_seed is not None:
+        raise ValueError('Route continuations cannot be combined')
+    if connection_seed is not None:
+        consumed_corrections = connection_seed['receipt']['previous_corrections_consumed']
+        if consumed_corrections > max_correction_rounds:
+            raise ValueError('connection continuation exhausted its original correction budget')
+        raw = connection_seed['proposal']
+        last_reconsideration = connection_seed['previous_correction']
+        if connection_seed['receipt']['mode'] == 'correction':
+            if consumed_corrections == max_correction_rounds:
+                raise ValueError('connection continuation has no remaining correction')
+            seed_packet = {'scope_label':scope_label,'route_evidence_packet':route_packet,
+                'route_proposal':raw,'route_proposal_sha256':connection_seed['proposal_sha256'],
+                'route_review':connection_seed['review'],'route_review_sha256':connection_seed['review_sha256'],
+                'previous_correction':last_reconsideration,
+                'connection_continuation':connection_seed['receipt'],
+                'instruction':('Continue this exact saved proposal after the exception-targeted upstream member repair. '
+                    'Resolve the saved CVP exception using current approved links and their actual rationale. '
+                    'Return the complete revised set, including the restored source argument if justified. '
+                    'Keep all unaffected evidence and findings; this receipt is not approval. '
+                    'This correction consumes the original remaining correction budget.')}
+            write_immutable(output_dir/'connection-correction-packet.json',seed_packet)
+            # All ordinary findings already passed; only the saved upstream
+            # exception remains. Use the complete-proposal schema for this
+            # correction rather than inventing a mandatory "correct" finding
+            # just to satisfy the ordinary reconsideration response schema.
+            answer,_,_=call_model(proposer,seed_packet,output_dir/'raw-connection-correction.json')
+            corrected=proposal_model.model_validate(canonicalize_proposal(answer)[0])
+            raw=corrected.model_dump(mode='json')
+            if sha256_json(raw) == connection_seed['proposal_sha256']:
+                raise CvpRouteReviewIncomplete('restored membership correction made no change')
+            write_immutable(output_dir/'connection-correction.json',{'proposal':raw,
+                'original_proposal_sha256':connection_seed['proposal_sha256'],
+                'original_review_sha256':connection_seed['review_sha256']})
+            consumed_corrections+=1
+    elif recovery_seed is None:
         raw, _, _ = call_model(proposer, route_packet,
                                output_dir / "raw-route-proposal-000.json")
     else:
@@ -293,6 +329,16 @@ def run_cvp_route_scope(
             route_proposal_sha256=proposal_sha,
             whole_cvp=True,
         )[0]
+        if connection_seed:
+            review_packet['connection_continuation_context'] = {
+                'original_review':connection_seed['review'],
+                'receipt':connection_seed['receipt'],
+                'instruction':('Independently review the entire postimage against current evidence and approved '
+                    'connection judgments. Recheck the saved CVP exception with its previously omitted identity '
+                    'rationale or restored member. Do not repeat an exception solely because a supporting or '
+                    'qualifying source has a complete inference; identify a concrete unresolved identity/scope '
+                    'problem if one remains. Prior approval does not prove this route set correct. '
+                    'Keep the old verdict immutable; this continuation is not content approval.')}
         if recovery_seed:
             review_packet["input_recovery_context"] = {
                 "original_review": recovery_seed["review"],
@@ -356,6 +402,9 @@ def run_cvp_route_scope(
                 "review_sha256": review_sha,
                 "rounds": rounds,
                 "proposal_validation_repairs": validation_repairs,
+                **({'connection_continuation':connection_seed['receipt'],
+                    'corrections_consumed_including_parent':consumed_corrections + validation_repairs + round_number}
+                   if connection_seed else {}),
                 **({"input_recovery": recovery_seed["receipt"],
                     "input_recovery_corrections": consumed_corrections} if recovery_seed else {}),
                 "passing_route_keys": sorted(item.local_route_key for item in effective.argument_route_candidates),

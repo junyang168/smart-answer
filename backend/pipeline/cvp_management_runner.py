@@ -43,6 +43,13 @@ def validate_authorization(request):
     if direction!=expected:raise ValueError('CVP2 authorization differs from exact operation/scope/budget')
 
 
+def clarify_summary_enrichment(store,parent_id,*,step_id,implementation):
+    """Check fixed code files before recording the existing-capability correction."""
+    for bound in implementation:check_binding(bound)
+    return persistence.clarify_summary_enrichment(store,parent_id,step_id=step_id,
+                                                 implementation=implementation)
+
+
 def _guard(store,bundle):
     from backend.pipeline.cvp_contextual_summary import guard as summary_guard
     for binding in bundle.get('summary_bindings',[]):summary_guard(store,binding)
@@ -314,7 +321,7 @@ def _same_material_inputs(current,saved):
         if current.get('human_source_decisions')!=[d for d in saved.get('human_source_decisions',[])
                                                   if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
-        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract'))
+        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract','summary_enrichment_contract'))
 
 
 def _omitted_duplicate_relations(store,step):
@@ -623,7 +630,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         write_immutable(filtered_path,recall)
                 # Control facts version semantic material while the original
                 # authenticated recall remains reusable. They never reset calls.
-                controls={k:bundle[k] for k in ('human_constraints','quality_findings') if bundle.get(k)}
+                controls={k:bundle[k] for k in ('human_constraints','quality_findings','summary_enrichment_contract') if bundle.get(k)}
                 if controls:
                     generation=sha256_json({'base_generation':generation,'controls':controls})[:24]
                     unit_root=root/('unit-'+sha256_json(key)[:16])/generation
@@ -705,8 +712,9 @@ def run(store,request,*,root,execute=False,clients=None):
                         raw,_,_=call(pa,packet,step_root/'proposal.json');response=validate_response('proposal',raw)
                         if response['result']=='context_insufficient':
                             newbundle=_expand(store,request,current,key,recall,bundle,response)
+                            newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                             if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
-                            bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                            bundle=newbundle;ordinal+=1;revision=False;continue
                         candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
                         proposal_path=step_root/'proposal.json'
                     else:
@@ -800,8 +808,9 @@ def run(store,request,*,root,execute=False,clients=None):
                     raw_review,_,_=call(ra,packet,step_root/'review.json');review=validate_response('review',raw_review)
                     if review['result']=='context_insufficient':
                         newbundle=_expand(store,request,current,key,recall,bundle,review)
+                        newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                         previous=domain.rebind_candidate(request,bundle,newbundle,candidate,prior_findings=prior_findings)
-                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);proposal_origin=None
+                        bundle=newbundle;proposal_origin=None
                         ordinal+=1;revision=False;continue
                     approval=domain.validate_review(request,bundle,candidate,review['review'],prior_findings=prior_findings)
                     write_immutable(step_root/'approval.json',approval)

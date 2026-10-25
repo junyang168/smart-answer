@@ -5830,6 +5830,31 @@ class PostgresKnowledgeStore:
                                                'payload':payload,'retired':False}
         return result
 
+    def read_cvp_link_judgment_origins(self, links):
+        """Indexed committed origins, never a scan of unrelated model history."""
+        if not links:
+            return {}
+        with self.connect() as conn:
+            conn.execute('SET LOCAL statement_timeout=5000')
+            rows = conn.execute('''SELECT v.object_id, v.revision, v.content_sha256,
+                    cs.metadata->>'reviewed_sha256', p.metadata
+                FROM wang_knowledge.object_versions v
+                JOIN wang_knowledge.change_sets cs USING(change_set_id)
+                JOIN wang_knowledge.pipeline_runs p ON p.run_id=cs.metadata->>'run_id'
+                JOIN unnest(%s::text[],%s::integer[]) wanted(object_id,revision)
+                  ON v.object_id=wanted.object_id AND v.revision=wanted.revision
+                WHERE v.collection='viewpoint_claim_links' AND cs.status='applied'
+                  AND p.metadata->>'kind'='cvp_management_round' ''',
+                ([l['viewpoint_claim_link_id'] for l in links], [l['revision'] for l in links])).fetchall()
+        result = {}
+        for oid, revision, sha, reviewed_sha, origin in rows:
+            link = next(l for l in links if l['viewpoint_claim_link_id'] == oid)
+            if (revision != link['revision'] or sha != record_content_sha(link)
+                    or reviewed_sha != origin['reviewed_sha256']):
+                raise ChangeSetConflict('connection rationale origin changed')
+            result[oid] = origin
+        return result
+
     def read_cvp_route_records(self, viewpoint_id):
         """Current route heads and their attestations for one CVP, using payload GIN."""
         with self.connect() as conn, conn.cursor() as cursor:

@@ -41,6 +41,7 @@ def prepare_cvp_route_materials(
     source_loader: Callable[[dict[str, Any]], Any] = load_context_source,
     include_context: bool = False,
     context_claim_ids: tuple[str, ...] = (),
+    include_connection_judgments: bool = False,
 ) -> dict[str, Any]:
     """Close active links, their evidence, and related physical source sections.
 
@@ -199,10 +200,27 @@ def prepare_cvp_route_materials(
         related=set(store.read_section_context_claim_ids(selected))-claim_ids
         if related:
             return prepare_cvp_route_materials(store, viewpoint_id, source_loader=source_loader,
-                context_claim_ids=tuple(sorted(related)))
+                context_claim_ids=tuple(sorted(related)),
+                include_connection_judgments=include_connection_judgments)
 
     records = {**head_row, **revision_rows, **route_rows, **link_rows, **claim_rows,
                **evidence_rows, **fragment_rows, **source_rows, **citation_rows}
+    judgments = []
+    if include_connection_judgments:
+        from backend.api.canonical_repository.cvp_link_judgment import approved_link_judgment
+        decision_rows = _read_exact(store, {('viewpoint_identity_decisions', l.decision_id) for l in links})
+        records.update(decision_rows)
+        origins = store.read_cvp_link_judgment_origins([l.model_dump(mode='json') for l in links])
+        for link in links:
+            decision = decision_rows['viewpoint_identity_decisions', link.decision_id]['payload']
+            origin = origins.get(link.viewpoint_claim_link_id)
+            if origin is not None:
+                judgments.append(approved_link_judgment(link.model_dump(mode='json'), decision, origin))
+            else:
+                judgments.append({'viewpoint_claim_link_id':link.viewpoint_claim_link_id,
+                    'decision_id':link.decision_id, 'claim_id':link.claim_id, 'link_type':link.link_type,
+                    'viewpoint_revision_id':revision_id, 'reasons':[decision['reason']],
+                    'review_artifact_sha256':decision['review_artifact_sha256']})
     pins = {(collection, object_id): (row["revision"], row["content_sha256"], False)
             for (collection, object_id), row in records.items()}
     store.verify_current_read_pins(pins)
@@ -234,6 +252,8 @@ def prepare_cvp_route_materials(
         body['existing_observation_supports'] = observations
     if unusable_context_claims:
         body['unusable_context_claims'] = unusable_context_claims
+    if include_connection_judgments:
+        body['approved_connection_judgments'] = judgments
     return body | {"artifact_sha256": sha256_json(body)}
 
 

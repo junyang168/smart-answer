@@ -121,6 +121,37 @@ def parent(store):
     return store.get_cvp_group('CVPM-'+runner.sha256_json('test-cvp2'))
 
 
+def test_existing_summary_capability_can_be_clarified_without_resetting_history(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    from backend.pipeline.cvp_sql_commit import binding
+    store,request,root,_,_=setup
+    request['input']=seal({k:v for k,v in request['input'].items() if k!='artifact_sha256'}|
+                          {'recall_profile':STATEMENT_SCOPE_PROFILE})
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    task=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    pid=task['run_id']
+    step=persistence.prepare_step(store,pid,group_key='g1',generation='legacy',ordinal=0,materials={'legacy':True})
+    intent={'cache_path':str(root/'proposal.json'),'request_bytes':100,'model_id':'gpt-6.1-sol'}
+    persistence.reserve_call(store,pid,key='proposal.json',role='gpt',intent=intent)
+    persistence.begin_call(store,pid,key='proposal.json',intent=intent)
+    implementation=[binding(Path(runner.__file__))]
+    with pytest.raises(ChangeSetConflict,match='exact returned original step'):
+        runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
+    persistence.returned_call(store,pid,key='proposal.json',raw={'saved':'answer'},artifact_sha256='sha')
+    before=store.get_cvp_group(pid)
+    receipt=runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
+    assert runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)==receipt
+    after=store.get_cvp_group(pid)
+    for key in ('request','call_reservations','revision_rounds','execution_root','units'):
+        assert before[key]==after[key]
+    bundle=seal({'schema_version':'wang_cvp_common_material_v1','group_key':'g1','records':[],'material':{}})
+    clarified=persistence.bind_task_constraints(store,pid,bundle)
+    assert clarified['summary_enrichment_contract']==domain.SUMMARY_ENRICHMENT_CONTRACT
+    assert 'summary_enrichment_contract' not in bundle
+
+
 def test_fitting_initial_proposal_does_not_screen_recalled_cvps(setup, monkeypatch):
     from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
     from backend.pipeline import cvp_candidate_screening

@@ -330,6 +330,7 @@ def build_registry_route_packet(
     observation_supports: bool = False,
     existing_observation_supports: list[dict[str, Any]] | None = None,
     unusable_context_claims: list[dict[str, Any]] | None = None,
+    approved_connection_judgments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Rebuild Route evidence solely from committed Registry state.
 
@@ -628,6 +629,21 @@ def build_registry_route_packet(
         packet['context_claim_ids'] = sorted(c.claim_id for c in scope_claims if c.claim_id not in linked_claims)
         if unusable_context_claims:
             packet['unusable_context_claims'] = unusable_context_claims
+    if approved_connection_judgments is not None:
+        links = {l['viewpoint_claim_link_id']:l for l in viewpoint_claim_links
+                 if l.get('effective_state') == 'active'}
+        if (len(approved_connection_judgments) != len(links)
+                or {j['viewpoint_claim_link_id'] for j in approved_connection_judgments} != set(links)
+                or any(j['claim_id'] != links[j['viewpoint_claim_link_id']]['claim_id']
+                       or j['link_type'] != links[j['viewpoint_claim_link_id']]['link_type']
+                       or j['viewpoint_revision_id'] != links[j['viewpoint_claim_link_id']]['validated_against_viewpoint_revision_id']
+                       for j in approved_connection_judgments)):
+            raise ValueError('connection judgments differ from active approved links')
+        packet['approved_connection_judgments'] = approved_connection_judgments
+        packet['connection_judgment_note'] = (
+            '以下是这些连接已批准的具体作用和理由，供核对身份范围，不是本轮论证内容批准。'
+            '完整推理不自动使 supports/qualifies 成为等价成员；判断结论归属须结合命题、范围及这些理由。'
+            '发现具体来源冲突或新的身份问题仍须提出复核，不因已有批准而忽略新证据。')
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 

@@ -84,6 +84,52 @@ def test_incremental_summary_prompt_checks_all_old_and_new_members():
     assert '不得因整条连接错误而要求删去相关细节' in reviewer._prompt
 
 
+def test_summary_permission_clarification_is_opt_in_and_does_not_relabel_saved_prompts():
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    req=request(input=seal({'schema_version':'wang_cvp_recall_preflight_v1',
+                            'recall_profile':STATEMENT_SCOPE_PROFILE}))
+    old=materials();old['sources']=[];old=seal({k:v for k,v in old.items() if k!='artifact_sha256'});original=deepcopy(old)
+    legacy=models.adapter('proposal',req,old,domain.proposal_packet(req,old),client=Client())
+    new=seal({k:v for k,v in old.items() if k!='artifact_sha256'}|
+             {'summary_enrichment_contract':domain.SUMMARY_ENRICHMENT_CONTRACT})
+    current=models.adapter('proposal',req,new,domain.proposal_packet(req,new),client=Client())
+    assert '不要求目标另列' not in legacy._prompt
+    assert '不要求目标另列' in current._prompt
+    assert '不允许改statement、scope、身份或旧连接' in current._prompt
+    assert current.prompt_sha256!=legacy.prompt_sha256
+    assert old==original
+    replay=models.adapter('proposal',req,old,domain.proposal_packet(req,old),client=Client())
+    assert replay.prompt_sha256==legacy.prompt_sha256
+    from backend.pipeline.cvp_management_runner import _same_material_inputs
+    assert not _same_material_inputs(new,old)
+    bad=seal({k:v for k,v in new.items() if k!='artifact_sha256'}|{'summary_enrichment_contract':'unknown'})
+    with pytest.raises(ValueError,match='unknown new-link'):
+        models.adapter('proposal',req,bad,domain.proposal_packet(req,bad),client=Client())
+
+
+def test_saved_expansion_before_contract_binding_reuses_exact_model_input_only():
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    from backend.pipeline.cvp_model_packet import project
+    req=request(input=seal({'schema_version':'wang_cvp_recall_preflight_v1',
+                            'recall_profile':STATEMENT_SCOPE_PROFILE}))
+    before=materials();previous=domain.compile_candidate(req,before,proposal())
+    final=seal({k:v for k,v in before.items() if k!='artifact_sha256'}|{
+        'summary_enrichment_contract':domain.SUMMARY_ENRICHMENT_CONTRACT,
+        'link_evidence_contract':'source_fragment_refs_v1'})
+    repaired=domain.compile_candidate(req,final,{},previous=previous)
+    assert repaired['material_sha256']==final['artifact_sha256']
+    assert repaired['component_plan']==previous['component_plan']
+    assert repaired['prior_findings']==previous['prior_findings']
+    assert repaired['rebase_history'][-1]['candidate_sha256']==previous['artifact_sha256']
+    # No model-visible semantic input is altered by repairing this binding.
+    assert project(domain.proposal_packet(req,final,previous=previous))==project(
+        domain.proposal_packet(req,final,previous=repaired))
+    drift=deepcopy(final);drift['material']['extra_source_fact']='changed'
+    drift=seal({k:v for k,v in drift.items() if k!='artifact_sha256'})
+    with pytest.raises(ValueError,match='changed request/material'):
+        domain.compile_candidate(req,drift,{},previous=previous)
+
+
 @pytest.mark.parametrize('bad', ['claim','text','component','creation','target','summary','member'])
 def test_scoped_proposal_schema_rejects_foreign_component_object_and_creation_refs(bad):
     req,b=request(),materials();a=models.adapter('proposal',req,b,domain.proposal_packet(req,b),client=Client())
