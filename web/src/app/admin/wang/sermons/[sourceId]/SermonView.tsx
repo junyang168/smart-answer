@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import cytoscape, { type Core } from "cytoscape";
 import { AlertCircle, ArrowLeft, Loader2, Search, Share2, Wrench } from "lucide-react";
 import { SourceText } from "../../source-coverage/SourceText";
+import { matchesAll, searchTerms } from "../../viewpoints/graph-types";
 import type { SourceDetail } from "../../source-coverage/types";
 
 type SermonClaim = {
@@ -21,6 +22,7 @@ type SermonGraphData = {
   claims: SermonClaim[];
   edges: { id: string; source: string; target: string; type: string; label: string; reason: string | null }[];
   relation_labels: Record<string, string>;
+  fold: Record<string, string>;
 };
 
 const COLORS: Record<string, string> = {
@@ -35,12 +37,6 @@ const COLORS: Record<string, string> = {
 
 function short(text: string, length = 14): string {
   return text.length > length ? `${text.slice(0, length)}…` : text;
-}
-
-function matches(claim: SermonClaim, query: string): boolean {
-  return claim.text.includes(query)
-    || claim.scripture.some((ref) => ref.includes(query))
-    || claim.viewpoints.some((viewpoint) => viewpoint.text.includes(query));
 }
 
 async function read<T>(url: string): Promise<T> {
@@ -105,7 +101,11 @@ export function SermonView({ sourceId }: { sourceId: string }) {
         } },
         { selector: "node.member", style: { "background-color": "#6366f1" } },
         { selector: ".dim", style: { opacity: 0.12 } },
-        { selector: "node.match", style: { "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10 } },
+        { selector: "node.match", style: {
+          "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10,
+          "font-size": 10,
+          "min-zoomed-font-size": 0, "text-background-color": "#fffbeb", "text-background-opacity": 0.9, "text-background-padding": "2px",
+        } },
         { selector: "node:selected", style: { "background-color": "#dc2626", width: 22, height: 22 } },
         { selector: "edge", style: {
           width: 1.5, "line-color": "data(color)", "target-arrow-color": "data(color)",
@@ -145,8 +145,11 @@ export function SermonView({ sourceId }: { sourceId: string }) {
     }
   }, [selected, graph, text]);
 
-  const term = query.trim();
-  const found = useMemo(() => (graph && term ? graph.claims.filter((item) => matches(item, term)) : []), [graph, term]);
+  const terms = useMemo(() => (graph ? searchTerms(query, graph.fold) : []), [graph, query]);
+  const found = useMemo(() => (graph ? graph.claims.filter((item) => matchesAll(
+    [item.text, ...item.scripture.map(String), ...item.viewpoints.map((viewpoint) => viewpoint.text)], terms, graph.fold,
+  )) : []), [graph, terms]);
+  const term = terms.length > 0;
   useEffect(() => {
     const instance = cy.current;
     if (!instance) return;
@@ -155,6 +158,11 @@ export function SermonView({ sourceId }: { sourceId: string }) {
     found.forEach((item) => instance.getElementById(item.id).addClass("match"));
     instance.nodes().not(".match").addClass("dim");
     instance.edges().addClass("dim");
+    const drawn = instance.nodes(".match");
+    if (drawn.nonempty()) {
+      instance.fit(drawn, 60);
+      if (instance.zoom() > 1.5) { instance.zoom(1.5); instance.center(drawn); }
+    }
   }, [found, term]);
 
   // A highlight in the text selects the first Claim built on that fragment.
@@ -202,7 +210,21 @@ export function SermonView({ sourceId }: { sourceId: string }) {
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按主张文字、经文或所属观点找"
                 className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" />
             </label>
-            {term ? <p className="mb-2 text-xs font-semibold text-amber-700">找到 {found.length} 条（橙色）</p> : null}
+            {term ? (
+              <div className="mb-2 rounded-2xl border border-amber-200 bg-white">
+                <p className="border-b border-amber-100 px-4 py-2 text-xs font-bold text-amber-800">
+                  找到 {found.length} 条主张（图上橙色）{found.length === 0 ? "。换个词，或用空格分开几个词试试" : ""}
+                </p>
+                <ul className="max-h-56 divide-y divide-slate-100 overflow-y-auto text-sm leading-6">
+                  {found.map((item) => (
+                    <li key={item.id}>
+                      <button type="button" onClick={() => select(item.id)}
+                        className={`w-full px-4 py-1.5 text-left hover:bg-amber-50 ${selected === item.id ? "bg-rose-50" : ""}`}>{item.text}</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div ref={container} className="h-[24rem] rounded-2xl border border-slate-200 bg-white" aria-label="主张关系图" />
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
               {Object.entries(graph.relation_labels).map(([type, label]) => (
@@ -210,17 +232,6 @@ export function SermonView({ sourceId }: { sourceId: string }) {
               ))}
             </div>
           </div>
-
-          {term && found.length > 0 ? (
-            <ul className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white text-sm">
-              {found.map((item) => (
-                <li key={item.id}>
-                  <button type="button" onClick={() => select(item.id)}
-                    className={`w-full px-4 py-2 text-left hover:bg-slate-50 ${selected === item.id ? "bg-rose-50" : ""}`}>{item.text}</button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
 
           {claim ? (
             <article className="rounded-2xl border border-slate-200 bg-white p-5">

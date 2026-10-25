@@ -19,6 +19,7 @@ export type ViewpointGraphData = {
   nodes: GraphNode[];
   edges: GraphEdge[];
   relation_labels: Record<string, string>;
+  fold: Record<string, string>;
   stats: { viewpoints: number; relations: number; connected: number; isolated: number; groups: number };
 };
 
@@ -55,4 +56,22 @@ export const RELATION_COLORS: Record<string, string> = {
 export function sermonHref(sourceId: string, claimId?: string): string {
   const query = claimId ? `?claim=${encodeURIComponent(claimId)}` : "";
   return `/admin/wang/sermons/${encodeURIComponent(sourceId)}${query}`;
+}
+
+// Search across the two scripts: the store mixes simplified and traditional
+// text, so the query and the text are both folded to simplified through the
+// map the backend sends (#453). Space-separated words must all appear, in
+// any order: 「人子 神性」.
+export function fold(text: string, map: Record<string, string>): string {
+  return Array.from(text.toLowerCase(), (char) => map[char] ?? char).join("");
+}
+
+export function searchTerms(query: string, map: Record<string, string>): string[] {
+  return fold(query, map).split(/[\s\u3000]+/).filter(Boolean);
+}
+
+export function matchesAll(texts: string[], terms: string[], map: Record<string, string>): boolean {
+  if (terms.length === 0) return false;
+  const haystack = fold(texts.join("\n"), map);
+  return terms.every((term) => haystack.includes(term));
 }

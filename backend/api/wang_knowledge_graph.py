@@ -19,10 +19,13 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException
+from opencc import OpenCC
 
 from .canonical_repository.postgres_store import PostgresKnowledgeStore, database_url_from_env
 
 router = APIRouter(prefix="/admin/wang/graph", tags=["wang-admin"])
+
+_TO_SIMPLIFIED = OpenCC("t2s")
 
 RELATION_LABELS = {
     "applies": "应用",
@@ -126,6 +129,17 @@ def components(node_ids: Iterable[str], edges: Iterable[tuple[str, str]]) -> dic
     return number
 
 
+def search_folding(texts: Iterable[str]) -> dict[str, str]:
+    """Traditional characters in these texts, each with its simplified form.
+
+    The store mixes the two scripts, so the page folds both the query and the
+    text through this map before matching: 強調 then finds 强调 and the reverse.
+    """
+
+    chars = {char for text in texts for char in text}
+    return {char: folded for char in chars if (folded := _TO_SIMPLIFIED.convert(char)) != char}
+
+
 def viewpoint_graph(store: PostgresKnowledgeStore) -> dict[str, Any]:
     with store.connect() as conn, conn.cursor() as cursor:
         viewpoints = _payloads(cursor, "canonical_viewpoints", "AND payload->>'identity_status' = 'active'")
@@ -176,6 +190,7 @@ def viewpoint_graph(store: PostgresKnowledgeStore) -> dict[str, Any]:
     return {
         "nodes": nodes,
         "edges": edges,
+        "fold": search_folding(text for node in nodes for text in [node["text"], *node["scripture"]]),
         "relation_labels": RELATION_LABELS,
         "stats": {
             "viewpoints": len(nodes),
@@ -326,8 +341,12 @@ def sermon_graph(store: PostgresKnowledgeStore, source_id: str) -> dict[str, Any
     viewpoints: dict[str, list[dict[str, str]]] = defaultdict(list)
     for claim_id, viewpoint_id, text in memberships:
         viewpoints[claim_id].append({"id": viewpoint_id, "text": text or ""})
+    searchable = [c.get("statement") or "" for c in claims] + [
+        str(ref) for c in claims for ref in c.get("scripture_refs") or []
+    ] + [v["text"] for linked in viewpoints.values() for v in linked]
     return {
         "source": titles[source_id],
+        "fold": search_folding(searchable),
         "claims": [
             {
                 "id": c["claim_id"],

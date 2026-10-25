@@ -5,16 +5,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import cytoscape, { type Core } from "cytoscape";
 import { AlertCircle, Loader2, Search } from "lucide-react";
 import { ViewpointPanel } from "./ViewpointPanel";
-import { RELATION_COLORS, type GraphNode, type ViewpointGraphData } from "./graph-types";
+import { RELATION_COLORS, matchesAll, searchTerms, type GraphNode, type ViewpointGraphData } from "./graph-types";
 
 function short(text: string, length = 18): string {
   return text.length > length ? `${text.slice(0, length)}…` : text;
 }
 
-function matches(node: GraphNode, query: string): boolean {
-  if (!query) return false;
-  return node.text.includes(query) || node.scripture.some((ref) => ref.includes(query));
-}
 
 // One graph of viewpoints across sermons; its edges are the recorded viewpoint
 // relations and nothing else (#453). Isolated viewpoints are listed beside it,
@@ -73,7 +69,12 @@ export function ViewpointGraph() {
           "min-zoomed-font-size": 7,
         } },
         { selector: ".dim", style: { opacity: 0.12 } },
-        { selector: "node.match", style: { "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10 } },
+        // Matches are labelled at any zoom, so a search can be read off the graph.
+        { selector: "node.match", style: {
+          "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10,
+          "font-size": 11,
+          "min-zoomed-font-size": 0, "text-background-color": "#fffbeb", "text-background-opacity": 0.9, "text-background-padding": "2px",
+        } },
         { selector: "node:selected", style: { "background-color": "#dc2626", "border-width": 3, "border-color": "#fecaca" } },
         { selector: "edge", style: {
           width: 1.5, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle",
@@ -114,21 +115,31 @@ export function ViewpointGraph() {
     }
   }, [selected, data]);
 
-  const found = useMemo(() => (data && query.trim() ? data.nodes.filter((node) => matches(node, query.trim())) : []), [data, query]);
+  const terms = useMemo(() => (data ? searchTerms(query, data.fold) : []), [data, query]);
+  const found = useMemo(
+    () => (data ? data.nodes.filter((node) => matchesAll([node.text, ...node.scripture], terms, data.fold)) : []),
+    [data, terms],
+  );
   useEffect(() => {
     const instance = cy.current;
     if (!instance) return;
     instance.elements().removeClass("match dim");
-    if (!query.trim()) return;
+    if (terms.length === 0) return;
     found.forEach((node) => instance.getElementById(node.id).addClass("match"));
     instance.nodes().not(".match").addClass("dim");
     instance.edges().addClass("dim");
-  }, [found, query]);
+    const drawn = instance.nodes(".match");
+    if (drawn.nonempty()) {
+      instance.fit(drawn, 80);
+      if (instance.zoom() > 1.5) { instance.zoom(1.5); instance.center(drawn); }
+    }
+  }, [found, terms]);
 
   if (error) return <p className="flex items-center gap-2 rounded-xl bg-rose-50 p-4 text-sm text-rose-800"><AlertCircle className="h-4 w-4" />{error}</p>;
   if (!data) return <p className="flex items-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />正在读取观点图…</p>;
 
-  const shownIsolated = query.trim() ? isolated.filter((node) => matches(node, query.trim())) : isolated;
+  const searching = terms.length > 0;
+  const shownIsolated = searching ? isolated.filter((node) => found.includes(node)) : isolated;
   return (
     <main className="space-y-4 pb-10">
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-4">
@@ -141,7 +152,7 @@ export function ViewpointGraph() {
         </div>
         <label className="relative w-full max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按观点文字或经文找，如 太20:28"
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按观点文字或经文找，如 人子 神性"
             className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" />
         </label>
       </header>
@@ -152,7 +163,7 @@ export function ViewpointGraph() {
             <span className="inline-block h-0.5 w-5" style={{ backgroundColor: RELATION_COLORS[type] ?? "#94a3b8" }} />{label}
           </span>
         ))}
-        {query.trim() ? <span className="font-semibold text-amber-700">找到 {found.length} 个（橙色）</span> : null}
+        {searching ? <span className="font-semibold text-amber-700">找到 {found.length} 个（橙色），列在右边</span> : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
@@ -169,17 +180,6 @@ export function ViewpointGraph() {
               </div>
             ) : null}
           </div>
-          {query.trim() && found.length > 0 ? (
-            <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white text-sm">
-              {found.slice(0, 30).map((node) => (
-                <li key={node.id}>
-                  <button type="button" onClick={() => select(node.id)} className="w-full px-4 py-2 text-left hover:bg-slate-50">
-                    {node.text}<span className="ml-2 text-xs text-slate-400">{node.group === null ? "孤立" : ""} {node.sermons} 篇</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
           <details className="rounded-2xl border border-slate-200 bg-white">
             <summary className="cursor-pointer px-5 py-3 text-sm font-bold text-slate-800">
               还没有任何关系的观点（{shownIsolated.length}）
@@ -196,7 +196,34 @@ export function ViewpointGraph() {
           </details>
         </div>
         <aside className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-          {selected ? <ViewpointPanel viewpointId={selected} onSelect={select} /> : (
+          {selected ? (
+            <>
+              {searching ? (
+                <button type="button" onClick={() => select(null)} className="mb-2 text-sm font-semibold text-indigo-700 hover:underline">
+                  ← 回到搜索结果（{found.length}）
+                </button>
+              ) : null}
+              <ViewpointPanel viewpointId={selected} onSelect={select} />
+            </>
+          ) : searching ? (
+            <section className="rounded-2xl border border-amber-200 bg-white">
+              <p className="border-b border-amber-100 px-4 py-2 text-sm font-bold text-amber-800">
+                找到 {found.length} 个观点{found.length === 0 ? "。换个词，或用空格分开几个词试试" : "，点一条看详情"}
+              </p>
+              <ul className="divide-y divide-slate-100 text-sm leading-6">
+                {found.map((node) => (
+                  <li key={node.id}>
+                    <button type="button" onClick={() => select(node.id)} className="w-full px-4 py-2 text-left hover:bg-amber-50">
+                      {node.text}
+                      <span className="mt-0.5 block text-xs text-slate-400">
+                        {node.sermons} 篇讲道{node.group === null ? " · 没有关系，不在图上" : ""}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : (
             <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm leading-7 text-slate-500">
               点图上的一个观点，这里显示它的论证路线、链接的主张、相关观点和版本历史。
             </p>
