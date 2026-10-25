@@ -900,3 +900,23 @@ def test_a_model_only_chooses_which_program_candidate_is_a_paragraphs_source():
     packet["source_originals"]["originals"].append({"source_id": "S3", "content": "第九章第六節：「但要叫你們知道，人子在地上有赦罪的權柄。就對癱子說：起來，拿你的褥子回家去罷！」這是命令，也是憑據。"})
     rows = derive_bindings(manuscript, packet, [], [])["bindings"]
     assert rows[0]["basis"] == ["lead_in"] and rows[0]["spans"] == rows[1]["spans"] != []
+
+
+def test_a_passed_draft_reopens_only_for_the_owners_own_notes(tmp_path):
+    import pytest
+    from backend.pipeline.draft_first_review_runner import DraftReviewContractError, continued_round
+    from backend.pipeline.matthew_exposition_authoring import sha256_text
+
+    manuscript = "# 標題\n\n正文。兩者的先後也不加判斷。\n"
+    (tmp_path / "final.md").write_text(manuscript)
+    (tmp_path / "final-self-check.json").write_text("[]")
+    (tmp_path / "round-02").mkdir()
+    (tmp_path / "round-02" / "outcome.json").write_text(json.dumps(
+        {"round": 2, "manuscript_sha256": sha256_text(manuscript), "passed": True, "blind_read": {},
+         "blind_compare": None, "review": None, "backstage_language_report": {}, "self_check_problems": []}))
+    packet = {"source_originals": {"originals": [{"content": "正文。"}]}}
+    scripture = {"chapters": {}, "text": "", "verses": []}
+    with pytest.raises(DraftReviewContractError, match="already passed"):
+        continued_round(tmp_path, packet, scripture)
+    _, _, seeded = continued_round(tmp_path, packet, scripture, [{"anchor": "兩者的先後也不加判斷。", "summary": "刪去"}])
+    assert [f["gate"] for f in seeded["blocking_findings"]] == ["owner"]

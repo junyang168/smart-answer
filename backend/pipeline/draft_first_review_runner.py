@@ -815,7 +815,9 @@ def continued_round(
     outcome = json.loads(last.read_text(encoding="utf-8"))
     if outcome["manuscript_sha256"] != sha256_text(manuscript):
         raise DraftReviewContractError(f"{last} did not review {previous / 'final.md'}")
-    if outcome["passed"]:
+    if outcome["passed"] and not owner_notes:
+        # A passed draft reopens only for the owner's own edits (#439: a
+        # footnote sentence and a stray character, after the review passed).
         raise DraftReviewContractError(f"{previous} already passed; nothing to continue")
     quote_report = verbatim_quote_report(manuscript, dict(packet), scripture)
     findings = merge_blocking_findings(
