@@ -44,6 +44,7 @@ from .wang_article_reviews import router as wang_article_reviews_router
 from .viewpoint_admin import router as viewpoint_admin_router
 from .wang_essay_runs import router as wang_essay_runs_router
 from .wang_inbox import router as wang_inbox_router
+from .wang_knowledge_graph import router as wang_knowledge_graph_router
 
 app = FastAPI()
 
@@ -92,6 +93,7 @@ app.include_router(wang_article_reviews_router)
 app.include_router(viewpoint_admin_router)
 app.include_router(wang_essay_runs_router)
 app.include_router(wang_inbox_router)
+app.include_router(wang_knowledge_graph_router)
 
 
 def _release_identity() -> dict[str, str]:

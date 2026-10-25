@@ -96,3 +96,10 @@ def test_article_rows_join_registered_reviews_and_runs(tmp_path):
     assert rows["keys"]["stage_label"] == "已发布" and rows["keys"]["run_href"] is None
     assert rows["ransom"]["stage_label"] == "定问题" and rows["ransom"]["review_href"] is None
     assert rows["ransom"]["waiting"] == "文章的问题、经文或选定的观点还没写全"
+
+
+def test_graph_components_leave_isolated_viewpoints_ungrouped():
+    from backend.api.wang_knowledge_graph import components
+
+    groups = components(["a", "b", "c", "d"], [("a", "b"), ("b", "c")])
+    assert groups["a"] == groups["b"] == groups["c"] and "d" not in groups
