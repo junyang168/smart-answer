@@ -303,6 +303,37 @@ class EssayRun:
         return {"status": "complete"}
 
 
+def init_run(run_dir: Path, *, review_id: str, title: str, question: str,
+             passages: list[str], decision_basis: str) -> None:
+    """Write a new run's owner inputs, so no session assembles them by hand.
+
+    The selection starts with no viewpoints: the coverage search proposes
+    them, and the owner's decisions put them in.
+    """
+
+    from backend.pipeline.theological_evidence_packet import make_editorial_scope
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    targets = {name: run_dir / name for name in ("essay.json", "scope.json", "editorial-selection.json")}
+    if any(path.exists() for path in targets.values()):
+        raise SystemExit(f"{run_dir} already has a run; continue it instead of starting again")
+    selection_id = f"editorial-selection-{review_id}"
+    scope = make_editorial_scope(
+        scope_id=f"TES-{review_id}", working_title=title, reader_question=question,
+        passage_refs=passages, structure_revision_id=selection_id,
+        publication_profile_id="WQ-theological-topic-essay-v1",
+    )
+    files = {
+        "essay.json": {"review_id": review_id, "passage": "；".join(passages)},
+        "scope.json": scope,
+        "editorial-selection.json": {"selection_id": selection_id, "attribution": "church_editor",
+                                     "decision_basis": decision_basis, "focal_viewpoints": [],
+                                     "unresolved_items": []},
+    }
+    for name, payload in files.items():
+        targets[name].write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def adopt_existing(stage: str, argv: list[str], log: Path) -> None:
     """Run nothing: a stage whose output already exists is recorded as done.
 
@@ -328,7 +359,22 @@ def main() -> int:
     parser.add_argument("--redo", choices=STAGES, help="forget this stage and every later one, then run")
     parser.add_argument("--adopt", action="store_true",
                         help="record outputs that already exist as done; run no command and call no model")
+    init = parser.add_argument_group("starting a new essay (--init)")
+    init.add_argument("--init", action="store_true", help="write the run's owner inputs, then stop")
+    init.add_argument("--review-id", help="lowercase id for the review page, e.g. ransom-for-many-v1")
+    init.add_argument("--title", help="working title")
+    init.add_argument("--question", help="the reader question, as the owner settled it")
+    init.add_argument("--passage", action="append", default=[], help="a passage, e.g. 太20:28; repeat")
+    init.add_argument("--decision-basis", help="what the owner decided the essay is about, in the owner's words")
     args = parser.parse_args()
+    if args.init:
+        missing = [flag for flag in ("review_id", "title", "question", "decision_basis") if not getattr(args, flag)]
+        if missing or not args.passage:
+            parser.error("--init needs --review-id, --title, --question, --passage and --decision-basis")
+        init_run(args.run_dir, review_id=args.review_id, title=args.title, question=args.question,
+                 passages=args.passage, decision_basis=args.decision_basis)
+        print(json.dumps({"status": "initialised", "run_dir": str(args.run_dir)}, ensure_ascii=False))
+        return 0
     run = EssayRun(args.run_dir, runner=adopt_existing if args.adopt else run_command)
     if args.status:
         print(json.dumps({"stages": {k: v.get("status") for k, v in run.state["stages"].items()},

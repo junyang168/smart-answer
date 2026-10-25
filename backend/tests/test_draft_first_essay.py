@@ -104,3 +104,18 @@ def test_a_changed_input_reruns_its_stage_and_what_follows(tmp_path):
     third = len(fake.calls)
     EssayRun(tmp_path, runner=fake, calibration_check=lambda: None).advance()
     assert fake.calls[third:] == ["coverage", "decisions"]
+
+
+def test_init_writes_the_owner_inputs_once(tmp_path):
+    import pytest
+    from backend.pipeline.draft_first_essay import init_run
+
+    init_run(tmp_path, review_id="ransom-v1", title="萬人的贖價", question="贖價是為誰付的？",
+             passages=["太20:28", "提前2:6"], decision_basis="負責人：跨講道專題")
+    scope = json.loads((tmp_path / "scope.json").read_text())
+    selection = json.loads((tmp_path / "editorial-selection.json").read_text())
+    assert scope["reader_question"] == "贖價是為誰付的？" and scope["structure_revision_id"] == selection["selection_id"]
+    assert selection["focal_viewpoints"] == []
+    assert EssayRun(tmp_path, runner=FakeCommands(), calibration_check=lambda: None).advance()["stage"] == "decisions"
+    with pytest.raises(SystemExit):
+        init_run(tmp_path, review_id="x", title="t", question="q", passages=["p"], decision_basis="b")
