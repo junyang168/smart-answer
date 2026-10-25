@@ -27,6 +27,7 @@ export function ViewpointGraph() {
   const [data, setData] = useState<ViewpointGraphData | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const [hover, setHover] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
   const container = useRef<HTMLDivElement | null>(null);
   const cy = useRef<Core | null>(null);
 
@@ -71,7 +72,8 @@ export function ViewpointGraph() {
           // Labels appear once they are big enough to read.
           "min-zoomed-font-size": 7,
         } },
-        { selector: "node.match", style: { "background-color": "#f59e0b" } },
+        { selector: ".dim", style: { opacity: 0.12 } },
+        { selector: "node.match", style: { "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10 } },
         { selector: "node:selected", style: { "background-color": "#dc2626", "border-width": 3, "border-color": "#fecaca" } },
         { selector: "edge", style: {
           width: 1.5, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle",
@@ -85,6 +87,15 @@ export function ViewpointGraph() {
       wheelSensitivity: 0.3,
     });
     instance.on("tap", "node", (event) => select(event.target.id()));
+    // Labels are cut short, so hovering a node shows its whole statement.
+    const byId = new Map(connected.map((node) => [node.id, node]));
+    instance.on("mouseover", "node", (event) => {
+      const node = byId.get(event.target.id());
+      const at = event.target.renderedPosition();
+      if (node) setHover({ node, x: at.x, y: at.y + event.target.renderedHeight() / 2 });
+    });
+    instance.on("mouseout", "node", () => setHover(null));
+    instance.on("viewport tap", () => setHover(null));
     cy.current = instance;
     return () => { instance.destroy(); cy.current = null; };
     // The graph is built once per payload; selection and search restyle it below.
@@ -107,9 +118,12 @@ export function ViewpointGraph() {
   useEffect(() => {
     const instance = cy.current;
     if (!instance) return;
-    instance.nodes().removeClass("match");
+    instance.elements().removeClass("match dim");
+    if (!query.trim()) return;
     found.forEach((node) => instance.getElementById(node.id).addClass("match"));
-  }, [found]);
+    instance.nodes().not(".match").addClass("dim");
+    instance.edges().addClass("dim");
+  }, [found, query]);
 
   if (error) return <p className="flex items-center gap-2 rounded-xl bg-rose-50 p-4 text-sm text-rose-800"><AlertCircle className="h-4 w-4" />{error}</p>;
   if (!data) return <p className="flex items-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />正在读取观点图…</p>;
@@ -143,7 +157,18 @@ export function ViewpointGraph() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="space-y-4">
-          <div ref={container} className="h-[38rem] rounded-2xl border border-slate-200 bg-white" aria-label="观点关系图" />
+          <div className="relative">
+            <div ref={container} className="h-[38rem] rounded-2xl border border-slate-200 bg-white" aria-label="观点关系图" />
+            {hover ? (
+              <div className="pointer-events-none absolute z-10 w-72 -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 text-sm leading-6 text-white shadow-lg"
+                style={{ left: hover.x, top: hover.y + 8 }}>
+                {hover.node.text}
+                <p className="mt-1 text-xs text-slate-300">
+                  {[...hover.node.scripture.slice(0, 3), `${hover.node.sermons} 篇讲道`].join(" · ")}
+                </p>
+              </div>
+            ) : null}
+          </div>
           {query.trim() && found.length > 0 ? (
             <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white text-sm">
               {found.slice(0, 30).map((node) => (

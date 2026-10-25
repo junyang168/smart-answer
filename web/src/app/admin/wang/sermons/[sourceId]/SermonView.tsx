@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import cytoscape, { type Core } from "cytoscape";
-import { AlertCircle, ArrowLeft, Loader2, Share2, Wrench } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Search, Share2, Wrench } from "lucide-react";
 import { SourceText } from "../../source-coverage/SourceText";
 import type { SourceDetail } from "../../source-coverage/types";
 
@@ -37,6 +37,12 @@ function short(text: string, length = 14): string {
   return text.length > length ? `${text.slice(0, length)}…` : text;
 }
 
+function matches(claim: SermonClaim, query: string): boolean {
+  return claim.text.includes(query)
+    || claim.scripture.some((ref) => ref.includes(query))
+    || claim.viewpoints.some((viewpoint) => viewpoint.text.includes(query));
+}
+
 async function read<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
   const payload = await response.json();
@@ -55,6 +61,7 @@ export function SermonView({ sourceId }: { sourceId: string }) {
   const [graph, setGraph] = useState<SermonGraphData | null>(null);
   const [text, setText] = useState<SourceDetail | null>(null);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
   const [scrollTo, setScrollTo] = useState<{ ordinal: number; nonce: number } | null>(null);
   const container = useRef<HTMLDivElement | null>(null);
   const cy = useRef<Core | null>(null);
@@ -97,6 +104,8 @@ export function SermonView({ sourceId }: { sourceId: string }) {
           color: "#334155", "text-valign": "bottom", "text-margin-y": 3, "min-zoomed-font-size": 6,
         } },
         { selector: "node.member", style: { "background-color": "#6366f1" } },
+        { selector: ".dim", style: { opacity: 0.12 } },
+        { selector: "node.match", style: { "background-color": "#f59e0b", "border-width": 3, "border-color": "#fde68a", "z-index": 10 } },
         { selector: "node:selected", style: { "background-color": "#dc2626", width: 22, height: 22 } },
         { selector: "edge", style: {
           width: 1.5, "line-color": "data(color)", "target-arrow-color": "data(color)",
@@ -135,6 +144,18 @@ export function SermonView({ sourceId }: { sourceId: string }) {
       setScrollTo({ ordinal, nonce: nonce.current });
     }
   }, [selected, graph, text]);
+
+  const term = query.trim();
+  const found = useMemo(() => (graph && term ? graph.claims.filter((item) => matches(item, term)) : []), [graph, term]);
+  useEffect(() => {
+    const instance = cy.current;
+    if (!instance) return;
+    instance.elements().removeClass("match dim");
+    if (!term) return;
+    found.forEach((item) => instance.getElementById(item.id).addClass("match"));
+    instance.nodes().not(".match").addClass("dim");
+    instance.edges().addClass("dim");
+  }, [found, term]);
 
   // A highlight in the text selects the first Claim built on that fragment.
   const selectFragment = useCallback((fragmentId: string) => {
@@ -176,6 +197,12 @@ export function SermonView({ sourceId }: { sourceId: string }) {
 
         <section className="space-y-4">
           <div>
+            <label className="relative mb-2 block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按主张文字、经文或所属观点找"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" />
+            </label>
+            {term ? <p className="mb-2 text-xs font-semibold text-amber-700">找到 {found.length} 条（橙色）</p> : null}
             <div ref={container} className="h-[24rem] rounded-2xl border border-slate-200 bg-white" aria-label="主张关系图" />
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-600">
               {Object.entries(graph.relation_labels).map(([type, label]) => (
@@ -183,6 +210,17 @@ export function SermonView({ sourceId }: { sourceId: string }) {
               ))}
             </div>
           </div>
+
+          {term && found.length > 0 ? (
+            <ul className="max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white text-sm">
+              {found.map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => select(item.id)}
+                    className={`w-full px-4 py-2 text-left hover:bg-slate-50 ${selected === item.id ? "bg-rose-50" : ""}`}>{item.text}</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
           {claim ? (
             <article className="rounded-2xl border border-slate-200 bg-white p-5">
