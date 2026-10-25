@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from opencc import OpenCC
 
 from backend.api.config import DATA_BASE_PATH, WANG_REPOSITORY_DIR, WANG_STAGING_DIR
+from backend.api.draft_first_review_report import review_report
 from backend.api.canonical_repository.service import CanonicalRepositoryService
 from backend.pipeline.excerpt_audio_alignment import (
     align_transcript_excerpt,
@@ -1301,7 +1302,9 @@ def _annotated_reader_markdown(
     return annotated.strip(), annotations, audit, playback_audit
 
 
-def _draft_first_stage_checks(run_record: dict[str, Any]) -> list[dict[str, str]]:
+def _draft_first_stage_checks(
+    run_record: dict[str, Any], *, rounds_total: int | None = None, published: bool = False
+) -> list[dict[str, str]]:
     """Stage chips for a draft-first run: three gates and the revision loop.
 
     The briefed pipeline's stage names (Grounding, Program Audit) do not
@@ -1312,7 +1315,9 @@ def _draft_first_stage_checks(run_record: dict[str, Any]) -> list[dict[str, str]
     status = str(run_record.get("status") or "unknown")
     passed = status == "review_passed"
     rounds = list(run_record.get("rounds") or [])
-    revisions = max(0, len(rounds) - 1)
+    # An owner-note round continues an earlier review directory; the count
+    # covers the whole chain when the caller has read it.
+    revisions = max(0, (rounds_total if rounds_total is not None else len(rounds)) - 1)
     gate_state = "passed" if passed else "failed"
     return [
         {"id": "author", "label": "Author 起草", "state": "complete"},
@@ -1324,7 +1329,7 @@ def _draft_first_stage_checks(run_record: dict[str, Any]) -> list[dict[str, str]
             "label": f"修订 {revisions} 轮",
             "state": "complete" if passed else "failed",
         },
-        {"id": "publication", "label": "正式出版", "state": "not_run"},
+        {"id": "publication", "label": "正式出版", "state": "complete" if published else "not_run"},
     ]
 
 
@@ -1434,6 +1439,29 @@ def _draft_first_route_steps(
     return None, []
 
 
+# How a paragraph's source was found, in a colleague's words (#453). A
+# checklist item id means the author's self-check landed that judgement here.
+_BASIS_LABELS = {
+    "scripture_read": "教授在讲道里读了这节经文",
+    "scripture_cited": "教授在讲道里提到这节经文",
+    "review": "审稿人查原文时记下的出处",
+    "lead_in": "引出下一段经文，出处随下一段",
+    "model_match": "程序在原文里找出候选，模型确认是这一处",
+}
+
+
+def _binding_basis(basis: list[Any], checklist_text: dict[str, str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    items = [str(value) for value in basis if str(value) in checklist_text]
+    if items:
+        rows.append({"kind": "self_check", "label": "作者自查：本段写到立场清单上的判断",
+                     "items": [checklist_text[value] for value in dict.fromkeys(items)]})
+    for value in dict.fromkeys(str(value) for value in basis):
+        if value in _BASIS_LABELS:
+            rows.append({"kind": value, "label": _BASIS_LABELS[value], "items": []})
+    return rows
+
+
 def _draft_first_annotated_markdown(
     markdown: str,
     bindings_record: dict[str, Any],
@@ -1447,8 +1475,10 @@ def _draft_first_annotated_markdown(
     spans keep their audio timing and the frontend shape is unchanged.
     """
 
+    from backend.pipeline.draft_first_checklist import build_checklist
     from backend.pipeline.draft_first_source_binding import reader_paragraphs
 
+    checklist_text = {str(item["item_id"]): str(item.get("text") or "") for item in build_checklist(packet)}
     knowledge = packet
     originals_payload = knowledge.get("source_originals") or {}
     originals = {
@@ -1535,6 +1565,7 @@ def _draft_first_annotated_markdown(
                 "annotation_id": annotation_id,
                 "paragraph_sha256": paragraph["paragraph_sha256"],
                 "sources": cards,
+                "basis": _binding_basis(binding.get("basis") or [], checklist_text),
             }
         )
         insertions.append(
@@ -1674,6 +1705,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)
+    draft_first_report = review_report(workflow_path.parent) if variant == "draft_first" else None
     result: dict[str, Any] = {
         "review_id": review_id,
         "archived": archived,
@@ -1689,7 +1721,11 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         "authoring_packet_sha256": str(manifest.get("authoring_packet_sha256") or ""),
         "workflow_status": str(workflow.get("status") or "unknown"),
         "stage_checks": (
-            _draft_first_stage_checks(workflow)
+            _draft_first_stage_checks(
+                workflow,
+                rounds_total=len((draft_first_report or {}).get("rounds") or []) or None,
+                published=(manifest.get("publication_decision") or {}).get("decision") == "approved",
+            )
             if variant == "draft_first"
             else _stage_checks(workflow)
         ),
@@ -1711,6 +1747,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             ) = _draft_first_annotated_markdown(
                 manuscript, bindings_record, evidence_packet
             )
+            result["review"] = draft_first_report
             return result
         knowledge = packet.get("knowledge") if isinstance(packet.get("knowledge"), dict) else {}
         if knowledge:

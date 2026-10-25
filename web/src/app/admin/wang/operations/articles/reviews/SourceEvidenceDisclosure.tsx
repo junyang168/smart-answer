@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { BookOpenText, ExternalLink, FileAudio, NotebookText } from "lucide-react";
-import type { ReviewSourceFragment, ReviewSourceMedia } from "./types";
+import type { ReviewSourceBasis, ReviewSourceFragment, ReviewSourceMedia } from "./types";
 
 function formatTime(seconds: number | null): string | null {
   if (seconds === null || !Number.isFinite(seconds)) return null;
@@ -108,6 +108,10 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
         <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs font-semibold leading-5 text-emerald-800">
           逐字引文核对：下面的文字直接命中 SHA 绑定的原稿。
         </p>
+      ) : source.mapping_kind === "derived_source_binding" ? (
+        <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs font-semibold leading-5 text-emerald-800">
+          本段的出处：下面的文字在教授原文里逐字核对过。
+        </p>
       ) : source.mapping_kind === "source_original_context" ? (
         <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3 text-xs font-semibold leading-5 text-sky-800">
           原稿上下文：补充本段问题或叙事前提所在的原文。
@@ -157,7 +161,27 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
   );
 }
 
-export function SourceEvidenceDisclosure({ sources }: { sources: ReviewSourceFragment[] }) {
+function BasisNote({ basis }: { basis: ReviewSourceBasis[] }) {
+  return (
+    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+      <p className="text-xs font-black tracking-[0.08em] text-indigo-800">这段出处是怎么找到的</p>
+      <ul className="mt-2 space-y-2 text-sm leading-6 text-indigo-950">
+        {basis.map((row) => (
+          <li key={row.kind}>
+            {row.label}
+            {row.items.length > 0 ? (
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] text-indigo-900">
+                {row.items.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function SourceEvidenceDisclosure({ sources, basis = [] }: { sources: ReviewSourceFragment[]; basis?: ReviewSourceBasis[] }) {
   return (
     <details className="not-prose my-5 rounded-2xl border border-dashed border-amber-300 bg-amber-50/30 open:border-solid open:bg-[#fffaf0]">
       <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold text-amber-950 marker:hidden">
@@ -167,6 +191,7 @@ export function SourceEvidenceDisclosure({ sources }: { sources: ReviewSourceFra
         </span>
       </summary>
       <div className="grid gap-3 border-t border-amber-200 p-4">
+        {basis.length > 0 ? <BasisNote basis={basis} /> : null}
         {sources.map((source) => <SourceCard key={source.fragment_ids.join(":")} source={source} />)}
       </div>
     </details>

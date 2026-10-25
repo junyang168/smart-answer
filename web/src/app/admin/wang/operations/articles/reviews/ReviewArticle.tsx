@@ -66,7 +66,7 @@ export function ReviewArticle({
   const [showSources, setShowSources] = useState(false);
   const withoutTitle = markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
   const { body, footnotes } = prepareFootnotes(withoutTitle);
-  const annotations = new Map(sourceAnnotations.map((item) => [item.annotation_id, item.sources]));
+  const annotations = new Map(sourceAnnotations.map((item) => [item.annotation_id, item]));
   return (
     <>
       <div className="not-prose mb-9 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5">
@@ -104,9 +104,9 @@ export function ReviewArticle({
             p: ({ children }) => {
               const href = nodeHref(children);
               const match = href?.match(/^#review-source-evidence-(p\d+)$/);
-              const sources = match ? annotations.get(match[1]) : null;
-              if (!sources) return <p>{children}</p>;
-              return showSources ? <SourceEvidenceDisclosure sources={sources} /> : null;
+              const annotation = match ? annotations.get(match[1]) : null;
+              if (!annotation) return <p>{children}</p>;
+              return showSources ? <SourceEvidenceDisclosure sources={annotation.sources} basis={annotation.basis} /> : null;
             },
             h2: ({ children }) => {
               const title = nodeText(children).trim();
@@ -130,7 +130,7 @@ export function ReviewArticle({
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{footnote.markdown}</ReactMarkdown>
                   </div>
                   {showSources && footnote.sourceAnnotationId && annotations.has(footnote.sourceAnnotationId) ? (
-                    <SourceEvidenceDisclosure sources={annotations.get(footnote.sourceAnnotationId)!} />
+                    <SourceEvidenceDisclosure sources={annotations.get(footnote.sourceAnnotationId)!.sources} basis={annotations.get(footnote.sourceAnnotationId)!.basis} />
                   ) : null}
                 </div>
               </li>

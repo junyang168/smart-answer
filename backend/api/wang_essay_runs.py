@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from backend.api.config import WANG_STAGING_DIR
+from backend.api.draft_first_review_report import review_report
 
 router = APIRouter(prefix="/admin/wang/essays", tags=["wang-admin"])
 
@@ -93,9 +94,103 @@ def list_runs(root: Path | None = None) -> list[dict[str, Any]]:
     return [run for run in runs if run]
 
 
+def latest_review_dir(run_dir: Path, state: dict[str, Any]) -> Path | None:
+    """The review the run stands on: the accepted one, else the newest round."""
+
+    if state.get("current_review"):
+        return Path(state["current_review"])
+    stopped = state.get("stopped") or {}
+    if stopped.get("review_dir"):
+        return Path(stopped["review_dir"])
+    dirs = [run_dir / "review", *sorted(run_dir.glob("review-owner-*"))]
+    dirs = [d for d in dirs if (d / "review-run.json").is_file()]
+    return dirs[-1] if dirs else None
+
+
+def coverage(run_dir: Path) -> list[dict[str, Any]]:
+    """Every coverage candidate beside the owner's decision on it, if made."""
+
+    candidates = (_read(run_dir / "coverage" / "coverage-candidates.json") or {}).get("candidates") or []
+    decisions = {str(d.get("id")): d for d in _read(run_dir / "coverage-decisions.json") or []}
+    rows = []
+    for candidate in candidates:
+        decision = decisions.get(str(candidate.get("id"))) or {}
+        rows.append({
+            "kind": candidate.get("kind"),
+            "text": candidate.get("text"),
+            "why_relevant": candidate.get("why_relevant"),
+            "suggestion": candidate.get("suggestion"),
+            "suggestion_reason": candidate.get("reason"),
+            "decision": decision.get("decision"),
+            "structure_role": decision.get("structure_role"),
+            "decision_reason": decision.get("reason"),
+        })
+    return rows
+
+
+def run_detail(run_dir: Path) -> dict[str, Any] | None:
+    summary = run_summary(run_dir)
+    if summary is None:
+        return None
+    state = _read(run_dir / "state.json") or {}
+    selection = _read(run_dir / "editorial-selection.json") or {}
+    review_dir = latest_review_dir(run_dir, state)
+    stopped = state.get("stopped") or {}
+    return {
+        **summary,
+        "decision_basis": selection.get("decision_basis"),
+        "coverage": coverage(run_dir),
+        "cvp_gap": stopped.get("claims") if stopped.get("stage") == "cvp_gap" else [],
+        "calibration": stopped.get("reason") if stopped.get("stage") == "calibration" else None,
+        "review": review_report(review_dir) if review_dir else None,
+    }
+
+
+def article_rows(run_root: Path | None = None, manifest_root: Path | None = None) -> list[dict[str, Any]]:
+    """Every draft-first article: its run if it has one, its registration if it has one.
+
+    人子 and the two September articles were registered before runs existed,
+    so a row may have a review page and no progress page, or the reverse.
+    """
+
+    from backend.api.wang_article_reviews import REVIEW_MANIFEST_ROOT
+
+    manifest_root = manifest_root or REVIEW_MANIFEST_ROOT
+    rows: dict[str, dict[str, Any]] = {}
+    for path in sorted(manifest_root.glob("*.json")) if manifest_root.is_dir() else []:
+        manifest = _read(path)
+        if not isinstance(manifest, dict) or manifest.get("variant") != "draft_first" or manifest.get("archived"):
+            continue
+        review_id = str(manifest.get("review_id") or path.stem)
+        decision = (manifest.get("publication_decision") or {}).get("decision")
+        rows[review_id] = {
+            "review_id": review_id,
+            "title": manifest.get("title") or review_id,
+            "passage": manifest.get("passage"),
+            "stage_label": "已发布" if decision == "approved" else "已撤下" if decision == "withdrawn" else "终审",
+            "waiting": None if decision else "审稿已通过，等终审与发布",
+            "published": decision == "approved",
+            "review_href": f"/admin/wang/operations/articles/reviews/{review_id}",
+            "run_href": None,
+            "updated_at": manifest.get("registered_at"),
+        }
+    for run in list_runs(run_root):
+        essay = _read((run_root or ESSAY_ROOT) / run["review_id"] / "essay.json") or {}
+        row = rows.setdefault(run["review_id"], {
+            "review_id": run["review_id"], "title": run["title"], "passage": essay.get("passage"),
+            "stage_label": run["stage_label"], "waiting": None, "published": False,
+            "review_href": None, "updated_at": run["updated_at"],
+        })
+        row["run_href"] = f"/admin/wang/operations/articles/essays/{run['review_id']}"
+        if not row.get("review_href") or (run.get("stopped") or {}).get("stage") not in (None, "final_review"):
+            row["stage_label"] = run["stage_label"]
+            row["waiting"] = (run.get("stopped") or {}).get("summary")
+    return sorted(rows.values(), key=lambda row: row.get("updated_at") or "", reverse=True)
+
+
 @router.get("")
 def essay_runs() -> dict[str, Any]:
-    return {"stage_labels": STAGE_LABELS, "runs": list_runs()}
+    return {"stage_labels": STAGE_LABELS, "runs": list_runs(), "articles": article_rows()}
 
 
 @router.get("/{review_id}")
@@ -103,7 +198,7 @@ def essay_run(review_id: str) -> dict[str, Any]:
     run_dir = ESSAY_ROOT / review_id
     if "/" in review_id or review_id.startswith(".") or not (run_dir / "essay.json").is_file():
         raise HTTPException(status_code=404, detail="没有这篇文章的运行记录")
-    summary = run_summary(run_dir)
-    if summary is None:
+    detail = run_detail(run_dir)
+    if detail is None:
         raise HTTPException(status_code=404, detail="没有这篇文章的运行记录")
-    return summary
+    return detail
