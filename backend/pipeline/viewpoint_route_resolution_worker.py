@@ -106,7 +106,11 @@ class OwnershipGuardedAdapter:
         self._ownership_guard = ownership_guard
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._adapter, name)
+        value = getattr(self._adapter, name)
+        if name.endswith("_copy") and callable(value):
+            # The runtime calls with a copy (response binding, request encoding); keep it fenced.
+            return lambda *args, **kwargs: OwnershipGuardedAdapter(value(*args, **kwargs), self._ownership_guard)
+        return value
 
     def generate(self, payload: dict[str, Any]) -> Any:
         self._ownership_guard()
