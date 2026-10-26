@@ -308,6 +308,148 @@ def relation_fix_package(run: Path, proposal: dict, verdicts: dict, decisions: d
     return {"viewpoint_relations": retired + replacement}, notes
 
 
+def load_run(run: Path) -> tuple[dict, dict, dict]:
+    """The packet a run was reviewed on, rebuilt from the store with the same scope, and the saved one."""
+    saved = _load(run / "packet.json")
+    spec = _load(run / "run.json") if (run / "run.json").exists() else {}
+    packet, private = build_packet(saved["topic"], spec.get("aliases", ["Son of Man", "son of man"]), spec.get("claim_ids"))
+    return saved, packet, private
+
+
+def check_refs(part: str, saved: dict, packet: dict) -> None:
+    strip = lambda p: {k: v for k, v in p.items() if k not in ("recall", "recalled_viewpoints")}
+    if part == "relations" and strip(packet) != strip(saved):
+        raise SystemExit("the store changed since this run was reviewed; the short refs no longer match")
+    # Writing changes the packet (new relations appear in it), so a later part
+    # checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
+    same_refs = lambda p: ([(v["ref"], v["statement"]) for v in p["scope_viewpoints"]],
+                           [(c["ref"], c["statement"]) for c in p["scope_claims"]], p["library_index"])
+    if part != "relations" and same_refs(packet) != same_refs(saved):
+        raise SystemExit("the topic's viewpoints or Claims changed since this run was reviewed")
+
+
+def settled_inputs(run: Path) -> tuple[dict, dict, dict, Path, Path]:
+    """A finished run's proposal, verdicts and decisions, with the owner's answers applied.
+
+    An escalated item the owner answered "write" counts as accepted; "skip" leaves
+    it out. Reviewed corrections of existing relations become relation_fixes.
+    """
+    state = _load(run / "state.json")
+    proposal = _load(run / "final-proposal.json")
+    verdicts = _load(run / "final-review.json")["verdicts"]
+    questions = _load(run / "questions.json") if (run / "questions.json").exists() else []
+    unanswered = [q["item"] for q in questions if q["answer"] not in q["choices"]]
+    if unanswered:
+        raise SystemExit(f"owner has not answered: {unanswered}")
+    decisions = {"drop_relations": [], "relation_fixes": [], "answers": questions}
+    for q in questions:
+        if q["answer"] == "write":
+            verdicts[q["item"]] = {**verdicts.get(q["item"], {"item": q["item"]}), "verdict": "accept"}
+        elif q["answer"] == "skip":
+            verdicts[q["item"]] = {**verdicts.get(q["item"], {"item": q["item"]}), "verdict": "reject"}
+            if q["item"].startswith("REL:"):
+                decisions["drop_relations"].append(q["item"])
+    for c in proposal["existing_relation_checks"]:
+        if c["verdict"] in ("direction_or_type_mismatch", "duplicate"):
+            decisions["relation_fixes"].append({"relation": c["relation"], "replace_with": c.get("corrected")})
+    (run / "decisions.json").write_text(json.dumps(decisions, ensure_ascii=False, indent=1))
+    return proposal, verdicts, decisions, Path(state["proposal_raw"]), Path(state["review_raw"])
+
+
+def write_part(run: Path, part: str, *, proposal: dict, verdicts: dict, decisions: dict, proposal_raw: Path,
+               review_raw: Path, decisions_path: Path, proposal_path: Path, backup: Path | None, execute: bool,
+               saved: dict, packet: dict, private: dict) -> dict:
+    """Plan one part; with `execute`, write it in one transaction under a topic run and read it back."""
+    topic = saved["topic"]
+    if (run / "write" / f"{part}-result.json").exists():
+        # The package and list on disk are the record of what was written; keep them.
+        return {"status": "already_written", "result": _load(run / "write" / f"{part}-result.json")}
+    store = PostgresKnowledgeStore(database_url_from_env())
+    out = run / "write"
+    out.mkdir(exist_ok=True)
+    if part == "relations":
+        viewpoint_ids = sorted({private["ref_to_id"][x] for r in proposal["relations"] for x in (r["from"], r["to"])})
+        with store.connect() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT v.object_id, v.payload->>'current_revision_id', r.payload->>'core_proposition'
+                           FROM wang_knowledge.objects v JOIN wang_knowledge.objects r
+                             ON r.collection='viewpoint_revisions' AND r.object_id=v.payload->>'current_revision_id'
+                           WHERE v.collection='canonical_viewpoints' AND v.object_id=ANY(%s)""", (viewpoint_ids,))
+            rows = cur.fetchall()
+        current = {vid: rev for vid, rev, _ in rows}
+        statements = {vid: text for vid, _, text in rows}
+        records, skipped = relation_records(run, proposal, verdicts, decisions, review_raw, packet, private, current)
+        held = held_claims(store, {c for r in records for c in r["supporting_claim_ids"]})
+        for r in records:
+            r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
+        package = {"viewpoint_relations": records}
+        listing = write_list(records, skipped, statements)
+    elif part == "relation-fixes":
+        package, notes = relation_fix_package(run, proposal, verdicts, decisions, review_raw, packet, private, store)
+        listing = "# 已有关系的更正\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    elif part == "held-cleanup":
+        package, notes = held_cleanup_package(run, store)
+        listing = "# 清理：本次写入中依赖待审 Claim 的部分\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+        if not package:
+            print("nothing relies on a held Claim")
+            return {"planned": 0}
+    else:
+        package, notes, affected = link_summary_package(run, proposal, verdicts, packet, private, store,
+                                                        proposal_raw, review_raw)
+        back = {v: k for k, v in private["ref_to_id"].items()}
+        summary_ids = {private["ref_to_id"][v["viewpoint"]] for v in proposal["viewpoints"] if v["summary"] and v["viewpoint"].startswith("V")}
+        listing = "\n".join([f"# 写入清单：连接 {len(package.get('viewpoint_claim_links', []))} 条，观点 {len(package.get('canonical_viewpoints', []))} 个", ""]
+                            + [f"- 连接 {back.get(l['claim_id'])} → {back.get(l['viewpoint_id'])}：{l['link_type']}"
+                               f"（{'改类型' if l['revision'] > 1 else '新增'}）" for l in package.get("viewpoint_claim_links", [])]
+                            + [f"- 观点 {back.get(v['viewpoint_id'])}：{'summary 更新；' if v['viewpoint_id'] in summary_ids else ''}成员依据重算"
+                               for v in package.get("canonical_viewpoints", [])]
+                            + ["", "## 不写", ""] + [f"- {n}" for n in notes]) + "\n"
+    if not any(package.values()):
+        (out / f"{part}-write-list.md").write_text(listing)
+        return {"planned": 0}
+    plan = store.plan_package(package, source_kind=SOURCE_KIND, transactional=True)
+    context = store.read_package_cvp_context(package)
+    read_pins = pins(context, absent=[(op.collection, op.object_id) for op in plan.operations if op.operation == "create"])
+    (out / f"{part}-package.json").write_text(json.dumps(package, ensure_ascii=False, indent=1))
+    (out / f"{part}-write-list.md").write_text(listing)
+    print(f"planned {len(plan.operations)} operations; list at {out / (part + '-write-list.md')}")
+    if not execute:
+        return {"planned": len(plan.operations), "list": str(out / (part + '-write-list.md'))}
+
+    if not backup or not backup.exists():
+        raise SystemExit("--execute needs the backup taken just before it")
+    claim_ids = sorted(private["ref_to_id"][c["ref"]] for c in packet["scope_claims"])
+    materials = {"packet": binding(run / "packet.json"), "proposal": binding(proposal_path)}
+    if part != "relations":
+        materials["part"] = part
+    run_id = store.prepare_topic_run(topic=topic, claim_ids=claim_ids, materials=materials)
+    evidence = {"package": {"sha256": sha256_json(package), "payload": package},
+                "approval": {"gpt": binding(proposal_raw), "opus": binding(review_raw)},
+                "authorization": binding(decisions_path), "backup": {"dump": binding(backup)},
+                "sources": [binding(run / "packet.json")], "read_pins": pin_rows(read_pins)}
+    reviewed = store.review_cvp_group(run_id, plan=plan, evidence=evidence)
+    result = store.apply_plan(plan, metadata={"reason": f"CVP 3.0 topic run {topic}: reviewed {part}",
+                                              "actor": "owner-authorized-topic-agent"},
+                              transaction_context=TransactionValidation(run_id=run_id, reviewed_sha256=reviewed,
+                                                                        read_pins=read_pins))
+    # Read back every written record and compare it with what was planned.
+    mismatched, written = [], 0
+    with store.connect() as conn, conn.cursor() as cur:
+        for collection, rows in package.items():
+            id_field = ID_FIELDS[collection]
+            for row in rows:
+                cur.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s AND retired_at IS NULL",
+                            (collection, row[id_field]))
+                got = cur.fetchone()
+                written += bool(got)
+                if not got or {k: v for k, v in got[0].items() if k in row} != row:
+                    mismatched.append(f"{collection}/{row[id_field]}")
+    (out / f"{part}-result.json").write_text(json.dumps({"run_id": run_id, "reviewed_sha256": reviewed, "apply": result,
+                                                             "written": written, "readback_mismatched": mismatched},
+                                                            ensure_ascii=False, indent=1, default=str))
+    print(json.dumps({"run_id": run_id, "written": written, "readback_mismatched": mismatched}, ensure_ascii=False))
+    return {"run_id": run_id, "written": written, "readback_mismatched": mismatched}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
@@ -327,18 +469,8 @@ def main() -> None:
     args = parser.parse_args()
 
     run = args.run
-    saved = _load(run / "packet.json")
-    topic = saved["topic"]
-    packet, private = build_packet(topic, _load(run / "run.json")["aliases"] if (run / "run.json").exists() else ["Son of Man", "son of man"])
-    strip = lambda p: {k: v for k, v in p.items() if k not in ("recall", "recalled_viewpoints")}
-    if args.part == "relations" and strip(packet) != strip(saved):
-        raise SystemExit("the store changed since this run was reviewed; the short refs no longer match")
-    # Writing changes the packet (new relations appear in it), so a later part
-    # checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
-    same_refs = lambda p: ([(v["ref"], v["statement"]) for v in p["scope_viewpoints"]],
-                           [(c["ref"], c["statement"]) for c in p["scope_claims"]], p["library_index"])
-    if args.part != "relations" and same_refs(packet) != same_refs(saved):
-        raise SystemExit("the topic's viewpoints or Claims changed since this run was reviewed")
+    saved, packet, private = load_run(run)
+    check_refs(args.part, saved, packet)
     proposal = _load(args.proposal)
     if args.previous_proposal:
         # Runs before the multi-round code saved the revision before numbering it.
@@ -351,87 +483,11 @@ def main() -> None:
     verdicts = {v["item"]: v for v in (raw["verdicts"] if isinstance(raw, dict) else raw)}
     decisions = _load(args.decisions)
 
-    store = PostgresKnowledgeStore(database_url_from_env())
-    out = run / "write"
-    out.mkdir(exist_ok=True)
-    if args.part == "relations":
-        viewpoint_ids = sorted({private["ref_to_id"][x] for r in proposal["relations"] for x in (r["from"], r["to"])})
-        with store.connect() as conn, conn.cursor() as cur:
-            cur.execute("""SELECT v.object_id, v.payload->>'current_revision_id', r.payload->>'core_proposition'
-                           FROM wang_knowledge.objects v JOIN wang_knowledge.objects r
-                             ON r.collection='viewpoint_revisions' AND r.object_id=v.payload->>'current_revision_id'
-                           WHERE v.collection='canonical_viewpoints' AND v.object_id=ANY(%s)""", (viewpoint_ids,))
-            rows = cur.fetchall()
-        current = {vid: rev for vid, rev, _ in rows}
-        statements = {vid: text for vid, _, text in rows}
-        records, skipped = relation_records(run, proposal, verdicts, decisions, args.review_raw, packet, private, current)
-        held = held_claims(store, {c for r in records for c in r["supporting_claim_ids"]})
-        for r in records:
-            r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
-        package = {"viewpoint_relations": records}
-        listing = write_list(records, skipped, statements)
-    elif args.part == "relation-fixes":
-        package, notes = relation_fix_package(run, proposal, verdicts, decisions, args.review_raw, packet, private, store)
-        listing = "# 已有关系的更正\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
-    elif args.part == "held-cleanup":
-        package, notes = held_cleanup_package(run, store)
-        listing = "# 清理：本次写入中依赖待审 Claim 的部分\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
-        if not package:
-            print("nothing relies on a held Claim")
-            return
-    else:
-        package, notes, affected = link_summary_package(run, proposal, verdicts, packet, private, store,
-                                                        args.proposal_raw, args.review_raw)
-        back = {v: k for k, v in private["ref_to_id"].items()}
-        summary_ids = {private["ref_to_id"][v["viewpoint"]] for v in proposal["viewpoints"] if v["summary"] and v["viewpoint"].startswith("V")}
-        listing = "\n".join([f"# 写入清单：连接 {len(package.get('viewpoint_claim_links', []))} 条，观点 {len(package.get('canonical_viewpoints', []))} 个", ""]
-                            + [f"- 连接 {back.get(l['claim_id'])} → {back.get(l['viewpoint_id'])}：{l['link_type']}"
-                               f"（{'改类型' if l['revision'] > 1 else '新增'}）" for l in package.get("viewpoint_claim_links", [])]
-                            + [f"- 观点 {back.get(v['viewpoint_id'])}：{'summary 更新；' if v['viewpoint_id'] in summary_ids else ''}成员依据重算"
-                               for v in package.get("canonical_viewpoints", [])]
-                            + ["", "## 不写", ""] + [f"- {n}" for n in notes]) + "\n"
-    plan = store.plan_package(package, source_kind=SOURCE_KIND, transactional=True)
-    context = store.read_package_cvp_context(package)
-    read_pins = pins(context, absent=[(op.collection, op.object_id) for op in plan.operations if op.operation == "create"])
-    (out / f"{args.part}-package.json").write_text(json.dumps(package, ensure_ascii=False, indent=1))
-    (out / f"{args.part}-write-list.md").write_text(listing)
-    print(f"planned {len(plan.operations)} operations; list at {out / (args.part + '-write-list.md')}")
-    if args.dry_run:
-        return
-
-    if not args.backup or not args.backup.exists():
-        raise SystemExit("--execute needs the backup taken just before it")
-    claim_ids = sorted(private["ref_to_id"][c["ref"]] for c in packet["scope_claims"])
-    materials = {"packet": binding(run / "packet.json"), "proposal": binding(args.proposal)}
-    if args.part != "relations":
-        materials["part"] = args.part
-    run_id = store.prepare_topic_run(topic=topic, claim_ids=claim_ids, materials=materials)
-    evidence = {"package": {"sha256": sha256_json(package), "payload": package},
-                "approval": {"gpt": binding(args.proposal_raw), "opus": binding(args.review_raw)},
-                "authorization": binding(args.decisions), "backup": {"dump": binding(args.backup)},
-                "sources": [binding(run / "packet.json")], "read_pins": pin_rows(read_pins)}
-    reviewed = store.review_cvp_group(run_id, plan=plan, evidence=evidence)
-    result = store.apply_plan(plan, metadata={"reason": f"CVP 3.0 topic run {topic}: reviewed {args.part}",
-                                              "actor": "owner-authorized-topic-agent"},
-                              transaction_context=TransactionValidation(run_id=run_id, reviewed_sha256=reviewed,
-                                                                        read_pins=read_pins))
-    # Read back every written record and compare it with what was planned.
-    mismatched, written = [], 0
-    with store.connect() as conn, conn.cursor() as cur:
-        for collection, rows in package.items():
-            id_field = ID_FIELDS[collection]
-            for row in rows:
-                cur.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s AND retired_at IS NULL",
-                            (collection, row[id_field]))
-                got = cur.fetchone()
-                written += bool(got)
-                if not got or {k: v for k, v in got[0].items() if k in row} != row:
-                    mismatched.append(f"{collection}/{row[id_field]}")
-    (out / f"{args.part}-result.json").write_text(json.dumps({"run_id": run_id, "reviewed_sha256": reviewed, "apply": result,
-                                                             "written": written, "readback_mismatched": mismatched},
-                                                            ensure_ascii=False, indent=1, default=str))
-    print(json.dumps({"run_id": run_id, "written": written, "readback_mismatched": mismatched}, ensure_ascii=False))
-
+    result = write_part(run, args.part, proposal=proposal, verdicts=verdicts, decisions=decisions,
+                        proposal_raw=args.proposal_raw, review_raw=args.review_raw, decisions_path=args.decisions,
+                        proposal_path=args.proposal, backup=args.backup, execute=args.execute,
+                        saved=saved, packet=packet, private=private)
+    print(json.dumps(result, ensure_ascii=False))
 
 if __name__ == "__main__":
     main()

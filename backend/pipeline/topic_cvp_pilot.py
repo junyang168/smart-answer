@@ -88,8 +88,13 @@ def _claims_by_id(cursor, ids):
           AND review_status <> 'superseded' AND object_id = ANY(%s)""", (sorted(ids),))}
 
 
-def build_packet(term: str, aliases: list[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return (model packet with short refs, private map from refs to ids and sources)."""
+def build_packet(term: str, aliases: list[str] = (), claim_ids: list[str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (model packet with short refs, private map from refs to ids and sources).
+
+    With `claim_ids` (a topic's Claims as another agent found them) the scope is
+    those Claims plus every CVP they are a member of; without, the CVPs and
+    Claims whose statement names the term or an alias.
+    """
 
     terms = [term, *aliases]
     store = PostgresKnowledgeStore(database_url_from_env())
@@ -97,16 +102,23 @@ def build_packet(term: str, aliases: list[str] = ()) -> tuple[dict[str, Any], di
         viewpoints = _payloads(cur, "canonical_viewpoints", "AND payload->>'identity_status' = 'active'")
         revisions = {r["viewpoint_revision_id"]: r for r in _payloads(cur, "viewpoint_revisions")}
         statement = {v["viewpoint_id"]: (revisions.get(v.get("current_revision_id")) or {}) for v in viewpoints}
-        scope_ids = [v["viewpoint_id"] for v in viewpoints
-                     if any(t in (statement[v["viewpoint_id"]].get("core_proposition") or "") for t in terms)]
         active = set(statement)
-        links = [l for l in _payloads(cur, "viewpoint_claim_links") if l["viewpoint_id"] in active]
+        links = [l for l in _payloads(cur, "viewpoint_claim_links")
+                 if l["viewpoint_id"] in active and l.get("effective_state", "active") == "active"]
+        if claim_ids is not None:
+            # A supports link does not make a CVP part of the topic; membership does.
+            given = set(claim_ids)
+            scope_ids = sorted({l["viewpoint_id"] for l in links if l["claim_id"] in given
+                                and l.get("link_type") in MEMBER_LINKS and l.get("effective_state", "active") == "active"})
+        else:
+            scope_ids = [v["viewpoint_id"] for v in viewpoints
+                         if any(t in (statement[v["viewpoint_id"]].get("core_proposition") or "") for t in terms)]
         by_viewpoint: dict[str, list[dict]] = defaultdict(list)
         by_claim: dict[str, list[dict]] = defaultdict(list)
         for link in links:
             by_viewpoint[link["viewpoint_id"]].append(link)
             by_claim[link["claim_id"]].append(link)
-        keyword_claims = {row[0] for row in _rows(cur, """
+        keyword_claims = set(claim_ids) if claim_ids is not None else {row[0] for row in _rows(cur, """
             SELECT object_id FROM wang_knowledge.objects WHERE collection = 'claims' AND retired_at IS NULL
               AND review_status <> 'superseded' AND payload->>'statement' LIKE ANY(%s)""", ([f"%{t}%" for t in terms],))}
         scope_claim_ids = {l["claim_id"] for vid in scope_ids for l in by_viewpoint[vid]} | keyword_claims
@@ -316,7 +328,8 @@ PROPOSAL_SCHEMA = _obj({
         "evidence_kind": {"type": "string", "enum": ["claim_relation", "quote", "two_quotes"]},
         "claim_relations": _STRS, "quotes": {"type": "array", "items": _QUOTE}, "explanation": _STR})},
     "existing_relation_checks": {"type": "array", "items": _obj({
-        "relation": _STR, "verdict": {"type": "string", "enum": ["evidence_found", "no_evidence", "direction_or_type_mismatch"]},
+        "relation": _STR, "verdict": {"type": "string", "enum": ["evidence_found", "no_evidence", "direction_or_type_mismatch", "duplicate"]},
+        "corrected": {"anyOf": [_obj({"from": _STR, "to": _STR, "type": {"type": "string", "enum": RELATION_TYPES}}), {"type": "null"}]},
         "claim_relations": _STRS, "quote": {"anyOf": [_QUOTE, {"type": "null"}]}, "note": _STR})},
     "merge_proposals": {"type": "array", "items": _obj({
         "item": _STR, "viewpoints": _STRS, "keep": _STR, "proposed_statement": _STR, "differences": _STR,
@@ -344,7 +357,7 @@ TASK_PROMPT = """你是王守仁教授讲道知识库的观点（CVP）整理者
 8. 张力与限定（负责人定）：教授自己交代了例外，或解释了表面上的例外为什么不算例外（例如文法不允许、属于转引），就是限定（qualifies），由交代例外的一方限定全称的一方，不记张力。例：「每次都用定冠词」与「約5:27 因文法省略定冠词」是限定。只有教授没有交代、两边又确实不能调和时，才是张力（tensions_with），证据用 two_quotes：两边各放一段逐字原话。不调和、不裁定谁对。
 9. 「强调X——主体具有A、B」这类句子，「强调」的直接对象是 X；不能凭破折号后的身份说明断定它分别强调 A 和 B，并据此与别的观点比较冲突。
 10. 你认为逻辑上相关、但找不到 a 或 b 的，不写关系；确有价值的列为未决。关系类型须与原话相符，可以连到 X 观点。教授以甲作为乙的理由（「因为……所以」），而甲不足以单独推出乙时，用 supports；能单独推出才用 entails。
-11. relations 只放新关系。已在 existing_viewpoint_relations 中的观点对（不论方向）不再放进 relations，而是逐条在 existing_relation_checks 中判定：evidence_found、no_evidence，或 direction_or_type_mismatch（在 note 写明应是什么）。只判定，不撤销。
+11. relations 只放新关系。已在 existing_viewpoint_relations 中的观点对（不论方向）不再放进 relations，而是逐条在 existing_relation_checks 中判定：evidence_found、no_evidence、direction_or_type_mismatch（有证据，但原话支持的方向或类型与记录不同：corrected 写明应记成的 from、to、type），或 duplicate（与另一条已记录关系是同一对观点的重复记录，note 写明是哪一条）。corrected 只在 direction_or_type_mismatch 时填，其余填 null。只判定，不撤销。
 
 三、合并
 12. 你认为是同一个观点的几个已有观点，提出合并提议，附各自能说明同一观点的原话。你没有合并权限，只提议，由负责人确认。
@@ -499,6 +512,13 @@ def check(proposal: dict, packet: dict, private: dict, seen: set[tuple[str, int]
         for q in m["quotes"]:
             if not quote_ok(q):
                 problems["merge_quote_not_verbatim_in_read_block"].append(f"{'+'.join(m['viewpoints'])} {q['source']}#{q['block']}")
+    for c in proposal["existing_relation_checks"]:
+        fix = c.get("corrected")
+        if c["verdict"] == "direction_or_type_mismatch":
+            if not fix or fix["from"] not in vrefs | slots or fix["to"] not in vrefs | slots or fix["from"] == fix["to"]:
+                problems["mismatch_without_valid_correction"].append(c["relation"])
+        elif fix:
+            problems["correction_on_non_mismatch"].append(c["relation"])
     existing = {e["ref"] for e in packet["existing_viewpoint_relations"]}
     problems["existing_relation_not_checked"] += sorted(existing - {c["relation"] for c in proposal["existing_relation_checks"]})
     return {k: v for k, v in problems.items() if v}
@@ -604,8 +624,10 @@ def seen_blocks(root: Path) -> set[tuple[str, int]]:
     return seen
 
 
-def run(root: Path, term: str, aliases: list[str], recall_only: bool = False) -> None:
-    packet, private = build_packet(term, aliases)
+def run(root: Path, term: str, aliases: list[str] = (), recall_only: bool = False,
+        claim_ids: list[str] | None = None) -> dict:
+    """One topic run up to the owner's questions. Returns the run state saved as state.json."""
+    packet, private = build_packet(term, aliases, claim_ids)
     recall(packet, private, root)
     (root / "packet.json").write_text(json.dumps(packet, ensure_ascii=False, indent=1))
     print(json.dumps({"run": str(root), "packet_bytes": len(_dump(packet).encode()), "packet_sha256": sha256_json(packet),
@@ -614,7 +636,7 @@ def run(root: Path, term: str, aliases: list[str], recall_only: bool = False) ->
                       "recalled_bytes": len(_dump(packet["recalled_viewpoints"]).encode()),
                       "sources": len(packet["source_index"])}, ensure_ascii=False, indent=1))
     if recall_only:
-        return
+        return {"status": "recall_only"}
     proposer, reviewer = _client(PROPOSER), _client(REVIEWER)
     proposal = Pilot(proposer, packet, private, root).run()
     assign_ids(proposal)
@@ -624,8 +646,9 @@ def run(root: Path, term: str, aliases: list[str], recall_only: bool = False) ->
     log = json.loads((root / "reading-log.json").read_text())
     if problems:
         write_report(root / "report.md", proposal, packet, problems, log)
-        print(json.dumps(problems, ensure_ascii=False, indent=1))
-        return
+        state = {"status": "failed_checks", "problems": problems}
+        (root / "state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2))
+        return state
 
     notebook = json.loads((root / "final" / "request.json").read_text())["reading_notebook"]
     final, verdicts, escalated, other = revise_rounds(proposer, reviewer, proposal, packet, private, root, seen, notebook)
@@ -634,7 +657,53 @@ def run(root: Path, term: str, aliases: list[str], recall_only: bool = False) ->
                                                        ensure_ascii=False, indent=2))
     write_report(root / "report.md", final, packet, {}, log,
                  {"verdicts": list(verdicts.values()), "other_findings": other, "set_check": {}}, escalated)
-    print((root / "report.md").read_text())
+    questions = owner_questions(final, packet, escalated)
+    (root / "questions.json").write_text(json.dumps(questions, ensure_ascii=False, indent=2))
+    state = {"status": "awaiting_owner" if questions else "settled", "questions": len(questions),
+             # The raw model outputs the write cites as its approval.
+             "proposal_raw": str(_latest(root, ("revision-", "repair-"), root / "final" / "raw.json")),
+             "review_raw": str(_latest(root, ("review-",), None))}
+    (root / "state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2))
+    return state
+
+
+def _latest(root: Path, prefixes: tuple[str, ...], default: Path | None) -> Path:
+    """The raw output of the last round of a stage (revision-3 over revision-1, over the default)."""
+    best = None
+    for stage in root.iterdir():
+        for prefix in prefixes:
+            if stage.name.startswith(prefix) and stage.name[len(prefix):].isdigit() and (stage / "raw.json").exists():
+                # Within a round a repair comes after the revision it repairs.
+                key = (int(stage.name[len(prefix):]), prefix == "repair-")
+                if best is None or key > best[0]:
+                    best = (key, stage / "raw.json")
+    if best is None and default is None:
+        raise ValueError(f"no {prefixes} raw output in {root}")
+    return best[1] if best else default
+
+
+def owner_questions(final: dict, packet: dict, escalated: dict) -> list[dict]:
+    """One question per escalated item: write it as the proposer has it, or leave it out."""
+    text = {v["ref"]: v["statement"] for v in packet["scope_viewpoints"]}
+    text.update({line.split(" ", 1)[0]: line.split(" ", 1)[1] for line in packet["library_index"]})
+    questions = []
+    for key, e in escalated.items():
+        item = e["item"] or {}
+        if key.startswith("REL:"):
+            what = f"关系：{text.get(item.get('from'), item.get('from'))} —{item.get('type')}→ {text.get(item.get('to'), item.get('to'))}"
+        elif key.startswith("CHK:"):
+            what = f"已有关系 {item.get('relation')}：{item.get('verdict')}，改成 {item.get('corrected')}"
+        elif key.startswith("VP:"):
+            what = f"观点 {item.get('viewpoint')}：{item.get('statement') or text.get(item.get('viewpoint'))}"
+        else:
+            what = item.get("question") or json.dumps(item, ensure_ascii=False)[:200]
+        last = (e["history"][-1]["verdict"] or {}) if e["history"] else {}
+        questions.append({"item": key, "why": e["why"], "what": what,
+                          "reviewer": last.get("reason", ""), "correction": last.get("correction", ""),
+                          # MERGE and UNR are recorded for the owner; nothing is written from them.
+                          "choices": ["write", "skip"] if key.split(":")[0] in ("REL", "CHK", "VP") else ["noted"],
+                          "answer": None})
+    return questions
 
 
 MAX_ROUNDS = 3
@@ -817,7 +886,8 @@ def write_report(path: Path, proposal: dict, packet: dict, problems: dict, log: 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("term")
+    parser.add_argument("term", help="the topic name (with --claims) or the term to search")
+    parser.add_argument("--claims", type=Path, help="JSON list of the topic's Claim ids, as a discovery agent found them")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--alias", action="append", default=[], help="another spelling of the term, e.g. 'Son of Man'")
     parser.add_argument("--recall-only", action="store_true", help="build the packet and run recall; no proposal")
@@ -825,7 +895,8 @@ def main() -> None:
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     root = PILOT_ROOT / f"{args.term}-{run_id}"
     root.mkdir(parents=True, exist_ok=True)
-    run(root, args.term, args.alias, args.recall_only)
+    claim_ids = json.loads(args.claims.read_text()) if args.claims else None
+    print(json.dumps(run(root, args.term, args.alias, args.recall_only, claim_ids), ensure_ascii=False))
 
 
 if __name__ == "__main__":
