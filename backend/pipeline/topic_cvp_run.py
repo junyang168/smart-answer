@@ -60,7 +60,8 @@ def start(topic: str, claim_ids: list[str], run_id: str | None) -> Path:
 
 
 def backup(root: Path) -> Path:
-    label = "before-topic-" + sha256_json(str(root))[:12]
+    # One label per attempt: the backup script refuses to overwrite a dump made earlier the same day.
+    label = "before-topic-" + sha256_json(str(root))[:12] + "-" + datetime.now(timezone.utc).strftime("%H%M%S")
     out = subprocess.run([str(REPO / "scripts" / "backup-registry.sh"), label], capture_output=True, text=True, check=True)
     match = re.search(r"wrote (\S+\.dump)", out.stdout + out.stderr)
     if not match:
