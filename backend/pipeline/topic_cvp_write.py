@@ -393,16 +393,40 @@ def relation_fix_package(run: Path, proposal: dict, verdicts: dict, decisions: d
 
 
 def load_run(run: Path) -> tuple[dict, dict, dict]:
-    """The packet a run was reviewed on, rebuilt from the store with the same scope, and the saved one."""
+    """The packet a run was reviewed on and the short refs its models used.
+
+    Refs come from refs.json, saved when the run was built; a rebuild from the
+    store would renumber them once the run's own writes add CVPs or links.
+    """
     saved = _load(run / "packet.json")
+    if (run / "refs.json").exists():
+        refs = _load(run / "refs.json")
+        return saved, saved, {"ref_to_id": refs, "ref": {v: k for k, v in refs.items()}}
     spec = _load(run / "run.json") if (run / "run.json").exists() else {}
     packet, private = build_packet(saved["topic"], spec.get("aliases", ["Son of Man", "son of man"]), spec.get("claim_ids"))
     return saved, packet, private
 
 
-def check_refs(part: str, saved: dict, packet: dict) -> None:
-    # Writing changes the packet (new links and relations appear in it), so every
-    # part checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
+def check_refs(part: str, saved: dict, packet: dict, private: dict | None = None) -> None:
+    """Every viewpoint and Claim the refs name still exists with the statement that was reviewed."""
+    refs = (private or {}).get("ref_to_id")
+    if refs and packet is saved:
+        store = PostgresKnowledgeStore(database_url_from_env())
+        want_v = {refs[v["ref"]]: v["statement"] for v in saved["scope_viewpoints"]}
+        want_c = {refs[c["ref"]]: c["statement"] for c in saved["scope_claims"]}
+        with store.connect() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT v.object_id, r.payload->>'core_proposition' FROM wang_knowledge.objects v
+                           JOIN wang_knowledge.objects r ON r.collection='viewpoint_revisions' AND r.object_id=v.payload->>'current_revision_id'
+                           WHERE v.collection='canonical_viewpoints' AND v.object_id=ANY(%s) AND v.payload->>'identity_status'='active'""",
+                        (sorted(want_v),))
+            got_v = dict(cur.fetchall())
+            cur.execute("SELECT object_id, payload->>'statement' FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s) AND retired_at IS NULL",
+                        (sorted(want_c),))
+            got_c = dict(cur.fetchall())
+        if got_v != want_v or got_c != want_c:
+            raise SystemExit("a reviewed viewpoint or Claim changed or is gone since this run was reviewed")
+        return
+    # Older runs without saved refs: the rebuilt packet must still match what was reviewed.
     same_refs = lambda p: ([(v["ref"], v["statement"]) for v in p["scope_viewpoints"]],
                            [(c["ref"], c["statement"]) for c in p["scope_claims"]], p["library_index"])
     if same_refs(packet) != same_refs(saved):

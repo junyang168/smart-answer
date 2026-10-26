@@ -109,7 +109,7 @@ def finish(root: Path) -> dict:
     results = {}
     for part in PARTS:
         saved, packet, private = load_run(root)
-        check_refs(part, saved, packet)
+        check_refs(part, saved, packet, private)
         results[part] = write_part(root, part, proposal=proposal, verdicts=verdicts, decisions=decisions,
                                    proposal_raw=proposal_raw, review_raw=review_raw,
                                    decisions_path=root / "decisions.json", proposal_path=root / "final-proposal.json",

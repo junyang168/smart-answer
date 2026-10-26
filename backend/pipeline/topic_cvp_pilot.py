@@ -88,23 +88,29 @@ def _claims_by_id(cursor, ids):
           AND review_status <> 'superseded' AND object_id = ANY(%s)""", (sorted(ids),))}
 
 
-def build_packet(term: str, aliases: list[str] = (), claim_ids: list[str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+def build_packet(term: str, aliases: list[str] = (), claim_ids: list[str] | None = None, *,
+                 as_before: dict | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return (model packet with short refs, private map from refs to ids and sources).
 
     With `claim_ids` (a topic's Claims as another agent found them) the scope is
     those Claims plus every CVP they are a member of; without, the CVPs and
     Claims whose statement names the term or an alias.
+
+    `as_before` ({"viewpoints": ids, "links": {id: payload or None}}) rebuilds the
+    packet as it was before a run's own writes, for runs that predate saved refs.
     """
+    as_before = as_before or {"viewpoints": set(), "links": {}}
 
     terms = [term, *aliases]
     store = PostgresKnowledgeStore(database_url_from_env())
     with store.connect() as conn, conn.cursor() as cur:
-        viewpoints = _payloads(cur, "canonical_viewpoints", "AND payload->>'identity_status' = 'active'")
+        viewpoints = [v for v in _payloads(cur, "canonical_viewpoints", "AND payload->>'identity_status' = 'active'")
+                      if v["viewpoint_id"] not in as_before["viewpoints"]]
         revisions = {r["viewpoint_revision_id"]: r for r in _payloads(cur, "viewpoint_revisions")}
         statement = {v["viewpoint_id"]: (revisions.get(v.get("current_revision_id")) or {}) for v in viewpoints}
         active = set(statement)
-        links = [l for l in _payloads(cur, "viewpoint_claim_links")
-                 if l["viewpoint_id"] in active and l.get("effective_state", "active") == "active"]
+        links = [as_before["links"].get(l["viewpoint_claim_link_id"], l) for l in _payloads(cur, "viewpoint_claim_links")]
+        links = [l for l in links if l and l["viewpoint_id"] in active and l.get("effective_state", "active") == "active"]
         if claim_ids is not None:
             # A supports link does not make a CVP part of the topic; membership does.
             given = set(claim_ids)
@@ -657,6 +663,8 @@ def run(root: Path, term: str, aliases: list[str] = (), recall_only: bool = Fals
     packet, private = build_packet(term, aliases, claim_ids)
     recall(packet, private, root)
     (root / "packet.json").write_text(json.dumps(packet, ensure_ascii=False, indent=1))
+    # The short refs the models used, as reviewed: writes resolve refs from this, not from a rebuild.
+    (root / "refs.json").write_text(json.dumps(private["ref_to_id"], ensure_ascii=False, indent=1))
     print(json.dumps({"run": str(root), "packet_bytes": len(_dump(packet).encode()), "packet_sha256": sha256_json(packet),
                       "viewpoints": len(packet["scope_viewpoints"]), "claims": len(packet["scope_claims"]),
                       "recall": packet["recall"], "recalled_viewpoints": len(packet["recalled_viewpoints"]),
