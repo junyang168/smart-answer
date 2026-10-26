@@ -253,10 +253,65 @@ def held_cleanup_package(run: Path, store) -> tuple[dict, list[str]]:
     return {k: v for k, v in package.items() if v}, notes
 
 
+def relation_fix_package(run: Path, proposal: dict, verdicts: dict, decisions: dict, review_raw: Path,
+                         packet: dict, private: dict, store) -> tuple[dict, list[str]]:
+    """Retire existing relations the run found wrong, and record their reviewed replacements.
+
+    `decisions["relation_fixes"]` names each existing relation (E ref) and its
+    replacement (or none). Only checks the reviewer accepted are applied; the
+    replacement carries the check's own evidence.
+    """
+    ids = private["ref_to_id"]
+    checks = {c["relation"]: c for c in proposal["existing_relation_checks"]}
+    # E refs are numbered when a packet is built, so after any relation write
+    # they shift. Resolve them from the packet the run was reviewed on, by ends and type.
+    existing = {e["ref"]: e for e in _load(run / "packet.json")["existing_viewpoint_relations"]}
+    fixes, notes = [], []
+    for fix in decisions.get("relation_fixes", []):
+        ref = fix["relation"]
+        if (verdicts.get("CHK:" + ref) or {}).get("verdict") != "accept":
+            notes.append(f"{ref}：复核未通过，不改")
+            continue
+        new = fix["replace_with"]
+        check = checks[ref]
+        if new:
+            fixes.append({"item": "FIX:" + ref, "from": new["from"], "to": new["to"], "type": new["type"],
+                          "evidence_kind": "quote" if check["quote"] else "claim_relation",
+                          "claim_relations": check["claim_relations"], "quotes": [check["quote"]] if check["quote"] else [],
+                          "explanation": check["note"]})
+    with store.connect() as conn, conn.cursor() as cur:
+        olds = {}
+        for f in decisions.get("relation_fixes", []):
+            if (verdicts.get("CHK:" + f["relation"]) or {}).get("verdict") != "accept":
+                continue
+            e = existing[f["relation"]]
+            cur.execute("""SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='viewpoint_relations'
+                           AND retired_at IS NULL AND payload->>'effective_state'='active' AND object_id NOT LIKE 'CVP3-%%'
+                           AND payload->>'source_viewpoint_id'=%s AND payload->>'target_viewpoint_id'=%s
+                           AND payload->>'relation_type'=%s""", (ids[e["from"]], ids[e["to"]], e["type"]))
+            rows = cur.fetchall()
+            if len(rows) != 1:
+                raise SystemExit(f"{f['relation']}: expected one active relation {e['from']} {e['type']} {e['to']}, found {len(rows)}")
+            olds[rows[0][0]] = rows[0][1]
+        ends = sorted({ids[x] for f in fixes for x in (f["from"], f["to"])})
+        cur.execute("SELECT object_id, payload->>'current_revision_id' FROM wang_knowledge.objects WHERE collection='canonical_viewpoints' AND object_id=ANY(%s)", (ends,))
+        current = dict(cur.fetchall())
+    retired = [{**r, "effective_state": "retired", "revision": int(r["revision"]) + 1} for r in olds.values() if r["effective_state"] == "active"]
+    replacement, _ = relation_records(run, {"relations": fixes}, {f["item"]: {"verdict": "accept"} for f in fixes},
+                                      {}, review_raw, packet, private, current)
+    held = held_claims(store, {c for r in replacement for c in r["supporting_claim_ids"]})
+    for r in replacement:
+        r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
+    back = {v: k for k, v in ids.items()}
+    notes += [f"撤回 {back.get(r['source_viewpoint_id'])} {r['relation_type']} {back.get(r['target_viewpoint_id'])}" for r in retired]
+    notes += [f"新记 {back.get(r['source_viewpoint_id'])} {r['relation_type']} {back.get(r['target_viewpoint_id'])}" for r in replacement]
+    return {"viewpoint_relations": retired + replacement}, notes
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    parser.add_argument("--part", choices=("relations", "links", "held-cleanup"), default="relations",
+    parser.add_argument("--part", choices=("relations", "links", "held-cleanup", "relation-fixes"), default="relations",
                         help="relations, or links with the summaries they change")
     parser.add_argument("--proposal", type=Path, required=True, help="final proposal JSON")
     parser.add_argument("--previous-proposal", type=Path,
@@ -315,6 +370,9 @@ def main() -> None:
             r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
         package = {"viewpoint_relations": records}
         listing = write_list(records, skipped, statements)
+    elif args.part == "relation-fixes":
+        package, notes = relation_fix_package(run, proposal, verdicts, decisions, args.review_raw, packet, private, store)
+        listing = "# 已有关系的更正\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
     elif args.part == "held-cleanup":
         package, notes = held_cleanup_package(run, store)
         listing = "# 清理：本次写入中依赖待审 Claim 的部分\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
