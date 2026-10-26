@@ -117,6 +117,9 @@ SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
     "viewpoint_resolution_ledgers": {"claim_id"},
 }
 SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
+# Above this many rows a reverse reference lookup goes through the payload GIN
+# index in batches; at or below, one pass over the rows is faster.
+SINGLE_PASS_REFERENCE_ROWS = 20_000
 OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS = (
     "composition_decisions",
     "composition_plans",
@@ -5991,11 +5994,22 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _reference_consumers(cursor, ids, collections):
         if not ids or not collections:return []
-        # Named reference values live under object fields. The final .* makes
-        # equality indexable with jsonb_ops; bare recursive equality and ANY
-        # can force repeated scans of every payload. Small OR batches retain
-        # exact equality and the existing readset/time limits.
         ids = sorted(set(ids))
+        cursor.execute("SELECT count(*) FROM wang_knowledge.objects WHERE retired_at IS NULL AND collection=ANY(%s)",
+                       (list(collections),))
+        if cursor.fetchone()[0] <= SINGLE_PASS_REFERENCE_ROWS:
+            # Few rows: the planner reaches them through the collection index
+            # and rechecks every jsonpath on every row, so batching re-scans
+            # them once per batch (13 s for 1,295 ids over the ~4k downstream
+            # rows, 2026-10-26). One walk per payload against all ids: 0.04 s.
+            cursor.execute("SELECT o.collection,o.object_id,o.payload FROM wang_knowledge.objects o "
+                           "WHERE o.retired_at IS NULL AND o.collection=ANY(%s) AND EXISTS ("
+                           "SELECT 1 FROM jsonb_path_query(o.payload,'strict $.**') v WHERE jsonb_typeof(v)='string' "
+                           "AND (v #>> '{}') IN (SELECT unnest(%s::text[]))) ORDER BY o.collection,o.object_id",
+                           (list(collections), ids))
+            return cursor.fetchall()
+        # Many rows: the final .* makes equality indexable with jsonb_ops, and
+        # small OR batches keep each recursive predicate cheap.
         found = {}
         for offset in range(0, len(ids), 8):
             predicates = ["$.**.* ? (@ == " + json.dumps(oid) + ")" for oid in ids[offset:offset+8]]
