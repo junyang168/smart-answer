@@ -3,7 +3,7 @@
 > **读者**：Solution architect、神学编辑、Developer
 > **类型**：规范
 > **状态**：当前（负责人 2026-10-26 批准，#456）
-> **与代码对齐**：2026-10-26（核对到 352b7d7e）。第 4–8 节对应试跑程序 `backend/pipeline/topic_cvp_pilot.py`；第 6 节的多轮修订与第 9 节的写库层尚未实现
+> **与代码对齐**：2026-10-26。第 4–8 节对应 `backend/pipeline/topic_cvp_pilot.py`，第 9 节对应 `backend/pipeline/topic_cvp_write.py`
 > **权威范围**：CVP 3.0 的工作单位、流程、分工、关系证据标准、多轮修订与转人工、写库与论证路线的衔接，以及从 CVP 2.0 沿用和退役的部分。等价、成员、summary 的语义规则仍以 [CVP 2.0 语义规则](../../../config/wang_cvp_contextual_semantics_v2.md) 为准，本文只写改动。
 
 **目标：一次处理一个主题。Agent 看得到这个主题的全部 CVP 和相关 Claim，原文按需去读，提出观点和观点之间的关系，自己与复核者来回修订到定稿；拿不准的交负责人。每条关系都附教授自己把两个观点连起来讲的原话。**
@@ -162,21 +162,34 @@ flowchart TD
 
 ## 9. 写库
 
-**尚未实现。** 负责人审完报告、定了转人工的项以后：
+写库由 `backend/pipeline/topic_cvp_write.py` 完成，分四部分，每部分一个事务：
 
-1. 整库备份（`scripts/backup-registry.sh`）。
-2. 程序把定稿的提议与负责人决定补成完整记录：Claim 与观点的连接、观点关系（附支持它的 Claim 或 Claim 关系）、充实后的 summary、已有关系的类型更正。记录格式沿用现有数据模型（`backend/api/canonical_repository/knowledge_models.py`）。
-3. 写入前先列出写入清单给负责人确认。
-4. 用库的提交接口写入一个事务，写后回读核对。
-5. 审计依据：Sol 的定稿提议、Opus 的各轮复核、负责人的决定，三者的原始文件和指纹随写入保存。
+| 部分（`--part`） | 写什么 |
+| --- | --- |
+| `relations` | 复核通过、负责人没有拿掉的新关系；证据是 Claim 关系或原话，原话连同出处写进理由 |
+| `links` | Claim 与观点连接的改动（范围内外都写），以及范围内复核通过的 summary；连接或 summary 变了的观点重算成员依据（`summary_basis`）。升为成员的连接沿用原有的成分定位 |
+| `relation-fixes` | 负责人决定里 `relation_fixes` 列出的已有关系：撤回旧的，按核对结论记新的 |
+| `held-cleanup` | 撤回本次写入里依赖待审 Claim 的部分 |
 
-写库不挂在 CVP 2.0 的批次运行之下。合并沿用 CVP 2.0 的合并代码（`cvp_merge_management.py`）：它独立读两个观点的全部成员和原文再判断，判不出是同一观点就不写。
+每部分的步骤：
+
+1. `--dry-run` 只规划不写，产出写入清单；
+2. 整库备份（`scripts/backup-registry.sh`）；
+3. `--execute`：登记一个主题运行（`prepare_topic_run`，`CVPT-` 开头），把定稿提议、末轮复核的原始输出、负责人决定、备份记作审计依据，在一个事务里写入，再逐条回读核对。
+
+主题运行借用 CVP 2.0 的事务边界（版本钉、锁、变更记录），但不是批次：没有 20 条 Claim 的上限，不挂在 campaign 下，写后不做 2.0 的 Gemini 审计，也不把 2.0 的旧批次标成待重审。
+
+**待审 Claim 不用**：review_status 为 `human_review_required` 等待审状态的 Claim，不作连接对象，也不作关系证据。材料包里标出 `on_hold`，提议者不得连接，程序检查也拦。
+
+**已有关系按两端和类型找**：材料包里的 E 编号每次编包都重排，写入新关系后就会错位。更正已有关系时，按运行当时那份材料包里的两端与类型在库里找原记录。
+
+合并沿用 CVP 2.0 的合并代码（`cvp_merge_management.py`）：它独立读两个观点的全部成员和原文再判断，判不出是同一观点就不写。
 
 ## 10. 论证路线
 
 写库之后，对这次有变化的 CVP 用现有路线代码（`backend/pipeline/viewpoint_route_cvp_worker.py`）逐个生成路线。每个 CVP 的路线自己就是提议、复核、修正的多轮，没有进展或判断不了就不写。
 
-**并行由程序调度，不用模型。** 路线代码带一个按 CVP 排队的任务队列（`viewpoint_route_cvp_queue.py`）：每个 CVP 一个任务，worker 领任务时加带期限的锁，不会两个 worker 做同一个；worker 中途停掉，锁到期后别的 worker 接手。主题写库后，程序把有变化的 CVP 排进队列，同时启动 2–3 个 worker，数量以订阅额度不被限流为准。路线先不写库，负责人看过再写。
+**并行由程序调度，不用模型。** 路线代码带一个按 CVP 排队的任务队列（`viewpoint_route_cvp_queue.py`）：每个 CVP 一个任务，worker 领任务时加带期限的锁，不会两个 worker 做同一个；worker 中途停掉，锁到期后别的 worker 接手。主题写库后，程序把成员有变化的 CVP 排进队列（`route_affected_viewpoints`），同时启动 2–3 个 worker，数量以订阅额度不被限流为准。路线直接写库（负责人 2026-10-26：没有时间逐条看）；路线代码自己的复核判不过就不写，留作未决。
 
 路线不放进 Agent 的提议，原因有三：
 
