@@ -123,12 +123,18 @@ def finding_blocks(finding, request, candidate):
                              + name + ' must contain unique keys from ' + repr(sorted(allowed)))
     if not (finding.get('impact_reason') or '').strip():
         raise ValueError('joint finding requires impact_reason')
+    # A finding about a target or an actual write affects that object; the
+    # program knows this, so the model omitting it is not a malformed answer
+    # (#459: GPT left CL004 out of affected_write_keys while writing CL004).
+    affected, affected_writes = implied_impact(finding, targets, writes)
+    return bool(affected or affected_writes or finding['target_key'] in set(required_keys(request)))
+
+
+def implied_impact(finding, targets, writes):
     key = finding['target_key']
-    if key in targets and key not in affected:
-        raise ValueError('joint finding on a target must include its target impact')
-    if key in writes and key not in affected_writes:
-        raise ValueError('joint finding on an actual write must include its write impact')
-    return bool(affected or affected_writes or key in set(required_keys(request)))
+    affected = set(finding.get('affected_target_keys') or []) | ({key} & targets)
+    affected_writes = set(finding.get('affected_write_keys') or []) | ({key} & writes)
+    return affected, affected_writes
 
 
 def validate_scope_agreement(candidate, review, previous, request):
@@ -142,10 +148,14 @@ def validate_scope_agreement(candidate, review, previous, request):
         finding_blocks({**previous[resolution.finding_id], 'affected_target_keys': resolution.affected_target_keys,
             'affected_write_keys': resolution.affected_write_keys, 'impact_reason': resolution.impact_reason}, request, candidate)
         proposed = decisions.get(resolution.finding_id)
-        if proposed is not None and proposed.disposition != 'resolved' and (
-                set(proposed.affected_target_keys or []) != set(resolution.affected_target_keys or [])
-                or set(proposed.affected_write_keys or []) != set(resolution.affected_write_keys or [])):
-            raise ValueError('joint Update GPT/Opus impact scope disagreement')
+        if proposed is not None and proposed.disposition != 'resolved':
+            targets = set(request.target_keys)
+            writes = {d.record_key for d in candidate.dispositions if d.action != 'retain'}
+            finding = previous[resolution.finding_id]
+            scope = lambda r: implied_impact({'target_key': finding['target_key'], 'affected_target_keys': r.affected_target_keys,
+                                              'affected_write_keys': r.affected_write_keys}, targets, writes)
+            if scope(proposed) != scope(resolution):
+                raise ValueError('joint Update GPT/Opus impact scope disagreement')
 
 
 def verify_completion(goal, child, observed):
