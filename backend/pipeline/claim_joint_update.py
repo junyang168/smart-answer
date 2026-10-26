@@ -51,7 +51,9 @@ def finding_permission_extension(previous, old, request):
     frozen = previous['original_goal']['original_objects']
     return bool(added and added <= findings and added <= set(frozen)
         and all(current.get(key) == value for key, value in prior.items())
-        and all(not key.startswith('claims/') and not frozen[key]['retired'] for key in added))
+        # A Claim may be added only when it is already a target: the rule is
+        # against hidden Claims, not the action's own (#459: CL004).
+        and all((not key.startswith('claims/') or key in request.target_keys) and not frozen[key]['retired'] for key in added))
 
 
 def admission_error(request, policy, before, goal):
