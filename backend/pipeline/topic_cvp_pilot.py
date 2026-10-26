@@ -41,6 +41,8 @@ RECALL_REQUEST_BYTES = 200_000
 RECALL_MAX_CALLS = 20
 RELATION_TYPES = ["applies", "entails", "extends", "generalizes", "qualifies", "specializes", "supports", "tensions_with"]
 MEMBER_LINKS = ("equivalent_full", "equivalent_component")
+# Claims on hold are shown but not linked or used as evidence until reviewed.
+HELD_CLAIMS = ("human_review_required", "human_hold", "withheld_unreviewed", "rejected", "superseded")
 # CVP 2.0 roles: GPT proposes, Opus reviews (solution doc §10).
 PROPOSER = ("codex", "gpt-6.1-sol")
 REVIEWER = ("claude", "claude-opus-5-5")
@@ -184,6 +186,7 @@ def build_packet(term: str, aliases: list[str] = ()) -> tuple[dict[str, Any], di
             "attribution": c.get("attribution"), "scripture": c.get("scripture_refs") or [],
             "qualifiers": {k: c[k] for k in ("conditions", "qualifications", "scope_note", "modality", "negation") if c.get(k)},
             "sources": found,
+            "on_hold": c.get("review_status") in HELD_CLAIMS,
             # Only equivalent_* links are memberships; supports etc. are arguments.
             "viewpoint_links": {ref[l["viewpoint_id"]]: l.get("link_type") for l in by_claim.get(cid, [])},
             "evidence": evidence,
@@ -328,7 +331,8 @@ TASK_PROMPT = """你是王守仁教授讲道知识库的观点（CVP）整理者
 一、观点身份（CVP 2.0）
 1. 观点是教授跨讲道的同一判断。按语境中的意思判断等价：允许同义改写、口语省略和同一判断的正反表达，但不得改变对象、范围、必要与充分条件、否定、因果、可能与必然或教授立场。
 2. 新主张先判断能否充实已有观点（背景、论据、解释展开、非排他的具体说明），不能仅因旧表述没写到就新建；同一观察在不同讲道里说得宽窄不一，只立一个观点，较窄的说法用 extends／qualifies 连到它，不按范围拆成几个观点。相同主题也不能强行合并实际不同的判断。确有独立判断才新建；依据不足就列为未决。
-3. 每条 scope_claims 都要给出处置：member（与某个观点等价）、supports／qualifies／extends（不等价，为某个观点提供论据、限定或延伸）、background（明确背景）、unresolved（附理由）。viewpoint 填 V／X 或新建槽位 N1、N2…。viewpoint_links 是主张现有的连接及类型，只有 equivalent_full／equivalent_component 是成员，supports 等是论据。
+3. on_hold 为 true 的主张在等人工审核：处置只能是 background 或 unresolved，不连到任何观点，也不作关系证据。
+3b. 每条 scope_claims 都要给出处置：member（与某个观点等价）、supports／qualifies／extends（不等价，为某个观点提供论据、限定或延伸）、background（明确背景）、unresolved（附理由）。viewpoint 填 V／X 或新建槽位 N1、N2…。viewpoint_links 是主张现有的连接及类型，只有 equivalent_full／equivalent_component 是成员，supports 等是论据。
 4. recall 列出没有任何观点连接的主张由召回找到的已有观点，recalled_viewpoints 给出这些观点的成员主张。处置这些主张前先与它们比较，能归入或连接已有观点的，不新建。
 5. 新建观点用槽位 N1、N2…，必须写 statement 和 summary。summary 最多 500 字，整合全部成员，保留限定、条件、否定和不确定语气；默认归属教授，不加「教授说／认为」之类引介语。只有实际变化时才给已有观点写 summary；不得借 summary 改变 statement 的意思，不把别的观点的内容写进来。
 6. 不得修改范围外（X）观点的 statement 或 summary；主张归入 X 观点时在处置中写明即可。
@@ -437,6 +441,10 @@ def check(proposal: dict, packet: dict, private: dict, seen: set[tuple[str, int]
         if d["disposition"] == "member":
             members[d["viewpoint"]].add(d["claim"])
 
+    held = {c["ref"] for c in packet["scope_claims"] if c.get("on_hold")}
+    for d in proposal["claim_dispositions"]:
+        if d["claim"] in held and d["disposition"] not in ("background", "unresolved"):
+            problems["held_claim_linked"].append(f"{d['claim']}→{d['viewpoint']}")
     disposed = {d["claim"] for d in proposal["claim_dispositions"]}
     problems["claims_without_disposition"] += sorted(crefs - disposed)
     problems["unknown_claim_refs"] += sorted(disposed - crefs)
