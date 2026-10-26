@@ -30,7 +30,8 @@ from backend.pipeline.theological_evidence_packet import TheologicalEvidencePack
 from backend.pipeline.topic_cvp_pilot import HELD_CLAIMS, PROPOSER, _client, _dump, _obj, call_model
 
 DISCOVERY_ROOT = WANG_STAGING_DIR / "topic-discovery"
-MAX_ROUNDS = 3
+# A run ends at its boundary, when a round accepts nothing new; this only guards a runaway walk.
+MAX_ROUNDS = 10
 # About what one topic run holds (solution doc §6): reported, not a stop.
 MAX_TOPIC_CLAIMS = 90
 SHARD_BYTES = 200_000
@@ -398,7 +399,7 @@ class Discovery:
 
 # --------------------------------------------------------------------------- report
 
-STOPS = {"no_new": "一轮没有新收入", "no_candidates": "没有新的候选", "max_rounds": f"已跑 {MAX_ROUNDS} 轮",
+STOPS = {"no_new": "一轮没有新收入", "no_candidates": "没有新的候选", "max_rounds": f"已跑 {MAX_ROUNDS} 轮仍有新收入，没有收敛，负责人看是否漂到了别的主题",
 }
 
 
