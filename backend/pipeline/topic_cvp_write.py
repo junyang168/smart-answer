@@ -89,6 +89,15 @@ def write_list(records: list[dict], skipped: list[str], statements: dict[str, st
 
 
 MEMBER_LINKS = ("equivalent_full", "equivalent_component")
+# Claims on hold are not used as members or as evidence until they are reviewed.
+HELD_CLAIMS = ("human_review_required", "human_hold", "withheld_unreviewed", "rejected", "superseded")
+
+
+def held_claims(store, claim_ids) -> set[str]:
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT object_id FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s)
+                       AND (retired_at IS NOT NULL OR review_status=ANY(%s))""", (sorted(claim_ids), list(HELD_CLAIMS)))
+        return {row[0] for row in cur.fetchall()}
 ID_FIELDS = {"viewpoint_relations": "viewpoint_relation_id", "viewpoint_identity_candidates": "identity_candidate_id",
              "viewpoint_identity_decisions": "identity_decision_id", "viewpoint_claim_links": "viewpoint_claim_link_id",
              "canonical_viewpoints": "viewpoint_id"}
@@ -110,6 +119,7 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
     packet_sha = binding(run / "packet.json")["file_sha256"]
     now = datetime.now(timezone.utc).isoformat()
     changes, notes = [], []
+    held = held_claims(store, {ids[d["claim"]] for d in proposal["claim_dispositions"]})
     with store.connect() as conn, conn.cursor() as cur:
         for d in proposal["claim_dispositions"]:
             if d["disposition"] not in ("member", "supports", "qualifies", "extends"):
@@ -123,7 +133,9 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
             kinds = {"member" if l["link_type"] in MEMBER_LINKS else l["link_type"] for l in existing}
             if d["disposition"] in kinds:
                 continue
-            if d["disposition"] == "member" and len(existing) != 1:
+            if claim_id in held:
+                notes.append(f"{label}：这条 Claim 在等人工审核，暂不连接")
+            elif d["disposition"] == "member" and len(existing) != 1:
                 notes.append(f"{label}：升为成员要沿用现有连接的成分定位，现有 {len(existing)} 条，暂不写")
             elif len(existing) > 1:
                 notes.append(f"{label}：现有 {len(existing)} 条连接，改哪一条不明确，暂不写")
@@ -252,6 +264,9 @@ def main() -> None:
         current = {vid: rev for vid, rev, _ in rows}
         statements = {vid: text for vid, _, text in rows}
         records, skipped = relation_records(run, proposal, verdicts, decisions, args.review_raw, packet, private, current)
+        held = held_claims(store, {c for r in records for c in r["supporting_claim_ids"]})
+        for r in records:
+            r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
         package = {"viewpoint_relations": records}
         listing = write_list(records, skipped, statements)
     else:
