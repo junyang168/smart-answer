@@ -108,6 +108,69 @@ ID_FIELDS = {"viewpoint_relations": "viewpoint_relation_id", "viewpoint_identity
 MODEL_IDS = ["claude-opus-5-5", "gpt-6.1-sol"]
 
 
+def evidence_bindings(cur, claims: dict[str, dict]) -> dict[str, list[dict]]:
+    """Each Claim's own (EvidenceStep, SourceFragment) pairs, as a link must carry them.
+
+    The route materials drop a member link without them, so the CVP's sermons
+    never reach the route model. Evidence withheld for a missing anchor is left
+    out, as the route materials leave it out.
+    """
+    from backend.api.canonical_repository.knowledge_models import evidence_fragment_ids
+    step_ids = sorted({e for c in claims.values() for e in c.get("evidence_step_ids", [])})
+    cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='evidence_steps' AND object_id=ANY(%s) AND retired_at IS NULL",
+                (step_ids,))
+    steps = dict(cur.fetchall())
+    out = {}
+    for claim_id, claim in claims.items():
+        pairs = {(e, f) for e in claim.get("evidence_step_ids", []) if e in steps
+                 and steps[e].get("support_eligibility") != "withheld_missing_anchor"
+                 for f in evidence_fragment_ids(steps[e])}
+        out[claim_id] = [{"evidence_step_id": e, "source_fragment_id": f} for e, f in sorted(pairs)]
+    return out
+
+
+def _with_member_basis(store, package: dict, notes: list[str]) -> None:
+    """Recompute the member basis of every viewpoint whose links the package changes."""
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+    affected = sorted({l["viewpoint_id"] for l in package["viewpoint_claim_links"]})
+    if not affected:
+        return
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT DISTINCT payload->>'claim_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
+                       AND retired_at IS NULL AND payload->>'viewpoint_id'=ANY(%s)""", (affected,))
+        member_claims = sorted(row[0] for row in cur.fetchall())
+    payloads = {k: r["payload"] for k, r in store.read_cvp_context(member_claims, viewpoint_ids=affected).items() if not r.get("retired")}
+    for link in package["viewpoint_claim_links"]:
+        payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
+    for view_id in affected:
+        view = payloads["canonical_viewpoints", view_id]
+        package["canonical_viewpoints"].append({**view, "revision": int(view["revision"]) + 1,
+                                                "summary_basis": summary_basis_for_records(payloads, view_id)})
+        notes.append(f"观点 {view_id} 重算成员依据")
+
+
+def link_bindings_package(run: Path, store) -> tuple[dict, list[str]]:
+    """Give this run's own links that carry no evidence bindings their Claim's pairs (#460)."""
+    written = [l["viewpoint_claim_link_id"] for l in _load(run / "write" / "links-package.json").get("viewpoint_claim_links", [])]
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND object_id=ANY(%s) AND retired_at IS NULL", (written,))
+        links = [l for _, l in sorted(cur.fetchall()) if l["effective_state"] == "active" and not l.get("evidence_bindings")]
+        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s) AND retired_at IS NULL",
+                    (sorted({l["claim_id"] for l in links}),))
+        bindings = evidence_bindings(cur, dict(cur.fetchall()))
+    package: dict[str, list] = {"viewpoint_claim_links": [], "canonical_viewpoints": []}
+    notes = []
+    for link in links:
+        if not bindings.get(link["claim_id"]):
+            notes.append(f"{link['claim_id']} 没有可用的原文证据，未补")
+            continue
+        package["viewpoint_claim_links"].append({**link, "evidence_bindings": bindings[link["claim_id"]],
+                                                 "revision": int(link["revision"]) + 1})
+        notes.append(f"连接 {link['claim_id']} → {link['viewpoint_id']}：补 {len(bindings[link['claim_id']])} 处原文证据")
+    _with_member_basis(store, package, notes)
+    return {k: v for k, v in package.items() if v}, notes
+
+
 def new_viewpoint_ids(run: Path, proposal: dict) -> dict[str, tuple[str, str]]:
     """Stable ids for the run's new CVP slots: slot -> (viewpoint_id, first revision id)."""
     out = {}
@@ -172,6 +235,7 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
         cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s)",
                     ([c for _, c, _, _ in changes],))
         claims = dict(cur.fetchall())
+        bindings = evidence_bindings(cur, claims)
     package: dict[str, list] = {"viewpoint_identity_candidates": [], "viewpoint_identity_decisions": [],
                                 "viewpoint_revisions": [], "viewpoint_claim_links": [], "canonical_viewpoints": []}
     new_view_ids = {ids[slot] for slot in new_views}
@@ -221,6 +285,8 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
                 link_type = "equivalent_component" if (old or {}).get("component_locator") else "equivalent_full"
         if old:
             link = {**old, "link_type": link_type, "decision_id": decision_id, "revision": int(old["revision"]) + 1}
+            if not link.get("evidence_bindings"):
+                link["evidence_bindings"] = bindings[claim_id]
             if locator:
                 link["component_locator"] = locator
             elif link_type == "equivalent_full":
@@ -233,7 +299,7 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
                 "validated_against_viewpoint_revision_id": revision_id, "claim_id": claim_id,
                 "pinned_claim_revision": int(claims[claim_id]["revision"]), "link_type": link_type,
                 **({"component_locator": locator} if locator else {}),
-                "supporting_relation_ids": [], "evidence_bindings": [], "occurrence_refs": [],
+                "supporting_relation_ids": [], "evidence_bindings": bindings[claim_id], "occurrence_refs": [],
                 "decision_id": decision_id, "effective_state": "active",
                 "review_status": "system_approved", "visibility": "internal", "revision": 1}
 
@@ -298,8 +364,6 @@ def held_cleanup_package(run: Path, store) -> tuple[dict, list[str]]:
     is dropped from relation evidence; affected viewpoints get their member
     basis recomputed. Nothing the run did not write is touched.
     """
-    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
-
     out = run / "write"
     written_links = [l["viewpoint_claim_link_id"] for l in _load(out / "links-package.json").get("viewpoint_claim_links", [])]
     written_relations = [r["viewpoint_relation_id"] for r in _load(out / "relations-package.json")["viewpoint_relations"]]
@@ -320,20 +384,7 @@ def held_cleanup_package(run: Path, store) -> tuple[dict, list[str]]:
         if kept != rel["supporting_claim_ids"]:
             package["viewpoint_relations"].append({**rel, "supporting_claim_ids": kept, "revision": int(rel["revision"]) + 1})
             notes.append(f"关系 {rel['viewpoint_relation_id']} 的证据去掉 {sorted(set(rel['supporting_claim_ids']) - set(kept))}")
-    affected = sorted({l["viewpoint_id"] for l in package["viewpoint_claim_links"]})
-    if affected:
-        with store.connect() as conn, conn.cursor() as cur:
-            cur.execute("""SELECT DISTINCT payload->>'claim_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
-                           AND retired_at IS NULL AND payload->>'viewpoint_id'=ANY(%s)""", (affected,))
-            member_claims = sorted(row[0] for row in cur.fetchall())
-        payloads = {k: r["payload"] for k, r in store.read_cvp_context(member_claims, viewpoint_ids=affected).items() if not r.get("retired")}
-        for link in package["viewpoint_claim_links"]:
-            payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
-        for view_id in affected:
-            view = payloads["canonical_viewpoints", view_id]
-            package["canonical_viewpoints"].append({**view, "revision": int(view["revision"]) + 1,
-                                                    "summary_basis": summary_basis_for_records(payloads, view_id)})
-            notes.append(f"观点 {view_id} 重算成员依据")
+    _with_member_basis(store, package, notes)
     return {k: v for k, v in package.items() if v}, notes
 
 
@@ -492,6 +543,9 @@ def write_part(run: Path, part: str, *, proposal: dict, verdicts: dict, decision
     elif part == "relation-fixes":
         package, notes = relation_fix_package(run, proposal, verdicts, decisions, review_raw, packet, private, store)
         listing = "# 已有关系的更正\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+    elif part == "link-bindings":
+        package, notes = link_bindings_package(run, store)
+        listing = "# 补连接的原文证据\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
     elif part == "held-cleanup":
         package, notes = held_cleanup_package(run, store)
         listing = "# 清理：本次写入中依赖待审 Claim 的部分\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
@@ -559,7 +613,7 @@ def write_part(run: Path, part: str, *, proposal: dict, verdicts: dict, decision
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    parser.add_argument("--part", choices=("relations", "links", "held-cleanup", "relation-fixes"), default="relations",
+    parser.add_argument("--part", choices=("relations", "links", "held-cleanup", "relation-fixes", "link-bindings"), default="relations",
                         help="relations, or links with the summaries they change")
     parser.add_argument("--proposal", type=Path, required=True, help="final proposal JSON")
     parser.add_argument("--previous-proposal", type=Path,
