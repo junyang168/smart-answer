@@ -630,7 +630,8 @@ def main() -> None:
 
     run = args.run
     saved, packet, private = load_run(run)
-    check_refs(args.part, saved, packet)
+    if args.part != "link-bindings":  # it reads only the links this run wrote, not the refs
+        check_refs(args.part, saved, packet, private)
     proposal = _load(args.proposal)
     if args.previous_proposal:
         # Runs before the multi-round code saved the revision before numbering it.
@@ -640,7 +641,8 @@ def main() -> None:
     if any(x["item"] == "" for field in ("relations", "merge_proposals", "unresolved") for x in proposal[field]):
         raise SystemExit("proposal has unnumbered items; pass --previous-proposal")
     raw = _load(args.verdicts)
-    verdicts = {v["item"]: v for v in (raw["verdicts"] if isinstance(raw, dict) else raw)}
+    raw = raw["verdicts"] if isinstance(raw, dict) else raw
+    verdicts = {v["item"]: v for v in (raw.values() if isinstance(raw, dict) else raw)}
     decisions = _load(args.decisions)
 
     result = write_part(run, args.part, proposal=proposal, verdicts=verdicts, decisions=decisions,
