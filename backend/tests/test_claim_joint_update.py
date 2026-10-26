@@ -735,3 +735,18 @@ def test_known_proposer_permission_gap_pauses_after_one_independent_review(share
     assert ports.calls==['gpt','opus']
     assert store.get_record_state('claim_relations','R')==before
     assert len(parent(store,request)['latest_rounds'])==1
+
+
+@pytest.mark.parametrize('added,allowed', [('claims/A', True), ('claims/C', False)])
+def test_permission_follow_up_may_add_a_target_claim_named_by_a_finding(added, allowed):
+    from types import SimpleNamespace
+    from backend.pipeline.claim_joint_update import finding_permission_extension
+    collection, oid = added.split('/')
+    previous = {'result': {'status': 'paused', 'reason': 'permission_required'},
+                'findings': {'F': {'target_key': added, 'category': 'limitation'}},
+                'original_goal': {'original_objects': {added: {'retired': False}, 'evidence_steps/E': {'retired': False}}}}
+    grant = cm.source.Permission(collection='evidence_steps', object_id='E', fields=['statement'])
+    old = SimpleNamespace(permissions=[grant])
+    request = SimpleNamespace(target_keys=['claims/A', 'claims/B'],
+                              permissions=[grant, cm.source.Permission(collection=collection, object_id=oid, fields=['statement'])])
+    assert finding_permission_extension(previous, old, request) is allowed
