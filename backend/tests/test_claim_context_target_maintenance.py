@@ -45,8 +45,9 @@ def test_saved_claim_objection_requires_explicit_target_and_exact_required_maint
     assert prior['context_maintained_by']=='CMA-'+cm.sha256_json(request.action_id)
 
 
+@pytest.mark.parametrize('stop',['permission_required','budget_exhausted','engineering_required'])
 @pytest.mark.parametrize('change_target',[False,True])
-def test_readonly_permission_refusal_can_handoff_all_findings_to_new_exact_scope(action,change_target):
+def test_readonly_permission_refusal_can_handoff_all_findings_to_new_exact_scope(action,change_target,stop):
     from backend.tests.test_claim_management_execution_postgres import seed_claims
     store,_,_,_,root,_=action;seed_claims(store,['C','D'])
     old,oldroot=operation_request(action,'Update',['C']);old.permissions=[]
@@ -68,6 +69,13 @@ def test_readonly_permission_refusal_can_handoff_all_findings_to_new_exact_scope
             impact_reason='the target wording needs correction') for fid in packet['unresolved']]}
     result=execute_claim_management(store,old,root=oldroot,ports=SyntheticPorts(store,root,proposal=initial,opus=confirm))
     assert result['reason']=='permission_required',result
+    if stop!='permission_required':
+        # The same read-only findings, stopped another way (#459: rounds ran out disputing them).
+        from backend.api.canonical_repository.postgres_store import canonical_json
+        with store.connect() as conn:
+            run='CMA-'+cm.sha256_json(old.action_id);meta=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(run,)).fetchone()[0]
+            meta['result']={'status':'paused','reason':stop,'detail':'synthetic'}
+            conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(meta),run))
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(old.action_id))
     request,newroot=operation_request(action,'Update',['D' if change_target else 'C'])
     policy.initial_candidate='proposal';authorize(request,policy,root/'writable-handoff-policy.json')
@@ -82,7 +90,7 @@ def test_readonly_permission_refusal_can_handoff_all_findings_to_new_exact_scope
             'reason':'correct all imported findings','citations':decision('unused')['citations']}],
             'findings':[],'finding_resolutions':resolutions(packet)}
     ports=SyntheticPorts(store,root,proposal=propose,opus=lambda p:{'complete_review':True,'findings':[],'prior_findings':resolutions(p)})
-    if change_target:
+    if change_target or stop=='engineering_required':
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         with pytest.raises(ChangeSetConflict):execute_claim_management(store,request,root=newroot,ports=ports)
         assert ports.calls==[] and store.get_cvp_group(parent['run_id'])==parent

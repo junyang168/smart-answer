@@ -3411,7 +3411,9 @@ class PostgresKnowledgeStore:
                     row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
                         (previous_id,)).fetchone()
                     prior = row[0] if row else None
-                    scope_repair = bool(prior and prior['result'].get('reason') == 'permission_required'
+                    # A read-only action could not repair its findings whether it
+                    # stopped asking for writes or ran out of rounds disputing them.
+                    scope_repair = bool(prior and prior['result'].get('reason') in ('permission_required', 'budget_exhausted')
                         and prior['result']['status'] == 'paused'
                         and prior['request']['target_keys'] == request.target_keys
                         and not prior['request']['permissions'] and not prior['request']['creation_permissions']
