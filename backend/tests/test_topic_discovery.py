@@ -150,7 +150,7 @@ def test_every_round_is_judged_against_the_seeds_only(tmp_path):
     c = corpus()
     judge = Judge({"related by relation": "in", "same verse elsewhere": "out", "same CVP": "out"})
     m.Discovery(c, sources(c), judge, tmp_path, "t", ["C1"]).run()
-    assert all(p["topic"] == {"name": "t", "seeds": ["seed"]} for p in judge.requests)
+    assert all(p["topic"] == {"name": "t", "seeds": ["seed"], "other_topics": []} for p in judge.requests)
 
 
 def test_rate_limit_waits_once_then_retries(tmp_path):
@@ -170,3 +170,19 @@ def test_rate_limit_waits_once_then_retries(tmp_path):
     d.sleep = waits.append
     d.run()
     assert waits[0] == m.RATE_LIMIT_WAIT_SECONDS
+
+
+def test_claims_of_another_topic_are_listed_apart(tmp_path):
+    class Elsewhere(Judge):
+        def generate_json(self, system, text, schema, timeout_seconds=None):
+            reply = super().generate_json(system, text, schema, timeout_seconds)
+            for v in reply["verdicts"]:
+                v["other_topic"] = "揀選" if v["verdict"] == "borderline" else ""
+            return reply
+
+    c = corpus()
+    judge = Elsewhere({"related by relation": "in", "same verse elsewhere": "borderline", "same CVP": "out"})
+    result = m.Discovery(c, sources(c), judge, tmp_path, "t", ["C1"], other_topics=["揀選"]).run()
+    assert judge.requests[0]["topic"]["other_topics"] == ["揀選"]
+    assert result["other_topics"] == {"揀選": ["C3"]}
+    assert "属于另一个主题：揀選" in (tmp_path / "report.md").read_text()
