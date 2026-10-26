@@ -53,3 +53,13 @@ def test_guarded_adapter_copies_stay_guarded():
     assert isinstance(copy, OwnershipGuardedAdapter)
     copy.generate({"x": 1})
     assert checks == [1, 1]
+
+
+def test_guarded_adapter_copy_keeps_guard_and_forwards_client():
+    from copy import copy
+    inner = plain_adapter([])
+    g = OwnershipGuardedAdapter(inner, lambda: None)
+    c = copy(g)
+    c._client = "private"
+    assert isinstance(c, OwnershipGuardedAdapter) and c._adapter is not inner
+    assert c._adapter._client == "private" and inner._client != "private"
