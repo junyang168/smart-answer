@@ -31,7 +31,7 @@ def relation_records(run: Path, proposal: dict, verdicts: dict, decisions: dict,
                      packet: dict, private: dict, current: dict) -> tuple[list[dict], list[str]]:
     """Accepted, not-dropped new relations as complete viewpoint_relations records."""
 
-    ids = private["ref_to_id"]
+    ids = {**private["ref_to_id"], **{slot: vid for slot, (vid, _) in new_viewpoint_ids(run, proposal).items()}}
     cards = {c["ref"]: c for c in packet["scope_claims"]}
     rel_by_ref = {r["ref"]: r for r in packet["claim_relations"]}
     titles = {s["ref"]: s["title"] for s in packet["source_index"]}
@@ -46,6 +46,10 @@ def relation_records(run: Path, proposal: dict, verdicts: dict, decisions: dict,
             skipped.append(f"{r['item']}：复核未通过")
             continue
         src, tgt = ids[r["from"]], ids[r["to"]]
+        if src not in current or tgt not in current:
+            # A new CVP that was not created (not accepted) cannot carry a relation.
+            skipped.append(f"{r['item']}：一端的新观点没有建立")
+            continue
         if r["type"] == "tensions_with" and src > tgt:
             src, tgt = tgt, src
         claim_relation_ids = sorted(ids[x] for x in r["claim_relations"])
@@ -104,28 +108,54 @@ ID_FIELDS = {"viewpoint_relations": "viewpoint_relation_id", "viewpoint_identity
 MODEL_IDS = ["claude-opus-5-5", "gpt-6.1-sol"]
 
 
+def new_viewpoint_ids(run: Path, proposal: dict) -> dict[str, tuple[str, str]]:
+    """Stable ids for the run's new CVP slots: slot -> (viewpoint_id, first revision id)."""
+    out = {}
+    for v in proposal.get("viewpoints", []):
+        if v["action"] == "new":
+            key = sha256_json({"run": str(run), "slot": v["viewpoint"], "statement": v["statement"]})
+            out[v["viewpoint"]] = ("CVP3-v-" + key[:24], "CVP3-r-" + key[:24])
+    return out
+
+
+def _locator(claim: dict, component: str) -> dict:
+    from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+    start = claim["statement"].index(component)
+    return {"statement_component": component, "claim_sha256": semantic_record_sha(claim),
+            "canonical_spans": [{"start_char": start, "end_char": start + len(component), "exact_text": component}]}
+
+
 def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict, private: dict, store,
                          proposal_raw: Path, review_raw: Path) -> tuple[dict, list[str], list[str]]:
-    """Reviewed link changes, on any viewpoint, and accepted in-scope summaries, as complete records.
+    """New CVPs, reviewed link changes on any viewpoint, and accepted summaries, as complete records.
 
-    Promoting a link to membership keeps the existing link's component: it
-    becomes equivalent_component, or equivalent_full when the link has none.
+    A new CVP is written with its first revision, an identity candidate and a
+    create_new decision covering its links. A member link takes the proposal's
+    member_type and component; promoting an existing link keeps its component
+    when the proposal gives none.
     """
     from datetime import datetime, timezone
     from backend.api.canonical_repository.cvp_management import summary_basis_for_records
 
-    ids = private["ref_to_id"]
+    new_ids = new_viewpoint_ids(run, proposal)
+    ids = {**private["ref_to_id"], **{slot: vid for slot, (vid, _) in new_ids.items()}}
     review_sha, proposal_sha = binding(review_raw)["file_sha256"], binding(proposal_raw)["file_sha256"]
     packet_sha = binding(run / "packet.json")["file_sha256"]
     now = datetime.now(timezone.utc).isoformat()
+    accepted = lambda key: (verdicts.get(key) or {}).get("verdict") == "accept"
+    new_views = {v["viewpoint"]: v for v in proposal["viewpoints"] if v["action"] == "new" and accepted("VP:" + v["viewpoint"])}
     changes, notes = [], []
-    held = held_claims(store, {ids[d["claim"]] for d in proposal["claim_dispositions"]})
+    held = held_claims(store, {private["ref_to_id"][d["claim"]] for d in proposal["claim_dispositions"]})
     with store.connect() as conn, conn.cursor() as cur:
         for d in proposal["claim_dispositions"]:
             if d["disposition"] not in ("member", "supports", "qualifies", "extends"):
                 continue
             label = f"{d['claim']} → {d['viewpoint']} {d['disposition']}"
-            claim_id, view_id = ids[d["claim"]], ids.get(d["viewpoint"])
+            claim_id = private["ref_to_id"][d["claim"]]
+            if d["viewpoint"] in new_ids and d["viewpoint"] not in new_views:
+                notes.append(f"{label}：新观点没有通过复核，不建")
+                continue
+            view_id = ids.get(d["viewpoint"])
             cur.execute("""SELECT payload FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
                            AND retired_at IS NULL AND payload->>'effective_state'='active'
                            AND payload->>'claim_id'=%s AND payload->>'viewpoint_id'=%s""", (claim_id, view_id))
@@ -135,8 +165,6 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
                 continue
             if claim_id in held:
                 notes.append(f"{label}：这条 Claim 在等人工审核，暂不连接")
-            elif d["disposition"] == "member" and len(existing) != 1:
-                notes.append(f"{label}：升为成员要沿用现有连接的成分定位，现有 {len(existing)} 条，暂不写")
             elif len(existing) > 1:
                 notes.append(f"{label}：现有 {len(existing)} 条连接，改哪一条不明确，暂不写")
             else:
@@ -144,59 +172,115 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
         cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s)",
                     ([c for _, c, _, _ in changes],))
         claims = dict(cur.fetchall())
-    viewpoint_rows = {}
     package: dict[str, list] = {"viewpoint_identity_candidates": [], "viewpoint_identity_decisions": [],
-                                "viewpoint_claim_links": [], "canonical_viewpoints": []}
-    changed_views = {view_id for _, _, view_id, _ in changes}
+                                "viewpoint_revisions": [], "viewpoint_claim_links": [], "canonical_viewpoints": []}
+    new_view_ids = {ids[slot] for slot in new_views}
+    existing_changed = {view_id for _, _, view_id, _ in changes if view_id not in new_view_ids}
     summaries = {ids[v["viewpoint"]]: v["summary"] for v in proposal["viewpoints"]
-                 if v["summary"] and v["viewpoint"].startswith("V")
-                 and (verdicts.get("VP:" + v["viewpoint"]) or {}).get("verdict") == "accept"}
-    affected = sorted(changed_views | set(summaries))
+                 if v["summary"] and v["viewpoint"].startswith("V") and accepted("VP:" + v["viewpoint"])}
+    affected = sorted(existing_changed | set(summaries))
     with store.connect() as conn, conn.cursor() as cur:
         cur.execute("""SELECT DISTINCT payload->>'claim_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
                        AND retired_at IS NULL AND payload->>'viewpoint_id'=ANY(%s)""", (affected,))
         member_claims = sorted({row[0] for row in cur.fetchall()} | {c for _, c, _, _ in changes})
     context = store.read_cvp_context(member_claims, viewpoint_ids=affected)
     payloads = {key: row["payload"] for key, row in context.items() if not row.get("retired")}
-    for key, view in payloads.items():
-        if key[0] == "canonical_viewpoints":
-            viewpoint_rows[key[1]] = view
-    for d, claim_id, view_id, old in changes:
-        fingerprint = sha256_json({"run": str(run), "claim": claim_id, "viewpoint": view_id, "link_type": d["disposition"]})
-        # The foundation validator derives the candidate id from its content.
-        candidate_id = "VIC-" + sha256_json({"claims": [claim_id], "viewpoints": [view_id], "relations": [],
-                                             "action": "match_existing", "blockers": [], "coverage_snapshot_id": None,
+    viewpoint_rows = {key[1]: view for key, view in payloads.items() if key[0] == "canonical_viewpoints"}
+
+    def decision(candidate_claims, view_id, action, fingerprint, link_decisions, reason, candidate_views):
+        candidate_id = "VIC-" + sha256_json({"claims": candidate_claims, "viewpoints": candidate_views, "relations": [],
+                                             "action": action, "blockers": [], "coverage_snapshot_id": None,
                                              "generation_fingerprint": fingerprint,
                                              "scope_manifest_sha256": packet_sha})[:20]
         decision_id = "CVP3-decision-" + fingerprint[:24]
         package["viewpoint_identity_candidates"].append({
             "identity_candidate_id": candidate_id, "schema_version": "wang_viewpoint_identity_candidate_v1",
-            "candidate_claim_ids": [claim_id], "candidate_viewpoint_ids": [view_id], "seed_relation_ids": [],
-            "proposed_action": "match_existing", "proposed_proposition_signature": None, "coverage_snapshot_id": None,
+            "candidate_claim_ids": candidate_claims, "candidate_viewpoint_ids": candidate_views, "seed_relation_ids": [],
+            "proposed_action": action, "proposed_proposition_signature": None, "coverage_snapshot_id": None,
             "scope_manifest_sha256": packet_sha, "blocker_codes": [], "generation_fingerprint": fingerprint,
             "review_status": "candidate", "visibility": "internal", "revision": 1})
         package["viewpoint_identity_decisions"].append({
             "identity_decision_id": decision_id, "schema_version": "wang_viewpoint_identity_decision_v1",
-            "identity_candidate_id": candidate_id, "decision": "match_existing", "resolved_viewpoint_id": view_id,
-            "claim_link_decisions": [{"claim_id": claim_id, "link_type": d["disposition"]}],
-            "proposition_unit_link_decisions": [], "reviewer_kind": "system", "reviewer_id": "wang_cvp_topic_v3",
-            "approval_basis": "dual_model_consensus", "reason": d["note"] or "topic run disposition",
-            "input_sha256": fingerprint, "review_artifact_sha256": review_sha, "policy_version": "wang_cvp_topic_v3",
-            "reviewer_model_ids": MODEL_IDS, "semantic_call_artifact_sha256s": sorted([proposal_sha, review_sha]),
+            "identity_candidate_id": candidate_id, "decision": action, "resolved_viewpoint_id": view_id,
+            "claim_link_decisions": link_decisions, "proposition_unit_link_decisions": [],
+            "reviewer_kind": "system", "reviewer_id": "wang_cvp_topic_v3", "approval_basis": "dual_model_consensus",
+            "reason": reason, "input_sha256": fingerprint, "review_artifact_sha256": review_sha,
+            "policy_version": "wang_cvp_topic_v3", "reviewer_model_ids": MODEL_IDS,
+            "semantic_call_artifact_sha256s": sorted([proposal_sha, review_sha]),
             "created_at": now, "review_status": "system_approved", "visibility": "internal", "revision": 1})
-        link_type = d["disposition"]
+        return candidate_id, decision_id
+
+    def link_for(d, claim_id, view_id, revision_id, decision_id, old):
+        link_type, locator = d["disposition"], None
         if link_type == "member":
-            link_type = "equivalent_component" if old.get("component_locator") else "equivalent_full"
-        package["viewpoint_identity_decisions"][-1]["claim_link_decisions"][0]["link_type"] = link_type
+            if d.get("member_type") in MEMBER_LINKS:
+                link_type = d["member_type"]
+                if link_type == "equivalent_component":
+                    locator = _locator(claims[claim_id], d["component"])
+            else:
+                link_type = "equivalent_component" if (old or {}).get("component_locator") else "equivalent_full"
         if old:
             link = {**old, "link_type": link_type, "decision_id": decision_id, "revision": int(old["revision"]) + 1}
-        else:
-            link = {"viewpoint_claim_link_id": "CVP3-l-" + fingerprint[:24], "schema_version": "wang_viewpoint_claim_link_v2",
-                    "viewpoint_id": view_id, "validated_against_viewpoint_revision_id": viewpoint_rows[view_id]["current_revision_id"],
-                    "claim_id": claim_id, "pinned_claim_revision": int(claims[claim_id]["revision"]),
-                    "link_type": link_type, "supporting_relation_ids": [], "evidence_bindings": [],
-                    "occurrence_refs": [], "decision_id": decision_id, "effective_state": "active",
-                    "review_status": "system_approved", "visibility": "internal", "revision": 1}
+            if locator:
+                link["component_locator"] = locator
+            elif link_type == "equivalent_full":
+                # A whole-Claim membership has no locator.
+                link.pop("component_locator", None)
+            return link
+        return {"viewpoint_claim_link_id": "CVP3-l-" + sha256_json({"run": str(run), "claim": claim_id, "viewpoint": view_id,
+                                                                    "link_type": link_type})[:24],
+                "schema_version": "wang_viewpoint_claim_link_v2", "viewpoint_id": view_id,
+                "validated_against_viewpoint_revision_id": revision_id, "claim_id": claim_id,
+                "pinned_claim_revision": int(claims[claim_id]["revision"]), "link_type": link_type,
+                **({"component_locator": locator} if locator else {}),
+                "supporting_relation_ids": [], "evidence_bindings": [], "occurrence_refs": [],
+                "decision_id": decision_id, "effective_state": "active",
+                "review_status": "system_approved", "visibility": "internal", "revision": 1}
+
+    # New CVPs: one candidate and one create_new decision per CVP, covering all its links.
+    for slot, v in new_views.items():
+        view_id, revision_id = new_ids[slot]
+        mine = [(d, c, vid, old) for d, c, vid, old in changes if vid == view_id]
+        links = [link_for(d, c, view_id, revision_id, None, old) for d, c, vid, old in mine]
+        fingerprint = sha256_json({"run": str(run), "slot": slot, "statement": v["statement"]})
+        candidate_id, decision_id = decision(sorted({l["claim_id"] for l in links}), view_id, "create_new", fingerprint,
+                                             [{"claim_id": l["claim_id"], "link_type": l["link_type"]} for l in links],
+                                             v["reason"] or "topic run new viewpoint", [])
+        for link in links:
+            link["decision_id"] = decision_id
+            package["viewpoint_claim_links"].append(link)
+            payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
+        revision = {"viewpoint_revision_id": revision_id, "schema_version": "wang_viewpoint_revision_v1",
+                    "viewpoint_id": view_id, "revision_number": 1, "core_proposition": v["statement"],
+                    "proposition_signature": v["signature"],
+                    "attribution_subject": "professor", "representation_kind": "editorial_normalization_of_source_claims",
+                    "not_a_direct_quote": True,
+                    "scope": {"scripture_scope": v["scripture_scope"], "audience_scope": [], "historical_scope": []},
+                    "provenance": {"basis_identity_decision_ids": [decision_id], "review_artifact_sha256": review_sha},
+                    "approved_by": "wang_cvp_topic_v3", "approved_at": now, "supersedes_revision_id": None,
+                    "editorial_aliases": [], "review_status": "system_approved", "visibility": "internal", "revision": 1}
+        head = {"viewpoint_id": view_id, "schema_version": "wang_canonical_viewpoint_v1", "current_revision_id": revision_id,
+                "identity_status": "active", "created_from_candidate_id": candidate_id, "redirect_to_viewpoint_id": None,
+                "summary": v["summary"], "review_status": "system_approved", "visibility": "internal", "revision": 1}
+        package["viewpoint_revisions"].append(revision)
+        payloads["viewpoint_revisions", revision_id] = revision
+        payloads["canonical_viewpoints", view_id] = head
+        for c in {l["claim_id"] for l in links}:
+            payloads.setdefault(("claims", c), claims[c])
+        head["summary_basis"] = summary_basis_for_records(payloads, view_id)
+        package["canonical_viewpoints"].append(head)
+        notes.append(f"新建观点 {slot}：{v['statement']}（{len(links)} 条连接）")
+
+    # Link changes on existing CVPs: one match_existing decision per link.
+    for d, claim_id, view_id, old in changes:
+        if view_id in new_view_ids:
+            continue
+        fingerprint = sha256_json({"run": str(run), "claim": claim_id, "viewpoint": view_id, "link_type": d["disposition"]})
+        link = link_for(d, claim_id, view_id, viewpoint_rows[view_id]["current_revision_id"], None, old)
+        _, decision_id = decision([claim_id], view_id, "match_existing", fingerprint,
+                                  [{"claim_id": claim_id, "link_type": link["link_type"]}],
+                                  d["note"] or "topic run disposition", [view_id])
+        link["decision_id"] = decision_id
         package["viewpoint_claim_links"].append(link)
         payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
     for view_id in affected:
@@ -317,14 +401,11 @@ def load_run(run: Path) -> tuple[dict, dict, dict]:
 
 
 def check_refs(part: str, saved: dict, packet: dict) -> None:
-    strip = lambda p: {k: v for k, v in p.items() if k not in ("recall", "recalled_viewpoints")}
-    if part == "relations" and strip(packet) != strip(saved):
-        raise SystemExit("the store changed since this run was reviewed; the short refs no longer match")
-    # Writing changes the packet (new relations appear in it), so a later part
-    # checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
+    # Writing changes the packet (new links and relations appear in it), so every
+    # part checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
     same_refs = lambda p: ([(v["ref"], v["statement"]) for v in p["scope_viewpoints"]],
                            [(c["ref"], c["statement"]) for c in p["scope_claims"]], p["library_index"])
-    if part != "relations" and same_refs(packet) != same_refs(saved):
+    if same_refs(packet) != same_refs(saved):
         raise SystemExit("the topic's viewpoints or Claims changed since this run was reviewed")
 
 
@@ -368,7 +449,8 @@ def write_part(run: Path, part: str, *, proposal: dict, verdicts: dict, decision
     out = run / "write"
     out.mkdir(exist_ok=True)
     if part == "relations":
-        viewpoint_ids = sorted({private["ref_to_id"][x] for r in proposal["relations"] for x in (r["from"], r["to"])})
+        slot_ids = {slot: vid for slot, (vid, _) in new_viewpoint_ids(run, proposal).items()}
+        viewpoint_ids = sorted({private["ref_to_id"].get(x) or slot_ids[x] for r in proposal["relations"] for x in (r["from"], r["to"])})
         with store.connect() as conn, conn.cursor() as cur:
             cur.execute("""SELECT v.object_id, v.payload->>'current_revision_id', r.payload->>'core_proposition'
                            FROM wang_knowledge.objects v JOIN wang_knowledge.objects r

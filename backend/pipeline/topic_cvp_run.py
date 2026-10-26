@@ -28,7 +28,8 @@ from backend.pipeline.topic_cvp_pilot import PILOT_ROOT, run as run_agent
 from backend.pipeline.topic_cvp_write import load_run, check_refs, settled_inputs, write_part
 
 REPO = Path(__file__).resolve().parents[2]
-PARTS = ("relations", "links", "relation-fixes")
+# Links first: they create the new CVPs that relations may point to.
+PARTS = ("links", "relations", "relation-fixes")
 ROUTE_WORKERS = 3
 
 

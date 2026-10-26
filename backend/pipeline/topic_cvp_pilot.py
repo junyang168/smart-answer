@@ -318,10 +318,16 @@ _QUOTE = _obj({"source": _STR, "block": {"type": "integer"}, "text": _STR})
 PROPOSAL_SCHEMA = _obj({
     "claim_dispositions": {"type": "array", "items": _obj({
         "claim": _STR, "disposition": {"type": "string", "enum": ["member", "supports", "qualifies", "extends", "background", "unresolved"]},
-        "viewpoint": _STR, "note": _STR})},
+        "viewpoint": _STR, "member_type": {"type": "string", "enum": ["equivalent_full", "equivalent_component", ""]},
+        "component": _STR, "note": _STR})},
     "viewpoints": {"type": "array", "items": _obj({
         "viewpoint": _STR, "action": {"type": "string", "enum": ["keep", "enrich", "new"]},
         "statement": _STR, "summary": _STR, "added_members": _STRS, "reason": _STR,
+        "signature": {"anyOf": [_obj({"subject": _STR, "predicate": _STR, "object": _STR,
+                                      "polarity": {"type": "string", "enum": ["affirmed", "denied"]}, "modality": _STR,
+                                      "temporal_scope": _STRS, "conditions": _STRS, "population_scope": _STRS}),
+                                {"type": "null"}]},
+        "scripture_scope": _STRS,
         "evidence_blocks": {"type": "array", "items": _BLOCK}})},
     "relations": {"type": "array", "items": _obj({
         "item": _STR, "from": _STR, "to": _STR, "type": {"type": "string", "enum": RELATION_TYPES},
@@ -347,7 +353,7 @@ TASK_PROMPT = """你是王守仁教授讲道知识库的观点（CVP）整理者
 3. on_hold 为 true 的主张在等人工审核：处置只能是 background 或 unresolved，不连到任何观点，也不作关系证据。
 3b. 每条 scope_claims 都要给出处置：member（与某个观点等价）、supports／qualifies／extends（不等价，为某个观点提供论据、限定或延伸）、background（明确背景）、unresolved（附理由）。viewpoint 填 V／X 或新建槽位 N1、N2…。viewpoint_links 是主张现有的连接及类型，只有 equivalent_full／equivalent_component 是成员，supports 等是论据。
 4. recall 列出没有任何观点连接的主张由召回找到的已有观点，recalled_viewpoints 给出这些观点的成员主张。处置这些主张前先与它们比较，能归入或连接已有观点的，不新建。
-5. 新建观点用槽位 N1、N2…，必须写 statement 和 summary。summary 最多 500 字，整合全部成员，保留限定、条件、否定和不确定语气；默认归属教授，不加「教授说／认为」之类引介语。只有实际变化时才给已有观点写 summary；不得借 summary 改变 statement 的意思，不把别的观点的内容写进来。
+5. 新建观点用槽位 N1、N2…，必须写 statement、summary、signature（主语、谓语、宾语、肯定或否定、语气、时间范围、条件、人群范围，须与 statement 一致）和 scripture_scope（实际适用的经文，不是出现过的经文清单）；其余观点 signature 填 null、scripture_scope 填空数组。处置为 member 时写 member_type：整条主张与观点等价填 equivalent_full；只有其中一段等价填 equivalent_component，并在 component 里从主张 statement 逐字摘出那一段；其余处置这两个字段填空字符串。一条主张只能整条等价于一个观点；它分属几个观点时，每个观点各用 equivalent_component 取不同的一段（viewpoint_links 里已有的成员身份也算在内）。summary 最多 500 字，整合全部成员，保留限定、条件、否定和不确定语气；默认归属教授，不加「教授说／认为」之类引介语。只有实际变化时才给已有观点写 summary；不得借 summary 改变 statement 的意思，不把别的观点的内容写进来。
 6. 不得修改范围外（X）观点的 statement 或 summary；主张归入 X 观点时在处置中写明即可。
 
 二、观点关系（知识层不即兴发挥）
@@ -458,10 +464,31 @@ def check(proposal: dict, packet: dict, private: dict, seen: set[tuple[str, int]
     for d in proposal["claim_dispositions"]:
         if d["claim"] in held and d["disposition"] not in ("background", "unresolved"):
             problems["held_claim_linked"].append(f"{d['claim']}→{d['viewpoint']}")
+    # The store allows one whole-Claim membership per Claim, and one owner per component.
+    cards = {c["ref"]: c for c in packet["scope_claims"]}
+    for c, card in cards.items():
+        listed = {d["viewpoint"]: d for d in proposal["claim_dispositions"] if d["claim"] == c and d["disposition"] == "member"}
+        kept = {v: t for v, t in card["viewpoint_links"].items() if t in MEMBER_LINKS and v not in listed and v.startswith("X")}
+        kinds = [d.get("member_type") for d in listed.values()] + list(kept.values())
+        if len(kinds) > 1 and "equivalent_full" in kinds:
+            problems["claim_whole_in_more_than_one_viewpoint"].append(c)
+        parts = [d["component"] for d in listed.values() if d.get("member_type") == "equivalent_component"]
+        if len(parts) != len(set(parts)):
+            problems["same_component_in_two_viewpoints"].append(c)
     disposed = {d["claim"] for d in proposal["claim_dispositions"]}
     problems["claims_without_disposition"] += sorted(crefs - disposed)
     problems["unknown_claim_refs"] += sorted(disposed - crefs)
+    statements = {c["ref"]: c["statement"] or "" for c in packet["scope_claims"]}
+    for v in proposal["viewpoints"]:
+        if v["action"] == "new" and not (v.get("signature") and v["signature"]["subject"] and v["signature"]["predicate"]):
+            problems["new_without_signature"].append(v["viewpoint"])
     for d in proposal["claim_dispositions"]:
+        if d["disposition"] == "member":
+            if d.get("member_type") not in ("equivalent_full", "equivalent_component"):
+                problems["member_without_type"].append(f"{d['claim']}→{d['viewpoint']}")
+            elif d["member_type"] == "equivalent_component" and (not d["component"].strip()
+                                                                 or d["component"] not in statements.get(d["claim"], "")):
+                problems["component_not_verbatim_in_claim"].append(f"{d['claim']}→{d['viewpoint']}")
         if d["disposition"] not in ("background", "unresolved") and d["viewpoint"] not in vrefs | slots:
             problems["disposition_to_unknown_viewpoint"].append(f"{d['claim']}→{d['viewpoint']}")
     for v in proposal["viewpoints"]:
