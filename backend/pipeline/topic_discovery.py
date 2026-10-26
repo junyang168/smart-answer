@@ -31,7 +31,7 @@ from backend.pipeline.topic_cvp_pilot import HELD_CLAIMS, PROPOSER, _client, _du
 
 DISCOVERY_ROOT = WANG_STAGING_DIR / "topic-discovery"
 MAX_ROUNDS = 3
-# What one topic run can hold (solution doc §6).
+# About what one topic run holds (solution doc §6): reported, not a stop.
 MAX_TOPIC_CLAIMS = 90
 SHARD_BYTES = 200_000
 # Blocks shown on each side of the block a candidate's evidence sits in.
@@ -381,9 +381,6 @@ class Discovery:
             rounds.append({"round": round_no, "candidates": len(found), "in": len(new_in),
                            "borderline": sum(r["verdict"] == "borderline" for r in results.values())})
             frontier = new_in
-            if len(accepted) > MAX_TOPIC_CLAIMS:
-                stop = "too_wide"
-                break
             if not new_in:
                 stop = "no_new"
                 break
@@ -402,7 +399,7 @@ class Discovery:
 # --------------------------------------------------------------------------- report
 
 STOPS = {"no_new": "一轮没有新收入", "no_candidates": "没有新的候选", "max_rounds": f"已跑 {MAX_ROUNDS} 轮",
-         "too_wide": f"收入超过 {MAX_TOPIC_CLAIMS} 条，主题太宽，建议拆成几个子问题"}
+}
 
 
 def report(result: dict, corpus: Corpus, sources: Sources) -> str:
@@ -419,7 +416,9 @@ def report(result: dict, corpus: Corpus, sources: Sources) -> str:
     sermons = {corpus.source_of.get(c) for c in result["accepted"]} - {None}
     lines = [f"# 主题发现：{result['topic']}", "",
              f"停下原因：{STOPS[result['stop']]}。收入 {len(result['accepted'])} 条（{len(sermons)} 篇来源），"
-             f"边缘 {len(result['borderline'])} 条。", "",
+             f"边缘 {len(result['borderline'])} 条。"
+             + (f"收入超过 {MAX_TOPIC_CLAIMS} 条，多于一次主题运行通常的量，负责人看是否拆成几个子问题。"
+                if len(result["accepted"]) > MAX_TOPIC_CLAIMS else ""), "",
              "| 轮 | 候选 | 收入 | 边缘 |", "| --- | --- | --- | --- |"]
     lines += [f"| {r['round']} | {r['candidates']} | {r['in']} | {r['borderline']} |" for r in result["rounds"]]
     elsewhere = {c for ids in result.get("other_topics", {}).values() for c in ids}
