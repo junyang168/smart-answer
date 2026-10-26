@@ -395,6 +395,7 @@ class Discovery:
         (self.root / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
         (self.root / "claims.json").write_text(json.dumps(accepted, ensure_ascii=False, indent=1))
         (self.root / "report.md").write_text(report(result, self.corpus, self.sources))
+        write_borderline(self.root, result, self.corpus, self.sources)
         return result
 
 
@@ -432,6 +433,26 @@ def report(result: dict, corpus: Corpus, sources: Sources) -> str:
     return "\n".join(lines)
 
 
+def write_borderline(root: Path, result: dict, corpus: Corpus, sources: Sources) -> None:
+    """Every borderline Claim in one list, from which the owner picks the next topic to discover."""
+    rows = []
+    for cid in result["borderline"]:
+        v = result["verdicts"][cid]
+        source = corpus.source_of.get(cid)
+        rows.append({"claim_id": cid, "statement": corpus.claims[cid].get("statement"),
+                     "source": sources.title(source) if source else "", "reason": v["reason"],
+                     "other_topic": v.get("other_topic") or ""})
+    rows.sort(key=lambda r: (r["other_topic"] == "", r["other_topic"], r["source"]))
+    (root / "borderline.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1))
+    cell = lambda x: str(x).replace("|", "／").replace("\n", " ")
+    lines = [f"# 边缘 Claim：{result['topic']}", "",
+             f"{len(rows)} 条。它们讲到这个主题，回答的却是另一个问题；可以从这里挑下一个要发现的主题，挑中的 Claim 作种子。", "",
+             "| 另一个主题 | Claim | 出处 | 理由 |", "| --- | --- | --- | --- |"]
+    lines += [f"| {cell(r['other_topic'])} | {cell(r['statement'])} `{r['claim_id']}` | {cell(r['source'])} | {cell(r['reason'])} |"
+              for r in rows]
+    (root / "borderline.md").write_text("\n".join(lines) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("topic")
@@ -440,7 +461,12 @@ def main() -> None:
     parser.add_argument("--other-topic", action="append", default=[], help="a topic the owner keeps apart, e.g. 揀選")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--dry-run", action="store_true", help="list round-1 candidates only; no model call")
+    parser.add_argument("--borderline-of", type=Path, help="rewrite borderline.md of a finished run; no model call")
     args = parser.parse_args()
+    if args.borderline_of:
+        corpus = Corpus.load(PostgresKnowledgeStore(database_url_from_env()))
+        write_borderline(args.borderline_of, json.loads((args.borderline_of / "result.json").read_text()), corpus, Sources(corpus))
+        return
     if not 1 <= len(args.seed) <= 3:
         parser.error("give one to three seeds")
     corpus = Corpus.load(PostgresKnowledgeStore(database_url_from_env()))

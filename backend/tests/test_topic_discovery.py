@@ -186,3 +186,6 @@ def test_claims_of_another_topic_are_listed_apart(tmp_path):
     assert judge.requests[0]["topic"]["other_topics"] == ["揀選"]
     assert result["other_topics"] == {"揀選": ["C3"]}
     assert "属于另一个主题：揀選" in (tmp_path / "report.md").read_text()
+    listed = json.loads((tmp_path / "borderline.json").read_text())
+    assert [(r["claim_id"], r["other_topic"]) for r in listed] == [("C3", "揀選")]
+    assert "same verse elsewhere" in (tmp_path / "borderline.md").read_text()
