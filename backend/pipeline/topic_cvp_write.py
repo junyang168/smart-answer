@@ -207,10 +207,56 @@ def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict
     return {k: v for k, v in package.items() if v}, notes, affected
 
 
+def held_cleanup_package(run: Path, store) -> tuple[dict, list[str]]:
+    """Undo, on this run's own writes, any reliance on a Claim that is on hold.
+
+    Links to a held Claim are withdrawn (effective_state retired); a held Claim
+    is dropped from relation evidence; affected viewpoints get their member
+    basis recomputed. Nothing the run did not write is touched.
+    """
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+
+    out = run / "write"
+    written_links = [l["viewpoint_claim_link_id"] for l in _load(out / "links-package.json").get("viewpoint_claim_links", [])]
+    written_relations = [r["viewpoint_relation_id"] for r in _load(out / "relations-package.json")["viewpoint_relations"]]
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND object_id=ANY(%s) AND retired_at IS NULL", (written_links,))
+        links = dict(cur.fetchall())
+        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='viewpoint_relations' AND object_id=ANY(%s) AND retired_at IS NULL", (written_relations,))
+        relations = dict(cur.fetchall())
+    held = held_claims(store, {l["claim_id"] for l in links.values()} | {c for r in relations.values() for c in r["supporting_claim_ids"]})
+    package: dict[str, list] = {"viewpoint_claim_links": [], "viewpoint_relations": [], "canonical_viewpoints": []}
+    notes = []
+    for link in links.values():
+        if link["claim_id"] in held and link["effective_state"] == "active":
+            package["viewpoint_claim_links"].append({**link, "effective_state": "retired", "revision": int(link["revision"]) + 1})
+            notes.append(f"撤回连接 {link['claim_id']} → {link['viewpoint_id']}（{link['link_type']}）")
+    for rel in relations.values():
+        kept = [c for c in rel["supporting_claim_ids"] if c not in held]
+        if kept != rel["supporting_claim_ids"]:
+            package["viewpoint_relations"].append({**rel, "supporting_claim_ids": kept, "revision": int(rel["revision"]) + 1})
+            notes.append(f"关系 {rel['viewpoint_relation_id']} 的证据去掉 {sorted(set(rel['supporting_claim_ids']) - set(kept))}")
+    affected = sorted({l["viewpoint_id"] for l in package["viewpoint_claim_links"]})
+    if affected:
+        with store.connect() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT DISTINCT payload->>'claim_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
+                           AND retired_at IS NULL AND payload->>'viewpoint_id'=ANY(%s)""", (affected,))
+            member_claims = sorted(row[0] for row in cur.fetchall())
+        payloads = {k: r["payload"] for k, r in store.read_cvp_context(member_claims, viewpoint_ids=affected).items() if not r.get("retired")}
+        for link in package["viewpoint_claim_links"]:
+            payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
+        for view_id in affected:
+            view = payloads["canonical_viewpoints", view_id]
+            package["canonical_viewpoints"].append({**view, "revision": int(view["revision"]) + 1,
+                                                    "summary_basis": summary_basis_for_records(payloads, view_id)})
+            notes.append(f"观点 {view_id} 重算成员依据")
+    return {k: v for k, v in package.items() if v}, notes
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
-    parser.add_argument("--part", choices=("relations", "links"), default="relations",
+    parser.add_argument("--part", choices=("relations", "links", "held-cleanup"), default="relations",
                         help="relations, or links with the summaries they change")
     parser.add_argument("--proposal", type=Path, required=True, help="final proposal JSON")
     parser.add_argument("--previous-proposal", type=Path,
@@ -269,6 +315,12 @@ def main() -> None:
             r["supporting_claim_ids"] = [c for c in r["supporting_claim_ids"] if c not in held]
         package = {"viewpoint_relations": records}
         listing = write_list(records, skipped, statements)
+    elif args.part == "held-cleanup":
+        package, notes = held_cleanup_package(run, store)
+        listing = "# 清理：本次写入中依赖待审 Claim 的部分\n\n" + "\n".join(f"- {n}" for n in notes) + "\n"
+        if not package:
+            print("nothing relies on a held Claim")
+            return
     else:
         package, notes, affected = link_summary_package(run, proposal, verdicts, packet, private, store,
                                                         args.proposal_raw, args.review_raw)
