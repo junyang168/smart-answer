@@ -89,6 +89,9 @@ def write_list(records: list[dict], skipped: list[str], statements: dict[str, st
 
 
 MEMBER_LINKS = ("equivalent_full", "equivalent_component")
+ID_FIELDS = {"viewpoint_relations": "viewpoint_relation_id", "viewpoint_identity_candidates": "identity_candidate_id",
+             "viewpoint_identity_decisions": "identity_decision_id", "viewpoint_claim_links": "viewpoint_claim_link_id",
+             "canonical_viewpoints": "viewpoint_id"}
 MODEL_IDS = ["claude-opus-5-5", "gpt-6.1-sol"]
 
 
@@ -291,8 +294,7 @@ def main() -> None:
     mismatched, written = [], 0
     with store.connect() as conn, conn.cursor() as cur:
         for collection, rows in package.items():
-            id_field = next(k for k in rows[0] if k.endswith("_id") and k.startswith(("viewpoint_relation", "identity_candidate",
-                            "identity_decision", "viewpoint_claim_link", "viewpoint_id")))
+            id_field = ID_FIELDS[collection]
             for row in rows:
                 cur.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s AND retired_at IS NULL",
                             (collection, row[id_field]))
