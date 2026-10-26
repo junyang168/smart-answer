@@ -88,9 +88,115 @@ def write_list(records: list[dict], skipped: list[str], statements: dict[str, st
     return "\n".join(lines) + "\n"
 
 
+MEMBER_LINKS = ("equivalent_full", "equivalent_component")
+MODEL_IDS = ["claude-opus-5-5", "gpt-6.1-sol"]
+
+
+def link_summary_package(run: Path, proposal: dict, verdicts: dict, packet: dict, private: dict, store,
+                         proposal_raw: Path, review_raw: Path) -> tuple[dict, list[str], list[str]]:
+    """Reviewed link changes, on any viewpoint, and accepted in-scope summaries, as complete records.
+
+    Promoting a link to membership keeps the existing link's component: it
+    becomes equivalent_component, or equivalent_full when the link has none.
+    """
+    from datetime import datetime, timezone
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+
+    ids = private["ref_to_id"]
+    review_sha, proposal_sha = binding(review_raw)["file_sha256"], binding(proposal_raw)["file_sha256"]
+    packet_sha = binding(run / "packet.json")["file_sha256"]
+    now = datetime.now(timezone.utc).isoformat()
+    changes, notes = [], []
+    with store.connect() as conn, conn.cursor() as cur:
+        for d in proposal["claim_dispositions"]:
+            if d["disposition"] not in ("member", "supports", "qualifies", "extends"):
+                continue
+            label = f"{d['claim']} → {d['viewpoint']} {d['disposition']}"
+            claim_id, view_id = ids[d["claim"]], ids.get(d["viewpoint"])
+            cur.execute("""SELECT payload FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
+                           AND retired_at IS NULL AND payload->>'effective_state'='active'
+                           AND payload->>'claim_id'=%s AND payload->>'viewpoint_id'=%s""", (claim_id, view_id))
+            existing = [row[0] for row in cur.fetchall()]
+            kinds = {"member" if l["link_type"] in MEMBER_LINKS else l["link_type"] for l in existing}
+            if d["disposition"] in kinds:
+                continue
+            if d["disposition"] == "member" and len(existing) != 1:
+                notes.append(f"{label}：升为成员要沿用现有连接的成分定位，现有 {len(existing)} 条，暂不写")
+            elif len(existing) > 1:
+                notes.append(f"{label}：现有 {len(existing)} 条连接，改哪一条不明确，暂不写")
+            else:
+                changes.append((d, claim_id, view_id, existing[0] if existing else None))
+        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='claims' AND object_id=ANY(%s)",
+                    ([c for _, c, _, _ in changes],))
+        claims = dict(cur.fetchall())
+    viewpoint_rows = {}
+    package: dict[str, list] = {"viewpoint_identity_candidates": [], "viewpoint_identity_decisions": [],
+                                "viewpoint_claim_links": [], "canonical_viewpoints": []}
+    changed_views = {view_id for _, _, view_id, _ in changes}
+    summaries = {ids[v["viewpoint"]]: v["summary"] for v in proposal["viewpoints"]
+                 if v["summary"] and v["viewpoint"].startswith("V")
+                 and (verdicts.get("VP:" + v["viewpoint"]) or {}).get("verdict") == "accept"}
+    affected = sorted(changed_views | set(summaries))
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT DISTINCT payload->>'claim_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links'
+                       AND retired_at IS NULL AND payload->>'viewpoint_id'=ANY(%s)""", (affected,))
+        member_claims = sorted({row[0] for row in cur.fetchall()} | {c for _, c, _, _ in changes})
+    context = store.read_cvp_context(member_claims, viewpoint_ids=affected)
+    payloads = {key: row["payload"] for key, row in context.items() if not row.get("retired")}
+    for key, view in payloads.items():
+        if key[0] == "canonical_viewpoints":
+            viewpoint_rows[key[1]] = view
+    for d, claim_id, view_id, old in changes:
+        fingerprint = sha256_json({"run": str(run), "claim": claim_id, "viewpoint": view_id, "link_type": d["disposition"]})
+        # The foundation validator derives the candidate id from its content.
+        candidate_id = "VIC-" + sha256_json({"claims": [claim_id], "viewpoints": [view_id], "relations": [],
+                                             "action": "match_existing", "blockers": [], "coverage_snapshot_id": None,
+                                             "generation_fingerprint": fingerprint,
+                                             "scope_manifest_sha256": packet_sha})[:20]
+        decision_id = "CVP3-decision-" + fingerprint[:24]
+        package["viewpoint_identity_candidates"].append({
+            "identity_candidate_id": candidate_id, "schema_version": "wang_viewpoint_identity_candidate_v1",
+            "candidate_claim_ids": [claim_id], "candidate_viewpoint_ids": [view_id], "seed_relation_ids": [],
+            "proposed_action": "match_existing", "proposed_proposition_signature": None, "coverage_snapshot_id": None,
+            "scope_manifest_sha256": packet_sha, "blocker_codes": [], "generation_fingerprint": fingerprint,
+            "review_status": "candidate", "visibility": "internal", "revision": 1})
+        package["viewpoint_identity_decisions"].append({
+            "identity_decision_id": decision_id, "schema_version": "wang_viewpoint_identity_decision_v1",
+            "identity_candidate_id": candidate_id, "decision": "match_existing", "resolved_viewpoint_id": view_id,
+            "claim_link_decisions": [{"claim_id": claim_id, "link_type": d["disposition"]}],
+            "proposition_unit_link_decisions": [], "reviewer_kind": "system", "reviewer_id": "wang_cvp_topic_v3",
+            "approval_basis": "dual_model_consensus", "reason": d["note"] or "topic run disposition",
+            "input_sha256": fingerprint, "review_artifact_sha256": review_sha, "policy_version": "wang_cvp_topic_v3",
+            "reviewer_model_ids": MODEL_IDS, "semantic_call_artifact_sha256s": sorted([proposal_sha, review_sha]),
+            "created_at": now, "review_status": "system_approved", "visibility": "internal", "revision": 1})
+        link_type = d["disposition"]
+        if link_type == "member":
+            link_type = "equivalent_component" if old.get("component_locator") else "equivalent_full"
+        package["viewpoint_identity_decisions"][-1]["claim_link_decisions"][0]["link_type"] = link_type
+        if old:
+            link = {**old, "link_type": link_type, "decision_id": decision_id, "revision": int(old["revision"]) + 1}
+        else:
+            link = {"viewpoint_claim_link_id": "CVP3-l-" + fingerprint[:24], "schema_version": "wang_viewpoint_claim_link_v2",
+                    "viewpoint_id": view_id, "validated_against_viewpoint_revision_id": viewpoint_rows[view_id]["current_revision_id"],
+                    "claim_id": claim_id, "pinned_claim_revision": int(claims[claim_id]["revision"]),
+                    "link_type": link_type, "supporting_relation_ids": [], "evidence_bindings": [],
+                    "occurrence_refs": [], "decision_id": decision_id, "effective_state": "active",
+                    "review_status": "system_approved", "visibility": "internal", "revision": 1}
+        package["viewpoint_claim_links"].append(link)
+        payloads["viewpoint_claim_links", link["viewpoint_claim_link_id"]] = link
+    for view_id in affected:
+        view = viewpoint_rows[view_id]
+        summary = summaries.get(view_id, view.get("summary"))
+        package["canonical_viewpoints"].append({**view, "summary": summary, "revision": int(view["revision"]) + 1,
+                                                "summary_basis": summary_basis_for_records(payloads, view_id)})
+    return {k: v for k, v in package.items() if v}, notes, affected
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
+    parser.add_argument("--part", choices=("relations", "links"), default="relations",
+                        help="relations, or links with the summaries they change")
     parser.add_argument("--proposal", type=Path, required=True, help="final proposal JSON")
     parser.add_argument("--previous-proposal", type=Path,
                         help="the proposal the final one was revised from; numbers items the run numbered in memory")
@@ -109,8 +215,14 @@ def main() -> None:
     topic = saved["topic"]
     packet, private = build_packet(topic, _load(run / "run.json")["aliases"] if (run / "run.json").exists() else ["Son of Man", "son of man"])
     strip = lambda p: {k: v for k, v in p.items() if k not in ("recall", "recalled_viewpoints")}
-    if strip(packet) != strip(saved):
+    if args.part == "relations" and strip(packet) != strip(saved):
         raise SystemExit("the store changed since this run was reviewed; the short refs no longer match")
+    # Writing changes the packet (new relations appear in it), so a later part
+    # checks only what the short refs stand on: the topic's viewpoints, Claims and the library index.
+    same_refs = lambda p: ([(v["ref"], v["statement"]) for v in p["scope_viewpoints"]],
+                           [(c["ref"], c["statement"]) for c in p["scope_claims"]], p["library_index"])
+    if args.part != "relations" and same_refs(packet) != same_refs(saved):
+        raise SystemExit("the topic's viewpoints or Claims changed since this run was reviewed")
     proposal = _load(args.proposal)
     if args.previous_proposal:
         # Runs before the multi-round code saved the revision before numbering it.
@@ -124,53 +236,74 @@ def main() -> None:
     decisions = _load(args.decisions)
 
     store = PostgresKnowledgeStore(database_url_from_env())
-    viewpoint_ids = sorted({private["ref_to_id"][x] for r in proposal["relations"] for x in (r["from"], r["to"])})
-    with store.connect() as conn, conn.cursor() as cur:
-        cur.execute("""SELECT v.object_id, v.payload->>'current_revision_id', r.payload->>'core_proposition'
-                       FROM wang_knowledge.objects v JOIN wang_knowledge.objects r
-                         ON r.collection='viewpoint_revisions' AND r.object_id=v.payload->>'current_revision_id'
-                       WHERE v.collection='canonical_viewpoints' AND v.object_id=ANY(%s)""", (viewpoint_ids,))
-        rows = cur.fetchall()
-    current = {vid: rev for vid, rev, _ in rows}
-    statements = {vid: text for vid, _, text in rows}
-    records, skipped = relation_records(run, proposal, verdicts, decisions, args.review_raw, packet, private, current)
-    package = {"viewpoint_relations": records}
+    out = run / "write"
+    out.mkdir(exist_ok=True)
+    if args.part == "relations":
+        viewpoint_ids = sorted({private["ref_to_id"][x] for r in proposal["relations"] for x in (r["from"], r["to"])})
+        with store.connect() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT v.object_id, v.payload->>'current_revision_id', r.payload->>'core_proposition'
+                           FROM wang_knowledge.objects v JOIN wang_knowledge.objects r
+                             ON r.collection='viewpoint_revisions' AND r.object_id=v.payload->>'current_revision_id'
+                           WHERE v.collection='canonical_viewpoints' AND v.object_id=ANY(%s)""", (viewpoint_ids,))
+            rows = cur.fetchall()
+        current = {vid: rev for vid, rev, _ in rows}
+        statements = {vid: text for vid, _, text in rows}
+        records, skipped = relation_records(run, proposal, verdicts, decisions, args.review_raw, packet, private, current)
+        package = {"viewpoint_relations": records}
+        listing = write_list(records, skipped, statements)
+    else:
+        package, notes, affected = link_summary_package(run, proposal, verdicts, packet, private, store,
+                                                        args.proposal_raw, args.review_raw)
+        back = {v: k for k, v in private["ref_to_id"].items()}
+        summary_ids = {private["ref_to_id"][v["viewpoint"]] for v in proposal["viewpoints"] if v["summary"] and v["viewpoint"].startswith("V")}
+        listing = "\n".join([f"# 写入清单：连接 {len(package.get('viewpoint_claim_links', []))} 条，观点 {len(package.get('canonical_viewpoints', []))} 个", ""]
+                            + [f"- 连接 {back.get(l['claim_id'])} → {back.get(l['viewpoint_id'])}：{l['link_type']}"
+                               f"（{'改类型' if l['revision'] > 1 else '新增'}）" for l in package.get("viewpoint_claim_links", [])]
+                            + [f"- 观点 {back.get(v['viewpoint_id'])}：{'summary 更新；' if v['viewpoint_id'] in summary_ids else ''}成员依据重算"
+                               for v in package.get("canonical_viewpoints", [])]
+                            + ["", "## 不写", ""] + [f"- {n}" for n in notes]) + "\n"
     plan = store.plan_package(package, source_kind=SOURCE_KIND, transactional=True)
     context = store.read_package_cvp_context(package)
     read_pins = pins(context, absent=[(op.collection, op.object_id) for op in plan.operations if op.operation == "create"])
-    out = run / "write"
-    out.mkdir(exist_ok=True)
-    (out / "relations-package.json").write_text(json.dumps(package, ensure_ascii=False, indent=1))
-    (out / "relations-write-list.md").write_text(write_list(records, skipped, statements))
-    print(f"planned {len(plan.operations)} operations; list at {out / 'relations-write-list.md'}")
+    (out / f"{args.part}-package.json").write_text(json.dumps(package, ensure_ascii=False, indent=1))
+    (out / f"{args.part}-write-list.md").write_text(listing)
+    print(f"planned {len(plan.operations)} operations; list at {out / (args.part + '-write-list.md')}")
     if args.dry_run:
         return
 
     if not args.backup or not args.backup.exists():
         raise SystemExit("--execute needs the backup taken just before it")
     claim_ids = sorted(private["ref_to_id"][c["ref"]] for c in packet["scope_claims"])
-    run_id = store.prepare_topic_run(topic=topic, claim_ids=claim_ids,
-                                     materials={"packet": binding(run / "packet.json"), "proposal": binding(args.proposal)})
+    materials = {"packet": binding(run / "packet.json"), "proposal": binding(args.proposal)}
+    if args.part != "relations":
+        materials["part"] = args.part
+    run_id = store.prepare_topic_run(topic=topic, claim_ids=claim_ids, materials=materials)
     evidence = {"package": {"sha256": sha256_json(package), "payload": package},
                 "approval": {"gpt": binding(args.proposal_raw), "opus": binding(args.review_raw)},
                 "authorization": binding(args.decisions), "backup": {"dump": binding(args.backup)},
                 "sources": [binding(run / "packet.json")], "read_pins": pin_rows(read_pins)}
     reviewed = store.review_cvp_group(run_id, plan=plan, evidence=evidence)
-    result = store.apply_plan(plan, metadata={"reason": f"CVP 3.0 topic run {topic}: reviewed relations",
+    result = store.apply_plan(plan, metadata={"reason": f"CVP 3.0 topic run {topic}: reviewed {args.part}",
                                               "actor": "owner-authorized-topic-agent"},
                               transaction_context=TransactionValidation(run_id=run_id, reviewed_sha256=reviewed,
                                                                         read_pins=read_pins))
     # Read back every written record and compare it with what was planned.
+    mismatched, written = [], 0
     with store.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT object_id, payload FROM wang_knowledge.objects WHERE collection='viewpoint_relations' AND object_id=ANY(%s)",
-                    ([r["viewpoint_relation_id"] for r in records],))
-        stored = dict(cur.fetchall())
-    mismatched = [r["viewpoint_relation_id"] for r in records
-                  if {k: v for k, v in (stored.get(r["viewpoint_relation_id"]) or {}).items() if k in r} != r]
-    (out / "relations-result.json").write_text(json.dumps({"run_id": run_id, "reviewed_sha256": reviewed, "apply": result,
-                                                          "written": len(stored), "readback_mismatched": mismatched},
-                                                         ensure_ascii=False, indent=1, default=str))
-    print(json.dumps({"run_id": run_id, "written": len(stored), "readback_mismatched": mismatched}, ensure_ascii=False))
+        for collection, rows in package.items():
+            id_field = next(k for k in rows[0] if k.endswith("_id") and k.startswith(("viewpoint_relation", "identity_candidate",
+                            "identity_decision", "viewpoint_claim_link", "viewpoint_id")))
+            for row in rows:
+                cur.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s AND retired_at IS NULL",
+                            (collection, row[id_field]))
+                got = cur.fetchone()
+                written += bool(got)
+                if not got or {k: v for k, v in got[0].items() if k in row} != row:
+                    mismatched.append(f"{collection}/{row[id_field]}")
+    (out / f"{args.part}-result.json").write_text(json.dumps({"run_id": run_id, "reviewed_sha256": reviewed, "apply": result,
+                                                             "written": written, "readback_mismatched": mismatched},
+                                                            ensure_ascii=False, indent=1, default=str))
+    print(json.dumps({"run_id": run_id, "written": written, "readback_mismatched": mismatched}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
