@@ -104,7 +104,7 @@ def held_claims(store, claim_ids) -> set[str]:
         return {row[0] for row in cur.fetchall()}
 ID_FIELDS = {"viewpoint_relations": "viewpoint_relation_id", "viewpoint_identity_candidates": "identity_candidate_id",
              "viewpoint_identity_decisions": "identity_decision_id", "viewpoint_claim_links": "viewpoint_claim_link_id",
-             "canonical_viewpoints": "viewpoint_id"}
+             "canonical_viewpoints": "viewpoint_id", "viewpoint_revisions": "viewpoint_revision_id"}
 MODEL_IDS = ["claude-opus-5-5", "gpt-6.1-sol"]
 
 
