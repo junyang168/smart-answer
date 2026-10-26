@@ -6,6 +6,11 @@ import pytest
 from backend.pipeline import topic_discovery as m
 
 
+@pytest.fixture(autouse=True)
+def no_pause(monkeypatch):
+    monkeypatch.setattr(m.time, "sleep", lambda seconds: None)
+
+
 def claim(cid, statement, steps=()):
     return {"claim_id": cid, "statement": statement, "evidence_step_ids": list(steps)}
 
@@ -123,3 +128,45 @@ def test_unknown_seed_stops_before_any_call(tmp_path):
     c = corpus()
     with pytest.raises(ValueError):
         m.Discovery(c, sources(c), Judge({}), tmp_path, "t", ["nope"])
+
+
+def test_a_source_edited_after_extraction_is_flagged_not_fatal(tmp_path):
+    from backend.pipeline.theological_evidence_packet import TheologicalEvidencePacketError
+
+    def loader(s):
+        if s["source_id"] == "B":
+            raise TheologicalEvidencePacketError("scoped source original SHA mismatch: B")
+        return {"content": "\n\n".join(TEXT[s["source_id"]])}
+
+    c = corpus()
+    judge = Judge({"related by relation": "out", "same verse elsewhere": "in", "same CVP": "out"})
+    result = m.Discovery(c, m.Sources(c, loader=loader), judge, tmp_path, "t", ["C1"]).run()
+    card = next(x for p in judge.requests for x in p["candidates"] if x["statement"] == "same verse elsewhere")
+    assert card["source_changed"] and card["blocks"] == []
+    assert result["sources_changed"] == ["B"] and "Sermon B" in (tmp_path / "report.md").read_text()
+
+
+def test_every_round_is_judged_against_the_seeds_only(tmp_path):
+    c = corpus()
+    judge = Judge({"related by relation": "in", "same verse elsewhere": "out", "same CVP": "out"})
+    m.Discovery(c, sources(c), judge, tmp_path, "t", ["C1"]).run()
+    assert all(p["topic"] == {"name": "t", "seeds": ["seed"]} for p in judge.requests)
+
+
+def test_rate_limit_waits_once_then_retries(tmp_path):
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionError
+
+    class Limited(Judge):
+        def generate_json(self, system, text, schema, timeout_seconds=None):
+            if not getattr(self, "refused", False):
+                self.refused = True
+                raise CodexSubscriptionError("exceeded retry limit, last status: 429 Too Many Requests")
+            return super().generate_json(system, text, schema, timeout_seconds)
+
+    c = corpus()
+    waits = []
+    d = m.Discovery(c, sources(c), Limited({"related by relation": "out", "same verse elsewhere": "out", "same CVP": "out"}),
+                    tmp_path, "t", ["C1"])
+    d.sleep = waits.append
+    d.run()
+    assert waits[0] == m.RATE_LIMIT_WAIT_SECONDS
