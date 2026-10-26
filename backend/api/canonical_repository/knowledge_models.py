@@ -1401,7 +1401,7 @@ class ViewpointRelationRecord(StrictViewpointRecord):
     validated_source_viewpoint_revision_id: str
     validated_target_viewpoint_revision_id: str
     relation_type: Literal[
-        "generalizes", "specializes", "entails", "extends", "qualifies",
+        "generalizes", "specializes", "entails", "supports", "extends", "qualifies",
         "applies", "tensions_with", "supersedes",
     ]
     reason: str = Field(min_length=1)
