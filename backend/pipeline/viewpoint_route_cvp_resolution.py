@@ -41,6 +41,9 @@ from backend.pipeline.viewpoint_route_resolution import (
 from backend.pipeline.viewpoint_route_review_continuity import (
     continuity_packet, review_history_entry,
 )
+from backend.pipeline.viewpoint_route_correction_changes import (
+    correction_adapter, expand_correction, CorrectionChanges, MARKER, VERSION as CHANGES_VERSION,
+)
 
 
 class CvpRouteReviewIncomplete(ValueError):
@@ -458,15 +461,20 @@ def run_cvp_route_scope(
             "previous_correction": last_reconsideration,
             "instruction": "Return a complete revised route set; the next review sees every route and attestation.",
         }
+        correction_path = output_dir / f'route-reconsideration-packet-{round_number:03d}.json'
+        response_path = output_dir / f'raw-route-reconsideration-{round_number:03d}.json'
+        active_reconsiderer = correction_adapter(reconsiderer, correction_path, response_path)
+        if getattr(active_reconsiderer, '_response_model', None) is CorrectionChanges:
+            reconsider_packet[MARKER] = CHANGES_VERSION
+            reconsider_packet['instruction'] = 'Return only actual edits and finding dispositions; the program preserves omitted fields and submits the complete expanded result for review.'
         reconsider_packet = continuity_packet(reconsider_packet, review_history,
-            packet_path=output_dir / f'route-reconsideration-packet-{round_number:03d}.json',
-            response_path=output_dir / f'raw-route-reconsideration-{round_number:03d}.json')
+            packet_path=correction_path, response_path=response_path)
         raw_reconsideration, _, _ = call_model(
-            reconsiderer, reconsider_packet,
-            output_dir / f"raw-route-reconsideration-{round_number:03d}.json",
+            active_reconsiderer, reconsider_packet, response_path,
         )
         reconsideration = correction_model.model_validate(
-            canonicalize_proposal(raw_reconsideration)[0]
+            canonicalize_proposal(expand_correction(raw_reconsideration, proposal, review, route_packet,
+                expected_contract=reconsider_packet.get(MARKER)))[0]
         )
         bound_proposal, retirement_binding = bind_revision_retirements(
             reconsideration.revised_proposal, route_packet)
@@ -489,6 +497,11 @@ def run_cvp_route_scope(
         write_immutable(output_dir / f"route-reconsideration-{round_number:03d}.json", {
             "reconsideration": last_reconsideration,
             "validation": reconsideration_validation,
+            **({'correction_expansion': {'schema_version': CHANGES_VERSION,
+                'raw_response_sha256': sha256_json(raw_reconsideration),
+                'base_proposal_sha256': proposal_sha,
+                'expanded_proposal_sha256': sha256_json(last_reconsideration['revised_proposal'])}}
+               if raw_reconsideration.get('schema_version') == CHANGES_VERSION else {}),
         })
         bound_reconsideration, source_bindings = bind_attestation_source_ids(
             last_reconsideration, route_packet

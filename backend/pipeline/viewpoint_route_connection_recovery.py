@@ -143,11 +143,21 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
             'route_review_sha256':sha256_json(last_review),'route_review':last_review,
             'previous_correction':previous,
             'instruction':'Return a complete revised route set; the next review sees every route and attestation.'}
+        from backend.pipeline.viewpoint_route_correction_changes import (
+            correction_adapter, expand_correction, CorrectionChanges, MARKER, VERSION as CHANGES_VERSION)
+        correction_path=parent/f'route-reconsideration-packet-{i:03d}.json'
+        response_path=parent/f'raw-route-reconsideration-{i:03d}.json'
+        active_reconsiderer=correction_adapter(reconsiderer,correction_path,response_path)
+        if getattr(active_reconsiderer,'_response_model',None) is CorrectionChanges:
+            correction_packet[MARKER]=CHANGES_VERSION
+            correction_packet['instruction']='Return only actual edits and finding dispositions; the program preserves omitted fields and submits the complete expanded result for review.'
         correction_packet=continuity_packet(correction_packet,review_history,
-            packet_path=parent/f'route-reconsideration-packet-{i:03d}.json',
-            response_path=parent/f'raw-route-reconsideration-{i:03d}.json')
-        raw=read_saved_model_response(reconsiderer,correction_packet,parent/f'raw-route-reconsideration-{i:03d}.json')
-        previous=ArgumentRouteReconsiderationV3Response.model_validate(canonicalize_proposal(raw)[0]).model_dump(mode='json')
+            packet_path=correction_path,response_path=response_path)
+        raw=read_saved_model_response(active_reconsiderer,correction_packet,response_path)
+        expanded=expand_correction(raw,ArgumentRouteProposalV3Response.model_validate(current),
+            ArgumentRouteReviewV3Response.model_validate(last_review),old,
+            expected_contract=correction_packet.get(MARKER))
+        previous=ArgumentRouteReconsiderationV3Response.model_validate(canonicalize_proposal(expanded)[0]).model_dump(mode='json')
         review_history[-1]['finding_dispositions']=previous['finding_dispositions']
         if read(f'route-reconsideration-{i:03d}.json')['reconsideration'] != previous:
             raise ValueError('connection continuation original correction answer changed')
