@@ -13,9 +13,13 @@ def enabled(request, policy=None):
     from backend.pipeline import claim_management as cm
     if isinstance(request, dict):
         request = cm.Request.model_validate(request)
-    # Structural/Create/source-impact contracts retain their existing scope.
-    if getattr(request, 'operation', None) not in {'Update', 'Review'} or cm.is_source_impact(request):
+    # Structural/Create and legacy source-impact contracts keep their scope.
+    if getattr(request, 'operation', None) not in {'Update', 'Review'}:
         return False
+    if cm.is_source_impact(request):
+        data = policy.model_dump() if policy else json.loads(cm.source.verify_file(request.policy).read_text())
+        if not data.get('source_impact_contract'):
+            return False
     if policy is None:
         bound = getattr(request, 'policy', None)
         if bound is None or not Path(bound.path).is_file():

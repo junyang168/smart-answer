@@ -87,6 +87,10 @@ def validate_source_repair_application(package: Mapping[str, Any]) -> None:
     Every adapter must prove its own exact records, never borrow old approval.
     """
     app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_source_change_transition_v1':
+        from backend.pipeline.source_change_transition import validate_package
+        validate_package(dict(package))
+        return
     if app.get('schema_version') == 'wang_verified_source_quote_sync_v1':
         from backend.pipeline.verified_source_quote_sync import validate_package
         validate_package(dict(package))

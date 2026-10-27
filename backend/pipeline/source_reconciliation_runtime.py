@@ -113,6 +113,10 @@ def claim_management_model_adapter(role, policy, *, live=False):
     if joint:
         response_model = JointJsonCandidate if role == 'gpt' else JointReview
         schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
+    if policy.source_impact_contract:
+        from backend.pipeline.claim_management import SourceChangeWire
+        response_model = SourceChangeWire
+        prompt += '\n本轮来源变更自动化：完整读取全部材料后才可 complete_review=true；不逐条重复只读记录的 retain/verdict。source_impacts 只覆盖原 target_keys；direct neighbours 只作只读背景。source_coverage 必须逐一覆盖所有改变的段落，检查新增或此前遗漏的教导、经文及推理、引述和否定的归属。每项列出真正承载这些教导的本来源 Claim keys；缺少独立 Claim 时标 needs_update，并对所列 Claim 给出具体维护 finding，要求在普通 Update 中补建并连接 Evidence、Question。教授投影片与教授原话具有同等证据地位。不得用不相干的现有 Claim 冒充覆盖。'
     if policy.model_output_contract:
         from backend.pipeline.claim_model_output import Changes, CreatingChanges, ManagedChanges, FindingsReview, CREATING_CONTRACT, MANAGED_CONTRACT
         creating = policy.model_output_contract == CREATING_CONTRACT

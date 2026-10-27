@@ -33,6 +33,21 @@ def claim_management_review_packet(materials, candidate):
     return add_packet(packet, candidate)
 
 
+def source_before_matches(transition, sid, document, history):
+    if sid not in transition.recovered_baselines:
+        return document.get('source_file_sha256') == transition.before_sources[sid].file_sha256
+    from backend.pipeline.source_change_transition import verify_before
+    bound = transition.recovered_baselines[sid].model_dump(mode='json')
+    check_binding(bound)
+    intent = json.loads(Path(bound['path']).read_text())
+    if (history.get('metadata', {}).get('intent') != bound or not intent['recovered_baseline']
+            or intent['before'] != transition.before_sources[sid].model_dump(mode='json')
+            or intent['records']['source_documents/' + sid]['payload'] != document):
+        return False
+    verify_before(document, intent['before'], recovered=True)
+    return True
+
+
 def claim_source_transition_context(store, request, before):
     """Consume one committed source transition, never authorize source writes."""
     from backend.pipeline import claim_management as cm
@@ -60,15 +75,24 @@ def claim_source_transition_context(store, request, before):
                 or operations[0]['operation'] != 'update'
                 or any(operations[0]['before'].get(field) != operations[0]['after'].get(field)
                        for field in ('source_id', 'source_type', 'transcript_id'))
-                or operations[0]['before'].get('source_file_sha256') != transition.before_sources[sid].file_sha256
+                or not source_before_matches(transition, sid, operations[0]['before'], history)
                 or operations[0]['after'].get('source_file_sha256') != request.source_bindings[sid].file_sha256
                 or [operations[0]['after_revision'], operations[0]['after_sha256']]
                    != [state['revision'], state['content_sha256']]):
             raise ValueError('source impact is not the exact committed/current source version transition')
         histories[sid] = {'change_set_id': change_set_id, 'fingerprint_sha256': history['fingerprint_sha256'],
                           'source_operation': operations[0]}
-    claim_keys = [key for key in cm.audit_keys(request, before) if key.startswith('claims/')]
-    return {'schema_version': 'wang_claim_source_transition_v2', 'histories': histories,
+    inherited = {}
+    if (not cm.is_source_impact(request) and predecessor.get('policy', {}).get('source_impact_contract')):
+        if predecessor.get('result', {}).get('status') != 'completed':
+            raise ValueError('source Update requires its completed source-impact assessment')
+        declared = set(cm.audit_keys(request, before))
+        inherited = {fid: finding for fid, finding in predecessor.get('findings', {}).items()
+                     if finding['target_key'] in declared}
+    automated = cm.Policy.model_validate_json(content.verify_file(request.policy).read_text()).source_impact_contract
+    claim_keys = list(request.target_keys) if automated else [key for key in cm.audit_keys(request, before) if key.startswith('claims/')]
+    return {'schema_version': transition.schema_version, 'histories': histories,
+            **({'prior_findings': inherited} if inherited else {}),
             'population': sorted(expected), 'baselines': claim_source_baselines(store, request, before, claim_keys, transition)
                 if cm.is_source_impact(request) else {}}
 
@@ -81,6 +105,7 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
     """
     from backend.pipeline import claim_management as cm
     from backend.pipeline.source_reconciliation_runner import body, read
+    automated = bool(cm.Policy.model_validate_json(content.verify_file(request.policy).read_text()).source_impact_contract)
     allowed_doc_fields = {'source_sha256','source_body_sha256','source_file_sha256','source_text_sha256',
         'anchor_binding_sha256','editorial_structure_sha256','editorial_topology_sha256','revision'}
     operations = {}
@@ -102,8 +127,12 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
                        OR metadata->'materials'->'original_goal'->'target_keys' ? ('claims/' || requested.claim_id))
                   AND (metadata->>'checkpoint' IN ('applied','audited')
                        OR metadata->'blocked_current_claim_ids' ? requested.claim_id)
+                  AND (NOT %s OR metadata->'materials'->'original_goal'->'target_keys' ? ('claims/' || requested.claim_id)
+                       OR metadata->'blocked_current_claim_ids' ? requested.claim_id
+                       OR EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(metadata->'candidate'->'dispositions','[]'::jsonb)) d
+                           WHERE d->>'record_key'=('claims/' || requested.claim_id) AND d->>'action'<>'retain'))
                 ORDER BY started_at DESC,run_id DESC LIMIT 1
-            ) latest""", (claim_ids,)).fetchall()
+            ) latest""", (claim_ids, automated)).fetchall()
         latest = dict(rows)
         distinct_ids = sorted(set(latest.values()))
         metadata = dict(conn.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
@@ -120,13 +149,19 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
             continue
         try:
             if rid not in validated:
-                receipt = value['stage_results']['audit']; check_binding(receipt)
+                stage = 'audit' if 'audit' in value['stage_results'] else 'readback' if automated else 'audit'
+                receipt = value['stage_results'][stage]; check_binding(receipt)
                 saved = body(read(Path(receipt['path'])))
-                check_binding(saved['audit'])
-                report = json.loads(Path(saved['audit']['path']).read_text())
-                material = value['materials']
-                candidate = cm.Candidate.model_validate(value['candidate'])
-                passed, _, _ = validate_claim_audit(report, material, candidate, historical=True)
+                if stage == 'audit':
+                    check_binding(saved['audit'])
+                    report = json.loads(Path(saved['audit']['path']).read_text())
+                    material = value['materials']
+                    candidate = cm.Candidate.model_validate(value['candidate'])
+                    passed, _, _ = validate_claim_audit(report, material, candidate, historical=True)
+                else:
+                    material, candidate, _, passed = validate_claim_stage_receipt(saved, historical=True)
+                    check_binding(saved['readback'])
+                    report = body(read(Path(saved['readback']['path'])))
                 validated[rid] = (receipt, report, material, candidate) if passed else None
             if validated[rid] is None:
                 continue
@@ -135,7 +170,7 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
             unit = cm.Request.model_validate(material['unit_request']).model_copy(update={'target_keys': [key], 'permissions': []})
             required = set(cm.audit_keys(unit, before))
             current = {k: v for k, v in before.items() if k in required}
-            old_graph = {k: {'payload': v['payload'], 'retired': v['retired']} for k, v in report['packet']['actual_records'].items()}
+            old_graph = {k: {'payload': v['payload'], 'retired': v['retired']} for k, v in report.get('packet', report)['actual_records'].items()}
             if set(current) != set(cm.audit_keys(unit, old_graph)) or not set(current) <= set(old_pins):
                 continue
             valid = True
@@ -149,6 +184,8 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
                     valid = False; break
                 changed = {f for f in set(op['before']) | set(op['after']) if op['before'].get(f) != op['after'].get(f)}
                 permitted = allowed_doc_fields if dep.startswith('source_documents/') else {'source_sha256','revision'} if dep.startswith('source_fragments/') else {'revision'}
+                if automated and dep.startswith('source_fragments/'):
+                    permitted |= {'paragraph_text_sha256', 'verbatim_excerpt_sha256'}
                 if changed - permitted:
                     valid = False; break
             if valid:
@@ -382,7 +419,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
         full_sources[sid]['body_sha256'] = sources[sid]['body_sha256']
     for sid, paragraphs in expected_before.items():
         full_sources[sid]['before'] = {'paragraphs': paragraphs}
-    review = cm.Review.model_validate(response)
+    review = cm.parse_review(response)
     approved = cm.validate_review(candidate, review, denominator, cm.operation_questions(materials['original_goal'], candidate),
                                    materials['unresolved'], full_sources, request=request, records=states)
     if approved:
@@ -390,7 +427,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     return approved, review, actual_pins
 
 
-def validate_claim_stage_receipt(receipt):
+def validate_claim_stage_receipt(receipt, *, historical=False):
     """One authenticated content result for existing SQL run metadata."""
     from backend.pipeline import claim_management as cm
     check_binding(receipt['materials'])
@@ -406,9 +443,11 @@ def validate_claim_stage_receipt(receipt):
         report = json.loads(Path(receipt['audit']['path']).read_text())
         passed, review, _ = validate_claim_audit(report, materials, candidate)
         return materials, candidate, review, passed
-    cm.require_current_implementation(materials['audit_contract'])
+    if not historical:
+        cm.require_current_implementation(materials['audit_contract'])
     policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
-                                       selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
+        archived_sources=materials.get('source_archives') if historical else None,
+        selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,

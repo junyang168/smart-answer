@@ -78,6 +78,7 @@ class Policy(source.Contract):
 
     evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
+    source_impact_contract: Literal['source_change_automation_v1'] | None = None
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
@@ -87,7 +88,7 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'source_impact_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -111,6 +112,9 @@ class Policy(source.Contract):
             allowed = AUDIT_MODELS if role == 'gemini' else {model}
             if selected not in allowed or self.models[role] != {"model_id": selected, "backend": backend, "effort": "high"}:
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
+        if self.source_impact_contract and (self.review_purpose != 'source_impact' or self.source_impact_batch_size
+                or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
+            raise ValueError('source automation requires one scoped Opus impact Review')
         if self.source_impact_batch_size and self.review_purpose != 'source_impact':
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
@@ -348,14 +352,25 @@ class JointReview(Review):
 
 
 class SourceTransition(source.Contract):
-    schema_version: Literal['wang_claim_source_transition_v2'] = 'wang_claim_source_transition_v2'
+    schema_version: Literal['wang_claim_source_transition_v2', 'wang_claim_source_transition_v3'] = 'wang_claim_source_transition_v2'
     before_sources: dict[str, source.FileBinding]
     source_change_set_ids: dict[str, str]
+    recovered_baselines: dict[str, source.FileBinding] = Field(default_factory=dict)
+
+    @model_serializer(mode='wrap')
+    def historical_shape(self, handler):
+        value = handler(self)
+        if self.schema_version == 'wang_claim_source_transition_v2':
+            value.pop('recovered_baselines', None)
+        return value
 
     @model_validator(mode='after')
     def complete(self):
         if not self.before_sources or set(self.before_sources) != set(self.source_change_set_ids):
             raise ValueError('source transition needs exact old files and committed source versions')
+        if (self.schema_version == 'wang_claim_source_transition_v2' and self.recovered_baselines
+                or set(self.recovered_baselines) - set(self.before_sources)):
+            raise ValueError('recovered baseline needs the explicit v3 source transition')
         return self
 
 
@@ -373,6 +388,35 @@ Review.model_rebuild()
 JointReview.model_rebuild()
 
 
+class SourceCoverage(source.Contract):
+    source_id: str
+    paragraph_key: str
+    claim_keys: list[str]
+    conclusion: Literal['represented', 'needs_update', 'source_uncertain']
+    reason: str = Field(min_length=1)
+    citations: list[Citation] = Field(min_length=1)
+
+
+class SourceChangeReview(Review):
+    source_coverage: list[SourceCoverage]
+
+
+class SourceChangeWire(source.Contract):
+    complete_review: bool
+    findings: list[Finding]
+    source_impacts: list[SourceImpact]
+    source_coverage: list[SourceCoverage]
+
+
+def review_model(policy):
+    value = policy.model_dump() if isinstance(policy, Policy) else policy
+    return SourceChangeWire if value.get('source_impact_contract') else Review
+
+
+def parse_review(value):
+    return (SourceChangeReview if 'source_coverage' in value else Review).model_validate(value)
+
+
 def audit_contract(root, policy=None):
     """Freeze actual audit instructions/schema and the implementation version."""
     from backend.pipeline.source_reconciliation_runner import archive_source_version, binding
@@ -380,7 +424,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'source_change_transition.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -389,7 +433,7 @@ def audit_contract(root, policy=None):
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
-        'response_schema': (JointReview if joint else Review).model_json_schema(),
+        'response_schema': (JointReview if joint else review_model(policy) if policy else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
 
 
@@ -949,8 +993,25 @@ def source_delta(before, current):
 
 def validate_source_impacts(review, keys, sources, *, request, records, unresolved):
     items = {item.record_key: item for item in review.source_impacts}
-    if len(items) != len(review.source_impacts) or set(items) != {k for k in keys if k.startswith('claims/')}:
+    automated = (Policy.model_validate_json(source.verify_file(request.policy).read_text()).source_impact_contract
+                 if Path(request.policy.path).is_file() else None)
+    expected = set(request.target_keys) if automated else {k for k in keys if k.startswith('claims/')}
+    if len(items) != len(review.source_impacts) or set(items) != expected:
         raise ValueError('source impact Review must account for every current Claim exactly once')
+    if automated:
+        # The before/current coordinates are identical in this intake.
+        expected_paragraphs = {(sid, key) for sid, snapshot in sources.items()
+            for key, paragraph in snapshot['paragraphs'].items()
+            if paragraph != snapshot['before']['paragraphs'].get(key)}
+        coverage = getattr(review, 'source_coverage', [])
+        if len(coverage) != len(expected_paragraphs) or {(c.source_id, c.paragraph_key) for c in coverage} != expected_paragraphs:
+            raise ValueError('source impact omitted changed-paragraph teaching coverage')
+        for item in coverage:
+            validate_citations(item.citations, sources)
+            if not item.claim_keys or not set(item.claim_keys) <= expected:
+                raise ValueError('source teaching coverage must name its actual source Claim owners')
+            if item.conclusion != 'represented' and not any(items[k].conclusion != 'unaffected' for k in item.claim_keys):
+                raise ValueError('source teaching gap requires an ordinary maintenance finding')
     findings = {f.target_key for f in review.findings}
     findings.update(unresolved[r.finding_id]['target_key'] for r in review.prior_findings
                     if r.disposition != 'resolved')
