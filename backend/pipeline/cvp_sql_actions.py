@@ -476,7 +476,7 @@ def validate_claim_stage_receipt(receipt, *, historical=False):
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
             materials['unresolved'], sources, request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
         check_binding(receipt['readback'])
-        if receipt['readback'] != binding(root / 'readback.json'):
+        if not Path(receipt['readback']['path']).samefile(root / 'readback.json'):
             raise ValueError('program readback belongs to a different round')
         report = body(read(root / 'readback.json'))
         if (report['round_id'] != materials['round_id'] or report['candidate_sha256'] != candidate.digest

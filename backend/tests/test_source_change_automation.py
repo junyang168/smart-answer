@@ -190,7 +190,8 @@ def test_editor_archives_exact_bytes_only_after_cas_success(tmp_path):
 
 
 @pytest.mark.parametrize('reviewed', [['C','D'], ['C']])
-def test_unaffected_source_impact_reuses_actual_opus_program_readback(action, monkeypatch, reviewed):
+@pytest.mark.parametrize('moved', [False, True])
+def test_unaffected_source_impact_reuses_actual_opus_program_readback(action, monkeypatch, reviewed, moved):
     from backend.pipeline import source_change_automation as automation, claim_management_intake as intake
     from backend.pipeline import claim_management_batch as batch
     from backend.pipeline.cvp_sql_actions import execute_claim_management
@@ -207,6 +208,9 @@ def test_unaffected_source_impact_reuses_actual_opus_program_readback(action, mo
                 ports=SyntheticPorts(store,execution,opus=pass_review))['status']=='completed'
     monkeypatch.setattr(batch,'run',execute)
     assert intake.run(reviewed,root/'previous-content',instruction='synthetic old content review',store=store)['status']=='completed'
+    if moved:
+        original=root/'previous-content';archived=root/'moved-content'
+        original.rename(archived);original.symlink_to(archived,target_is_directory=True)
     path.write_bytes(edited_raw)
     handoff=transition.register(store,'S',binding(old),root/'source',instruction='synthetic source')
     request=automation.prepare_impact(store,handoff,root/'impact','synthetic source')
