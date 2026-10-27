@@ -504,7 +504,12 @@ def execute_claim_management(store, request, *, root, ports):
     from backend.pipeline.claim_joint_update import enabled
     from backend.pipeline.source_reconciliation_runner import exclusive, Stop
     request = cm.Request.model_validate(request)
-    read_context = store.read_affected_context if cm.is_source_impact(request) or request.operation == 'Create' else store.read_claim_context
+    # Reverse source/CVP consumers alone do not close incoming Evidence support.
+    # The new source contract has ordinary Claim roots and needs that same
+    # complete evidence reader. Preserve the historical source-review contract.
+    direct_impact = cm.is_source_impact(request) and cm.Policy.model_validate_json(
+        cm.source.verify_file(request.policy).read_text()).source_impact_contract == 'source_change_automation_v1'
+    read_context = store.read_affected_context if (cm.is_source_impact(request) and not direct_impact) or request.operation == 'Create' else store.read_claim_context
     root = Path(root).resolve()
     if request.operation == 'Read':
         return {'status': 'completed', 'operation': 'Read', 'records': {

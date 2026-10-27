@@ -268,3 +268,72 @@ def test_changed_source_between_batches_blocks_next_dispatch(action):
     with pytest.raises(ValueError,match='binding drift'):
         automation.run(store,'S',root,instruction='synthetic',before=old,ports=Ports(store))
     assert starts==[['C']]
+
+
+def add_upstream_support(store):
+    store.apply_plan(store.plan_package({'package_id':'upstream-chain',
+        'observations':[{'observation_id':'O','statement':'甲是假设。','source_fragment_ids':['FC']}],
+        'evidence_steps':[{'evidence_step_id':'UP','statement':'甲是假设。','produced_claim_ids':[],
+            'source_fragment_ids':['FC'],'speaker':'professor','stance':'asserted','support_eligibility':'eligible_candidate'}],
+        'knowledge_relations':[{'relation_id':'OE','from_id':'O','to_id':'UP','relation_type':'supports','reason':'upstream premise'},
+            {'relation_id':'EE','from_id':'UP','to_id':'EC','relation_type':'supports','reason':'argument chain'}]}))
+
+
+def test_source_impact_closes_entire_incoming_evidence_chain(action):
+    from backend.pipeline import source_change_automation as automation
+    from backend.pipeline.cvp_sql_actions import execute_claim_management
+    store,old,root=two_paragraphs(action)
+    add_upstream_support(store)
+    handoff=transition.register(store,'S',binding(old),root/'handoff',instruction='synthetic source')
+    request=automation.prepare_impact(store,handoff,root/'impact','synthetic source')
+    def opus(packet):
+        assert {'observations/O','evidence_steps/UP','knowledge_relations/OE','knowledge_relations/EE'} <= set(packet['before'])
+        return automated_impact(packet)
+    ports=SyntheticPorts(store,root,opus=opus)
+    result=execute_claim_management(store,request,root=root/'impact/execution',ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus']
+
+
+@pytest.mark.parametrize('fault', [None,'started','drift'])
+def test_unstarted_source_read_recovery_keeps_original_action_and_budget(action,monkeypatch,fault):
+    from backend.pipeline import source_change_automation as automation
+    from backend.pipeline.claim_review_recovery import recover_unstarted_source_review, UNSTARTED_SOURCE_VERSION
+    from backend.pipeline.cvp_sql_actions import execute_claim_management
+    from backend.api.canonical_repository.postgres_store import canonical_json, ChangeSetConflict
+    store,old,root=two_paragraphs(action)
+    add_upstream_support(store)
+    handoff=transition.register(store,'S',binding(old),root/'handoff',instruction='synthetic source')
+    request=automation.prepare_impact(store,handoff,root/'impact','synthetic source')
+    complete=store.read_claim_context
+    monkeypatch.setattr(store,'read_claim_context',store.read_affected_context)
+    ports=SyntheticPorts(store,root,opus=automated_impact)
+    result=execute_claim_management(store,request,root=root/'impact/execution',ports=ports)
+    assert result['reason']=='engineering_required' and ports.calls==[],result
+    monkeypatch.setattr(store,'read_claim_context',complete)
+    pid='CMA-'+cm.sha256_json(request.action_id)
+    parent=store.get_cvp_group(pid);rid=next(iter(parent['latest_rounds'].values()))
+    original=store.get_cvp_group(rid)
+    if fault=='started':
+        metadata={k:v for k,v in parent.items() if k not in {'run_id','status','error'}}
+        next(iter(metadata['call_reservations'].values()))['state']='started'
+        with store.connect() as conn:
+            conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(metadata),pid))
+    if fault=='drift':
+        claim=deepcopy(store.get_record_state('claims','C')['payload']);claim['statement']='concurrent change'
+        store.apply_plan(store.plan_package({'package_id':'concurrent','claims':[claim]}))
+    auth=root/'recovery-authority.json'
+    auth.write_text(json.dumps({'schema_version':UNSTARTED_SOURCE_VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'synthetic authorized engineering correction',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json({k:v for k,v in original.items() if k not in {'run_id','status','error'}})}))
+    if fault:
+        with pytest.raises((ValueError,ChangeSetConflict)):recover_unstarted_source_review(store,rid,authorization=binding(auth))
+        assert store.get_cvp_group(rid)==original
+        return
+    path=recover_unstarted_source_review(store,rid,authorization=binding(auth))
+    assert Path(path,'engineering-recovery.json').is_file()
+    assert store.get_cvp_group(pid)['call_reservations']==parent['call_reservations']
+    assert store.get_cvp_group(rid)['unstarted_source_recoveries'][0]['original_round']['stage_results']==original['stage_results']
+    assert execute_claim_management(store,request,root=root/'impact/execution',ports=ports)['status']=='completed'
+    assert ports.calls==['opus']
+    assert list(store.get_cvp_group(pid)['latest_rounds'].values())==[rid]
