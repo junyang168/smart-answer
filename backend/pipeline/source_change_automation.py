@@ -19,11 +19,8 @@ from backend.pipeline.claim_management_batch import progress
 
 @contextmanager
 def production_lock():
-    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
-    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
-    data = Path(os.environ['DATA_BASE_DIR'])
-    with maintenance_lock(), exclusive_cvp_run_lock({'global_lock_path': str(data /
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}):
+    from backend.pipeline.source_reconciliation_runtime import wait_for_claim_operation_locks
+    with wait_for_claim_operation_locks():
         yield
 
 
@@ -47,12 +44,11 @@ class Production:
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
         ports = ProductionPorts(self.store)
-        with self.lock():
-            ports._environment_guard(require_backup=False)
-            runtime = canonical_runtime()
-            if not runtime['reused'] or runtime['new_model_calls']:
-                raise ValueError('source change requires the existing authorized runtime proof')
-            return execute_claim_management(self.store, request, root=root, ports=ports)
+        ports._environment_guard(require_backup=False)
+        runtime = canonical_runtime()
+        if not runtime['reused'] or runtime['new_model_calls']:
+            raise ValueError('source change requires the existing authorized runtime proof')
+        return execute_claim_management(self.store, request, root=root, ports=ports)
 
     def update(self, ids, root, **kwargs):
         return intake.run(ids, root, store=self.store, **kwargs)
@@ -184,6 +180,7 @@ def run(store, sid, root, *, instruction, before=None, recovered=False, source_c
                 handoff = json.loads(saved.read_text())
             else:
                 bound, recovered = resolve_before(store, sid, root, before, recovered)
+                progress(root/'state.json', {'status':'waiting_for_maintenance_lock', 'stage':'source_handoff'})
                 with ports.lock():
                     ports.guard()
                     handoff = transition.register(store, sid, bound, root/'source-handoff', instruction=instruction,
@@ -191,12 +188,15 @@ def run(store, sid, root, *, instruction, before=None, recovered=False, source_c
                 intake.immutable(saved, handoff)
             check_binding(handoff['source'])
             progress(root/'state.json', {'status':'running', 'stage':'source_impact'})
-            request = prepare_impact(store, handoff, root/'impact', instruction)
             plan_path = root/'paragraphs.json'
             if not plan_path.exists():
-                result = ports.impact(request, root/'impact/execution')
+                with ports.lock():
+                    request = prepare_impact(store, handoff, root/'impact', instruction)
+                    result = ports.impact(request, root/'impact/execution')
                 if result.get('status') != 'completed':
                     return finish(root, 'source_impact', result)
+            else:
+                request = cm.Request.model_validate_json((root/'impact/request.json').read_text())
             if not plan_path.exists():
                 intake.immutable(plan_path, plan_paragraphs(store, request, handoff))
             plan = json.loads(plan_path.read_text())

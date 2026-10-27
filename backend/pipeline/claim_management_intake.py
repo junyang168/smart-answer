@@ -186,7 +186,7 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None, so
             manifest = prepared['manifest']['path'] if prepared['manifest'] else None
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             if not batch._paragraph_results(store, jobs)['all_actions_completed']:
-                batch.run(manifest, root / 'batch')
+                batch.run(manifest, root / 'batch', **({'wait_for_locks':True} if source_transition else {}))
             result = batch._paragraph_results(store, jobs)
             by_claim = {cid: {'action_id': None, 'result': reason, 'qualification': None}
                         for cid, reason in prepared['excluded'].items()}

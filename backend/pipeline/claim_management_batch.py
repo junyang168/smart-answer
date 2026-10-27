@@ -131,7 +131,7 @@ def worker(manifest, root, key):
             'qualifications': {k: store.claim_management_qualification(k.split('/', 1)[1]) for k in request.target_keys}}
 
 
-def run(manifest, root):
+def run(manifest, root, *, wait_for_locks=False):
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
@@ -140,9 +140,13 @@ def run(manifest, root):
     with ExitStack() as stack:
         lock = stack.enter_context((root / 'controller.lock').open('a'))
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        maintenance = stack.enter_context(maintenance_lock())
-        registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path': str(Path(os.environ['DATA_BASE_DIR']) /
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
+        if wait_for_locks:
+            from backend.pipeline.source_reconciliation_runtime import wait_for_claim_operation_locks
+            maintenance, registry = stack.enter_context(wait_for_claim_operation_locks())
+        else:
+            maintenance = stack.enter_context(maintenance_lock())
+            registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path': str(Path(os.environ['DATA_BASE_DIR']) /
+                'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
         plan, jobs = load(manifest, root)
         store = PostgresKnowledgeStore()
         pending, active, results = list(jobs), {}, {}

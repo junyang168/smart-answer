@@ -54,6 +54,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.source_change_automati
 ## 三、恢復與完成
 
 同一 root 固定原方向、來源、段落計畫、子 action、policy 和 budget。
+共用維護／Registry 鎖被其他任務占用時留在同一操作等待；兩把鎖須同時取得，等待時不占住其中一把。這不重試模型、審閱或 SQL，也不增加預算。
 已完成來源交接查真實 ChangeSet；已完成的 Update 從 SQL 和當前資格核對，不重發模型。
 已提交論證先回讀原 job，不因路線基準改變而重建 job。未知回答、額度、hold、分歧及預算耗盡
 保持原任務狀態；不以新的 root、次數或「工程恢復」消除它們。

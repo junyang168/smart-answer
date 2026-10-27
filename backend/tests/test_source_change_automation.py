@@ -144,7 +144,7 @@ def test_two_paragraphs_call_normal_updates_in_order_and_resume(action, monkeypa
             events.append(('downstream',tuple(ids)))
             assert all(store.claim_management_qualification(c)['ready'] for c in ids)
             return {'status':'completed','fixture':'downstream boundary only'}
-    def execute(manifest, output):
+    def execute(manifest, output, **kwargs):
         _, jobs=batch.load(manifest, output, store=store)
         for key,(request,execution) in jobs.items():
             def resolutions(packet):
@@ -201,7 +201,7 @@ def test_unaffected_source_impact_reuses_actual_opus_program_readback(action, mo
     edited_raw=path.read_bytes(); path.write_bytes(old.read_bytes())
     store.apply_plan(store.plan_package({'package_id':'readonly-neighbour', 'claim_relations':[{
         'claim_relation_id':'R','from_id':'C','to_id':'D','relation_type':'supports','reason':'synthetic direct neighbour'}]}))
-    def execute(manifest, output):
+    def execute(manifest, output, **kwargs):
         _,jobs=batch.load(manifest,output,store=store)
         for _,(request,execution) in jobs.items():
             assert execute_claim_management(store,request,root=execution,

@@ -5,7 +5,7 @@ local; models are invoked only by the runner after durable reservations.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
 import hashlib
 import json
@@ -47,6 +47,35 @@ def maintenance_lock():
         # Closing releases the lock after the final inherited descriptor closes.
         # A batch worker can keep it across coordinator death without a gap.
         yield lock
+
+
+@contextmanager
+def wait_for_claim_operation_locks():
+    """Queue for both shared resources, holding neither while waiting.
+
+    This waits only for a local lock. It never retries a model, operation,
+    review, or SQL write, and cannot invert the two-lock acquisition order.
+    """
+    import time
+    from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
+    while True:
+        stack = ExitStack()
+        try:
+            maintenance = stack.enter_context(maintenance_lock())
+            registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path':str(
+                workspace().parent/'cvp-production-357/registry-cvp.lock')}))
+        except (BlockingIOError, CvpProductionBlocked) as exc:
+            stack.close()
+            if isinstance(exc, CvpProductionBlocked) and exc.findings != ['another CVP identity run holds the global lock']:
+                raise
+            time.sleep(1)
+            continue
+        except BaseException:
+            stack.close()
+            raise
+        with stack:
+            yield maintenance, registry
+        return
 
 
 def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False,
