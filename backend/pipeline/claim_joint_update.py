@@ -96,6 +96,13 @@ def admission_error(request, policy, before, goal):
         from types import SimpleNamespace
         natural = request.model_copy(deep=True, update={'permissions': []})
         reachable = set(cm.audit_keys(natural, before))
+        # A writable relation in that closure brings its other end into review,
+        # so what review then shows is reachable too -- one hop: relations
+        # granted beyond the closure do not extend it further (#459, P06-CL001:
+        # CR001 brings CL004's E016/ER011 into the reviewed and writable set).
+        hop = [p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS and p.key in reachable]
+        if hop:
+            reachable |= set(cm.audit_keys(request.model_copy(deep=True, update={'permissions': hop}), before))
         permissions = {p.key for p in request.permissions}
         if (permissions | set(required)) - reachable:
             raise ValueError('joint Update permission/required maintenance item is unreachable from its target closure')
