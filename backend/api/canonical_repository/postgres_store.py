@@ -3291,6 +3291,9 @@ class PostgresKnowledgeStore:
                             (key.split('/',1)[1],)).fetchone():
                         raise ChangeSetConflict('legacy Restore cannot override a human decision')
             expected_goal = cm.original_goal(request, before)
+            if policy.model_output_contract == 'claim_changes_v4':
+                from .claim_identity_allocation import assert_reserved
+                assert_reserved(cursor, request, expected_goal['claim_creation_allocations'], root=root)
             if goal != expected_goal:
                 raise ChangeSetConflict('Claim original goal/scope/proof differs from actual current SQL and source history')
             source_baselines = {}

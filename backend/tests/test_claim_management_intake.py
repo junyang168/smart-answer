@@ -94,7 +94,8 @@ def test_permissions_do_not_turn_related_claims_into_hidden_targets(claims):
     prepared = intake.prepare(['C'], root, instruction='Update', store=store)
     _, jobs = batch.load(prepared['manifest']['path'], root / 'batch', store=store)
     request = next(iter(jobs.values()))[0]
-    assert request.target_keys == ['claims/C'] and not request.creation_permissions
+    assert request.target_keys == ['claims/C']
+    assert [(p.collection, p.source_id) for p in request.creation_permissions] == [('claims', 'S')]
     assert not any(p.key == 'claims/D' for p in request.permissions)
     assert all(not set(p.fields) & (cm.source.PROVENANCE | {'visibility', 'claim_id', 'source_id'})
                for p in request.permissions)
@@ -123,6 +124,7 @@ def test_review_revision_and_commit_run_through_the_list_entry(claims, monkeypat
         assert packet['original_goal']['review_questions'] == ['Cleanup this Claim']
         return {'changes': [{'record_key': 'claims/C', 'fields_json': json.dumps({'statement': '甲是假设，不是断言。'}),
                              'reason': 'synthetic complete qualification', 'citations': [citation]}],
+                'creations': [], 'retirements': [],
                 'findings': [], 'finding_resolutions': [resolution(fid) for fid in packet['unresolved']]}
     def execute(manifest, output):
         for request, execution in batch.load(manifest, output, store=store)[1].values():
@@ -223,3 +225,13 @@ def test_detached_cli_freezes_input_ids_and_uses_the_same_entry(claims, monkeypa
     command, output = commands[0]
     assert output == root
     assert json.loads(Path(command[command.index('--claim-ids') + 1]).read_text()) == ['C', 'D']
+
+
+def test_existing_intake_keeps_its_frozen_policy_when_new_default_changes(claims):
+    store, root = claims
+    legacy = cm.DEFAULT_POLICY.parent / 'wang_claim_management_joint_update_v6.json'
+    saved = intake.prepare(['C'], root, instruction='Update', store=store, policy=legacy)
+    assert intake.prepare(['C'], root, instruction='Update', store=store) == saved
+    request = next(iter(batch.load(saved['manifest']['path'], root / 'batch', store=store)[1].values()))[0]
+    assert request.allowed_operations == ['Update'] and not request.creation_permissions
+    assert json.loads(Path(request.policy.path).read_text())['model_output_contract'] == 'claim_changes_v2'

@@ -9,7 +9,7 @@ import json
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_commit import binding, check_binding
 
-DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v6.json'
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v8.json'
 
 # Ordinary content maintenance cannot alter identity, human holds or approval.
 FIELDS = {
@@ -45,17 +45,12 @@ def claim_ids(values):
 def immutable(path, value):
     """Refuse a changed task/root; never overwrite an original authority."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with path.open('x') as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-    except FileExistsError:
-        if json.loads(path.read_text()) != value:
-            raise ValueError('immutable Claim intake differs: ' + str(path))
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    write_immutable(path, value)
     return binding(path)
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFAULT_POLICY):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -71,6 +66,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFA
         raise ValueError('max_workers must be 1 or 2')
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if policy is None:
+        policy = root / 'policy.json' if (root / 'policy.json').exists() else DEFAULT_POLICY
     selected = cm.Policy.model_validate_json(Path(policy).read_text())
     if (selected.review_purpose != 'content' or selected.claim_scope_contract != 'claim_direct_neighbours_v1'
             or selected.independent_audit_required):
@@ -121,6 +118,15 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFA
         request = cm.Request(action_id='claim-list-' + token, operation='Update', allowed_operations=['Update'],
             target_keys=['claims/' + cid], source_bindings=sources, policy=policy_binding,
             authorization={'path': str(auth_path), 'file_sha256': '0' * 64})
+        allocations = {}
+        if selected.model_output_contract == 'claim_changes_v4':
+            from backend.api.canonical_repository.claim_identity_allocation import reserve
+            sid = next(iter(own))
+            request.allowed_operations = ['Update', 'Create', 'Retire']
+            request.creation_permissions = [cm.CreationPermission(collection='claims', source_id=sid,
+                                                                  fields=sorted(FIELDS['claims']))]
+            allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
+                                       root=action_dir / 'execution')
         natural = scope(request, before)
         for key in natural['record_keys']:
             col, oid = cm.source.split_key(key)
@@ -137,6 +143,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFA
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
             'policy': policy_binding, 'required_maintenance_keys': [],
             'review_questions': [instruction]}
+        if selected.model_output_contract == 'claim_changes_v4':
+            authorization['claim_creation_allocations'] = allocations
         request.authorization = cm.source.FileBinding.model_validate(immutable(auth_path, authorization))
         documents = {sid: before['source_documents/' + sid]['payload'] for sid in own}
         cm.load_authority(request, source_documents=documents)
@@ -151,7 +159,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFA
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=DEFAULT_POLICY):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()

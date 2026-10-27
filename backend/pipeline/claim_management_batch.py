@@ -161,7 +161,13 @@ def run(manifest, root):
                     for key in pending:
                         request, _ = jobs[key]
                         records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
-                        scopes[key] = ({cm.source.key(*k) for k in records}, {p.key for p in request.permissions})
+                        # Separate actions in one sermon lock overlapping read
+                        # pins even when their content writes look disjoint.
+                        # Keep the existing scheduler; serialize its own-source
+                        # lanes as well as actual record write conflicts.
+                        sources = {'claim_source_execution/' + sid for sid in request.source_bindings}
+                        scopes[key] = ({cm.source.key(*k) for k in records} | sources,
+                                       {p.key for p in request.permissions} | sources)
                     stale = False
                 for key in selection(pending, active, scopes, plan['max_workers']):
                     token = cm.sha256_json(key)
@@ -191,9 +197,10 @@ def run(manifest, root):
                     time.sleep(1)
             current = {key: {k: store.claim_management_qualification(k.split('/', 1)[1])
                               for k in request.target_keys} for key, (request, _) in jobs.items()}
+            completion = _paragraph_results(store, jobs)
             progress(root / 'result.json', {'results': results, 'current_qualifications': current,
-                'all_actions_completed': all(v['result'].get('status') == 'completed' for v in results.values())
-                    and all(q and q.get('ready') for values in current.values() for q in values.values())})
+                'created_keys': completion['created_keys'], 'retired_keys': completion.get('retired_keys', []),
+                'all_actions_completed': completion['all_actions_completed']})
         except BaseException as exc:
             event(stage='controller_failed', error=repr(exc))
             # Inherited locks survive even SIGKILL until the workers exit.
@@ -295,7 +302,7 @@ def _paragraph_guard(plan, store):
 def _paragraph_results(store, jobs):
     """SQL is the completion authority, including new Claims, not a saved flag."""
     from backend.pipeline import claim_management as cm
-    results, qualifications, created = {}, {}, set()
+    results, qualifications, created, retired = {}, {}, set(), set()
     for action_id, (request, action_root) in jobs.items():
         check_binding(request.authorization.model_dump())
         check_binding(request.policy.model_dump())
@@ -305,11 +312,28 @@ def _paragraph_results(store, jobs):
             raise ValueError('paragraph recovery cannot change the original action/root/budget')
         results[action_id] = parent['result'] if parent else {'status': 'not_started'}
         created.update(key for key in (parent or {}).get('created_keys', []) if key.startswith('claims/'))
+        if (parent and parent['result'].get('status') == 'completed'
+                and parent['original_goal'].get('target_disposition_contract') == 'reviewed_update_or_retirement_v1'):
+            candidates = []
+            for rid in parent['latest_rounds'].values():
+                child = store.get_cvp_group(rid)
+                candidates.extend(d['record_key'] for d in child['candidate']['dispositions']
+                                  if d['action'] == 'retire' and d['record_key'] in request.target_keys)
+            if candidates:
+                # Retired means successfully processed, never Claim-ready.
+                # Consume the ordinary completion boundary, including the
+                # real Opus retirement verdict and exact current readback.
+                try:
+                    store.finish_claim_management_action(parent['run_id'])
+                    retired.update(candidates)
+                except (ValueError, RuntimeError) as exc:
+                    results[action_id] = {'status': 'paused', 'reason': 'retirement_readback_changed', 'detail': str(exc)}
     for key in set(k for request, _ in jobs.values() for k in request.target_keys) | created:
         qualifications[key] = store.claim_management_qualification(key.split('/', 1)[1])
     return {'results': results, 'current_qualifications': qualifications, 'created_keys': sorted(created),
+            **({'retired_keys': sorted(retired)} if retired else {}),
             'all_actions_completed': all(result.get('status') == 'completed' for result in results.values())
-            and all(q and q.get('ready') for q in qualifications.values())}
+            and all(key in retired or (q and q.get('ready')) for key, q in qualifications.items())}
 
 
 def run_paragraphs(manifest, root, *, store=None):
@@ -344,6 +368,8 @@ def run_paragraphs(manifest, root, *, store=None):
                           completed_paragraphs=completed,
                           downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['current_qualifications']),
                                               'action_ids': list(all_jobs), 'status': 'not_executed'})
+            if result.get('retired_keys'):
+                result['downstream_handoff']['retired_claim_ids'] = [key.split('/', 1)[1] for key in result['retired_keys']]
             progress(root / 'result.json', result)
             return result
         except BaseException as exc:

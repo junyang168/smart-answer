@@ -57,7 +57,13 @@ def finding_permission_extension(previous, old, request):
 
 
 def creates(policy):
-    return policy.model_output_contract == 'claim_changes_v3'
+    return policy.model_output_contract in {'claim_changes_v3', 'claim_changes_v4'}
+
+
+def retires(request):
+    from backend.pipeline import claim_management as cm
+    policy = json.loads(cm.source.verify_file(request.policy).read_text())
+    return policy.get('model_output_contract') == 'claim_changes_v4' and 'Retire' in request.allowed_operations
 
 
 def admission_error(request, policy, before, goal):
@@ -118,7 +124,12 @@ def validate_candidate_scope(request, before, candidate):
     if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
         raise ValueError('joint Update may create at most one granted Claim')
     for disposition in candidate.dispositions:
-        if disposition.action not in {'retain', 'update', 'create'}:
+        if disposition.action == 'retire':
+            col = disposition.record_key.split('/', 1)[0]
+            if (not retires(request) or (col == 'claims' and disposition.record_key not in request.target_keys)
+                    or col not in {'claims', *cm.RELATION_COLLECTIONS}):
+                raise ValueError('joint retirement is limited to granted targets and their relations')
+        elif disposition.action not in {'retain', 'update', 'create'}:
             raise ValueError('joint Update supports existing retain/update only')
         if disposition.action == 'update' and proposed.get(disposition.record_key) == before.get(disposition.record_key, {}).get('payload'):
             raise ValueError('joint Update unchanged objects require retain disposition')
@@ -198,9 +209,10 @@ def verify_completion(goal, child, observed):
     created = {k for k, d in dispositions.items() if d.action == 'create'}
     if not created <= approved or not created <= set(observed) or any(observed[k].get('retired') for k in created):
         raise ValueError('joint Update completion lacks per-object pass or current readback for a created Claim')
+    retirement = goal.get('target_disposition_contract') == 'reviewed_update_or_retirement_v1'
     if (not obligations <= set(dispositions) or not obligations <= approved or not obligations <= set(observed)
-            or any(observed[k].get('retired') for k in obligations)
-            or any(dispositions[k].action not in {'retain', 'update'} for k in obligations)):
+            or any(bool(observed[k].get('retired')) != (retirement and dispositions[k].action == 'retire') for k in obligations)
+            or any(dispositions[k].action not in ({'retain', 'update', 'retire'} if retirement else {'retain', 'update'}) for k in obligations)):
         raise ValueError('joint Update completion lacks final dispositions, per-object pass or current readback')
 
 

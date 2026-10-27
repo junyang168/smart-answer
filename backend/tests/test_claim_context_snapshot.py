@@ -84,7 +84,7 @@ def test_controller_reads_footprints_at_start_and_after_exits_not_every_poll(tmp
     monkeypatch.setenv('DATA_BASE_DIR', str(tmp_path))
     # a and b share Claim X, so b waits for a; a polls running many times.
     requests = {k: (SimpleNamespace(target_keys=['claims/' + k], permissions=[cm.source.Permission(
-        collection='claims', object_id='X', fields=['statement'])]), tmp_path / k) for k in ['a', 'b']}
+        collection='claims', object_id='X', fields=['statement'])], source_bindings={}), tmp_path / k) for k in ['a', 'b']}
     monkeypatch.setattr(batch, 'load', lambda *a: ({'max_workers': 2}, requests))
     reads = []
 
@@ -96,6 +96,9 @@ def test_controller_reads_footprints_at_start_and_after_exits_not_every_poll(tmp
         def claim_management_qualification(self, key):
             return {'ready': True}
     monkeypatch.setattr(pg, 'PostgresKnowledgeStore', Store)
+    # This test isolates scheduler reads; SQL completion is exercised by the
+    # intake and paragraph tests with the real executor and disposable store.
+    monkeypatch.setattr(batch, '_paragraph_results', lambda *args: {'all_actions_completed': True, 'created_keys': []})
     started = []
 
     class Process:

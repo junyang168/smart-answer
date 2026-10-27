@@ -63,3 +63,20 @@ PATH=/opt/homebrew/opt/postgresql@14/bin:$PATH PYTHONPATH=. backend/.venv/bin/py
 针对性四文件验证为 46 passed。最终回归运行本记录第 1 节的六个文件，另加入 `backend/tests/test_claim_management_intake.py` 与 `backend/tests/test_claim_context_snapshot.py`：**293 passed，23 skipped，74.35 秒**。跳过项仍为原有保存输入验收／提交阶段条件。`git diff --check` 通过；文档检查仍只有前述另一项目的既有失效锚点。
 
 此次清单入口验证未调用真实 GPT／Opus，未改动生产 Claims、来源记录或 CVP。清单 Update 完成与来源修订、来源覆盖和 CVP／论证层完成继续分别报告。
+
+## 4. PR #463 的 Claude 审阅修正
+
+2026-10-27 处理 [Claude 的实跑意见](https://github.com/junyang168/smart-answer/pull/463#issuecomment-6435124742)。从 #461 以保留原提交出处的 cherry-pick 接入八项 Claim 共用修正：`79722381`、`790a2f3c`、`f74e5cd2`、`effd8013`、`d7dd186f`、`5ab8c647`、`939e56de`、`1958dcb5`。未引入该分支的整套主题探索功能。
+
+- batch 在原读写冲突调度中加入来源占用：同一来源的 action 排队，不同来源才可并行。受控 worker 测试观察到 `max_workers=2` 时，同源最大同时启动数为 1，不同源为 2。
+- 新清单默认 v8，以 v7 创建能力为基础增加版本化 `claim_changes_v4`。既有任务自动消费自己的冻结 policy，不升级旧 schema、原答或预算。
+- 程序查询已登记／退休身份，在既有 SQL 运行账本中为各 action/source/root 预留一个 Claim ID；其他 collection 的同名身份及另一任务的预留也不能占用。并发预留与同 root 重复执行由隔离 SQL 验证；模型输出受该 ID 枚举及候选／提交校验约束。
+- 使用真实 Update 执行器验证同源新 Claim、Evidence 双向 owner 和 Question 答案关联共同完成。
+- 使用同一执行器验证目标 Claim 与关系退休、Evidence／Question 清理在一笔 transaction 提交；晚期失败全笔回滚，恢复复用原模型回答。退休历史 payload 保留，列表报告已处理的 `retired_keys`，而不伪称退休 Claim-ready。
+- 原子 artifact 写入沿用共用 `write_immutable`，不留下另一个半写文件恢复协议。
+
+八个针对性文件先得到 141 passed。随后对 Claim Management、compact 输出、联合更新、证据审阅、权限接续、资格复用、段落批次及来源查询共 21 个文件做回归：**487 passed，58 skipped，114.13 秒**。跳过项是原有外部保存输入／阶段条件；模型答复均为合成，没有真实 provider 或 batch 调用。文档检查仍只有另一项目的既有失效锚点。
+
+最后补充退休评估指令与跨来源同前缀 ID 预留后，重新验证清单、身份／退休和来源排队三个文件：**34 passed，9.93 秒**。不同来源但同一 ID 前缀的并发预留同样得到不同身份。
+
+审阅第 4 点的多处来源校订、版本登记、完整影响判定及 Claim/CVP 自动接续另记 [#464](https://github.com/junyang168/smart-answer/issues/464)，已登记 E02 与项目看板。该事项在本记录时仍未完成；S 210613 的来源版本、Claims 与 CVP 均未因本次审阅修正而写入。

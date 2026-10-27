@@ -78,7 +78,7 @@ class Policy(source.Contract):
 
     evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
-    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3'] | None = None
+    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
@@ -115,7 +115,7 @@ class Policy(source.Contract):
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
             raise ValueError('compact model decisions require the joint content Update contract')
-        if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
+        if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
             raise ValueError('own Evidence review requires scoped compact Opus and program readback')
         return self
 
@@ -385,6 +385,9 @@ def audit_contract(root, policy=None):
         pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
+    if policy is not None and policy.model_output_contract == 'claim_changes_v4':
+        files += [pipeline/'prompts/claim_management_compact_v4.md',
+                  repository/'backend/api/canonical_repository/claim_identity_allocation.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -1102,6 +1105,16 @@ def original_goal(request, before):
                     or len(questions) != len(set(questions))):
                 raise ValueError('explicit maintenance review_questions require distinct nonempty questions')
             result['review_questions'] = list(questions)
+        policy = json.loads(source.verify_file(request.policy).read_text()) if Path(request.policy.path).is_file() else {}
+        if policy.get('model_output_contract') == 'claim_changes_v4':
+            allocations = authority.get('claim_creation_allocations', {})
+            if (not isinstance(allocations, dict) or len(allocations) > 1
+                    or any(not isinstance(cid, str) or not cid for cid in allocations.values())
+                    or set(allocations) != {p.source_id for p in request.creation_permissions}
+                    or any(source.key('claims', cid) in before for cid in allocations.values())):
+                raise ValueError('compact v4 requires one program-reserved identity per granted own source')
+            result['claim_creation_allocations'] = dict(allocations)
+            result['target_disposition_contract'] = 'reviewed_update_or_retirement_v1'
     from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions
     if evidence_enabled(request):
         result['required_questions'] = sorted(set(result['required_questions']) | evidence_questions)
@@ -1783,6 +1796,11 @@ def goal_satisfied(goal, current, replacements):
             raise ValueError("original structural cardinality is unfinished")
     elif operation == "Retire" and any(not current.get(k, {}).get("retired") for k in targets):
         raise ValueError("original retirement obligation is unfinished")
+    elif operation == 'Update' and goal.get('target_disposition_contract') == 'reviewed_update_or_retirement_v1':
+        if any(not current.get(k) for k in targets):
+            raise ValueError('original Claim disposition is missing from current readback')
+        # Joint verify_completion checks each approved disposition against its
+        # exact active/retired readback before this action-level coverage check.
     elif operation in {"Update", "Restore", "Review"} and any(not current.get(k) or current[k]["retired"] for k in targets):
         raise ValueError("original active Claim obligation is unfinished")
     if operation == 'Restore':

@@ -42,7 +42,10 @@ def evidence_table(request, before, candidate=None, *, content_keys=None):
         rows.update(cm.source.index(candidate.records))
     content = content_keys if content_keys is not None else scope(request, before, candidate)['content_claim_keys']
     table = {}
+    retired = {d.record_key for d in candidate.dispositions if d.action == 'retire'} if candidate else set()
     for key in content:
+        if key in retired:
+            continue  # Reviewed retirement reasons replace active evidence qualification.
         claim = rows[key]
         steps = {}
         for eid in claim.get('evidence_step_ids', []):
