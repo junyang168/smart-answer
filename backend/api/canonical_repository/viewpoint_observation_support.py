@@ -12,6 +12,7 @@ from .viewpoint_batch_resolution import (
 
 COLLECTION = 'viewpoint_observation_supports'
 CONTRACT = 'wang_cvp_observation_support_v1'
+RETIREMENT_BINDING = 'wang_observation_revision_retirement_binding_v1'
 INELIGIBLE_CLAIM_STATUSES = frozenset({
     'rejected', 'human_hold', 'human_review_required', 'invalidated',
     'superseded', 'retired', 'withdrawn', 'withheld_unreviewed',
@@ -124,6 +125,49 @@ def observation_payload(item,packet):
 
 
 def observation_id(payload):return 'VOS-'+sha256_json(payload)[:24]
+
+
+def revision_retirement_binding(viewpoints, existing_supports):
+    """An observation for an old CVR cannot remain current under its successor.
+
+    This retires an immutable version, not its semantic observation. Models
+    still propose the complete current observations; independent review sees
+    every resulting retirement together with that complete replacement set.
+    """
+    current = {v['viewpoint_id']:v['viewpoint_revision_id'] for v in viewpoints}
+    if len(current) != len(viewpoints):
+        raise ValueError('observation retirement needs one current revision per CVP')
+    if any(o['viewpoint_id'] not in current for o in existing_supports):
+        raise ValueError('observation retirement has a foreign CVP')
+    return {'schema_version':RETIREMENT_BINDING,
+        'required_retirement_ids':sorted(o['observation_support_id'] for o in existing_supports
+            if o['validated_against_viewpoint_revision_id'] != current[o['viewpoint_id']]),
+        'note':('程序会将绑定旧 CVP 修订的观察记录列为技术退役，不要求模型抄写这些 ID。'
+                '这不表示其观察内容应删除：仍须根据全部原文提出完整的当前观察。'
+                'Opus 审核程序展开后的完整候选，包括全部旧记录、技术退役和新观察。'
+                '绑定当前 CVP 修订的旧观察仍须逐项保留或明确提出退役，不能静默省略。')}
+
+
+def bind_revision_retirements(proposal, packet):
+    """Expand forced version bookkeeping without changing raw model content."""
+    binding = packet.get('observation_retirement_binding')
+    if binding is None:
+        return proposal, None  # Historical packets retain their exact contract.
+    expected = revision_retirement_binding(packet['approved_viewpoints'],
+        packet.get('existing_observation_supports', []))
+    if binding != expected or not isinstance(proposal, ArgumentRouteProposalV3Response):
+        raise ValueError('observation retirement binding differs from current complete material')
+    supplied = set(proposal.retired_observation_support_ids)
+    added = sorted(set(expected['required_retirement_ids']) - supplied)
+    if not added:
+        return proposal, None
+    bound = proposal.model_copy(update={'retired_observation_support_ids':sorted(supplied | set(added))})
+    return bound, {'schema_version':RETIREMENT_BINDING,
+        'route_packet_sha256':packet['packet_sha256'],
+        'model_proposal_sha256':sha256_json(proposal.model_dump(mode='json')),
+        'bound_proposal_sha256':sha256_json(bound.model_dump(mode='json')),
+        'program_added_retirement_ids':added, 'observation_content_unchanged':True,
+        'requires_independent_review':True}
 
 
 def validate_observation_proposal(proposal,*,claims,components,approved_revisions,existing_supports=(),viewpoint_ids=None):

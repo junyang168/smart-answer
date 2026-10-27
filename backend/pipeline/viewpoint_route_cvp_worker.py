@@ -378,6 +378,9 @@ def process_cvp_route(
         unavailable_evidence=materials.get('unavailable_evidence'),
         claim_evidence_for_intermediate_steps=use_claim_evidence,
         observation_supports=observations_enabled,
+        program_bound_observation_retirements=observations_enabled and (
+            not saved_packet_path.exists()
+            or 'observation_retirement_binding' in json.loads(saved_packet_path.read_text())),
         existing_observation_supports=materials.get('existing_observation_supports'),
         unusable_context_claims=materials.get('unusable_context_claims'),
         approved_connection_judgments=materials.get('approved_connection_judgments'),

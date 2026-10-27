@@ -158,7 +158,7 @@ def run_cvp_route_scope(
     scope_label = str(route_packet["scope_label"])
     from backend.api.canonical_repository.viewpoint_observation_support import (
         CONTRACT, ArgumentRouteProposalV3Response, ArgumentRouteReviewV3Response,
-        ArgumentRouteReconsiderationV3Response,
+        ArgumentRouteReconsiderationV3Response, bind_revision_retirements,
     )
     has_observations = route_packet.get('observation_support_contract') == CONTRACT
     if route_packet.get('observation_support_contract') not in (None, CONTRACT):
@@ -279,6 +279,10 @@ def run_cvp_route_scope(
             proposal = proposal_model.model_validate(
                 canonicalize_proposal(bound_raw)[0]
             )
+            proposal, retirement_binding = bind_revision_retirements(proposal, route_packet)
+            if retirement_binding:
+                write_immutable(output_dir / 'observation-retirement-bindings' /
+                    (sha256_json(raw) + '.json'), retirement_binding)
             validate_route_proposal(routes=proposal, **validation_args)
             if source_bindings:
                 write_immutable(output_dir / "route-proposal-source-bindings.json", {
@@ -441,6 +445,12 @@ def run_cvp_route_scope(
         reconsideration = correction_model.model_validate(
             canonicalize_proposal(raw_reconsideration)[0]
         )
+        bound_proposal, retirement_binding = bind_revision_retirements(
+            reconsideration.revised_proposal, route_packet)
+        if retirement_binding:
+            write_immutable(output_dir / 'observation-retirement-bindings' /
+                (sha256_json(raw_reconsideration) + '.json'), retirement_binding)
+            reconsideration = reconsideration.model_copy(update={'revised_proposal':bound_proposal})
         reconsideration_validation = validate_route_reconsideration(
             reconsideration=reconsideration,
             proposal=proposal,
