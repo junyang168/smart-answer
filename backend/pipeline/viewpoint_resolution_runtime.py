@@ -279,7 +279,11 @@ def response_adapter(adapter, saved=None):
     if all(saved.get(k) == getattr(roles, k) for k in keys): return roles
     if all(saved.get(k) == getattr(bound, k) for k in keys): return bound
     for base in (roles,bound,adapter):
-        if not getattr(base,'_shared_record_payload',False):continue
+        if not getattr(base,'_shared_record_payload',False):
+            upgrade=getattr(base,'shared_records_copy',None)
+            if not callable(upgrade):continue
+            base=upgrade()
+            if all(saved.get(k)==getattr(base,k) for k in keys):return base
         for factory in ('shared_keys_copy','shared_keys_v2_copy','shared_values_copy','shared_shapes_copy','shared_shapes_v2_copy','shared_shapes_v3_copy','shared_shapes_v4_copy','shared_shapes_v5_copy','shared_shapes_v6_copy'):
             method=getattr(base,factory,None)
             if callable(method):
@@ -386,6 +390,13 @@ def call_model(
     encoding_path = cache.with_name(cache.stem + '.request-encoding.json')
     if not saved and not intent_path.exists() and not encoding_path.exists():
         limit, _ = effective_request_limit(adapter, cache)
+        records_factory = getattr(adapter, 'shared_records_copy', None)
+        if (limit is not None and callable(records_factory)
+                and not getattr(adapter, '_shared_record_payload', False)
+                and adapter.request_bytes(payload) > int(limit)):
+            smaller = records_factory()
+            if smaller.request_bytes(payload) < adapter.request_bytes(payload):
+                adapter = smaller
         key_factory = getattr(adapter, 'shared_keys_copy', None)
         if (limit is not None and callable(key_factory)
                 and getattr(adapter, '_shared_record_payload', False)

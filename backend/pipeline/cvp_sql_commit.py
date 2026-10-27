@@ -44,12 +44,29 @@ def validate_transaction_audit(audit,claim_ids,viewpoint_ids):
         raise ValueError('affected current Claim/Evidence reciprocity failed')
 
 
+def _under_relocated_staging(path: Path) -> bool:
+    """True for a file under Wang staging after OPS-38 moved it behind a symlink.
+
+    Bindings recorded before the move hold the /opt path, later ones may hold
+    the SSD path; both name the same file, and the SHA still proves content.
+    """
+    from backend.api.config import WANG_STAGING_DIR
+    link = Path(WANG_STAGING_DIR)
+    if not link.is_symlink():
+        return False
+    return path.is_relative_to(link) or path.is_relative_to(link.resolve())
+
+
 def binding(path):
+    import os
     from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
     # Authorized SSD archives intentionally retain their original logical
     # path. The archive reader verifies UUID, exact target, size and SHA first.
     from backend.pipeline.viewpoint_backup_archive import logical_binding_path
-    path = logical_binding_path(path)
+    given = Path(os.path.normpath(Path(path).absolute()))
+    # A staging file keeps the path it was named by, so the staging move does
+    # not read as drift; archive symlinks inside staging keep their own check.
+    path = given if _under_relocated_staging(given) and not given.is_symlink() else logical_binding_path(path)
     return {"path":str(path),"file_sha256":file_sha256(path)}
 
 
