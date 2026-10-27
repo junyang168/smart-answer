@@ -388,6 +388,7 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
+    files += [pipeline/'claim_qualification_refresh.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -1122,6 +1123,10 @@ def original_goal(request, before):
     from backend.pipeline.claim_joint_update import enabled, required_keys, CONTRACT
     if enabled(request):
         result.update(joint_update_contract=CONTRACT, required_maintenance_keys=required_keys(request, strict=False))
+    if Path(request.authorization.path).is_file() and authority.get('completion_refresh'):
+        from backend.pipeline.claim_qualification_refresh import verify_admission
+        verify_admission(request, result, authority['completion_refresh'])
+        result['completion_refresh'] = authority['completion_refresh']
     return result
 
 
@@ -1533,7 +1538,8 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     extension = authority.get('owner_call_extension')
-    read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh' and not request.permissions)
+    read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh'
+        and not request.permissions and not request.creation_permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
             not enabled(request, policy)
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
@@ -1545,8 +1551,9 @@ def continuation_budget(previous, request, policy):
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
-            or request.creation_permissions != old.creation_permissions
-            or previous.get('created_keys') or previous.get('replacements')):
+            or (request.creation_permissions != old.creation_permissions
+                and not (read_only_refresh and not request.creation_permissions))
+            or (previous.get('created_keys') and not read_only_refresh) or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     permission_follow_up = (extension_basis == 'permission_required'
@@ -1603,6 +1610,10 @@ def continuation_budget(previous, request, policy):
         if slot['state'] in {'planned','cancelled'}:
             continue
         if slot['state'] == 'completed':
+            spent[slot['role']] += 1
+            continue
+        from backend.pipeline.claim_review_recovery import consumed_invalid_review
+        if consumed_invalid_review(previous, key, slot):
             spent[slot['role']] += 1
             continue
         if key in recovery:
@@ -1667,6 +1678,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('original remaining budget cannot fund correction and review')
     return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
+        **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
         **({'owner_call_extension':deepcopy(extension),'preserved_unknown_calls':unknown,
@@ -1674,6 +1686,29 @@ def continuation_budget(previous, request, policy):
         **({'human_source_verification':human_follow_up,
             'human_verified_finding_ids':human_follow_up['human_verified_finding_ids'],
             'budget_basis':'new_human_source_evidence_follow_up', 'follow_up_budget':policy.budget.model_dump()} if human_follow_up else {})}
+
+
+def inherited_readonly_context(value):
+    """Keep prior nonblocking notes outside a read-only successor's scope.
+
+    No issue is resolved or rejudged here. In-scope, changed or newly blocking
+    findings still need this action's own GPT/Opus adjudication.
+    """
+    continuation = value.get('continuation', {})
+    request = value['request']
+    if (not continuation.get('read_only_refresh') or request['permissions']
+            or request['creation_permissions'] or value.get('created_keys')):
+        return {}
+    prior = continuation.get('prior_findings', {})
+    scope = set(value['original_goal']['original_objects'])
+    result = {}
+    for fid, finding in value['findings'].items():
+        if (finding == prior.get(fid) and finding['target_key'] not in scope
+                and finding.get('affected_target_keys') == []
+                and finding.get('affected_write_keys') == []
+                and (finding.get('impact_reason') or '').strip()):
+            result[fid] = finding
+    return result
 
 
 def operation_questions(goal, candidate):

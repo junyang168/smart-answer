@@ -260,3 +260,139 @@ def recover_returned_candidate(store, round_id, *, authorization):
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
                 (canonical_json(metadata),rid))
         return str(root)
+
+
+INVALID_REVIEW_VERSION = 'wang_claim_invalid_review_input_recovery_v1'
+
+
+def consumed_invalid_review(previous, key, slot):
+    """Authenticate a returned input defect for accounting, never approval.
+
+    The original started slot stays unchanged. A later explicit qualification
+    refresh must still charge this known returned answer to its predecessor.
+    """
+    entries = previous.get('original_goal', {}).get('unaccepted_review_inputs', [])
+    root = Path(previous['execution_root']) / slot['round_id']
+    matches = [entry for entry in entries if entry['raw']['path'] == str(root/'opus.raw.json')]
+    if not matches:
+        return False
+    if len(matches) != 1 or slot['role'] != 'opus' or slot['state'] != 'started' or key != slot['round_id']+':opus':
+        raise ValueError('invalid review input accounting identity drift')
+    entry = matches[0]; check_binding(entry['raw'])
+    materials = body(read(root/'materials.json'))
+    if (materials['request'] != previous['request'] or materials['round_number'] != 0
+            or materials['roles'] != ['opus'] or materials['round_id'] != slot['round_id']):
+        raise ValueError('invalid review input accounting requires original initial review')
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_candidate_origin
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.source_reconciliation_runner import validate_bound_call
+    policy = cm.Policy.model_validate(materials['policy'])
+    candidate = cm.Candidate.model_validate(body(read(root/'candidate.json')))
+    validate_claim_candidate_origin(root, materials, policy, materials['sources'], candidate)
+    if body(read(root/'opus.reservation.json')) != slot['intent'] or sha256_json(slot['intent']) != slot['intent_sha256']:
+        raise ValueError('invalid review input reservation drift')
+    packet = claim_management_review_packet(materials, candidate)
+    raw = validate_bound_call(root, 'opus', packet, claim_management_model_adapter('opus', policy))
+    if raw['response'] != entry['response']:
+        raise ValueError('invalid review input response drift')
+    from backend.pipeline.claim_model_output import review as expand_review
+    review = expand_review(raw['response'], materials, candidate)
+    try:
+        cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
+            materials['unresolved'], materials['sources'], request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
+    except ValueError as exc:
+        if str(exc) != 'citation is not an exact quote from the complete own source':
+            raise
+    else:
+        raise ValueError('accepted review cannot be charged as an invalid input')
+    return True
+
+
+def resume_invalid_initial_review(store, round_id, *, authorization):
+    """Send an authentic but unaccepted review to the next ordinary GPT round.
+
+    The original answer is input, never an approved review. No quote is edited,
+    no source is supplemented, and the existing action's budget is unchanged.
+    """
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_candidate_origin
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.source_reconciliation_runner import validate_bound_call
+    from backend.pipeline.claim_model_output import review as expand_review
+    check_binding(authorization)
+    direction = json.loads(Path(authorization['path']).read_text())
+    if (direction.get('schema_version') != INVALID_REVIEW_VERSION or direction.get('round_id') != round_id
+            or direction.get('authorized_by') != 'owner' or not direction.get('authorization_quote')
+            or direction.get('human_content_approval') is not False):
+        raise ValueError('exact invalid-review engineering direction required')
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(round_id,)).fetchone()[0]
+        history = value.get('invalid_review_input_recoveries',[])
+        if history and history[-1]['authorization']==authorization:return history[-1]['recovery_root']
+        parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(value['parent_run_id'],)).fetchone()[0]
+        materials = value['materials']; request = cm.Request.model_validate(materials['unit_request'])
+        policy = cm.Policy.model_validate(materials['policy'])
+        if (sha256_json(value)!=direction.get('prior_metadata_sha256') or request.operation!='Update'
+                or value['round_number']!=0 or value['checkpoint']!='prepared' or value.get('change_set_ids')
+                or materials['roles']!=['opus'] or set(value['stage_results'])!={'candidate'}
+                or len(parent['latest_rounds'])!=1 or list(parent['latest_rounds'].values())!=[round_id]
+                or parent.get('continued_by') or parent['result'].get('returned_rejected_call')!=round_id+':opus'
+                or parent['call_reservations'][round_id+':opus']['state']!='started'
+                or not policy.all_findings_to_gpt or policy.budget.max_revisions<1):
+            raise ValueError('requires exact returned initial review and original unused correction budget')
+        root = Path(value.get('recovery_root',Path(parent['execution_root'])/round_id))
+        candidate = cm.Candidate.model_validate(value['candidate'])
+        validate_claim_candidate_origin(root,materials,policy,materials['sources'],candidate)
+        packet = claim_management_review_packet(materials,candidate)
+        raw = validate_bound_call(root,'opus',packet,claim_management_model_adapter('opus',policy))
+        review = expand_review(raw['response'],materials,candidate)
+        bad = []
+        for finding in review.findings:
+            for citation in finding.citations:
+                try:cm.validate_citations([citation],materials['sources'])
+                except ValueError:
+                    if citation.source_id not in materials['sources'] or citation.paragraph_key not in materials['sources'][citation.source_id]['paragraphs']:
+                        raise ValueError('invalid-review recovery cannot invent a source or paragraph')
+                    bad.append(citation)
+        if not bad:raise ValueError('review does not have the proved citation contract failure')
+        try:
+            cm.validate_review(candidate,review,packet['denominator'],packet['required_questions'],materials['unresolved'],materials['sources'],request=request,records=materials['before'])
+        except ValueError as exc:
+            if str(exc)!='citation is not an exact quote from the complete own source':raise
+        else:raise ValueError('valid review must follow its ordinary recording path')
+        store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in materials['transaction_before'].items()}))
+        _, current_sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
+            human_source_decisions=materials.get('human_source_decisions'))
+        if current_sources != materials['sources']:
+            raise ValueError('invalid-review input recovery cannot refresh a changed source')
+        if 'human_source_decisions' in materials:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+        original = deepcopy(value); original_parent = deepcopy(parent)
+        destination = root/('invalid-review-input-'+sha256_json(direction)[:20])
+        contract = cm.audit_contract(destination,policy)
+        if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
+            raise ValueError('invalid-review recovery cannot change original model instructions')
+        # A program finding reports the INPUT defect, not a content judgment.
+        # The full unchanged raw response supplies every objection to GPT.
+        citation = bad[0]
+        current = materials['sources'][citation.source_id]['paragraphs'][citation.paragraph_key]['text']
+        finding = cm.Finding(target_key=request.target_keys[0],category='engineering',component='unaccepted_initial_review_citations',
+            reason='The returned initial Opus report has non-exact or unavailable-epoch citations. Its complete unchanged response is attached in original_goal.unaccepted_review_inputs. Examine EVERY objection against the complete current source; the old report is not content approval.',
+            acceptance_condition='GPT assesses every original objection, proposes necessary complete Claim maintenance with exact current citations, and normal Opus review validates the resulting candidate.',
+            citations=[cm.Citation(source_id=citation.source_id,paragraph_key=citation.paragraph_key,exact_quote=current)],
+            affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='the original review could not enter the normal correction ledger')
+        parent.setdefault('findings',{})[finding.identity(parent['action_id'])]=finding.model_dump(mode='json')
+        parent['original_goal'].setdefault('unaccepted_review_inputs',[]).append({
+            'raw':binding(root/'opus.raw.json'),'response':raw['response'],
+            'invalid_citations':[c.model_dump(mode='json') for c in bad],
+            'instruction':'This report is unaccepted input, not an approval. Assess all objections, including context objections. Do not copy its invalid citations; use the supplied complete current source.'})
+        record={'authorization':authorization,'original_round':original,'original_parent':original_parent,
+            'recovery_root':str(destination),'raw':binding(root/'opus.raw.json'),'raw_unchanged':True,
+            'model_calls':0,'new_budget':False,'human_content_approval':False,'review_not_accepted':True}
+        write(destination/'engineering-recovery.json',record)
+        parent.update(audit_contract=contract,result={'status':'running','reason':'revision_required','round_id':round_id,'unit_id':value['unit_id']})
+        value.update(outcome='revision_required',invalid_review_input_recoveries=history+[record])
+        for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',heartbeat_at=now() WHERE run_id=%s",(canonical_json(metadata),rid))
+    return str(destination)

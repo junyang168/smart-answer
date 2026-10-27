@@ -154,3 +154,21 @@ def test_insufficient_binding_may_be_named_on_the_claims_own_evidence(material,t
         er.validate_assessments(review,m,candidate)
     else:
         with pytest.raises(ValueError,match='concrete Claim finding'):er.validate_assessments(review,m,candidate)
+
+
+@pytest.mark.parametrize('target,accepted',[
+    ('claims/C',True),('evidence_steps/E',True),('source_fragments/F',True),
+    ('observations/O',False),('questions/Q',False),('source_fragments/NEIGHBOUR',False)])
+def test_insufficient_binding_accepts_only_its_claim_steps_or_bound_excerpts(material,target,accepted):
+    m,candidate=material;raw=answer(sufficient=False)
+    raw['findings']=[{'target_key':target,'component':'binding','category':'evidence',
+        'reason':'Exact bound excerpt does not cover this judgment',
+        'acceptance_condition':'repair the actual evidence binding',
+        'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设。'}],
+        'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'own Evidence gap'}]
+    parsed=er.BindingFindingsReview.model_validate(raw)
+    if accepted:
+        er.validate_assessments(parsed,m,candidate)
+    else:
+        with pytest.raises(ValueError,match='insufficient own Evidence'):
+            er.validate_assessments(parsed,m,candidate)

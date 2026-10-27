@@ -3946,6 +3946,15 @@ class PostgresKnowledgeStore:
                                            if item['record_key'] in owned})
                     source_revalidations.update(set(child.get('source_revalidations', {})) & owned)
             if not report_only:
+                # An explicit read-only refresh imports the predecessor's
+                # context ledger as well as its blocking findings. Notes that
+                # remain outside this successor's scope keep their exact
+                # original classification; they are not content resolutions.
+                from backend.pipeline.claim_management import inherited_readonly_context
+                inherited = inherited_readonly_context(value)
+                if inherited:
+                    value.setdefault('context_findings', {}).update(inherited)
+                    value['findings'] = {k:f for k,f in value['findings'].items() if k not in inherited}
                 if value['findings'] and not source_impact:
                     raise ChangeSetConflict('whole Claim action retains unresolved stable findings')
                 goal_satisfied(value['original_goal'], observed, value.get('replacements', {}))
