@@ -70,7 +70,20 @@ def authenticate_saved_route_review(output_dir, round_number, final, policy_path
         timeout_seconds=float(policy['call_timeout_seconds']), whole_cvp=True, observations=policy["schema_version"] == "wang_route_resolution_policy_v8")
     model.max_request_bytes = int(policy['max_request_bytes'])
     packet = json.loads((output_dir / f'route-review-packet-{round_number:03d}.json').read_text())
-    raw = read_saved_model_response(model, packet, output_dir / f'raw-route-review-{round_number:03d}.json')
+    response_path = output_dir / f'raw-route-review-{round_number:03d}.json'
+    source = final.get('saved_model_response_source')
+    if source is not None:
+        from backend.pipeline.cvp_sql_commit import check_binding
+        if set(source) != {'request', 'response', 'authorization'}:
+            raise ValueError('saved Route review source bindings are incomplete')
+        for pin in source.values():
+            if Path(pin['path']).resolve().parent != output_dir.resolve():
+                raise ValueError('saved Route review source belongs to another job')
+            check_binding(pin)
+        if json.loads(Path(source['request']['path']).read_text()) != packet:
+            raise ValueError('saved Route review source request differs from final packet')
+        response_path = Path(source['response']['path'])
+    raw = read_saved_model_response(model, packet, response_path)
     from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReviewV3Response
     review_model = ArgumentRouteReviewV3Response if policy['schema_version'] == 'wang_route_resolution_policy_v8' else ArgumentRouteReviewV2Response
     review = review_model.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')
@@ -97,6 +110,10 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
     material = sealed('cvp-route-materials.json', 'artifact_sha256')
     packet = sealed('route-packet.json', 'packet_sha256')
     run = sealed('route-cvp-run.json', 'artifact_sha256')
+    if run.get('continued_execution_bindings'):
+        from backend.pipeline.cvp_sql_commit import check_binding
+        for pin in run['continued_execution_bindings']:
+            check_binding(pin)
     if run.get('correction_round_extension_sha256'):
         from backend.pipeline.viewpoint_route_round_extension import round_extension, FILENAME
         extension = json.loads((output_dir/FILENAME).read_text())
@@ -117,6 +134,11 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
             or not run['rounds'] or run['rounds'][-1]['outcome'] != 'pass'):
         raise ValueError('committed Route recovery differs from its original approval')
     final = json.loads((output_dir / f"route-review-{run['rounds'][-1]['round']:03d}.json").read_text())
+    if final.get('saved_model_response_source') is not None:
+        source_sha = sha256_json(final['saved_model_response_source'])
+        if (run.get('saved_review_source_sha256') != source_sha
+                or metadata.get('route_approval_source_sha256') != source_sha):
+            raise ValueError('committed Route review source differs from recorded approval')
     if (final['review_sha256'] != run['review_sha256']
             or sha256_json(final['review']) != run['review_sha256']
             or final['validation']['outcome'] != 'pass'
