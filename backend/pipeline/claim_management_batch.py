@@ -51,6 +51,7 @@ def selection(pending, active, footprints, capacity):
 
 def load(manifest, root, *, store=None):
     from backend.pipeline import claim_management as cm
+    manifest = Path(manifest)
     plan = json.loads(Path(manifest).read_text())
     if set(plan) != {'jobs', 'max_workers'} or plan['max_workers'] not in (1, 2) or not plan['jobs']:
         raise ValueError('batch requires explicit jobs and max_workers 1 or 2')
@@ -353,20 +354,42 @@ def run_paragraphs(manifest, root, *, store=None):
 
 def status(root):
     root = Path(root)
-    with (root / 'controller.lock').open('a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            live = False
-        except BlockingIOError:
-            live = True  # coordinator OR an inherited worker holds the lock
-    saved = json.loads((root / 'status.json').read_text()) if (root / 'status.json').exists() else {}
+    root.mkdir(parents=True, exist_ok=True)
+    paths = [root / 'controller.lock']
+    if (root / 'intake.json').exists():
+        paths.extend([root / 'intake.lock', root / 'batch/controller.lock'])
+    live = False
+    for path in paths:
+        if not path.parent.exists():
+            continue
+        with path.open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                live = True  # coordinator OR an inherited worker holds the lock
+    progress_file = root / ('batch/status.json' if (root / 'intake.json').exists() else 'status.json')
+    saved = json.loads(progress_file.read_text()) if progress_file.exists() else {}
     return {'live_lock_holder': live, 'saved_progress': saved,
             'result': json.loads((root / 'result.json').read_text()) if (root / 'result.json').exists() else None}
+
+
+def detach(command, root):
+    if status(root)['live_lock_holder']:
+        raise ValueError('batch lock is held; do not launch a duplicate')
+    logfile = str(root / 'controller.log')
+    if any(c in logfile for c in ('"', '\\', '\n', '\r')):
+        raise ValueError('unsafe screen logfile path')
+    config = root / 'screenrc'
+    config.write_text('logfile "' + logfile + '"\nlogfile flush 1\ndeflog on\n')
+    subprocess.run(['screen', '-c', str(config), '-dmS', 'wkp-claims-' + root.name[:32], *command], check=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path)
+    parser.add_argument('--claim-ids', type=Path, help='JSON list of Claim IDs; prepares and runs ordinary Updates')
+    parser.add_argument('--instruction', help='the actual owner direction for the Claim ID list')
+    parser.add_argument('--max-workers', type=int, choices=(1, 2), default=1)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--detach', action='store_true')
     parser.add_argument('--status', action='store_true')
@@ -377,6 +400,26 @@ def main():
     load_dotenv('backend/.env'); load_dotenv('.env')
     if args.status:
         print(json.dumps(status(args.root), ensure_ascii=False)); return
+    if args.claim_ids:
+        if args.manifest or args.paragraphs or args.job:
+            parser.error('--claim-ids cannot combine with manifest/paragraph/job')
+        if not args.instruction:
+            parser.error('--instruction required with --claim-ids')
+        from backend.pipeline.claim_management_intake import run as run_claim_ids, prepare
+        args.root = args.root.resolve()
+        ids = json.loads(args.claim_ids.read_text())
+        if args.detach:
+            prepared = prepare(ids, args.root, instruction=args.instruction, max_workers=args.max_workers)
+            # Child consumes frozen normalized IDs; caller may move its original file.
+            ids_path = args.root / 'claim-ids.json'
+            from backend.pipeline.claim_management_intake import immutable
+            immutable(ids_path, prepared['claim_ids'])
+            detach([sys.executable, '-m', MODULE, '--claim-ids', str(ids_path), '--root', str(args.root),
+                    '--instruction', args.instruction, '--max-workers', str(args.max_workers)], args.root)
+            return
+        result = run_claim_ids(ids, args.root,
+                               instruction=args.instruction, max_workers=args.max_workers)
+        print(json.dumps(result, ensure_ascii=False)); return
     if not args.manifest:
         parser.error('--manifest required')
     args.manifest = args.manifest.resolve(); args.root = args.root.resolve()
@@ -384,16 +427,9 @@ def main():
         parser.error('--paragraphs cannot run an individual batch worker')
     if args.detach:
         (load_paragraphs if args.paragraphs else load)(args.manifest, args.root)
-        if status(args.root)['live_lock_holder']:
-            raise ValueError('batch lock is held; do not launch a duplicate')
-        logfile = str(args.root / 'controller.log')
-        if any(c in logfile for c in ('"', '\\', '\n', '\r')):
-            raise ValueError('unsafe screen logfile path')
-        config = args.root / 'screenrc'
-        config.write_text('logfile "' + logfile + '"\nlogfile flush 1\ndeflog on\n')
-        subprocess.run(['screen', '-c', str(config), '-dmS', 'wkp-claims-' + args.root.name[:32], sys.executable, '-m', MODULE,
+        detach([sys.executable, '-m', MODULE,
                         '--manifest', str(args.manifest), '--root', str(args.root),
-                        *(['--paragraphs'] if args.paragraphs else [])], check=True)
+                        *(['--paragraphs'] if args.paragraphs else [])], args.root)
     elif args.job:
         try:
             result = worker(args.manifest, args.root, args.job)

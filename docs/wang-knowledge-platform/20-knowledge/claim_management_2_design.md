@@ -6,6 +6,7 @@
 > **与代码对齐**：第 5.3 节独立判断遗漏的审阅规则、同轮新建同源 Claim 与双向归属校验于 2026-10-22 核对到引入 `one_sided_owner_pairs` 与 `test_claim_hidden_judgement.py` 的提交；概括语义力度的既有审阅理由于 2026-10-18 核对到 `claim_management_review_v2.md`、`claim_management_compact_v1/v2.md` 与 `claim_own_evidence_v1.md`；具体维护问题冻结与已知权限缺口提前暂停于 2026-10-18 核对到 `a60e4bba`；自身证据覆盖与经文论据归属契约于 2026-10-18 核对到 `a14d8242`；已记录只读异议的联合权限接续于 2026-10-17 核对到 `0077424e`；以下既有项目于 2026-10-16 核对：精简模型输出、显式授权接续及只读资格刷新核对到 `4ee96f3`，真实验收见实施检查点；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。第 9.1 节人工修改／确认的持久登记、自动带入和当前证据核实对齐到 `f6101f47`。
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
+> **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run` 与 batch 的 `--claim-ids` 入口；使用现有 Update 执行器，隔离模型回答不作为真实内容验收。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
@@ -504,6 +505,22 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 指定 Claims 以原始清单为分母，逐项报告保留、更新、替代、退役或暂停原因。来源整理另以来源覆盖为分母：现有 Claims 全通过不代表来源无遗漏；新发现保存来源绑定候选，许可内 Create，范围外登记后续处置。遗漏被接收或有审核过的处置后，来源覆盖才可完成。
 
 独立单元可完成，整批仍未完成；只读依赖和写权限分别管理。Split 子对象数不替换原项，第 5.2 节统一约束最终验收。Review 报告完成、内容维护完成和来源覆盖完成分别报告。
+
+指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；多个 action 的读写冲突由原 scheduler 串行安排，独立项允许显式选择 `max_workers=2`。不把清单自动变成联合内容修改或 Merge。
+
+CLI 沿用同一 batch 模块：
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
+  --claim-ids /absolute/path/claim-ids.json \
+  --root /absolute/path/this-update-task \
+  --instruction '清理这些 Claims，核对原文、经文证据及相关关系' \
+  --max-workers 2 --detach
+```
+
+清单文件仅含 JSON 数组，不含预制 request。任务保存去重后的原分母、执行方向、policy、各 action/root、来源绑定与授权文件。policy 副本保存在任务内，不依赖开发 worktree 长期存在。后台运行消费冻结清单；`--status --root <同一任务目录>` 核对实际控制器或继承锁的 worker。重启使用同一清单、方向、policy 和 root，不能换址清预算或覆盖旧授权。
+
+此入口使用现有 scoped Opus-only Update，包含必要的 GPT 修订、Opus 复审、短 transaction 与回读，预算和所有退出条件保持原样。逐项结果保留实际暂停原因；不存在、退役或受人工 hold 保护的 ID 不静默丢弃，也不阻止其他独立项执行。内容操作需要超出普通 Update 的创建、退役、恢复或隐藏 Claim 修改时，仍按原契约报告所需操作，不自行扩大权限。清单内 action 历史完成且全部目标及本轮新建对象当前资格有效，整批才完成；相互依赖的后续修改使先前资格失效时保留未完成，不用额外审阅循环消解。该入口不代替来源版本交接、完整来源覆盖或 CVP／论证层维护。
 
 ### 11.2 批前依赖检查与分组
 

@@ -53,3 +53,13 @@ PATH=/opt/homebrew/opt/postgresql@14/bin:$PATH PYTHONPATH=. backend/.venv/bin/py
 预检使用零角色调用预算、零字段写权限，调用 `load_paragraphs`，没有调用 batch 执行或模型端口。由于源文件已改而数据库仍登记旧版本，在授权检查处准确拒绝：`registered source physical version drift; new source version/action required`。因此先前的来源版本交接仍需经已有来源维护流程完成，不能通过新入口直接重绑 SHA 绕过。
 
 前后逐项核对这五条 Claim 和来源注册行未变，新预检 action 行为 0，模型调用为 0，内容写入为 0。这不是这篇讲道已完成修订、语义审阅或 CVP 同步的证明。
+
+## 3. Claim ID 清单入口补充验证
+
+2026-10-27 按负责人「先把這個補上」的方向，新增 `claim_management_intake.prepare`／`run`，batch CLI 提供 `--claim-ids`、`--instruction`、`--max-workers`，沿用 `--detach` 与 `--status`。调用者提供 ID 数组即可准备并执行普通 Update，不需要逐条手工构造 request。
+
+在同一隔离 PostgreSQL 验证边界内，实际调用 Update 执行器；模型输出仍为明确合成回复。验证了完整清单去重、逐条结果、Opus 异议 → GPT 修订 → Opus 复审 → SQL 提交／当前资格、同 root 恢复零重复调用、未知答复保留原调用而另一条完成、不存在及人工 hold 的明确未完成结果、只读邻居不得变成隐藏目标、输入／来源／policy 漂移拒绝、任务内 policy 副本、冻结后台清单、继承 worker 锁的真实状态查询，以及失败时不保留误导的旧 completed 结果。
+
+针对性四文件验证为 46 passed。最终回归运行本记录第 1 节的六个文件，另加入 `backend/tests/test_claim_management_intake.py` 与 `backend/tests/test_claim_context_snapshot.py`：**293 passed，23 skipped，74.35 秒**。跳过项仍为原有保存输入验收／提交阶段条件。`git diff --check` 通过；文档检查仍只有前述另一项目的既有失效锚点。
+
+此次清单入口验证未调用真实 GPT／Opus，未改动生产 Claims、来源记录或 CVP。清单 Update 完成与来源修订、来源覆盖和 CVP／论证层完成继续分别报告。
