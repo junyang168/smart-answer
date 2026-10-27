@@ -337,3 +337,28 @@ def test_unstarted_source_read_recovery_keeps_original_action_and_budget(action,
     assert execute_claim_management(store,request,root=root/'impact/execution',ports=ports)['status']=='completed'
     assert ports.calls==['opus']
     assert list(store.get_cvp_group(pid)['latest_rounds'].values())==[rid]
+
+
+@pytest.mark.parametrize('finding_on_own_evidence',[False,True])
+def test_source_impact_neighbour_finding_is_separate_from_own_evidence(action,finding_on_own_evidence):
+    from backend.pipeline import source_change_automation as automation
+    from backend.pipeline.cvp_sql_actions import execute_claim_management
+    store,old,root=two_paragraphs(action)
+    store.apply_plan(store.plan_package({'package_id':'direct-neighbours','claim_relations':[{
+        'claim_relation_id':'CD','from_id':'C','to_id':'D','relation_type':'supports','reason':'synthetic neighbour'}]}))
+    handoff=transition.register(store,'S',binding(old),root/'handoff',instruction='synthetic source')
+    request=automation.prepare_impact(store,handoff,root/'impact','synthetic source')
+    def opus(packet):
+        value=automated_impact(packet)
+        value['findings']=[f for f in value['findings'] if f['target_key']!='claims/C']
+        value['source_impacts'][0].update(conclusion='unaffected',operation=None)
+        value['source_coverage'][0]['conclusion']='represented'
+        if finding_on_own_evidence:
+            extra=deepcopy(value['findings'][0]);extra['target_key']='evidence_steps/EC'
+            value['findings'].append(extra)
+        return value
+    result=execute_claim_management(store,request,root=root/'impact/execution',ports=SyntheticPorts(store,root,opus=opus))
+    if finding_on_own_evidence:
+        assert result['status']=='paused' and 'unresolved dependency finding' in result['detail'],result
+    else:
+        assert result['status']=='completed',result

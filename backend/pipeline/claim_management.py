@@ -1023,6 +1023,13 @@ def validate_source_impacts(review, keys, sources, *, request, records, unresolv
         if item.conclusion == 'unaffected':
             own = request.model_copy(update={'target_keys': [item.record_key], 'permissions': []})
             closure = set(audit_keys(own, records))
+            from backend.pipeline.claim_direct_scope import enabled as direct_enabled, scope as direct_scope
+            if direct_enabled(own):
+                # A neighbour is immutable relation context, not this Claim's
+                # evidence or maintenance owner. Its separate finding does not
+                # establish an impact on this Claim. Shared evidence and actual
+                # maintenance owners remain in the dependency check.
+                closure -= set(direct_scope(own, records)['neighbour_claim_keys'])
             if closure & findings:
                 raise ValueError('unaffected source impact cannot hide an unresolved dependency finding')
             for key in closure:
