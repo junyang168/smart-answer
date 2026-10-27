@@ -1067,7 +1067,14 @@ def unlinkable_questions(request, before):
     if request.operation != 'Update' or not any(p.collection == 'claims' for p in request.creation_permissions):
         return []
     granted = {p.key for p in request.permissions if 'answer_claim_ids' in p.fields}
-    return sorted(k for k, v in before.items() if k.startswith('questions/') and not v['retired'] and k not in granted)
+    read = set(before)
+    from backend.pipeline.claim_joint_update import enabled
+    if enabled(request):
+        # A joint Update reviews only its targets' closure; a question read from
+        # elsewhere in the sermon is outside it, and a grant on it would be
+        # refused as unreachable (#459: 30 questions, none in CL003's closure).
+        read = set(audit_keys(request.model_copy(deep=True, update={'permissions': []}), before))
+    return sorted(k for k, v in before.items() if k in read and k.startswith('questions/') and not v['retired'] and k not in granted)
 
 
 def original_goal(request, before):
