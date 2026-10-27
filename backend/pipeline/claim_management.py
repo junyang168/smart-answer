@@ -1681,6 +1681,29 @@ def continuation_budget(previous, request, policy):
             'budget_basis':'new_human_source_evidence_follow_up', 'follow_up_budget':policy.budget.model_dump()} if human_follow_up else {})}
 
 
+def inherited_readonly_context(value):
+    """Keep prior nonblocking notes outside a read-only successor's scope.
+
+    No issue is resolved or rejudged here. In-scope, changed or newly blocking
+    findings still need this action's own GPT/Opus adjudication.
+    """
+    continuation = value.get('continuation', {})
+    request = value['request']
+    if (not continuation.get('read_only_refresh') or request['permissions']
+            or request['creation_permissions'] or value.get('created_keys')):
+        return {}
+    prior = continuation.get('prior_findings', {})
+    scope = set(value['original_goal']['original_objects'])
+    result = {}
+    for fid, finding in value['findings'].items():
+        if (finding == prior.get(fid) and finding['target_key'] not in scope
+                and finding.get('affected_target_keys') == []
+                and finding.get('affected_write_keys') == []
+                and (finding.get('impact_reason') or '').strip()):
+            result[fid] = finding
+    return result
+
+
 def operation_questions(goal, candidate):
     if set(goal['required_questions']) == IMPACT_QUESTIONS:
         return sorted(IMPACT_QUESTIONS)
