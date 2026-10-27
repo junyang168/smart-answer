@@ -58,6 +58,8 @@
 | --- | --- |
 | ★ [CanonicalViewpoint 设计](./20-knowledge/canonical_viewpoint_design.md) | 观点身份、论证路线、观点关系：怎样判断两条主张是同一个观点，以及谁能读什么 |
 | [Claim／CVP Management 2.0 主控设计](./20-knowledge/claim_cvp_management_2_design.md) | #357 两管理域的目标职责、Claim 多轮修订与独立终审、必要人工出口及完整生命周期验收；尚未启用 |
+| [CVP 3.0：主题式 CVP Agent](./20-knowledge/topic_cvp_agent_solution.md) | 主题式 Agent 取代 CVP 2.0 的分批生成：一次处理一个主题，召回、按需读原文、提议、多轮复核修订，拿不准的转负责人；关系须附教授原话；写库后再生成论证路线。2026-10-26 批准 |
+| [主题式 CVP 试跑记录（2026-10-25／26）](./20-knowledge/topic_cvp_agent_pilot_record_20261025.md) | 「人子」九次试跑与一次合并试验的经过和数字 |
 | [CVP 2.0 执行入口与恢复](./20-knowledge/cvp2_recall_preparation_v1.md) | 完整 action、增量召回、共同材料、多轮、维护权限、SQL 提交／恢复及独立质量状态；真实模型验收另行进行 |
 | [Claims → CVP 現行完整流程](./20-knowledge/cvp_production_process_v1.md) | 正常生成、唯一纠正、來源／Claim／連接例外、完整審計、人工出口與恢復；區分已實作與尚未自動接通 |
 | [CVP 特殊案例索引](./90-ops/cvp_special_cases_20261007.md) | #357 實際 special cases 如何改變流程；歷史特批不等於永久授權（記錄） |

@@ -266,6 +266,7 @@ CLAIM_EVIDENCE_HUMAN_AUTHORITY_SNAPSHOT_SCHEMA_VERSION = (
     "wang_claim_evidence_reciprocity_human_authority_snapshot_v1"
 )
 POSTGRES_APPLY_ADVISORY_LOCK_KEY = "wang_knowledge.apply_plan.v1"
+TOPIC_RUN_KIND = "cvp_topic_v3"
 CLAIM_EVIDENCE_BACKUP_VERIFICATION_SCHEMA_VERSION = (
     "wang_claim_evidence_reciprocity_backup_verification_v1"
 )
@@ -4227,6 +4228,35 @@ class PostgresKnowledgeStore:
                            (run_id, campaign_sha256, group_key, canonical_json(value)))
         return run_id
 
+    def prepare_topic_run(self, *, topic: str, claim_ids: Sequence[str], materials: Mapping[str, Any]) -> str:
+        """CVP 3.0: one transaction carrier per topic run, outside any 2.0 campaign.
+
+        A topic run reuses the SQL review/apply boundary of a CVP group but is
+        not a batch: no 20-Claim cap, no campaign sequence, and no 2.0
+        post-write audit. Its approval is the topic agent's reviewed proposal
+        plus the owner's decisions, recorded in the reviewed evidence.
+        """
+        from .transaction_validation import CONTRACT
+        if not topic or not claim_ids or len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("topic run requires a topic and unique Claim ids")
+        identity = {"contract": CONTRACT, "kind": TOPIC_RUN_KIND, "topic": topic,
+                    "claim_ids": sorted(claim_ids), "materials": dict(materials)}
+        run_id = "CVPT-" + sha256_json(identity)
+        value = {**identity, "checkpoint": "prepared", "change_set_ids": [],
+                 "revisit_required": False, "independent_audit_complete": False}
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if row:
+                if any(row[0].get(k) != v for k, v in identity.items()):
+                    raise ChangeSetConflict("topic run identity changed")
+                return run_id
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
+                              (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
+                              VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
+                           (run_id, topic, canonical_json(value)))
+        return run_id
+
     def fail_cvp_group(self, run_id: str, error: str) -> None:
         # An error changes execution status, never erases an applied checkpoint.
         with self.connect() as conn:
@@ -4563,6 +4593,8 @@ class PostgresKnowledgeStore:
 
     @staticmethod
     def _affected_cvp_groups(cursor, plan, context, group):
+        # A CVP 3.0 topic run does not reopen 2.0 batch audits it supersedes.
+        if group.get('kind') == TOPIC_RUN_KIND:return []
         changed=[op for op in plan.operations if op.operation in {'update','retire','revive'}]
         links=[op for op in plan.operations if op.collection=='viewpoint_claim_links']
         if not changed and not links:return []
