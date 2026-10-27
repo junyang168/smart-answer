@@ -127,17 +127,28 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                                                                   fields=sorted(FIELDS['claims']))]
             allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
                                        root=action_dir / 'execution')
-        natural = scope(request, before)
-        for key in natural['record_keys']:
-            col, oid = cm.source.split_key(key)
-            if col not in FIELDS or (col == 'claims' and oid != cid):
-                continue
-            state = before[key]
-            if state['retired'] or state['payload'].get('review_status') in cm.HELD:
-                continue
-            if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
-                continue
-            request.permissions.append(cm.source.Permission(collection=col, object_id=oid, fields=sorted(FIELDS[col])))
+        # A writable relation makes its other Claim reviewed content, so one
+        # more pass grants the Evidence and relations that review then shows
+        # (#459: CR001 brought CL004's E016/ER011 into review but not into the
+        # write set). Other Claims stay read-only. No further passes: chaining
+        # on through neighbours of neighbours reached 333 objects for P06-CL001.
+        granted = set()
+        for _ in range(2):
+            added = []
+            for key in scope(request, before)['record_keys']:
+                col, oid = cm.source.split_key(key)
+                if key in granted or col not in FIELDS or (col == 'claims' and oid != cid):
+                    continue
+                state = before[key]
+                if state['retired'] or state['payload'].get('review_status') in cm.HELD:
+                    continue
+                if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
+                    continue
+                added.append(cm.source.Permission(collection=col, object_id=oid, fields=sorted(FIELDS[col])))
+            if not added:
+                break
+            granted.update(p.key for p in added)
+            request.permissions.extend(added)
         authorization = {'schema_version': cm.VERSION, 'authorized_by': 'owner',
             'authorization_quote': instruction, 'human_content_approval': False,
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
