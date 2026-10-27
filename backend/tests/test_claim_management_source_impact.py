@@ -136,6 +136,12 @@ def test_deleted_original_quote_is_bound_to_before_epoch():
         cm.validate_citations([cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='旧转录字句。')],sources)
 
 
+def test_before_epoch_of_an_unchanged_source_is_its_current_text():
+    sources={'S':{'paragraphs':{'S0001':{'text':'未改的字句。'}}}}
+    cm.validate_citations([cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='未改的字句。',source_epoch='before')],sources)
+    with pytest.raises(ValueError,match='exact quote'):
+        cm.validate_citations([cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='别的字句。',source_epoch='before')],sources)
+
 def test_explicit_batches_share_one_budget_and_qualify_only_their_owned_targets(action):
     store, original, _, _, root, _ = action
     seed_claims(store,['C','D'])

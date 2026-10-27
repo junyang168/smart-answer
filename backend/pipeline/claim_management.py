@@ -404,7 +404,8 @@ def validate_citations(citations, sources):
     for citation in citations:
         snapshot = sources.get(citation.source_id)
         if citation.source_epoch == 'before':
-            snapshot = (snapshot or {}).get('before')
+            # an unchanged source has no separate before: it is the current text
+            snapshot = (snapshot or {}).get('before', snapshot)
         paragraph = (snapshot or {}).get("paragraphs", {}).get(citation.paragraph_key)
         if not paragraph or citation.exact_quote not in paragraph["text"]:
             raise ValueError("citation is not an exact quote from the complete own source")
