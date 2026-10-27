@@ -5,7 +5,7 @@ local; models are invoked only by the runner after durable reservations.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager
 from copy import deepcopy
 import hashlib
 import json
@@ -47,35 +47,6 @@ def maintenance_lock():
         # Closing releases the lock after the final inherited descriptor closes.
         # A batch worker can keep it across coordinator death without a gap.
         yield lock
-
-
-@contextmanager
-def wait_for_claim_operation_locks():
-    """Queue for both shared resources, holding neither while waiting.
-
-    This waits only for a local lock. It never retries a model, operation,
-    review, or SQL write, and cannot invert the two-lock acquisition order.
-    """
-    import time
-    from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
-    while True:
-        stack = ExitStack()
-        try:
-            maintenance = stack.enter_context(maintenance_lock())
-            registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path':str(
-                workspace().parent/'cvp-production-357/registry-cvp.lock')}))
-        except (BlockingIOError, CvpProductionBlocked) as exc:
-            stack.close()
-            if isinstance(exc, CvpProductionBlocked) and exc.findings != ['another CVP identity run holds the global lock']:
-                raise
-            time.sleep(1)
-            continue
-        except BaseException:
-            stack.close()
-            raise
-        with stack:
-            yield maintenance, registry
-        return
 
 
 def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False,
@@ -142,10 +113,6 @@ def claim_management_model_adapter(role, policy, *, live=False):
     if joint:
         response_model = JointJsonCandidate if role == 'gpt' else JointReview
         schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
-    if policy.source_impact_contract:
-        from backend.pipeline.claim_management import SourceChangeWire
-        response_model = SourceChangeWire
-        prompt += '\n本轮来源变更自动化：完整读取全部材料后才可 complete_review=true；不逐条重复只读记录的 retain/verdict。source_impacts 只覆盖原 target_keys；direct neighbours 只作只读背景。source_coverage 必须逐一覆盖所有改变的段落，检查新增或此前遗漏的教导、经文及推理、引述和否定的归属。每项列出真正承载这些教导的本来源 Claim keys；缺少独立 Claim 时标 needs_update，并对所列 Claim 给出具体维护 finding，要求在普通 Update 中补建并连接 Evidence、Question。教授投影片与教授原话具有同等证据地位。不得用不相干的现有 Claim 冒充覆盖。'
     if policy.model_output_contract:
         from backend.pipeline.claim_model_output import Changes, CreatingChanges, ManagedChanges, FindingsReview, CREATING_CONTRACT, MANAGED_CONTRACT
         creating = policy.model_output_contract == CREATING_CONTRACT

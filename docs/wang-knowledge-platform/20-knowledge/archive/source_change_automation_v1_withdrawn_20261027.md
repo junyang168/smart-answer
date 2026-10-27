@@ -2,9 +2,9 @@
 
 > **讀者**：Developer。
 > **類型**：流程。
-> **狀態**：當前。
+> **狀態**：已撤回；見[回撤記錄](../../90-ops/source_change_464_rollback_20261027.md)。
 > **與代碼對齊**：2026-10-27，核對 `source_change_automation`、`source_change_transition`、Claim ID intake 及既有 CVP／論證執行入口；實際運行結果另記，隔離模型回答不作內容批准。
-> **權威範圍**：段落座標未變的逐字稿校訂，從來源版本交接到 Claim、CVP 與論證層接續；不更動既有任務或舊來源修訂契約。
+> **權威範圍**：歷史方案，程式已回撤，不再作為可執行流程。原範圍：段落座標未變的逐字稿校訂，從來源版本交接到 Claim、CVP 與論證層接續；不更動既有任務或舊來源修訂契約。
 
 ## 一、入口與邊界
 
@@ -61,7 +61,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.source_change_automati
 
 只有 Claim 當前資格、CVP 操作及所有必要論證 job 的實際回讀都通過，外層才顯示 completed。
 其他結果顯示 paused，保存具體 stage 與原結果；人工問題仍走
-[Claim Management 的人工返回](./claim_management_2_design.md#91-人工核实的返回)。
+[Claim Management 的人工返回](../claim_management_2_design.md#91-人工核实的返回)。
 純機械恢復不代表 Opus 作過內容批准，模型審閱也不冒充人工確認。
 
 新入口不導入舊 campaign 的 Gemini、整庫備份或 SSD 規則，不生成文章或部署。

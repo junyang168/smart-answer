@@ -204,7 +204,7 @@ def test_release_runtime_consumption_never_generates_diagnostic(tmp_path,monkeyp
 
 
 @pytest.mark.parametrize('drift', [None, 'login', 'binary', 'model', 'path',
-                                  'previous', 'proof', 'missing', 'owner', 'direction', 'alias', 'copy'])
+                                  'previous', 'proof', 'missing', 'owner', 'direction'])
 def test_explicit_canonical_renewal_consumes_exact_proof_without_new_call(tmp_path, monkeypatch, drift):
     import copy
     import json
@@ -229,16 +229,7 @@ def test_explicit_canonical_renewal_consumes_exact_proof_without_new_call(tmp_pa
                'owner_direction': 'Use current login and one startup verification.',
                'previous_runtime': binding(previous), 'current_runtime': verified,
                'current_proof': binding(verified['proof_path'])}
-    if drift == 'alias':
-        alias = tmp_path/'old-alias'; alias.symlink_to(previous.parent, target_is_directory=True)
-        renewal['previous_runtime']['path'] = str(alias/previous.name)
-        proof_alias = tmp_path/'proof-alias'; proof_alias.symlink_to(tmp_path/'proofs', target_is_directory=True)
-        renewal['current_proof']['path'] = str(proof_alias/m.Path(verified['proof_path']).name)
-        verified['proof_path'] = renewal['current_proof']['path']
-    elif drift == 'copy':
-        copy_path = tmp_path/'copied-previous.json';copy_path.write_bytes(previous.read_bytes())
-        renewal['previous_runtime']['path'] = str(copy_path)
-    elif drift == 'login': (home/'auth.json').write_text('another login')
+    if drift == 'login': (home/'auth.json').write_text('another login')
     elif drift == 'binary': client.cli_identity['file_sha256'] = 'another binary'
     elif drift == 'model': verified['identity']['model'] = 'another model'
     elif drift == 'path': verified['identity']['cli']['path'] = '/foreign/codex'
@@ -251,7 +242,7 @@ def test_explicit_canonical_renewal_consumes_exact_proof_without_new_call(tmp_pa
     monkeypatch.setenv('WKP_CODEX_RUNTIME_RENEWAL', str(path))
     monkeypatch.setattr(m, 'CodexSubscriptionClient', lambda **kw: client)
     monkeypatch.setattr(client, 'generate_json', lambda *a, **k: pytest.fail('no diagnostic fallback'))
-    if drift not in (None, 'alias'):
+    if drift:
         with pytest.raises((ValueError, RuntimeError, FileNotFoundError)):
             mod.canonical_runtime()
     else:

@@ -131,16 +131,6 @@ def recompletion_seed(path, seeds):
     return result
 
 
-def _same_runtime_file(bound, expected):
-    """Allow a moved directory alias only for the same exact physical file."""
-    from backend.pipeline.cvp_sql_commit import binding
-    if not isinstance(bound, dict) or set(bound) != {'path','file_sha256'}:
-        return False
-    path = Path(bound['path'])
-    return (path.is_absolute() and path.samefile(expected)
-            and bound['file_sha256'] == binding(expected)['file_sha256'])
-
-
 def canonical_runtime():
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
     from backend.pipeline.codex_subscription_preflight import verify_runtime, consume_saved_runtime
@@ -157,7 +147,7 @@ def canonical_runtime():
         if (renewal.get('schema_version') != 'codex_runtime_renewal.v1'
                 or renewal.get('authorized_by') != 'owner'
                 or not renewal.get('owner_direction', '').strip()
-                or not _same_runtime_file(renewal.get('previous_runtime'), saved_path)):
+                or renewal.get('previous_runtime') != binding(saved_path)):
             raise ValueError('invalid explicit Codex runtime renewal authority')
         proof = renewal['current_runtime']
         identity = proof['identity']
@@ -165,8 +155,7 @@ def canonical_runtime():
                 or any(identity[k] != saved['identity'][k] for k in ('model','backend','reasoning_effort'))
                 or renewal['current_proof']['path'] != proof['proof_path']):
             raise ValueError('runtime renewal cannot substitute executable/model/backend/effort')
-        if not _same_runtime_file(renewal['current_proof'], Path(proof['proof_path'])):
-            raise ValueError('runtime renewal saved proof file drift')
+        check_binding(renewal['current_proof'])
         result = consume_saved_runtime(client, proof)
         os.environ['CODEX_EXECUTABLE'] = executable
         return result

@@ -6,7 +6,7 @@
 > **与代码对齐**：第 5.3 节独立判断遗漏的审阅规则、同轮新建同源 Claim 与双向归属校验于 2026-10-22 核对到引入 `one_sided_owner_pairs` 与 `test_claim_hidden_judgement.py` 的提交；概括语义力度的既有审阅理由于 2026-10-18 核对到 `claim_management_review_v2.md`、`claim_management_compact_v1/v2.md` 与 `claim_own_evidence_v1.md`；具体维护问题冻结与已知权限缺口提前暂停于 2026-10-18 核对到 `a60e4bba`；自身证据覆盖与经文论据归属契约于 2026-10-18 核对到 `a14d8242`；已记录只读异议的联合权限接续于 2026-10-17 核对到 `0077424e`；以下既有项目于 2026-10-16 核对：精简模型输出、显式授权接续及只读资格刷新核对到 `4ee96f3`，真实验收见实施检查点；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。第 9.1 节人工修改／确认的持久登记、自动带入和当前证据核实对齐到 `f6101f47`。
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
-> **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。使用现有 Update 执行器，隔离模型回答不作为真实内容验收。完整 source change 接續見[來源變更自動接續](./source_change_automation_v1.md)，實際驗證由 [#464](https://github.com/junyang168/smart-answer/issues/464) 記錄。
+> **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。使用现有 Update 执行器，隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
@@ -424,8 +424,6 @@ Opus 或 Gemini 可主动提出原文疑点。程序先核完整材料、引文�
 普通联合 Update 的上述人工返回路径只覆盖同一个尚未内容提交的联合单元：后续 action 保留全部目标、必做维护对象、权限及明确的旧单元映射，必须读取已保存候选；候选缺失不得以 None 相等代替核实。不能只接回其中一条 Claim 或重分组来消解共同修改义务。已发生内容提交后再有人工问题，保留实际版本和不可用原因，依第 6.2 节使用确已实现／验收的修订路径；当前人工接续不能表达时记为工程未完成，不重放旧预算。本轮不扩展多单元部分提交后的人工接续。
 
 ### 9.2 原文只改一段或几段
-
-完整自動接續入口見[來源變更自動接續](./source_change_automation_v1.md)：版本交接、完整來源影響、按段落呼叫下述 Claim ID batch，以及既有 CVP／論證執行與回讀。以下保留獨立使用薄順序入口的契約。
 
 来源维护产生一次可核实的版本交接：完整新旧原件及 SHA、完整段落差异、段落对应表、绑定旧版本的依赖清单。Claim Management 消费这份交接，不再制作第二份对应表，也不增加 operation。新来源版本注册行与依赖影响登记在同一短 DB transaction 内成立；物理原件仍按第 10.2 节的文件版本边界核实。旧审核与历史内容保留；当前是否可用由第 10.1 节派生，不增加“待确认”状态字段。
 

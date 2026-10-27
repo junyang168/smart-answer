@@ -71,12 +71,7 @@ def binding(path):
 
 
 def check_binding(value):
-    # A binding authenticates its declared file bytes. A directory migration
-    # can leave that exact absolute path as a symlink; resolving its spelling
-    # must not invalidate every already-frozen material/approval in staging.
-    if (set(value) != {'path','file_sha256'} or not Path(value['path']).is_absolute()
-            or binding(value['path'])['file_sha256'] != value['file_sha256']):
-        raise ValueError('exact SQL material/source binding drift')
+    if binding(value["path"]) != value: raise ValueError("exact SQL material/source binding drift")
 
 
 def verified_group_backup(root, package, ports):

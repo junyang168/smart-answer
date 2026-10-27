@@ -373,9 +373,6 @@ class ScriptDelta:
                         "script changed before atomic save: "
                         f"expected {expected_current_sha256}, found {actual or 'missing'}"
                     )
-            if folder in ('script_review', 'script_published') and os.path.exists(target):
-                from backend.pipeline.source_version_archive import archive_bytes
-                archive_bytes(base_folder, Path(target).read_bytes())
             target_mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
             encoded = json.dumps(payload, ensure_ascii=False, indent=4).encode("UTF-8")
             written_sha256 = hashlib.sha256(encoded).hexdigest()

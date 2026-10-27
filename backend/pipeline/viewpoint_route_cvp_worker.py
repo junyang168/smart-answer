@@ -428,23 +428,6 @@ def main() -> int:
         parser.error("run claims one queued CVP; do not pass viewpoint IDs")
     if args.output_dir is None:
         parser.error("run requires --output-dir")
-    return _run_queued_cvp_route(store, queue, policy, policy_sha, args)
-
-
-def run_queued_cvp_route(store, queue_dir, output_dir, *, job_id, worker_id, policy_path=DEFAULT_POLICY):
-    """Consume one exact existing job with the CLI's ownership and recovery rules."""
-    from types import SimpleNamespace
-    policy = load_route_policy(policy_path)
-    if policy['schema_version'] not in {'wang_route_resolution_policy_v5', 'wang_route_resolution_policy_v8'}:
-        raise ValueError('whole-CVP worker requires Route policy v5 or v8')
-    policy_sha = route_policy_fingerprint(policy, prompt_sha256s=route_policy_prompt_sha256s(
-        policy, prompt_dir=Path(__file__).resolve().parent/'prompts'))
-    args = SimpleNamespace(worker_id=worker_id, retry_exceptions=False, apply=True, job_id=job_id,
-        output_dir=Path(output_dir), route_policy=policy_path, repair_evidence_input=False, repair_connection_context=False)
-    return _run_queued_cvp_route(store, CvpRouteQueue(Path(queue_dir)), policy, policy_sha, args)
-
-
-def _run_queued_cvp_route(store, queue, policy, policy_sha, args):
     lease_seconds = int(policy["call_timeout_seconds"]) + 300
     claimed = queue.claim(worker_id=args.worker_id, policy_sha256=policy_sha,
                           lease_seconds=lease_seconds,

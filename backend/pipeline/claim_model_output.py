@@ -232,20 +232,8 @@ def candidate(raw, materials):
 
 
 def review(raw, materials, proposal):
-    if materials['policy'].get('source_impact_contract'):
-        wire = cm.SourceChangeWire.model_validate(raw)
-        if not wire.complete_review:
-            raise ValueError('source impact requires an explicit complete material review')
-        request = cm.Request.model_validate(materials['unit_request'])
-        return cm.SourceChangeReview(proposal_sha256=proposal.digest,
-            verdicts=[cm.source.Verdict(record_key=key, approved=True, problems=[],
-                reason='Complete source-impact assessment; no Claim content approval')
-                for key in cm.audit_keys(request, materials['before'], proposal)],
-            findings=wire.findings, prior_findings=[],
-            answered_questions=cm.operation_questions(materials['original_goal'], proposal),
-            source_impacts=wire.source_impacts, source_coverage=wire.source_coverage)
     if not enabled(materials):
-        return cm.parse_review(raw)
+        return cm.Review.model_validate(raw)
     from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments
     binding = binding_enabled(materials['policy'])
     wire = (BindingFindingsReview if binding else FindingsReview).model_validate(raw)

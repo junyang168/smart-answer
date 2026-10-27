@@ -50,7 +50,7 @@ def immutable(path, value):
     return binding(path)
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, source_transition=None, predecessor_action_id=None):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -59,10 +59,6 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     from backend.pipeline import claim_management_batch as batch
     from backend.pipeline.claim_direct_scope import scope
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    if bool(source_transition) != bool(predecessor_action_id):
-        raise ValueError('source intake requires its exact transition and predecessor Review')
-    if source_transition:
-        check_binding(source_transition)
     ids = claim_ids(values)
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError('the Claim Update direction is required')
@@ -76,16 +72,10 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     if (selected.review_purpose != 'content' or selected.claim_scope_contract != 'claim_direct_neighbours_v1'
             or selected.independent_audit_required):
         raise ValueError('Claim list intake requires the scoped Opus-only content Update policy')
-    if source_transition:
-        # Source impact has already raised concrete objections. Send them to
-        # GPT immediately rather than buying another initial Opus assessment.
-        selected.initial_candidate = 'proposal'
     # Execution artifacts must survive moving/removing the development checkout.
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}
-    if source_transition:
-        intent.update(source_transition=source_transition, predecessor_action_id=predecessor_action_id)
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -127,7 +117,6 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         auth_path = action_dir / 'authorization.json'
         request = cm.Request(action_id='claim-list-' + token, operation='Update', allowed_operations=['Update'],
             target_keys=['claims/' + cid], source_bindings=sources, policy=policy_binding,
-            **({'source_transition': source_transition, 'predecessor_action_id': predecessor_action_id} if source_transition else {}),
             authorization={'path': str(auth_path), 'file_sha256': '0' * 64})
         allocations = {}
         if selected.model_output_contract == 'claim_changes_v4':
@@ -186,7 +175,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=None, source_transition=None, predecessor_action_id=None):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()
@@ -197,12 +186,11 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None, so
     with (root / 'intake.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
-            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy,
-                source_transition=source_transition, predecessor_action_id=predecessor_action_id)
+            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy)
             manifest = prepared['manifest']['path'] if prepared['manifest'] else None
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             if not batch._paragraph_results(store, jobs)['all_actions_completed']:
-                batch.run(manifest, root / 'batch', **({'wait_for_locks':True} if source_transition else {}))
+                batch.run(manifest, root / 'batch')
             result = batch._paragraph_results(store, jobs)
             by_claim = {cid: {'action_id': None, 'result': reason, 'qualification': None}
                         for cid, reason in prepared['excluded'].items()}

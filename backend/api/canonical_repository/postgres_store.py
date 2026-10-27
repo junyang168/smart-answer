@@ -3298,18 +3298,16 @@ class PostgresKnowledgeStore:
             if goal != expected_goal:
                 raise ChangeSetConflict('Claim original goal/scope/proof differs from actual current SQL and source history')
             source_baselines = {}
-            source_findings = {}
             if request.source_transition:
                 from backend.pipeline.cvp_sql_actions import claim_source_transition_context
                 context = claim_source_transition_context(self, request, before)
                 source_baselines = context.pop('baselines')
-                source_findings = context.pop('prior_findings', {})
                 goal = {**expected_goal, 'source_transition_context': context}
             from backend.pipeline.claim_joint_update import admission_error
             refusal = admission_error(request, policy, before, goal)
             value = {**identity, "original_goal": goal, "latest_rounds": {},
                      "source_baselines": source_baselines,
-                     "call_reservations": {}, "findings": source_findings, "created_keys": [],
+                     "call_reservations": {}, "findings": {}, "created_keys": [],
                      "revision_rounds": {},
                      "claim_ids": [key.split("/", 1)[1] for key in request.target_keys],
                      "result": {"status": "prepared"}}
@@ -3758,8 +3756,7 @@ class PostgresKnowledgeStore:
                     if cm.is_source_impact(materials['request']):
                         opus_receipt = body(read(Path(stages['opus']['path'])))
                         opus_raw = body(read(Path(opus_receipt['materials']['path']).parent / 'opus.raw.json'))
-                        from backend.pipeline.claim_model_output import review as expand_review
-                        first = expand_review(opus_raw['response'], materials, candidate)
+                        first = cm.Review.model_validate(opus_raw['response'])
                         if {i.record_key: (i.conclusion,i.operation) for i in first.source_impacts} != {
                                 i.record_key: (i.conclusion,i.operation) for i in review.source_impacts}:
                             passed = False
@@ -4064,10 +4061,7 @@ class PostgresKnowledgeStore:
                         for bound in [revalidation['impact_audit'], revalidation['content_audit']]:
                             check_binding(bound)
                         records = self._assert_transaction_read_pins(cursor, decoded_pins(revalidation['current_pins']))
-                        scoped_request = value['materials']['unit_request']
-                        if value['materials']['policy'].get('source_impact_contract'):
-                            scoped_request = {**scoped_request, 'target_keys':['claims/' + claim_id]}
-                        self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records, request=scoped_request)
+                        self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records, request=value['materials']['unit_request'])
                     except (ValueError, OSError, KeyError, ChangeSetConflict):
                         return {'ready': False, 'reason': 'source_revalidation_drift', 'run_id': rid}
                     state = records.get(('claims', claim_id))
@@ -7900,18 +7894,6 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
-                if plan.source_kind == 'wang_source_change_transition_v1':
-                    from backend.pipeline.source_change_transition import assert_current
-                    intent_binding = (metadata or {}).get('intent')
-                    from backend.pipeline.cvp_sql_commit import check_binding
-                    check_binding(intent_binding)
-                    intent = json.loads(Path(intent_binding['path']).read_text())
-                    from backend.pipeline.source_change_transition import compile_package
-                    plan_source_package = compile_package(intent)[0]
-                    plan_source_package['source_repair_application'] = {'schema_version': plan.source_kind, 'intent': intent_binding}
-                    if plan.source_sha256 != sha256_json(plan_source_package):
-                        raise ValueError('source handoff plan differs from its exact intent')
-                    assert_current(self, cursor, plan_source_package)
                 if expected_current_route_material_pins is not None:
                     self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
                     viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
