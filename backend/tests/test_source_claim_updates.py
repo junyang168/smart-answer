@@ -64,6 +64,9 @@ def test_complete_shared_object_refresh_then_fresh_next_paragraph_and_zero_call_
                 result=pass_review(packet);rows={k:v['payload'] for k,v in packet['before'].items()}
                 rows.update(cm.source.index(cm.Candidate.model_validate(packet['candidate']).records))
                 if rows['source_fragments/'+fid]['verbatim_excerpt']!=citation(packet)['exact_quote']:
+                    if fid=='FD':
+                        for assessment in result['binding_assessments']:
+                            if assessment['claim_key']==target:assessment['sufficient']=False
                     result['findings']=[{'target_key':'source_fragments/'+fid,'component':'source_binding','category':'mapping',
                         'reason':'old shared quotation is no longer in the source','acceptance_condition':'use current exact source',
                         'citations':[citation(packet)],'affected_target_keys':[target],'affected_write_keys':[],
@@ -93,3 +96,57 @@ def test_current_source_drift_blocks_without_preparing_claim_batches(action):
     doc=store.get_record_state('source_documents','S')['payload'];Path(doc['source_path']).write_text('[]')
     with pytest.raises(ValueError):updates.run(store,'S',old,cid,root,'refresh')
     assert not (root/'paragraphs').exists()
+
+
+def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(action,monkeypatch):
+    from backend.pipeline import claim_management_intake as intake,claim_evidence_review as evidence
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    store,old,cid,root=fixture(action);root=root/'single-D'
+    citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    def resolutions(packet):return [{'finding_id':f,'disposition':'resolved','reason':'bound excerpt repaired',
+        'citations':[citation],'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],
+        'impact_reason':'own bound evidence refreshed'} for f in packet['unresolved']]
+    def review(packet):
+        value=pass_review(packet)
+        if not packet['unresolved']:
+            for a in value['binding_assessments']:
+                if a['claim_key']=='claims/D':a['sufficient']=False
+            value['findings']=[{'target_key':'source_fragments/FD','component':'binding','category':'evidence',
+                'reason':'old bound excerpt is no longer current','acceptance_condition':'refresh own bound excerpt',
+                'citations':[citation],'affected_target_keys':['claims/D'],'affected_write_keys':[],
+                'impact_reason':'own source evidence is stale'}]
+        value['prior_findings']=resolutions(packet);return value
+    def proposal(packet):return {'changes':[{'record_key':'source_fragments/FD',
+        'fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),'reason':'refresh quotation','citations':[citation]}],
+        'creations':[],'retirements':[],'findings':[],'finding_resolutions':resolutions(packet)}
+    clients={}
+    def execute(manifest,output):
+        for key,(request,execution) in batch.load(manifest,output,store=store)[1].items():
+            client=clients.setdefault(key,SyntheticPorts(store,execution,opus=review,proposal=proposal))
+            execute_claim_management(store,request,root=execution,ports=client)
+    monkeypatch.setattr(batch,'run',execute)
+    current=evidence.validate_assessments
+    def legacy(review,materials,candidate):
+        if any(not a.sufficient for a in review.binding_assessments):
+            raise ValueError('insufficient own Evidence requires a concrete Claim finding')
+        return current(review,materials,candidate)
+    monkeypatch.setattr(evidence,'validate_assessments',legacy)
+    first=intake.run(['D'],root,store=store,instruction='refresh source')
+    assert first['status']=='paused'
+    aid=first['claims']['D']['action_id'];parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+    rid=next(iter(parent['latest_rounds'].values()));saved=store.get_cvp_group(rid)
+    raw=Path(parent['execution_root'])/rid/'opus.raw.json';original_raw=raw.read_bytes()
+    monkeypatch.setattr(evidence,'validate_assessments',current)
+    auth=root/'engineering-direction.json';auth.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'fix the bound-excerpt validator and resume original result',
+        'human_content_approval':False,'record_unaccepted_result':True,
+        'prior_metadata_sha256':cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}})}))
+    recovery=recover_returned_review(store,rid,authorization=binding(auth),unrecorded=True)
+    record=json.loads(Path(recovery,'engineering-recovery.json').read_text())
+    assert record['model_calls']==0 and record['returned_review_passed'] is False
+    assert raw.read_bytes()==original_raw
+    assert Path(recovery,'opus.raw.json').read_bytes()==original_raw
+    final=intake.run(['D'],root,store=store,instruction='refresh source')
+    assert final['all_actions_completed'],final
+    assert next(iter(clients.values())).calls==['opus','gpt','opus']
+    assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']

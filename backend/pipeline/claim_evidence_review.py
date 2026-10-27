@@ -105,7 +105,10 @@ def validate_assessments(review, materials, candidate):
                     steps[k]['support_eligibility'] in {'eligible', 'eligible_candidate'}
                     for k in a.evidence_keys):
                 raise ValueError('professor judgment cannot be supported only by context/ineligible Evidence')
-        elif a.claim_key not in rejected and not rejected & set(steps):
-            # The gap may be named on the Claim or on one of its own Evidence
-            # steps (#459: Opus put the binding gap on E012/E001), not elsewhere.
-            raise ValueError('insufficient own Evidence requires a concrete Claim finding')
+        else:
+            bound = set(steps) | {f for step in steps.values() for f in step['fragment_keys']}
+            # A binding objection belongs on the exact bound excerpt too.
+            # Unrelated observations, Questions and neighbour excerpts do not
+            # explain a gap in this Claim's own Evidence.
+            if a.claim_key not in rejected and not rejected & bound:
+                raise ValueError('insufficient own Evidence requires a concrete Claim finding')
