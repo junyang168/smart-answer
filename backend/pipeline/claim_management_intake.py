@@ -135,7 +135,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=DEFA
         authorization = {'schema_version': cm.VERSION, 'authorized_by': 'owner',
             'authorization_quote': instruction, 'human_content_approval': False,
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
-            'policy': policy_binding, 'required_maintenance_keys': []}
+            'policy': policy_binding, 'required_maintenance_keys': [],
+            'review_questions': [instruction]}
         request.authorization = cm.source.FileBinding.model_validate(immutable(auth_path, authorization))
         documents = {sid: before['source_documents/' + sid]['payload'] for sid in own}
         cm.load_authority(request, source_documents=documents)

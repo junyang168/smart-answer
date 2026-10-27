@@ -109,6 +109,7 @@ def test_review_revision_and_commit_run_through_the_list_entry(claims, monkeypat
                 'citations': [citation], 'affected_target_keys': ['claims/C'],
                 'affected_write_keys': ['claims/C'], 'impact_reason': 'target wording corrected'}
     def review(packet):
+        assert packet['original_goal']['review_questions'] == ['Cleanup this Claim']
         result = pass_review(packet)
         if not packet['unresolved']:
             result['findings'] = [{'target_key': 'claims/C', 'component': 'statement', 'category': 'content',
@@ -119,6 +120,7 @@ def test_review_revision_and_commit_run_through_the_list_entry(claims, monkeypat
             result['prior_findings'] = [resolution(fid) for fid in packet['unresolved']]
         return result
     def propose(packet):
+        assert packet['original_goal']['review_questions'] == ['Cleanup this Claim']
         return {'changes': [{'record_key': 'claims/C', 'fields_json': json.dumps({'statement': '甲是假设，不是断言。'}),
                              'reason': 'synthetic complete qualification', 'citations': [citation]}],
                 'findings': [], 'finding_resolutions': [resolution(fid) for fid in packet['unresolved']]}
