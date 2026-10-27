@@ -3,9 +3,9 @@
   "policy_id": "wang_claim_management_joint_update_v8",
   "independent_audit": false,
   "budget": {
-    "max_revisions": 1,
-    "gpt_calls": 2,
-    "opus_calls": 2,
+    "max_revisions": 4,
+    "gpt_calls": 4,
+    "opus_calls": 5,
     "gemini_calls": 0,
     "max_request_bytes": 500000,
     "max_output_tokens": 32000

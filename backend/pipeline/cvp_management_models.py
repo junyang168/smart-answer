@@ -42,7 +42,7 @@ component_ref如需出现在fields_json也必须是相同k引用。全文等价�
 每个新连接可在fields_json给evidence_step_refs:[e短引用,...]，只选当前Claim材料中直接支持该连接成分的合格证据；
 拆分同一Claim连接不同成分时须分别选择，不能把整条Claim的证据都绑定到每个连接。修订时也可只改这个选择。
 新viewpoint_relations槽nqN：source_viewpoint_id、target_viewpoint_id选短引用；
-relation_type=generalizes|specializes|entails|extends|qualifies|applies|tensions_with|supersedes；
+relation_type=generalizes|specializes|entails|supports|extends|qualifies|applies|tensions_with|supersedes（supports：教授以一个观点作为另一个观点的理由，弱于entails）；
 reason写具体作用，supporting_claim_ids及supporting_claim_relation_ids只用给定短引用；
 只有supersedes可给temporal_assertion且必须有明确后期修正证据。不可由措辞相似推断合并。
 冲突规则（提议和审核共用）：先据各Claim自身原文语境核对主语、判断、否定对象、例外和适用范围。

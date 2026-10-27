@@ -102,11 +102,25 @@ class OwnershipGuardedAdapter:
     """
 
     def __init__(self, adapter: Any, ownership_guard: Callable[[], None]) -> None:
-        self._adapter = adapter
-        self._ownership_guard = ownership_guard
+        object.__setattr__(self, "_adapter", adapter)
+        object.__setattr__(self, "_ownership_guard", ownership_guard)
+
+    def __copy__(self) -> "OwnershipGuardedAdapter":
+        from copy import copy
+        return OwnershipGuardedAdapter(copy(self._adapter), self._ownership_guard)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # call_model gives its copy a private client; that must reach the adapter that calls it.
+        setattr(self._adapter, name, value)
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._adapter, name)
+        if name.startswith("__") or name in ("_adapter", "_ownership_guard"):
+            raise AttributeError(name)
+        value = getattr(self._adapter, name)
+        if name.endswith("_copy") and callable(value):
+            # The runtime calls with a copy (response binding, request encoding); keep it fenced.
+            return lambda *args, **kwargs: OwnershipGuardedAdapter(value(*args, **kwargs), self._ownership_guard)
+        return value
 
     def generate(self, payload: dict[str, Any]) -> Any:
         self._ownership_guard()

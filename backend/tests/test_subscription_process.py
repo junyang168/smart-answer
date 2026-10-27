@@ -184,10 +184,14 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     monkeypatch.setattr(runtime,'maintenance_lock',locked)
     monkeypatch.setattr(safety,'exclusive_cvp_run_lock',locked)
     monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
-    requests={k:(SimpleNamespace(target_keys=['claims/'+k],permissions=[]),tmp_path/k) for k in ['a','b']}
+    bound=SimpleNamespace(model_dump=lambda: {})
+    requests={k:(SimpleNamespace(target_keys=['claims/'+k],permissions=[],source_bindings={},
+        authorization=bound,policy=bound),tmp_path/k) for k in ['a','b']}
     monkeypatch.setattr(batch,'load',lambda *a: ({'max_workers':2},requests))
+    monkeypatch.setattr(batch,'check_binding',lambda binding: None)
     class Store:
         def read_claim_context(self,keys): return {tuple(keys[0]): {}}
+        def get_cvp_group(self,run_id): return None
         def claim_management_qualification(self,key): return {'ready':key=='b'}
     monkeypatch.setattr(pg,'PostgresKnowledgeStore',Store)
     started=[]

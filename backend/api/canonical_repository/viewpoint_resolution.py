@@ -2205,6 +2205,21 @@ class StructuredJsonReviewerAdapter:
         from .viewpoint_response_binding import wire_schema
         return wire_schema(self._response_model)
 
+    def shared_records_copy(self):
+        """Compact shared-text/record encoding for an adapter built without it.
+
+        Lossless, with its own identity; receipts of the plain encoding are unchanged.
+        It is the first step a too-large request takes towards the smaller encodings.
+        """
+        from copy import copy
+        if self._shared_record_payload:return self
+        result=copy(self)
+        result._compact_payload=result._shared_text_payload=result._shared_record_payload=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':self.generation_config_sha256,
+            'payload_serialization':'wkp_shared_records_upgrade_v1'})
+        return result
+
     def shared_keys_copy(self):
         """New codec identity; frozen legacy encodings remain byte-identical."""
         from copy import copy
