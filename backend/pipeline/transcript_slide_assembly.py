@@ -29,18 +29,31 @@ def paragraph_times(paragraphs: list[dict], tokens: list[dict]) -> list[dict]:
     return result
 
 
-def place_slides(paragraphs: list[dict], events: list[dict]) -> list[dict]:
+def slide_at_time(visibility: dict, time_ms: int) -> str | None:
+    """A timeline consumer must clear its image on both no-slide and unknown."""
+    span = next((s for s in visibility['spans'] if s['start_ms'] <= time_ms < s['end_ms']), None)
+    return span['image'] if span is not None and span['state'] == 'visible' else None
+
+
+def place_slides(paragraphs: list[dict], events: list[dict], visibility: dict | None = None) -> list[dict]:
     placements = []
     for event in events:
         # Attach to a whole paragraph. Preserve the true visual event timestamp
         # separately; do not split a sentence or claim semantic agreement.
-        target = next((p for p in paragraphs if p['start_ms'] is not None and p['end_ms'] >= event['time_ms']), None)
-        if target is None:
+        intervals = ([s for s in visibility['spans'] if s['state'] == 'visible' and s['slide_event_id'] == event['id']]
+                     if visibility is not None else None)
+        target = next((p for p in paragraphs if p['start_ms'] is not None and p['end_ms'] >= event['time_ms']
+                       and (intervals is None or any(p['start_ms'] < s['end_ms'] and p['end_ms'] > s['start_ms']
+                                                    for s in intervals))), None)
+        if target is None and visibility is None:
             target = paragraphs[-1]
-        distance = None if target['start_ms'] is None else max(target['start_ms'] - event['time_ms'],
-                                                               event['time_ms'] - target['end_ms'], 0)
-        placements.append({**event, 'paragraph_id': target['id'], 'distance_to_paragraph_interval_ms': distance,
-                           'method': 'visual time to containing or next whole paragraph; no semantic inference'})
+        distance = None if target is None or target['start_ms'] is None else max(target['start_ms'] - event['time_ms'],
+                                                                              event['time_ms'] - target['end_ms'], 0)
+        placements.append({**event, 'paragraph_id': target['id'] if target is not None else None,
+                           'distance_to_paragraph_interval_ms': distance,
+                           'method': ('visual time to an overlapping whole paragraph; no filling no-slide intervals'
+                                      if visibility is not None else
+                                      'visual time to containing or next whole paragraph; no semantic inference')})
     if len({p['id'] for p in placements}) != len(events):
         raise ValueError('Duplicate slide occurrence IDs')
     return placements
@@ -74,7 +87,29 @@ def assemble(out: Path, slide_out: Path) -> dict:
         events.append({'id': original['id'], 'time_ms': original['time_ms'], 'capture_ms': original['capture_ms'],
                        'kind': original['kind'], 'image': str(target.relative_to(out)),
                        'image_sha256': file_sha(target), 'source_frame_number': original['source_frame_number']})
-    placements = place_slides(paragraphs, events)
+    visibility = source_slides.get('visibility')
+    if visibility is not None:
+        if visibility['start_ms'] != 0 or visibility['end_ms'] != manifest['duration_ms']:
+            raise ValueError('Slide visibility does not cover this audio window')
+        by_id = {event['id']: event for event in events}
+        spans, cursor = [], 0
+        for span in visibility['spans']:
+            if span['start_ms'] != cursor or not cursor < span['end_ms'] <= manifest['duration_ms']:
+                raise ValueError('Visibility intervals must partition the audio window')
+            if span['state'] == 'visible':
+                if span['slide_event_id'] not in by_id:
+                    raise ValueError('Visible interval has no original slide image')
+                image = by_id[span['slide_event_id']]['image']
+            elif span['state'] in ('no_slide', 'unknown') and span['image'] is None and span['slide_event_id'] is None:
+                image = None
+            else:
+                raise ValueError('No-slide/unknown interval must have an empty image')
+            spans.append({**span, 'image': image})
+            cursor = span['end_ms']
+        if cursor != manifest['duration_ms']:
+            raise ValueError('Slide visibility leaves an uncovered audio interval')
+        visibility = {**visibility, 'spans': spans}
+    placements = place_slides(paragraphs, events, visibility)
     flags = []
     # Only nominate review candidates. Never replace what was said with OCR or
     # a familiar Bible passage, and never call these confirmed speech errors.
@@ -91,6 +126,7 @@ def assemble(out: Path, slide_out: Path) -> dict:
         'timed_text_sha256': file_sha(out / 'timed_text.json'), 'format_plan_sha256': object_sha(plan),
         'formatted_text_sha256': file_sha(out / 'formatted_text.json'),
         'slide_report_sha256': file_sha(slide_out / 'report.json'), 'paragraphs': paragraphs, 'slides': placements,
+        'visibility': visibility, 'visibility_available': visibility is not None,
         'token_timing_counts': counts, 'review_candidates': flags, 'seam_review': timed['issues'],
         'content_characters_preserved': True, 'human_confirmed': False,
         'asr_estimated_usd': read_json(out / 'asr.json')['estimated_usd'],

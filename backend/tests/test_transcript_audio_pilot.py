@@ -180,3 +180,51 @@ def test_cli_keeps_the_isolated_venv_interpreter_symlink(tmp_path, monkeypatch):
     audio_pilot.main()
     assert calls[0][0] == str(python.absolute())
     assert calls[0][0] != str(python.resolve())
+
+
+def test_slide_is_not_moved_into_a_later_no_slide_paragraph():
+    paragraphs = [{'id': 'p0', 'start_ms': 2000, 'end_ms': 3000, 'text': '口述仍然保留。'}]
+    events = [{'id': 's0', 'time_ms': 100, 'image': 's0.png'}]
+    visibility = {'spans': [
+        {'start_ms': 0, 'end_ms': 1000, 'state': 'visible', 'slide_event_id': 's0', 'image': 's0.png'},
+        {'start_ms': 1000, 'end_ms': 4000, 'state': 'no_slide', 'slide_event_id': None, 'image': None}]}
+    placed = place_slides(paragraphs, events, visibility)
+    assert placed[0]['paragraph_id'] is None
+    assert paragraphs[0]['text'] == '口述仍然保留。'
+
+
+def test_assembled_artifact_keeps_speech_but_no_image_in_lecturer_only_interval(tmp_path):
+    import cv2
+    from backend.pipeline.slide_change_pilot import save_json
+    from backend.pipeline.transcript_slide_assembly import assemble, slide_at_time
+    out, slides = tmp_path / 'audio', tmp_path / 'slides'
+    text = '甲。乙。'
+    units, plan = layout_plan(text, boundaries=['u0000', 'u0001'])
+    save_json(out / 'audio_manifest.json', {'source_sha256': 'source', 'duration_ms': 8000})
+    save_json(out / 'asr.json', {'estimated_usd': 0})
+    save_json(out / 'timed_text.json', {'text': text, 'asr_sha256': file_sha(out / 'asr.json'), 'issues': [], 'tokens': [
+        {'start': 0, 'end': 1, 'audio_start_ms': 1000, 'audio_end_ms': 2000, 'timing_precision': 'word'},
+        {'start': 2, 'end': 3, 'audio_start_ms': 4000, 'audio_end_ms': 5000, 'timing_precision': 'word'}]})
+    save_json(out / 'format_plan.json', plan)
+    formatted = apply_layout(text, units, plan)
+    save_json(out / 'formatted_text.json', {**formatted, 'estimated_usd_upper': 0})
+    slides.mkdir()
+    cv2.imwrite(str(slides / 's0.png'), np.zeros((10, 10, 3), np.uint8))
+    report = {'source_sha256': 'source', 'events': [
+        {'id': 's0', 'time_ms': 500, 'capture_ms': 600, 'kind': 'new_slide', 'slide_image': 's0.png',
+         'slide_sha256': file_sha(slides / 's0.png'), 'source_frame_number': 1}],
+        'visibility': {'start_ms': 0, 'end_ms': 8000, 'spans': [
+            {'start_ms': 0, 'end_ms': 500, 'state': 'unknown', 'slide_event_id': None, 'image': None},
+            {'start_ms': 500, 'end_ms': 3000, 'state': 'visible', 'slide_event_id': 's0', 'image': 's0.png'},
+            {'start_ms': 3000, 'end_ms': 8000, 'state': 'no_slide', 'slide_event_id': None, 'image': None}]}}
+    save_json(slides / 'report.json', report)
+    result = assemble(out, slides)
+    assert [p['text'] for p in result['paragraphs']] == ['甲。', '乙。']
+    assert slide_at_time(result['visibility'], 1500) == 'slides/s0.png'
+    assert slide_at_time(result['visibility'], 4500) is None
+    assert [s['paragraph_id'] for s in result['slides']] == ['p0000']
+    # Reject a report that tries to carry the old image into a no-slide view.
+    report['visibility']['spans'][-1]['image'] = 's0.png'
+    save_json(slides / 'report.json', report)
+    with pytest.raises(ValueError, match='empty image'):
+        assemble(out, slides)
