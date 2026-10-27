@@ -80,8 +80,10 @@ def test_permission_follow_up_preserves_old_calls_and_candidate_and_checks_promo
     if fault:
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         if fault == 'unreported_write':
-            result = execute_claim_management(store,request,root=tmp/'follow',ports=ports)
-            assert result['status']=='paused' and result['reason']=='engineering_required'
+            # EB is one relation hop from A, so admission passes; the continuation
+            # still refuses a permission no finding reported
+            with pytest.raises(ValueError,match='continuation must retain'):
+                execute_claim_management(store,request,root=tmp/'follow',ports=ports)
         else:
             with pytest.raises((ValueError,ChangeSetConflict)):
                 execute_claim_management(store,request,root=tmp/'follow',ports=ports)
