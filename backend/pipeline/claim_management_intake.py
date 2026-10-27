@@ -133,9 +133,14 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         # write set). Other Claims stay read-only. No further passes: chaining
         # on through neighbours of neighbours reached 333 objects for P06-CL001.
         granted = set()
-        for _ in range(2):
+        for passed in range(2):
+            # The second pass widens only through relations, as joint
+            # admission does; writable Evidence must not pull in its other
+            # owners (#459 P07-CL001: 20 grants admission then refused).
+            shown = request if not passed else request.model_copy(deep=True, update={'permissions': [
+                p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS]})
             added = []
-            for key in scope(request, before)['record_keys']:
+            for key in scope(shown, before)['record_keys']:
                 col, oid = cm.source.split_key(key)
                 if key in granted or col not in FIELDS or (col == 'claims' and oid != cid):
                     continue
