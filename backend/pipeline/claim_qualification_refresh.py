@@ -157,7 +157,7 @@ def run(store, jobs, root, *, instruction):
             return current
 
 
-def checkpoint(path, identity, result=None):
+def checkpoint(path, identity, result=None, *, store, jobs):
     """A passed earlier boundary is history, not current qualification.
 
     A resume may reach the later boundary that caused new drift. The final
@@ -168,6 +168,11 @@ def checkpoint(path, identity, result=None):
         value = batch.body(batch.read(path))
         if value['identity'] != identity or not value['result']['all_actions_completed']:
             raise ValueError('paragraph completion checkpoint identity drift')
+        for aid,(request,root) in jobs.items():
+            parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+            if (not parent or parent['result'].get('status')!='completed'
+                    or parent['request']!=request.model_dump(mode='json') or parent['execution_root']!=str(root)):
+                raise ValueError('paragraph checkpoint has no actual completed original action')
         return True
     if result is None:
         return False

@@ -233,3 +233,13 @@ def test_worker_rejects_frozen_currentness_input_drift_before_any_call(claims,mo
     readonly=[p for aid,p in clients.items() if aid.startswith('claim-currentness-')]
     assert len(readonly)==1 and readonly[0].calls==[]
     assert store.get_record_state('claims','C')['revision']==2
+
+
+def test_a_completion_file_cannot_skip_an_unfinished_sql_action(claims):
+    store,root=shared(claims)
+    intake.prepare(['C'],root,store=store,instruction='Update C')
+    _,jobs=batch.load(root/'manifest.json',root/'batch',store=store)
+    path=root/'forged-completed-paragraph.json';identity={'paragraph':'S0001'}
+    batch.write(path,{'identity':identity,'result':{'all_actions_completed':True}})
+    with pytest.raises(ValueError,match='no actual completed original action'):
+        refresh.checkpoint(path,identity,store=store,jobs=jobs)

@@ -113,9 +113,10 @@ def run(store, source_id, before, change_set_id, root, instruction):
             from backend.pipeline.claim_qualification_refresh import run as refresh_currentness, checkpoint
             identity={'plan':binding(root/'plan.json'),'paragraph':group}
             passed=root/'completed-paragraphs'/(paragraph+'.json')
-            if checkpoint(passed,identity):
+            if passed.exists():
                 manifest=json.loads((output/'prepared.json').read_text())['manifest']
                 if manifest:jobs.update(batch.load(manifest['path'],output/'batch',store=store)[1])
+                checkpoint(passed,identity,store=store,jobs=jobs)
                 completed.append(paragraph);continue
             batch.progress(root/'status.json',{'stage':'claim_update','paragraph_key':paragraph,'completed_paragraphs':completed})
             # No later batch is prepared until this one has actually completed.
@@ -131,7 +132,7 @@ def run(store, source_id, before, change_set_id, root, instruction):
                 value={'status':'paused','stage':'completion_currentness','paragraph_key':paragraph,
                        'batch':current,'completed_paragraphs':completed}
                 batch.progress(root/'result.json',value);return value
-            checkpoint(passed,identity,current)
+            checkpoint(passed,identity,current,store=store,jobs=jobs)
             completed.append(paragraph)
         guard(store,plan)
         final = batch._paragraph_results(store,jobs)

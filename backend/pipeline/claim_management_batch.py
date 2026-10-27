@@ -353,7 +353,7 @@ def run_paragraphs(manifest, root, *, store=None):
                 from backend.pipeline.claim_qualification_refresh import run as refresh_currentness, checkpoint
                 identity={'manifest':plan['manifest'],'paragraph_key':paragraph}
                 passed=root/'completed-paragraphs'/(paragraph+'.json')
-                if checkpoint(passed,identity):
+                if checkpoint(passed,identity,store=store,jobs=all_jobs):
                     completed.append(paragraph);continue
                 current = _paragraph_results(store, jobs)
                 progress(root / 'status.json', {'paragraph_key': paragraph, 'completed_paragraphs': completed})
@@ -368,7 +368,7 @@ def run_paragraphs(manifest, root, *, store=None):
                               'all_actions_completed': False, 'batch': current}
                     progress(root / 'result.json', result)
                     return result
-                checkpoint(passed,identity,current)
+                checkpoint(passed,identity,current,store=store,jobs=all_jobs)
                 completed.append(paragraph)
             _paragraph_guard(plan, store)
             result = _paragraph_results(store, all_jobs)
