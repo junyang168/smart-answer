@@ -318,6 +318,13 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
             if str(exc)!='citation is not an exact quote from the complete own source':raise
         else:raise ValueError('valid review must follow its ordinary recording path')
         store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in materials['transaction_before'].items()}))
+        _, current_sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
+            human_source_decisions=materials.get('human_source_decisions'))
+        if current_sources != materials['sources']:
+            raise ValueError('invalid-review input recovery cannot refresh a changed source')
+        if 'human_source_decisions' in materials:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
         original = deepcopy(value); original_parent = deepcopy(parent)
         destination = root/('invalid-review-input-'+sha256_json(direction)[:20])
         contract = cm.audit_contract(destination,policy)
