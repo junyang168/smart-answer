@@ -117,6 +117,10 @@ SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
     "viewpoint_resolution_ledgers": {"claim_id"},
 }
 SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
+# Above this many rows a reverse reference lookup goes through the payload GIN
+# index in batches; at or below, one pass over the rows is faster.
+SINGLE_PASS_REFERENCE_ROWS = 20_000
+CLAIM_CLOSURE_SECONDS = 30
 OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS = (
     "composition_decisions",
     "composition_plans",
@@ -3409,7 +3413,9 @@ class PostgresKnowledgeStore:
                     row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
                         (previous_id,)).fetchone()
                     prior = row[0] if row else None
-                    scope_repair = bool(prior and prior['result'].get('reason') == 'permission_required'
+                    # A read-only action could not repair its findings whether it
+                    # stopped asking for writes or ran out of rounds disputing them.
+                    scope_repair = bool(prior and prior['result'].get('reason') in ('permission_required', 'budget_exhausted')
                         and prior['result']['status'] == 'paused'
                         and prior['request']['target_keys'] == request.target_keys
                         and not prior['request']['permissions'] and not prior['request']['creation_permissions']
@@ -6023,11 +6029,29 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _reference_consumers(cursor, ids, collections):
         if not ids or not collections:return []
-        # Named reference values live under object fields. The final .* makes
-        # equality indexable with jsonb_ops; bare recursive equality and ANY
-        # can force repeated scans of every payload. Small OR batches retain
-        # exact equality and the existing readset/time limits.
         ids = sorted(set(ids))
+        # Table statistics pick the strategy without reading rows: count(*)
+        # over the ~41 collections _affected_cvp_context passes scanned the
+        # whole table on every Claim read (#459). Collections too rare for the
+        # statistics count as zero, which only favours the single pass.
+        cursor.execute("""SELECT GREATEST(c.reltuples,0) * COALESCE((SELECT sum(m.f) FROM pg_stats s,
+                              unnest(s.most_common_vals::text::text[], s.most_common_freqs) AS m(v,f)
+                              WHERE s.schemaname='wang_knowledge' AND s.tablename='objects'
+                                AND s.attname='collection' AND m.v=ANY(%s)),0)
+                          FROM pg_class c WHERE c.oid='wang_knowledge.objects'::regclass""", (list(collections),))
+        if cursor.fetchone()[0] <= SINGLE_PASS_REFERENCE_ROWS:
+            # Few rows: the planner reaches them through the collection index
+            # and rechecks every jsonpath on every row, so batching re-scans
+            # them once per batch (13 s for 1,295 ids over the ~4k downstream
+            # rows, 2026-10-26). One walk per payload against all ids: 0.04 s.
+            cursor.execute("SELECT o.collection,o.object_id,o.payload FROM wang_knowledge.objects o "
+                           "WHERE o.retired_at IS NULL AND o.collection=ANY(%s) AND EXISTS ("
+                           "SELECT 1 FROM jsonb_path_query(o.payload,'strict $.**') v WHERE jsonb_typeof(v)='string' "
+                           "AND (v #>> '{}') IN (SELECT unnest(%s::text[]))) ORDER BY o.collection,o.object_id",
+                           (list(collections), ids))
+            return cursor.fetchall()
+        # Many rows: the final .* makes equality indexable with jsonb_ops, and
+        # small OR batches keep each recursive predicate cheap.
         found = {}
         for offset in range(0, len(ids), 8):
             predicates = ["$.**.* ? (@ == " + json.dumps(oid) + ")" for oid in ids[offset:offset+8]]
@@ -6145,7 +6169,9 @@ class PostgresKnowledgeStore:
                 # drops a dependency discovered in the preceding iteration.
                 for (col,oid), state in records.items():
                     roots.setdefault(col,{})[oid] = state['payload']
-                if time.monotonic() - started > 5:
+                # A dense sermon reaches ~2k objects over 16 sources in 7-10 s
+                # through indexed lookups only (#459, DK-584379 P06/P07/P08).
+                if time.monotonic() - started > CLAIM_CLOSURE_SECONDS:
                     raise ValueError('Claim dependency closure exceeds existing readset budget')
 
     def _affected_cvp_context(self,conn,keys):

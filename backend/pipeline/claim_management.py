@@ -78,7 +78,7 @@ class Policy(source.Contract):
 
     evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
-    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2'] | None = None
+    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
@@ -115,7 +115,7 @@ class Policy(source.Contract):
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
             raise ValueError('compact model decisions require the joint content Update contract')
-        if self.evidence_review_contract and (self.model_output_contract != 'claim_changes_v2' or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
+        if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
             raise ValueError('own Evidence review requires scoped compact Opus and program readback')
         return self
 
@@ -1067,7 +1067,14 @@ def unlinkable_questions(request, before):
     if request.operation != 'Update' or not any(p.collection == 'claims' for p in request.creation_permissions):
         return []
     granted = {p.key for p in request.permissions if 'answer_claim_ids' in p.fields}
-    return sorted(k for k, v in before.items() if k.startswith('questions/') and not v['retired'] and k not in granted)
+    read = set(before)
+    from backend.pipeline.claim_joint_update import enabled
+    if enabled(request):
+        # A joint Update reviews only its targets' closure; a question read from
+        # elsewhere in the sermon is outside it, and a grant on it would be
+        # refused as unreachable (#459: 30 questions, none in CL003's closure).
+        read = set(audit_keys(request.model_copy(deep=True, update={'permissions': []}), before))
+    return sorted(k for k, v in before.items() if k in read and k.startswith('questions/') and not v['retired'] and k not in granted)
 
 
 def original_goal(request, before):

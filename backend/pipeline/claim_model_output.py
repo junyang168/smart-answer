@@ -13,6 +13,9 @@ from backend.pipeline import claim_management as cm
 
 CONTRACT = 'claim_changes_v1'
 SCOPED_CONTRACT = 'claim_changes_v2'
+# v2 plus new records under the request's creation_permissions (#459: a Create
+# under the full-disposition schema made GPT copy 352-532 retain entries by hand).
+CREATING_CONTRACT = 'claim_changes_v3'
 
 
 class Change(cm.source.Contract):
@@ -28,6 +31,18 @@ class Changes(cm.source.Contract):
     finding_resolutions: list[cm.JointFindingResolution]
 
 
+class Creation(cm.source.Contract):
+    collection: str
+    object_id: str = Field(description='New identity; must not exist in the frozen input.')
+    fields_json: str = Field(description='JSON object with the complete new record, without identity, provenance or derived hashes.')
+    reason: str = Field(min_length=1)
+    citations: list[cm.Citation] = Field(min_length=1)
+
+
+class CreatingChanges(Changes):
+    creations: list[Creation]
+
+
 class FindingsReview(cm.source.Contract):
     complete_review: Literal[True] = Field(description='Explicitly confirms the entire supplied scope and every required question were reviewed, and approves every record without a new or persistent/reopened finding. Does not approve publication or action completion.')
     findings: list[cm.JointFinding]
@@ -35,7 +50,7 @@ class FindingsReview(cm.source.Contract):
 
 
 def enabled(materials):
-    return materials['policy'].get('model_output_contract') in {CONTRACT, SCOPED_CONTRACT}
+    return materials['policy'].get('model_output_contract') in {CONTRACT, SCOPED_CONTRACT, CREATING_CONTRACT}
 
 
 def scoped_adapter(adapter, packet):
@@ -45,7 +60,8 @@ def scoped_adapter(adapter, packet):
     with enum domains compiled only from the frozen unit and actual candidate.
     No response is filtered, corrected, or accepted by this function.
     """
-    if packet.get('policy', {}).get('model_output_contract') != SCOPED_CONTRACT:
+    contract = packet.get('policy', {}).get('model_output_contract')
+    if contract not in {SCOPED_CONTRACT, CREATING_CONTRACT}:
         return adapter
     request = packet['unit_request']
     if request == {'__claim_request_ref__': 'request'}:
@@ -81,10 +97,14 @@ def scoped_adapter(adapter, packet):
             prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
     else:
         change = create_model('ScopedChange', __base__=Change, record_key=(key_type(writable), ...))
-        model = create_model('ScopedChanges', __base__=Changes,
-            changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
+        fields = dict(changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
             findings=(list[finding], ...),
             finding_resolutions=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+        if contract == CREATING_CONTRACT:
+            creatable = {p['collection'] for p in request.get('creation_permissions', [])}
+            creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...))
+            fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else {})))
+        model = create_model('ScopedChanges', __base__=CreatingChanges if contract == CREATING_CONTRACT else Changes, **fields)
     schema_sha = cm.sha256_json(model.model_json_schema())
     if getattr(adapter, '_claim_scope_schema_sha256', None) == schema_sha:
         return adapter
@@ -130,9 +150,10 @@ def candidate(raw, materials):
         return result, receipt
     if materials.get('candidate_identity_recovery'):
         raise ValueError('legacy identity recovery cannot upgrade the model output contract')
-    wire = Changes.model_validate(raw)
+    creating = materials['policy']['model_output_contract'] == CREATING_CONTRACT
+    wire = (CreatingChanges if creating else Changes).model_validate(raw)
     request = cm.Request.model_validate(materials['unit_request'])
-    if request.operation != 'Update' or request.creation_permissions or materials['replacements']:
+    if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
     before = materials['before']
     dispositions = {k:cm.ObjectDisposition(record_key=k, action='retain',
@@ -155,6 +176,20 @@ def candidate(raw, materials):
         rows.append(cm.source.Row(collection=collection, object_id=oid, payload=payload))
         dispositions[key] = cm.ObjectDisposition(record_key=key, action='update', reason=change.reason,
                                                 citations=change.citations)
+    for creation in getattr(wire, 'creations', []):
+        key = cm.source.key(creation.collection, creation.object_id)
+        if key in seen or key in before or creation.collection not in cm.KNOWLEDGE_COLLECTIONS:
+            raise ValueError('created record repeated, already present or of an unknown collection')
+        seen.add(key)
+        fields = object_json(creation.fields_json)
+        identity = cm.KNOWLEDGE_COLLECTIONS[creation.collection][1]
+        if set(fields) & (cm.MECHANICAL_FIELDS | cm.source.PROVENANCE | cm.FRAGMENT_HASH_FIELDS | {identity}):
+            raise ValueError('created fields include program-owned identity, provenance or hashes')
+        # Permission, own source and field grants are checked by validate_candidate.
+        rows.append(cm.source.Row(collection=creation.collection, object_id=creation.object_id,
+                                  payload={**fields, identity: creation.object_id}))
+        dispositions[key] = cm.ObjectDisposition(record_key=key, action='create', reason=creation.reason,
+                                                citations=creation.citations)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])

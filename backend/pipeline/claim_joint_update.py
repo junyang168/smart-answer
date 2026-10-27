@@ -51,7 +51,13 @@ def finding_permission_extension(previous, old, request):
     frozen = previous['original_goal']['original_objects']
     return bool(added and added <= findings and added <= set(frozen)
         and all(current.get(key) == value for key, value in prior.items())
-        and all(not key.startswith('claims/') and not frozen[key]['retired'] for key in added))
+        # A Claim may be added only when it is already a target: the rule is
+        # against hidden Claims, not the action's own (#459: CL004).
+        and all((not key.startswith('claims/') or key in request.target_keys) and not frozen[key]['retired'] for key in added))
+
+
+def creates(policy):
+    return policy.model_output_contract == 'claim_changes_v3'
 
 
 def admission_error(request, policy, before, goal):
@@ -65,8 +71,14 @@ def admission_error(request, policy, before, goal):
     try:
         if len(request.target_keys) > (policy.joint_update_max_targets or 1):
             raise ValueError('joint Update exceeds joint_update_max_targets')
-        if request.creation_permissions:
+        if request.creation_permissions and not creates(policy):
             raise ValueError('joint Update supports existing retain/update only; creation requires a separate capability')
+        if creates(policy) and request.creation_permissions:
+            from backend.pipeline import claim_management as cm
+            payloads = {k: v['payload'] for k, v in before.items()}
+            own = set().union(*(cm.own_source_ids(payloads[k], payloads) for k in request.target_keys))
+            if any(p.collection != 'claims' or p.source_id not in own for p in request.creation_permissions):
+                raise ValueError('joint Update may create only a Claim from a target\'s own source')
         if not policy.all_findings_to_gpt:
             raise ValueError('joint Update must adjudicate all findings with GPT')
         required = required_keys(request)
@@ -99,14 +111,18 @@ def validate_candidate_scope(request, before, candidate):
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if not required <= set(dispositions) or not required <= set(before):
         raise ValueError('joint Update candidate omitted required maintenance disposition')
-    if candidate.operation not in {None, 'Update'} or candidate.replacements or request.creation_permissions:
+    if candidate.operation not in {None, 'Update'} or candidate.replacements:
         raise ValueError('joint Update supports existing retain/update only')
+    created = [d.record_key for d in candidate.dispositions if d.action == 'create']
+    # One new same-source Claim per action, under an explicit creation grant.
+    if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
+        raise ValueError('joint Update may create at most one granted Claim')
     for disposition in candidate.dispositions:
-        if disposition.action not in {'retain', 'update'}:
+        if disposition.action not in {'retain', 'update', 'create'}:
             raise ValueError('joint Update supports existing retain/update only')
         if disposition.action == 'update' and proposed.get(disposition.record_key) == before.get(disposition.record_key, {}).get('payload'):
             raise ValueError('joint Update unchanged objects require retain disposition')
-        if disposition.action != 'retain' and disposition.record_key.startswith('claims/') and disposition.record_key not in request.target_keys:
+        if disposition.action == 'update' and disposition.record_key.startswith('claims/') and disposition.record_key not in request.target_keys:
             raise ValueError('joint Update cannot write a hidden Claim target')
 
 
@@ -121,12 +137,18 @@ def finding_blocks(finding, request, candidate):
                              + name + ' must contain unique keys from ' + repr(sorted(allowed)))
     if not (finding.get('impact_reason') or '').strip():
         raise ValueError('joint finding requires impact_reason')
+    # A finding about a target or an actual write affects that object; the
+    # program knows this, so the model omitting it is not a malformed answer
+    # (#459: GPT left CL004 out of affected_write_keys while writing CL004).
+    affected, affected_writes = implied_impact(finding, targets, writes)
+    return bool(affected or affected_writes or finding['target_key'] in set(required_keys(request)))
+
+
+def implied_impact(finding, targets, writes):
     key = finding['target_key']
-    if key in targets and key not in affected:
-        raise ValueError('joint finding on a target must include its target impact')
-    if key in writes and key not in affected_writes:
-        raise ValueError('joint finding on an actual write must include its write impact')
-    return bool(affected or affected_writes or key in set(required_keys(request)))
+    affected = set(finding.get('affected_target_keys') or []) | ({key} & targets)
+    affected_writes = set(finding.get('affected_write_keys') or []) | ({key} & writes)
+    return affected, affected_writes
 
 
 def validate_scope_agreement(candidate, review, previous, request):
@@ -140,10 +162,14 @@ def validate_scope_agreement(candidate, review, previous, request):
         finding_blocks({**previous[resolution.finding_id], 'affected_target_keys': resolution.affected_target_keys,
             'affected_write_keys': resolution.affected_write_keys, 'impact_reason': resolution.impact_reason}, request, candidate)
         proposed = decisions.get(resolution.finding_id)
-        if proposed is not None and proposed.disposition != 'resolved' and (
-                set(proposed.affected_target_keys or []) != set(resolution.affected_target_keys or [])
-                or set(proposed.affected_write_keys or []) != set(resolution.affected_write_keys or [])):
-            raise ValueError('joint Update GPT/Opus impact scope disagreement')
+        if proposed is not None and proposed.disposition != 'resolved':
+            targets = set(request.target_keys)
+            writes = {d.record_key for d in candidate.dispositions if d.action != 'retain'}
+            finding = previous[resolution.finding_id]
+            scope = lambda r: implied_impact({'target_key': finding['target_key'], 'affected_target_keys': r.affected_target_keys,
+                                              'affected_write_keys': r.affected_write_keys}, targets, writes)
+            if scope(proposed) != scope(resolution):
+                raise ValueError('joint Update GPT/Opus impact scope disagreement')
 
 
 def verify_completion(goal, child, observed):
@@ -169,6 +195,9 @@ def verify_completion(goal, child, observed):
         raise ValueError('joint Update completion candidate/review binding drift')
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
     obligations = set(goal['target_keys']) | set(required)
+    created = {k for k, d in dispositions.items() if d.action == 'create'}
+    if not created <= approved or not created <= set(observed) or any(observed[k].get('retired') for k in created):
+        raise ValueError('joint Update completion lacks per-object pass or current readback for a created Claim')
     if (not obligations <= set(dispositions) or not obligations <= approved or not obligations <= set(observed)
             or any(observed[k].get('retired') for k in obligations)
             or any(dispositions[k].action not in {'retain', 'update'} for k in obligations)):

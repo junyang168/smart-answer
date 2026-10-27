@@ -140,3 +140,17 @@ def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
     assert ports.calls==['opus']
     assert execute_claim_management(store,request,root=output_root,ports=ports)==result
     assert ports.calls==['opus']
+
+
+@pytest.mark.parametrize('target,passes',[('evidence_steps/E',True),('claims/C',True),('evidence_steps/OTHER',False)])
+def test_insufficient_binding_may_be_named_on_the_claims_own_evidence(material,target,passes):
+    # #459: Opus named the gap on the Claim's own Evidence step, not the Claim.
+    m,candidate=material;raw=answer(sufficient=False)
+    raw['findings']=[{'target_key':target,'component':'statement','category':'evidence','reason':'bound excerpts cover only half',
+        'acceptance_condition':'bind the rest of the judgement','citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'田地'}],
+        'affected_target_keys':[],'affected_write_keys':[],'impact_reason':'the Claim is not yet covered'}]
+    review=er.BindingFindingsReview.model_validate(raw)
+    if passes:
+        er.validate_assessments(review,m,candidate)
+    else:
+        with pytest.raises(ValueError,match='concrete Claim finding'):er.validate_assessments(review,m,candidate)
