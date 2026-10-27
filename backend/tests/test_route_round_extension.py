@@ -12,7 +12,7 @@ from backend.pipeline.viewpoint_route_round_extension import round_extension, VE
 from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
 
 
-def stopped(tmp_path):
+def stopped(tmp_path, *, pass_after=3):
     material = {'viewpoint_id':'CV-1'}
     material['artifact_sha256'] = sha256_json(material)
     job = make_cvp_route_job('CV-1', material['artifact_sha256'], 'policy-sha')
@@ -29,7 +29,7 @@ def stopped(tmp_path):
                 'disposition':'accepted','reason':'已修订范围'}], 'revised_proposal':revised}
     def review(p):
         answer = approved(p)
-        if reviewer.calls < 3:
+        if reviewer.calls < pass_after:
             row = next(r for r in answer['change_reviews'] if r['target_kind']=='observation')
             row.update(decision='correct', finding_codes=['scope_overstates'],
                 reason='仍须收窄范围', correction='明确实际原文范围')
@@ -88,3 +88,43 @@ def test_extension_resume_authenticates_authority_and_original_rejected_review(t
     path=authority if fault=='authority' else root/'route-review-001.json'
     value=json.loads(path.read_text());value['changed']=True;path.write_text(json.dumps(value))
     with pytest.raises(ValueError):round_extension(root,job,policy)
+
+
+def second_authority(root, job, policy, previous, path):
+    latest=json.loads((root/'route-review-002.json').read_text())
+    write_immutable(path,{'schema_version':VERSION,'authorized_by':'owner','owner_direction':'再加一轮',
+        **{k:job[k] for k in ('job_id','viewpoint_id','material_sha256','policy_sha256')},
+        'original_max_correction_rounds':policy['max_correction_rounds'],'additional_correction_rounds':1,
+        'latest_review_round':2,'latest_review_sha256':latest['review_sha256'],
+        'previous_extension_sha256':previous['artifact_sha256']})
+
+
+def test_second_explicit_round_appends_without_changing_first_authorization_or_calls(tmp_path):
+    root,job,policy,authority,args=stopped(tmp_path,pass_after=4)
+    first=round_extension(root,job,policy,authority)
+    original_receipt=(root/FILENAME).read_bytes()
+    with pytest.raises(CvpRouteReviewIncomplete,match='round 2'):
+        run_cvp_route_scope(**args,max_correction_rounds=2,round_extension=first)
+    next_authority=tmp_path/'owner-another-round.json'
+    second_authority(root,job,policy,first,next_authority)
+    second=round_extension(root,job,policy,next_authority)
+    assert second['effective_max_correction_rounds']==3 and policy['max_correction_rounds']==1
+    assert (root/FILENAME).read_bytes()==original_receipt
+    assert round_extension(root,job,policy)==second
+    result=run_cvp_route_scope(**args,max_correction_rounds=3,round_extension=second)
+    assert result['rounds'][-1]['outcome']=='pass'
+    assert args['proposer'].calls==1 and args['reviewer'].calls==4 and args['reconsiderer'].calls==3
+    assert result['correction_round_extension_sha256']==second['artifact_sha256']
+    authority.write_text('{}')
+    with pytest.raises(ValueError):round_extension(root,job,policy)
+
+
+def test_an_old_authorization_cannot_grant_the_next_round_again(tmp_path):
+    root,job,policy,authority,args=stopped(tmp_path,pass_after=4)
+    first=round_extension(root,job,policy,authority)
+    with pytest.raises(CvpRouteReviewIncomplete,match='round 2'):
+        run_cvp_route_scope(**args,max_correction_rounds=2,round_extension=first)
+    copied=tmp_path/'reused-old-authority.json';copied.write_text(authority.read_text())
+    with pytest.raises(ValueError,match='authorization differs'):
+        round_extension(root,job,policy,copied)
+    assert not(root/'correction-round-extension-002.json').exists()

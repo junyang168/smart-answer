@@ -14,23 +14,31 @@ def round_extension(root, job, policy, authorization=None):
     """Keep old policy, consumed rounds and provider answers immutable."""
     root = Path(root).resolve()
     path = root / FILENAME
-    if path.exists():
-        receipt = json.loads(path.read_text())
+    additions = sorted(root.glob('correction-round-extension-[0-9][0-9][0-9].json'))
+    if additions and not path.exists():
+        raise ValueError('Route round extension lost its original reservation')
+    paths = ([path] if path.exists() else []) + additions
+    previous = None
+    for ordinal, saved_path in enumerate(paths, 1):
+        expected_name = FILENAME if ordinal == 1 else f'correction-round-extension-{ordinal:03d}.json'
+        receipt = json.loads(saved_path.read_text())
         body = {k:v for k,v in receipt.items() if k != 'artifact_sha256'}
-        if (receipt.get('artifact_sha256') != sha256_json(body)
+        if (saved_path.name != expected_name or receipt.get('schema_version') != VERSION
+                or receipt.get('artifact_sha256') != sha256_json(body)
                 or receipt.get('job') != job
                 or receipt.get('original_max_correction_rounds') != policy['max_correction_rounds']
-                or receipt.get('effective_max_correction_rounds') != policy['max_correction_rounds'] + 1):
+                or receipt.get('effective_max_correction_rounds') != policy['max_correction_rounds'] + ordinal
+                or receipt.get('previous_extension') != (binding(paths[ordinal-2]) if previous else None)):
             raise ValueError('Route round extension identity or original policy changed')
         check_binding(receipt['authorization'])
-        if authorization is not None and binding(authorization) != receipt['authorization']:
-            raise ValueError('Route round extension authorization changed')
         for name, pin in receipt['original_files'].items():
             if Path(name).name != name or binding(root/name) != pin:
                 raise ValueError('Route round extension original artifact changed')
-        return receipt
+        previous = receipt
     if authorization is None:
-        return None
+        return previous
+    if previous and binding(authorization) == previous['authorization']:
+        return previous
     if root.name != job['job_id'] or (root/'route-cvp-run.json').exists() or (root/'route-change-plan.json').exists():
         raise ValueError('Route round extension requires the original uncommitted job')
     read = lambda name:json.loads((root/name).read_text())
@@ -46,7 +54,8 @@ def round_extension(root, job, policy, authorization=None):
     review = read(latest.name)
     validation = review['validation']
     consumed = ordinal + len(list(root.glob('route-proposal-validation-[0-9][0-9][0-9].json')))
-    if (consumed != policy['max_correction_rounds']
+    current_limit = previous['effective_max_correction_rounds'] if previous else policy['max_correction_rounds']
+    if (consumed != current_limit
             or validation['outcome'] != 'findings'
             or not validation['reconsideration_required'] or validation['exception_keys']):
         raise ValueError('Route round extension requires exhausted ordinary corrections and correctable findings')
@@ -63,14 +72,19 @@ def round_extension(root, job, policy, authorization=None):
         'original_max_correction_rounds':policy['max_correction_rounds'],
         'additional_correction_rounds':1, 'latest_review_round':ordinal,
         'latest_review_sha256':review['review_sha256']}
+    if previous:
+        expected['previous_extension_sha256'] = previous['artifact_sha256']
     if direction != expected or not isinstance(direction.get('owner_direction'),str) or not direction['owner_direction'].strip():
         raise ValueError('Route round extension authorization differs from exact job/review/one round')
     receipt = {'schema_version':VERSION, 'job':job, 'authorization':auth_pin,
         'original_max_correction_rounds':policy['max_correction_rounds'],
-        'effective_max_correction_rounds':policy['max_correction_rounds']+1,
+        'effective_max_correction_rounds':current_limit+1,
         'previous_corrections_consumed':consumed, 'latest_review_round':ordinal,
         'latest_review_sha256':review['review_sha256'], 'human_content_approval':False,
         'original_files':{p.name:binding(p) for p in sorted(root.glob('*.json'))}}
+    if previous:
+        receipt['previous_extension'] = binding(paths[-1])
+        path = root/f'correction-round-extension-{len(paths)+1:03d}.json'
     receipt['artifact_sha256'] = sha256_json(receipt)
     write_immutable(path, receipt, require_new=True)
     return receipt
