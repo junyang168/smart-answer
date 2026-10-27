@@ -1,6 +1,7 @@
 """Run bound Claim requests durably; reuse the existing action/root/call budgets.
 
 Launch with --detach (screen), inspect with --status, resume the SAME manifest.
+Use --paragraphs to call ordinary batches in source paragraph order.
 No autonomous retry, model-driven repair or new content authority is created.
 """
 from __future__ import annotations
@@ -198,6 +199,158 @@ def run(manifest, root):
             raise
 
 
+def load_paragraphs(manifest, root, *, store=None):
+    """Prepare ordinary batches; never edit their bound Update requests."""
+    from backend.pipeline import claim_management as cm
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    store = store if store is not None else PostgresKnowledgeStore()
+    manifest, root = Path(manifest).resolve(), Path(root).resolve()
+    value = json.loads(manifest.read_text())
+    if set(value) != {'source_id', 'source', 'paragraphs'} or not value['paragraphs']:
+        raise ValueError('paragraph sequence requires one source and paragraph batches')
+    check_binding(value['source'])
+    document = store.get_record_state('source_documents', value['source_id'])
+    if document is None or document['retired']:
+        raise ValueError('paragraph source is missing or retired')
+    snapshot = cm.source.source_snapshot(value['source'], source=document['payload'])
+    positions = {key: i for i, key in enumerate(snapshot['paragraphs'])}
+    entries = value['paragraphs']
+    for entry in entries:
+        if set(entry) != {'paragraph_key', 'batch', 'root'} or entry['paragraph_key'] not in positions:
+            raise ValueError('paragraph batch must name an actual source paragraph')
+        if not Path(entry['root']).is_absolute():
+            raise ValueError('paragraph batch root must be absolute')
+    if len({entry['paragraph_key'] for entry in entries}) != len(entries):
+        raise ValueError('duplicate paragraph batch')
+    entries = sorted(entries, key=lambda entry: positions[entry['paragraph_key']])
+    owners, actions, roots, steps, requests, batch_inputs = {}, {}, {str(root)}, [], [], []
+    batch_roots = {str(Path(entry['root']).resolve()) for entry in entries}
+    if len(batch_roots) != len(entries) or str(root) in batch_roots:
+        raise ValueError('paragraph batch roots must be distinct from the sequence root')
+    roots.update(batch_roots)
+    for entry in entries:
+        check_binding(entry['batch'])
+        original = json.loads(Path(entry['batch']['path']).read_text())
+        if set(original) != {'jobs', 'max_workers'} or not original['jobs'] or original['max_workers'] not in (1, 2):
+            raise ValueError('paragraph input must be an ordinary batch manifest')
+        jobs = []
+        for job in original['jobs']:
+            if set(job) != {'request', 'root'} or not Path(job['root']).is_absolute():
+                raise ValueError('paragraph job must bind an existing request and absolute action root')
+            check_binding(job['request'])
+            request = cm.Request.model_validate_json(Path(job['request']['path']).read_text())
+            if (request.operation != 'Update' or not request.target_keys
+                    or request.source_bindings.get(value['source_id']) != cm.source.FileBinding.model_validate(value['source'])):
+                raise ValueError('paragraph Update must bind the same complete current source')
+            identity = {'request': job['request'], 'root': str(Path(job['root']).resolve())}
+            if request.action_id in actions:
+                if actions[request.action_id] != identity:
+                    raise ValueError('duplicate action changed its request or root')
+                continue  # The identical whole action belongs to its earliest paragraph.
+            if set(request.target_keys) & owners.keys():
+                raise ValueError('overlapping Claim targets require deduplication before authorization; cannot trim a bound Update')
+            if identity['root'] in roots:
+                raise ValueError('duplicate action/batch/sequence root')
+            roots.add(identity['root'])
+            owners.update({key: entry['paragraph_key'] for key in request.target_keys})
+            actions[request.action_id] = identity
+            jobs.append(job)
+            requests.append(job['request'])
+        step_root = Path(entry['root']).resolve()
+        selected = step_root / 'paragraph-input.json'
+        step_jobs = {}
+        if jobs:
+            selected_value = {'jobs': jobs, 'max_workers': original['max_workers']}
+            if selected.exists() and json.loads(selected.read_text()) != selected_value:
+                raise ValueError('immutable paragraph batch input differs')
+            if not selected.exists():
+                step_root.mkdir(parents=True, exist_ok=True)
+                progress(selected, selected_value)
+            _, step_jobs = load(selected, step_root, store=store)
+            batch_inputs.append(binding(selected))
+        steps.append((entry['paragraph_key'], selected, step_root, step_jobs))
+    plan = {'manifest': binding(manifest), 'source_id': value['source_id'], 'source': value['source'],
+            'source_pin': [document['revision'], document['content_sha256']],
+            'paragraphs': entries, 'claim_paragraphs': owners, 'requests': requests, 'batch_inputs': batch_inputs}
+    write(root / 'plan.json', plan)
+    return plan, steps
+
+
+def _paragraph_guard(plan, store):
+    check_binding(plan['manifest'])
+    check_binding(plan['source'])
+    for entry in plan['paragraphs']:
+        check_binding(entry['batch'])
+    for request in plan['requests']:
+        check_binding(request)
+    for selected in plan['batch_inputs']:
+        check_binding(selected)
+    document = store.get_record_state('source_documents', plan['source_id'])
+    if (document is None or document['retired']
+            or [document['revision'], document['content_sha256']] != plan['source_pin']):
+        raise ValueError('paragraph source registration changed during sequence')
+
+
+def _paragraph_results(store, jobs):
+    """SQL is the completion authority, including new Claims, not a saved flag."""
+    from backend.pipeline import claim_management as cm
+    results, qualifications, created = {}, {}, set()
+    for action_id, (request, action_root) in jobs.items():
+        check_binding(request.authorization.model_dump())
+        check_binding(request.policy.model_dump())
+        parent = store.get_cvp_group('CMA-' + cm.sha256_json(action_id))
+        if parent and (parent['request'] != request.model_dump(mode='json')
+                       or parent['execution_root'] != str(action_root)):
+            raise ValueError('paragraph recovery cannot change the original action/root/budget')
+        results[action_id] = parent['result'] if parent else {'status': 'not_started'}
+        created.update(key for key in (parent or {}).get('created_keys', []) if key.startswith('claims/'))
+    for key in set(k for request, _ in jobs.values() for k in request.target_keys) | created:
+        qualifications[key] = store.claim_management_qualification(key.split('/', 1)[1])
+    return {'results': results, 'current_qualifications': qualifications, 'created_keys': sorted(created),
+            'all_actions_completed': all(result.get('status') == 'completed' for result in results.values())
+            and all(q and q.get('ready') for q in qualifications.values())}
+
+
+def run_paragraphs(manifest, root, *, store=None):
+    """Call p1's existing batch, then p2's; each batch retains its scheduler."""
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    store = store if store is not None else PostgresKnowledgeStore()
+    root = Path(root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / 'controller.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        completed, all_jobs = [], {}
+        try:
+            plan, steps = load_paragraphs(manifest, root, store=store)
+            for paragraph, batch_input, batch_root, jobs in steps:
+                _paragraph_guard(plan, store)
+                all_jobs.update(jobs)
+                current = _paragraph_results(store, jobs)
+                progress(root / 'status.json', {'paragraph_key': paragraph, 'completed_paragraphs': completed})
+                if jobs and not current['all_actions_completed']:
+                    run(batch_input, batch_root)  # Reads current Claim context after the previous commit.
+                    current = _paragraph_results(store, jobs)
+                _paragraph_guard(plan, store)
+                if not current['all_actions_completed']:
+                    result = {'status': 'paused', 'paragraph_key': paragraph, 'completed_paragraphs': completed,
+                              'all_actions_completed': False, 'batch': current}
+                    progress(root / 'result.json', result)
+                    return result
+                completed.append(paragraph)
+            _paragraph_guard(plan, store)
+            result = _paragraph_results(store, all_jobs)
+            result.update(status='claims_completed' if result['all_actions_completed'] else 'paused',
+                          completed_paragraphs=completed,
+                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['current_qualifications']),
+                                              'action_ids': list(all_jobs), 'status': 'not_executed'})
+            progress(root / 'result.json', result)
+            return result
+        except BaseException as exc:
+            progress(root / 'result.json', {'status': 'paused', 'all_actions_completed': False,
+                                           'completed_paragraphs': completed, 'detail': str(exc)})
+            raise
+
+
 def status(root):
     root = Path(root)
     with (root / 'controller.lock').open('a') as lock:
@@ -218,6 +371,7 @@ def main():
     parser.add_argument('--detach', action='store_true')
     parser.add_argument('--status', action='store_true')
     parser.add_argument('--job')
+    parser.add_argument('--paragraphs', action='store_true', help='call ordinary batches in source paragraph order')
     args = parser.parse_args()
     from dotenv import load_dotenv
     load_dotenv('backend/.env'); load_dotenv('.env')
@@ -226,8 +380,10 @@ def main():
     if not args.manifest:
         parser.error('--manifest required')
     args.manifest = args.manifest.resolve(); args.root = args.root.resolve()
+    if args.paragraphs and args.job:
+        parser.error('--paragraphs cannot run an individual batch worker')
     if args.detach:
-        load(args.manifest, args.root)
+        (load_paragraphs if args.paragraphs else load)(args.manifest, args.root)
         if status(args.root)['live_lock_holder']:
             raise ValueError('batch lock is held; do not launch a duplicate')
         logfile = str(args.root / 'controller.log')
@@ -236,7 +392,8 @@ def main():
         config = args.root / 'screenrc'
         config.write_text('logfile "' + logfile + '"\nlogfile flush 1\ndeflog on\n')
         subprocess.run(['screen', '-c', str(config), '-dmS', 'wkp-claims-' + args.root.name[:32], sys.executable, '-m', MODULE,
-                        '--manifest', str(args.manifest), '--root', str(args.root)], check=True)
+                        '--manifest', str(args.manifest), '--root', str(args.root),
+                        *(['--paragraphs'] if args.paragraphs else [])], check=True)
     elif args.job:
         try:
             result = worker(args.manifest, args.root, args.job)
@@ -245,7 +402,10 @@ def main():
         except BaseException:
             traceback.print_exc(); raise
     else:
-        run(args.manifest, args.root)
+        if args.paragraphs:
+            print(json.dumps(run_paragraphs(args.manifest, args.root), ensure_ascii=False))
+        else:
+            run(args.manifest, args.root)
 
 
 if __name__ == '__main__':
