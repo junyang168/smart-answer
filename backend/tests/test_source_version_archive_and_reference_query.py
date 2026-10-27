@@ -45,6 +45,8 @@ def test_reference_query_on_few_rows_is_one_pass_with_json_escaped_ids():
     assert result == [("claims", "CL", {"id": "CL"})]
     sql, params = cursor.calls[-1]
     assert len(cursor.calls) == 2 and "jsonb_path_query" in sql and "retired_at IS NULL" in sql
+    # The strategy probe reads table statistics; count(*) scanned the table (#459).
+    assert 'pg_stats' in cursor.calls[0][0] and 'count(' not in cursor.calls[0][0]
     # Ids travel as bound text, never spliced into the jsonpath.
     assert params == (["claims"], sorted(set(ids)))
     assert PostgresKnowledgeStore._reference_consumers(cursor, [], ["claims"]) == []
@@ -80,3 +82,4 @@ def test_reference_disjunction_matches_previous_exact_predicates_in_real_sql(pos
                        (['claims'], *['$.** ? (@ == ' + json.dumps(value) + ')' for value in ids]))
         assert actual == cursor.fetchall()
         assert [row[1] for row in actual] == ['CL-0', 'CL-1', 'CL-2']
+
