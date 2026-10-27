@@ -190,17 +190,23 @@ def transcribe(out: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', choices=['prepare', 'transcribe', 'align', 'format', 'assemble', 'run'])
+    parser.add_argument('stage', choices=['prepare', 'transcribe', 'align', 'format', 'assemble', 'visual', 'run'])
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--video', type=Path)
     parser.add_argument('--slides', type=Path)
     parser.add_argument('--aligner-python', type=Path, default=Path('.venv-align/bin/python'))
     parser.add_argument('--device', choices=['mps', 'cpu'], default='mps')
+    parser.add_argument('--extract-visuals', action='store_true', help='After run, extract confirmed slide text and diagram primitives')
+    parser.add_argument('--visual-provider', choices=['gemini', 'openai'], default='gemini')
     args = parser.parse_args()
-    if args.stage in ('assemble', 'run') and not args.slides:
-        parser.error('assemble/run requires --slides')
+    if args.stage in ('assemble', 'visual', 'run') and not args.slides:
+        parser.error('assemble/visual/run requires --slides')
     if args.stage == 'run' and not (args.slides / 'report.json').is_file():
         parser.error('run requires an existing slide pilot report')
+    if args.stage == 'visual':
+        source = read_json(args.out / 'illustrated_transcript.json')
+        if read_json(args.slides / 'report.json')['source_sha256'] != source['source_sha256']:
+            raise ValueError('Slide report does not match assembled speech; no visual calls sent')
     if args.stage in ('prepare', 'run'):
         if not args.video:
             parser.error('prepare requires --video')
@@ -225,6 +231,11 @@ def main():
         from backend.pipeline.transcript_slide_assembly import assemble
         result = assemble(args.out, args.slides)
         print({'paragraphs': len(result['paragraphs']), 'slides': len(result['slides'])})
+    if args.stage == 'visual' or args.stage == 'run' and args.extract_visuals:
+        from backend.pipeline.slide_visual_evidence import extract
+        from backend.pipeline.visual_transcript_packet import build
+        extract(args.slides, args.out / 'visual-evidence', provider=args.visual_provider)
+        print(build(args.out, args.out / 'visual-evidence', args.out / 'with-visual-evidence'))
 
 
 if __name__ == '__main__':
