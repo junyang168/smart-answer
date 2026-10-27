@@ -16,6 +16,7 @@ SCOPED_CONTRACT = 'claim_changes_v2'
 # v2 plus new records under the request's creation_permissions (#459: a Create
 # under the full-disposition schema made GPT copy 352-532 retain entries by hand).
 CREATING_CONTRACT = 'claim_changes_v3'
+MANAGED_CONTRACT = 'claim_changes_v4'
 
 
 class Change(cm.source.Contract):
@@ -43,6 +44,16 @@ class CreatingChanges(Changes):
     creations: list[Creation]
 
 
+class Retirement(cm.source.Contract):
+    record_key: str
+    reason: str = Field(min_length=1)
+    citations: list[cm.Citation] = Field(min_length=1)
+
+
+class ManagedChanges(CreatingChanges):
+    retirements: list[Retirement]
+
+
 class FindingsReview(cm.source.Contract):
     complete_review: Literal[True] = Field(description='Explicitly confirms the entire supplied scope and every required question were reviewed, and approves every record without a new or persistent/reopened finding. Does not approve publication or action completion.')
     findings: list[cm.JointFinding]
@@ -50,7 +61,7 @@ class FindingsReview(cm.source.Contract):
 
 
 def enabled(materials):
-    return materials['policy'].get('model_output_contract') in {CONTRACT, SCOPED_CONTRACT, CREATING_CONTRACT}
+    return materials['policy'].get('model_output_contract') in {CONTRACT, SCOPED_CONTRACT, CREATING_CONTRACT, MANAGED_CONTRACT}
 
 
 def scoped_adapter(adapter, packet):
@@ -61,7 +72,7 @@ def scoped_adapter(adapter, packet):
     No response is filtered, corrected, or accepted by this function.
     """
     contract = packet.get('policy', {}).get('model_output_contract')
-    if contract not in {SCOPED_CONTRACT, CREATING_CONTRACT}:
+    if contract not in {SCOPED_CONTRACT, CREATING_CONTRACT, MANAGED_CONTRACT}:
         return adapter
     request = packet['unit_request']
     if request == {'__claim_request_ref__': 'request'}:
@@ -100,11 +111,23 @@ def scoped_adapter(adapter, packet):
         fields = dict(changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
             findings=(list[finding], ...),
             finding_resolutions=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
-        if contract == CREATING_CONTRACT:
+        if contract in {CREATING_CONTRACT, MANAGED_CONTRACT}:
             creatable = {p['collection'] for p in request.get('creation_permissions', [])}
-            creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...))
-            fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else {})))
-        model = create_model('ScopedChanges', __base__=CreatingChanges if contract == CREATING_CONTRACT else Changes, **fields)
+            identity = {}
+            if contract == MANAGED_CONTRACT:
+                slots = set(packet['original_goal']['claim_creation_allocations'].values())
+                identity['object_id'] = (key_type(slots), ...)
+            creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...), **identity)
+            fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else
+                                                          {'max_length': 1} if contract == MANAGED_CONTRACT else {})))
+        if contract == MANAGED_CONTRACT:
+            allowed = {k for k in writable if k in targets or k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
+            if 'Retire' not in request['allowed_operations']:
+                allowed = set()
+            retirement = create_model('ScopedRetirement', __base__=Retirement, record_key=(key_type(allowed), ...))
+            fields['retirements'] = (list[retirement], Field(**({'max_length': 0} if not allowed else {})))
+        base = ManagedChanges if contract == MANAGED_CONTRACT else CreatingChanges if contract == CREATING_CONTRACT else Changes
+        model = create_model('ScopedChanges', __base__=base, **fields)
     schema_sha = cm.sha256_json(model.model_json_schema())
     if getattr(adapter, '_claim_scope_schema_sha256', None) == schema_sha:
         return adapter
@@ -150,8 +173,9 @@ def candidate(raw, materials):
         return result, receipt
     if materials.get('candidate_identity_recovery'):
         raise ValueError('legacy identity recovery cannot upgrade the model output contract')
-    creating = materials['policy']['model_output_contract'] == CREATING_CONTRACT
-    wire = (CreatingChanges if creating else Changes).model_validate(raw)
+    managed = materials['policy']['model_output_contract'] == MANAGED_CONTRACT
+    creating = materials['policy']['model_output_contract'] in {CREATING_CONTRACT, MANAGED_CONTRACT}
+    wire = (ManagedChanges if managed else CreatingChanges if creating else Changes).model_validate(raw)
     request = cm.Request.model_validate(materials['unit_request'])
     if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
@@ -180,6 +204,8 @@ def candidate(raw, materials):
         key = cm.source.key(creation.collection, creation.object_id)
         if key in seen or key in before or creation.collection not in cm.KNOWLEDGE_COLLECTIONS:
             raise ValueError('created record repeated, already present or of an unknown collection')
+        if managed and creation.object_id not in materials['original_goal']['claim_creation_allocations'].values():
+            raise ValueError('created identity is not a program-reserved Claim slot')
         seen.add(key)
         fields = object_json(creation.fields_json)
         identity = cm.KNOWLEDGE_COLLECTIONS[creation.collection][1]
@@ -190,6 +216,13 @@ def candidate(raw, materials):
                                   payload={**fields, identity: creation.object_id}))
         dispositions[key] = cm.ObjectDisposition(record_key=key, action='create', reason=creation.reason,
                                                 citations=creation.citations)
+    for retirement in getattr(wire, 'retirements', []):
+        key = retirement.record_key
+        if key in seen or key not in before:
+            raise ValueError('retirement repeated, also modified, or absent from frozen input')
+        seen.add(key)
+        dispositions[key] = cm.ObjectDisposition(record_key=key, action='retire', reason=retirement.reason,
+                                                citations=retirement.citations)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
