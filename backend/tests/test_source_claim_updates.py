@@ -98,9 +98,10 @@ def test_current_source_drift_blocks_without_preparing_claim_batches(action):
     assert not (root/'paragraphs').exists()
 
 
-def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(action,monkeypatch):
+@pytest.mark.parametrize('citation_error',[False,'current','before','foreign'])
+def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(action,monkeypatch,citation_error):
     from backend.pipeline import claim_management_intake as intake,claim_evidence_review as evidence
-    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION,resume_invalid_initial_review,INVALID_REVIEW_VERSION
     store,old,cid,root=fixture(action);root=root/'single-D'
     citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
     def resolutions(packet):return [{'finding_id':f,'disposition':'resolved','reason':'bound excerpt repaired',
@@ -115,8 +116,16 @@ def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(a
                 'reason':'old bound excerpt is no longer current','acceptance_condition':'refresh own bound excerpt',
                 'citations':[citation],'affected_target_keys':['claims/D'],'affected_write_keys':[],
                 'impact_reason':'own source evidence is stale'}]
+        if citation_error and not packet['unresolved']:
+            value['findings'][0]['citations']=[{**citation,'exact_quote':'教授否定这个译法TYPO。',
+                'source_epoch':'before' if citation_error=='before' else 'current',
+                'source_id':'MISSING' if citation_error=='foreign' else 'S'}]
         value['prior_findings']=resolutions(packet);return value
-    def proposal(packet):return {'changes':[{'record_key':'source_fragments/FD',
+    def proposal(packet):
+        if citation_error:
+            original=packet['original_goal']['unaccepted_review_inputs'][0]['response']
+            assert original['findings'][0]['citations'][0]['exact_quote']=='教授否定这个译法TYPO。'
+        return {'changes':[{'record_key':'source_fragments/FD',
         'fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),'reason':'refresh quotation','citations':[citation]}],
         'creations':[],'retirements':[],'findings':[],'finding_resolutions':resolutions(packet)}
     clients={}
@@ -127,7 +136,7 @@ def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(a
     monkeypatch.setattr(batch,'run',execute)
     current=evidence.validate_assessments
     def legacy(review,materials,candidate):
-        if any(not a.sufficient for a in review.binding_assessments):
+        if not citation_error and any(not a.sufficient for a in review.binding_assessments):
             raise ValueError('insufficient own Evidence requires a concrete Claim finding')
         return current(review,materials,candidate)
     monkeypatch.setattr(evidence,'validate_assessments',legacy)
@@ -137,15 +146,22 @@ def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(a
     rid=next(iter(parent['latest_rounds'].values()));saved=store.get_cvp_group(rid)
     raw=Path(parent['execution_root'])/rid/'opus.raw.json';original_raw=raw.read_bytes()
     monkeypatch.setattr(evidence,'validate_assessments',current)
-    auth=root/'engineering-direction.json';auth.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+    auth=root/'engineering-direction.json';auth.write_text(json.dumps({'schema_version':INVALID_REVIEW_VERSION if citation_error else VERSION,'round_id':rid,
         'authorized_by':'owner','authorization_quote':'fix the bound-excerpt validator and resume original result',
         'human_content_approval':False,'record_unaccepted_result':True,
         'prior_metadata_sha256':cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}})}))
-    recovery=recover_returned_review(store,rid,authorization=binding(auth),unrecorded=True)
+    if citation_error=='foreign':
+        with pytest.raises(ValueError,match='cannot invent a source or paragraph'):
+            resume_invalid_initial_review(store,rid,authorization=binding(auth))
+        assert store.get_cvp_group(rid)==saved and raw.read_bytes()==original_raw
+        return
+    recovery=(resume_invalid_initial_review(store,rid,authorization=binding(auth)) if citation_error else
+        recover_returned_review(store,rid,authorization=binding(auth),unrecorded=True))
     record=json.loads(Path(recovery,'engineering-recovery.json').read_text())
-    assert record['model_calls']==0 and record['returned_review_passed'] is False
+    assert record['model_calls']==0
+    assert record['review_not_accepted'] if citation_error else record['returned_review_passed'] is False
     assert raw.read_bytes()==original_raw
-    assert Path(recovery,'opus.raw.json').read_bytes()==original_raw
+    if not citation_error:assert Path(recovery,'opus.raw.json').read_bytes()==original_raw
     final=intake.run(['D'],root,store=store,instruction='refresh source')
     assert final['all_actions_completed'],final
     assert next(iter(clients.values())).calls==['opus','gpt','opus']
