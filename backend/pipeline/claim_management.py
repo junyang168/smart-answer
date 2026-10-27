@@ -388,6 +388,7 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
+    files += [pipeline/'claim_qualification_refresh.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -1122,6 +1123,10 @@ def original_goal(request, before):
     from backend.pipeline.claim_joint_update import enabled, required_keys, CONTRACT
     if enabled(request):
         result.update(joint_update_contract=CONTRACT, required_maintenance_keys=required_keys(request, strict=False))
+    if Path(request.authorization.path).is_file() and authority.get('completion_refresh'):
+        from backend.pipeline.claim_qualification_refresh import verify_admission
+        verify_admission(request, result, authority['completion_refresh'])
+        result['completion_refresh'] = authority['completion_refresh']
     return result
 
 

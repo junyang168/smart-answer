@@ -110,6 +110,13 @@ def run(store, source_id, before, change_set_id, root, instruction):
         for group in plan['paragraphs']:
             guard(store,plan)
             paragraph = group['paragraph_key']; output = root/'paragraphs'/paragraph
+            from backend.pipeline.claim_qualification_refresh import run as refresh_currentness, checkpoint
+            identity={'plan':binding(root/'plan.json'),'paragraph':group}
+            passed=root/'completed-paragraphs'/(paragraph+'.json')
+            if checkpoint(passed,identity):
+                manifest=json.loads((output/'prepared.json').read_text())['manifest']
+                if manifest:jobs.update(batch.load(manifest['path'],output/'batch',store=store)[1])
+                completed.append(paragraph);continue
             batch.progress(root/'status.json',{'stage':'claim_update','paragraph_key':paragraph,'completed_paragraphs':completed})
             # No later batch is prepared until this one has actually completed.
             result = intake.run(group['claim_ids'],output,store=store,max_workers=1,
@@ -119,6 +126,12 @@ def run(store, source_id, before, change_set_id, root, instruction):
                 batch.progress(root/'result.json',value); return value
             manifest = json.loads((output/'prepared.json').read_text())['manifest']
             if manifest:jobs.update(batch.load(manifest['path'],output/'batch',store=store)[1])
+            current = refresh_currentness(store,jobs,root/'completion-currentness'/paragraph,instruction=instruction)
+            if not current['all_actions_completed']:
+                value={'status':'paused','stage':'completion_currentness','paragraph_key':paragraph,
+                       'batch':current,'completed_paragraphs':completed}
+                batch.progress(root/'result.json',value);return value
+            checkpoint(passed,identity,current)
             completed.append(paragraph)
         guard(store,plan)
         final = batch._paragraph_results(store,jobs)
@@ -126,7 +139,11 @@ def run(store, source_id, before, change_set_id, root, instruction):
             completed_paragraphs=completed,unowned_paragraphs=plan['unowned_paragraphs'],
             downstream_handoff={'status':'not_executed','claim_ids':sorted(k.split('/',1)[1] for k,q in final['current_qualifications'].items() if q and q.get('ready') and k not in final.get('retired_keys',[])),
                 'retired_claim_ids':[k.split('/',1)[1] for k in final.get('retired_keys',[])]})
-        batch.progress(root/'result.json',final); return final
+        # Result bindings already consumed as historical evidence survive an
+        # unchanged, zero-call resume (including different dict key order).
+        if not (root/'result.json').exists() or json.loads((root/'result.json').read_text()) != final:
+            batch.progress(root/'result.json',final)
+        return final
 
 
 def main():

@@ -183,8 +183,8 @@ def test_final_report_rechecks_earlier_qualification_after_later_batch(paragraph
             store.apply_plan(store.plan_package({'package_id': 'later-shared-impact', 'claims': [p]}))
     calls, _, _ = execute_batches(monkeypatch, store, after=after)
     result = batch.run_paragraphs(manifest, root, store=store)
-    assert len(calls) == 2 and result['completed_paragraphs'] == ['S0049', 'S0050']
-    assert not result['all_actions_completed'] and not result['current_qualifications']['claims/C']['ready']
+    assert len(calls) == 2 and result['completed_paragraphs'] == ['S0049']
+    assert not result['all_actions_completed'] and not result['batch']['current_qualifications']['claims/C']['ready']
 
 
 def test_new_claims_also_need_current_qualification_before_next_paragraph(paragraphs, monkeypatch):
