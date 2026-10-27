@@ -265,6 +265,49 @@ def recover_returned_candidate(store, round_id, *, authorization):
 INVALID_REVIEW_VERSION = 'wang_claim_invalid_review_input_recovery_v1'
 
 
+def consumed_invalid_review(previous, key, slot):
+    """Authenticate a returned input defect for accounting, never approval.
+
+    The original started slot stays unchanged. A later explicit qualification
+    refresh must still charge this known returned answer to its predecessor.
+    """
+    entries = previous.get('original_goal', {}).get('unaccepted_review_inputs', [])
+    root = Path(previous['execution_root']) / slot['round_id']
+    matches = [entry for entry in entries if entry['raw']['path'] == str(root/'opus.raw.json')]
+    if not matches:
+        return False
+    if len(matches) != 1 or slot['role'] != 'opus' or slot['state'] != 'started' or key != slot['round_id']+':opus':
+        raise ValueError('invalid review input accounting identity drift')
+    entry = matches[0]; check_binding(entry['raw'])
+    materials = body(read(root/'materials.json'))
+    if (materials['request'] != previous['request'] or materials['round_number'] != 0
+            or materials['roles'] != ['opus'] or materials['round_id'] != slot['round_id']):
+        raise ValueError('invalid review input accounting requires original initial review')
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_candidate_origin
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.source_reconciliation_runner import validate_bound_call
+    policy = cm.Policy.model_validate(materials['policy'])
+    candidate = cm.Candidate.model_validate(body(read(root/'candidate.json')))
+    validate_claim_candidate_origin(root, materials, policy, materials['sources'], candidate)
+    if body(read(root/'opus.reservation.json')) != slot['intent'] or sha256_json(slot['intent']) != slot['intent_sha256']:
+        raise ValueError('invalid review input reservation drift')
+    packet = claim_management_review_packet(materials, candidate)
+    raw = validate_bound_call(root, 'opus', packet, claim_management_model_adapter('opus', policy))
+    if raw['response'] != entry['response']:
+        raise ValueError('invalid review input response drift')
+    from backend.pipeline.claim_model_output import review as expand_review
+    review = expand_review(raw['response'], materials, candidate)
+    try:
+        cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
+            materials['unresolved'], materials['sources'], request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
+    except ValueError as exc:
+        if str(exc) != 'citation is not an exact quote from the complete own source':
+            raise
+    else:
+        raise ValueError('accepted review cannot be charged as an invalid input')
+    return True
+
+
 def resume_invalid_initial_review(store, round_id, *, authorization):
     """Send an authentic but unaccepted review to the next ordinary GPT round.
 

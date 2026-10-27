@@ -1545,7 +1545,8 @@ def continuation_budget(previous, request, policy):
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
-            or request.creation_permissions != old.creation_permissions
+            or (request.creation_permissions != old.creation_permissions
+                and not (read_only_refresh and not request.creation_permissions))
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
@@ -1603,6 +1604,10 @@ def continuation_budget(previous, request, policy):
         if slot['state'] in {'planned','cancelled'}:
             continue
         if slot['state'] == 'completed':
+            spent[slot['role']] += 1
+            continue
+        from backend.pipeline.claim_review_recovery import consumed_invalid_review
+        if consumed_invalid_review(previous, key, slot):
             spent[slot['role']] += 1
             continue
         if key in recovery:

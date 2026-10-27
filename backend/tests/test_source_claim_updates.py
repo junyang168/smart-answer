@@ -84,6 +84,8 @@ def test_complete_shared_object_refresh_then_fresh_next_paragraph_and_zero_call_
     result=updates.run(store,'S',old,cid,root,'full refresh')
     assert result['status']=='claims_completed',result
     assert result['downstream_handoff']['status']=='not_executed'
+    assert result['downstream_handoff']['claim_ids']==['A','B','C','D']
+    assert result['downstream_handoff']['retired_claim_ids']==[]
     assert events==['claims/A','claims/B','claims/C','claims/D']
     assert {c:store.get_record_state('claims',c)['payload']['statement'] for c in original}==original
     assert [c.calls for c in clients.values()]==[['opus','gpt','opus'],['opus'],['opus'],['opus','gpt','opus']]
@@ -166,3 +168,46 @@ def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(a
     assert final['all_actions_completed'],final
     assert next(iter(clients.values())).calls==['opus','gpt','opus']
     assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']
+    if citation_error:
+        from backend.pipeline.claim_review_recovery import consumed_invalid_review
+        parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+        key=rid+':opus';slot=parent['call_reservations'][key]
+        assert consumed_invalid_review(parent,key,slot)
+        assert slot['state']=='started' and raw.read_bytes()==original_raw
+        tampered=deepcopy(parent)
+        tampered['original_goal']['unaccepted_review_inputs'][0]['response']['findings'][0]['reason']='changed'
+        with pytest.raises(ValueError,match='response drift'):
+            consumed_invalid_review(tampered,key,slot)
+        assert not consumed_invalid_review(parent,rid+':gpt',{'role':'gpt','state':'started','round_id':'unrelated'})
+        # A read-only successor drops every creation/write grant and still
+        # charges the authentic rejected initial reply, without accepting it.
+        metadata={k:v for k,v in parent.items() if k not in {'run_id','status','error'}}
+        metadata['context_findings']={'context':{'target_key':'claims/N'}}
+        request=cm.Request.model_validate(parent['request'])
+        assert request.creation_permissions
+        request.action_id+='-readback';request.predecessor_action_id=aid
+        request.permissions=[];request.creation_permissions=[];request.allowed_operations=['Update']
+        policy=cm.Policy.model_validate(parent['policy']);policy.initial_candidate='proposal'
+        policy.budget.gpt_calls=1;policy.budget.opus_calls=1;policy.budget.max_revisions=1
+        policy_path=root/'refresh-policy.json';policy_path.write_text(policy.model_dump_json())
+        request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+        auth_path=root/'refresh-authorization.json';request.authorization=cm.source.FileBinding(path=str(auth_path),file_sha256='0'*64)
+        ext={'predecessor_action_id':aid,'prior_metadata_sha256':cm.sha256_json(metadata),'budget':policy.budget.model_dump(mode='json'),
+             'authorization_quote':'finish with a bounded read-only refresh','basis':'qualification_refresh',
+             'current_objects_sha256':'bound separately at SQL admission','related_action_metadata_sha256':{}}
+        auth_path.write_text(json.dumps({'authorized_by':'owner','human_content_approval':False,'owner_call_extension':ext,'required_maintenance_keys':[]}))
+        request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+        continuation=cm.continuation_budget(metadata,request,policy)
+        assert continuation['read_only_refresh'] and continuation['spent_generations']=={'gpt':1,'opus':2,'gemini':0}
+
+
+def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
+    store,old,cid,root=fixture(action)
+    monkeypatch.setattr(updates.intake,'run',lambda *a,**k:{'all_actions_completed':True})
+    final={'all_actions_completed':True,'current_qualifications':{'claims/A':{'ready':True},'claims/D':None,'claims/X':{'ready':False}},'retired_keys':['claims/D']}
+    monkeypatch.setattr(batch,'_paragraph_results',lambda *a:deepcopy(final))
+    plan=updates.prepare(store,'S',old,cid,root,'refresh')
+    for group in plan['paragraphs']:
+        p=root/'paragraphs'/group['paragraph_key']/'prepared.json';p.parent.mkdir(parents=True);p.write_text('{"manifest":null}')
+    result=updates.run(store,'S',old,cid,root,'refresh')
+    assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
