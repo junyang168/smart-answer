@@ -1533,7 +1533,8 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     extension = authority.get('owner_call_extension')
-    read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh' and not request.permissions)
+    read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh'
+        and not request.permissions and not request.creation_permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
             not enabled(request, policy)
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
@@ -1547,7 +1548,7 @@ def continuation_budget(previous, request, policy):
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
             or (request.creation_permissions != old.creation_permissions
                 and not (read_only_refresh and not request.creation_permissions))
-            or previous.get('created_keys') or previous.get('replacements')):
+            or (previous.get('created_keys') and not read_only_refresh) or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     permission_follow_up = (extension_basis == 'permission_required'
@@ -1672,6 +1673,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('original remaining budget cannot fund correction and review')
     return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
+        **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
         **({'owner_call_extension':deepcopy(extension),'preserved_unknown_calls':unknown,

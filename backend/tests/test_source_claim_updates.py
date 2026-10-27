@@ -199,6 +199,13 @@ def test_unaccepted_fragment_review_recovers_same_raw_and_then_normal_revision(a
         request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
         continuation=cm.continuation_budget(metadata,request,policy)
         assert continuation['read_only_refresh'] and continuation['spent_generations']=={'gpt':1,'opus':2,'gemini':0}
+        metadata['created_keys']=['claims/NEW']
+        ext['prior_metadata_sha256']=cm.sha256_json(metadata)
+        auth_path.write_text(json.dumps({'authorized_by':'owner','human_content_approval':False,'owner_call_extension':ext,'required_maintenance_keys':[]}))
+        request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+        continuation=cm.continuation_budget(metadata,request,policy)
+        assert continuation['predecessor_created_keys']==['claims/NEW']
+        assert not request.permissions and not request.creation_permissions
 
 
 def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
