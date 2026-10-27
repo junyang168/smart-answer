@@ -182,3 +182,56 @@ def test_all_context_findings_still_go_to_gpt_without_promoting_bystanders(share
     assert ports.calls==['opus','gpt','opus']
     assert store.get_record_state('claims','C')==before
     assert not (store.claim_management_qualification('C') or {}).get('ready')
+
+
+def creating(material):
+    """#459: a judgement only an Evidence step carries gets its own Claim in compact output."""
+    request=cm.Request.model_validate(material['unit_request'])
+    request.allowed_operations=['Update','Create']
+    request.permissions.append(cm.source.Permission(collection='evidence_steps',object_id='E',fields=['produced_claim_ids']))
+    fields=sorted({'occurrences'}|set(cm.KNOWLEDGE_COLLECTIONS['claims'][0].model_fields)-{'claim_id','review_status','revision'})
+    request.creation_permissions=[cm.CreationPermission(collection='claims',source_id='S',fields=fields)]
+    return {**material,'policy':{'model_output_contract':wire.CREATING_CONTRACT},'unit_request':request.model_dump(mode='json')}
+
+
+def creation(object_id='C2'):
+    return {'collection':'claims','object_id':object_id,'reason':'professor asserts it; no Claim carries it',
+        'fields_json':json.dumps({'statement':'甲是假设。','claim_type':'exegesis','evidence_step_ids':['E'],
+            'occurrences':[{'source_id':'S','anchors':[]}]},ensure_ascii=False),
+        'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设。'}]}
+
+
+def test_v3_creates_one_claim_and_program_expands_every_retain(material):
+    material=creating(material)
+    raw={**empty(),'creations':[creation()],'changes':[change('evidence_steps/E',{'produced_claim_ids':['C','C2']})]}
+    candidate,proof=wire.candidate(raw,material)
+    post,writes=cm.validate_candidate(cm.Request.model_validate(material['unit_request']),material['before'],candidate,material['sources'])
+    assert writes['claims/C2']['action']=='create' and post['claims/C2']['claim_id']=='C2'
+    assert post['evidence_steps/E']['produced_claim_ids']==['C','C2']
+    assert {d.record_key for d in candidate.dispositions}==set(material['before'])|{'claims/C2'}
+    assert proof['changed_keys']==['claims/C2','evidence_steps/E']
+
+
+@pytest.mark.parametrize('bad',['v2','no_grant','existing','identity'])
+def test_v3_creation_needs_grant_and_a_new_identity(material,bad):
+    material=creating(material);raw={**empty(),'creations':[creation()]}
+    if bad=='v2':material['policy']={'model_output_contract':wire.SCOPED_CONTRACT}
+    if bad=='no_grant':
+        request=cm.Request.model_validate(material['unit_request']);request.creation_permissions=[]
+        material['unit_request']=request.model_dump(mode='json')
+    if bad=='existing':raw['creations']=[creation('C')]
+    if bad=='identity':raw['creations'][0]['fields_json']=json.dumps({'claim_id':'C2','statement':'甲是假设。'})
+    with pytest.raises(ValueError):
+        candidate,_=wire.candidate(raw,material)
+        cm.validate_candidate(cm.Request.model_validate(material['unit_request']),material['before'],candidate,material['sources'])
+
+
+def test_joint_scope_caps_creation_at_one_claim(material,monkeypatch):
+    from backend.pipeline import claim_joint_update as joint
+    monkeypatch.setattr(joint,'required_keys',lambda request,strict=True:[])
+    material=creating(material);request=cm.Request.model_validate(material['unit_request'])
+    one,_=wire.candidate({**empty(),'creations':[creation()]},material)
+    joint.validate_candidate_scope(request,material['before'],one)
+    two,_=wire.candidate({**empty(),'creations':[creation(),creation('C3')]},material)
+    with pytest.raises(ValueError,match='at most one'):
+        joint.validate_candidate_scope(request,material['before'],two)
