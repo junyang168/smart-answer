@@ -113,10 +113,14 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         raise ValueError('connection continuation original correction budget is inconsistent')
     expected={'raw-route-proposal-000.call-intent.json'}
     previous=None
-    raw=read_saved_model_response(proposer,old,parent/'raw-route-proposal-000.json')
+    from backend.pipeline.viewpoint_route_review_continuity import continuity_packet, review_history_entry
+    proposal_input=continuity_packet(old, [], packet_path=parent/'route-proposal-input.json',
+        response_path=parent/'raw-route-proposal-000.json')
+    raw=read_saved_model_response(proposer,proposal_input,parent/'raw-route-proposal-000.json')
     current=ArgumentRouteProposalV3Response.model_validate(canonicalize_proposal(
         bind_attestation_source_ids(raw,old)[0])[0]).model_dump(mode='json')
     last_review=None
+    review_history=[]
     for i in range(n+1):
         proposal_doc=read(f'route-proposal-{i:03d}.json')
         review_doc=read(f'route-review-{i:03d}.json')
@@ -132,14 +136,19 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
                 or last_review['route_proposal_sha256'] != sha256_json(current)):
             raise ValueError('connection continuation original reviewer answer changed')
         expected.add(f'raw-route-review-{i:03d}.call-intent.json')
+        review_history.append(review_history_entry(i,sha256_json(current),sha256_json(last_review),last_review))
         if i == n:break
         correction_packet={'scope_label':old['scope_label'],'route_evidence_packet':old,
             'route_proposal_sha256':sha256_json(current),'route_proposal':current,
             'route_review_sha256':sha256_json(last_review),'route_review':last_review,
             'previous_correction':previous,
             'instruction':'Return a complete revised route set; the next review sees every route and attestation.'}
+        correction_packet=continuity_packet(correction_packet,review_history,
+            packet_path=parent/f'route-reconsideration-packet-{i:03d}.json',
+            response_path=parent/f'raw-route-reconsideration-{i:03d}.json')
         raw=read_saved_model_response(reconsiderer,correction_packet,parent/f'raw-route-reconsideration-{i:03d}.json')
         previous=ArgumentRouteReconsiderationV3Response.model_validate(canonicalize_proposal(raw)[0]).model_dump(mode='json')
+        review_history[-1]['finding_dispositions']=previous['finding_dispositions']
         if read(f'route-reconsideration-{i:03d}.json')['reconsideration'] != previous:
             raise ValueError('connection continuation original correction answer changed')
         current=ArgumentRouteReconsiderationV3Response.model_validate(

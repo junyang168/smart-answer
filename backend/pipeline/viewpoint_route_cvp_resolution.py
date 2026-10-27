@@ -38,6 +38,9 @@ from backend.pipeline.viewpoint_route_resolution import (
     build_route_review_batches,
     route_member_source_review_targets,
 )
+from backend.pipeline.viewpoint_route_review_continuity import (
+    continuity_packet, review_history_entry,
+)
 
 
 class CvpRouteReviewIncomplete(ValueError):
@@ -231,7 +234,10 @@ def run_cvp_route_scope(
                 'original_review_sha256':connection_seed['review_sha256']})
             consumed_corrections+=1
     elif recovery_seed is None:
-        raw, _, _ = call_model(proposer, route_packet,
+        proposal_input = continuity_packet(route_packet, [],
+            packet_path=output_dir / 'route-proposal-input.json',
+            response_path=output_dir / 'raw-route-proposal-000.json')
+        raw, _, _ = call_model(proposer, proposal_input,
                                output_dir / "raw-route-proposal-000.json")
     else:
         if max_correction_rounds < 1 or contract != CLAIM_EVIDENCE_BINDING_CONTRACT:
@@ -313,6 +319,9 @@ def run_cvp_route_scope(
                 "validation_findings": findings,
                 "instruction": "Return the complete corrected proposal in the same schema; do not invent bindings or omit old routes.",
             }
+            repair_packet = continuity_packet(repair_packet, [],
+                packet_path=output_dir / f'route-proposal-validation-input-{validation_repairs:03d}.json',
+                response_path=output_dir / f'raw-route-proposal-validation-{validation_repairs:03d}.json')
             raw, _, _ = call_model(
                 proposer, repair_packet,
                 output_dir / f"raw-route-proposal-validation-{validation_repairs:03d}.json",
@@ -320,6 +329,7 @@ def run_cvp_route_scope(
             validation_repairs += 1
     seen: set[str] = set()
     rounds: list[dict[str, Any]] = []
+    review_history = []
     remaining_review_corrections = max_correction_rounds - validation_repairs - consumed_corrections
     for round_number in range(remaining_review_corrections + 1):
         proposal_payload = proposal.model_dump(mode="json")
@@ -359,6 +369,9 @@ def run_cvp_route_scope(
                     "assumption that a CVP link's selected evidence limits intermediate Claim evidence."
                 ),
             }
+        review_packet = continuity_packet(review_packet, review_history,
+            packet_path=output_dir / f'route-review-packet-{round_number:03d}.json',
+            response_path=output_dir / f'raw-route-review-{round_number:03d}.json')
         write_immutable(output_dir / f"route-proposal-{round_number:03d}.json", {
             "proposal_sha256": proposal_sha,
             "proposal": proposal_payload,
@@ -387,6 +400,8 @@ def run_cvp_route_scope(
         )
         review_payload = review.model_dump(mode="json")
         review_sha = sha256_json(review_payload)
+        review_history.append(review_history_entry(
+            round_number, proposal_sha, review_sha, review_payload))
         write_immutable(output_dir / f"route-review-{round_number:03d}.json", {
             "proposal_sha256": proposal_sha,
             "review_sha256": review_sha,
@@ -443,6 +458,9 @@ def run_cvp_route_scope(
             "previous_correction": last_reconsideration,
             "instruction": "Return a complete revised route set; the next review sees every route and attestation.",
         }
+        reconsider_packet = continuity_packet(reconsider_packet, review_history,
+            packet_path=output_dir / f'route-reconsideration-packet-{round_number:03d}.json',
+            response_path=output_dir / f'raw-route-reconsideration-{round_number:03d}.json')
         raw_reconsideration, _, _ = call_model(
             reconsiderer, reconsider_packet,
             output_dir / f"raw-route-reconsideration-{round_number:03d}.json",
@@ -467,6 +485,7 @@ def run_cvp_route_scope(
         if reconsideration_validation["outcome"] != "resolved":
             raise CvpRouteReviewIncomplete("route correction left a reviewer finding unresolved")
         last_reconsideration = reconsideration.model_dump(mode="json")
+        review_history[-1]['finding_dispositions'] = deepcopy(last_reconsideration['finding_dispositions'])
         write_immutable(output_dir / f"route-reconsideration-{round_number:03d}.json", {
             "reconsideration": last_reconsideration,
             "validation": reconsideration_validation,

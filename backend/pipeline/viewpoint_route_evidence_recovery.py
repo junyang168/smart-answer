@@ -46,7 +46,10 @@ def prepare_evidence_input_recovery(parent, packet, materials, *, proposer, revi
             or any(p.name != "raw-route-review-000.json" for p in parent.glob("raw-route-review-[0-9][0-9][0-9].json"))):
         raise ValueError("Route input recovery requires the initial uncommitted review and original budget")
     proposal_doc, review_doc = read("route-proposal-000.json"), read("route-review-000.json")
-    raw_proposal = read_saved_model_response(proposer, old, parent / "raw-route-proposal-000.json")
+    from backend.pipeline.viewpoint_route_review_continuity import continuity_packet
+    proposal_input = continuity_packet(old, [], packet_path=parent / 'route-proposal-input.json',
+        response_path=parent / 'raw-route-proposal-000.json')
+    raw_proposal = read_saved_model_response(proposer, proposal_input, parent / "raw-route-proposal-000.json")
     proposal = ArgumentRouteProposalV2Response.model_validate(canonicalize_proposal(raw_proposal)[0]).model_dump(mode="json")
     review_packet = read("route-review-packet-000.json")
     if (review_packet.get("route_evidence_context") != old
