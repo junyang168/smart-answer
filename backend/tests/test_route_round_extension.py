@@ -1,0 +1,90 @@
+"""One owner-approved round reuses all original calls and verdicts."""
+from copy import deepcopy
+import json
+
+import pytest
+
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_route_cvp_queue import make_cvp_route_job
+from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+from backend.pipeline.viewpoint_route_cvp_resolution import run_cvp_route_scope, CvpRouteReviewIncomplete
+from backend.pipeline.viewpoint_route_round_extension import round_extension, VERSION, FILENAME
+from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
+
+
+def stopped(tmp_path):
+    material = {'viewpoint_id':'CV-1'}
+    material['artifact_sha256'] = sha256_json(material)
+    job = make_cvp_route_job('CV-1', material['artifact_sha256'], 'policy-sha')
+    root = tmp_path/job['job_id']
+    write_immutable(root/'cvp-route-materials.json', material)
+    packet = fixture_packet()
+    original = observation_proposal(packet)
+    def correction(p):
+        revised = deepcopy(original)
+        revised['observation_supports'][0]['support_scope_note'] = f'原文观察范围，第{corrector.calls}次实质修正。'
+        return {'schema_version':'wang_argument_route_reconsideration_v3',
+            'route_proposal_sha256':p['route_proposal_sha256'], 'route_review_sha256':p['route_review_sha256'],
+            'finding_dispositions':[{'target_kind':'observation','target_key':'OBS-1',
+                'disposition':'accepted','reason':'已修订范围'}], 'revised_proposal':revised}
+    def review(p):
+        answer = approved(p)
+        if reviewer.calls < 3:
+            row = next(r for r in answer['change_reviews'] if r['target_kind']=='observation')
+            row.update(decision='correct', finding_codes=['scope_overstates'],
+                reason='仍须收窄范围', correction='明确实际原文范围')
+        return answer
+    proposer = Answer(original, model_id='gpt')
+    reviewer = Answer(review, model_id='opus')
+    corrector = Answer(correction, model_id='gpt')
+    args = dict(route_packet=packet,existing_routes=[],output_dir=root,proposer=proposer,
+        reviewer=reviewer,reconsiderer=corrector)
+    with pytest.raises(CvpRouteReviewIncomplete,match='round 1'):
+        run_cvp_route_scope(**args,max_correction_rounds=1)
+    latest = json.loads((root/'route-review-001.json').read_text())
+    auth = {'schema_version':VERSION,'authorized_by':'owner','owner_direction':'好，再加一轮',
+        **{k:job[k] for k in ('job_id','viewpoint_id','material_sha256','policy_sha256')},
+        'original_max_correction_rounds':1,'additional_correction_rounds':1,
+        'latest_review_round':1,'latest_review_sha256':latest['review_sha256']}
+    authority = tmp_path/'owner-one-more-round.json'
+    write_immutable(authority,auth)
+    return root,job,{'max_correction_rounds':1},authority,args
+
+
+def test_exact_one_extra_round_replays_saved_calls_and_keeps_original_artifacts(tmp_path):
+    root,job,policy,authority,args = stopped(tmp_path)
+    assert round_extension(root,job,policy) is None
+    receipt = round_extension(root,job,policy,authority)
+    assert receipt['effective_max_correction_rounds']==2 and policy['max_correction_rounds']==1
+    assert receipt['human_content_approval'] is False
+    result = run_cvp_route_scope(**args,max_correction_rounds=2,round_extension=receipt)
+    assert len(result['rounds'])==3 and result['rounds'][-1]['outcome']=='pass'
+    assert result['correction_round_extension_sha256']==receipt['artifact_sha256']
+    assert args['proposer'].calls==1 and args['reviewer'].calls==3 and args['reconsiderer'].calls==2
+    assert round_extension(root,job,policy)==receipt
+    assert json.loads((root/'route-review-001.json').read_text())['validation']['outcome']=='findings'
+    assert json.loads((root/'route-review-000.json').read_text())['validation']['outcome']=='findings'
+
+
+@pytest.mark.parametrize('fault',['job','policy','two_rounds','different_review','unknown_call'])
+def test_extension_refuses_scope_budget_review_or_unknown_call_changes(tmp_path,fault):
+    root,job,policy,authority,_ = stopped(tmp_path)
+    if fault=='job':job={**job,'material_sha256':'different'}
+    elif fault=='policy':policy={'max_correction_rounds':2}
+    elif fault=='unknown_call':(root/'raw-extra.call-intent.json').write_text('{}')
+    else:
+        auth=json.loads(authority.read_text())
+        if fault=='two_rounds':auth['additional_correction_rounds']=2
+        else:auth['latest_review_sha256']='different'
+        authority.write_text(json.dumps(auth))
+    with pytest.raises(ValueError):round_extension(root,job,policy,authority)
+    assert not (root/FILENAME).exists()
+
+
+@pytest.mark.parametrize('fault',['authority','original_review'])
+def test_extension_resume_authenticates_authority_and_original_rejected_review(tmp_path,fault):
+    root,job,policy,authority,_ = stopped(tmp_path)
+    round_extension(root,job,policy,authority)
+    path=authority if fault=='authority' else root/'route-review-001.json'
+    value=json.loads(path.read_text());value['changed']=True;path.write_text(json.dumps(value))
+    with pytest.raises(ValueError):round_extension(root,job,policy)

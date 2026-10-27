@@ -97,6 +97,12 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
     material = sealed('cvp-route-materials.json', 'artifact_sha256')
     packet = sealed('route-packet.json', 'packet_sha256')
     run = sealed('route-cvp-run.json', 'artifact_sha256')
+    if run.get('correction_round_extension_sha256'):
+        from backend.pipeline.viewpoint_route_round_extension import round_extension, FILENAME
+        extension = json.loads((output_dir/FILENAME).read_text())
+        extension = round_extension(output_dir, extension['job'], load_route_policy(policy_path))
+        if extension['artifact_sha256'] != run['correction_round_extension_sha256']:
+            raise ValueError('committed Route round extension differs from its reservation')
     package = json.loads((output_dir / 'route-change-package.json').read_text())
     metadata = history.get('metadata', {})
     if (material['viewpoint_id'] != viewpoint_id
@@ -324,6 +330,7 @@ def process_cvp_route(
     *, store: PostgresKnowledgeStore, viewpoint_id: str, output_dir: Path,
     proposer: Any, reviewer: Any, reconsiderer: Any,
     max_correction_rounds: int, apply: bool = False,
+    round_extension: dict[str, Any] | None = None,
     ownership_guard: Callable[[], None] | None = None,
     repair_evidence_input: bool = False,
     repair_connection_context: bool = False,
@@ -406,6 +413,7 @@ def process_cvp_route(
         reconsiderer=reconsiderer, max_correction_rounds=max_correction_rounds,
         recovery_seed=recovery_seed,
         connection_seed=connection_seed,
+        **({'round_extension':round_extension} if round_extension else {}),
     )
     if result["cvp_re_review_exceptions"]:
         raise CvpRouteReviewIncomplete("route review raised CVP identity exceptions")
@@ -490,12 +498,17 @@ def main() -> int:
                         help="Continue the saved initial review after the Claim-evidence boundary fix")
     parser.add_argument('--repair-connection-context', action='store_true',
                         help='Continue the exact saved CVP exception with approved connection context')
+    parser.add_argument('--round-extension', type=Path,
+                        help='Owner authorization for one extra correction/review in this exact saved job')
     args = parser.parse_args()
     if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
         parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
     if args.repair_connection_context and (args.action != 'run' or not args.job_id
                                           or not args.retry_exceptions or args.repair_evidence_input):
         parser.error('connection continuation requires run, exact job ID, --retry-exceptions and no other repair')
+    if args.round_extension and (args.action != 'run' or not args.job_id or not args.retry_exceptions
+                                or args.repair_evidence_input or args.repair_connection_context):
+        parser.error('round extension requires run, exact job ID, --retry-exceptions and no input repair')
     policy = load_route_policy(args.route_policy)
     if policy["schema_version"] not in {"wang_route_resolution_policy_v5", "wang_route_resolution_policy_v8"}:
         parser.error("whole-CVP worker requires Route policy v5 or v8")
@@ -606,13 +619,17 @@ def main() -> int:
         }
         for adapter in adapters.values():
             adapter.max_request_bytes = int(policy["max_request_bytes"])
+        from backend.pipeline.viewpoint_route_round_extension import round_extension
+        extension = round_extension(active_output, job, policy, args.round_extension)
         result = process_cvp_route(
             store=store, viewpoint_id=job["viewpoint_id"],
             output_dir=args.output_dir / job["job_id"],
             proposer=OwnershipGuardedAdapter(adapters["proposal"], guard),
             reviewer=OwnershipGuardedAdapter(adapters["review"], guard),
             reconsiderer=OwnershipGuardedAdapter(adapters["correction"], guard),
-            max_correction_rounds=int(policy["max_correction_rounds"]),
+            max_correction_rounds=(extension['effective_max_correction_rounds'] if extension
+                                   else int(policy["max_correction_rounds"])),
+            round_extension=extension,
             apply=args.apply, ownership_guard=guard,
             repair_evidence_input=args.repair_evidence_input, policy_path=args.route_policy,
             repair_connection_context=args.repair_connection_context,

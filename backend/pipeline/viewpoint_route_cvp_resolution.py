@@ -139,6 +139,7 @@ def run_cvp_route_scope(
     max_correction_rounds: int,
     recovery_seed: dict[str, Any] | None = None,
     connection_seed: dict[str, Any] | None = None,
+    round_extension: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Review the entire replacement set on every round, then stop at a pass.
 
@@ -148,6 +149,8 @@ def run_cvp_route_scope(
 
     if max_correction_rounds < 0:
         raise ValueError("max_correction_rounds must be nonnegative")
+    if round_extension and max_correction_rounds != round_extension['effective_max_correction_rounds']:
+        raise ValueError('Route correction limit differs from its authorized extension')
     contract = route_packet.get("evidence_binding_contract")
     if contract not in (None, CLAIM_EVIDENCE_BINDING_CONTRACT):
         raise ValueError("unknown Route evidence binding contract")
@@ -406,6 +409,8 @@ def run_cvp_route_scope(
                 "review_sha256": review_sha,
                 "rounds": rounds,
                 "proposal_validation_repairs": validation_repairs,
+                **({'correction_round_extension_sha256':round_extension['artifact_sha256']}
+                   if round_extension else {}),
                 **({'connection_continuation':connection_seed['receipt'],
                     'corrections_consumed_including_parent':consumed_corrections + validation_repairs + round_number}
                    if connection_seed else {}),
