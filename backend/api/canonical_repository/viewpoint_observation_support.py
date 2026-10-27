@@ -127,8 +127,9 @@ def observation_payload(item,packet):
 def observation_id(payload):return 'VOS-'+sha256_json(payload)[:24]
 
 
-def revision_retirement_binding(viewpoints, existing_supports):
-    """An observation for an old CVR cannot remain current under its successor.
+def revision_retirement_binding(viewpoints, existing_supports, *, claims=(),
+                                source_revisions=None, unusable_context_claims=()):
+    """An observation pinned to an obsolete input cannot remain current.
 
     This retires an immutable version, not its semantic observation. Models
     still propose the complete current observations; independent review sees
@@ -139,13 +140,30 @@ def revision_retirement_binding(viewpoints, existing_supports):
         raise ValueError('observation retirement needs one current revision per CVP')
     if any(o['viewpoint_id'] not in current for o in existing_supports):
         raise ValueError('observation retirement has a foreign CVP')
+    claim_index = {c['claim_id']:c for c in claims}
+    unavailable = {c['claim_id'] for c in unusable_context_claims}
+    source_revisions = source_revisions or {}
+    def obsolete(o):
+        if o['validated_against_viewpoint_revision_id'] != current[o['viewpoint_id']]:
+            return True
+        if o['source_id'] in source_revisions and o['source_revision_sha256'] != source_revisions[o['source_id']]:
+            return True
+        for binding in o['evidence_bindings']:
+            if binding['claim_id'] in unavailable:
+                return True
+            claim = claim_index.get(binding['claim_id'])
+            if claim is not None and (binding['pinned_claim_revision'] != claim['pinned_claim_revision']
+                    or binding['claim_revision_sha256'] != claim['claim_revision_sha256']):
+                return True
+        # Missing context alone is not evidence of a retired/replaced Claim.
+        return False
     return {'schema_version':RETIREMENT_BINDING,
         'required_retirement_ids':sorted(o['observation_support_id'] for o in existing_supports
-            if o['validated_against_viewpoint_revision_id'] != current[o['viewpoint_id']]),
-        'note':('程序会将绑定旧 CVP 修订的观察记录列为技术退役，不要求模型抄写这些 ID。'
+            if obsolete(o)),
+        'note':('程序会将绑定已更换的 CVP、Claim 或来源版本，以及明确不可用 Claim 的观察记录列为技术退役，不要求模型抄写这些 ID。'
                 '这不表示其观察内容应删除：仍须根据全部原文提出完整的当前观察。'
                 'Opus 审核程序展开后的完整候选，包括全部旧记录、技术退役和新观察。'
-                '绑定当前 CVP 修订的旧观察仍须逐项保留或明确提出退役，不能静默省略。')}
+                '全部绑定仍为当前有效版本的旧观察须逐项保留或明确提出退役，不能静默省略。')}
 
 
 def bind_revision_retirements(proposal, packet):
@@ -154,7 +172,9 @@ def bind_revision_retirements(proposal, packet):
     if binding is None:
         return proposal, None  # Historical packets retain their exact contract.
     expected = revision_retirement_binding(packet['approved_viewpoints'],
-        packet.get('existing_observation_supports', []))
+        packet.get('existing_observation_supports', []), claims=packet.get('claims', []),
+        source_revisions=packet.get('source_revisions', {}),
+        unusable_context_claims=packet.get('unusable_context_claims', []))
     if binding != expected or not isinstance(proposal, ArgumentRouteProposalV3Response):
         raise ValueError('observation retirement binding differs from current complete material')
     supplied = set(proposal.retired_observation_support_ids)

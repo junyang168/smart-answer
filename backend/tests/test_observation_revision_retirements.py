@@ -17,11 +17,17 @@ from test_viewpoint_observation_support import (
 from test_viewpoint_batch_resolution import _claim, _registry_link, _approved_viewpoint, ROCK_STATEMENT
 
 
-def revised_packet(*, same_revision=False, binding=True):
+def revised_packet(*, same_revision=False, binding=True, claim_revision=1, stale_source=False):
     old = fixture_packet()
     old_proposal = ArgumentRouteProposalV3Response.model_validate(observation_proposal(old))
     observations, _, _ = compile_observation_package(old_proposal, old, review_sha256='old-review')
     claim = _claim('C1', ROCK_STATEMENT)
+    if stale_source:
+        claim = claim.model_copy(update={'evidence':[
+            e.model_copy(update={'source_sha256':'source-sha-v2'}) for e in claim.evidence]})
+    if claim_revision != 1:
+        claim = claim.model_copy(update={'pinned_claim_revision':claim_revision,
+            'claim_revision_sha256':'sha-C1-v2'})
     revision = 'CVR-1' if same_revision else 'CVR-2'
     packet = build_registry_route_packet(scope_label='observation-test',
         approved_viewpoints=[_approved_viewpoint() | {'viewpoint_revision_id':revision}],
@@ -146,3 +152,29 @@ def test_correction_does_not_need_to_copy_forced_retirement_ids(tmp_path):
     assert all(('observation_retirement', obsolete) in {
         (t['target_kind'], t['target_key']) for t in p['review_targets']} for p in reviewer.payloads)
     assert revised['retired_observation_support_ids'] == []
+
+
+@pytest.mark.parametrize('change', ['claim', 'source'])
+def test_unchanged_cvp_revision_still_replaces_obsolete_dependency_pins(tmp_path, change):
+    packet, obsolete = revised_packet(same_revision=True,
+        claim_revision=2 if change == 'claim' else 1, stale_source=change == 'source')
+    raw = observation_proposal(packet)
+    assert raw['retired_observation_support_ids'] == []
+    reviewer = Answer(approved, model_id='opus')
+    result = run_cvp_route_scope(route_packet=packet, existing_routes=[], output_dir=tmp_path,
+        proposer=Answer(raw, model_id='gpt'), reviewer=reviewer,
+        reconsiderer=Answer({}), max_correction_rounds=0)
+    assert result['_effective_proposal'].retired_observation_support_ids == [obsolete]
+    assert reviewer.calls == 1
+
+
+def test_missing_claim_is_not_treated_as_explicitly_unusable():
+    packet, obsolete = revised_packet(same_revision=True)
+    old = deepcopy(packet['existing_observation_supports'])
+    old[0]['evidence_bindings'][0]['claim_id'] = 'C-no-longer-in-context'
+    args = dict(claims=packet['claims'], source_revisions=packet['source_revisions'])
+    missing = revision_retirement_binding(packet['approved_viewpoints'], old, **args)
+    assert missing['required_retirement_ids'] == []
+    unavailable = revision_retirement_binding(packet['approved_viewpoints'], old,
+        **args, unusable_context_claims=[{'claim_id':'C-no-longer-in-context'}])
+    assert unavailable['required_retirement_ids'] == [obsolete]

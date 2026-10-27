@@ -635,7 +635,9 @@ def build_registry_route_packet(
             raise ValueError('program observation retirements require observation support')
         from backend.api.canonical_repository.viewpoint_observation_support import revision_retirement_binding
         packet['observation_retirement_binding'] = revision_retirement_binding(
-            packet['approved_viewpoints'], packet['existing_observation_supports'])
+            packet['approved_viewpoints'], packet['existing_observation_supports'],
+            claims=packet['claims'], source_revisions=packet['source_revisions'],
+            unusable_context_claims=packet.get('unusable_context_claims', []))
     if approved_connection_judgments is not None:
         links = {l['viewpoint_claim_link_id']:l for l in viewpoint_claim_links
                  if l.get('effective_state') == 'active'}
