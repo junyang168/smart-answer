@@ -120,6 +120,7 @@ SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
 # Above this many rows a reverse reference lookup goes through the payload GIN
 # index in batches; at or below, one pass over the rows is faster.
 SINGLE_PASS_REFERENCE_ROWS = 20_000
+CLAIM_CLOSURE_SECONDS = 30
 OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS = (
     "composition_decisions",
     "composition_plans",
@@ -6029,8 +6030,15 @@ class PostgresKnowledgeStore:
     def _reference_consumers(cursor, ids, collections):
         if not ids or not collections:return []
         ids = sorted(set(ids))
-        cursor.execute("SELECT count(*) FROM wang_knowledge.objects WHERE retired_at IS NULL AND collection=ANY(%s)",
-                       (list(collections),))
+        # Table statistics pick the strategy without reading rows: count(*)
+        # over the ~41 collections _affected_cvp_context passes scanned the
+        # whole table on every Claim read (#459). Collections too rare for the
+        # statistics count as zero, which only favours the single pass.
+        cursor.execute("""SELECT GREATEST(c.reltuples,0) * COALESCE((SELECT sum(m.f) FROM pg_stats s,
+                              unnest(s.most_common_vals::text::text[], s.most_common_freqs) AS m(v,f)
+                              WHERE s.schemaname='wang_knowledge' AND s.tablename='objects'
+                                AND s.attname='collection' AND m.v=ANY(%s)),0)
+                          FROM pg_class c WHERE c.oid='wang_knowledge.objects'::regclass""", (list(collections),))
         if cursor.fetchone()[0] <= SINGLE_PASS_REFERENCE_ROWS:
             # Few rows: the planner reaches them through the collection index
             # and rechecks every jsonpath on every row, so batching re-scans
@@ -6161,7 +6169,9 @@ class PostgresKnowledgeStore:
                 # drops a dependency discovered in the preceding iteration.
                 for (col,oid), state in records.items():
                     roots.setdefault(col,{})[oid] = state['payload']
-                if time.monotonic() - started > 5:
+                # A dense sermon reaches ~2k objects over 16 sources in 7-10 s
+                # through indexed lookups only (#459, DK-584379 P06/P07/P08).
+                if time.monotonic() - started > CLAIM_CLOSURE_SECONDS:
                     raise ValueError('Claim dependency closure exceeds existing readset budget')
 
     def _affected_cvp_context(self,conn,keys):
