@@ -47,6 +47,8 @@
 | [來源逐句對帳與 claim 層完整性 v1](./10-extraction/source_to_claim_layer_ledger_v1.md) | 来源里的东西有没有真的进入论证图 |
 | [講道口語抽取實測 v1](./10-extraction/transcript_extraction_on_spoken_sermon_v1.md) | 抽取在口语讲道上的实际表现（记录） |
 | [投影片換頁辨識試跑](./10-extraction/slide_change_pilot_20261027.md) | 15 分鐘原片的換頁、逐步顯示、游標排除與雙模型實測（記錄） |
+| [音訊轉錄與投影片組合試跑](./10-extraction/transcript_slide_pilot_20261027.md) | 15 分鐘 ASR、中文對齊、標點分段與 24 張原圖的私人圖文試稿（記錄） |
+| [投影片可見性與空白輸出 v1](./10-extraction/slide_visibility_output_v1.md) | 教授單獨入鏡或無法判斷時清空圖片，保留口述與可見性時段 |
 | [分節抽取後獨立複審的價值 v1](./10-extraction/independent_review_value_after_section_extraction_v1.md) | 分节之后 AI 复审还抓得到什么（记录） |
 | [论证层视图 v1](./10-extraction/argument_layer_view_v1.md) | 怎样查看单篇来源的论证层 |
 | [講道目錄分類與 ingestion 邊界](./10-extraction/sermon_catalog_ingestion.md) | 目录导航、内容分类与跨讲归组的分界 |

@@ -21,11 +21,11 @@ import numpy as np
 
 
 SCHEMA = "slide-change-pilot.v1"
-PROMPT_VERSION = "slide-pair-review.v1"
+PROMPT_VERSION = "slide-pair-review.v2"
 EVENT_KINDS = {"new_slide", "build", "emphasis", "return"}
 ALL_KINDS = EVENT_KINDS | {"same_content", "layout_change", "not_visible", "uncertain"}
 KIND_LABELS = {"new_slide": "新投影片", "build": "內容增減", "emphasis": "標示變化", "return": "返回",
-               "same_content": "內容相同", "layout_change": "版面切換", "not_visible": "過渡空白", "uncertain": "待核對"}
+               "same_content": "內容相同", "layout_change": "版面切換", "not_visible": "無可見投影片", "uncertain": "待核對"}
 
 PAIR_PROMPT = """Compare each labelled BEFORE/AFTER pair of a lecture recording.
 Images contain the proposed main slide crop and smaller uncropped context frames.
@@ -37,9 +37,19 @@ emphasis: persistent meaningful highlight change;
 return: return to an earlier slide (only if demonstrable from the provided evidence);
 same_content: identical content except pointer/caret/noise;
 layout_change: same slide content but editor/presentation layout or scale changes;
-not_visible: AFTER has no readable slide content (blank/transition/other view);
+not_visible: AFTER has no visible slide (including lecturer-only, blank, or transition);
 uncertain: obscured, clipped ROI, or insufficient evidence.
-If AFTER reveals content after a blank BEFORE, use new_slide. Do not invent slide
+Attend only to slide content. Ignore a lecturer's motion, facial expression,
+camera motion, zoom, and framing changes when the visible slide content is unchanged.
+If the lecturer and slide are both visible, compare only the visible slide content.
+If AFTER is lecturer-only or otherwise has no slide, always use not_visible,
+even when BEFORE is also lecturer-only. Never treat a lecturer, lectern, subtitles,
+or the last remembered slide as a currently visible slide. The image output must
+be empty for no-slide views. If a slide is present but unreadable/occluded, use
+uncertain; never reconstruct hidden content. A cropped blue region alone is not
+proof of a slide; use the uncropped context.
+If AFTER reveals content after a no-slide BEFORE, use new_slide for acquisition;
+this does not establish whether it changed while off-camera. Do not invent slide
 text, reconstruct pixels, or infer from biblical knowledge. Labels are navigation
 descriptions, not quotations or transcript. Return exactly one result per supplied
 candidate ID, in order, using only the specified IDs. confidence is not calibrated.
@@ -502,6 +512,58 @@ def selected_events(candidates: dict, review: dict) -> list[dict]:
             if decision["kind"] in EVENT_KINDS and not candidate.get("stability_unconfirmed")]
 
 
+def visibility_timeline(manifest: dict, candidates: dict, review: dict,
+                        events: list[dict]) -> dict:
+    """Keep no-slide/unknown intervals explicit; never forward-fill through them.
+
+    This is sampled model evidence, not a frame-accurate visibility guarantee.
+    A positive view starts at its reviewed stable sample; absence/uncertainty
+    clears the image from the candidate boundary conservatively.
+    """
+    if review['candidates_sha256'] != object_sha(candidates):
+        raise ValueError('Visibility review belongs to another detector run')
+    decisions = validate_results({'results': review['results']},
+                                 [c['id'] for c in candidates['candidates']])
+    exported = {event['id']: event for event in events}
+    start, end = manifest['identity']['start_ms'], manifest['identity']['end_ms']
+    cursor, active, state, evidence = start, None, 'unknown', None
+    spans = []
+    def append(until):
+        if until > cursor:
+            spans.append({'start_ms': cursor, 'end_ms': until, 'state': state,
+                'slide_event_id': active,
+                'image': exported[active]['slide_image'] if active is not None else None,
+                'evidence_candidate_id': evidence})
+    previous_change = start
+    for candidate, decision in zip(candidates['candidates'], decisions):
+        change, stable = candidate['change_from_ms'], candidate['stable_ms']
+        if not previous_change <= change <= stable < end:
+            raise ValueError('Invalid or unordered visibility boundary')
+        previous_change = change
+        kind = decision['kind']
+        is_blank = kind in ('not_visible', 'uncertain') or candidate.get('stability_unconfirmed')
+        boundary = change if is_blank else stable
+        # An overlapping pending candidate must not move the output backwards.
+        boundary = max(cursor, boundary)
+        append(boundary)
+        cursor, evidence = boundary, candidate['id']
+        if is_blank:
+            active = None
+            state = 'no_slide' if kind == 'not_visible' and not candidate.get('stability_unconfirmed') else 'unknown'
+        elif kind in EVENT_KINDS:
+            active = candidate['id'] if candidate['id'] in exported else None
+            state = 'visible' if active is not None else 'unknown'
+        elif active is None:
+            # same_content/layout_change without an active, visible source is
+            # insufficient to revive an old picture from before a blank view.
+            state = 'unknown'
+    append(end)
+    return {'schema_version': 'sampled-slide-visibility.v1', 'start_ms': start,
+            'end_ms': end, 'spans': spans, 'no_slide_image': None,
+            'review_prompt_version': review.get('prompt_version'),
+            'precision': 'sampled candidate evidence; not verified transition times'}
+
+
 def export_originals(out: Path, manifest: dict, candidates: dict, events: list[dict]) -> list[dict]:
     """Pick the sharpest of at most six samples within the same stable state.
 
@@ -575,6 +637,7 @@ def create_report(out: Path, manifest: dict, candidates: dict, review: dict) -> 
               "reference_sha256": file_sha(out / "reference.json"),
               "candidates_sha256": object_sha(candidates), "review_sha256": file_sha(out / "review.json"),
               "candidate_count": len(candidates["candidates"]), "exported_state_count": len(events),
+              "visibility": visibility_timeline(manifest, candidates, review, events),
               "initial_acquisition": {k: v for k, v in initial_result.items() if k != "false_positives"},
               "changes": match_events(refs, changes, tolerance_ms=0),
               "changes_with_2s_tolerance": match_events(refs, changes, tolerance_ms=2000),
