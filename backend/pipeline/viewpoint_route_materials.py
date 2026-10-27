@@ -108,6 +108,27 @@ def prepare_cvp_route_materials(
     observation_claim_ids={b['claim_id'] for (collection,_),row in route_rows.items()
         if collection=='viewpoint_observation_supports' for b in row['payload']['evidence_bindings']}
     linked_claim_ids={link.claim_id for link in links}
+    # Old observations are a disposition roster, not authority to keep a
+    # withdrawn Claim live. Preserve their current state as history-only pins
+    # so the existing whole-set review can explicitly retire/rebuild them.
+    history_rows={};unavailable_observation_claims=[]
+    observation_context=observation_claim_ids-linked_claim_ids
+    if observation_context:
+        observed=store.read_current_records(('claims',cid) for cid in observation_context)
+        if len(observed)!=len(observation_context):
+            raise ValueError('old observation Claim history is missing')
+        for key,row in observed.items():
+            if record_content_sha(row['payload'])!=row['content_sha256']:
+                raise ValueError('old observation Claim history is inconsistent')
+            if row.get('retired') or not observation_claim_is_usable(ClaimRecord.model_validate(row['payload'])):
+                history_rows[key]=row
+                unavailable_observation_claims.append({'claim_id':key[1],
+                    'pinned_claim_revision':row['revision'],
+                    'reason':'Old observation Claim is retired, superseded or held; review its disposition, never use as current support.',
+                    'usable_for_binding':False})
+    unavailable_ids={key[1] for key in history_rows}
+    observation_claim_ids-=unavailable_ids
+    context_claim_ids=tuple(cid for cid in context_claim_ids if cid not in unavailable_ids)
     context_claim_ids=tuple(sorted(set(context_claim_ids) | (observation_claim_ids-linked_claim_ids)))
     claim_ids = linked_claim_ids | set(context_claim_ids)
     claim_rows = _read_exact(store, {("claims", claim_id) for claim_id in claim_ids})
@@ -137,7 +158,7 @@ def prepare_cvp_route_materials(
 
     review_claims: list[ReviewClaim] = []
     unavailable_evidence = []
-    unusable_context_claims = []
+    unusable_context_claims = list(unavailable_observation_claims)
     fragments_by_source: dict[str, dict[str, Any]] = {sid: {} for sid in source_ids}
     for claim_id in sorted(claim_ids):
         unavailable = frozenset(eid for eid in claims[claim_id].evidence_step_ids
@@ -203,7 +224,7 @@ def prepare_cvp_route_materials(
                 context_claim_ids=tuple(sorted(related)),
                 include_connection_judgments=include_connection_judgments)
 
-    records = {**head_row, **revision_rows, **route_rows, **link_rows, **claim_rows,
+    records = {**head_row, **revision_rows, **route_rows, **link_rows, **claim_rows, **history_rows,
                **evidence_rows, **fragment_rows, **source_rows, **citation_rows}
     judgments = []
     if include_connection_judgments:
@@ -221,7 +242,7 @@ def prepare_cvp_route_materials(
                     'decision_id':link.decision_id, 'claim_id':link.claim_id, 'link_type':link.link_type,
                     'viewpoint_revision_id':revision_id, 'reasons':[decision['reason']],
                     'review_artifact_sha256':decision['review_artifact_sha256']})
-    pins = {(collection, object_id): (row["revision"], row["content_sha256"], False)
+    pins = {(collection, object_id): (row["revision"], row["content_sha256"], bool(row.get("retired")))
             for (collection, object_id), row in records.items()}
     store.verify_current_read_pins(pins)
     body = {
@@ -237,7 +258,8 @@ def prepare_cvp_route_materials(
         "existing_attestations": existing_attestations,
         "record_pins": [
             {"collection": collection, "object_id": object_id,
-             "revision": row["revision"], "content_sha256": row["content_sha256"]}
+             "revision": row["revision"], "content_sha256": row["content_sha256"],
+             **({"retired":True} if row.get("retired") else {})}
             for (collection, object_id), row in sorted(records.items())
         ],
         "physical_sources": physical_sources,
@@ -266,7 +288,7 @@ def verify_cvp_route_materials(store: Any, materials: dict[str, Any]) -> None:
         raise ValueError("Route material artifact changed")
     store.verify_current_read_pins({
         (row["collection"], row["object_id"]):
-            (row["revision"], row["content_sha256"], False)
+            (row["revision"], row["content_sha256"], bool(row.get("retired")))
         for row in materials["record_pins"]
     })
     current_links = store.read_cvp_links(viewpoint_ids=[materials["viewpoint_id"]])

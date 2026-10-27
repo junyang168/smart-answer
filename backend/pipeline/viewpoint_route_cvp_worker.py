@@ -118,7 +118,7 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
         raise ValueError('committed Route recovery lacks its exact passing review')
     authenticate_saved_route_review(output_dir, run['rounds'][-1]['round'], final, policy_path)
     store.verify_current_read_pins({(r['collection'],r['object_id']):
-        (r['revision'],r['content_sha256'],False) for r in material['record_pins']
+        (r['revision'],r['content_sha256'],bool(r.get('retired'))) for r in material['record_pins']
         if r['collection'] not in ROUTE_COLLECTIONS})
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
     for source in material['physical_sources']:
@@ -187,29 +187,97 @@ def enqueue_current_cvp_routes(
 def route_affected_viewpoints(package: dict[str, Any]) -> list[str]:
     """CVPs whose head, revision or active member link was written."""
 
-    ids = {row["viewpoint_id"] for row in package.get("viewpoint_revisions", [])}
+    ids = {row["viewpoint_id"] for col in ("canonical_viewpoints", "viewpoint_revisions")
+           for row in package.get(col, [])}
     ids.update(row["viewpoint_id"] for row in package.get("viewpoint_claim_links", []))
     return sorted(ids)
 
 
 def handoff_cvp_route_jobs(
     store: PostgresKnowledgeStore, package: dict[str, Any],
-    queue_dir: Path, issue_dir: Path,
+    queue_dir: Path, issue_dir: Path, *, update_viewpoint_ids=(),
 ) -> dict[str, Any]:
     """Keep a committed CVP independent from later Route material failures."""
 
     jobs = []
     issues = {}
-    for viewpoint_id in route_affected_viewpoints(package):
+    inactive = {}
+    dependencies = {}
+    ids = set(route_affected_viewpoints(package)) | set(update_viewpoint_ids)
+    # A moved link affects both old and new targets. The complete update scope
+    # carries the old endpoint even when it has no business writes.
+    previous_path = issue_dir / 'route-handoff.json'
+    previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
+    if previous and previous.get('artifact_sha256') != sha256_json({
+            k:v for k,v in previous.items() if k!='artifact_sha256'}):
+        raise ValueError('saved Route handoff changed')
+    pending = sorted(ids)
+    while pending:
+        viewpoint_id = pending.pop(0)
         try:
-            jobs.extend(enqueue_current_cvp_routes(store, [viewpoint_id], queue_dir))
+            if not update_viewpoint_ids:
+                jobs.extend(enqueue_current_cvp_routes(store, [viewpoint_id], queue_dir))
+                continue
+            row = store.get_record_state('canonical_viewpoints', viewpoint_id)
+            if not row or row.get('retired'):
+                raise ValueError('Route handoff current viewpoint is missing or retired')
+            view = row['payload']
+            if update_viewpoint_ids and view['identity_status'] != 'active':
+                # Existing runtime projection excludes inactive conclusions.
+                # Close their current use, retaining historical route records;
+                # never send them to the active-CVP model worker.
+                inactive[viewpoint_id] = {'identity_status':view['identity_status'],
+                    'revision':row['revision'], 'content_sha256':row['content_sha256'],
+                    'current_use':'closed_by_inactive_conclusion'}
+                survivor = view.get('redirect_to_viewpoint_id')
+                if survivor and survivor not in ids:
+                    ids.add(survivor);pending.append(survivor)
+                continue
+            policy = load_route_policy(DEFAULT_POLICY)
+            policy_sha = route_policy_fingerprint(policy, prompt_sha256s=route_policy_prompt_sha256s(
+                policy, prompt_dir=Path(__file__).resolve().parent/'prompts'))
+            material = prepare_cvp_route_materials(store, viewpoint_id,
+                include_context=policy['schema_version']=='wang_route_resolution_policy_v8',
+                include_connection_judgments=True)
+            # Route writes change their own baseline. They must not create a
+            # new update job when the CVP/Claim/source dependencies are intact.
+            basis = sha256_json({'policy_sha256':policy_sha, 'current_input':{
+                field:material.get(field) for field in ('viewpoint','revision','links','claims',
+                    'source_sections','physical_sources','unavailable_evidence','approved_connection_judgments')}})
+            old = previous.get('dependencies',{}).get(viewpoint_id)
+            queue = CvpRouteQueue(queue_dir)
+            state_path = queue.states / (old['job_id']+'.json') if old else None
+            if old and old['dependency_sha256']==basis and state_path.exists():
+                job_id=old['job_id']
+                visited=set()
+                while True:
+                    if job_id in visited:
+                        raise ValueError('Route handoff supersession cycle')
+                    visited.add(job_id)
+                    state=json.loads((queue.states/(job_id+'.json')).read_text())
+                    if state['status']!='superseded':break
+                    detail=state.get('detail') or ''
+                    if not detail.startswith('replaced by CRJ-'):
+                        raise ValueError('superseded Route job lacks its replacement identity')
+                    successor=detail.removeprefix('replaced by ')
+                    next_job=json.loads((queue.jobs/(successor+'.json')).read_text())
+                    if (next_job.get('viewpoint_id')!=viewpoint_id or next_job.get('policy_sha256')!=policy_sha
+                            or next_job.get('job_id')!=successor or next_job.get('artifact_sha256')!=sha256_json({
+                                k:v for k,v in next_job.items() if k!='artifact_sha256'})):
+                        raise ValueError('Route replacement differs from the bound handoff')
+                    job_id=successor
+            else:
+                job=make_cvp_route_job(viewpoint_id,material['artifact_sha256'],policy_sha)
+                queue.enqueue(job);job_id=job['job_id']
+            jobs.append(job_id)
+            dependencies[viewpoint_id]={'dependency_sha256':basis,'job_id':job_id}
         except Exception as exc:
             issues[viewpoint_id] = str(exc)
     report = {"schema_version": "wang_cvp_route_handoff_v2",
-              "viewpoint_ids": route_affected_viewpoints(package),
-              "job_ids": sorted(jobs), "issues": issues}
-    write_derived(issue_dir / "route-handoff.json",
-                  report | {"artifact_sha256": sha256_json(report)})
+              "viewpoint_ids": sorted(ids), "job_ids": sorted(set(jobs)), "issues": issues}
+    if update_viewpoint_ids:
+        report.update(dependencies=dependencies,inactive_viewpoints=inactive)
+    write_derived(previous_path, report | {"artifact_sha256": sha256_json(report)})
     return report
 
 
@@ -225,7 +293,31 @@ def handoff_completed_cvp_groups(store: PostgresKnowledgeStore, parent: dict[str
             step["reviewed"]["evidence"]["package"]["payload"],
             root / "route-queue-v2",
             Path(step["materials"]["step_root"]),
+            update_viewpoint_ids=parent["request"]["input"].get("update",{}).get("viewpoint_ids",()),
         )
+
+
+def cvp_update_completion(store, parent, root):
+    """Report both stages without relabeling a CVP-only completion as finished."""
+    if parent['result'].get('status')!='completed':
+        return {'status':'cvp_pending','cvp_status':parent['result'].get('status')}
+    states={};issues={};inactive={}
+    for unit in parent['units'].values():
+        step=store.get_cvp_group(unit['completed_step'])
+        path=Path(step['materials']['step_root'])/'route-handoff.json'
+        if not path.exists():
+            issues[unit['completed_step']]='missing Route handoff'
+            continue
+        report=json.loads(path.read_text())
+        if report.get('artifact_sha256')!=sha256_json({k:v for k,v in report.items() if k!='artifact_sha256'}):
+            raise ValueError('Route handoff report changed')
+        issues.update(report['issues']);inactive.update(report.get('inactive_viewpoints',{}))
+        for job_id in report['job_ids']:
+            path=Path(root)/'route-queue-v2'/'states'/(job_id+'.json')
+            states[job_id]=json.loads(path.read_text())['status'] if path.exists() else 'missing'
+    complete=not issues and all(state=='complete' for state in states.values())
+    return {'status':'completed' if complete else 'arguments_pending', 'cvp_status':'completed',
+            'argument_jobs':states, 'issues':issues, 'inactive_viewpoints':inactive}
 
 
 def process_cvp_route(
@@ -326,7 +418,7 @@ def process_cvp_route(
                               retiring_keys=retiring, transactional=True)
     plan_context = store.read_package_cvp_context(package, retiring=retiring)
     material_pins = {(row["collection"], row["object_id"]):
-                     (row["revision"], row["content_sha256"], False)
+                     (row["revision"], row["content_sha256"], bool(row.get("retired")))
                      for row in materials["record_pins"]}
     for key, row in plan_context.items():
         pin = (row["revision"], row["content_sha256"],

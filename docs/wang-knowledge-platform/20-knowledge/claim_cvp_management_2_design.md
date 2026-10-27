@@ -3,7 +3,7 @@
 > **读者**：Solution architect、Developer、流程负责人。
 > **类型**：规范。
 > **状态**：当前目标设计；未启用为生产契约。
-> **更新模式**：第 8.9 节明确现有 CVP 与论证层的更新输入及共用流程；本次仅交付设计，未验证其端到端实现。
+> **更新模式与代码对齐**：2026-10-27（#474）；第 8.9 节已接入现有 `maintain` runner 和逐 CVP 论证 worker，以临时 PostgreSQL 和模拟模型验证两阶段流程；尚未作真实模型／生产数据验收。
 > **实施状态**：2026-10-19 发现 #436 分支不论实际初次 propose 大小都先按全部候选 detail 筛选，触发条件过宽；该执行已停止。设计改为按实际请求超限触发，修正后的完整生命周期尚待验收。Claim 实作现状以其子卡和实施记录为准。
 > **权威范围**：#357 下两管理域的目标职责、Claim 多轮退出条件及完整生命周期验收。受使命与架构约束；不授予模型调用、内容修改或旧预算重开权限。
 
@@ -355,6 +355,12 @@ GPT 可以建议保留、修改 statement／summary／范围、调整必要连�
 **完成与恢复。** 沿第 8.6–8.7 节及现有论证层契约分别保存两阶段结果。CVP 已完成而论证层未完成时，保留已提交 CVP，明确哪些路线／实例／观察仍过期或待处理，不能宣称整次更新完成，也不能把旧绑定继续作为当前有效依据。全部受影响 CVP 及其必要论证维护都完成审核、提交／零写项核验、回读与交接结案后，才关闭本次更新。独立质量审计另记，不追加模型终审。
 
 两阶段复用各自现有 policy、调用记录、累计资源、短事务和精确版本核对；输入漂移、旧 findings、未知调用及已提交恢复沿既有规则处理。更新模式不产生新的预算重置或重跑许可，不增加后台调度框架、独立状态机或全库备份步骤。
+
+**调用与状态接口。** `backend.pipeline.cvp_update_preparation` 只做只读准备：`affected_update_viewpoints(store, claim_ids)` 沿现有反向依赖读取 active／invalidated 连接、关系支持、实例和观察所影响的当前身份；`prepare_update_input(store, base_input, viewpoint_ids=[...], replacement_claim_ids=[...])` 收齐当前成员与明确的替代候选，生成现有 input envelope。`update_permissions(store, viewpoint_ids)` 返回该维护范围的具体字段清单，仍须绑定到原有任务授权记录，不增加一轮人工批准。
+
+把所得 input 放入现有 `wang_cvp_management_v2` request，使用 `mode=maintain`，`maintenance_viewpoint_ids` 与 `input.update.viewpoint_ids` 完全相同；预算、创建槽、授权与执行 root 沿现有契约。执行入口仍为 `cvp_sql_flow --action cvp-management`。通常每个 request 一个 CVP；已知要改挂／合并到另一已有身份时，同一 request 带入两端，不能把它们分成独立写入。普通更新只读取已知受影响身份及当前归属的 head，不扫描无关 CVP 的索引，也不调用全库模型 recall。
+
+更新返回的 `status` 和 `update.status` 为 `cvp_pending`、`arguments_pending` 或 `completed`；原 CVP 阶段结果单列为 `cvp_status`，不改写已保存的阶段完成事实。`route-handoff.json` 列出每个当前论证 job 或具体交接问题；队列仍是现有 `route-queue-v2`，由现有逐 CVP worker 执行。续跑只核对已审核后像的必要当前依赖并重试交接，不重置 GPT／Opus 调用；论证写入自身历史不会产生重复更新 job。inactive 身份关闭当前使用并保留历史，不送普通 worker；合并后存续身份继续进队列。旧观察所用 Claim 已退役或被替代时，作为不可用历史交给完整审核明确退役／重建，不能因组包拒绝退役 Claim 而无法维护。
 
 ## 9. 共同执行与端到端验收
 

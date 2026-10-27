@@ -192,7 +192,7 @@ def validate_sql_review(store,cursor,step,evidence,plan):
     for key,row in original.items():
         actual=cursor.execute('''SELECT revision,content_sha256,retired_at FROM wang_knowledge.objects
                                 WHERE collection=%s AND object_id=%s''',key).fetchone()
-        if actual!=(row['revision'],row['content_sha256'],None):
+        if not actual or (actual[0],actual[1],actual[2] is not None)!=(row['revision'],row['content_sha256'],bool(row.get('retired'))):
             raise ValueError('CVP2 selected input or necessary member changed')
     wanted={tuple(key) for key in original}
     link_ids={oid for (col,oid),row in original.items() if col=='viewpoint_claim_links'
@@ -310,6 +310,11 @@ def validate_completion_scope(store,conn,cursor,evidence,observed):
     """
     from .postgres_store import record_content_sha
     package=validate_evidence(evidence)
+    if evidence['bundle'].get('update') is not None:
+        unavailable=set(evidence['bundle']['update']['unavailable_claim_ids'])
+        store._assert_transaction_read_pins(cursor,{(row['collection'],row['object_id']):
+            (row['revision'],row['content_sha256'],bool(row.get('retired')))
+            for row in evidence['bundle']['records'] if row['collection']=='claims' and row['object_id'] in unavailable})
     keys={(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]) for col,rows in package.items()
           if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
     closure=store._affected_cvp_context(conn,sorted(keys)) if keys else {}

@@ -142,6 +142,10 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     if [r['claim_id'] for r in rows]!=ids or recall.get('identity_decided') is not False:
         raise ValueError('recall Claim denominator or identity boundary differs')
     maintenance=set(maintenance_viewpoint_ids)
+    update=preflight.get('update')
+    unavailable=set((update or {}).get('unavailable_claim_ids',[]))
+    if update is not None and maintenance != set(update['viewpoint_ids']):
+        raise ValueError('update material must preserve its complete maintain scope')
     candidate_vids={vid for row in rows for vid in row['viewpoint_ids']}
     primary_vids=sorted(candidate_vids|maintenance)
     heads={h['viewpoint_id']:h for h in preflight['heads']}
@@ -153,7 +157,11 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     records={}
     def accept(got):
         for key,row in got.items():
-            if row.get('retired') or record_content_sha(row['payload'])!=row['content_sha256']:
+            if (update is not None and key[0]=='claims' and key[1] not in ids
+                    and (row.get('retired') or row['payload'].get('review_status')=='superseded')):
+                unavailable.add(key[1])
+            if ((row.get('retired') and key not in {('claims',cid) for cid in unavailable})
+                    or record_content_sha(row['payload'])!=row['content_sha256']):
                 raise ValueError('common material contains a retired or inconsistent record')
             if key in records and records[key]!=row:
                 raise ValueError('superseded_input: common dependency changed while reading')
@@ -228,6 +236,7 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     read(('claims',cid) for cid in all_claims)
     support_ids=set(ids)|set(member_support_ids)|relation_claims|{r['payload']['claim_id'] for r in supplied_links.values()
         if r['payload']['viewpoint_id'] in maintenance}
+    support_ids -= unavailable
     evidence_ids={eid for cid in support_ids for eid in records['claims',cid]['payload'].get('evidence_step_ids',[])}
     read(('evidence_steps',eid) for eid in evidence_ids)
     fragment_ids={fid for eid in evidence_ids for fid in evidence_fragment_ids(records['evidence_steps',eid]['payload'])}
@@ -272,7 +281,8 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     member_authority={cid:deepcopy(store.claim_management_qualification(cid)) for cid in all_claims if cid not in ids}
     all_authority={**member_authority,**authority}
     material={'claims':[{'qualification':deepcopy(all_authority.get(cid)),'claim_ref':refs['claims'][cid],'target':cid in ids,'support_loaded':cid in support_ids,
-                        'content':content[cid]} for cid in all_claims],
+                        'content':content[cid],
+                        **({'support_status':'unavailable_history_only'} if cid in unavailable else {})} for cid in all_claims],
         'viewpoints':[{'cvp_ref':refs['canonical_viewpoints'][vid],
             'context_only':vid in context_vids,'viewpoint':records['canonical_viewpoints',vid]['payload'],
             'head':records['viewpoint_revisions',records['canonical_viewpoints',vid]['payload']['current_revision_id']]['payload']} for vid in vids],
@@ -296,7 +306,14 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
         'fragments':[{'fragment_ref':refs['source_fragments'][fid],'content':records['source_fragments',fid]['payload']} for fid in sorted(fragment_ids)],
         'citations':[{'citation_ref':refs['citations'][cid],'content':records['citations',cid]['payload']} for cid in sorted(citation_ids-{None,''})],
         'sources':sources}
-    stored_summaries,summary_status,summary_sources=_current_stored_summaries(store,records,vids,source_loader)
+    stored_summaries,summary_status,summary_sources=_current_stored_summaries(
+        store,records,[vid for vid in vids if not update or vid not in maintenance],source_loader)
+    if update is not None:
+        material['update']={'target_cvp_refs':[refs['canonical_viewpoints'][vid] for vid in sorted(maintenance)],
+            'replacement_claim_refs':[refs['claims'][cid] for cid in update['replacement_claim_ids']],
+            'unavailable_claim_refs':[refs['claims'][cid] for cid in sorted(unavailable)],
+            'existing_text_is_evidence':False}
+        summary_status.update({vid:'requires_current_review' for vid in maintenance})
     physical_by_source={row['source_id']:row for row in [*physical,*summary_sources]}
     physical=[physical_by_source[sid] for sid in sorted(physical_by_source)]
     human_source_decisions=store.read_human_source_decisions([row['source_id'] for row in physical])
@@ -308,16 +325,17 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     summary_bindings=[]
     if summary_root:
         from backend.pipeline.cvp_contextual_summary import load_current_cards
-        summaries,summary_bindings=load_current_cards(store,summary_root,vids)
+        summaries,summary_bindings=load_current_cards(store,summary_root,[vid for vid in vids if not update or vid not in maintenance])
         for item in material['viewpoints']:
             vid=item['viewpoint']['viewpoint_id']
             if vid in summaries and vid not in stored_summaries:
                 item['contextual_summary']={'text':summaries[vid],'attribution':'editorial_synthesis'}
                 item['summary_status']='current'
-    pins={(col,oid):(r['revision'],r['content_sha256'],False) for (col,oid),r in records.items()}
+    pins={(col,oid):(r['revision'],r['content_sha256'],bool(r.get('retired'))) for (col,oid),r in records.items()}
     store.verify_current_read_pins(pins)
     return seal({'schema_version':VERSION,'preflight_sha256':preflight['artifact_sha256'],
         'relationship_scope':'candidate_one_hop_v1',
+        **({'update':{**deepcopy(update),'unavailable_claim_ids':sorted(unavailable)}} if update is not None else {}),
         'recall_sha256':recall['artifact_sha256'],'group_key':group_key,'material':material,
         'summary_bindings':summary_bindings,
         'references':refs,'records':[{'collection':col,'object_id':oid,**row} for (col,oid),row in sorted(records.items())],
@@ -417,6 +435,7 @@ def action_member_requests(bundle,recall,candidate):
             if row['cvp_ref'] in {references[vid] for vid in required}
             and row['content'].get('effective_state')=='active'}
     unloaded={row['claim_ref'] for row in bundle['material']['claims']
-              if not row['target'] and not row['support_loaded']}
+              if not row['target'] and not row['support_loaded']
+              and row.get('support_status')!='unavailable_history_only'}
     return [{'member_ref':ref,'reason':'核对拟连接或新建观点与已有成员的完整依据'}
             for ref in sorted(active & unloaded)]
