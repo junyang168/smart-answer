@@ -78,7 +78,7 @@ class Policy(source.Contract):
 
     evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
-    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2'] | None = None
+    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
@@ -115,7 +115,7 @@ class Policy(source.Contract):
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
             raise ValueError('compact model decisions require the joint content Update contract')
-        if self.evidence_review_contract and (self.model_output_contract != 'claim_changes_v2' or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
+        if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
             raise ValueError('own Evidence review requires scoped compact Opus and program readback')
         return self
 

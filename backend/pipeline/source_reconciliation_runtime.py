@@ -114,10 +114,11 @@ def claim_management_model_adapter(role, policy, *, live=False):
         response_model = JointJsonCandidate if role == 'gpt' else JointReview
         schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
     if policy.model_output_contract:
-        from backend.pipeline.claim_model_output import Changes, FindingsReview
-        response_model = Changes if role == 'gpt' else FindingsReview
-        schema_name = 'claim_changes_v1' if role == 'gpt' else 'claim_findings_review_v1'
-        version = 'v2' if policy.model_output_contract == 'claim_changes_v2' else 'v1'
+        from backend.pipeline.claim_model_output import Changes, CreatingChanges, FindingsReview, CREATING_CONTRACT
+        creating = policy.model_output_contract == CREATING_CONTRACT
+        response_model = (CreatingChanges if creating else Changes) if role == 'gpt' else FindingsReview
+        schema_name = ('claim_changes_v3' if creating else 'claim_changes_v1') if role == 'gpt' else 'claim_findings_review_v1'
+        version = {'claim_changes_v2': 'v2', CREATING_CONTRACT: 'v3'}.get(policy.model_output_contract, 'v1')
         prompt = semantic_prompt((PROMPTS / ('claim_management_compact_' + version + '.md')).read_text()) + ('\n你是提议者，输出 Changes。' if role == 'gpt' else '\n你是独立 Opus 审阅者，输出 FindingsReview。')
     if policy.evidence_review_contract:
         from backend.pipeline.claim_evidence_review import BindingFindingsReview

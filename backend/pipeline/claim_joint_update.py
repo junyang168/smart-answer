@@ -56,6 +56,10 @@ def finding_permission_extension(previous, old, request):
         and all((not key.startswith('claims/') or key in request.target_keys) and not frozen[key]['retired'] for key in added))
 
 
+def creates(policy):
+    return policy.model_output_contract == 'claim_changes_v3'
+
+
 def admission_error(request, policy, before, goal):
     """For new actions only. The caller persists the refusal before any call."""
     if request.operation != 'Update':
@@ -67,8 +71,14 @@ def admission_error(request, policy, before, goal):
     try:
         if len(request.target_keys) > (policy.joint_update_max_targets or 1):
             raise ValueError('joint Update exceeds joint_update_max_targets')
-        if request.creation_permissions:
+        if request.creation_permissions and not creates(policy):
             raise ValueError('joint Update supports existing retain/update only; creation requires a separate capability')
+        if creates(policy) and request.creation_permissions:
+            from backend.pipeline import claim_management as cm
+            payloads = {k: v['payload'] for k, v in before.items()}
+            own = set().union(*(cm.own_source_ids(payloads[k], payloads) for k in request.target_keys))
+            if any(p.collection != 'claims' or p.source_id not in own for p in request.creation_permissions):
+                raise ValueError('joint Update may create only a Claim from a target\'s own source')
         if not policy.all_findings_to_gpt:
             raise ValueError('joint Update must adjudicate all findings with GPT')
         required = required_keys(request)
@@ -101,14 +111,18 @@ def validate_candidate_scope(request, before, candidate):
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if not required <= set(dispositions) or not required <= set(before):
         raise ValueError('joint Update candidate omitted required maintenance disposition')
-    if candidate.operation not in {None, 'Update'} or candidate.replacements or request.creation_permissions:
+    if candidate.operation not in {None, 'Update'} or candidate.replacements:
         raise ValueError('joint Update supports existing retain/update only')
+    created = [d.record_key for d in candidate.dispositions if d.action == 'create']
+    # One new same-source Claim per action, under an explicit creation grant.
+    if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
+        raise ValueError('joint Update may create at most one granted Claim')
     for disposition in candidate.dispositions:
-        if disposition.action not in {'retain', 'update'}:
+        if disposition.action not in {'retain', 'update', 'create'}:
             raise ValueError('joint Update supports existing retain/update only')
         if disposition.action == 'update' and proposed.get(disposition.record_key) == before.get(disposition.record_key, {}).get('payload'):
             raise ValueError('joint Update unchanged objects require retain disposition')
-        if disposition.action != 'retain' and disposition.record_key.startswith('claims/') and disposition.record_key not in request.target_keys:
+        if disposition.action == 'update' and disposition.record_key.startswith('claims/') and disposition.record_key not in request.target_keys:
             raise ValueError('joint Update cannot write a hidden Claim target')
 
 
@@ -181,6 +195,9 @@ def verify_completion(goal, child, observed):
         raise ValueError('joint Update completion candidate/review binding drift')
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
     obligations = set(goal['target_keys']) | set(required)
+    created = {k for k, d in dispositions.items() if d.action == 'create'}
+    if not created <= approved or not created <= set(observed) or any(observed[k].get('retired') for k in created):
+        raise ValueError('joint Update completion lacks per-object pass or current readback for a created Claim')
     if (not obligations <= set(dispositions) or not obligations <= approved or not obligations <= set(observed)
             or any(observed[k].get('retired') for k in obligations)
             or any(dispositions[k].action not in {'retain', 'update'} for k in obligations)):
