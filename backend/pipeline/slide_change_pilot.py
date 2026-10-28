@@ -192,6 +192,9 @@ def cropped(out: Path, manifest: dict, row: dict) -> np.ndarray:
     if frame is None:
         raise ValueError(f"Missing image {row['id']}")
     scale_x, scale_y = frame.shape[1] / manifest["original_width"], frame.shape[0] / manifest["original_height"]
+    if row.get('screen_quad_original_xy'):
+        from backend.pipeline.projected_slide_region import rectify
+        return rectify(frame,[[x*scale_x,y*scale_y] for x,y in row['screen_quad_original_xy']])
     x, y, w, h = row["roi_original_xywh"]
     x, y, w, h = round(x * scale_x), round(y * scale_y), round(w * scale_x), round(h * scale_y)
     result = frame[y:y + h, x:x + w]
@@ -613,7 +616,15 @@ def export_originals(out: Path, manifest: dict, candidates: dict, events: list[d
                 event.update(original_image=f'originals/{event["id"]}-full.png',
                              slide_image=f'originals/{event["id"]}-slide.png', decoder_pts_ms=pts)
                 image_write(out / event["original_image"], frame)
-                image_write(out / event["slide_image"], frame[y:y + h, x:x + w])
+                selected_row=next(r for r in rows if r['id']==event['selected_frame_id'])
+                if selected_row.get('screen_quad_original_xy'):
+                    from backend.pipeline.projected_slide_region import rectify
+                    quad=selected_row['screen_quad_original_xy']
+                    event['screen_quad_original_xy']=quad
+                    event['image_derivation']='source_pixels_perspective_rectification'
+                    image_write(out / event['slide_image'],rectify(frame,quad))
+                else:
+                    image_write(out / event["slide_image"], frame[y:y + h, x:x + w])
                 event.update(original_sha256=file_sha(out / event["original_image"]),
                              slide_sha256=file_sha(out / event["slide_image"]))
     finally:

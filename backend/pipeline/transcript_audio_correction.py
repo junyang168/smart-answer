@@ -56,6 +56,16 @@ def normalized(text: str) -> str:
 
 def locate(text: str, old: str, occurrence: int) -> tuple[int, int]:
     starts = [m.start() for m in re.finditer(re.escape(old), text)] if old else []
+    if not starts and old and any(c in text for c in '\r\n'):
+        # ASR hard wraps are not lexical differences. Keep an exact map back
+        # to the original characters; spaces and punctuation are not folded.
+        positions=[i for i,c in enumerate(text) if c not in '\r\n']
+        flat=''.join(text[i] for i in positions)
+        quote=old.replace('\r','').replace('\n','')
+        matches=list(re.finditer(re.escape(quote),flat)) if quote else []
+        if type(occurrence) is int and 1<=occurrence<=len(matches):
+            match=matches[occurrence-1]
+            return positions[match.start()],positions[match.end()-1]+1
     if type(occurrence) is not int or not 1 <= occurrence <= len(starts):
         raise ValueError('Replacement does not identify an exact original occurrence')
     start = starts[occurrence - 1]
@@ -72,6 +82,28 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
         if row['occurrence'] != int(row['occurrence']):
             raise ValueError('Occurrence must be an integer')
         occurrence = int(row['occurrence'])
+        context={}
+        if len(row['old'])>32 or len(row['new'])>32:
+            # A short edit may arrive surrounded by a long unchanged English
+            # phrase. Trim only byte-identical context; prove the paragraph's
+            # resulting text is exactly the model's original replacement.
+            p=by_id[row['paragraph_id']]
+            left,right=locate(p['text'],row['old'],occurrence)
+            old,new=row['old'],row['new'];prefix=0;suffix=0
+            while prefix<min(len(old),len(new)) and old[prefix]==new[prefix]:prefix+=1
+            while suffix<min(len(old),len(new))-prefix and old[-1-suffix]==new[-1-suffix]:suffix+=1
+            # Retain context if the minimal change is an insertion/deletion.
+            if prefix+suffix>=min(len(old),len(new)) and prefix:prefix-=1
+            while prefix and unicodedata.category(old[prefix]).startswith('M'):prefix-=1
+            while suffix and unicodedata.category(old[len(old)-suffix]).startswith('M'):suffix-=1
+            end_old=len(old)-suffix;end_new=len(new)-suffix
+            quote,replacement=old[prefix:end_old],new[prefix:end_new]
+            starts=[m.start() for m in re.finditer(re.escape(quote),p['text'])] if quote else []
+            if (1<=len(quote)<=32 and 1<=len(replacement)<=32 and left+prefix in starts
+                and p['text'][:left]+new+p['text'][right:]==p['text'][:left+prefix]+replacement+p['text'][right-suffix:]):
+                context={'model_context_old':old,'model_context_new':new,'unchanged_context_trimmed':True}
+                row={**row,'old':quote,'new':replacement,'occurrence':starts.index(left+prefix)+1}
+                occurrence=row['occurrence']
         if not 1 <= len(row['old']) <= 32 or not 1 <= len(row['new']) <= 32:
             raise ValueError('Correction must be a bounded nonempty replacement')
         if normalized(row['old']) == normalized(row['new']):
@@ -93,8 +125,10 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
             start, end = locate(converted, old, occurrence)
         if start and unicodedata.category(p['text'][start]).startswith('M') or end < len(p['text']) and unicodedata.category(p['text'][end]).startswith('M'):
             raise ValueError('Correction would split a combining sequence')
-        item = {**row, 'old': p['text'][start:end], 'model_old': model_old,
-                'source_script_equivalence_used': p['text'][start:end] != model_old,
+        if p['text'][start:end].count('\n')!=model_old.count('\n') or p['text'][start:end].count('\r')!=model_old.count('\r'):
+            context['source_linebreak_equivalence_used']=True
+        item = {**row, **context, 'old': p['text'][start:end], 'model_old': model_old,
+                'source_script_equivalence_used': p['text'][start:end].replace('\r','').replace('\n','') != model_old.replace('\r','').replace('\n',''),
                 'occurrence': occurrence, 'start': start, 'end': end,
                 'paragraph_text_sha256': object_sha(p['text'])}
         if any(r['paragraph_id'] == p['id'] and r['start'] < end and start < r['end'] for r in result):
@@ -141,6 +175,20 @@ def audio_decision(paragraph: dict, proposal: dict) -> dict:
     if proposal['audio_support'] != 'clear':
         return {'status': 'pending', 'reason': 'Gemini 判定原聲不清楚，保留原文'}
     return {'status': 'machine_supported', 'reason': 'Gemini 結合原聲與投影片提示判定為明確辨識錯誤；機器校對，非人工確認'}
+
+
+def withhold_overlap_conflicts(answer, paragraphs, slide_ids):
+    """After the sole repair, retain source text for conflicting local edits."""
+    check_schema(answer,SCHEMA)
+    rows=[validate_proposals({'proposals':[r]},paragraphs,slide_ids)[0] for r in answer['proposals']]
+    conflicts=set()
+    for i,left in enumerate(rows):
+        for j,right in enumerate(rows[i+1:],start=i+1):
+            if left['paragraph_id']==right['paragraph_id'] and left['start']<right['end'] and right['start']<left['end']:
+                conflicts.update((i,j))
+    if not conflicts:raise ValueError('No overlap conflict can be safely isolated')
+    valid=validate_proposals({'proposals':[r for i,r in enumerate(answer['proposals']) if i not in conflicts]},paragraphs,slide_ids)
+    return valid,[{**r,'status':'withheld_overlap_conflict','reason_for_withholding':'Conflicting ranges after one structural repair; original text retained.'} for i,r in enumerate(rows) if i in conflicts]
 
 
 def apply_corrections(paragraphs: list[dict], proposals: list[dict]) -> list[dict]:
@@ -233,6 +281,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         if file_sha(source_dir / asset['original_image']) != asset['image_sha256']:
             raise ValueError('Original slide image changed')
     all_proposals, proposal_cost = [], 0.0
+    withheld=[]
     for batch_id in range(5):
         batch = [p for p in paragraphs if p['start_ms'] is not None and min(p['start_ms'] // 180000, 4) == batch_id]
         if not batch:
@@ -243,6 +292,9 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         occurrences = [s for s in source['occurrences'] if s['paragraph_id'] in ids]
         hints = [{'event_id': s['event_id'], 'time_ms': s['time_ms'], 'text': assets[s['asset_id']]['visible_text']} for s in occurrences]
         material = {'audio_start_ms': start, 'audio_end_ms': end, 'paragraphs': batch, 'slide_hints': hints}
+        if source.get('speaker_identity_hint'):
+            material['speaker_identity_hint']=source['speaker_identity_hint']
+            material['speaker_hint_rule']='Catalog identity is a hint, not audio proof. A competing name without clear contextual evidence must remain uncertain.'
         parts = [types.Part.from_text(text=adapter.prompt + '\nMaterials:\n' + json.dumps(material, ensure_ascii=False)),
                  types.Part.from_bytes(data=audio.read_bytes(), mime_type='audio/mp3')]
         selected = occurrences if len(occurrences) <= 6 else [occurrences[i * (len(occurrences)-1) // 5] for i in range(6)]
@@ -277,8 +329,13 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
             repair_request = {**request, 'stage': 'proposal_structure_repair_once',
                 'parent_response_sha256': object_sha(raw), 'repair_prompt': repair_text}
             repaired, repair_cost, request_sha = proposal_response(adapter, repair_parts, repair_request, out)
-            proposals = validate_repaired_proposals(json.loads(adapter.text(repaired)), batch,
-                                           {s['event_id'] for s in occurrences})
+            repaired_answer=json.loads(adapter.text(repaired))
+            try:
+                proposals = validate_repaired_proposals(repaired_answer, batch,{s['event_id'] for s in occurrences})
+            except ValueError as error:
+                if str(error)!='Overlapping correction proposals':raise
+                proposals,rejected=withhold_overlap_conflicts(repaired_answer,batch,{s['event_id'] for s in occurrences})
+                withheld += [{**r,'batch_id':batch_id,'proposal_request_sha256':request_sha} for r in rejected]
             cost += repair_cost
         all_proposals += [{**p, 'id': f'c{len(all_proposals)+i:03d}', 'proposal_request_sha256': request_sha,
                            'batch_id': batch_id} for i, p in enumerate(proposals)]
@@ -302,6 +359,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         'independent_asr_estimated_usd': 0,
         'word_times_recomputed': False, 'production_sources_written': 0}
     record['correction_offset_space'] = 'original_formatted_paragraph_unicode_codepoints'
+    if withheld:record['withheld_proposals']=withheld
     record['reconciliation_rounds_per_batch'] = 0
     save_json(out / 'correction_trial.json', record)
     render_review(source, source_dir, out, record)
@@ -310,7 +368,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
 
 def render_review(source: dict, source_dir: Path, out: Path, record: dict) -> None:
     e = html.escape
-    sections, markdown = [], ['# S 210307 原聲校對試稿', '', 'Slides 只作提示，修改以原聲為準。機器校對，非人工確認。', '']
+    sections, markdown = [], ['# 原聲校對試稿', '', 'Slides 只作提示，修改以原聲為準。機器校對，非人工確認。', '']
     corrected = {p['id']: p for p in record['corrected_paragraphs']}
     assets = {a['asset_id']: a for a in source['assets']}
     for paragraph in record['original_paragraphs']:
@@ -344,10 +402,10 @@ def render_review(source: dict, source_dir: Path, out: Path, record: dict) -> No
     (out / 'corrected_transcript.md').write_text('\n'.join(markdown), encoding='utf-8')
     counts = record['status_counts']
     page = '''<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>S 210307 原聲與投影片校對（新版）</title><style>body{font:18px/1.8 system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#222}
+<title>原聲與投影片校對試稿</title><style>body{font:18px/1.8 system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#222}
 section,aside{background:white;border-radius:8px;padding:20px;margin:20px 0}.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px}p{white-space:pre-wrap}
 del{background:#ffe0df;color:#9a2420}ins{background:#dff3e5;color:#165a30;text-decoration:none}article{border-top:1px solid #ddd;padding:14px 0}code{font:inherit;background:#eef1f5;padding:2px 4px}audio{width:min(100%,500px)}img{max-width:100%;height:auto}h3{font-size:17px;color:#555}button{padding:8px 14px;font:inherit}@media(max-width:700px){.columns{grid-template-columns:1fr}}</style>
-<h1>S 210307 原聲與投影片校對（新版）</h1><aside>Slides 只作提示，修改以原聲為準。Gemini 校對試稿，已移除重複轉錄檢查，非人工確認；原稿完整保留，章節和口頭語不依常識改寫。
+<h1>原聲與投影片校對試稿</h1><aside>Slides 只作提示，修改以原聲為準。Gemini 校對試稿，已移除重複轉錄檢查，非人工確認；原稿完整保留，章節和口頭語不依常識改寫。
 ''' + f'<p>已套用 {counts.get("machine_supported",0)} 處 · 保留待回聽 {counts.get("pending",0)} 處。音訊按原段落擷取，時間仍需核對。</p>' + '''
 <button id="filter" onclick="const on=this.dataset.on!=='1';this.dataset.on=on?'1':'0';document.querySelectorAll('section').forEach(x=>x.hidden=on&amp;&amp;x.dataset.changes==='0');this.textContent=on?'顯示全部段落':'只看有候選的段落'">只看有候選的段落</button>
 <p><a href="corrected_transcript.md">下載原稿與校對稿</a> · <a href="correction_trial.json">完整修改紀錄</a></p></aside>''' + ''.join(sections) + '</html>'

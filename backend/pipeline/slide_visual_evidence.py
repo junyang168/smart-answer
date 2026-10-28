@@ -159,10 +159,10 @@ def validate_content(content: dict) -> None:
             raise ValueError('Invalid unresolved image region')
 
 
-def render_svg(content: dict, width: int, height: int, image_sha: str) -> str:
+def render_svg(content: dict, width: int, height: int, image_sha: str, *, allow_text_only: bool = False) -> str:
     """Generate XML from primitives only. Never execute or embed model SVG/HTML."""
     validate_content(content)
-    if not content['has_diagram'] or not content['shapes']:
+    if not allow_text_only and (not content['has_diagram'] or not content['shapes']):
         raise ValueError('No visible diagram geometry; do not invent a diagram from prose')
     if not re.fullmatch(r'[0-9a-f]{64}', image_sha) or not 0 < width <= 20000 or not 0 < height <= 20000:
         raise ValueError('Invalid source image identity/dimensions')
@@ -260,6 +260,10 @@ def parse_visual_json(text: str) -> dict:
         if value != SCHEMA:
             raise ValueError('Unexpected extra visual response data')
         value = json.loads(rest)
+    if isinstance(value,dict) and 'results' in value and set(value)!={'results'}:
+        extras=set(value)-{'results'}
+        if extras <= set(SCHEMA) and all(value[k]==SCHEMA[k] for k in extras):
+            value={'results':value['results']}
     return value
 
 def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: int = 2,
