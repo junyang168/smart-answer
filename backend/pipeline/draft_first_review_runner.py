@@ -943,10 +943,17 @@ def main() -> int:
         baseline_review = seeded.get("review")
     for round_number in range(first_round, last_round + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
-        if seeded is not None and round_number == first_round:
+        # A stopped round with nothing open but a stage error has nothing to
+        # revise: the same draft gets a fresh full review (#488: a review that
+        # passed was stored as an error by a score-merge bug).
+        if seeded is not None and round_number == first_round and not (
+            seeded.get("stage_errors") and not seeded["blocking_findings"]
+        ):
             outcome = seeded
             _write(round_dir / "outcome.json", outcome)
         else:
+            if seeded is not None and round_number == first_round:
+                baseline_review = None
             outcome = run_gates(
                 manuscript=manuscript,
                 packet=packet,
