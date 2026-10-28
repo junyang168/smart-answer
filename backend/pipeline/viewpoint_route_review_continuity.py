@@ -57,6 +57,9 @@ def continuity_packet(packet, history, *, packet_path: Path, response_path: Path
         return packet
     if saved is None or OBSERVATION_IDENTITIES in saved:
         packet=with_observation_identities(packet)
+    from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
+    if saved is None or CREATION_SHAPES in saved:
+        packet=with_creation_shapes(packet)
     enriched = packet | {CONTEXT: {
         'schema_version': VERSION,
         'shared_rules': list(RULES),

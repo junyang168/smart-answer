@@ -28,6 +28,9 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if not request.exists() or OBSERVATION_IDENTITIES in read_artifact(request):
             repair=with_observation_identities(repair)
+        from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
+        if not request.exists() or CREATION_SHAPES in read_artifact(request):
+            repair=with_creation_shapes(repair)
         if request.exists():
             saved = read_artifact(request)
             if ({k:v for k,v in saved.items() if k != 'validation_findings'} !=
@@ -64,6 +67,9 @@ def read_validated_changes(adapter, packet, cache):
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if OBSERVATION_IDENTITIES in actual:
             expected=with_observation_identities(expected)
+        from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
+        if CREATION_SHAPES in actual:
+            expected=with_creation_shapes(expected)
         if actual != expected:
             raise ValueError('saved Route validation repair input changed')
         raw = read_saved_model_response(adapter, actual, response)

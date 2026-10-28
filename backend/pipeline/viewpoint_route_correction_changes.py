@@ -14,6 +14,7 @@ VERSION = 'wang_route_correction_changes_v1'
 MARKER = 'route_correction_output_contract'
 PROPOSAL_VERSION = 'wang_route_proposal_changes_v1'
 PROPOSAL_MARKER = 'route_proposal_output_contract'
+CREATION_SHAPES = 'route_creation_field_schemas'
 COLLECTIONS = {
     'argument_route_candidates': ('local_route_key',),
     'source_route_attestations': ('local_attestation_key',),
@@ -44,6 +45,42 @@ class CorrectionChanges(StrictBatchModel):
 class ProposalChanges(StrictBatchModel):
     schema_version: Literal['wang_route_proposal_changes_v1'] = PROPOSAL_VERSION
     edits: list[ProposalEdit]
+
+
+def with_creation_shapes(packet):
+    """Empty collections have no examples; supply their actual business shape."""
+    baseline=(packet.get('route_proposal_baseline') or packet.get('route_proposal')
+              or packet.get('route_proposal_context'))
+    if not baseline:
+        return packet
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteProposalV3Response
+    from backend.api.canonical_repository.viewpoint_batch_resolution import ArgumentRouteProposalV2Response
+    model=ArgumentRouteProposalV3Response if 'observation_supports' in baseline else ArgumentRouteProposalV2Response
+    schema=model.model_json_schema();definitions=schema.get('$defs',{});shapes={}
+    for name,identity in COLLECTIONS.items():
+        if name not in baseline or baseline[name] or not identity:
+            continue
+        item=deepcopy(schema['properties'][name]['items'])
+        if '$ref' in item:item=deepcopy(definitions[item['$ref'].rsplit('/',1)[1]])
+        supplied=set(identity) if len(identity)==1 else set()
+        if name=='source_route_attestations':supplied.add('source_revision_sha256')
+        item['properties']={k:v for k,v in item.get('properties',{}).items() if k not in supplied}
+        item['required']=[k for k in item.get('required',[]) if k not in supplied]
+        shapes[name]=item
+    if not shapes:return packet
+    used={}
+    def collect(value):
+        if isinstance(value,dict):
+            if '$ref' in value:
+                name=value['$ref'].rsplit('/',1)[1]
+                if name not in used:
+                    used[name]=deepcopy(definitions[name]);collect(used[name])
+            for child in value.values():collect(child)
+        elif isinstance(value,list):
+            for child in value:collect(child)
+    collect(shapes)
+    return packet | {CREATION_SHAPES:{'collections':shapes,'$defs':used,
+        'instruction':'新建空集合的条目时，fields_json必须使用相应集合的实际字段定义。程序拥有的local key及source SHA已省略，不需抄写。不要猜测字段名；这些是格式说明，不是新证据或内容批准。'}}
 
 
 PROMPT = '''你是同一 CVP 的论证层修改员。使用 wang_route_correction_changes_v1。

@@ -16,6 +16,27 @@ from backend.pipeline.viewpoint_route_resolution_worker import OwnershipGuardedA
 from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
 
 
+def test_empty_collections_receive_actual_creation_fields_without_program_keys():
+    from backend.pipeline.viewpoint_route_update_projection import update_baseline
+    from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
+    baseline=update_baseline(fixture_packet())
+    result=with_creation_shapes({'route_proposal_baseline':baseline})[CREATION_SHAPES]
+    route=result['collections']['argument_route_candidates']
+    assert 'ordered_inference_nodes' in route['required'] and 'conclusion_ref' in route['required']
+    assert 'local_route_key' not in route['properties']
+    attestation=result['collections']['source_route_attestations']
+    assert 'claim_ids' in attestation['required']
+    assert not {'local_attestation_key','source_revision_sha256'} & set(attestation['properties'])
+    def check_refs(value):
+        if isinstance(value,dict):
+            if '$ref' in value:assert value['$ref'].rsplit('/',1)[1] in result['$defs']
+            for child in value.values():check_refs(child)
+        elif isinstance(value,list):
+            for child in value:check_refs(child)
+    check_refs(result)
+    assert 'CCK-' not in json.dumps(result)
+
+
 def delta(edits):
     return {'schema_version': VERSION, 'finding_dispositions': [
         {'target_kind': 'observation', 'target_key': 'OBS-1', 'disposition': 'accepted',
