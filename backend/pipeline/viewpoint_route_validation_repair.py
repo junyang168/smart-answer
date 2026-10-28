@@ -33,9 +33,6 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
             'validation_instruction': repair_instruction}
         response = cache.with_name(cache.stem+f'-validation-{len(failures):03d}.json')
         request = response.with_name(response.stem+'-packet.json')
-        from backend.pipeline.viewpoint_route_review_scope import MARKER as SCOPE, with_review_scope
-        if not request.exists() or SCOPE in read_artifact(request):
-            repair=with_review_scope(repair)
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if not request.exists() or OBSERVATION_IDENTITIES in read_artifact(request):
             repair=with_observation_identities(repair)
@@ -45,6 +42,9 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
         if not request.exists() or RESTORE in read_artifact(request):
             repair=with_restore_contract(repair)
+        from backend.pipeline.viewpoint_route_review_scope import MARKER as SCOPE, with_review_scope
+        if not request.exists() or SCOPE in read_artifact(request):
+            repair=with_review_scope(repair)
         if request.exists():
             saved = read_artifact(request)
             if ({k:v for k,v in saved.items() if k != 'validation_findings'} !=
@@ -79,9 +79,6 @@ def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_RE
         actual = read_artifact(response.with_name(response.stem+'-packet.json'))
         expected = packet | {'prior_invalid_response': raw, 'validation_findings': failure['findings'],
             'validation_instruction': repair_instruction}
-        from backend.pipeline.viewpoint_route_review_scope import MARKER as SCOPE, with_review_scope
-        if SCOPE in actual:
-            expected=with_review_scope(expected)
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if OBSERVATION_IDENTITIES in actual:
             expected=with_observation_identities(expected)
@@ -91,6 +88,9 @@ def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_RE
         from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
         if RESTORE in actual:
             expected=with_restore_contract(expected)
+        from backend.pipeline.viewpoint_route_review_scope import MARKER as SCOPE, with_review_scope
+        if SCOPE in actual:
+            expected=with_review_scope(expected)
         if actual != expected:
             raise ValueError('saved Route validation repair input changed')
         raw = read_saved_model_response(adapter, actual, response)
