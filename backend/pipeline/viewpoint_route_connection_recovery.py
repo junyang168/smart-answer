@@ -173,6 +173,10 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         current=ArgumentRouteReconsiderationV3Response.model_validate(
             bind_attestation_source_ids(previous,old)[0]).revised_proposal.model_dump(mode='json')
         expected.add(f'raw-route-reconsideration-{i:03d}.call-intent.json')
+    from backend.pipeline.viewpoint_route_resolution import apply_confirmed_unattested_members
+    current=apply_confirmed_unattested_members(
+        proposal=ArgumentRouteProposalV3Response.model_validate(current),
+        review=ArgumentRouteReviewV3Response.model_validate(last_review)).model_dump(mode='json')
     technical_limit=max_correction_rounds
     if run.get('correction_round_extension_sha256'):
         from backend.pipeline.viewpoint_route_round_extension import round_extension, FILENAME

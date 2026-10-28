@@ -253,6 +253,7 @@ def run_cvp_route_scope(
             active=proposal_adapter(proposer,seed_path,response_path)
             compact=getattr(active,'_response_model',None) is ProposalChanges
             if compact:
+                initial_changes=True
                 baseline=deepcopy(raw)
                 seed_packet.update({PROPOSAL_MARKER:PROPOSAL_VERSION,'route_proposal_baseline':baseline,
                     'instruction':'Continue the exact saved complete proposal after the approved member repair. Return only actual edits against route_proposal_baseline. Account for the restored member, preserve the existing valid observations and no_route judgment unless current source evidence requires a change; this is not a new initial proposal or approval.'})
@@ -267,7 +268,7 @@ def run_cvp_route_scope(
             else:
                 corrected=proposal_model.model_validate(canonicalize_proposal(answer)[0])
             raw=corrected.model_dump(mode='json')
-            if sha256_json(raw) == connection_seed['proposal_sha256']:
+            if not compact and sha256_json(raw) == connection_seed['proposal_sha256']:
                 raise CvpRouteReviewIncomplete('restored membership correction made no change')
             write_immutable(output_dir/'connection-correction.json',{'proposal':raw,
                 'original_proposal_sha256':connection_seed['proposal_sha256'],

@@ -158,3 +158,24 @@ def test_upstream_repaired_member_uses_one_original_correction_then_full_review(
     with pytest.raises(ValueError,match='remaining original correction'):
         recovery.prepare_connection_continuation(tmp_path,packet,m,proposer=p,reviewer=r,
             reconsiderer=c,max_correction_rounds=0)
+
+
+def test_compact_member_continuation_can_keep_valid_content_and_review_new_connection(tmp_path,monkeypatch):
+    from test_route_update_changes import Client,proposer
+    from backend.pipeline.viewpoint_route_correction_changes import PROPOSAL_VERSION
+    packet,m,p,r,c=saved_exception(tmp_path,monkeypatch,original_judgments=True)
+    added=deepcopy(m['links'][0]);added.update(viewpoint_claim_link_id='L2',link_type='extends')
+    m['links'].append(added)
+    m['record_pins'].append({'collection':'viewpoint_claim_links','object_id':'L2','revision':1,'content_sha256':'L2'})
+    judgment=deepcopy(m['approved_connection_judgments'][0]);judgment.update(viewpoint_claim_link_id='L2',link_type='extends')
+    m['approved_connection_judgments'].append(judgment);m=seal(m)
+    packet['approved_connection_judgments']=m['approved_connection_judgments'];packet=seal(packet,'packet_sha256')
+    seed=recovery.prepare_connection_continuation(tmp_path,packet,m,proposer=p,reviewer=r,reconsiderer=c,max_correction_rounds=1)
+    client=Client(lambda payload,n:{'schema_version':PROPOSAL_VERSION,'edits':[]})
+    r._response=approved
+    result=run_cvp_route_scope(route_packet=packet,existing_routes=[],output_dir=tmp_path/recovery.DIRECTORY,
+        proposer=proposer(client),reviewer=r,reconsiderer=c,max_correction_rounds=1,connection_seed=seed)
+    assert len(client.packets)==1 and p.calls==1 and c.calls==0
+    assert result['rounds'][-1]['outcome']=='pass' and result['cvp_re_review_exceptions']==[]
+
+
