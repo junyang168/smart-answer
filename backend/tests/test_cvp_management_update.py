@@ -159,18 +159,27 @@ def test_repeated_invalid_proposal_does_not_loop_or_reach_opus(setup):
     assert 'no progress' in parent['units']['cvp-update']['detail']
 
 
-def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup):
+@pytest.mark.parametrize('legacy_frame',[False,True])
+def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup,monkeypatch,legacy_frame):
     from test_cvp_management import passing
     store,initial,root,clients,_,view,_,_=_initial(setup)
     request=_request(store,initial,root,[view],name='revision-program-feedback')
     clients['gpt'].requests.clear();clients['opus'].requests.clear()
     proposals=[];reviews=[]
+    real_rebase=runner._rebase_previous
     def propose(packet):
         proposals.append(packet)
         response=_member_candidate(packet,summary='此处人子称号表明耶稣的神性。')
         if len(proposals)==2:
             response['candidate']['component_dispositions'][0]['component_ref']='missing-component'
-        if len(proposals)==3:
+            if legacy_frame:
+                # Preserve one old frozen step exactly as the broken runner
+                # did, then restore fixed code before the next invalid delta.
+                monkeypatch.setattr(runner,'_rebase_previous',lambda request,old,new,previous,**kw:previous)
+        if len(proposals)==3 and legacy_frame:
+            monkeypatch.setattr(runner,'_rebase_previous',real_rebase)
+            response['candidate']['component_dispositions'][0]['component_ref']='another-invalid-component'
+        if len(proposals)==(4 if legacy_frame else 3):
             assert packet['program_validation_feedback']['findings']
             assert packet['previous']['prior_findings']
         return response
@@ -185,7 +194,7 @@ def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup):
         return envelope('review',review=value)
     clients['gpt'].behavior=_proposal_behavior(propose);clients['opus'].behavior=review
     result,step=_run(store,request,root.parent/'revision-error',clients)
-    assert len(proposals)==3 and len(reviews)==2
+    assert len(proposals)==(4 if legacy_frame else 3) and len(reviews)==2
     assert result['cvp_status']=='completed'
     assert reviews[-1]['candidate']['prior_findings']
 

@@ -750,6 +750,13 @@ def run(store,request,*,root,execute=False,clients=None):
                                 'program_validation_feedback':feedback,
                                 'program_validation_response_shas':[*failures,failed_sha]})
                             if previous is not None:
+                                if previous.get('material_sha256')!=bundle['artifact_sha256']:
+                                    # A legacy frozen step may already carry an
+                                    # unrebound previous frame. Normalize only
+                                    # the exact program-metadata preimage before
+                                    # adding another genuine validation finding.
+                                    previous=domain.compile_candidate(request,bundle,{},previous=previous,
+                                                                      prior_findings=prior_findings)
                                 previous=_rebase_previous(request,bundle,newbundle,previous,
                                                           prior_findings=prior_findings)
                             bundle=newbundle
