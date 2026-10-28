@@ -1,6 +1,6 @@
 """Bounded audio-first ASR correction trial; slides are hints, never authority.
 
-Only local replacements with independent audio-transcription support enter the
+Only local replacements judged clear by the audio-and-slide model enter the
 machine-corrected draft. Original speech, OCR and production sources stay intact.
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import obj, check_schema
 from backend.pipeline.transcript_audio_pilot import read_audio, write_audio, saved_call
 
-PROMPT_VERSION = 'audio-first-correction.v1'
+PROMPT_VERSION = 'audio-slide-correction.v2'
 PROMPT = '''Listen to the supplied lecture audio and compare the exact draft paragraphs.
 Propose only obvious ASR recognition errors, not stylistic editing. Return local
 replacements, never rewritten paragraphs. Preserve repetitions, fillers, unfinished
@@ -48,9 +48,6 @@ SCHEMA = obj({'proposals': {'type': 'array', 'maxItems': 12, 'items': obj({
     'kind': {'type': 'string', 'enum': ['lexical', 'proper_name', 'scripture_reference', 'foreign_word']},
     'audio_quote': {'type': 'string'}, 'audio_support': {'type': 'string', 'enum': ['clear', 'uncertain']},
     'reason': {'type': 'string'}, 'slide_event_ids': {'type': 'array', 'items': {'type': 'string'}}})}})
-BLIND_CONFIG = {'model': 'gpt-transcribe',
-    'prompt': '繁體中文課堂錄音，可能夾雜英文或外文。保留口頭重複、未完成語句與實際說出的數字；不要依常識修正講者。',
-    'extra_body': {'languages': ['zh-tw', 'en', 'el', 'he']}}
 
 
 def normalized(text: str) -> str:
@@ -79,8 +76,8 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
             raise ValueError('Correction must be a bounded nonempty replacement')
         if normalized(row['old']) == normalized(row['new']):
             raise ValueError('This stage must not rewrite punctuation/case alone')
-        if any(c in row['old'] + row['new'] for c in '\n\r'):
-            raise ValueError('Correction cannot split or merge paragraphs')
+        if any(c in row['new'] for c in '\n\r'):
+            raise ValueError('Correction cannot insert paragraph breaks')
         p = by_id[row['paragraph_id']]
         start, end = locate(p['text'], row['old'], occurrence)
         if start and unicodedata.category(p['text'][start]).startswith('M') or end < len(p['text']) and unicodedata.category(p['text'][end]).startswith('M'):
@@ -93,34 +90,44 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
     return result
 
 
-def audio_decision(paragraph: dict, proposal: dict, independent_text: str) -> dict:
+def validate_repaired_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]) -> list[dict]:
+    """Fold a redundant nested edit already represented by a larger replacement.
+
+    Never retarget an ambiguous occurrence. Preserve it under the covering edit
+    so the review ledger still discloses the model's full response.
+    """
+    check_schema(answer, SCHEMA)
+    rows = [validate_proposals({'proposals': [r]}, paragraphs, slide_ids)[0]
+            for r in answer['proposals']]
+    covered = {}
+    for i, child in enumerate(rows):
+        for j, parent in enumerate(rows):
+            if (i != j and parent['paragraph_id'] == child['paragraph_id']
+                and parent['start'] <= child['start'] < child['end'] <= parent['end']
+                and parent['end'] - parent['start'] > child['end'] - child['start']
+                and child['new'] in parent['new']):
+                covered[i] = j
+                break
+    kept = [r for i, r in enumerate(answer['proposals']) if i not in covered]
+    result = validate_proposals({'proposals': kept}, paragraphs, slide_ids)
+    for i, j in covered.items():
+        while j in covered:
+            j = covered[j]
+        parent = next(r for r in result if r['paragraph_id'] == rows[j]['paragraph_id']
+                      and r['start'] == rows[j]['start'] and r['end'] == rows[j]['end'])
+        parent.setdefault('subsumed_proposals', []).append(rows[i])
+    return result
+
+
+def audio_decision(paragraph: dict, proposal: dict) -> dict:
+    """Apply the audio/slide model's clear edits; no second ASR veto."""
     if proposal['paragraph_text_sha256'] != object_sha(paragraph['text']):
         raise ValueError('Correction belongs to another paragraph revision')
-    start, end = proposal['start'], proposal['end']
-    if paragraph['text'][start:end] != proposal['old']:
+    if paragraph['text'][proposal['start']:proposal['end']] != proposal['old']:
         raise ValueError('Correction source range drifted')
     if proposal['audio_support'] != 'clear':
-        return {'status': 'pending', 'reason': '提議模型未能確定原聲，不修改'}
-    protected = '不沒未無非'
-    if any(proposal['old'].count(c) != proposal['new'].count(c) for c in protected):
-        return {'status': 'pending', 'reason': '涉及否定詞變更，保留原文待回聽'}
-    left, right = normalized(paragraph['text'][:start])[-3:], normalized(paragraph['text'][end:])[:3]
-    expected = left + normalized(proposal['new']) + right
-    original = left + normalized(proposal['old']) + right
-    heard = normalized(independent_text)
-    # Match surrounding words as well as the proposed word. Mere appearance
-    # elsewhere in the clip is not sufficient evidence for this occurrence.
-    if len(left + right) < 3 or expected not in heard or original in heard:
-        return {'status': 'pending', 'reason': '獨立原聲轉錄未在相同上下文唯一支持改文，保留原文'}
-    return {'status': 'machine_supported', 'reason': '音訊提議與未看改文的獨立原聲轉錄在相同上下文相符；仍非人工確認'}
-
-
-def refinement_parent(refinement: dict, pending: list[dict]) -> dict:
-    parent = next((d for d in pending if d['paragraph_id'] == refinement['paragraph_id']
-                   and d['start'] <= refinement['start'] < refinement['end'] <= d['end']), None)
-    if parent is None:
-        raise ValueError('Refinement exceeds its original pending source range')
-    return parent
+        return {'status': 'pending', 'reason': 'Gemini 判定原聲不清楚，保留原文'}
+    return {'status': 'machine_supported', 'reason': 'Gemini 結合原聲與投影片提示判定為明確辨識錯誤；機器校對，非人工確認'}
 
 
 def apply_corrections(paragraphs: list[dict], proposals: list[dict]) -> list[dict]:
@@ -136,7 +143,7 @@ def apply_corrections(paragraphs: list[dict], proposals: list[dict]) -> list[dic
         parts.append(paragraph['text'][cursor:])
         paragraph['text'] = ''.join(parts)
         if edits:
-            paragraph['text_derivation'] = 'audio_supported_machine_correction'
+            paragraph['text_derivation'] = 'audio_slide_machine_correction'
             paragraph['timing_precision'] = 'phrase'
             paragraph['word_timing_valid'] = False
             paragraph['source_ranges_address_original_text_only'] = True
@@ -161,7 +168,7 @@ def clip_audio(samples, start: int, end: int, folder: Path) -> Path:
 def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, float, str]:
     cached = (out / 'calls' / object_sha(request) / 'state.json').exists()
     count = 0 if cached else adapter.count(parts)
-    raw = saved_call(out, request, (count * .75 * 1.2 + 8192 * 3.75) / 1_000_000,
+    raw = saved_call(out, request, (count * .75 * 1.2 + adapter.config.get('max_output_tokens', 8192) * 3.75) / 1_000_000,
                      lambda: adapter.generate(parts), max_calls=48, budget_usd=3)
     cost = adapter.usage(raw)['estimated_usd_upper']
     if raw.get('candidates', [{}])[0].get('finish_reason') != 'MAX_TOKENS':
@@ -186,7 +193,6 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
 
 def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
     from google.genai import types
-    from openai import OpenAI
     source_path = source_dir / 'illustrated_with_visual_text.json'
     source, manifest = read_json(source_path), read_json(audio_dir / 'audio_manifest.json')
     if source['source_sha256'] != manifest['source_sha256'] or file_sha(audio_dir / 'audio.wav') != manifest['audio_sha256']:
@@ -199,11 +205,12 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
     adapter = VisionReviewer('gemini', PROMPT, SCHEMA)
     adapter.config.pop('response_json_schema')
     adapter.prompt = PROMPT + '\nSchema:\n' + json.dumps(SCHEMA, ensure_ascii=False)
-    adapter.config['max_output_tokens'] = 8192
+    adapter.config['max_output_tokens'] = 16384
+    adapter.config['thinking_config'] = {'thinking_level': 'LOW'}
     identity = {'source_sha256': source['source_sha256'], 'illustrated_source_sha256': file_sha(source_path),
         'audio_manifest_sha256': file_sha(audio_dir / 'audio_manifest.json'), 'audio_sha256': manifest['audio_sha256'],
         'prompt_version': PROMPT_VERSION, 'prompt': adapter.prompt, 'config': adapter.config,
-        'proposal_model': adapter.model, 'independent_asr_config': BLIND_CONFIG}
+        'proposal_model': adapter.model, 'acceptance_policy': 'gemini_clear_audio_no_asr_veto'}
     identity_path = out / 'input_manifest.json'
     if identity_path.exists() and read_json(identity_path) != identity:
         raise ValueError('Correction output belongs to another source/configuration')
@@ -241,86 +248,45 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
             'material': material, 'audio_sha256': file_sha(audio), 'previews': previews, 'config': adapter.config, 'prompt': adapter.prompt}
         raw, cost, request_sha = proposal_response(adapter, parts, request, out)
         answer = json.loads(adapter.text(raw))
-        proposals = validate_proposals(answer, batch, {s['event_id'] for s in occurrences})
+        try:
+            proposals = validate_proposals(answer, batch, {s['event_id'] for s in occurrences})
+        except ValueError as error:
+            # One structural repair of the same model response, never an ASR veto.
+            repair_text = ('Your JSON proposals failed deterministic validation: ' + str(error) +
+                '. Repair only the invalid range/occurrence/structure. Count occurrences across '
+                'the ENTIRE exact paragraph, including substrings inside longer phrases. '
+                'Edits must not overlap. Preserve the intended audio-based corrections; '
+                'do not introduce unrelated edits. Previous response: ' + json.dumps(answer, ensure_ascii=False))
+            repair_parts = parts + [types.Part.from_text(text=repair_text)]
+            repair_request = {**request, 'stage': 'proposal_structure_repair_once',
+                'parent_response_sha256': object_sha(raw), 'repair_prompt': repair_text}
+            repaired, repair_cost, request_sha = proposal_response(adapter, repair_parts, repair_request, out)
+            proposals = validate_repaired_proposals(json.loads(adapter.text(repaired)), batch,
+                                           {s['event_id'] for s in occurrences})
+            cost += repair_cost
         all_proposals += [{**p, 'id': f'c{len(all_proposals)+i:03d}', 'proposal_request_sha256': request_sha,
                            'batch_id': batch_id} for i, p in enumerate(proposals)]
         proposal_cost += cost
         print(f'Listened to batch {batch_id}: {len(proposals)} correction proposals', flush=True)
     save_json(out / 'proposals.json', {'identity_sha256': file_sha(identity_path), 'proposals': all_proposals})
-    independent, asr_seconds = {}, 0
-    client = OpenAI(timeout=180, max_retries=0)
-    for paragraph in paragraphs:
-        if not any(p['paragraph_id'] == paragraph['id'] for p in all_proposals):
-            continue
-        start, end = max(0, paragraph['start_ms']-2000), min(900000, paragraph['end_ms']+2000)
-        audio = clip_audio(samples, start, end, out / 'verification_audio' / paragraph['id'])
-        request = {'stage': 'blind_audio_verification', 'manifest_sha256': file_sha(identity_path),
-            'paragraph_id': paragraph['id'], 'start_ms': start, 'end_ms': end,
-            'audio_sha256': file_sha(audio), 'config': BLIND_CONFIG}
-        def invoke():
-            with audio.open('rb') as stream:
-                return client.audio.transcriptions.create(file=stream, **BLIND_CONFIG).model_dump(mode='json')
-        raw = saved_call(out, request, (end-start)/60000*.01, invoke, max_calls=48, budget_usd=3)
-        if not isinstance(raw.get('text'), str):
-            raise ValueError('Independent audio transcription missing')
-        independent[paragraph['id']] = {'text': raw['text'], 'request_sha256': object_sha(request),
-            'response_sha256': object_sha(raw), 'clip': str(audio.relative_to(out)), 'start_ms': start, 'end_ms': end}
-        asr_seconds += (end-start)/1000
-        print(f'Independently transcribed {paragraph["id"]}', flush=True)
     decisions = []
     by_id = {p['id']: p for p in paragraphs}
     for proposal in all_proposals:
-        verification = independent.get(proposal['paragraph_id'])
-        decision = audio_decision(by_id[proposal['paragraph_id']], proposal, verification['text'] if verification else '')
+        decision = audio_decision(by_id[proposal['paragraph_id']], proposal)
+        p = by_id[proposal['paragraph_id']]
+        start, end = max(0, p['start_ms'] - 2000), min(900000, p['end_ms'] + 2000)
+        clip = clip_audio(samples, start, end, out / 'review_audio' / p['id'])
         decisions.append({**proposal, **decision, 'proposal_reason': proposal['reason'],
-                          'independent_audio': verification, 'human_confirmed': False})
-    # One bounded reconciliation may narrow a composite proposal (for example,
-    # a book name bundled with an unsupported chapter change). It must remain
-    # inside an original pending range and uses the same frozen blind transcript.
-    for batch_id in range(5):
-        pending = [d for d in decisions if d['batch_id'] == batch_id and d['status'] == 'pending']
-        if not pending:
-            continue
-        ids = {d['paragraph_id'] for d in pending}
-        prompt = PROMPT + '''\nThis is the one allowed reconciliation pass. Listen again.
-The independent transcript below was made without seeing your proposals or slides.
-If your earlier proposal bundled a supported spelling correction with an unsupported
-chapter change, narrow it to the supported part. Stay wholly within a supplied
-pending old-text range. Do not modify already accepted changes, add unrelated edits,
-or force agreement with the independent model. If the sound is unclear or supports
-the original, return no change or uncertain. A slide/Bible discrepancy is never proof.'''
-        material = {'paragraphs': [p for p in paragraphs if p['id'] in ids], 'pending': pending,
-                    'independent_audio_transcriptions': {i: independent[i]['text'] for i in sorted(ids) if i in independent}}
-        audio = out / f'proposal_audio/b{batch_id}/audio.mp3'
-        parts = [types.Part.from_text(text=prompt + '\nSchema:\n' + json.dumps(SCHEMA, ensure_ascii=False) +
-                                      '\nMaterials:\n' + json.dumps(material, ensure_ascii=False)),
-                 types.Part.from_bytes(data=audio.read_bytes(), mime_type='audio/mp3')]
-        request = {'stage': 'pending_audio_reconciliation_once', 'manifest_sha256': file_sha(identity_path),
-            'batch_id': batch_id, 'prompt': prompt, 'material': material, 'audio_sha256': file_sha(audio), 'config': adapter.config}
-        raw, cost, request_sha = proposal_response(adapter, parts, request, out)
-        refinements = validate_proposals(json.loads(adapter.text(raw)), material['paragraphs'],
-                                        {s['event_id'] for s in source['occurrences']})
-        proposal_cost += cost
-        for refinement in refinements:
-            parent = refinement_parent(refinement, pending)
-            verification = independent.get(refinement['paragraph_id'])
-            decision = audio_decision(by_id[refinement['paragraph_id']], refinement, verification['text'] if verification else '')
-            parent['status'] = 'superseded'
-            parent['reason'] = '已由一次原聲核對後的局部候選取代，原候選未直接套用'
-            decisions.append({**refinement, **decision, 'id': f'c{len(decisions):03d}',
-                'parent_candidate_id': parent['id'], 'proposal_request_sha256': request_sha,
-                'proposal_reason': refinement['reason'], 'batch_id': batch_id,
-                'independent_audio': verification, 'human_confirmed': False})
-        print(f'Reconciled batch {batch_id} once: {len(refinements)} narrowed candidates', flush=True)
+                          'audio_clip': str(clip.relative_to(out)), 'human_confirmed': False})
     corrected = apply_corrections(paragraphs, decisions)
-    record = {'schema_version': 'audio-supported-transcript-correction.v1', **identity,
+    record = {'schema_version': 'audio-slide-transcript-correction.v2', **identity,
         'original_paragraphs': paragraphs, 'corrected_paragraphs': corrected, 'decisions': decisions,
         'status_counts': dict(Counter(d['status'] for d in decisions)), 'human_confirmed': False,
-        'proposal_estimated_usd_upper': proposal_cost, 'independent_asr_seconds': asr_seconds,
-        'independent_asr_estimated_usd': asr_seconds / 60 * .0045,
+        'proposal_estimated_usd_upper': proposal_cost, 'independent_asr_calls': 0,
+        'independent_asr_estimated_usd': 0,
         'word_times_recomputed': False, 'production_sources_written': 0}
     record['correction_offset_space'] = 'original_formatted_paragraph_unicode_codepoints'
-    record['reconciliation_rounds_per_batch'] = 1
+    record['reconciliation_rounds_per_batch'] = 0
     save_json(out / 'correction_trial.json', record)
     render_review(source, source_dir, out, record)
     return record
@@ -351,25 +317,21 @@ def render_review(source: dict, source_dir: Path, out: Path, record: dict) -> No
             b.append(('<ins>' + e(updated['text'][begin:end]) + '</ins>') if tag != 'equal' else e(updated['text'][begin:end]))
         parts.append(f'<div class="columns"><div><h3>原稿</h3><p>{"".join(a)}</p></div><div><h3>校對稿</h3><p>{"".join(b)}</p></div></div>')
         for change in changes:
-            if change['status'] == 'superseded':
-                parts.append('<details><summary>查看已被細化的原候選（未套用）</summary>')
-            label = {'machine_supported': '已套用，原聲雙模型支持', 'superseded': '原候選已細化，未直接套用',
+            label = {'machine_supported': '已套用，Gemini 原聲與投影片校對',
                      'pending': '保留原文，待回聽'}[change['status']]
             parts.append(f'<article><b>{label}：</b><code>{e(change["old"])}</code> → <code>{e(change["new"])}</code><p>{e(change["reason"])}</p>')
-            verification = change['independent_audio']
-            if verification:
-                parts.append(f'<audio controls preload="none" src="{e(verification["clip"])}"></audio><details><summary>獨立原聲轉錄</summary><p>{e(verification["text"])}</p></details>')
+            clip = change.get('audio_clip')
+            if clip:
+                parts.append(f'<audio controls preload="none" src="{e(clip)}"></audio>')
             parts.append(f'<details><summary>候選理由與原聲摘錄</summary><p>{e(change["proposal_reason"])}</p><p>{e(change["audio_quote"])}</p></details></article>')
-            if change['status'] == 'superseded':
-                parts.append('</details>')
         sections.append(''.join(parts) + '</section>')
     (out / 'corrected_transcript.md').write_text('\n'.join(markdown), encoding='utf-8')
     counts = record['status_counts']
     page = '''<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>S 210307 原聲校對試驗</title><style>body{font:18px/1.8 system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#222}
+<title>S 210307 原聲與投影片校對（新版）</title><style>body{font:18px/1.8 system-ui;max-width:1200px;margin:auto;padding:24px;background:#f5f6f8;color:#222}
 section,aside{background:white;border-radius:8px;padding:20px;margin:20px 0}.columns{display:grid;grid-template-columns:1fr 1fr;gap:24px}p{white-space:pre-wrap}
 del{background:#ffe0df;color:#9a2420}ins{background:#dff3e5;color:#165a30;text-decoration:none}article{border-top:1px solid #ddd;padding:14px 0}code{font:inherit;background:#eef1f5;padding:2px 4px}audio{width:min(100%,500px)}img{max-width:100%;height:auto}h3{font-size:17px;color:#555}button{padding:8px 14px;font:inherit}@media(max-width:700px){.columns{grid-template-columns:1fr}}</style>
-<h1>S 210307 原聲校對試驗</h1><aside>Slides 只作提示，修改以原聲為準。機器校對試稿，非人工確認；原稿完整保留，章節和口頭語不依常識改寫。
+<h1>S 210307 原聲與投影片校對（新版）</h1><aside>Slides 只作提示，修改以原聲為準。Gemini 校對試稿，已移除重複轉錄檢查，非人工確認；原稿完整保留，章節和口頭語不依常識改寫。
 ''' + f'<p>已套用 {counts.get("machine_supported",0)} 處 · 保留待回聽 {counts.get("pending",0)} 處。音訊按原段落擷取，時間仍需核對。</p>' + '''
 <button id="filter" onclick="const on=this.dataset.on!=='1';this.dataset.on=on?'1':'0';document.querySelectorAll('section').forEach(x=>x.hidden=on&amp;&amp;x.dataset.changes==='0');this.textContent=on?'顯示全部段落':'只看有候選的段落'">只看有候選的段落</button>
 <p><a href="corrected_transcript.md">下載原稿與校對稿</a> · <a href="correction_trial.json">完整修改紀錄</a></p></aside>''' + ''.join(sections) + '</html>'

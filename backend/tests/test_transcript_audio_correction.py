@@ -5,8 +5,7 @@ import pytest
 from backend.pipeline.slide_change_pilot import object_sha
 from backend.pipeline.transcript_audio_correction import (
     apply_corrections, audio_decision, locate, normalized, validate_proposals,
-    proposal_response,
-    refinement_parent,
+    proposal_response, validate_repaired_proposals,
 )
 
 
@@ -22,30 +21,25 @@ def proposal(p, old='in how', new='引號', occurrence=1, **fields):
     return validate_proposals({'proposals': [row]}, [p], set())[0]
 
 
-def test_independent_audio_support_needs_the_same_surrounding_words():
+def test_clear_gemini_audio_slide_correction_is_accepted_without_asr_agreement():
     p = paragraph()
     edit = proposal(p)
-    assert audio_decision(p, edit, '他用了引號來引用這句話。')['status'] == 'machine_supported'
-    # A hint or another mention of the new word somewhere in the clip is not evidence.
-    assert audio_decision(p, edit, '他用了 in how 來引用這句話，後面再談引號。')['status'] == 'pending'
-    assert audio_decision(p, edit, '這張投影片有引號。')['status'] == 'pending'
+    decision = audio_decision(p, edit)
+    assert decision['status'] == 'machine_supported'
+    assert apply_corrections([p], [{**edit, **decision}])[0]['text'] == '他用了 引號 來引用這句話。'
 
 
-def test_slide_or_bible_reference_cannot_override_audible_chapter():
-    p = paragraph('我們來看十三章，這裡提到愛。')
-    edit = proposal(p, '十三章', '十四章', kind='scripture_reference')
-    heard = '我們來看十三章，這裡提到愛，後面還會講十四章。'
-    assert audio_decision(p, edit, heard)['status'] == 'pending'
-    assert apply_corrections([p], [{**edit, 'status': 'pending'}])[0] == p
-
-
-def test_negation_and_uncertain_audio_are_preserved_even_if_another_model_agrees():
-    p = paragraph('他說這是正確的，然後往下講。')
-    edit = proposal(p, '正確', '不正確')
-    assert audio_decision(p, edit, '他說這是不正確的，然後往下講。')['status'] == 'pending'
+def test_only_model_uncertainty_holds_back_a_valid_correction():
     p = paragraph()
     edit = proposal(p, audio_support='uncertain')
-    assert audio_decision(p, edit, '他用了引號來引用這句話。')['status'] == 'pending'
+    assert audio_decision(p, edit)['status'] == 'pending'
+    assert apply_corrections([p], [{**edit, **audio_decision(p, edit)}])[0] == p
+
+
+def test_clear_negation_correction_is_not_vetoed_by_a_second_rule():
+    p = paragraph('他說這是正確的，然後往下講。')
+    edit = proposal(p, '正確', '不正確')
+    assert audio_decision(p, edit)['status'] == 'machine_supported'
 
 
 def test_exact_occurrences_preserve_repetition_and_only_audited_ranges_change():
@@ -68,7 +62,7 @@ def test_stale_or_overlapping_edits_cannot_be_applied():
     with pytest.raises(ValueError):
         apply_corrections([{**p, 'text': 'changed'}], [{**edit, 'status': 'machine_supported'}])
     with pytest.raises(ValueError):
-        audio_decision({**p, 'text': 'changed'}, edit, '引號')
+        audio_decision({**p, 'text': 'changed'}, edit)
 
 
 @pytest.mark.parametrize('field,value', [
@@ -131,17 +125,77 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
     assert len(list((tmp_path / 'calls').glob('*/state.json'))) == 1
 
 
-def test_composite_reference_can_be_narrowed_without_overriding_the_audible_chapter():
-    p = paragraph('我們來看哥羅前書第十三章第一節。')
-    parent = proposal(p, '哥羅前書第十三章第一節', '哥林多前書第十四章第一節', kind='scripture_reference')
-    child = proposal(p, '哥羅前書', '哥林多前書', kind='proper_name')
-    assert refinement_parent(child, [parent]) == parent
-    heard = '我們來看哥林多前書第十三章第一節。'
-    assert audio_decision(p, parent, heard)['status'] == 'pending'
-    decision = audio_decision(p, child, heard)
-    assert decision['status'] == 'machine_supported'
-    corrected = apply_corrections([p], [{**child, **decision}])[0]
-    assert corrected['text'] == heard
-    outside = proposal(p, '我們', '大家')
-    with pytest.raises(ValueError, match='original pending'):
-        refinement_parent(outside, [parent])
+@pytest.mark.parametrize('repair_needed', [False, True])
+def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed):
+    import json
+    import sys
+    from backend.pipeline import transcript_audio_correction as module
+    from backend.pipeline.slide_change_pilot import file_sha, save_json
+    source, audio, out = tmp_path / 'source', tmp_path / 'audio', tmp_path / 'out'
+    source.mkdir(); audio.mkdir()
+    (audio / 'audio.wav').write_bytes(b'synthetic audio')
+    (audio / 'illustrated_transcript.json').write_text('{}')
+    p = paragraph()
+    row = proposal(p)
+    fields = ['paragraph_id', 'old', 'new', 'occurrence', 'kind', 'audio_quote',
+              'audio_support', 'reason', 'slide_event_ids']
+    answer = {'proposals': [{k: row[k] for k in fields}]}
+    save_json(audio / 'audio_manifest.json', {'source_sha256': 'source',
+              'audio_sha256': file_sha(audio / 'audio.wav'), 'duration_ms': 900000})
+    save_json(source / 'illustrated_with_visual_text.json', {'source_sha256': 'source',
+              'speech_artifact_sha256': file_sha(audio / 'illustrated_transcript.json'),
+              'paragraphs': [p], 'assets': [], 'occurrences': []})
+    class Adapter:
+        def __init__(self, *args):
+            self.config = {'response_json_schema': {}, 'max_output_tokens': 8192}
+            self.model = 'synthetic-gemini'
+            self.calls = 0
+        def count(self, parts): return 100
+        def generate(self, parts):
+            self.calls += 1
+            response = {'proposals': answer['proposals'] * 2} if repair_needed and self.calls == 1 else answer
+            return {'answer': response, 'candidates': [{'finish_reason': 'STOP'}]}
+        def text(self, raw): return json.dumps(raw['answer'])
+        def usage(self, raw): return {'estimated_usd_upper': .01}
+    def fake_clip(samples, start, end, folder):
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / 'audio.mp3'; path.write_bytes(b'synthetic mp3'); return path
+    monkeypatch.setattr(module, 'VisionReviewer', Adapter)
+    monkeypatch.setattr(module, 'read_audio', lambda _: None)
+    monkeypatch.setattr(module, 'clip_audio', fake_clip)
+    # Any reintroduced OpenAI ASR import would fail this end-to-end trial.
+    monkeypatch.setitem(sys.modules, 'openai', None)
+    result = module.run(source, audio, out)
+    assert result['status_counts'] == {'machine_supported': 1}
+    assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
+    assert result['independent_asr_calls'] == 0
+    requests = [json.loads(p.read_text()) for p in (out / 'calls').glob('*/request.json')]
+    expected = ['audio_correction_proposals', 'proposal_structure_repair_once'] if repair_needed else ['audio_correction_proposals']
+    assert sorted(r['stage'] for r in requests) == sorted(expected)
+    assert result['reconciliation_rounds_per_batch'] == 0
+
+
+def test_redundant_nested_foreign_word_edit_is_recorded_under_covering_edit():
+    p = paragraph('zēlōtai este，後面再說 este。')
+    parent = {'paragraph_id': p['id'], 'old': 'zēlōtai este', 'new': 'ζηλωταί ἐστε',
+              'occurrence': 1, 'kind': 'foreign_word', 'audio_quote': 'ζηλωταί ἐστε',
+              'audio_support': 'clear', 'reason': 'Synthetic', 'slide_event_ids': []}
+    child = {**parent, 'old': 'este', 'new': 'ἐστε'}
+    answer = {'proposals': [parent, child]}
+    with pytest.raises(ValueError, match='Overlapping'):
+        validate_proposals(answer, [p], set())
+    edits = validate_repaired_proposals(answer, [p], set())
+    assert len(edits) == 1 and edits[0]['subsumed_proposals'][0]['old'] == 'este'
+    corrected = apply_corrections([p], [{**edits[0], **audio_decision(p, edits[0])}])[0]
+    # Do not guess that the nested edit meant the second occurrence.
+    assert corrected['text'] == 'ζηλωταί ἐστε，後面再說 este。'
+    with pytest.raises(ValueError, match='Overlapping'):
+        validate_repaired_proposals({'proposals': [parent, {**child, 'new': 'different'}]}, [p], set())
+
+
+def test_existing_internal_linebreak_does_not_block_a_clear_word_correction():
+    p = paragraph('這個\n不是有恩賜你就屬靈。')
+    edit = proposal(p, '這個\n不是', '這個不是屬靈，不是')
+    corrected = apply_corrections([p], [{**edit, **audio_decision(p, edit)}])
+    assert len(corrected) == 1 and corrected[0]['id'] == p['id']
+    assert corrected[0]['text'] == '這個不是屬靈，不是有恩賜你就屬靈。'
