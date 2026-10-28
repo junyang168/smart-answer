@@ -313,6 +313,10 @@ def merge_delta_scores(
         for item in baseline_review.get("findings") or []
         if item.get("blocking")
     }
+    # A score below its minimum is never inherited: nothing else re-reads it,
+    # and #488 carried round 1's reader_memory_center 3 through four rounds
+    # while the reviewer scored it 4.
+    affected |= set((baseline_review.get("verdict") or {}).get("dimensions_below_minimum") or [])
     baseline_scores = {
         str(item["dimension_id"]): item for item in baseline_review["dimension_scores"]
     }

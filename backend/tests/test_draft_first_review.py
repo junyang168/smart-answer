@@ -332,6 +332,10 @@ def test_delta_scores_inherit_unless_affected():
         "rescored_dimensions": ["b", "c"],
         "inherited_dimensions": ["a"],
     }
+    # #488: a score below its minimum is re-read, not carried forward.
+    merged, provenance = merge_delta_scores({**baseline, "verdict": {"dimensions_below_minimum": ["a"]}}, delta)
+    assert {s["dimension_id"]: s["score"] for s in merged["dimension_scores"]}["a"] == 4
+    assert provenance["inherited_dimensions"] == []
 
 
 def test_gate_outputs_are_sha_bound():
