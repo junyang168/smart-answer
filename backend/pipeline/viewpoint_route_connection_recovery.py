@@ -115,7 +115,9 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
     expected={'raw-route-proposal-000.call-intent.json'}
     previous=None
     from backend.pipeline.viewpoint_route_review_continuity import continuity_packet, review_history_entry
-    from backend.pipeline.viewpoint_route_validation_repair import read_initial_saved_proposal,read_validated_changes
+    from backend.pipeline.viewpoint_route_validation_repair import (
+        read_initial_saved_proposal,read_validated_changes,REVIEW_REPAIR_INSTRUCTION,
+    )
     raw, initial_calls=read_initial_saved_proposal(proposer,old,parent)
     expected={Path(name).stem+'.call-intent.json' for name in initial_calls}
     technical_repairs=len(initial_calls)-1
@@ -131,13 +133,14 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
                 or review_packet['route_evidence_context'] != old
                 or review_packet['route_proposal_sha256'] != sha256_json(current)):
             raise ValueError('connection continuation saved proposal chain changed')
-        raw_review=read_saved_model_response(reviewer,review_packet,parent/f'raw-route-review-{i:03d}.json')
+        raw_review,review_calls=read_validated_changes(reviewer,review_packet,
+            parent/f'raw-route-review-{i:03d}.json',repair_instruction=REVIEW_REPAIR_INSTRUCTION)
         last_review=ArgumentRouteReviewV3Response.model_validate(canonicalize_review(raw_review)[0]).model_dump(mode='json')
         if (review_doc['review'] != last_review or review_doc['review_sha256'] != sha256_json(last_review)
                 or last_review['route_evidence_packet_sha256'] != old['packet_sha256']
                 or last_review['route_proposal_sha256'] != sha256_json(current)):
             raise ValueError('connection continuation original reviewer answer changed')
-        expected.add(f'raw-route-review-{i:03d}.call-intent.json')
+        expected.update(Path(name).stem+'.call-intent.json' for name in review_calls)
         review_history.append(review_history_entry(i,sha256_json(current),sha256_json(last_review),last_review))
         if i == n:break
         correction_packet={'scope_label':old['scope_label'],'route_evidence_packet':old,
@@ -158,9 +161,14 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         raw, correction_calls=read_validated_changes(active_reconsiderer,correction_packet,response_path)
         technical_repairs+=len(correction_calls)-1
         expected.update(Path(name).stem+'.call-intent.json' for name in correction_calls)
+        from backend.pipeline.viewpoint_route_observation_restore import MARKER as RESTORE,contract
+        last_response=parent/correction_calls[-1]
+        response_context=(read(correction_path.name) if len(correction_calls)==1
+            else read(last_response.stem+'-packet.json'))
         expanded=expand_correction(raw,ArgumentRouteProposalV3Response.model_validate(current),
             ArgumentRouteReviewV3Response.model_validate(last_review),old,
-            expected_contract=correction_packet.get(MARKER))
+            expected_contract=correction_packet.get(MARKER),
+            allow_observation_restore=response_context.get(RESTORE)==contract(old))
         previous=ArgumentRouteReconsiderationV3Response.model_validate(canonicalize_proposal(expanded)[0]).model_dump(mode='json')
         if 'program_validation_repairs' in run:
             from backend.api.canonical_repository.viewpoint_observation_support import bind_revision_retirements

@@ -150,14 +150,15 @@ route_proposal_baseline 是旧记录的机械投影草稿，绝不代表它们�
     return result
 
 
-def expand_correction(raw, proposal, review, route_packet, *, expected_contract=None):
+def expand_correction(raw, proposal, review, route_packet, *, expected_contract=None, allow_observation_restore=False):
     """No inferred edits: omitted records and fields remain untouched."""
     if expected_contract is not None and (expected_contract != VERSION or raw.get('schema_version') != VERSION):
         raise ValueError('Route correction response differs from its compact output contract')
     if raw.get('schema_version') != VERSION:
         return raw
     changes = CorrectionChanges.model_validate(raw)
-    revised = type(proposal).model_validate(apply_edits(changes.edits, proposal.model_dump(mode='json'), route_packet))
+    revised = type(proposal).model_validate(apply_edits(changes.edits, proposal.model_dump(mode='json'), route_packet,
+        allow_observation_restore=allow_observation_restore))
     return {'schema_version': 'wang_argument_route_reconsideration_v3' if hasattr(proposal, 'observation_supports') else 'wang_argument_route_reconsideration_v2',
         'route_proposal_sha256': sha256_json(proposal.model_dump(mode='json')),
         'route_review_sha256': sha256_json(review.model_dump(mode='json')),
@@ -170,7 +171,7 @@ def expand_proposal(raw, baseline, route_packet):
     return apply_edits(changes.edits, baseline, route_packet)
 
 
-def apply_edits(edits, baseline, route_packet):
+def apply_edits(edits, baseline, route_packet, *, allow_observation_restore=False):
     payload = deepcopy(baseline)
     seen = set()
     for edit in edits:
@@ -191,7 +192,10 @@ def apply_edits(edits, baseline, route_packet):
             rows.pop(matches[0])
             continue
         if (edit.action == 'create' and matches) or (edit.action == 'update' and not matches):
-            raise ValueError('Route create/update target does not match current proposal')
+            raise ValueError('Route create/update target does not match current proposal: '
+                f'collection={collection}, action={edit.action}, key={key}; '
+                f'existing_keys={[row_key(row) for row in rows]}. '
+                'Updates must use an exact baseline key; prior invalid edits were not applied.')
         if not identity:
             if edit.action != 'create' or edit.fields_json is not None:
                 raise ValueError('Route retirement IDs only accept create/remove without fields')
@@ -199,6 +203,13 @@ def apply_edits(edits, baseline, route_packet):
             rows.sort()
             continue
         fields = _json_fields(edit.fields_json)
+        from backend.pipeline.viewpoint_route_observation_restore import FIELD, restore_observation
+        if FIELD in fields:
+            if (not allow_observation_restore or collection!='observation_supports'
+                    or edit.action!='update' or set(fields)!={FIELD} or fields[FIELD]!=key):
+                raise ValueError('Observation restore requires its offered contract and exact update target')
+            rows[matches[0]]=restore_observation(route_packet,key)
+            continue
         if edit.action == 'update':
             if set(fields) & set(identity):
                 raise ValueError('Route edit cannot rewrite its key')

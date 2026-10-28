@@ -5,12 +5,20 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_resolution_runtime import call_model, read_saved_model_response, write_immutable, read_artifact
 
 
-def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repairs):
+EDIT_REPAIR_INSTRUCTION = 'Fix the failed edits against the SAME baseline; return the complete corrected edits only. Preserve all still-valid intended edits and current finding dispositions. Do not rewrite the full proposal or change scope.'
+REVIEW_REPAIR_INSTRUCTION = ('Return a complete corrected review of the SAME proposal and all review_targets. '
+    'Resolve the program validation findings, including missing or duplicate target decisions. '
+    'Preserve valid substantive findings; do not edit the proposal, infer approval or omit targets.')
+
+
+def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repairs,
+                     repair_instruction=EDIT_REPAIR_INSTRUCTION, contextual=False):
     seen = set()
     failures = []
+    active_packet=packet
     while True:
         try:
-            result = validate(raw)
+            result = validate(raw,active_packet) if contextual else validate(raw)
             write_immutable(cache.with_name(cache.stem+'-validated.json'), {
                 'response_sha256': sha256_json(raw), 'failures': failures})
             return result, raw
@@ -22,7 +30,7 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
                 raise ValueError(f'Route program validation remains unresolved: {findings}') from exc
             seen.add(fingerprint)
         repair = packet | {'prior_invalid_response': raw, 'validation_findings': findings,
-            'validation_instruction': 'Fix the failed edits against the SAME baseline; return the complete corrected edits only. Preserve all still-valid intended edits and current finding dispositions. Do not rewrite the full proposal or change scope.'}
+            'validation_instruction': repair_instruction}
         response = cache.with_name(cache.stem+f'-validation-{len(failures):03d}.json')
         request = response.with_name(response.stem+'-packet.json')
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
@@ -31,6 +39,9 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
         if not request.exists() or CREATION_SHAPES in read_artifact(request):
             repair=with_creation_shapes(repair)
+        from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
+        if not request.exists() or RESTORE in read_artifact(request):
+            repair=with_restore_contract(repair)
         if request.exists():
             saved = read_artifact(request)
             if ({k:v for k,v in saved.items() if k != 'validation_findings'} !=
@@ -46,9 +57,10 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         state['used'] += 1
         state['attempts'].append({'stage': cache.name, 'repair_response': response.name, 'findings': findings})
         raw, _, _ = call_model(adapter, repair, response)
+        active_packet=repair
 
 
-def read_validated_changes(adapter, packet, cache):
+def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_REPAIR_INSTRUCTION):
     """Authenticate every saved repair without invoking a model or trusting an alias."""
     raw = read_saved_model_response(adapter, packet, cache)
     names = [cache.name]
@@ -63,13 +75,16 @@ def read_validated_changes(adapter, packet, cache):
         response = cache.with_name(name)
         actual = read_artifact(response.with_name(response.stem+'-packet.json'))
         expected = packet | {'prior_invalid_response': raw, 'validation_findings': failure['findings'],
-            'validation_instruction': 'Fix the failed edits against the SAME baseline; return the complete corrected edits only. Preserve all still-valid intended edits and current finding dispositions. Do not rewrite the full proposal or change scope.'}
+            'validation_instruction': repair_instruction}
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if OBSERVATION_IDENTITIES in actual:
             expected=with_observation_identities(expected)
         from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
         if CREATION_SHAPES in actual:
             expected=with_creation_shapes(expected)
+        from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
+        if RESTORE in actual:
+            expected=with_restore_contract(expected)
         if actual != expected:
             raise ValueError('saved Route validation repair input changed')
         raw = read_saved_model_response(adapter, actual, response)
