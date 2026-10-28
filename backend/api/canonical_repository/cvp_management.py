@@ -45,6 +45,13 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class CandidateValidationError(ValueError):
+    """Stable error category plus concrete diagnostics for an ordinary correction."""
+    def __init__(self, message, *, details):
+        super().__init__(message)
+        self.details = details
+
+
 class Binding(Contract):
     path: str = Field(min_length=1)
     file_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
@@ -689,7 +696,14 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             if ref not in component_by_link:
                 # Existing withdrawn links are still explicitly reviewed as objects/members.
                 if is_new:
-                    raise ValueError('new active link needs an explicit component disposition')
+                    raise CandidateValidationError('new active link needs an explicit component disposition',
+                        details={'link_ref': ref, 'claim_ref': cref,
+                            'target_ref': keyrefs.get(('canonical_viewpoints', payload.get('viewpoint_id'))),
+                            'inherited': previous is not None and any(w['ref']==ref for w in previous['writes']),
+                            'instruction': 'Inherited uncommitted new links remain until discard_refs removes them; '
+                                'mentioning a link in a reason does not assign its component. '
+                                'Each component has exactly one disposition; resolve competing new links explicitly '
+                                'without duplicating spans or losing the underlying judgement.'})
                 if payload.get('effective_state', 'active') == 'active' and (col, oid) not in _members(original, set(request.maintenance_viewpoint_ids)):
                     raise ValueError('existing active link is outside complete member maintenance')
             else:

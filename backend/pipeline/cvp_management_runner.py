@@ -433,6 +433,22 @@ def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
         max_request_bytes=request.budget.max_request_bytes,probe=probe)
 
 
+def _refresh_program_diagnostics(request,bundle,previous,prior_findings):
+    """Reproduce an old exact rejection, adding only concrete program diagnostics."""
+    feedback=bundle.get('program_validation_feedback')
+    if not feedback or 'diagnostics' in feedback:return bundle
+    try:
+        domain.compile_candidate(request,bundle,feedback['raw_response']['candidate'],
+            previous=previous,prior_findings=prior_findings)
+    except domain.CandidateValidationError as exc:
+        if feedback['findings']!=[str(exc)]:return bundle
+        return seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
+            'program_validation_feedback':{**feedback,'diagnostics':exc.details}})
+    except ValueError:
+        pass
+    return bundle
+
+
 def run(store,request,*,root,execute=False,clients=None):
     request=domain.Request.model_validate(request);root=Path(root).resolve()
     validate_authorization(request)
@@ -713,6 +729,22 @@ def run(store,request,*,root,execute=False,clients=None):
                             seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                 while True:
                     step_root=unit_root/f'step-{ordinal:04d}'
+                    if (proposal_origin is None and bundle.get('program_validation_feedback')
+                            and 'diagnostics' not in bundle['program_validation_feedback']
+                            and not (step_root/'proposal.json').exists()
+                            and all(slot['state']=='returned' for slot in
+                                store.get_cvp_group(parent_id)['call_reservations'].values())):
+                        # Only an undispatched next step receives improved
+                        # diagnostics. Preserve frozen steps and every answer;
+                        # never alter an uncertain invocation.
+                        refreshed=_refresh_program_diagnostics(request,bundle,previous,prior_findings)
+                        if refreshed['artifact_sha256']!=bundle['artifact_sha256']:
+                            if previous is not None:
+                                previous=_rebase_previous(request,bundle,refreshed,previous,
+                                                          prior_findings=prior_findings)
+                            bundle=refreshed;revision=False
+                            if (step_root/'materials.json').exists():
+                                ordinal+=1;step_root=unit_root/f'step-{ordinal:04d}'
                     materials={'bundle':bundle,'previous':previous,'prior_findings':prior_findings,
                                'step_root':str(step_root),'recall_root':str(recall_root),'index_root':str(index_root)}
                     if proposal_origin is not None:
@@ -742,6 +774,16 @@ def run(store,request,*,root,execute=False,clients=None):
                                 raise ValueError('proposal program validation made no progress: '+str(exc)) from exc
                             feedback={'raw_response':raw,'raw_artifact':binding(step_root/'proposal.json'),
                                 'findings':[str(exc)],'content_approval':False}
+                            feedback_path=step_root/'proposal-program-validation.json'
+                            if feedback_path.exists():
+                                # Authenticate the old rejection without rewriting
+                                # history when diagnostics improve in newer code.
+                                saved_feedback=read_artifact(feedback_path)
+                                if {k:v for k,v in saved_feedback.items() if k!='diagnostics'}!=feedback:
+                                    raise ValueError('saved proposal validation feedback differs from exact rejection')
+                                feedback=saved_feedback
+                            elif getattr(exc,'details',None) is not None:
+                                feedback['diagnostics']=exc.details
                             write_immutable(step_root/'proposal-program-validation.json',feedback)
                             # Keep the failed call in its original step. The
                             # next ordinary proposal uses the same records,
