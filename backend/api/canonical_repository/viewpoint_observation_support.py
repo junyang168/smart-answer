@@ -240,7 +240,10 @@ def compile_observation_package(proposal,packet,*,review_sha256):
             f'still_kept_but_retired={sorted(keeping & retired)}; '
             f'unknown_retirements={sorted(retired-set(old))}. '
             'An edited observation has a new content identity even when its local key is unchanged; '
-            'explicitly retire its old record if replacing it. Removing a draft row alone does not retire it.')
+            'explicitly retire its old record if replacing it. Removing a draft row alone does not retire it '
+            'or restore its original content. When the review asks to keep the original observation, '
+            'update the changed draft key back to its original content and evidence; '
+            'do not remove it or retire the original record.')
     return created,[(COLLECTION,i) for i in sorted(retired)],sorted(keeping & old.keys())
 
 

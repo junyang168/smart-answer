@@ -50,7 +50,8 @@ def round_extension(root, job, policy, authorization=None):
     reviews = sorted(root.glob('route-review-[0-9][0-9][0-9].json'))
     initial_validation = not reviews or direction.get('stage') == 'program_validation'
     if initial_validation:
-        repairs=sorted(root.glob('raw-*-validation-[0-9][0-9][0-9].json'))
+        repairs=sorted(p for p in root.glob('raw-*-validation-[0-9][0-9][0-9].json')
+                       if not p.name.startswith('raw-route-review-'))
         limit=previous['effective_max_correction_rounds'] if previous else policy['max_correction_rounds']
         if not repairs or len(repairs)!=limit:
             raise ValueError('Route validation extension requires its exact exhausted repair chain')

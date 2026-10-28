@@ -194,3 +194,20 @@ def test_initial_technical_continuations_append_without_resetting_calls(tmp_path
         assert all((root/name).read_bytes()==value for name,value in frozen.items())
     assert len(pc.packets)==4 and rev.calls==1
     assert round_extension(root,job,policy)==previous
+
+
+def test_proposal_repair_extension_keeps_review_completion_in_its_own_chain(tmp_path):
+    root,job,policy,_,_=stopped(tmp_path)
+    write_immutable(root/'raw-route-proposal-000-validation-000.json',{'repair':'proposal'})
+    write_immutable(root/'raw-route-review-000-validation-000.json',{'repair':'review'})
+    failed=root/'raw-route-reconsideration-001.json';write_immutable(failed,{'repair':'pending correction'})
+    auth=tmp_path/'technical-correction.json'
+    write_immutable(auth,{'schema_version':VERSION,'authorized_by':'owner','owner_direction':'继续原任务',
+        **{k:job[k] for k in ('job_id','viewpoint_id','material_sha256','policy_sha256')},
+        'original_max_correction_rounds':1,'additional_correction_rounds':1,
+        'latest_review_round':None,'latest_review_sha256':sha256_json(json.loads(failed.read_text())),
+        'stage':'program_validation','validation_response_name':failed.name})
+    extension=round_extension(root,job,policy,auth)
+    assert extension['previous_corrections_consumed']==1
+    assert 'raw-route-review-000-validation-000.json' in extension['original_files']
+    assert round_extension(root,job,policy)==extension
