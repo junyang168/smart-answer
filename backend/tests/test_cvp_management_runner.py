@@ -331,7 +331,11 @@ def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_c
             prior_intent_sha256=updated['intent_sha256'],role='gpt',intent=old)
 
 
-def test_original_task_retains_calls_across_bounded_continuations(setup,tmp_path):
+@pytest.mark.parametrize('cap_note',[
+    'The earlier 14 and 18 call caps were selected by the agent, not specified by the user.',
+    'The original 1-call cap was selected by the agent, not specified by the user.',
+])
+def test_original_task_retains_calls_across_bounded_continuations(setup,tmp_path,cap_note):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     from backend.pipeline.cvp_management_control import run as control
@@ -372,11 +376,17 @@ def test_original_task_retains_calls_across_bounded_continuations(setup,tmp_path
     next_auth=tmp_path/'continuation.json'
     write_immutable(next_auth,{'schema_version':domain.VERSION+'_call_budget_extension_v1',
         'authorized_by':'agent_under_user_task_scope','numerical_cap_selected_by':'agent',
-        'prior_cap_note':'The earlier 14 and 18 call caps were selected by the agent, not specified by the user.',
+        'prior_cap_note':cap_note,
         'parent_run_id':run_id,'action_id':request['action_id'],
         'original_max_calls':1,'total_max_calls':5,'group_key':'g1'})
     next_manifest={**manifest,'total_max_calls':5,'authorization':{
         'path':str(next_auth),'file_sha256':hashlib.sha256(next_auth.read_bytes()).hexdigest()}}
+    bad_auth=tmp_path/'wrong-original-cap.json'
+    write_immutable(bad_auth,{**json.loads(next_auth.read_text()),
+        'prior_cap_note':'The original 999-call cap was selected by the agent, not specified by the user.'})
+    with pytest.raises(ValueError,match='exact owner direction'):
+        control(store,{**next_manifest,'authorization':{'path':str(bad_auth),
+            'file_sha256':hashlib.sha256(bad_auth.read_bytes()).hexdigest()}},execute=True)
     assert control(store,next_manifest,execute=True)['previous_max_calls']==3
     assert control(store,next_manifest,execute=True)['total_max_calls']==5
     with pytest.raises(ChangeSetConflict,match='bounded original task allowance'):
