@@ -98,6 +98,9 @@ def test_visual_json_may_echo_exact_schema_but_cannot_hide_extra_payload():
     from backend.pipeline.slide_visual_evidence import SCHEMA,parse_visual_json
     data={'results':[]}
     assert parse_visual_json(json.dumps(SCHEMA)+'\n'+json.dumps(data)) == data
+    assert parse_visual_json(json.dumps(SCHEMA)+', "results": []}') == data
+    literal = {'results': [{'text': '心 וּבְתִמְה֥וֹן καρδία "quoted" , results'}]}
+    assert parse_visual_json(json.dumps(SCHEMA)+', '+json.dumps(literal)[1:]) == literal
     assert parse_visual_json(json.dumps(data))==data
     assert parse_visual_json(json.dumps({'type':SCHEMA['type'],'properties':SCHEMA['properties'],**data}))==data
     # Non-schema extras are never dropped.
@@ -105,6 +108,9 @@ def test_visual_json_may_echo_exact_schema_but_cannot_hide_extra_payload():
     with pytest.raises(ValueError):check_schema(parse_visual_json(json.dumps({'unexpected':True,**data})),SCHEMA)
     with pytest.raises(ValueError):parse_visual_json('{"unexpected":true}\n'+json.dumps(data))
     with pytest.raises(ValueError):parse_visual_json(json.dumps(SCHEMA)+'\n'+json.dumps(data)+'\n{}')
+    with pytest.raises(ValueError):parse_visual_json(json.dumps(SCHEMA)+', "results": [], "unexpected": true}')
+    with pytest.raises(ValueError):parse_visual_json(json.dumps(SCHEMA)+', "unexpected": []}')
+    with pytest.raises(ValueError):parse_visual_json('{"unexpected":true}, "results": []}')
 
 
 def test_unresolved_paragraph_gets_neighbour_bounded_audio_without_invented_timestamps(tmp_path):

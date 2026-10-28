@@ -192,6 +192,38 @@ def withhold_overlap_conflicts(answer, paragraphs, slide_ids):
     return valid,[{**r,'status':'withheld_overlap_conflict','reason_for_withholding':'Conflicting ranges after one structural repair; original text retained.'} for i,r in enumerate(rows) if i in conflicts]
 
 
+def validate_completed_repair(answer: dict, paragraphs: list[dict], slide_ids: set[str]) -> tuple[list[dict], list[dict]]:
+    """After the sole structural repair, omit an unlocatable edit, never guess.
+
+    A malformed schema or invented reference still stops. Only an exact-quote
+    failure in a known paragraph can be isolated without interpreting audio or
+    changing the proposed correction. All raw answers remain in the call ledger.
+    """
+    check_schema(answer, SCHEMA)
+    kept, withheld = [], []
+    by_id = {p['id']: p for p in paragraphs}
+    for row in answer['proposals']:
+        try:
+            validate_proposals({'proposals': [row]}, paragraphs, slide_ids)
+        except ValueError as error:
+            if str(error) != 'Replacement does not identify an exact original occurrence':
+                raise
+            withheld.append({**row, 'status': 'withheld_invalid_exact_range',
+                'paragraph_text_sha256': object_sha(by_id[row['paragraph_id']]['text']),
+                'reason_for_withholding': 'No exact original occurrence after one structural repair; no fuzzy retargeting; original text retained.'})
+        else:
+            kept.append(row)
+    filtered = {'proposals': kept}
+    try:
+        valid = validate_repaired_proposals(filtered, paragraphs, slide_ids)
+    except ValueError as error:
+        if str(error) != 'Overlapping correction proposals':
+            raise
+        valid, conflicts = withhold_overlap_conflicts(filtered, paragraphs, slide_ids)
+        withheld += conflicts
+    return valid, withheld
+
+
 def apply_corrections(paragraphs: list[dict], proposals: list[dict]) -> list[dict]:
     result = copy.deepcopy(paragraphs)
     for paragraph in result:
@@ -334,12 +366,8 @@ def run(source_dir: Path, audio_dir: Path, out: Path, *, vocabulary: dict | None
                 'parent_response_sha256': object_sha(raw), 'repair_prompt': repair_text}
             repaired, repair_cost, request_sha = proposal_response(adapter, repair_parts, repair_request, out)
             repaired_answer=json.loads(adapter.text(repaired))
-            try:
-                proposals = validate_repaired_proposals(repaired_answer, batch,{s['event_id'] for s in occurrences})
-            except ValueError as error:
-                if str(error)!='Overlapping correction proposals':raise
-                proposals,rejected=withhold_overlap_conflicts(repaired_answer,batch,{s['event_id'] for s in occurrences})
-                withheld += [{**r,'batch_id':batch_id,'proposal_request_sha256':request_sha} for r in rejected]
+            proposals,rejected=validate_completed_repair(repaired_answer,batch,{s['event_id'] for s in occurrences})
+            withheld += [{**r,'batch_id':batch_id,'proposal_request_sha256':request_sha} for r in rejected]
             cost += repair_cost
         all_proposals += [{**p, 'id': f'c{len(all_proposals)+i:03d}', 'proposal_request_sha256': request_sha,
                            'batch_id': batch_id} for i, p in enumerate(proposals)]

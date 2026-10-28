@@ -37,6 +37,25 @@ def test_only_model_uncertainty_holds_back_a_valid_correction():
     assert apply_corrections([p], [{**edit, **audio_decision(p, edit)}])[0] == p
 
 
+def test_completed_repair_withholds_only_unlocatable_quotes_and_never_guesses_references():
+    from backend.pipeline.transcript_audio_correction import SCHEMA, validate_completed_repair
+    p = paragraph()
+    valid = {k: v for k, v in proposal(p).items()
+             if k in SCHEMA['properties']['proposals']['items']['properties']}
+    missing = {**valid, 'old': 'inhow'}  # Similarity is not exact source evidence.
+    original = copy.deepcopy(p)
+    edits, withheld = validate_completed_repair({'proposals': [valid, missing]}, [p], set())
+    assert len(edits) == len(withheld) == 1
+    assert withheld[0]['old'] == 'inhow'
+    assert withheld[0]['paragraph_text_sha256'] == object_sha(p['text'])
+    assert 'start' not in withheld[0] and p == original
+    for bad in ({**missing, 'paragraph_id': 'invented'}, {**valid, 'slide_event_ids': ['invented']}):
+        with pytest.raises(ValueError, match='invented'):
+            validate_completed_repair({'proposals': [bad]}, [p], set())
+    with pytest.raises(ValueError):
+        validate_completed_repair({'proposals': [valid], 'extra': True}, [p], set())
+
+
 def test_clear_negation_correction_is_not_vetoed_by_a_second_rule():
     p = paragraph('他說這是正確的，然後往下講。')
     edit = proposal(p, '正確', '不正確')
@@ -126,7 +145,7 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
     assert len(list((tmp_path / 'calls').glob('*/state.json'))) == 1
 
 
-@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json'])
+@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json', 'unlocatable_old'])
 @pytest.mark.parametrize('use_vocabulary', [False, True])
 def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed, use_vocabulary):
     import json
@@ -156,7 +175,9 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
         def generate(self, parts):
             self.calls += 1
             response = {'proposals': answer['proposals'] * 2} if repair_needed is True and self.calls == 1 else answer
-            return {'answer': response, 'bad_prefix': repair_needed == 'malformed_json' and self.calls == 1,
+            if repair_needed == 'unlocatable_old' and self.calls == 2:
+                response = {'proposals': answer['proposals'] + [{**answer['proposals'][0], 'old': '不存在的原文'}]}
+            return {'answer': response, 'bad_prefix': repair_needed in ('malformed_json', 'unlocatable_old') and self.calls == 1,
                     'candidates': [{'finish_reason': 'STOP'}]}
         def text(self, raw): return ('female' if raw.get('bad_prefix') else '') + json.dumps(raw['answer'])
         def usage(self, raw): return {'estimated_usd_upper': .01}
@@ -179,6 +200,10 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
     assert result['status_counts'] == {'machine_supported': 1}
     assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
     assert result['independent_asr_calls'] == 0
+    if repair_needed == 'unlocatable_old':
+        assert len(result['withheld_proposals']) == 1
+        assert result['withheld_proposals'][0]['status'] == 'withheld_invalid_exact_range'
+        assert result['withheld_proposals'][0]['old'] == '不存在的原文'
     requests = [json.loads(p.read_text()) for p in (out / 'calls').glob('*/request.json')]
     expected = ['audio_correction_proposals', 'proposal_structure_repair_once'] if repair_needed else ['audio_correction_proposals']
     assert sorted(r['stage'] for r in requests) == sorted(expected)
