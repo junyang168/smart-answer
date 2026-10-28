@@ -1,7 +1,8 @@
 """Changed source paragraphs -> complete Claim ID Updates, in source order.
 
 The source version must already be registered. This module does not register
-sources, judge semantic impact, alter Claim contracts, or execute CVP work.
+sources, judge semantic impact, or alter Claim contracts. The CLI continues
+through the existing CVP/Route runners after the Claim stage completes.
 """
 from pathlib import Path
 from types import SimpleNamespace
@@ -147,6 +148,29 @@ def run(store, source_id, before, change_set_id, root, instruction):
         return final
 
 
+def run_workflow(store, source_id, before, change_set_id, root, instruction, *, downstream_instruction=None):
+    """Keep the historical Claim receipt; report whole-operation completion separately."""
+    root = Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    with (root/'workflow.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try:
+            claims = run(store,source_id,before,change_set_id,root,instruction)
+            if claims['status']!='claims_completed':
+                result = {'status':'paused','stage':'claim_update','claims':claims}
+            else:
+                from backend.pipeline.source_cvp_updates import run as downstream
+                plan = json.loads((root/'plan.json').read_text())
+                result = downstream(store,claims,root/'downstream',source_plan=binding(root/'plan.json'),
+                    instruction=downstream_instruction or instruction,guard_source=lambda:guard(store,plan))
+                result = {'status':result['status'],'stage':'completed' if result['status']=='completed' else result.get('stage','cvp_update'),
+                          'claim_stage':binding(root/'result.json'),'downstream':result}
+            batch.progress(root/'workflow-result.json',result)
+            return result
+        except Exception as exc:
+            batch.progress(root/'workflow-result.json',{'status':'paused','detail':str(exc)})
+            raise
+
+
 def main():
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parents[2]/'.env')
@@ -154,6 +178,8 @@ def main():
     parser.add_argument('--source-id',required=True);parser.add_argument('--before',type=Path,required=True)
     parser.add_argument('--change-set-id',required=True);parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--instruction',required=True);parser.add_argument('--prepare-only',action='store_true')
+    parser.add_argument('--claim-only',action='store_true',help='Stop explicitly after the Claim stage')
+    parser.add_argument('--downstream-instruction',help='Explicit CVP direction when continuing a historical Claim-only task')
     parser.add_argument('--detach',action='store_true')
     args=parser.parse_args()
     if not args.root.is_absolute():parser.error('--root must be absolute')
@@ -164,8 +190,9 @@ def main():
         batch.detach([sys.executable,'-m',__spec__.name,*[v for v in sys.argv[1:] if v!='--detach']],args.root)
         return
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    function=prepare if args.prepare_only else run
-    print(json.dumps(function(PostgresKnowledgeStore(),args.source_id,args.before,args.change_set_id,args.root,args.instruction),ensure_ascii=False))
+    function=prepare if args.prepare_only else run if args.claim_only else run_workflow
+    options = {'downstream_instruction':args.downstream_instruction} if function is run_workflow else {}
+    print(json.dumps(function(PostgresKnowledgeStore(),args.source_id,args.before,args.change_set_id,args.root,args.instruction,**options),ensure_ascii=False))
 
 
 if __name__=='__main__':main()

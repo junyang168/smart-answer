@@ -309,19 +309,21 @@ def handoff_cvp_route_jobs(
     return report
 
 
-def handoff_completed_cvp_groups(store: PostgresKnowledgeStore, parent: dict[str, Any], root: Path) -> None:
+def handoff_completed_cvp_groups(store: PostgresKnowledgeStore, parent: dict[str, Any], root: Path, *, track_dependencies=False) -> None:
     """Retry the idempotent Route handoff after a completed CVP action resumes."""
 
     for unit in parent.get("units", {}).values():
         if unit.get("status") != "completed" or not unit.get("completed_step"):
             continue
         step = store.get_cvp_group(unit["completed_step"])
+        package = step["reviewed"]["evidence"]["package"]["payload"]
         handoff_cvp_route_jobs(
             store,
-            step["reviewed"]["evidence"]["package"]["payload"],
+            package,
             root / "route-queue-v2",
             Path(step["materials"]["step_root"]),
-            update_viewpoint_ids=parent["request"]["input"].get("update",{}).get("viewpoint_ids",()),
+            update_viewpoint_ids=(route_affected_viewpoints(package) if track_dependencies else
+                parent["request"]["input"].get("update",{}).get("viewpoint_ids",())),
         )
 
 

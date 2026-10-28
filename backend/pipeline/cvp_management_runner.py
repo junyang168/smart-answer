@@ -907,6 +907,13 @@ def _guard_completed_update(store,parent):
     """
     if 'update' not in parent['request']['input']:
         return
+    verify_completed_action(store,parent)
+
+
+def verify_completed_action(store,parent):
+    """Authenticate a completed CVP postimage without enqueueing Route work."""
+    if parent.get('result',{}).get('status')!='completed':
+        raise ValueError('CVP action has not completed')
     for unit in parent['units'].values():
         if unit.get('status')!='completed':
             continue
