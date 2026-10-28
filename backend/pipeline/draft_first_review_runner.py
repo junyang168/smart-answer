@@ -862,9 +862,10 @@ def continued_round(
         })
     return manuscript, self_check, {
         **outcome,
-        # Open findings mean the round is not passed, whatever the stopped
-        # run said: an owner note on a passed draft must still be revised.
-        "passed": bool(outcome["passed"]) and not findings,
+        # Passed as a fresh round would be: open findings fail it whatever the
+        # stopped run said (an owner note on a passed draft is still revised),
+        # and a round whose only findings were a check fixed since passes (#488).
+        "passed": not findings and not outcome.get("stage_errors"),
         "quote_report": quote_report,
         "program_check_report": program_report,
         "blocking_findings": findings,

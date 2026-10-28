@@ -199,9 +199,17 @@ def _verse_range(slug: str) -> tuple[str, int, int, int]:
 def verse_mentions(content: str) -> list[tuple[int, str]]:
     """Where a source names a verse: written (「太16:13」) or spoken (「第七章第三節」)."""
 
-    from backend.api.scripture import _SINGLE_REFERENCE_PATTERN, _resolve_book_slug, spoken_references
+    from backend.api.scripture import spoken_references
 
-    found = list(spoken_references(content))
+    return sorted([*spoken_references(content), *written_mentions(content)])
+
+
+def written_mentions(content: str) -> list[tuple[int, str]]:
+    """Where a source writes a verse out (「太16:13」), even run into the words before it."""
+
+    from backend.api.scripture import _SINGLE_REFERENCE_PATTERN, _resolve_book_slug
+
+    found: list[tuple[int, str]] = []
     for match in _SINGLE_REFERENCE_PATTERN.finditer(content):
         book = _resolve_book_slug(match.group("book"))
         if book is None:
@@ -209,9 +217,10 @@ def verse_mentions(content: str) -> list[tuple[int, str]]:
             book = next((_resolve_book_slug(match.group("book")[-n:]) for n in range(len(match.group("book")) - 1, 0, -1)
                          if _resolve_book_slug(match.group("book")[-n:])), None)
         if book:
-            end = match.group("end") or match.group("start")
-            found.append((match.start("book"), f"{book}-{match.group('chapter')}-{match.group('start')}-{end}"))
-    return sorted(found)
+            end = match.group("end")
+            span = f"{match.group('start')}-{end}" if end and end != match.group("start") else match.group("start")
+            found.append((match.start("book"), f"{book}-{match.group('chapter')}-{span}"))
+    return found
 
 
 def _read_aloud(text: str, content: str) -> str | None:
@@ -247,6 +256,8 @@ def _cuv_slugs(line: str, packet: Mapping[str, Any]) -> list[str]:
     segment = max((normalize(part) for part in _ELISION.split(line)), key=len, default="")
     if len(segment) < 8:
         return []
+    # Every place it occurs: 「被召的人多，選上的人少」 is 太20:16 as well as 22:14.
+    found: list[str] = []
     for book, number in cited_chapters(packet):
         verses = cuv.chapter(book, number)
         text, verse_at = "", []
@@ -256,8 +267,8 @@ def _cuv_slugs(line: str, packet: Mapping[str, Any]) -> list[str]:
             verse_at += [key] * len(folded)
         index = text.find(segment)
         if index >= 0:
-            return [f"{book.lower()}-{number}-{verse_at[index]}-{verse_at[index + len(segment) - 1]}"]
-    return []
+            found.append(f"{book.lower()}-{number}-{verse_at[index]}-{verse_at[index + len(segment) - 1]}")
+    return found
 
 
 def scripture_bindings(paragraph_text: str, packet: Mapping[str, Any]) -> list[dict[str, str]]:
