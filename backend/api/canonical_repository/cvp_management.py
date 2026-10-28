@@ -45,6 +45,13 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class CandidateValidationError(ValueError):
+    """Stable error category plus concrete diagnostics for an ordinary correction."""
+    def __init__(self, message, *, details):
+        super().__init__(message)
+        self.details = details
+
+
 class Binding(Contract):
     path: str = Field(min_length=1)
     file_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
@@ -432,6 +439,18 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
     request = _request(request)
     if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
             and previous.get('material_sha256')!=bundle.get('artifact_sha256')
+            and bundle.get('program_validation_feedback') is not None):
+        # Older runners added mechanical error feedback without rebinding the
+        # preceding candidate. Recover ONLY its exact full material preimage:
+        # removing these two program fields must reproduce the saved SHA.
+        # Every record, source, Claim position and authority remains bound.
+        before=seal({k:v for k,v in bundle.items() if k not in {
+            'program_validation_feedback','program_validation_response_shas','artifact_sha256'}})
+        if before['artifact_sha256']==previous['material_sha256']:
+            return rebind_candidate(request,before,bundle,previous,
+                replacement_raw=raw,prior_findings=prior_findings)
+    if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
+            and previous.get('material_sha256')!=bundle.get('artifact_sha256')
             and bundle.get('summary_enrichment_contract')==SUMMARY_ENRICHMENT_CONTRACT):
         # A historical expansion rebound the candidate before task contracts
         # were attached. Recover only an exact preimage differing in these two
@@ -473,7 +492,12 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             or not discarded <= prior_write_refs | prior_summary_refs
             or discarded & {row.ref for row in raw.changes}
             or discarded & {row.ref for row in raw.summaries}):
-        raise ValueError('discard requires unique previous candidate edits without a conflicting new delta')
+        raise CandidateValidationError('discard requires unique previous candidate edits without a conflicting new delta',
+            details={'discard_refs':raw.discard_refs,
+                'unknown_refs':sorted(discarded-(prior_write_refs|prior_summary_refs)),
+                'conflicting_refs':sorted(discarded & ({row.ref for row in raw.changes}|{row.ref for row in raw.summaries})),
+                'instruction':'Discard only edits still present in previous.writes or previous.summaries. '
+                    'An edit already removed by an accepted earlier proposal must not be discarded again.'})
     plan = _positions(bundle, raw, previous)
     parts = {row['component_ref']: row for row in plan['components']}
     changed_plan = previous is not None and plan['artifact_sha256'] != previous['component_plan']['artifact_sha256']
@@ -677,7 +701,14 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             if ref not in component_by_link:
                 # Existing withdrawn links are still explicitly reviewed as objects/members.
                 if is_new:
-                    raise ValueError('new active link needs an explicit component disposition')
+                    raise CandidateValidationError('new active link needs an explicit component disposition',
+                        details={'link_ref': ref, 'claim_ref': cref,
+                            'target_ref': keyrefs.get(('canonical_viewpoints', payload.get('viewpoint_id'))),
+                            'inherited': previous is not None and any(w['ref']==ref for w in previous['writes']),
+                            'instruction': 'Inherited uncommitted new links remain until discard_refs removes them; '
+                                'mentioning a link in a reason does not assign its component. '
+                                'Each component has exactly one disposition; resolve competing new links explicitly '
+                                'without duplicating spans or losing the underlying judgement.'})
                 if payload.get('effective_state', 'active') == 'active' and (col, oid) not in _members(original, set(request.maintenance_viewpoint_ids)):
                     raise ValueError('existing active link is outside complete member maintenance')
             else:

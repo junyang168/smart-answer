@@ -159,6 +159,75 @@ def test_repeated_invalid_proposal_does_not_loop_or_reach_opus(setup):
     assert 'no progress' in parent['units']['cvp-update']['detail']
 
 
+@pytest.mark.parametrize('legacy_frame',[False,True])
+@pytest.mark.parametrize('late_finding',[False,True])
+def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup,monkeypatch,legacy_frame,late_finding):
+    from test_cvp_management import passing
+    store,initial,root,clients,_,view,_,_=_initial(setup)
+    request=_request(store,initial,root,[view],name='revision-program-feedback')
+    clients['gpt'].requests.clear();clients['opus'].requests.clear()
+    proposals=[];reviews=[]
+    real_rebase=runner._rebase_previous
+    def propose(packet):
+        proposals.append(packet)
+        response=_member_candidate(packet,summary='此处人子称号表明耶稣的神性。')
+        if len(proposals)==2:
+            response['candidate']['component_dispositions'][0]['component_ref']='missing-component'
+            if legacy_frame:
+                # Preserve one old frozen step exactly as the broken runner
+                # did, then restore fixed code before the next invalid delta.
+                monkeypatch.setattr(runner,'_rebase_previous',lambda request,old,new,previous,**kw:previous)
+        if len(proposals)==3 and legacy_frame:
+            monkeypatch.setattr(runner,'_rebase_previous',real_rebase)
+            response['candidate']['component_dispositions'][0]['component_ref']='another-invalid-component'
+        if len(proposals)==(4 if legacy_frame else 3):
+            assert packet['program_validation_feedback']['findings']
+            assert packet['previous']['prior_findings']
+        if late_finding and len(proposals)==(5 if legacy_frame else 4):
+            assert 'program_validation_feedback' not in packet
+            assert packet['previous']['prior_findings']
+        return response
+    def review(packet):
+        reviews.append(packet);value=passing(packet['candidate'])
+        value['prior_findings']=[{'ref':ref,'disposition':'resolved','reason':'按原异议修改并完整核对。'}
+            for ref in packet['candidate']['review_sets']['prior_findings']]
+        if len(reviews)==1 or late_finding and len(reviews)==2:
+            ref=packet['material']['viewpoints'][0]['cvp_ref']
+            next(r for r in value['object_reviews'] if r['ref']==ref).update(decision='revise',finding_refs=['f1'])
+            value['findings']=[{'slot':'f1','target_refs':[ref],'category':'wording',
+                'reason':'明确归属。' if len(reviews)==1 else '保留原文限定。'}]
+        return envelope('review',review=value)
+    clients['gpt'].behavior=_proposal_behavior(propose);clients['opus'].behavior=review
+    result,step=_run(store,request,root.parent/'revision-error',clients)
+    assert len(proposals)==(4 if legacy_frame else 3)+int(late_finding) and len(reviews)==2+int(late_finding)
+    assert result['cvp_status']=='completed'
+    assert reviews[-1]['candidate']['prior_findings']
+
+
+@pytest.mark.parametrize('drift',[None,'record','source','authority'])
+def test_legacy_feedback_rebind_requires_exact_unchanged_preimage(setup,drift):
+    store,initial,root,clients,_,view,_,_=_initial(setup)
+    request=_request(store,initial,root,[view],name='legacy-feedback')
+    clients['gpt'].behavior=_proposal_behavior(lambda p:_member_candidate(p,summary='人子称号表明耶稣的神性。'))
+    _,step=_run(store,request,root.parent/'legacy-feedback',clients)
+    bundle=step['materials']['bundle']
+    candidate=read_artifact(Path(step['materials']['step_root'])/'candidate.json')
+    feedback=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
+        'program_validation_feedback':{'findings':['unaccepted delta'],'content_approval':False},
+        'program_validation_response_shas':['original-raw-sha']})
+    if drift=='record':feedback['records'][0]['revision']+=1
+    if drift=='source':feedback['sources'][0]['file_sha256']='0'*64
+    if drift=='authority':request={**request,'budget':{**request['budget'],'max_calls':99}}
+    feedback=seal({k:v for k,v in feedback.items() if k!='artifact_sha256'})
+    if drift:
+        with pytest.raises(ValueError):domain.compile_candidate(request,feedback,{},previous=candidate)
+    else:
+        rebuilt=domain.compile_candidate(request,feedback,{},previous=candidate)
+        assert rebuilt['material_sha256']==feedback['artifact_sha256']
+        assert rebuilt['component_dispositions']==candidate['component_dispositions']
+        assert rebuilt['rebase_history'][-1]['candidate_sha256']==candidate['artifact_sha256']
+
+
 def test_zero_business_change_is_reviewed_and_still_queued_once(setup):
     store,initial,root,clients,_,view,_,_=_initial(setup)
     first=_request(store,initial,root,[view],name='summary-bind')
