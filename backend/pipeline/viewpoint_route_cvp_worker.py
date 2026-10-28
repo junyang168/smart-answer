@@ -83,7 +83,11 @@ def authenticate_saved_route_review(output_dir, round_number, final, policy_path
         if json.loads(Path(source['request']['path']).read_text()) != packet:
             raise ValueError('saved Route review source request differs from final packet')
         response_path = Path(source['response']['path'])
-    raw = read_saved_model_response(model, packet, response_path)
+    from backend.pipeline.viewpoint_route_validation_repair import (
+        read_validated_changes, REVIEW_REPAIR_INSTRUCTION,
+    )
+    raw, _ = read_validated_changes(model, packet, response_path,
+        repair_instruction=REVIEW_REPAIR_INSTRUCTION)
     from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReviewV3Response
     review_model = ArgumentRouteReviewV3Response if policy['schema_version'] == 'wang_route_resolution_policy_v8' else ArgumentRouteReviewV2Response
     review = review_model.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')

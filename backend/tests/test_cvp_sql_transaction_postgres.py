@@ -248,3 +248,25 @@ def test_indexable_reference_batches_match_recursive_equality_for_nested_object_
             cursor.execute('SELECT %s::jsonb @? %s::jsonpath, %s::jsonb @? %s::jsonpath',
                 (json.dumps(payload),'$.** ? (@ == "needle")',json.dumps(payload),'$.**.* ? (@ == "needle")'))
             left,right=cursor.fetchone();assert left==right
+
+
+@pytest.mark.parametrize('historical_pins_only',[False,True])
+def test_scoped_route_context_includes_loaded_revision_predecessors(postgres_store,historical_pins_only):
+    store=postgres_store
+    rows=[{'argument_route_revision_id':'ARR-current','argument_route_id':'AR-local',
+           'supersedes_revision_id':'ARR-prior'},
+          {'argument_route_revision_id':'ARR-prior','argument_route_id':'AR-local',
+           'supersedes_revision_id':'ARR-first'},
+          {'argument_route_revision_id':'ARR-first','argument_route_id':'AR-local'},
+          {'argument_route_revision_id':'ARR-unrelated','argument_route_id':'AR-other'}]
+    with store.connect() as conn:
+        for payload in rows:
+            conn.execute('''INSERT INTO wang_knowledge.objects
+                (collection,object_id,revision,content_sha256,payload)
+                VALUES ('argument_route_revisions',%s,1,%s,%s::jsonb)''',
+                (payload['argument_route_revision_id'],record_content_sha(payload),canonical_json(payload)))
+    roots={'argument_route_attestations':{'ATT-new':{'validated_against_route_revision_id':'ARR-current'}}}
+    with store.connect() as conn:
+        context=store._existing_cvp_context(conn,roots,historical_pins_only=historical_pins_only)
+    assert set(context)=={('argument_route_revisions',rid) for rid in ('ARR-current','ARR-prior','ARR-first')}
+    assert context['argument_route_revisions','ARR-prior']['payload']['supersedes_revision_id']=='ARR-first'

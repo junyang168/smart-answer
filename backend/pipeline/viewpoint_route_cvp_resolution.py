@@ -46,7 +46,7 @@ from backend.pipeline.viewpoint_route_correction_changes import (
     proposal_adapter, expand_proposal, ProposalChanges, PROPOSAL_MARKER, PROPOSAL_VERSION,
 )
 from backend.pipeline.viewpoint_route_update_projection import update_baseline
-from backend.pipeline.viewpoint_route_validation_repair import validate_changes
+from backend.pipeline.viewpoint_route_validation_repair import validate_changes, REVIEW_REPAIR_INSTRUCTION
 
 
 class CvpRouteReviewIncomplete(ValueError):
@@ -442,21 +442,27 @@ def run_cvp_route_scope(
             reviewer, review_packet,
             output_dir / f"raw-route-review-{round_number:03d}.json",
         )
-        review = review_model.model_validate(
-            canonicalize_review(raw_review)[0]
-        )
-        review_validation = validate_route_review(
-            review=review,
-            proposal=proposal,
-            route_proposal_sha256=proposal_sha,
-            route_evidence_packet_sha256=route_packet["packet_sha256"],
-            expected_targets={(item["target_kind"], item["target_key"])
-                              for item in review_packet["review_targets"]},
-            allowed_claim_component_keys={item.claim_component_key for item in bindings},
-            member_source_targets=set(route_member_source_review_targets(
-                proposal=proposal, route_packet=route_packet
-            )),
-        )
+        def parse_review(answer):
+            parsed = review_model.model_validate(canonicalize_review(answer)[0])
+            validated = validate_route_review(
+                review=parsed, proposal=proposal,
+                route_proposal_sha256=proposal_sha,
+                route_evidence_packet_sha256=route_packet['packet_sha256'],
+                expected_targets={(item['target_kind'], item['target_key'])
+                                  for item in review_packet['review_targets']},
+                allowed_claim_component_keys={item.claim_component_key for item in bindings},
+                member_source_targets=set(route_member_source_review_targets(
+                    proposal=proposal, route_packet=route_packet)),
+            )
+            return parsed, validated
+        if max_program_repairs == 0:
+            review, review_validation = parse_review(raw_review)
+        else:
+            (review, review_validation), _ = validate_changes(
+                raw_review, validate=parse_review, adapter=reviewer, packet=review_packet,
+                cache=output_dir / f'raw-route-review-{round_number:03d}.json',
+                state={'used':0, 'attempts':[]}, max_repairs=max_program_repairs,
+                repair_instruction=REVIEW_REPAIR_INSTRUCTION)
         review_payload = review.model_dump(mode="json")
         review_sha = sha256_json(review_payload)
         review_history.append(review_history_entry(
@@ -530,10 +536,13 @@ def run_cvp_route_scope(
         raw_reconsideration, _, _ = call_model(
             active_reconsiderer, reconsider_packet, response_path,
         )
-        def parse_correction(answer):
+        def parse_correction(answer, response_context=None):
+            from backend.pipeline.viewpoint_route_observation_restore import MARKER as RESTORE, contract
+            restore_allowed=(response_context or {}).get(RESTORE)==contract(route_packet)
             corrected = correction_model.model_validate(canonicalize_proposal(
                 expand_correction(answer, proposal, review, route_packet,
-                    expected_contract=reconsider_packet.get(MARKER)))[0])
+                    expected_contract=reconsider_packet.get(MARKER),
+                    allow_observation_restore=restore_allowed))[0])
             bound_proposal, retirement = bind_revision_retirements(corrected.revised_proposal, route_packet)
             if retirement:
                 corrected = corrected.model_copy(update={'revised_proposal': bound_proposal})
@@ -553,9 +562,9 @@ def run_cvp_route_scope(
             parsed, raw_reconsideration = validate_changes(raw_reconsideration,
                 validate=parse_correction, adapter=active_reconsiderer,
                 packet=reconsider_packet, cache=response_path, state=program_repairs,
-                max_repairs=max_program_repairs)
+                max_repairs=max_program_repairs, contextual=True)
         else:
-            parsed = parse_correction(raw_reconsideration)
+            parsed = parse_correction(raw_reconsideration,reconsider_packet)
         reconsideration, retirement_binding, reconsideration_validation, can_re_review = parsed
         if retirement_binding:
             write_immutable(output_dir / 'observation-retirement-bindings' /
