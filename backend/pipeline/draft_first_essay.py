@@ -40,8 +40,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-STAGES = ("scope", "coverage", "decisions", "cvp_gap", "calibration",
-          "packet", "author", "review", "binding", "register", "final_review")
+STAGES = ("scope", "coverage", "decisions", "cvp_gap",
+          "packet", "author", "calibration", "review", "binding", "register", "final_review")
 STOPPED = 3
 
 Runner = Callable[[str, list[str], Path], None]
@@ -290,8 +290,8 @@ class EssayRun:
 
     # -- driver --------------------------------------------------------------
     def advance(self) -> dict[str, Any]:
-        steps = [self.scope, self.coverage, self.decisions, self.cvp_gap, self.calibration,
-                 self.build_packet, self.author, self.review, self.binding, self.register, self.final_review]
+        steps = [self.scope, self.coverage, self.decisions, self.cvp_gap,
+                 self.build_packet, self.author, self.calibration, self.review, self.binding, self.register, self.final_review]
         try:
             for step in steps:
                 step()
