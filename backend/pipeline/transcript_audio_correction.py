@@ -79,10 +79,23 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
         if any(c in row['new'] for c in '\n\r'):
             raise ValueError('Correction cannot insert paragraph breaks')
         p = by_id[row['paragraph_id']]
-        start, end = locate(p['text'], row['old'], occurrence)
+        model_old = row['old']
+        try:
+            start, end = locate(p['text'], model_old, occurrence)
+        except ValueError:
+            # ASR can ignore zh-tw and return simplified script. Bind an exact
+            # s2t-equivalent range only; never fuzzy-match or guess another word.
+            from opencc import OpenCC
+            converter = OpenCC('s2t')
+            converted, old = converter.convert(p['text']), converter.convert(model_old)
+            if len(converted) != len(p['text']) or len(old) != len(model_old):
+                raise ValueError('Script conversion changed range length; cannot guess offsets')
+            start, end = locate(converted, old, occurrence)
         if start and unicodedata.category(p['text'][start]).startswith('M') or end < len(p['text']) and unicodedata.category(p['text'][end]).startswith('M'):
             raise ValueError('Correction would split a combining sequence')
-        item = {**row, 'occurrence': occurrence, 'start': start, 'end': end,
+        item = {**row, 'old': p['text'][start:end], 'model_old': model_old,
+                'source_script_equivalence_used': p['text'][start:end] != model_old,
+                'occurrence': occurrence, 'start': start, 'end': end,
                 'paragraph_text_sha256': object_sha(p['text'])}
         if any(r['paragraph_id'] == p['id'] and r['start'] < end and start < r['end'] for r in result):
             raise ValueError('Overlapping correction proposals')
@@ -199,8 +212,8 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         raise ValueError('Audio and illustrated transcript source identities differ')
     if source['speech_artifact_sha256'] != file_sha(audio_dir / 'illustrated_transcript.json'):
         raise ValueError('Illustrated text belongs to another original speech artifact')
-    if manifest['duration_ms'] != 900000:
-        raise ValueError('This trial is bounded to the existing 15-minute source')
+    if not 0 < manifest['duration_ms'] <= 900000:
+        raise ValueError('Correction windows must not exceed 15 minutes')
     samples, paragraphs = read_audio(audio_dir / 'audio.wav'), source['paragraphs']
     adapter = VisionReviewer('gemini', PROMPT, SCHEMA)
     adapter.config.pop('response_json_schema')
@@ -224,7 +237,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         batch = [p for p in paragraphs if p['start_ms'] is not None and min(p['start_ms'] // 180000, 4) == batch_id]
         if not batch:
             continue
-        start, end = max(0, min(p['start_ms'] for p in batch) - 3000), min(900000, max(p['end_ms'] for p in batch) + 3000)
+        start, end = max(0, min(p['start_ms'] for p in batch) - 3000), min(manifest['duration_ms'], max(p['end_ms'] for p in batch) + 3000)
         audio = clip_audio(samples, start, end, out / f'proposal_audio/b{batch_id}')
         ids = {p['id'] for p in batch}
         occurrences = [s for s in source['occurrences'] if s['paragraph_id'] in ids]
@@ -247,15 +260,18 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
         request = {'stage': 'audio_correction_proposals', 'manifest_sha256': file_sha(identity_path), 'batch_id': batch_id,
             'material': material, 'audio_sha256': file_sha(audio), 'previews': previews, 'config': adapter.config, 'prompt': adapter.prompt}
         raw, cost, request_sha = proposal_response(adapter, parts, request, out)
-        answer = json.loads(adapter.text(raw))
+        answer = adapter.text(raw)
         try:
+            answer = json.loads(answer)
             proposals = validate_proposals(answer, batch, {s['event_id'] for s in occurrences})
         except ValueError as error:
             # One structural repair of the same model response, never an ASR veto.
             repair_text = ('Your JSON proposals failed deterministic validation: ' + str(error) +
                 '. Repair only the invalid range/occurrence/structure. Count occurrences across '
                 'the ENTIRE exact paragraph, including substrings inside longer phrases. '
-                'Edits must not overlap. Preserve the intended audio-based corrections; '
+                'Edits must not overlap. Omit punctuation-only, case-only and identical edits. '
+                'Use exact original characters for old, including simplified script if present. '
+                'Preserve the intended audio-based corrections; '
                 'do not introduce unrelated edits. Previous response: ' + json.dumps(answer, ensure_ascii=False))
             repair_parts = parts + [types.Part.from_text(text=repair_text)]
             repair_request = {**request, 'stage': 'proposal_structure_repair_once',
@@ -274,7 +290,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
     for proposal in all_proposals:
         decision = audio_decision(by_id[proposal['paragraph_id']], proposal)
         p = by_id[proposal['paragraph_id']]
-        start, end = max(0, p['start_ms'] - 2000), min(900000, p['end_ms'] + 2000)
+        start, end = max(0, p['start_ms'] - 2000), min(manifest['duration_ms'], p['end_ms'] + 2000)
         clip = clip_audio(samples, start, end, out / 'review_audio' / p['id'])
         decisions.append({**proposal, **decision, 'proposal_reason': proposal['reason'],
                           'audio_clip': str(clip.relative_to(out)), 'human_confirmed': False})
