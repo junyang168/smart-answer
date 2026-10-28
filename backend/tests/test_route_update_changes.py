@@ -351,3 +351,16 @@ def test_review_completion_cannot_turn_substantive_rejection_into_approval(tmp_p
     assert saved['validation']['outcome']!='pass'
     assert any(r['decision']=='reject' for r in saved['review']['change_reviews'])
     assert not (tmp_path/'route-change-plan.json').exists()
+
+
+def test_observation_pair_error_identifies_the_actual_registry_owner():
+    from test_viewpoint_observation_support import validate
+    from backend.api.canonical_repository.viewpoint_batch_resolution import BatchResolutionError
+    packet=fixture_packet();raw=observation_proposal(packet)
+    binding=raw['observation_supports'][0]['evidence_bindings'][0]
+    original=binding['evidence_step_id'];binding['evidence_step_id']='wrong-evidence'
+    with pytest.raises(BatchResolutionError) as error:
+        validate(packet,raw)
+    message=str(error.value)
+    assert 'wrong-evidence' in message and original in message
+    assert binding['source_fragment_id'] in message and 'fragment_registry_pairs=' in message

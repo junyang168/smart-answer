@@ -209,7 +209,11 @@ def validate_observation_proposal(proposal,*,claims,components,approved_revision
                     or claim.source_id!=o.source_id or component.source_id!=o.source_id
                     or not any(e.evidence_step_id==b.evidence_step_id and e.source_fragment_id==b.source_fragment_id
                                and e.source_id==o.source_id and route_evidence_is_usable(e) for e in claim.evidence)):
-                findings.append(f'{o.local_observation_key}: observation evidence is not an eligible source-local Claim pair')
+                owners=[(c.claim_id,e.evidence_step_id) for c in claims if c.source_id==o.source_id
+                        for e in c.evidence if e.source_fragment_id==b.source_fragment_id]
+                findings.append(f'{o.local_observation_key}: observation evidence is not an eligible source-local Claim pair; '
+                    f'requested_component={b.claim_component_key}, evidence_step_id={b.evidence_step_id}, '
+                    f'source_fragment_id={b.source_fragment_id}; fragment_registry_pairs={owners}')
     absent={(s.viewpoint_revision_id,s.source_id) for s in proposal.sources_without_observation}
     if claimed & absent:findings.append('source both has and lacks observations')
     if claimed|absent != eligible:findings.append('observation source coverage differs from complete positive source roster')
