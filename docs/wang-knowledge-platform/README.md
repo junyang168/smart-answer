@@ -55,6 +55,7 @@
 | [原聲與投影片校對重跑](./10-extraction/transcript_audio_slide_correction_v2_20261027.md) | 移除重複 ASR 否決，31 處 Gemini 修改及原聲回聽（記錄） |
 | [S 210307 全片圖文校對](./10-extraction/full_video_transcript_s210307_20261027.md) | 71 分鐘全片、閱讀稿清理與重新對齊時間檢查（記錄） |
 | [視頻轉錄與文庫接入 v1](./10-extraction/video_transcript_integration_v1.md) | 來源處理入口、圖文來源格式橋接與尚未接通的正式准入 |
+| [未記錄人工編輯講道的全片試跑](./10-extraction/unedited_video_20190901_20261028.md) | 成聖（II）全片、實體投影、全片清理上下文及文庫格式橋接（記錄） |
 | [分節抽取後獨立複審的價值 v1](./10-extraction/independent_review_value_after_section_extraction_v1.md) | 分节之后 AI 复审还抓得到什么（记录） |
 | [论证层视图 v1](./10-extraction/argument_layer_view_v1.md) | 怎样查看单篇来源的论证层 |
 | [講道目錄分類與 ingestion 邊界](./10-extraction/sermon_catalog_ingestion.md) | 目录导航、内容分类与跨讲归组的分界 |
