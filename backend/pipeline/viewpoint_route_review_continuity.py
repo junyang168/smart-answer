@@ -63,6 +63,9 @@ def continuity_packet(packet, history, *, packet_path: Path, response_path: Path
     from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
     if saved is None or RESTORE in saved:
         packet=with_restore_contract(packet)
+    from backend.pipeline.viewpoint_route_review_scope import MARKER as SCOPE, with_review_scope
+    if saved is None or SCOPE in saved:
+        packet=with_review_scope(packet)
     enriched = packet | {CONTEXT: {
         'schema_version': VERSION,
         'shared_rules': list(RULES),
