@@ -180,9 +180,11 @@ def apply_layout(text: str, units: list[dict], plan: dict) -> dict:
             raise ValueError('Cannot split a foreign word')
         edits.append({'start': start, 'end': end, 'delete': old, 'insert': new,
                       'unit_id': unit['id'], 'owner_unit_start': unit['start']})
-    edits.sort(key=lambda e: (e['start'], e['end']))
+    edits.sort(key=lambda e: (e['start'], e['end'], e['owner_unit_start']))
     for a, b in zip(edits, edits[1:]):
-        if a['end'] > b['start'] or a['start'] == b['start']:
+        shared_unit_boundary = (a['start'] == a['end'] == b['start'] == b['end']
+                                and a['owner_unit_start'] != b['owner_unit_start'])
+        if a['end'] > b['start'] or a['start'] == b['start'] and not shared_unit_boundary:
             raise ValueError('Overlapping format operations')
     paragraph_ids = plan['paragraph_break_after']
     if len(set(paragraph_ids)) != len(paragraph_ids) or any(i not in by_id for i in paragraph_ids):

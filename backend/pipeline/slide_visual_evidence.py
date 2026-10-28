@@ -250,8 +250,20 @@ def compare_sample(primary: Path, independent: Path) -> dict:
     return record
 
 
+
+def parse_visual_json(text: str) -> dict:
+    """Permit a verbatim schema echo before one data object; preserve raw reply."""
+    decoder = json.JSONDecoder()
+    value, end = decoder.raw_decode(text.lstrip())
+    rest = text.lstrip()[end:].strip()
+    if rest:
+        if value != SCHEMA:
+            raise ValueError('Unexpected extra visual response data')
+        value = json.loads(rest)
+    return value
+
 def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: int = 2,
-            budget_usd: float = 3.0, max_calls: int = 20) -> dict:
+            budget_usd: float = 3.0, max_calls: int = 20, thinking_level: str | None = None, repair_invalid_output: bool = False) -> dict:
     if not 1 <= batch_size <= 3 or not 0 < budget_usd <= 5 or not 1 <= max_calls <= 32:
         raise ValueError('Pilot request bounds exceeded')
     report = read_json(slides / 'report.json')
@@ -276,6 +288,8 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: in
         # Use JSON mode with the full explicit schema and the same strict local
         # validation, rather than guessing which nested keyword was rejected.
         adapter.config.pop('response_json_schema')
+        if thinking_level is not None:
+            adapter.config['thinking_config'] = {'thinking_level': thinking_level}
         adapter.prompt = PROMPT + '\nReturn JSON matching this exact schema:\n' + json.dumps(SCHEMA, ensure_ascii=False)
     identity = {'source_sha256': report['source_sha256'], 'slide_report_sha256': file_sha(slides / 'report.json'),
                 'assets': list(assets.values()), 'occurrences': occurrences, 'model': adapter.model,
@@ -296,10 +310,30 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: in
         count = 0 if cached else adapter.count(contents)
         reserved = (count * adapter.input_rate * 1.2 + 16384 * adapter.output_rate) / 1_000_000
         raw = saved_call(out, request, reserved, lambda: adapter.generate(contents), max_calls=max_calls, budget_usd=budget_usd)
-        answer = json.loads(adapter.text(raw))
-        check_schema(answer, SCHEMA)
-        if [r['asset_id'] for r in answer['results']] != ids:
-            raise ValueError('Model invented, reordered or omitted slide assets')
+        repair_usage = None
+        def validated(response):
+            value = parse_visual_json(adapter.text(response))
+            check_schema(value, SCHEMA)
+            if [r['asset_id'] for r in value['results']] != ids:
+                raise ValueError('Model invented, reordered or omitted slide assets')
+            for content in value['results']:
+                validate_content(content)
+            return value
+        try:
+            answer = validated(raw)
+        except (ValueError, KeyError) as error:
+            if not repair_invalid_output or provider != 'gemini':
+                raise
+            from google.genai import types
+            repair = {**request, 'stage': 'slide_visual_structure_repair_once',
+                      'parent_response_sha256': object_sha(raw), 'validation_error': str(error)}
+            repair_parts = contents + [types.Part.from_text(text='Repair this response to the exact closed JSON schema. '
+                'Keep all source text and diagrams, fix invalid fields/types/enums only. Error: '+str(error)+
+                '\nPrevious response: '+adapter.text(raw))]
+            repaired = saved_call(out, repair, reserved, lambda: adapter.generate(repair_parts),
+                                 max_calls=max_calls, budget_usd=budget_usd)
+            answer = validated(repaired)
+            repair_usage = {'request_sha256': object_sha(repair), **adapter.usage(repaired)}
         for asset, content in zip(batch, answer['results']):
             validate_content(content)
             target = out / 'assets' / asset['asset_id']
@@ -315,7 +349,8 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: in
                 'source_video_sha256': report['source_sha256'], 'image_sha256': asset['image_sha256'],
                 'image_width': width, 'image_height': height, 'content': content, 'visible_text': text,
                 'text_sha256': hashlib.sha256(text.encode()).hexdigest(), 'content_sha256': object_sha(content),
-                'request_sha256': object_sha(request), 'response_sha256': object_sha(raw),
+                'request_sha256': object_sha(repair) if repair_usage else object_sha(request),
+                'response_sha256': object_sha(repaired) if repair_usage else object_sha(raw),
                 'review_status': 'unreviewed_model_candidate', 'quotation_status': 'not_spoken_verbatim',
                 'svg': None, 'original_image': str((target / 'original.png').relative_to(out))}
             if content['has_diagram'] and content['shapes']:
@@ -328,6 +363,8 @@ def extract(slides: Path, out: Path, *, provider: str = 'gemini', batch_size: in
                     'canonical_sha256': block.canonical_sha256}
             save_json(target / 'evidence.json', result)
         calls.append({'request_sha256': object_sha(request), **adapter.usage(raw)})
+        if repair_usage:
+            calls.append(repair_usage)
         print(f'Extracted {min(start+batch_size, len(rows))}/{len(rows)} slide images', flush=True)
     results = [read_json(out / 'assets' / a['asset_id'] / 'evidence.json') for a in rows]
     record = {'schema_version': 'slide-visual-evidence-collection.v1', 'source_video_sha256': report['source_sha256'],

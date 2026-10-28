@@ -125,7 +125,7 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
     assert len(list((tmp_path / 'calls').glob('*/state.json'))) == 1
 
 
-@pytest.mark.parametrize('repair_needed', [False, True])
+@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json'])
 def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed):
     import json
     import sys
@@ -153,9 +153,10 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
         def count(self, parts): return 100
         def generate(self, parts):
             self.calls += 1
-            response = {'proposals': answer['proposals'] * 2} if repair_needed and self.calls == 1 else answer
-            return {'answer': response, 'candidates': [{'finish_reason': 'STOP'}]}
-        def text(self, raw): return json.dumps(raw['answer'])
+            response = {'proposals': answer['proposals'] * 2} if repair_needed is True and self.calls == 1 else answer
+            return {'answer': response, 'bad_prefix': repair_needed == 'malformed_json' and self.calls == 1,
+                    'candidates': [{'finish_reason': 'STOP'}]}
+        def text(self, raw): return ('female' if raw.get('bad_prefix') else '') + json.dumps(raw['answer'])
         def usage(self, raw): return {'estimated_usd_upper': .01}
     def fake_clip(samples, start, end, folder):
         folder.mkdir(parents=True, exist_ok=True)
