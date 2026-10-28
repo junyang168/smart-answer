@@ -259,7 +259,16 @@ def parse_visual_json(text: str) -> dict:
     if rest:
         if value != SCHEMA:
             raise ValueError('Unexpected extra visual response data')
-        value = json.loads(rest)
+        # One observed provider response closes the exact echoed schema before
+        # appending its sole data member: SCHEMA, "results": [...]}. Recover
+        # only that literal outer-container defect. No source field, text,
+        # coordinate or value is edited; closed-schema validation still runs.
+        if re.match(r'^,\s*"results"\s*:', rest):
+            value = json.loads('{' + rest[1:].lstrip())
+            if set(value) != {'results'}:
+                raise ValueError('Unexpected extra visual response data')
+        else:
+            value = json.loads(rest)
     if isinstance(value,dict) and 'results' in value and set(value)!={'results'}:
         extras=set(value)-{'results'}
         if extras <= set(SCHEMA) and all(value[k]==SCHEMA[k] for k in extras):
