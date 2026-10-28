@@ -187,6 +187,11 @@ def run_cvp_route_scope(
         raise ValueError("max_correction_rounds must be nonnegative")
     if round_extension and max_correction_rounds != round_extension['effective_max_correction_rounds']:
         raise ValueError('Route correction limit differs from its authorized extension')
+    max_program_repairs = max_correction_rounds
+    if round_extension and round_extension.get('stage') == 'initial_program_validation':
+        # Continue one technical repair without enlarging the semantic review
+        # allowance or erasing any consumed validation/provider history.
+        max_correction_rounds = round_extension['original_max_correction_rounds']
     contract = route_packet.get("evidence_binding_contract")
     if contract not in (None, CLAIM_EVIDENCE_BINDING_CONTRACT):
         raise ValueError("unknown Route evidence binding contract")
@@ -269,7 +274,7 @@ def run_cvp_route_scope(
             parsed, validated_raw = validate_changes(raw,
                 validate=lambda answer: parse_proposal_changes(answer, baseline, route_packet, validation_args),
                 adapter=active_proposer, packet=proposal_input, cache=response_path,
-                state=program_repairs, max_repairs=max_correction_rounds)
+                state=program_repairs, max_repairs=max_program_repairs)
             initial_proposal, source_bindings, retirements = parsed
             raw = initial_proposal.model_dump(mode='json')
             write_immutable(output_dir/'route-proposal-changes-result.json', {
@@ -528,7 +533,7 @@ def run_cvp_route_scope(
             parsed, raw_reconsideration = validate_changes(raw_reconsideration,
                 validate=parse_correction, adapter=active_reconsiderer,
                 packet=reconsider_packet, cache=response_path, state=program_repairs,
-                max_repairs=max_correction_rounds)
+                max_repairs=max_program_repairs)
         else:
             parsed = parse_correction(raw_reconsideration)
         reconsideration, retirement_binding, reconsideration_validation = parsed

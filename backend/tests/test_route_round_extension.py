@@ -66,6 +66,35 @@ def test_exact_one_extra_round_replays_saved_calls_and_keeps_original_artifacts(
     assert json.loads((root/'route-review-000.json').read_text())['validation']['outcome']=='findings'
 
 
+def test_initial_technical_continuation_reuses_failures_and_does_not_extend_semantic_rounds(tmp_path):
+    from test_route_update_changes import Client, proposer, initial_edits
+    from test_route_correction_changes import edit
+    from backend.pipeline.viewpoint_route_correction_changes import PROPOSAL_VERSION
+    material={'viewpoint_id':'CV-1'};material['artifact_sha256']=sha256_json(material)
+    job=make_cvp_route_job('CV-1',material['artifact_sha256'],'policy-sha')
+    root=tmp_path/job['job_id'];write_immutable(root/'cvp-route-materials.json',material)
+    pc=Client(lambda p,n: ({'schema_version':PROPOSAL_VERSION,'edits':[]} if n==1 else
+        {'schema_version':PROPOSAL_VERSION,'edits':[edit(key='absent',fields={'supports':'x'})]} if n==2 else initial_edits(p)))
+    rev=Answer(approved,model_id='opus')
+    args=dict(route_packet=fixture_packet(),existing_routes=[],output_dir=root,
+        proposer=proposer(pc),reviewer=rev,reconsiderer=Answer({},model_id='gpt'))
+    with pytest.raises(ValueError,match='program validation remains unresolved'):
+        run_cvp_route_scope(**args,max_correction_rounds=1)
+    old={p.name:p.read_bytes() for p in root.glob('*.json')}
+    auth=tmp_path/'technical-direction.json'
+    write_immutable(auth,{'schema_version':VERSION,'authorized_by':'owner','owner_direction':'继续原任务',
+        **{k:job[k] for k in ('job_id','viewpoint_id','material_sha256','policy_sha256')},
+        'original_max_correction_rounds':1,'additional_correction_rounds':1,
+        'latest_review_round':None,'latest_review_sha256':sha256_json(json.loads(
+            (root/'raw-route-proposal-000-validation-000.json').read_text())),
+        'stage':'initial_program_validation'})
+    extension=round_extension(root,job,{'max_correction_rounds':1},auth)
+    result=run_cvp_route_scope(**args,max_correction_rounds=2,round_extension=extension)
+    assert result['program_validation_repairs']==2 and rev.calls==1 and len(pc.packets)==3
+    assert all((root/name).read_bytes()==content for name,content in old.items())
+    assert round_extension(root,job,{'max_correction_rounds':1})==extension
+
+
 @pytest.mark.parametrize('fault',['job','policy','two_rounds','different_review','unknown_call'])
 def test_extension_refuses_scope_budget_review_or_unknown_call_changes(tmp_path,fault):
     root,job,policy,authority,_ = stopped(tmp_path)
