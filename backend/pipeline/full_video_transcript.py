@@ -693,7 +693,7 @@ def render(out: Path, video: Path, record: dict, audit: dict) -> None:
                 parts.append(f'<p><del>{e(d["old"])}</del> → <ins>{e(d["new"])}</ins> · {status}</p>')
         for d in record.get('withheld_correction_proposals',[]):
             if d['paragraph_id']==p['id']:
-                parts.append(f'<p>重疊建議未套用，保留原文：{e(d["old"])} → {e(d["new"])}</p>')
+                parts.append(f'<p>建議未套用，保留原文：{e(d["old"])} → {e(d["new"])}</p>')
         parts.append('</details></section>');md += [p['text'],'']
     orphans = [r for r in record['slides'] if r['paragraph_id'] is None]
     if orphans:
