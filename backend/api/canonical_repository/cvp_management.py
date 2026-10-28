@@ -685,9 +685,20 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                 if component['claim_ref'] != cref:
                     raise ValueError('link component belongs to another Claim')
                 payload.pop('component_ref', None)
-                if payload['link_type'] == 'equivalent_full':
-                    own = [u for u in bundle['claim_input']['text_units'] if u['claim_ref'] == cref]
-                    if len(component['spans']) != len(own) or any(s['start_char'] != 0 or s['end_char'] != len(next(u['text'] for u in own if u['text_ref'] == s['text_ref'])) for s in component['spans']):
+                own = [u for u in bundle['claim_input']['text_units'] if u['claim_ref'] == cref]
+                whole_claim = (len(component['spans']) == len(own) and all(
+                    s['start_char'] == 0 and s['end_char'] == len(next(
+                        u['text'] for u in own if u['text_ref'] == s['text_ref']))
+                    for s in component['spans']))
+                # An existing whole-Claim support/extension remains whole
+                # when repinned. Adding a redundant full-text locator would
+                # falsely turn a retained relationship into a semantic edit.
+                preserve_whole = (not is_new and request.input.get('update') is not None
+                    and not original[key]['payload'].get('component_locator')
+                    and not original[key]['payload'].get('component_position_locator')
+                    and whole_claim)
+                if payload['link_type'] == 'equivalent_full' or preserve_whole:
+                    if not whole_claim:
                         raise ValueError('equivalent_full must represent the full Claim text units')
                     payload['component_locator'] = None
                     payload.pop('component_position_locator', None)

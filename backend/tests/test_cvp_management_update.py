@@ -96,6 +96,26 @@ def test_update_rebinds_changed_claim_and_summary_without_new_head_and_hands_off
     assert '不要求Claim diff' in clients['gpt'].requests[0]['system_prompt']
 
 
+@pytest.mark.parametrize('role', ['supports', 'extends', 'qualifies'])
+def test_update_retains_whole_claim_nonidentity_role_without_inventing_component(setup, role):
+    store,initial,root,clients,_,view,link,_=_initial(setup)
+    lid=link['viewpoint_claim_link_id']
+    row=store.get_record_state('viewpoint_claim_links',lid)
+    payload=deepcopy(row['payload']);payload['link_type']=role
+    assert not payload.get('component_locator') and not payload.get('component_position_locator')
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET payload=%s::jsonb,content_sha256=%s WHERE collection='viewpoint_claim_links' AND object_id=%s",
+            (canonical_json(payload),record_content_sha(payload),lid))
+    _update_claim(store,'C1',statement='此处人子称号表明耶稣的神性。')
+    request=_request(store,initial,root,[view],name='whole-'+role)
+    clients['gpt'].behavior=_proposal_behavior(lambda p:_member_candidate(p,summary='此处人子称号表明耶稣的神性。'))
+    result,_=_run(store,request,root.parent/('whole-'+role),clients)
+    assert result['cvp_status']=='completed'
+    after=store.get_record_state('viewpoint_claim_links',lid)['payload']
+    assert after['link_type']==role and after['pinned_claim_revision']==2
+    assert not after.get('component_locator') and not after.get('component_position_locator')
+
+
 def test_zero_business_change_is_reviewed_and_still_queued_once(setup):
     store,initial,root,clients,_,view,_,_=_initial(setup)
     first=_request(store,initial,root,[view],name='summary-bind')
