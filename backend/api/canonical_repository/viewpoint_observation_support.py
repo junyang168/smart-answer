@@ -235,7 +235,12 @@ def compile_observation_package(proposal,packet,*,review_sha256):
             'review_status':'system_approved'}).model_dump(mode='json'))
     retired=set(proposal.retired_observation_support_ids)
     if keeping & retired or set(old)-keeping!=retired:
-        raise ValueError('complete observation set must retain or explicitly retire every old support')
+        raise ValueError('complete observation set must retain or explicitly retire every old support; '
+            f'missing_retirements={sorted(set(old)-keeping-retired)}; '
+            f'still_kept_but_retired={sorted(keeping & retired)}; '
+            f'unknown_retirements={sorted(retired-set(old))}. '
+            'An edited observation has a new content identity even when its local key is unchanged; '
+            'explicitly retire its old record if replacing it. Removing a draft row alone does not retire it.')
     return created,[(COLLECTION,i) for i in sorted(retired)],sorted(keeping & old.keys())
 
 

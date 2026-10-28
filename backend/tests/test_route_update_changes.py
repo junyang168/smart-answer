@@ -58,6 +58,21 @@ def test_projection_keeps_old_observation_evidence_and_exposes_ambiguity():
     assert packet['existing_observation_supports'] == [old]
 
 
+def test_changed_observation_reports_exact_old_record_needing_retirement():
+    packet=fixture_packet()
+    proposal=ArgumentRouteProposalV3Response.model_validate(observation_proposal(packet))
+    old=compile_observation_package(proposal,packet,review_sha256='old-review')[0][0]
+    packet['existing_observation_supports']=[old]
+    updated=proposal.model_copy(deep=True)
+    updated.observation_supports[0].supports='仅支持该经文中直接指出的用词。'
+    with pytest.raises(ValueError,match=old['observation_support_id']) as error:
+        compile_observation_package(updated,packet,review_sha256='new-review')
+    assert 'missing_retirements=' in str(error.value)
+    updated.retired_observation_support_ids=[old['observation_support_id']]
+    created,retired,_=compile_observation_package(updated,packet,review_sha256='new-review')
+    assert len(created)==1 and retired==[('viewpoint_observation_supports',old['observation_support_id'])]
+
+
 def test_projection_rebinds_revision_as_unapproved_draft_without_rewriting_route():
     from test_viewpoint_batch_resolution import _routes_v2
     p = fixture_packet(); route = _routes_v2().argument_route_candidates[0].model_dump(mode='json')
@@ -211,6 +226,24 @@ def test_saved_initial_repair_chain_is_authenticated_without_new_calls(tmp_path)
     with pytest.raises(ValueError):
         read_initial_saved_proposal(prop,p,tmp_path)
     assert len(pc.packets)==2
+
+
+def test_clearer_validator_does_not_rewrite_dispatched_repair_input(tmp_path):
+    from backend.pipeline.viewpoint_route_validation_repair import validate_changes
+    pc=Client(lambda p,n:{'fixed':True});prop=proposer(pc)
+    def check(message):
+        def validate(raw):
+            if not raw.get('fixed'):raise ValueError(message)
+            return raw
+        return validate
+    args=dict(raw={'fixed':False},adapter=prop,packet={'baseline':'unchanged'},
+        cache=tmp_path/'raw.json',max_repairs=1)
+    validate_changes(**args,validate=check('original diagnostic'),state={'used':0,'attempts':[]})
+    files={p.name:p.read_bytes() for p in tmp_path.glob('*.json')}
+    result,_=validate_changes(**args,validate=check('clearer diagnostic with exact record'),
+        state={'used':0,'attempts':[]})
+    assert result=={'fixed':True} and len(pc.packets)==1
+    assert files=={p.name:p.read_bytes() for p in tmp_path.glob('*.json')}
 
 
 def test_semantic_disagreement_does_not_trigger_program_repairs(tmp_path):

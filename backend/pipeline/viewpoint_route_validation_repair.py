@@ -25,6 +25,15 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
             'validation_instruction': 'Fix the failed edits against the SAME baseline; return the complete corrected edits only. Preserve all still-valid intended edits and current finding dispositions. Do not rewrite the full proposal or change scope.'}
         response = cache.with_name(cache.stem+f'-validation-{len(failures):03d}.json')
         request = response.with_name(response.stem+'-packet.json')
+        if request.exists():
+            saved = read_artifact(request)
+            if ({k:v for k,v in saved.items() if k != 'validation_findings'} !=
+                    {k:v for k,v in repair.items() if k != 'validation_findings'}
+                    or not saved.get('validation_findings')):
+                raise ValueError('saved Route validation repair baseline changed')
+            # A clearer diagnostic may be shipped after a saved failure.
+            # Replay the exact dispatched input; improve only future requests.
+            repair, findings = saved, saved['validation_findings']
         write_immutable(request, repair)
         failures.append({'response_sha256': sha256_json(raw), 'findings': findings,
             'repair_response': response.name})
