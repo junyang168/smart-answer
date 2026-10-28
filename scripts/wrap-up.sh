@@ -49,6 +49,18 @@ if (( CLEANUP )); then
 fi
 
 [[ -z "$(git status --porcelain)" ]] || fail "uncommitted changes — commit them before opening the PR"
+
+# A branch that changes the essay reviewer -- its prompt, the two-way rules it
+# shares with the author, or its model -- calibrates it here, once, against the
+# owner's key. Writing an essay never stops for this (#494).
+git fetch --quiet origin main
+if git diff --name-only origin/main...HEAD \
+     | grep -qE '^backend/pipeline/prompts/draft_first_two_way_(review|rules)\.md$' \
+   || git diff origin/main...HEAD -- backend/pipeline/draft_first_review_runner.py | grep -qE '^[+-]REVIEW_MODEL'; then
+  backend/.venv/bin/python scripts/draft-first-calibrate.py --if-needed \
+    || fail "the changed reviewer no longer agrees with the owner's calibration key — see the rows above"
+fi
+
 git push --quiet -u origin "$BRANCH"
 
 if url="$(gh pr view "$BRANCH" --json url -q .url 2>/dev/null)" && [[ -n "$url" ]]; then

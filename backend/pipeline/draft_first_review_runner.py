@@ -909,9 +909,6 @@ def main() -> int:
     self_check_path = args.self_check or args.draft.with_name("self-check.json")
     self_check = json.loads(self_check_path.read_text(encoding="utf-8")) if self_check_path.exists() else []
 
-    # A changed prompt or model is a reviewer the owner has not calibrated.
-    from backend.pipeline.draft_first_calibration import require_calibrated
-    require_calibrated(REVIEW_MODEL)
     clients = {
         "blind_read": ClaudeSubscriptionClient(model="claude-haiku-4-5", reasoning_effort="high"),
         "blind_compare": CodexSubscriptionClient(model=REVIEW_MODEL, reasoning_effort="high"),

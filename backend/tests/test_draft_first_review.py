@@ -945,8 +945,8 @@ def test_program_checks_catch_a_stray_character_and_an_unsourced_verse():
     assert [(f["gate"], f["kind"]) for f in findings] == [("program_check", "unsourced_verse")]
 
 
-def test_a_review_refuses_a_reviewer_the_owner_has_not_calibrated(tmp_path):
-    """#451: the 2026-10-24 calibration ran because someone remembered to."""
+def test_a_reviewer_is_calibrated_only_by_a_record_for_its_own_fingerprint(tmp_path):
+    """#451/#494: wrap-up skips the reviewer call when this exact reviewer agreed."""
 
     import pytest
     from backend.pipeline.draft_first_calibration import (

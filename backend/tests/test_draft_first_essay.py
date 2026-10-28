@@ -53,7 +53,7 @@ class FakeCommands:
 
 def test_an_essay_run_stops_for_the_owner_and_resumes_without_repeating(tmp_path):
     fake = FakeCommands()
-    run = lambda: EssayRun(tmp_path, runner=fake, calibration_check=lambda: None).advance()
+    run = lambda: EssayRun(tmp_path, runner=fake).advance()
 
     assert run()["stage"] == "scope"
     (tmp_path / "essay.json").write_text(json.dumps({"review_id": "test-essay", "passage": "太20:28"}))
@@ -94,15 +94,15 @@ def test_a_changed_input_reruns_its_stage_and_what_follows(tmp_path):
     (tmp_path / "scope.json").write_text(json.dumps({"reader_question": "q"}))
     (tmp_path / "editorial-selection.json").write_text("{}")
     (tmp_path / "coverage-decisions.json").write_text(json.dumps([{"id": "CL1", "decision": "adjacent", "reason": "r"}]))
-    EssayRun(tmp_path, runner=fake, calibration_check=lambda: None).advance()
+    EssayRun(tmp_path, runner=fake).advance()
     first = len(fake.calls)
     (tmp_path / "scope.json").write_text(json.dumps({"reader_question": "改過的問題"}))
-    EssayRun(tmp_path, runner=fake, calibration_check=lambda: None).advance()
+    EssayRun(tmp_path, runner=fake).advance()
     assert fake.calls[first:] == ["coverage", "decisions", "packet", "author", "review", "binding", "register"]
     # An unchanged packet does not rewrite the essay.
     (tmp_path / "editorial-selection.json").write_text("{ }")
     third = len(fake.calls)
-    EssayRun(tmp_path, runner=fake, calibration_check=lambda: None).advance()
+    EssayRun(tmp_path, runner=fake).advance()
     assert fake.calls[third:] == ["coverage", "decisions"]
 
 
@@ -116,6 +116,6 @@ def test_init_writes_the_owner_inputs_once(tmp_path):
     selection = json.loads((tmp_path / "editorial-selection.json").read_text())
     assert scope["reader_question"] == "贖價是為誰付的？" and scope["structure_revision_id"] == selection["selection_id"]
     assert selection["focal_viewpoints"] == []
-    assert EssayRun(tmp_path, runner=FakeCommands(), calibration_check=lambda: None).advance()["stage"] == "decisions"
+    assert EssayRun(tmp_path, runner=FakeCommands()).advance()["stage"] == "decisions"
     with pytest.raises(SystemExit):
         init_run(tmp_path, review_id="x", title="t", question="q", passages=["p"], decision_basis="b")
