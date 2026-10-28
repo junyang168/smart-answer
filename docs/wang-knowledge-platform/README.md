@@ -51,6 +51,8 @@
 | [投影片可見性與空白輸出 v1](./10-extraction/slide_visibility_output_v1.md) | 教授單獨入鏡或無法判斷時清空圖片，保留口述與可見性時段 |
 | [投影片文字與圖表證據抽取 v1](./10-extraction/slide_visual_evidence_v1.md) | 可見文字、原圖座標、SVG 派生與論證取材來源分軌 |
 | [投影片文字與 SVG 試跑記錄](./10-extraction/slide_visual_evidence_pilot_20261027.md) | 24 張原圖的 124 個文字區域、獨立抽樣差異與遠端試稿（記錄） |
+| [原聲校對與投影片提示初次試跑](./10-extraction/transcript_audio_correction_pilot_20261027.md) | 已停用的重複 ASR 否決試驗歷史（記錄） |
+| [原聲與投影片校對重跑](./10-extraction/transcript_audio_slide_correction_v2_20261027.md) | 移除重複 ASR 否決，31 處 Gemini 修改及原聲回聽（記錄） |
 | [分節抽取後獨立複審的價值 v1](./10-extraction/independent_review_value_after_section_extraction_v1.md) | 分节之后 AI 复审还抓得到什么（记录） |
 | [论证层视图 v1](./10-extraction/argument_layer_view_v1.md) | 怎样查看单篇来源的论证层 |
 | [講道目錄分類與 ingestion 邊界](./10-extraction/sermon_catalog_ingestion.md) | 目录导航、内容分类与跨讲归组的分界 |
