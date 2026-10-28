@@ -65,7 +65,6 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
     if ((parent/'route-change-plan.json').exists() or not run['rounds']
             or run['rounds'][-1]['outcome'] != 'pass' or not run['cvp_re_review_exceptions']
             or run.get('proposal_validation_repairs') or run.get('input_recovery')
-            or old.get('approved_connection_judgments') is not None
             or materials['viewpoint_revision_id'] != old_material['viewpoint_revision_id']
             or old['scope_label'] != packet['scope_label']
             or not packet.get('approved_connection_judgments')):
@@ -76,6 +75,8 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
     before={l['viewpoint_claim_link_id']:l for l in old_material['links']}
     after={l['viewpoint_claim_link_id']:l for l in materials['links']}
     added=set(after)-set(before)
+    if old.get('approved_connection_judgments') is not None and not added:
+        raise ValueError('connection continuation with existing rationale needs the exact repaired member')
     if (not set(before) <= set(after) or any(after[k] != v for k,v in before.items())
             or any(after[k]['claim_id'] not in allowed_claims for k in added)):
         raise ValueError('connection continuation changed unrelated membership')
@@ -172,8 +173,16 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         current=ArgumentRouteReconsiderationV3Response.model_validate(
             bind_attestation_source_ids(previous,old)[0]).revised_proposal.model_dump(mode='json')
         expected.add(f'raw-route-reconsideration-{i:03d}.call-intent.json')
+    technical_limit=max_correction_rounds
+    if run.get('correction_round_extension_sha256'):
+        from backend.pipeline.viewpoint_route_round_extension import round_extension, FILENAME
+        from backend.pipeline.viewpoint_route_cvp_worker import DEFAULT_POLICY,load_route_policy
+        first=read(FILENAME);extension=round_extension(parent,first['job'],load_route_policy(DEFAULT_POLICY))
+        if extension['artifact_sha256'] != run['correction_round_extension_sha256']:
+            raise ValueError('connection continuation changed its original validation extension')
+        technical_limit=extension['effective_max_correction_rounds']
     if (technical_repairs != run.get('program_validation_repairs',0)
-            or technical_repairs > max_correction_rounds
+            or technical_repairs > technical_limit
             or {p.name for p in parent.glob('raw-*.call-intent.json')} != expected
             or run['review_sha256'] != sha256_json(last_review)
             or run['proposal_sha256'] != sha256_json(current)
@@ -191,7 +200,8 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         'old_packet_sha256':old['packet_sha256'],'packet_sha256':packet['packet_sha256'],
         'original_correction_limit':max_correction_rounds,'previous_corrections_consumed':n,
         'mode':'correction' if added else 'review','added_link_ids':sorted(added),
-        'defect':'approved_connection_rationale_omitted_from_route_packet',
+        'defect':('exception_identified_missing_member_connection' if old.get('approved_connection_judgments') is not None
+                  else 'approved_connection_rationale_omitted_from_route_packet'),
         'original_exceptions':run['cvp_re_review_exceptions'],'new_initial_proposal_calls':0,
         'human_content_approval':False,'automatic_retry_unknown_calls':False,
         'fixed_code_commit':commit, 'implementation_sha256s':implementation}
@@ -199,6 +209,7 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         receipt['previous_program_validation'] = {
             'used': run['program_validation_repairs'],
             'attempts': run.get('program_validation_attempts', [])}
+        receipt['original_program_validation_limit']=technical_limit
     receipt['artifact_sha256']=sha256_json(receipt)
     if saved is not None and saved != receipt:
         raise ValueError('connection continuation reservation or fixed implementation changed')

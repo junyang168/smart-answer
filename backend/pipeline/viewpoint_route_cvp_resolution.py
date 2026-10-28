@@ -225,6 +225,7 @@ def run_cvp_route_scope(
         if 'previous_program_validation' in connection_seed['receipt']:
             initial_changes = True
             program_repairs = deepcopy(connection_seed['receipt']['previous_program_validation'])
+            max_program_repairs=connection_seed['receipt'].get('original_program_validation_limit',max_program_repairs)
         consumed_corrections = connection_seed['receipt']['previous_corrections_consumed']
         if consumed_corrections > max_correction_rounds:
             raise ValueError('connection continuation exhausted its original correction budget')
@@ -243,13 +244,28 @@ def run_cvp_route_scope(
                     'Return the complete revised set, including the restored source argument if justified. '
                     'Keep all unaffected evidence and findings; this receipt is not approval. '
                     'This correction consumes the original remaining correction budget.')}
-            write_immutable(output_dir/'connection-correction-packet.json',seed_packet)
             # All ordinary findings already passed; only the saved upstream
             # exception remains. Use the complete-proposal schema for this
             # correction rather than inventing a mandatory "correct" finding
             # just to satisfy the ordinary reconsideration response schema.
-            answer,_,_=call_model(proposer,seed_packet,output_dir/'raw-connection-correction.json')
-            corrected=proposal_model.model_validate(canonicalize_proposal(answer)[0])
+            seed_path=output_dir/'connection-correction-packet.json'
+            response_path=output_dir/'raw-connection-correction.json'
+            active=proposal_adapter(proposer,seed_path,response_path)
+            compact=getattr(active,'_response_model',None) is ProposalChanges
+            if compact:
+                baseline=deepcopy(raw)
+                seed_packet.update({PROPOSAL_MARKER:PROPOSAL_VERSION,'route_proposal_baseline':baseline,
+                    'instruction':'Continue the exact saved complete proposal after the approved member repair. Return only actual edits against route_proposal_baseline. Account for the restored member, preserve the existing valid observations and no_route judgment unless current source evidence requires a change; this is not a new initial proposal or approval.'})
+            seed_packet=continuity_packet(seed_packet,[],packet_path=seed_path,response_path=response_path)
+            answer,_,_=call_model(active,seed_packet,response_path)
+            if compact:
+                parsed,_=validate_changes(answer,
+                    validate=lambda value:parse_proposal_changes(value,baseline,route_packet,validation_args),
+                    adapter=active,packet=seed_packet,cache=response_path,state=program_repairs,
+                    max_repairs=max_program_repairs)
+                corrected=parsed[0]
+            else:
+                corrected=proposal_model.model_validate(canonicalize_proposal(answer)[0])
             raw=corrected.model_dump(mode='json')
             if sha256_json(raw) == connection_seed['proposal_sha256']:
                 raise CvpRouteReviewIncomplete('restored membership correction made no change')
