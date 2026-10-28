@@ -772,7 +772,7 @@ def test_concise_is_one_standard_and_the_reviewer_knows_what_wordy_looks_like():
     reviewer = (prompts / "draft_first_two_way_review.md").read_text()
     standard = [next(line for line in text.splitlines() if "成功的标准" in line).split("**")[1]
                 for text in (author, reviewer)]
-    assert standard[0] == standard[1] and "言之有物，言简意赅" in standard[0]
+    assert standard[0] == standard[1] and "言之有物，言简意赅，重点突出，不枝不蔓" in standard[0]
     assert "不要原样嵌进正文当总结" in author
     for kind in ("引完经文紧接着", "相邻几段说两三遍", "路标句", "Claim 的原句嵌进正文"):
         assert kind in reviewer
