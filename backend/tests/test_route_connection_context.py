@@ -177,5 +177,3 @@ def test_compact_member_continuation_can_keep_valid_content_and_review_new_conne
         proposer=proposer(client),reviewer=r,reconsiderer=c,max_correction_rounds=1,connection_seed=seed)
     assert len(client.packets)==1 and p.calls==1 and c.calls==0
     assert result['rounds'][-1]['outcome']=='pass' and result['cvp_re_review_exceptions']==[]
-
-
