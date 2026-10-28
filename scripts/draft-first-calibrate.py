@@ -5,6 +5,10 @@ Re-run whenever a reviewer prompt or model changes: a reviewer that stops
 finding what the owner found, or starts blocking what the owner did not, is
 no longer the reviewer the owner calibrated. One reviewer call; nothing is
 revised, written to the knowledge layer, or published.
+
+`scripts/wrap-up.sh` runs it with `--if-needed` on a branch that changes the
+review prompt or model: no call when this exact reviewer already agreed, exit
+1 when the new run disagrees.
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +25,8 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 from backend.pipeline.draft_first_checklist import build_checklist
-from backend.pipeline.draft_first_calibration import record, reviewer_fingerprint
+from backend.pipeline.draft_first_calibration import (
+    CalibrationRequired, record, records_path, require_calibrated, reviewer_fingerprint)
 from backend.pipeline.draft_first_review_agent import CodexReviewAgent
 from backend.pipeline.draft_first_review_runner import REVIEW_MODEL, run_two_way_review
 from backend.pipeline.matthew_exposition_authoring import sha256_text
@@ -43,9 +49,21 @@ def score(key: dict, findings: list[dict]) -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--key", type=Path, default=ROOT / "backend/config/draft_first_calibration/wkp439-son-of-man-draft-a.json")
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path,
+                        help="default: a new folder beside the calibration records")
+    parser.add_argument("--if-needed", action="store_true",
+                        help="skip when this reviewer already agrees; exit 1 when the new run disagrees")
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
+    if args.if_needed:
+        try:
+            entry = require_calibrated(REVIEW_MODEL)
+            print(f"calibration: this reviewer already agrees ({entry['calibrated_at']})")
+            return 0
+        except CalibrationRequired:
+            pass
+    if args.output_dir is None:
+        args.output_dir = records_path().parent / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     key = json.loads(args.key.read_text(encoding="utf-8"))
     data = Path(os.environ["DATA_BASE_DIR"])
     texts = {}
@@ -68,7 +86,7 @@ def main() -> int:
               "findings": len(review["findings"]), "blocking": sum(f["blocking"] for f in review["findings"])}
     (args.output_dir / "calibration.json").write_text(json.dumps({**report, "review": review}, ensure_ascii=False, indent=2))
     print(json.dumps(report, ensure_ascii=False, indent=1))
-    return 0
+    return 0 if entry["agrees"] or not args.if_needed else 1
 
 
 if __name__ == "__main__":
