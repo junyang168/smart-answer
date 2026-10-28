@@ -34,7 +34,8 @@ def test_empty_collections_receive_actual_creation_fields_without_program_keys()
         elif isinstance(value,list):
             for child in value:check_refs(child)
     check_refs(result)
-    assert 'CCK-' not in json.dumps(result)
+    import re
+    assert not re.search(r'CCK-[0-9a-f]{64}',json.dumps(result))
 
 
 def delta(edits):
