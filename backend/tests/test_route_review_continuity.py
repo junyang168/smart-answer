@@ -11,6 +11,29 @@ from backend.pipeline.viewpoint_route_review_continuity import (
 from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
 
 
+def test_review_sees_compiled_observation_identity_after_content_change(tmp_path):
+    from backend.api.canonical_repository.viewpoint_observation_support import (
+        ArgumentRouteProposalV3Response, compile_observation_package)
+    from backend.pipeline.viewpoint_route_review_continuity import OBSERVATION_IDENTITIES
+    evidence=fixture_packet();proposal=observation_proposal(evidence)
+    old=compile_observation_package(ArgumentRouteProposalV3Response.model_validate(proposal),
+        evidence,review_sha256='old')[0][0]
+    evidence['existing_observation_supports']=[old]
+    proposal['observation_supports'][0].update(local_observation_key=old['observation_support_id'],
+        supports='仅支持本节经文用词的观察。')
+    proposal['retired_observation_support_ids']=[old['observation_support_id']]
+    packet={'route_proposal':proposal,'route_evidence_context':evidence}
+    result=continuity_packet(packet,[],packet_path=tmp_path/'packet.json',response_path=tmp_path/'raw.json')
+    item=result[OBSERVATION_IDENTITIES]['records'][0]
+    assert item['local_observation_key']==old['observation_support_id']
+    assert item['compiled_observation_support_id']!=old['observation_support_id']
+    created,retired,_=compile_observation_package(ArgumentRouteProposalV3Response.model_validate(proposal),
+        evidence,review_sha256='new')
+    assert created[0]['observation_support_id']==item['compiled_observation_support_id']
+    assert retired==[('viewpoint_observation_supports',old['observation_support_id'])]
+    assert continuity_packet(packet,[],packet_path=tmp_path/'packet.json',response_path=tmp_path/'raw.json')==result
+
+
 def test_all_rounds_keep_objections_dispositions_and_shared_rubric(tmp_path):
     packet = fixture_packet()
     original = observation_proposal(packet)

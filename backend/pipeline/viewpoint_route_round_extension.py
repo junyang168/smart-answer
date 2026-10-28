@@ -42,19 +42,30 @@ def round_extension(root, job, policy, authorization=None):
     if root.name != job['job_id'] or (root/'route-cvp-run.json').exists() or (root/'route-change-plan.json').exists():
         raise ValueError('Route round extension requires the original uncommitted job')
     read = lambda name:json.loads((root/name).read_text())
+    direction = json.loads(Path(authorization).read_text())
     material = read('cvp-route-materials.json')
     if (material.get('artifact_sha256') != job['material_sha256']
             or material['viewpoint_id'] != job['viewpoint_id']):
         raise ValueError('Route round extension material differs from original job')
     reviews = sorted(root.glob('route-review-[0-9][0-9][0-9].json'))
-    initial_validation = not reviews
+    initial_validation = not reviews or direction.get('stage') == 'program_validation'
     if initial_validation:
-        repairs=sorted(root.glob('raw-route-proposal-000-validation-[0-9][0-9][0-9].json'))
-        if (previous or not repairs or len(repairs)!=policy['max_correction_rounds']
-                or [p.name for p in repairs] != [f'raw-route-proposal-000-validation-{i:03d}.json' for i in range(len(repairs))]
-                or (root/'raw-route-proposal-000-validated.json').exists()):
-            raise ValueError('Route initial validation extension requires its exact exhausted repair chain')
-        latest=repairs[-1];ordinal=None;review={'review_sha256':sha256_json(read(latest.name))}
+        repairs=sorted(root.glob('raw-*-validation-[0-9][0-9][0-9].json'))
+        limit=previous['effective_max_correction_rounds'] if previous else policy['max_correction_rounds']
+        if not repairs or len(repairs)!=limit:
+            raise ValueError('Route validation extension requires its exact exhausted repair chain')
+        if reviews:
+            name=direction.get('validation_response_name','')
+            if Path(name).name != name or not name.startswith('raw-route-reconsideration-') or not name.endswith('.json'):
+                raise ValueError('Route validation extension needs the exact failed correction response')
+            latest=root/name
+            if latest.with_name(latest.stem+'-validated.json').exists():
+                raise ValueError('Route validation extension cannot extend an already valid response')
+        else:
+            if previous or (root/'raw-route-proposal-000-validated.json').exists():
+                raise ValueError('Route initial validation extension needs an unvalidated initial proposal')
+            latest=repairs[-1]
+        ordinal=None;review={'review_sha256':sha256_json(read(latest.name))}
         consumed=len(repairs)
     else:
         latest = reviews[-1]
@@ -81,7 +92,8 @@ def round_extension(root, job, policy, authorization=None):
         'additional_correction_rounds':1, 'latest_review_round':ordinal,
         'latest_review_sha256':review['review_sha256']}
     if initial_validation:
-        expected['stage']='initial_program_validation'
+        expected['stage']='program_validation' if reviews else 'initial_program_validation'
+        if reviews:expected['validation_response_name']=latest.name
     if previous:
         expected['previous_extension_sha256'] = previous['artifact_sha256']
     if direction != expected or not isinstance(direction.get('owner_direction'),str) or not direction['owner_direction'].strip():
@@ -93,7 +105,7 @@ def round_extension(root, job, policy, authorization=None):
         'latest_review_sha256':review['review_sha256'], 'human_content_approval':False,
         'original_files':{p.name:binding(p) for p in sorted(root.glob('*.json'))}}
     if initial_validation:
-        receipt['stage']='initial_program_validation'
+        receipt['stage']=expected['stage']
     if previous:
         receipt['previous_extension'] = binding(paths[-1])
         path = root/f'correction-round-extension-{len(paths)+1:03d}.json'

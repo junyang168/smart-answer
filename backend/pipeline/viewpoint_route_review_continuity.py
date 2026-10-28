@@ -6,6 +6,22 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_i
 
 CONTEXT = 'route_review_continuity'
 VERSION = 'wang_route_review_continuity_v1'
+OBSERVATION_IDENTITIES = 'observation_record_identities'
+
+
+def with_observation_identities(packet):
+    """Expose compiled IDs so draft labels cannot be mistaken for SQL keys."""
+    proposal=packet.get('route_proposal',{})
+    evidence=packet.get('route_evidence_context') or packet.get('route_evidence_packet')
+    if not evidence or 'observation_supports' not in proposal:
+        return packet
+    from backend.api.canonical_repository.viewpoint_observation_support import (
+        ProposedObservationSupport, observation_payload, observation_id)
+    rows=[{'local_observation_key':o['local_observation_key'],
+        'compiled_observation_support_id':observation_id(observation_payload(
+            ProposedObservationSupport.model_validate(o),evidence))} for o in proposal['observation_supports']]
+    return packet | {OBSERVATION_IDENTITIES:{'records':rows,
+        'rule':'local_observation_key只是提案标签，不是写入ID。实际ID由完整内容生成。修改内容会产生新记录，旧ID须退役；即使local key恰好等于旧ID，也不表示新旧数据库记录相同。请按本映射判断是否保留／退役冲突，不得要求以旧ID原地改写不可变观察。'}}
 
 # One shared rubric for proposal, correction and independent review. Historical
 # requests retain their actual input; this context applies only to new calls.
@@ -39,6 +55,8 @@ def continuity_packet(packet, history, *, packet_path: Path, response_path: Path
         response_path.with_name(response_path.stem + '.request-encoding.json'),
     )):
         return packet
+    if saved is None or OBSERVATION_IDENTITIES in saved:
+        packet=with_observation_identities(packet)
     enriched = packet | {CONTEXT: {
         'schema_version': VERSION,
         'shared_rules': list(RULES),

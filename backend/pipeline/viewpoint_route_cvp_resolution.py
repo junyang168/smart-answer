@@ -188,7 +188,7 @@ def run_cvp_route_scope(
     if round_extension and max_correction_rounds != round_extension['effective_max_correction_rounds']:
         raise ValueError('Route correction limit differs from its authorized extension')
     max_program_repairs = max_correction_rounds
-    if round_extension and round_extension.get('stage') == 'initial_program_validation':
+    if round_extension and round_extension.get('stage') in {'initial_program_validation','program_validation'}:
         # Continue one technical repair without enlarging the semantic review
         # allowance or erasing any consumed validation/provider history.
         max_correction_rounds = round_extension['original_max_correction_rounds']
