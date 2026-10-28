@@ -140,7 +140,7 @@ def assemble(out: Path, slide_out: Path) -> dict:
     save_json(out / 'illustrated_transcript.json', record)
     e = html.escape
     timeline = []
-    markdown = ['# S 210307 前十五分鐘圖文逐字稿試稿', '',
+    markdown = ['# 音訊視窗圖文逐字稿試稿', '',
         '機器轉錄試稿，尚未校對。字詞、經文章節及切段接縫均可能有誤；圖片是原影片畫面，不補入口述。', '']
     for paragraph in paragraphs:
         label = clock(paragraph['start_ms']) if paragraph['start_ms'] is not None else '時間待核對'
@@ -160,9 +160,9 @@ def assemble(out: Path, slide_out: Path) -> dict:
         markdown += [f'## {label}{tag}', '', paragraph['text'], '']
     (out / 'illustrated_transcript.md').write_text('\n'.join(markdown), encoding='utf-8')
     page = f'''<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>S 210307 圖文逐字稿試稿</title><style>body{{font:19px/1.9 system-ui;max-width:1000px;margin:auto;padding:24px;color:#222;background:#f6f6f6}}
+<title>圖文逐字稿試稿</title><style>body{{font:19px/1.9 system-ui;max-width:1000px;margin:auto;padding:24px;color:#222;background:#f6f6f6}}
 section,aside,details{{background:white;padding:16px;margin:12px 0;border-radius:8px}}h1,h2{{line-height:1.4}}h2{{font-size:21px}}img{{max-width:100%;height:auto}}figure{{margin:12px 0}}figcaption{{color:#555;font-size:15px}}summary{{cursor:pointer}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}a{{color:#165cab}}</style>
-<h1>S 210307 前十五分鐘圖文逐字稿試稿</h1><aside>機器轉錄試稿，尚未校對。疑似錯字、經文章節及四處切段接縫需要回聽。
+<h1>音訊視窗圖文逐字稿試稿</h1><aside>機器轉錄試稿，尚未校對。疑似錯字、經文章節及切段接縫需要回聽。
 原圖不等於口述，沒有用投影片替換逐字稿文字。內容逐步增加的圖片可展開查看。</aside>
 <p>{len(paragraphs)} 段文字 · {len(placements)} 次原畫面 · 中文可用字時間 {counts.get('word',0)} 個（只是預測有效率，不是準確率）。
 <a href="audio.wav">原音訊</a> · <a href="illustrated_transcript.json">來源與核對清單</a> · <a href="asr.json">原始 ASR</a></p>
