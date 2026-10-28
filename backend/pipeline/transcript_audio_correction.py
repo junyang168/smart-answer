@@ -23,6 +23,7 @@ from backend.pipeline.slide_change_pilot import clock, file_sha, object_sha, rea
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import obj, check_schema
 from backend.pipeline.transcript_audio_pilot import read_audio, write_audio, saved_call
+from backend.pipeline.transcription_vocabulary import correction_vocabulary_prompt, load_vocabulary, vocabulary_binding
 
 PROMPT_VERSION = 'audio-slide-correction.v2'
 PROMPT = '''Listen to the supplied lecture audio and compare the exact draft paragraphs.
@@ -252,7 +253,7 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
     return raw, cost + adapter.usage(raw)['estimated_usd_upper'], object_sha(recovery)
 
 
-def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
+def run(source_dir: Path, audio_dir: Path, out: Path, *, vocabulary: dict | None = None) -> dict:
     from google.genai import types
     source_path = source_dir / 'illustrated_with_visual_text.json'
     source, manifest = read_json(source_path), read_json(audio_dir / 'audio_manifest.json')
@@ -263,15 +264,18 @@ def run(source_dir: Path, audio_dir: Path, out: Path) -> dict:
     if not 0 < manifest['duration_ms'] <= 900000:
         raise ValueError('Correction windows must not exceed 15 minutes')
     samples, paragraphs = read_audio(audio_dir / 'audio.wav'), source['paragraphs']
-    adapter = VisionReviewer('gemini', PROMPT, SCHEMA)
+    prompt = PROMPT + correction_vocabulary_prompt(vocabulary)
+    adapter = VisionReviewer('gemini', prompt, SCHEMA)
     adapter.config.pop('response_json_schema')
-    adapter.prompt = PROMPT + '\nSchema:\n' + json.dumps(SCHEMA, ensure_ascii=False)
+    adapter.prompt = prompt + '\nSchema:\n' + json.dumps(SCHEMA, ensure_ascii=False)
     adapter.config['max_output_tokens'] = 16384
     adapter.config['thinking_config'] = {'thinking_level': 'LOW'}
     identity = {'source_sha256': source['source_sha256'], 'illustrated_source_sha256': file_sha(source_path),
         'audio_manifest_sha256': file_sha(audio_dir / 'audio_manifest.json'), 'audio_sha256': manifest['audio_sha256'],
         'prompt_version': PROMPT_VERSION, 'prompt': adapter.prompt, 'config': adapter.config,
         'proposal_model': adapter.model, 'acceptance_policy': 'gemini_clear_audio_no_asr_veto'}
+    if vocabulary is not None:
+        identity['vocabulary_hint'] = vocabulary_binding(vocabulary)
     identity_path = out / 'input_manifest.json'
     if identity_path.exists() and read_json(identity_path) != identity:
         raise ValueError('Correction output belongs to another source/configuration')
@@ -417,8 +421,9 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--audio', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--vocabulary', type=Path)
     args = parser.parse_args()
-    result = run(args.source, args.audio, args.out)
+    result = run(args.source, args.audio, args.out, vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else None)
     print(result['status_counts'])
 
 

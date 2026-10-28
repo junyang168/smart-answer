@@ -1,3 +1,4 @@
+from pathlib import Path
 import copy
 
 import pytest
@@ -126,7 +127,8 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
 
 
 @pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json'])
-def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed):
+@pytest.mark.parametrize('use_vocabulary', [False, True])
+def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed, use_vocabulary):
     import json
     import sys
     from backend.pipeline import transcript_audio_correction as module
@@ -166,7 +168,14 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
     monkeypatch.setattr(module, 'clip_audio', fake_clip)
     # Any reintroduced OpenAI ASR import would fail this end-to-end trial.
     monkeypatch.setitem(sys.modules, 'openai', None)
-    result = module.run(source, audio, out)
+    from backend.pipeline.transcription_vocabulary import load_vocabulary, vocabulary_binding
+    vocabulary = load_vocabulary(Path(module.__file__).parent / 'policies/wang_transcription_vocabulary_v1.json') if use_vocabulary else None
+    result = module.run(source, audio, out, vocabulary=vocabulary)
+    if use_vocabulary:
+        assert result['vocabulary_hint'] == vocabulary_binding(vocabulary)
+        assert 'Possible confusions are NOT automatic replacements' in result['prompt']
+    else:
+        assert 'vocabulary_hint' not in result
     assert result['status_counts'] == {'machine_supported': 1}
     assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
     assert result['independent_asr_calls'] == 0
