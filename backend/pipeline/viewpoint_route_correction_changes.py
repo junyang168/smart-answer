@@ -12,6 +12,8 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact
 
 VERSION = 'wang_route_correction_changes_v1'
 MARKER = 'route_correction_output_contract'
+PROPOSAL_VERSION = 'wang_route_proposal_changes_v1'
+PROPOSAL_MARKER = 'route_proposal_output_contract'
 COLLECTIONS = {
     'argument_route_candidates': ('local_route_key',),
     'source_route_attestations': ('local_attestation_key',),
@@ -36,6 +38,11 @@ class ProposalEdit(StrictBatchModel):
 class CorrectionChanges(StrictBatchModel):
     schema_version: Literal['wang_route_correction_changes_v1'] = VERSION
     finding_dispositions: list[FindingDispositionV3] = Field(min_length=1)
+    edits: list[ProposalEdit]
+
+
+class ProposalChanges(StrictBatchModel):
+    schema_version: Literal['wang_route_proposal_changes_v1'] = PROPOSAL_VERSION
     edits: list[ProposalEdit]
 
 
@@ -79,6 +86,33 @@ def correction_adapter(adapter, packet_path: Path, response_path: Path):
     return result
 
 
+def proposal_adapter(adapter, packet_path: Path, response_path: Path):
+    if packet_path.exists():
+        if read_artifact(packet_path).get(PROPOSAL_MARKER) != PROPOSAL_VERSION:
+            return adapter
+    elif any(p.exists() for p in (response_path,
+            response_path.with_name(response_path.stem+'.call-intent.json'),
+            response_path.with_name(response_path.stem+'.request-encoding.json'))):
+        return adapter
+    if not hasattr(adapter, '_response_model'):
+        return adapter
+    result = copy(adapter)
+    result._response_model = ProposalChanges
+    result._schema_name = PROPOSAL_VERSION
+    result._base_prompt = result._prompt = adapter._base_prompt + '''
+输出协议 wang_route_proposal_changes_v1 取代上述完整输出和响应 schema 约定：
+只返回 edits，操作格式与如下说明一致；不返回完整提案、未变记录、SHA 或 finding_dispositions。
+route_proposal_baseline 是旧记录的机械投影草稿，绝不代表它们仍然正确或已通过本轮审核。
+逐项核对全部旧骨架、实例、观察、当前 Claim 和原文，明确需要修改、撤去或补充的内容。
+旧结论版本由程序映射到当前 CVP；绑定为 null 或已失效时必须修正，不能猜测或默认批准。
+未变部分由程序保留。空 edits 也要完整交 Opus 审核；新材料确有新路线或观察须补齐。
+''' + PROMPT[PROMPT.index('edits 每项'):PROMPT.index('只报告解决异议')].replace('空 edits 不会获得通过。', '')
+    result.prompt_sha256 = sha256_json({'prompt': result._prompt})
+    result.generation_config_sha256 = sha256_json({
+        'base_config_sha256': adapter.generation_config_sha256, 'route_proposal_output': PROPOSAL_VERSION})
+    return result
+
+
 def expand_correction(raw, proposal, review, route_packet, *, expected_contract=None):
     """No inferred edits: omitted records and fields remain untouched."""
     if expected_contract is not None and (expected_contract != VERSION or raw.get('schema_version') != VERSION):
@@ -86,9 +120,23 @@ def expand_correction(raw, proposal, review, route_packet, *, expected_contract=
     if raw.get('schema_version') != VERSION:
         return raw
     changes = CorrectionChanges.model_validate(raw)
-    payload = proposal.model_dump(mode='json')
+    revised = type(proposal).model_validate(apply_edits(changes.edits, proposal.model_dump(mode='json'), route_packet))
+    return {'schema_version': 'wang_argument_route_reconsideration_v3' if hasattr(proposal, 'observation_supports') else 'wang_argument_route_reconsideration_v2',
+        'route_proposal_sha256': sha256_json(proposal.model_dump(mode='json')),
+        'route_review_sha256': sha256_json(review.model_dump(mode='json')),
+        'finding_dispositions': [d.model_dump(mode='json') for d in changes.finding_dispositions],
+        'revised_proposal': revised.model_dump(mode='json')}
+
+
+def expand_proposal(raw, baseline, route_packet):
+    changes = ProposalChanges.model_validate(raw)
+    return apply_edits(changes.edits, baseline, route_packet)
+
+
+def apply_edits(edits, baseline, route_packet):
+    payload = deepcopy(baseline)
     seen = set()
-    for edit in changes.edits:
+    for edit in edits:
         collection, key = edit.collection, edit.key
         if collection not in payload or (collection, key) in seen:
             raise ValueError('Route edit collection absent or target repeated')
@@ -135,9 +183,4 @@ def expand_correction(raw, proposal, review, route_packet, *, expected_contract=
             item['source_revision_sha256'] = route_packet['source_revisions'][item['source_id']]
         if edit.action == 'update': rows[matches[0]] = item
         else: rows.append(item)
-    revised = type(proposal).model_validate(payload)
-    return {'schema_version': 'wang_argument_route_reconsideration_v3' if hasattr(proposal, 'observation_supports') else 'wang_argument_route_reconsideration_v2',
-        'route_proposal_sha256': sha256_json(proposal.model_dump(mode='json')),
-        'route_review_sha256': sha256_json(review.model_dump(mode='json')),
-        'finding_dispositions': [d.model_dump(mode='json') for d in changes.finding_dispositions],
-        'revised_proposal': revised.model_dump(mode='json')}
+    return payload

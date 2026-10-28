@@ -114,9 +114,10 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
     expected={'raw-route-proposal-000.call-intent.json'}
     previous=None
     from backend.pipeline.viewpoint_route_review_continuity import continuity_packet, review_history_entry
-    proposal_input=continuity_packet(old, [], packet_path=parent/'route-proposal-input.json',
-        response_path=parent/'raw-route-proposal-000.json')
-    raw=read_saved_model_response(proposer,proposal_input,parent/'raw-route-proposal-000.json')
+    from backend.pipeline.viewpoint_route_validation_repair import read_initial_saved_proposal,read_validated_changes
+    raw, initial_calls=read_initial_saved_proposal(proposer,old,parent)
+    expected={Path(name).stem+'.call-intent.json' for name in initial_calls}
+    technical_repairs=len(initial_calls)-1
     current=ArgumentRouteProposalV3Response.model_validate(canonicalize_proposal(
         bind_attestation_source_ids(raw,old)[0])[0]).model_dump(mode='json')
     last_review=None
@@ -153,18 +154,27 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
             correction_packet['instruction']='Return only actual edits and finding dispositions; the program preserves omitted fields and submits the complete expanded result for review.'
         correction_packet=continuity_packet(correction_packet,review_history,
             packet_path=correction_path,response_path=response_path)
-        raw=read_saved_model_response(active_reconsiderer,correction_packet,response_path)
+        raw, correction_calls=read_validated_changes(active_reconsiderer,correction_packet,response_path)
+        technical_repairs+=len(correction_calls)-1
+        expected.update(Path(name).stem+'.call-intent.json' for name in correction_calls)
         expanded=expand_correction(raw,ArgumentRouteProposalV3Response.model_validate(current),
             ArgumentRouteReviewV3Response.model_validate(last_review),old,
             expected_contract=correction_packet.get(MARKER))
         previous=ArgumentRouteReconsiderationV3Response.model_validate(canonicalize_proposal(expanded)[0]).model_dump(mode='json')
+        if 'program_validation_repairs' in run:
+            from backend.api.canonical_repository.viewpoint_observation_support import bind_revision_retirements
+            bound, _ = bind_revision_retirements(
+                ArgumentRouteProposalV3Response.model_validate(previous['revised_proposal']), old)
+            previous['revised_proposal'] = bound.model_dump(mode='json')
         review_history[-1]['finding_dispositions']=previous['finding_dispositions']
         if read(f'route-reconsideration-{i:03d}.json')['reconsideration'] != previous:
             raise ValueError('connection continuation original correction answer changed')
         current=ArgumentRouteReconsiderationV3Response.model_validate(
             bind_attestation_source_ids(previous,old)[0]).revised_proposal.model_dump(mode='json')
         expected.add(f'raw-route-reconsideration-{i:03d}.call-intent.json')
-    if ({p.name for p in parent.glob('raw-*.call-intent.json')} != expected
+    if (technical_repairs != run.get('program_validation_repairs',0)
+            or technical_repairs > max_correction_rounds
+            or {p.name for p in parent.glob('raw-*.call-intent.json')} != expected
             or run['review_sha256'] != sha256_json(last_review)
             or run['proposal_sha256'] != sha256_json(current)
             or last_review['cvp_re_review_exceptions'] != run['cvp_re_review_exceptions']):
@@ -185,6 +195,10 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         'original_exceptions':run['cvp_re_review_exceptions'],'new_initial_proposal_calls':0,
         'human_content_approval':False,'automatic_retry_unknown_calls':False,
         'fixed_code_commit':commit, 'implementation_sha256s':implementation}
+    if 'program_validation_repairs' in run:
+        receipt['previous_program_validation'] = {
+            'used': run['program_validation_repairs'],
+            'attempts': run.get('program_validation_attempts', [])}
     receipt['artifact_sha256']=sha256_json(receipt)
     if saved is not None and saved != receipt:
         raise ValueError('connection continuation reservation or fixed implementation changed')

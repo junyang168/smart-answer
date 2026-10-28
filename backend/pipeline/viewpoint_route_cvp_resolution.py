@@ -43,11 +43,41 @@ from backend.pipeline.viewpoint_route_review_continuity import (
 )
 from backend.pipeline.viewpoint_route_correction_changes import (
     correction_adapter, expand_correction, CorrectionChanges, MARKER, VERSION as CHANGES_VERSION,
+    proposal_adapter, expand_proposal, ProposalChanges, PROPOSAL_MARKER, PROPOSAL_VERSION,
 )
+from backend.pipeline.viewpoint_route_update_projection import update_baseline
+from backend.pipeline.viewpoint_route_validation_repair import validate_changes
 
 
 class CvpRouteReviewIncomplete(ValueError):
     """The current CVP route set has no complete independent approval."""
+
+
+def route_validation_args(packet, existing_routes=None):
+    routes = packet['existing_routes'] if existing_routes is None else existing_routes
+    return dict(scope_label=packet['scope_label'],
+        claims=[ReviewClaim.model_validate(c) for c in packet['claims']],
+        approved_viewpoint_revision_ids=packet['approved_viewpoint_revision_ids'],
+        known_route_revision_ids=[r['route_revision_id'] for r in routes],
+        known_route_conclusions={r['route_revision_id']:r['conclusion_viewpoint_revision_id'] for r in routes},
+        known_route_viewpoint_ids={r['route_revision_id']:r['route']['conclusion_viewpoint_id'] for r in routes},
+        approved_viewpoint_ids={v['viewpoint_revision_id']:v['viewpoint_id'] for v in packet['approved_viewpoints']},
+        component_bindings=[RouteComponentBinding.model_validate(c) for c in packet['claim_components']],
+        allow_unresolved_member_sources=True, complete_cvp=True,
+        claim_evidence_for_intermediate_steps=packet.get('evidence_binding_contract') == CLAIM_EVIDENCE_BINDING_CONTRACT,
+        existing_observation_supports=packet.get('existing_observation_supports', []))
+
+
+def parse_proposal_changes(raw, baseline, packet, validation_args=None):
+    from backend.api.canonical_repository.viewpoint_observation_support import (
+        CONTRACT, ArgumentRouteProposalV3Response, bind_revision_retirements)
+    model = ArgumentRouteProposalV3Response if packet.get('observation_support_contract') == CONTRACT else ArgumentRouteProposalV2Response
+    expanded = expand_proposal(raw, baseline, packet)
+    bound, source_bindings = bind_attestation_source_ids(expanded, packet)
+    proposal = model.model_validate(canonicalize_proposal(bound)[0])
+    proposal, retirements = bind_revision_retirements(proposal, packet)
+    validate_route_proposal(routes=proposal, **(validation_args or route_validation_args(packet)))
+    return proposal, source_bindings, retirements
 
 
 def bind_attestation_source_ids(
@@ -178,32 +208,18 @@ def run_cvp_route_scope(
     claims = [ReviewClaim.model_validate(item) for item in route_packet["claims"]]
     bindings = [RouteComponentBinding.model_validate(item)
                 for item in route_packet["claim_components"]]
-    known = [str(item["route_revision_id"]) for item in existing_routes]
-    known_conclusions = {str(item["route_revision_id"]): str(
-        item["conclusion_viewpoint_revision_id"]) for item in existing_routes}
-    known_viewpoints = {str(item["route_revision_id"]): str(
-        item["route"]["conclusion_viewpoint_id"]) for item in existing_routes}
-    validation_args = dict(
-        scope_label=scope_label,
-        claims=claims,
-        approved_viewpoint_revision_ids=route_packet["approved_viewpoint_revision_ids"],
-        known_route_revision_ids=known,
-        known_route_conclusions=known_conclusions,
-        known_route_viewpoint_ids=known_viewpoints,
-        approved_viewpoint_ids={str(item["viewpoint_revision_id"]): str(item["viewpoint_id"])
-                                for item in route_packet["approved_viewpoints"]},
-        component_bindings=bindings,
-        allow_unresolved_member_sources=True,
-        complete_cvp=True,
-        claim_evidence_for_intermediate_steps=contract == CLAIM_EVIDENCE_BINDING_CONTRACT,
-        existing_observation_supports=route_packet.get('existing_observation_supports', []),
-    )
+    validation_args = route_validation_args(route_packet, existing_routes)
     write_immutable(output_dir / "route-packet.json", route_packet)
     last_reconsideration = None
     consumed_corrections = 0
+    initial_changes = False
+    program_repairs = {'used': 0, 'attempts': []}
     if recovery_seed is not None and connection_seed is not None:
         raise ValueError('Route continuations cannot be combined')
     if connection_seed is not None:
+        if 'previous_program_validation' in connection_seed['receipt']:
+            initial_changes = True
+            program_repairs = deepcopy(connection_seed['receipt']['previous_program_validation'])
         consumed_corrections = connection_seed['receipt']['previous_corrections_consumed']
         if consumed_corrections > max_correction_rounds:
             raise ValueError('connection continuation exhausted its original correction budget')
@@ -237,11 +253,29 @@ def run_cvp_route_scope(
                 'original_review_sha256':connection_seed['review_sha256']})
             consumed_corrections+=1
     elif recovery_seed is None:
-        proposal_input = continuity_packet(route_packet, [],
-            packet_path=output_dir / 'route-proposal-input.json',
-            response_path=output_dir / 'raw-route-proposal-000.json')
-        raw, _, _ = call_model(proposer, proposal_input,
-                               output_dir / "raw-route-proposal-000.json")
+        input_path = output_dir / 'route-proposal-input.json'
+        response_path = output_dir / 'raw-route-proposal-000.json'
+        active_proposer = proposal_adapter(proposer, input_path, response_path)
+        initial_changes = getattr(active_proposer, '_response_model', None) is ProposalChanges
+        proposal_input = route_packet
+        if initial_changes:
+            baseline = update_baseline(route_packet)
+            proposal_input = route_packet | {PROPOSAL_MARKER: PROPOSAL_VERSION,
+                'route_proposal_baseline': baseline}
+        proposal_input = continuity_packet(proposal_input, [],
+            packet_path=input_path, response_path=response_path)
+        raw, _, _ = call_model(active_proposer, proposal_input, response_path)
+        if initial_changes:
+            parsed, validated_raw = validate_changes(raw,
+                validate=lambda answer: parse_proposal_changes(answer, baseline, route_packet, validation_args),
+                adapter=active_proposer, packet=proposal_input, cache=response_path,
+                state=program_repairs, max_repairs=max_correction_rounds)
+            initial_proposal, source_bindings, retirements = parsed
+            raw = initial_proposal.model_dump(mode='json')
+            write_immutable(output_dir/'route-proposal-changes-result.json', {
+                'schema_version': PROPOSAL_VERSION, 'baseline_sha256': sha256_json(baseline),
+                'response_sha256': sha256_json(validated_raw), 'proposal_sha256': sha256_json(raw),
+                'source_bindings': source_bindings, 'retirement_binding': retirements})
     else:
         if max_correction_rounds < 1 or contract != CLAIM_EVIDENCE_BINDING_CONTRACT:
             raise ValueError("evidence input recovery requires its original remaining correction budget")
@@ -427,6 +461,8 @@ def run_cvp_route_scope(
                 "review_sha256": review_sha,
                 "rounds": rounds,
                 "proposal_validation_repairs": validation_repairs,
+                **({'program_validation_repairs': program_repairs['used'],
+                    'program_validation_attempts': program_repairs['attempts']} if initial_changes else {}),
                 **({'correction_round_extension_sha256':round_extension['artifact_sha256']}
                    if round_extension else {}),
                 **({'connection_continuation':connection_seed['receipt'],
@@ -472,24 +508,33 @@ def run_cvp_route_scope(
         raw_reconsideration, _, _ = call_model(
             active_reconsiderer, reconsider_packet, response_path,
         )
-        reconsideration = correction_model.model_validate(
-            canonicalize_proposal(expand_correction(raw_reconsideration, proposal, review, route_packet,
-                expected_contract=reconsider_packet.get(MARKER)))[0]
-        )
-        bound_proposal, retirement_binding = bind_revision_retirements(
-            reconsideration.revised_proposal, route_packet)
+        def parse_correction(answer):
+            corrected = correction_model.model_validate(canonicalize_proposal(
+                expand_correction(answer, proposal, review, route_packet,
+                    expected_contract=reconsider_packet.get(MARKER)))[0])
+            bound_proposal, retirement = bind_revision_retirements(corrected.revised_proposal, route_packet)
+            if retirement:
+                corrected = corrected.model_copy(update={'revised_proposal': bound_proposal})
+            checked = validate_route_reconsideration(reconsideration=corrected,
+                proposal=proposal, review=review, route_proposal_sha256=proposal_sha,
+                route_review_sha256=review_sha, whole_cvp=True,
+                allow_unchanged_escalation=initial_changes)
+            # Unaccepted semantic findings stop normally; technical repairs
+            # must never force the model to accept a substantive objection.
+            if initial_changes and checked['outcome'] == 'resolved':
+                validate_route_proposal(routes=corrected.revised_proposal, **validation_args)
+            return corrected, retirement, checked
+        if initial_changes:
+            parsed, raw_reconsideration = validate_changes(raw_reconsideration,
+                validate=parse_correction, adapter=active_reconsiderer,
+                packet=reconsider_packet, cache=response_path, state=program_repairs,
+                max_repairs=max_correction_rounds)
+        else:
+            parsed = parse_correction(raw_reconsideration)
+        reconsideration, retirement_binding, reconsideration_validation = parsed
         if retirement_binding:
             write_immutable(output_dir / 'observation-retirement-bindings' /
                 (sha256_json(raw_reconsideration) + '.json'), retirement_binding)
-            reconsideration = reconsideration.model_copy(update={'revised_proposal':bound_proposal})
-        reconsideration_validation = validate_route_reconsideration(
-            reconsideration=reconsideration,
-            proposal=proposal,
-            review=review,
-            route_proposal_sha256=proposal_sha,
-            route_review_sha256=review_sha,
-            whole_cvp=True,
-        )
         if reconsideration_validation["outcome"] != "resolved":
             raise CvpRouteReviewIncomplete("route correction left a reviewer finding unresolved")
         last_reconsideration = reconsideration.model_dump(mode="json")
