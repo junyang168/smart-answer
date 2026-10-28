@@ -62,7 +62,7 @@ def round_extension(root, job, policy, authorization=None):
             if latest.with_name(latest.stem+'-validated.json').exists():
                 raise ValueError('Route validation extension cannot extend an already valid response')
         else:
-            if previous or (root/'raw-route-proposal-000-validated.json').exists():
+            if (root/'raw-route-proposal-000-validated.json').exists():
                 raise ValueError('Route initial validation extension needs an unvalidated initial proposal')
             latest=repairs[-1]
         ordinal=None;review={'review_sha256':sha256_json(read(latest.name))}

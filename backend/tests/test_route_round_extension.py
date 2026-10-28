@@ -157,3 +157,40 @@ def test_an_old_authorization_cannot_grant_the_next_round_again(tmp_path):
     with pytest.raises(ValueError,match='authorization differs'):
         round_extension(root,job,policy,copied)
     assert not(root/'correction-round-extension-002.json').exists()
+
+
+def test_initial_technical_continuations_append_without_resetting_calls(tmp_path):
+    from test_route_update_changes import Client,proposer,initial_edits
+    from test_route_correction_changes import edit
+    from backend.pipeline.viewpoint_route_correction_changes import PROPOSAL_VERSION
+    material={'viewpoint_id':'CV-1'};material['artifact_sha256']=sha256_json(material)
+    job=make_cvp_route_job('CV-1',material['artifact_sha256'],'policy-sha')
+    root=tmp_path/job['job_id'];write_immutable(root/'cvp-route-materials.json',material)
+    pc=Client(lambda p,n:initial_edits(p) if n==4 else {'schema_version':PROPOSAL_VERSION,
+        'edits':[edit(key=f'absent-{n}',fields={'supports':'x'})]})
+    rev=Answer(approved,model_id='opus');policy={'max_correction_rounds':1}
+    args=dict(route_packet=fixture_packet(),existing_routes=[],output_dir=root,
+        proposer=proposer(pc),reviewer=rev,reconsiderer=Answer({}))
+    with pytest.raises(ValueError,match='program validation remains unresolved'):
+        run_cvp_route_scope(**args,max_correction_rounds=1)
+    previous=None
+    for ordinal in (1,2):
+        latest=root/f'raw-route-proposal-000-validation-{ordinal-1:03d}.json'
+        direction={'schema_version':VERSION,'authorized_by':'owner','owner_direction':'完成原任务',
+            **{k:job[k] for k in ('job_id','viewpoint_id','material_sha256','policy_sha256')},
+            'original_max_correction_rounds':1,'additional_correction_rounds':1,
+            'latest_review_round':None,'latest_review_sha256':sha256_json(json.loads(latest.read_text())),
+            'stage':'initial_program_validation'}
+        if previous:direction['previous_extension_sha256']=previous['artifact_sha256']
+        auth=tmp_path/f'authority-{ordinal}.json';write_immutable(auth,direction)
+        previous=round_extension(root,job,policy,auth)
+        frozen={p.name:p.read_bytes() for p in root.glob('*.json')}
+        if ordinal==1:
+            with pytest.raises(ValueError,match='program validation remains unresolved'):
+                run_cvp_route_scope(**args,max_correction_rounds=2,round_extension=previous)
+        else:
+            result=run_cvp_route_scope(**args,max_correction_rounds=3,round_extension=previous)
+            assert result['program_validation_repairs']==3
+        assert all((root/name).read_bytes()==value for name,value in frozen.items())
+    assert len(pc.packets)==4 and rev.calls==1
+    assert round_extension(root,job,policy)==previous

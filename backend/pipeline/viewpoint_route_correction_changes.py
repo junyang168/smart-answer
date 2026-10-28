@@ -191,7 +191,10 @@ def apply_edits(edits, baseline, route_packet):
             rows.pop(matches[0])
             continue
         if (edit.action == 'create' and matches) or (edit.action == 'update' and not matches):
-            raise ValueError('Route create/update target does not match current proposal')
+            raise ValueError('Route create/update target does not match current proposal: '
+                f'collection={collection}, action={edit.action}, key={key}; '
+                f'existing_keys={[row_key(row) for row in rows]}. '
+                'Updates must use an exact baseline key; prior invalid edits were not applied.')
         if not identity:
             if edit.action != 'create' or edit.fields_json is not None:
                 raise ValueError('Route retirement IDs only accept create/remove without fields')

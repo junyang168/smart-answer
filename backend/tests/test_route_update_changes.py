@@ -285,3 +285,69 @@ def test_valid_changed_candidate_returns_rebuttal_to_full_review(tmp_path):
         proposer=proposer(pc),reviewer=rev,reconsiderer=adapter(cc),max_correction_rounds=1)
     assert len(result['rounds'])==2 and rev.calls==2 and len(cc.packets)==1
     assert result['rounds'][-1]['outcome']=='pass' and result['program_validation_repairs']==0
+
+
+def test_incomplete_opus_review_is_repaired_and_authenticated_before_commit(setup,tmp_path,monkeypatch):
+    store,_,_,_,_,view,_,_ = _initial(setup)
+    pc=Client(lambda p,n:initial_edits(p))
+    prop=proposer(pc)
+    def review(p):
+        result=approved(p)
+        if rev.calls==1:
+            result['change_reviews']=[r for r in result['change_reviews'] if r['target_kind']!='observation']
+        else:
+            assert p['validation_findings'] and 'complete corrected review' in p['validation_instruction']
+            assert p['prior_invalid_response']['change_reviews']
+        return result
+    rev=Answer(review,model_id='opus')
+    root=tmp_path/'route'
+    result=worker.process_cvp_route(store=store,viewpoint_id=view['viewpoint_id'],output_dir=root,
+        proposer=prop,reviewer=rev,reconsiderer=Answer({}),max_correction_rounds=2,apply=True)
+    assert result['status']=='applied_readback_verified' and rev.calls==2
+    saved=json.loads((root/'raw-route-review-000.json').read_text())['response']
+    assert all(r['target_kind']!='observation' for r in saved['change_reviews'])
+    assert (root/'raw-route-review-000-validation-000.json').exists()
+    monkeypatch.setattr(worker,'build_route_reviewer',lambda *a,**kw:rev)
+    recovered=worker.resume_applied_cvp_route(store,view['viewpoint_id'],root)
+    assert recovered['status']=='applied_readback_verified' and recovered['model_calls']==0
+    assert rev.calls==2
+    repair_path=root/'raw-route-review-000-validation-000-packet.json'
+    altered=json.loads(repair_path.read_text());altered['prior_invalid_response']['reason']='tampered'
+    repair_path.write_text(json.dumps(altered))
+    with pytest.raises(ValueError,match='repair input changed'):
+        worker.resume_applied_cvp_route(store,view['viewpoint_id'],root)
+
+
+def test_unknown_update_target_reports_exact_baseline_identity():
+    from backend.pipeline.viewpoint_route_correction_changes import apply_edits,ProposalChanges
+    baseline=update_baseline(fixture_packet())
+    baseline['observation_supports']=[{'local_observation_key':'VOS-current'}]
+    changes=ProposalChanges.model_validate({'schema_version':PROPOSAL_VERSION,'edits':[
+        edit(key='invented-alias',fields={'supports':'x'})]})
+    with pytest.raises(ValueError) as error:
+        apply_edits(changes.edits,baseline,fixture_packet())
+    assert 'invented-alias' in str(error.value) and 'VOS-current' in str(error.value)
+    assert 'prior invalid edits were not applied' in str(error.value)
+
+
+def test_review_completion_cannot_turn_substantive_rejection_into_approval(tmp_path):
+    p=fixture_packet()
+    def review(packet):
+        result=approved(packet)
+        if rev.calls==1:
+            result['change_reviews']=result['change_reviews'][:1]
+        else:
+            row=next(r for r in result['change_reviews'] if r['target_kind']=='observation')
+            row.update(decision='reject',finding_codes=['invented_observation'],reason='原文不支持')
+        return result
+    rev=Answer(review,model_id='opus')
+    from backend.pipeline.viewpoint_route_cvp_resolution import CvpRouteReviewIncomplete
+    with pytest.raises(CvpRouteReviewIncomplete):
+        run_cvp_route_scope(route_packet=p,existing_routes=[],output_dir=tmp_path,
+            proposer=Answer(observation_proposal,model_id='gpt'),reviewer=rev,
+            reconsiderer=Answer({}),max_correction_rounds=2)
+    assert rev.calls==2
+    saved=json.loads((tmp_path/'route-review-000.json').read_text())
+    assert saved['validation']['outcome']!='pass'
+    assert any(r['decision']=='reject' for r in saved['review']['change_reviews'])
+    assert not (tmp_path/'route-change-plan.json').exists()
