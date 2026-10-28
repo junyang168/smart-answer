@@ -26,6 +26,7 @@ from backend.pipeline.transcript_slide_assembly import assemble, place_slides
 from backend.pipeline.slide_visual_evidence import extract
 from backend.pipeline.visual_transcript_packet import build
 from backend.pipeline.transcript_audio_correction import run as correct
+from backend.pipeline.transcription_vocabulary import load_vocabulary, vocabulary_binding, vocabulary_from_manifest
 
 SR = 16000
 WINDOW_SAMPLES = 900 * SR
@@ -350,8 +351,24 @@ def clean_full_transcript(out: Path) -> dict:
     return proof
 
 
+def configure_vocabulary(out: Path, path: Path | None) -> None:
+    if path is None:
+        return
+    master = read(out / 'master.json')
+    binding = vocabulary_binding(load_vocabulary(path))
+    if master.get('vocabulary_hint') != binding:
+        if master.get('vocabulary_hint') or any((out / 'windows').glob('*/audio/asr.json')):
+            raise ValueError('Vocabulary changed after a run started; use a fresh output directory')
+        master['vocabulary_hint'] = binding
+        vocabulary_from_manifest(master)
+        save(out / 'master.json', master)
+
+
 def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, window_ids: set[str] | None = None) -> None:
     master = read(out / 'master.json')
+    vocabulary = vocabulary_from_manifest(master)
+    if vocabulary is not None and pilot_correction is not None:
+        raise ValueError('Vocabulary trial requires fresh speech, not a reused pilot correction')
     for w in master['windows']:
         if window_ids is not None and w['id'] not in window_ids:
             continue
@@ -360,13 +377,13 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
         if w['origin_sample'] == 0 and pilot_correction is not None:
             shutil.copytree(pilot_correction, correction, dirs_exist_ok=True)
         else:
-            transcribe(audio)
+            transcribe(audio, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
             align(audio, aligner)
             stitch(audio); format_text(audio)
             slide_folder = local_slides(out, w)
             assemble(audio, slide_folder)
             join_window_visuals(out, w, slide_folder)
-            correct(folder / 'joined', audio, correction)
+            correct(folder / 'joined', audio, correction, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
         print(f'Corrected {w["id"]}', flush=True)
     clean_full_transcript(out)
 
@@ -463,7 +480,9 @@ def review_recovered_paragraphs(out: Path, window_ids: set[str] | None = None) -
         recovery=folder/'recovered-audio-review'/sha(path)[:16]
         save(recovery/'before_reading_view.json',reading)
         save(recovery/'joined/illustrated_with_visual_text.json',source)
-        supplement=correct(recovery/'joined',folder/'audio',recovery/'correction')
+        vocabulary=vocabulary_from_manifest(master)
+        supplement=correct(recovery/'joined',folder/'audio',recovery/'correction',
+                           **({'vocabulary':vocabulary} if vocabulary is not None else {}))
         corrected={p['id']:p for p in supplement['corrected_paragraphs']}
         reading['script_changes']=[r for r in reading.get('script_changes',[]) if r['paragraph_id'] not in ids]
         for p in reading['paragraphs']:
@@ -616,6 +635,8 @@ def finish(out: Path, video: Path) -> dict:
         'human_confirmed':False,'repeat_asr_verification_calls':0,'timing_audit_sha256':sha(out/'timing_audit.json')}
     from importlib.metadata import version
     record['script_converter']={'config':'OpenCC s2t','version':version('opencc-python-reimplemented')}
+    if vocabulary_from_manifest(master) is not None:
+        record['vocabulary_hint'] = master['vocabulary_hint']
     save(out/'full_transcript.json',record)
     transcript_sha=sha(out/'full_transcript.json')
     visual_binding=lambda a:{'channel':'slide_visual','asset_id':a['asset_id'],
@@ -713,6 +734,7 @@ def main():
     p.add_argument('--window',action='append',help='Resume only named wNN windows')
     p.add_argument('--projected-screen',action='store_true',help='Propose a perspective crop of a physical projection screen')
     p.add_argument('--speaker-name',help='Optional catalog speaker identity hint, never audio proof')
+    p.add_argument('--vocabulary',type=Path,help='Optional versioned spelling hints; fixed for this run')
     args=p.parse_args();out=args.out.resolve()
     if args.stage=='run':
         if args.aligner_python is None:p.error('run requires --aligner-python')
@@ -720,6 +742,8 @@ def main():
         master=prepare(args.video,out,args.pilot_audio)
         if args.speaker_name:
             master['speaker_name']=args.speaker_name;save(out/'master.json',master)
+        configure_vocabulary(out,args.vocabulary)
+        master=read(out/'master.json')
         manifest=slides.sample_video(args.video,out/'slides',start_ms=0,end_ms=master['duration_ms'])
         if args.projected_screen:
             from backend.pipeline.projected_slide_region import calibrate
@@ -746,11 +770,15 @@ def main():
     elif args.stage=='preview':
         import uvicorn
         uvicorn.run(preview_app(out),host='127.0.0.1',port=args.port)
-    elif args.stage=='prepare':print(prepare(args.video,out,args.pilot_audio),flush=True)
+    elif args.stage=='prepare':
+        prepare(args.video,out,args.pilot_audio);configure_vocabulary(out,args.vocabulary)
+        print(read(out/'master.json'),flush=True)
     elif args.stage=='frame-audit':save(out/'frame_pts_audit.json',audit_frame_pts(args.video,read(out/'slides/manifest.json')))
     elif args.stage=='slides':classify_slides(out)
     elif args.stage=='visuals':extract_slides(out,args.pilot_evidence)
-    elif args.stage=='speech':process_windows(out,args.aligner_python,args.pilot_correction,set(args.window) if args.window else None)
+    elif args.stage=='speech':
+        configure_vocabulary(out,args.vocabulary)
+        process_windows(out,args.aligner_python,args.pilot_correction,set(args.window) if args.window else None)
     elif args.stage=='final-align':
         prepare_final_alignment(out,set(args.window) if args.window else None)
         for w in read(out/'master.json')['windows']:

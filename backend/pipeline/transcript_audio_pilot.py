@@ -12,6 +12,7 @@ import wave
 import numpy as np
 
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
+from backend.pipeline.transcription_vocabulary import asr_vocabulary_config, load_vocabulary, vocabulary_binding
 
 SAMPLE_RATE = 16000
 ASR_PROMPT = "這是以中文為主的聖經講課，可能夾雜英文及希臘文、希伯來文。中文使用繁體字，外文保留實際說出的語言。只轉錄聽到的話，不補上投影片、經文或推測的內容；背景雜音與靜音不是口述。"
@@ -158,7 +159,13 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
     return result
 
 
-def transcribe(out: Path) -> dict:
+def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
+    config = asr_vocabulary_config(ASR_CONFIG, vocabulary)
+    binding = {'vocabulary_hint': vocabulary_binding(vocabulary)} if vocabulary is not None else {}
+    if (out / 'asr.json').exists():
+        prior = read_json(out / 'asr.json')
+        if prior['config'] != config or prior.get('vocabulary_hint') != binding.get('vocabulary_hint'):
+            raise ValueError('ASR vocabulary/config changed; use a fresh output directory')
     from dotenv import load_dotenv
     from openai import OpenAI
     load_dotenv(Path(__file__).resolve().parents[2] / '.env')
@@ -169,18 +176,18 @@ def transcribe(out: Path) -> dict:
         path = out / chunk['audio']
         if file_sha(path) != chunk['audio_sha256']:
             raise ValueError('Chunk changed since preparation')
-        request = {'stage': 'asr', 'config': ASR_CONFIG, 'audio_sha256': chunk['audio_sha256'],
+        request = {'stage': 'asr', 'config': config, **binding, 'audio_sha256': chunk['audio_sha256'],
                    'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunk': chunk}
         def invoke():
             with path.open('rb') as stream:
-                return client.audio.transcriptions.create(file=stream, **ASR_CONFIG).model_dump(mode='json')
+                return client.audio.transcriptions.create(file=stream, **config).model_dump(mode='json')
         response = saved_call(out, request, (chunk['end_ms'] - chunk['start_ms']) / 60000 * .01, invoke)
         if not isinstance(response.get('text'), str):
             raise ValueError('ASR response has no transcript')
         chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(request),
                        'response_sha256': object_sha(response)})
         print(f'Transcribed {chunk["id"]}: {len(response["text"])} characters', flush=True)
-    result = {'schema_version': 'audio-asr-pilot.v1', 'config': ASR_CONFIG,
+    result = {'schema_version': 'audio-asr-pilot.v1', 'config': config, **binding,
               'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunks': chunks,
               'estimated_usd': sum(c['end_ms'] - c['start_ms'] for c in chunks) / 60000 * .0045,
               'pricing_as_of': '2026-10-27', 'pricing_source': 'https://developers.openai.com/api/docs/pricing'}
@@ -194,6 +201,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--video', type=Path)
     parser.add_argument('--slides', type=Path)
+    parser.add_argument('--vocabulary', type=Path, help='Optional versioned spelling hints')
     parser.add_argument('--aligner-python', type=Path, default=Path('.venv-align/bin/python'))
     parser.add_argument('--device', choices=['mps', 'cpu'], default='mps')
     parser.add_argument('--extract-visuals', action='store_true', help='After run, extract confirmed slide text and diagram primitives')
@@ -215,7 +223,7 @@ def main():
             raise ValueError('Slide report does not match source video; no ASR calls sent')
         print({'chunks': len(result['chunks']), 'duration_ms': result['duration_ms']})
     if args.stage in ('transcribe', 'run'):
-        transcribe(args.out)
+        transcribe(args.out, vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else None)
     if args.stage in ('align', 'run'):
         env = dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1')
         # Resolving the venv python symlink launches the base interpreter and
