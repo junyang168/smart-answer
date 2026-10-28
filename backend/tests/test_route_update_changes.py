@@ -364,3 +364,62 @@ def test_observation_pair_error_identifies_the_actual_registry_owner():
     message=str(error.value)
     assert 'wrong-evidence' in message and original in message
     assert binding['source_fragment_id'] in message and 'fragment_registry_pairs=' in message
+
+
+def test_explicit_restore_uses_pinned_record_without_copying_content(tmp_path):
+    from backend.pipeline.viewpoint_route_observation_restore import FIELD,MARKER as RESTORE,restore_observation
+    from backend.pipeline.viewpoint_route_correction_changes import apply_edits,ProposalChanges
+    from backend.api.canonical_repository.viewpoint_observation_support import observation_payload,ProposedObservationSupport
+    packet=fixture_packet();old=compile_observation_package(ArgumentRouteProposalV3Response.model_validate(
+        observation_proposal(packet)),packet,review_sha256='old')[0][0]
+    packet['existing_observation_supports']=[old];key=old['observation_support_id']
+    def initial(p,n):
+        return {'schema_version':PROPOSAL_VERSION,'edits':[
+            initial_edits(p)['edits'][0],edit(key=key,fields={'supports':'被错误修改的范围'}),
+            edit('create','retired_observation_support_ids',key)]}
+    def correction(p,n):
+        if n==1:edits=[edit('remove',key=key),edit('remove','retired_observation_support_ids',key)]
+        else:
+            assert p[RESTORE]['route_packet_sha256']==packet['packet_sha256']
+            edits=[edit(key=key,fields={FIELD:key}),edit('remove','retired_observation_support_ids',key)]
+        return {'schema_version':VERSION,'finding_dispositions':[{'target_kind':'observation',
+            'target_key':key,'disposition':'accepted','reason':'恢复原版，不再重写证据'}],'edits':edits}
+    pc,cc=Client(initial),Client(correction)
+    def review(p):
+        result=approved(p)
+        if rev.calls==1:
+            row=next(r for r in result['change_reviews'] if r['target_kind']=='observation')
+            row.update(decision='correct',finding_codes=['evidence_dropped'],reason='保留原记录',correction='恢复原记录全部内容')
+        return result
+    rev=Answer(review,model_id='opus')
+    run_cvp_route_scope(route_packet=packet,existing_routes=[],output_dir=tmp_path,
+        proposer=proposer(pc),reviewer=rev,reconsiderer=adapter(cc),max_correction_rounds=2)
+    assert len(pc.packets)==1 and len(cc.packets)==rev.calls==2
+    raw=json.loads((tmp_path/'raw-route-reconsideration-000-validation-000.json').read_text())['response']
+    restore=next(e for e in raw['edits'] if e['collection']=='observation_supports')
+    assert json.loads(restore['fields_json'])=={FIELD:key}
+    restored=restore_observation(packet,key)
+    expected_payload=observation_payload(ProposedObservationSupport.model_validate(restored),packet)
+    assert expected_payload=={k:old[k] for k in expected_payload}
+    aliases=deepcopy(packet);alias=deepcopy(aliases['claim_components'][0])
+    alias.update(claim_component_key='CCK-'+'0'*64,disposition='no_registry_assertion',
+        target_viewpoint_revision_id=None,viewpoint_claim_link_id=None)
+    aliases['claim_components'].append(alias)
+    aliased=ProposedObservationSupport.model_validate(restore_observation(aliases,key))
+    assert aliased.evidence_bindings[0].claim_component_key==alias['claim_component_key']
+    assert observation_payload(aliased,aliases)==expected_payload
+    stale=deepcopy(packet);stale['source_revisions'][old['source_id']]='b'*64
+    with pytest.raises(ValueError,match='source versions'):restore_observation(stale,key)
+    edits=ProposalChanges.model_validate({'schema_version':PROPOSAL_VERSION,'edits':[restore]}).edits
+    with pytest.raises(ValueError,match='offered contract'):
+        apply_edits(edits,update_baseline(packet),packet)
+    changed=deepcopy(packet);changed['claims'][0]['pinned_claim_revision']+=1
+    with pytest.raises(ValueError,match='Claim versions'):restore_observation(changed,key)
+    with pytest.raises(ValueError,match='exact existing'):restore_observation(packet,'VOS-unknown')
+    # Cached technical answers keep their exact request contract and need no calls.
+    from backend.pipeline.viewpoint_route_validation_repair import read_validated_changes
+    from backend.pipeline.viewpoint_route_correction_changes import correction_adapter
+    cache=tmp_path/'raw-route-reconsideration-000.json';request=tmp_path/'route-reconsideration-packet-000.json'
+    active=correction_adapter(adapter(cc),request,cache)
+    read_validated_changes(active,json.loads(request.read_text()),cache)
+    assert len(cc.packets)==2

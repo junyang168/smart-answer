@@ -12,12 +12,13 @@ REVIEW_REPAIR_INSTRUCTION = ('Return a complete corrected review of the SAME pro
 
 
 def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repairs,
-                     repair_instruction=EDIT_REPAIR_INSTRUCTION):
+                     repair_instruction=EDIT_REPAIR_INSTRUCTION, contextual=False):
     seen = set()
     failures = []
+    active_packet=packet
     while True:
         try:
-            result = validate(raw)
+            result = validate(raw,active_packet) if contextual else validate(raw)
             write_immutable(cache.with_name(cache.stem+'-validated.json'), {
                 'response_sha256': sha256_json(raw), 'failures': failures})
             return result, raw
@@ -38,6 +39,9 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
         if not request.exists() or CREATION_SHAPES in read_artifact(request):
             repair=with_creation_shapes(repair)
+        from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
+        if not request.exists() or RESTORE in read_artifact(request):
+            repair=with_restore_contract(repair)
         if request.exists():
             saved = read_artifact(request)
             if ({k:v for k,v in saved.items() if k != 'validation_findings'} !=
@@ -53,6 +57,7 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
         state['used'] += 1
         state['attempts'].append({'stage': cache.name, 'repair_response': response.name, 'findings': findings})
         raw, _, _ = call_model(adapter, repair, response)
+        active_packet=repair
 
 
 def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_REPAIR_INSTRUCTION):
@@ -77,6 +82,9 @@ def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_RE
         from backend.pipeline.viewpoint_route_correction_changes import with_creation_shapes, CREATION_SHAPES
         if CREATION_SHAPES in actual:
             expected=with_creation_shapes(expected)
+        from backend.pipeline.viewpoint_route_observation_restore import with_restore_contract, MARKER as RESTORE
+        if RESTORE in actual:
+            expected=with_restore_contract(expected)
         if actual != expected:
             raise ValueError('saved Route validation repair input changed')
         raw = read_saved_model_response(adapter, actual, response)
