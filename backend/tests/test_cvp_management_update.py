@@ -160,7 +160,8 @@ def test_repeated_invalid_proposal_does_not_loop_or_reach_opus(setup):
 
 
 @pytest.mark.parametrize('legacy_frame',[False,True])
-def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup,monkeypatch,legacy_frame):
+@pytest.mark.parametrize('late_finding',[False,True])
+def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup,monkeypatch,legacy_frame,late_finding):
     from test_cvp_management import passing
     store,initial,root,clients,_,view,_,_=_initial(setup)
     request=_request(store,initial,root,[view],name='revision-program-feedback')
@@ -182,19 +183,23 @@ def test_program_feedback_after_opus_revision_rebinds_previous_candidate(setup,m
         if len(proposals)==(4 if legacy_frame else 3):
             assert packet['program_validation_feedback']['findings']
             assert packet['previous']['prior_findings']
+        if late_finding and len(proposals)==(5 if legacy_frame else 4):
+            assert 'program_validation_feedback' not in packet
+            assert packet['previous']['prior_findings']
         return response
     def review(packet):
         reviews.append(packet);value=passing(packet['candidate'])
         value['prior_findings']=[{'ref':ref,'disposition':'resolved','reason':'按原异议修改并完整核对。'}
             for ref in packet['candidate']['review_sets']['prior_findings']]
-        if len(reviews)==1:
+        if len(reviews)==1 or late_finding and len(reviews)==2:
             ref=packet['material']['viewpoints'][0]['cvp_ref']
             next(r for r in value['object_reviews'] if r['ref']==ref).update(decision='revise',finding_refs=['f1'])
-            value['findings']=[{'slot':'f1','target_refs':[ref],'category':'wording','reason':'明确归属。'}]
+            value['findings']=[{'slot':'f1','target_refs':[ref],'category':'wording',
+                'reason':'明确归属。' if len(reviews)==1 else '保留原文限定。'}]
         return envelope('review',review=value)
     clients['gpt'].behavior=_proposal_behavior(propose);clients['opus'].behavior=review
     result,step=_run(store,request,root.parent/'revision-error',clients)
-    assert len(proposals)==(4 if legacy_frame else 3) and len(reviews)==2
+    assert len(proposals)==(4 if legacy_frame else 3)+int(late_finding) and len(reviews)==2+int(late_finding)
     assert result['cvp_status']=='completed'
     assert reviews[-1]['candidate']['prior_findings']
 

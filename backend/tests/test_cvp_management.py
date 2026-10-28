@@ -118,6 +118,15 @@ def test_unassigned_new_link_reports_exact_ref_and_requires_explicit_discard(inh
         assert refreshed['program_validation_feedback']['raw_response']=={'candidate':raw}
         assert refreshed['program_validation_feedback']['diagnostics']['link_ref']=='nl1'
         assert _refresh_program_diagnostics(req,refreshed,previous,[])==refreshed
+        current=cvp.rebind_candidate(req,feedback_bundle,refreshed,previous)
+        accepted=cvp.compile_candidate(req,refreshed,{**raw,'discard_refs':['nl1']},previous=current)
+        clean=_refresh_program_diagnostics(req,refreshed,accepted,[])
+        assert 'program_validation_feedback' not in clean
+        assert clean['program_validation_response_shas']==['saved-original-response']
+        assert refreshed['program_validation_feedback']['diagnostics']['link_ref']=='nl1'
+        with pytest.raises(cvp.CandidateValidationError) as repeated:
+            cvp.compile_candidate(req,refreshed,{'discard_refs':['nl1']},previous=accepted)
+        assert repeated.value.details['unknown_refs']==['nl1']
 
 
 def provenance():

@@ -433,19 +433,28 @@ def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
         max_request_bytes=request.budget.max_request_bytes,probe=probe)
 
 
-def _refresh_program_diagnostics(request,bundle,previous,prior_findings):
+def _refresh_program_diagnostics(request,bundle,previous,prior_findings,*,resolved=False):
     """Reproduce an old exact rejection, adding only concrete program diagnostics."""
     feedback=bundle.get('program_validation_feedback')
-    if not feedback or 'diagnostics' in feedback:return bundle
+    if not feedback:return bundle
+    if resolved:
+        return seal({k:v for k,v in bundle.items()
+                     if k not in {'artifact_sha256','program_validation_feedback'}})
     try:
         domain.compile_candidate(request,bundle,feedback['raw_response']['candidate'],
             previous=previous,prior_findings=prior_findings)
     except domain.CandidateValidationError as exc:
-        if feedback['findings']!=[str(exc)]:return bundle
+        if feedback['findings']!=[str(exc)] or 'diagnostics' in feedback:return bundle
         return seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
             'program_validation_feedback':{**feedback,'diagnostics':exc.details}})
     except ValueError:
-        pass
+        return bundle
+    else:
+        # A successfully accepted candidate already resolved this rejected
+        # delta. Its later semantic revision must not receive obsolete repair
+        # instructions. The original rejection and call SHAs stay in history.
+        return seal({k:v for k,v in bundle.items()
+                     if k not in {'artifact_sha256','program_validation_feedback'}})
     return bundle
 
 
@@ -679,6 +688,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         position-=1
                         continue
                 previous=None;prior_findings=[];ordinal=0;revision=False;seen=set();proposal_origin=None
+                feedback_resolved=False
                 if latest:
                     oldroot=Path(latest['materials']['step_root'])
                     oldbundle=latest['materials']['bundle']
@@ -699,6 +709,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     else:
                         if (oldroot/'candidate.json').exists():
                             previous=read_artifact(oldroot/'candidate.json')
+                            feedback_resolved=True
                             prior_findings=list(previous['prior_findings'])
                             if has_approval:prior_findings=_all_findings(previous,read_artifact(oldroot/'approval.json'))
                             if not same:
@@ -730,14 +741,14 @@ def run(store,request,*,root,execute=False,clients=None):
                 while True:
                     step_root=unit_root/f'step-{ordinal:04d}'
                     if (proposal_origin is None and bundle.get('program_validation_feedback')
-                            and 'diagnostics' not in bundle['program_validation_feedback']
                             and not (step_root/'proposal.json').exists()
                             and all(slot['state']=='returned' for slot in
                                 store.get_cvp_group(parent_id)['call_reservations'].values())):
                         # Only an undispatched next step receives improved
                         # diagnostics. Preserve frozen steps and every answer;
                         # never alter an uncertain invocation.
-                        refreshed=_refresh_program_diagnostics(request,bundle,previous,prior_findings)
+                        refreshed=_refresh_program_diagnostics(request,bundle,previous,prior_findings,
+                                                               resolved=feedback_resolved)
                         if refreshed['artifact_sha256']!=bundle['artifact_sha256']:
                             if previous is not None:
                                 previous=_rebase_previous(request,bundle,refreshed,previous,
@@ -767,7 +778,9 @@ def run(store,request,*,root,execute=False,clients=None):
                             bundle=newbundle;ordinal+=1;revision=False;continue
                         try:
                             candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                            feedback_resolved=True
                         except ValueError as exc:
+                            feedback_resolved=False
                             failed_sha=sha256_json(raw)
                             failures=bundle.get('program_validation_response_shas',[])
                             if failed_sha in failures:
@@ -814,6 +827,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         candidate=previous
                         if candidate['material_sha256']!=bundle['artifact_sha256']:
                             raise ValueError('review-only candidate differs from expanded material')
+                        feedback_resolved=True
                     from backend.pipeline import cvp_candidate_screening as screening
                     detail_recall=screening.effective_recall(recall,bundle,current,key)
                     missing=action_member_requests(bundle,detail_recall,candidate)

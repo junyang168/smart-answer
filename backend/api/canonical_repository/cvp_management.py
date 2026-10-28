@@ -492,7 +492,12 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             or not discarded <= prior_write_refs | prior_summary_refs
             or discarded & {row.ref for row in raw.changes}
             or discarded & {row.ref for row in raw.summaries}):
-        raise ValueError('discard requires unique previous candidate edits without a conflicting new delta')
+        raise CandidateValidationError('discard requires unique previous candidate edits without a conflicting new delta',
+            details={'discard_refs':raw.discard_refs,
+                'unknown_refs':sorted(discarded-(prior_write_refs|prior_summary_refs)),
+                'conflicting_refs':sorted(discarded & ({row.ref for row in raw.changes}|{row.ref for row in raw.summaries})),
+                'instruction':'Discard only edits still present in previous.writes or previous.summaries. '
+                    'An edit already removed by an accepted earlier proposal must not be discarded again.'})
     plan = _positions(bundle, raw, previous)
     parts = {row['component_ref']: row for row in plan['components']}
     changed_plan = previous is not None and plan['artifact_sha256'] != previous['component_plan']['artifact_sha256']
