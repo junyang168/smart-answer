@@ -432,6 +432,18 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
     request = _request(request)
     if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
             and previous.get('material_sha256')!=bundle.get('artifact_sha256')
+            and bundle.get('program_validation_feedback') is not None):
+        # Older runners added mechanical error feedback without rebinding the
+        # preceding candidate. Recover ONLY its exact full material preimage:
+        # removing these two program fields must reproduce the saved SHA.
+        # Every record, source, Claim position and authority remains bound.
+        before=seal({k:v for k,v in bundle.items() if k not in {
+            'program_validation_feedback','program_validation_response_shas','artifact_sha256'}})
+        if before['artifact_sha256']==previous['material_sha256']:
+            return rebind_candidate(request,before,bundle,previous,
+                replacement_raw=raw,prior_findings=prior_findings)
+    if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
+            and previous.get('material_sha256')!=bundle.get('artifact_sha256')
             and bundle.get('summary_enrichment_contract')==SUMMARY_ENRICHMENT_CONTRACT):
         # A historical expansion rebound the candidate before task contracts
         # were attached. Recover only an exact preimage differing in these two

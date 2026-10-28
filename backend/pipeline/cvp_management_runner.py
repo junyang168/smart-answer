@@ -746,9 +746,13 @@ def run(store,request,*,root,execute=False,clients=None):
                             # Keep the failed call in its original step. The
                             # next ordinary proposal uses the same records,
                             # permissions and SQL call budget plus exact errors.
-                            bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'} | {
+                            newbundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'} | {
                                 'program_validation_feedback':feedback,
                                 'program_validation_response_shas':[*failures,failed_sha]})
+                            if previous is not None:
+                                previous=_rebase_previous(request,bundle,newbundle,previous,
+                                                          prior_findings=prior_findings)
+                            bundle=newbundle
                             ordinal+=1;revision=False;continue
                         proposal_path=step_root/'proposal.json'
                     else:
