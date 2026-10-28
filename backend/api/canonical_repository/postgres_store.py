@@ -5778,9 +5778,11 @@ class PostgresKnowledgeStore:
                     result[col,oid] = {"revision":revision,"content_sha256":content_sha,"payload":payload,
                                        "retired_at":retired,"retired":retired is not None}
                     if not historical_pins_only:
-                        ids.update(self._record_reference_ids(payload))
+                        ids.update(self._record_reference_ids(payload,
+                            include_predecessor=col=='argument_route_revisions'))
                     else:
-                        ids.update(self._record_reference_ids(payload,exclude_provenance=True))
+                        ids.update(self._record_reference_ids(payload,exclude_provenance=True,
+                            include_predecessor=col=='argument_route_revisions'))
                         historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
                     if col == "canonical_viewpoints" and retired is None: views.add(oid)
                 new_views = sorted(views - expanded_views)
