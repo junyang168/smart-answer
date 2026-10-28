@@ -1031,7 +1031,12 @@ def _validate_afterimage(request, original, states, dispositions, parts, refs):
             if (any(s['path'] != ['statement'] for s in parts[ref]['spans'])
                     or locator['claim_sha256'] != current_claim['content_sha256']
                     or locator['canonical_spans'] != expected):
-                raise ValueError('existing statement locator differs from actual component')
+                raise ValueError(f'{ref}: existing statement locator differs from actual component; '
+                    f'link_ref={disposition["link_ref"]}; '
+                    f'fixed_ranges={[(s["start_char"],s["end_char"]) for s in locator["canonical_spans"]]}; '
+                    f'proposed_ranges={[(s["start_char"],s["end_char"]) for s in expected]}. '
+                    'Preserve the exact existing connected range; account for intervening punctuation/connectives '
+                    'as separate unconnected components when necessary, without changing the Claim or other CVP links.')
         view = states['canonical_viewpoints', target]
         if (_held(view) or _held(states['viewpoint_revisions', view['current_revision_id']])
                 or view['identity_status'] != 'active' or payload['validated_against_viewpoint_revision_id'] != view['current_revision_id']):
@@ -1171,11 +1176,17 @@ def proposal_packet(request, bundle, *, context=None, previous=None, prior_findi
             if k not in {'old_bundle', 'previous_candidate', 'artifact_sha256'}},
             'schema_version': VERSION + '_rebase_frame_runtime',
             'durable_frame_sha256': previous['artifact_sha256']}
-    return {'schema_version': VERSION + '_proposal_packet',
+    packet = {'schema_version': VERSION + '_proposal_packet',
         'request': request.model_dump(mode='json'), 'material': bundle['material'],
         'input': bundle['claim_input'], 'context': expected,
         'previous': previous, 'prior_findings': list(prior_findings),
         'instructions': 'Output only compact field changes and short references. Empty changes/dispositions/summaries retain previous candidate. Never copy identifiers, hashes, old text or unchanged records. All new viewpoints require same-group novelty review.'}
+    if bundle.get('program_validation_feedback'):
+        packet['program_validation_feedback'] = deepcopy(bundle['program_validation_feedback'])
+        packet['instructions'] += (' The previous raw answer failed program validation and is not an approved candidate. '
+            'Fix the reported errors against this same complete material and permissions; preserve all valid intended decisions. '
+            'Return a corrected compact response, or request genuinely missing material. Do not relax coverage or change readonly connections.')
+    return packet
 
 
 def review_packet(request, bundle, candidate, *, prior_findings=()):

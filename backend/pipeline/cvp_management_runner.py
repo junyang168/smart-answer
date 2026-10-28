@@ -733,7 +733,23 @@ def run(store,request,*,root,execute=False,clients=None):
                             newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                             if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
                             bundle=newbundle;ordinal+=1;revision=False;continue
-                        candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                        try:
+                            candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                        except ValueError as exc:
+                            failed_sha=sha256_json(raw)
+                            failures=bundle.get('program_validation_response_shas',[])
+                            if failed_sha in failures:
+                                raise ValueError('proposal program validation made no progress: '+str(exc)) from exc
+                            feedback={'raw_response':raw,'raw_artifact':binding(step_root/'proposal.json'),
+                                'findings':[str(exc)],'content_approval':False}
+                            write_immutable(step_root/'proposal-program-validation.json',feedback)
+                            # Keep the failed call in its original step. The
+                            # next ordinary proposal uses the same records,
+                            # permissions and SQL call budget plus exact errors.
+                            bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'} | {
+                                'program_validation_feedback':feedback,
+                                'program_validation_response_shas':[*failures,failed_sha]})
+                            ordinal+=1;revision=False;continue
                         proposal_path=step_root/'proposal.json'
                     else:
                         origin=proposal_origin

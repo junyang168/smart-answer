@@ -116,6 +116,49 @@ def test_update_retains_whole_claim_nonidentity_role_without_inventing_component
     assert not after.get('component_locator') and not after.get('component_position_locator')
 
 
+def test_invalid_proposal_returns_exact_error_in_same_action_then_reviews_and_commits(setup):
+    store,initial,root,clients,_,view,_,_=_initial(setup)
+    request=_request(store,initial,root,[view],name='repair-program-error')
+    clients['gpt'].requests.clear();clients['opus'].requests.clear()
+    def propose(p):
+        response=_member_candidate(p,summary='此处人子称号表明耶稣的神性。')
+        if not p.get('program_validation_feedback'):
+            response['candidate']['component_dispositions'][0]['component_ref']='missing-component'
+        else:
+            feedback=p['program_validation_feedback']
+            assert feedback['findings'] and feedback['content_approval'] is False
+            assert feedback['raw_response']['candidate']['component_dispositions'][0]['component_ref']=='missing-component'
+        return response
+    clients['gpt'].behavior=_proposal_behavior(propose)
+    output=root.parent/'program-error'
+    result,step=_run(store,request,output,clients)
+    assert result['cvp_status']=='completed'
+    assert len(clients['gpt'].requests)==2 and len(clients['opus'].requests)==1
+    assert len(list(output.rglob('proposal-program-validation.json')))==1
+    parent=store.get_cvp_group('CVPM-'+sha256_json(request['action_id']))
+    assert len(parent['units']['cvp-update']['steps'])==2
+    assert len(parent['call_reservations'])==3
+    counts=(len(clients['gpt'].requests),len(clients['opus'].requests))
+    runner.run(store,request,root=output,execute=True,clients=clients)
+    assert counts==(len(clients['gpt'].requests),len(clients['opus'].requests))
+
+
+def test_repeated_invalid_proposal_does_not_loop_or_reach_opus(setup):
+    store,initial,root,clients,_,view,_,_=_initial(setup)
+    request=_request(store,initial,root,[view],name='repeated-program-error')
+    clients['gpt'].requests.clear();clients['opus'].requests.clear()
+    def propose(p):
+        response=_member_candidate(p)
+        response['candidate']['component_dispositions'][0]['component_ref']='missing-component'
+        return response
+    clients['gpt'].behavior=_proposal_behavior(propose)
+    result=runner.run(store,request,root=root.parent/'repeated-error',execute=True,clients=clients)
+    assert result['cvp_status']!='completed'
+    assert len(clients['gpt'].requests)==2 and len(clients['opus'].requests)==0
+    parent=store.get_cvp_group('CVPM-'+sha256_json(request['action_id']))
+    assert 'no progress' in parent['units']['cvp-update']['detail']
+
+
 def test_zero_business_change_is_reviewed_and_still_queued_once(setup):
     store,initial,root,clients,_,view,_,_=_initial(setup)
     first=_request(store,initial,root,[view],name='summary-bind')
