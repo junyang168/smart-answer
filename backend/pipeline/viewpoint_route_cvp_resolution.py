@@ -526,9 +526,12 @@ def run_cvp_route_scope(
                 allow_unchanged_escalation=initial_changes)
             # Unaccepted semantic findings stop normally; technical repairs
             # must never force the model to accept a substantive objection.
-            if initial_changes and checked['outcome'] == 'resolved':
+            can_re_review = (initial_changes and checked['outcome'] == 'exception'
+                and all(d.disposition != 'deferred' for d in corrected.finding_dispositions)
+                and sha256_json(corrected.revised_proposal.model_dump(mode='json')) != proposal_sha)
+            if initial_changes and (checked['outcome'] == 'resolved' or can_re_review):
                 validate_route_proposal(routes=corrected.revised_proposal, **validation_args)
-            return corrected, retirement, checked
+            return corrected, retirement, checked, can_re_review
         if initial_changes:
             parsed, raw_reconsideration = validate_changes(raw_reconsideration,
                 validate=parse_correction, adapter=active_reconsiderer,
@@ -536,11 +539,11 @@ def run_cvp_route_scope(
                 max_repairs=max_program_repairs)
         else:
             parsed = parse_correction(raw_reconsideration)
-        reconsideration, retirement_binding, reconsideration_validation = parsed
+        reconsideration, retirement_binding, reconsideration_validation, can_re_review = parsed
         if retirement_binding:
             write_immutable(output_dir / 'observation-retirement-bindings' /
                 (sha256_json(raw_reconsideration) + '.json'), retirement_binding)
-        if reconsideration_validation["outcome"] != "resolved":
+        if reconsideration_validation["outcome"] != "resolved" and not can_re_review:
             raise CvpRouteReviewIncomplete("route correction left a reviewer finding unresolved")
         last_reconsideration = reconsideration.model_dump(mode="json")
         review_history[-1]['finding_dispositions'] = deepcopy(last_reconsideration['finding_dispositions'])

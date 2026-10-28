@@ -263,3 +263,25 @@ def test_semantic_disagreement_does_not_trigger_program_repairs(tmp_path):
         run_cvp_route_scope(route_packet=fixture_packet(),existing_routes=[],output_dir=tmp_path,
             proposer=proposer(pc),reviewer=rev,reconsiderer=adapter(cc),max_correction_rounds=4)
     assert len(pc.packets)==1 and len(cc.packets)==1 and rev.calls==1
+
+
+def test_valid_changed_candidate_returns_rebuttal_to_full_review(tmp_path):
+    pc=Client(lambda p,n:initial_edits(p))
+    def review(p):
+        r=approved(p)
+        if rev.calls==1:
+            row=next(x for x in r['change_reviews'] if x['target_kind']=='observation')
+            row.update(decision='correct',finding_codes=['scope'],reason='范围',correction='修改作用')
+        else:
+            assert p['route_review_continuity']['rounds'][0]['finding_dispositions'][0]['disposition']=='rebutted'
+        return r
+    rev=Answer(review,model_id='opus')
+    def disagree(p,n):
+        answer=delta([edit(fields={'supports':'只支持该经文的用词观察。'})])
+        answer['finding_dispositions'][0].update(disposition='rebutted',reason='保留真实观察；修正支持范围后请重新核对原文。')
+        return answer
+    cc=Client(disagree)
+    result=run_cvp_route_scope(route_packet=fixture_packet(),existing_routes=[],output_dir=tmp_path,
+        proposer=proposer(pc),reviewer=rev,reconsiderer=adapter(cc),max_correction_rounds=1)
+    assert len(result['rounds'])==2 and rev.calls==2 and len(cc.packets)==1
+    assert result['rounds'][-1]['outcome']=='pass' and result['program_validation_repairs']==0
