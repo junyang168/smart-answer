@@ -870,6 +870,21 @@ def test_every_quoted_verse_is_bound_to_where_the_professor_reads_or_names_it():
     assert any(slug.startswith("jhn-5-27") for _, slug in verse_mentions("見約翰福音 5:27。"))
 
 
+def test_an_unlabelled_verse_block_is_found_by_its_cuv_text():
+    """#488: the reference sat in the sentence before the block, so three cited verses were flagged."""
+
+    from backend.pipeline.draft_first_source_binding import scripture_bindings
+
+    packet = {"source_originals": {"originals": [
+        {"source_id": "S1", "content": "再看林前10:33，保羅說，就好像我凡事都叫所有的人喜歡。"},
+        {"source_id": "S2", "content": "林前10:1 我們的祖宗從前都在雲下。"},
+    ]}}
+    cited = scripture_bindings("> 就好像我凡事都叫眾人喜歡，不求自己的益處，只求眾人的益處，叫他們得救。", packet)
+    assert [(s["source_id"], s["basis"]) for s in cited] == [("S1", "scripture_cited")]
+    # 林前10:31: a chapter the sources cite, a verse none of them names.
+    assert scripture_bindings("> 你們或吃或喝，無論做甚麼，都要為榮耀神而行。", packet) == []
+
+
 def test_a_model_only_chooses_which_program_candidate_is_a_paragraphs_source():
     """Owner, 2026-10-24: every paragraph but the summary should be traceable."""
 

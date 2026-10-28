@@ -238,6 +238,28 @@ def _read_aloud(text: str, content: str) -> str | None:
     return excerpt[:150]
 
 
+def _cuv_slugs(line: str, packet: Mapping[str, Any]) -> list[str]:
+    """The verses a quote shows, found in the 和合本 of the chapters the sources cite."""
+
+    from backend.bible_study import cuv
+    from backend.pipeline.draft_first_scripture import _ELISION, cited_chapters, normalize
+
+    segment = max((normalize(part) for part in _ELISION.split(line)), key=len, default="")
+    if len(segment) < 8:
+        return []
+    for book, number in cited_chapters(packet):
+        verses = cuv.chapter(book, number)
+        text, verse_at = "", []
+        for key in sorted(verses, key=int):
+            folded = normalize(verses[key])
+            text += folded
+            verse_at += [key] * len(folded)
+        index = text.find(segment)
+        if index >= 0:
+            return [f"{book.lower()}-{number}-{verse_at[index]}-{verse_at[index + len(segment) - 1]}"]
+    return []
+
+
 def scripture_bindings(paragraph_text: str, packet: Mapping[str, Any]) -> list[dict[str, str]]:
     """Where the professor reads or cites each verse a quote block shows.
 
@@ -250,6 +272,10 @@ def scripture_bindings(paragraph_text: str, packet: Mapping[str, Any]) -> list[d
 
     lines = [line[1:].strip() for line in paragraph_text.splitlines() if line.startswith(">") and line[1:].strip()]
     slugs = [slug for line in lines for label in _VERSE_LABEL.findall(line) for slug in reference_slugs(label)]
+    # A block with no label names its verse in the sentence before it; the
+    # prompts ask for the 和合本 there, so the verse is found by its text
+    # (#488: 林前10:33, 太22:14, 提前2:4-6 flagged though the sources cite all three).
+    slugs = slugs or [slug for line in lines for slug in _cuv_slugs(line, packet)]
     spans: list[dict[str, str]] = []
     for item in (packet.get("source_originals") or {}).get("originals") or []:
         content, source_id = str(item.get("content") or ""), str(item.get("source_id") or "")
