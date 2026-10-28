@@ -11,7 +11,7 @@ OBSERVATION_IDENTITIES = 'observation_record_identities'
 
 def with_observation_identities(packet):
     """Expose compiled IDs so draft labels cannot be mistaken for SQL keys."""
-    proposal=packet.get('route_proposal',{})
+    proposal=packet.get('route_proposal') or packet.get('route_proposal_context',{})
     evidence=packet.get('route_evidence_context') or packet.get('route_evidence_packet')
     if not evidence or 'observation_supports' not in proposal:
         return packet

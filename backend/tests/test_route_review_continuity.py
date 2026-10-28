@@ -22,7 +22,7 @@ def test_review_sees_compiled_observation_identity_after_content_change(tmp_path
     proposal['observation_supports'][0].update(local_observation_key=old['observation_support_id'],
         supports='仅支持本节经文用词的观察。')
     proposal['retired_observation_support_ids']=[old['observation_support_id']]
-    packet={'route_proposal':proposal,'route_evidence_context':evidence}
+    packet={'route_proposal_context':proposal,'route_evidence_context':evidence}
     result=continuity_packet(packet,[],packet_path=tmp_path/'packet.json',response_path=tmp_path/'raw.json')
     item=result[OBSERVATION_IDENTITIES]['records'][0]
     assert item['local_observation_key']==old['observation_support_id']
