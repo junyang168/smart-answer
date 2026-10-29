@@ -186,6 +186,10 @@ def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict
 class ProductionPorts:
     def __init__(self, store=None):
         self.store = store or PostgresKnowledgeStore()
+        configuration = os.environ.get('WKP_CLAIM_CAPACITY_CONFIG')
+        if configuration:
+            from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+            self.model_call_capacity = ClaimModelCapacity(json.loads(Path(configuration).read_text())).call
 
     def current_snapshot(self, keys):
         """Fresh exact row identities, including storage metadata; no SELECT-all."""

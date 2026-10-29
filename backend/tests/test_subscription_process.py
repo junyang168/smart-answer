@@ -163,6 +163,7 @@ def test_common_bound_call_recovers_returned_output_without_reservation_or_gener
     runner.root=tmp_path/'round'
     raw=runner.call_bound('gpt',{'input':'complete'},adapter,expected=('fake','codex_subscription'))
     (runner.root/'gpt.raw.json').unlink()  # returned CLI, parent not yet saved common raw
+    runner.ports.model_call_capacity = lambda *a: pytest.fail('replay acquired model capacity')
     monkeypatch.setattr(subprocess,'run',lambda *a,**k: pytest.fail('recovery sent another call'))
     recovered=runner.call_bound('gpt',{'input':'complete'},adapter,expected=('fake','codex_subscription'))
     assert recovered['response']==raw['response']=={'ok':True}

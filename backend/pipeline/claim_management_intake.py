@@ -175,7 +175,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None, model_capacity=None):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()
@@ -191,9 +191,10 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             original = batch._paragraph_results(store, jobs)
             if not all(v.get('status') == 'completed' for v in original['results'].values()):
-                batch.run(manifest, root / 'batch')
+                batch.run(manifest, root / 'batch', **({'model_capacity': model_capacity} if model_capacity else {}))
             from backend.pipeline.claim_qualification_refresh import run as refresh_currentness
-            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction)
+            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction,
+                **({'model_capacity': model_capacity} if model_capacity else {}))
             by_claim = {cid: {'action_id': None, 'result': reason, 'qualification': None}
                         for cid, reason in prepared['excluded'].items()}
             for action_id, (request, _) in jobs.items():

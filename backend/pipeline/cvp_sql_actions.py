@@ -619,6 +619,7 @@ def execute_claim_management(store, request, *, root, ports):
                                     records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'])
                     before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
                     transport = SimpleNamespace(before_model_call=before_call,
+                        model_call_capacity=getattr(ports, 'model_call_capacity', None),
                         model_call_reserved=lambda role, intent: store.begin_claim_management_call(
                             parent_id, round_id=rid, role=role, intent=intent))
                     stages = ModelStages(root, transport)
