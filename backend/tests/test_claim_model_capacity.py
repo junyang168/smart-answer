@@ -50,11 +50,12 @@ def test_independent_two_plus_two_and_immediate_refill(tmp_path):
 
 def test_unknown_blocks_new_calls_but_other_provider_runs(tmp_path):
     gate=capacity(tmp_path)
-    with gate.call('opus',tmp_path/'lost'):
+    with gate.call('gpt',tmp_path/'lost'):
         (tmp_path/'lost').mkdir(); (tmp_path/'lost/invocation.json').write_text('{}')
     with pytest.raises(CapacityUnavailable,match='unsettled'):
-        with gate.call('opus',tmp_path/'must-not-dispatch'): pytest.fail('dispatched')
-    with gate.call('gpt',tmp_path/'answer'): returned(tmp_path/'answer')
+        with gate.call('gpt',tmp_path/'must-not-dispatch'): pytest.fail('dispatched')
+    # Independent Opus reviews may still pass without requiring GPT repair.
+    with gate.call('opus',tmp_path/'answer'): returned(tmp_path/'answer')
 
 
 def test_refusal_cools_down_without_replaying_and_then_recovers(tmp_path):
@@ -137,3 +138,20 @@ with ClaimModelCapacity(json.loads(sys.argv[1])).call('opus',sys.argv[2]):
             with ClaimModelCapacity(config).call('opus',tmp_path/'another'): pytest.fail('duplicate')
     finally:
         if parent.poll() is None: parent.kill();parent.wait()
+
+
+@pytest.mark.parametrize('code',[0,1])
+def test_actual_claude_session_quota_stops_all_later_claim_calls(tmp_path,code):
+    gate=capacity(tmp_path); path=tmp_path/'quota'
+    with gate.call('opus',path):
+        returned(path,code)
+        (path/'stdout.log').write_text(json.dumps({'is_error':True,'api_error_status':429,
+            'api_error':'usage_limit_reached','terminal_reason':'api_error',
+            'result':"You've hit your session limit · resets 3:50pm (America/Chicago)",
+            'usage':{'input_tokens':0,'output_tokens':0}}))
+    with pytest.raises(CapacityUnavailable,match='session limit|usage_limit_reached'):
+        with gate.call('opus',tmp_path/'no-repeat'): pytest.fail('quota probe')
+    with pytest.raises(CapacityUnavailable,match='GPT waits for Opus recovery'):
+        with gate.call('gpt',tmp_path/'no-new-proposal'): pytest.fail('unreviewable proposal')
+    assert not (tmp_path/'no-new-proposal/invocation.json').exists()
+    assert not list((gate.root/'gpt').glob('wait-*.json'))

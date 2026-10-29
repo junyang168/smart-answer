@@ -107,6 +107,10 @@ class ClaimModelCapacity:
                     with self._state(role) as (root, state):
                         if state.get('blocked'):
                             raise CapacityUnavailable(role + ': ' + state['blocked'])
+                        if role == 'gpt':
+                            downstream = _read(self.root / 'opus' / 'state.json', {})
+                            if downstream.get('blocked'):
+                                raise CapacityUnavailable('GPT waits for Opus recovery: ' + downstream['blocked'])
                         if (self._waiters(root)[:1] == [ticket.name]
                                 and time.time() >= state['next_start']):
                             for index in range(state['allowed']):
@@ -143,20 +147,23 @@ class ClaimModelCapacity:
                         settled = self._settled(artifacts)
                         receipt = _read(Path(artifacts) / 'exit.json', {})
                         error = ''
+                        envelope = {}
                         stdout = Path(artifacts) / 'stdout.log'
                         if stdout.exists():
                             try:
                                 envelope = json.loads(stdout.read_text())
                                 if isinstance(envelope, dict) and envelope.get('is_error'):
-                                    error = str(envelope.get('result', '')).lower()
+                                    error = ' '.join(str(envelope.get(k, '')) for k in
+                                        ('result', 'api_error', 'api_error_status')).lower()
                             except (ValueError, OSError):
                                 pass
                         if receipt.get('returncode') not in (None, 0):
                             stderr = Path(artifacts) / 'stderr.log'
                             error += stderr.read_text()[-16000:].lower() if stderr.exists() else ''
-                        fatal = next((s for s in ('insufficient_quota', 'usage limit reached',
-                            "you've hit your limit", 'not logged in', 'authentication_error', 'invalid_api_key') if s in error), None)
-                        limited = any(s in error for s in ('rate_limit_error', 'rate limit exceeded',
+                        fatal = next((s for s in ('insufficient_quota', 'usage_limit_reached', 'usage limit reached',
+                            "you've hit your limit", "you've hit your session limit", 'not logged in', 'authentication_error', 'invalid_api_key') if s in error), None)
+                        limited = (isinstance(envelope, dict)
+                            and envelope.get('is_error') and envelope.get('api_error_status') in (429, 503)) or any(s in error for s in ('rate_limit_error', 'rate limit exceeded',
                                                           'too many requests', 'http 429', 'overloaded_error', 'temporarily unavailable'))
                         if not settled:
                             state['blocked'] = 'unsettled transport: ' + str(artifacts)
