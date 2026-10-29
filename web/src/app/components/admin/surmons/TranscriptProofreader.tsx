@@ -1371,6 +1371,12 @@ function TranscriptProofreader({
             const active = p.index === selected;
             const binding = doc.context.paragraph_bindings[p.index];
             const review = doc.context.reviews["p:" + p.index];
+            const uncertainFrames = doc.context.groups.filter(
+              (g) =>
+                !g.hidden &&
+                g.needs_review &&
+                g.before_paragraph_id === p.index,
+            );
             const reviewed =
               review?.sha256 === doc.paragraph_shas[p.index] &&
               review.decision === "confirmed" &&
@@ -1387,7 +1393,12 @@ function TranscriptProofreader({
                 className={`rounded-xl border bg-white p-4 ${active ? "border-blue-400 ring-1 ring-blue-100" : "border-slate-200"}`}
               >
                 {doc.context.groups
-                  .filter((g) => !g.hidden && g.before_paragraph_id === p.index)
+                  .filter(
+                    (g) =>
+                      !g.hidden &&
+                      !g.needs_review &&
+                      g.before_paragraph_id === p.index,
+                  )
                   .map((g) => (
                     <button
                       key={g.id}
@@ -1401,11 +1412,37 @@ function TranscriptProofreader({
                         alt="投影片錨點"
                         src={`${base}/assets/${doc.context.occurrences[g.slide_id].asset_id}`}
                       />{" "}
-                      {g.needs_review
-                        ? "待釐清畫面 · 檢視原圖與文字"
-                        : "投影片 · 檢視原圖與文字"}
+                      投影片 · 檢視原圖與文字
                     </button>
                   ))}
+                {uncertainFrames.length > 0 && (
+                  <details className="mb-3 text-xs text-slate-500">
+                    <summary className="cursor-pointer">
+                      待釐清的短暫畫面（{uncertainFrames.length}）
+                    </summary>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {uncertainFrames.map((g) => (
+                        <button
+                          key={g.id}
+                          className="rounded border px-2 py-1 text-left text-blue-700"
+                          onClick={() => {
+                            setActiveGroup({
+                              paragraphId: selected,
+                              groupId: g.id,
+                            });
+                            setPeekSlide(undefined);
+                          }}
+                        >
+                          查看{" "}
+                          {stamp(
+                            doc.context.occurrences[g.slide_id].time_ms || 0,
+                          )}{" "}
+                          的原始畫面
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <div className="mb-3 flex items-center justify-between gap-2 text-xs">
                   <button
                     className="text-blue-700"
