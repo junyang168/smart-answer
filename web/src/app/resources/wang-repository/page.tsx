@@ -143,6 +143,36 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
   );
 }
 
+/** 「按講論主題」里的一篇专题文章。
+ *
+ * 不能套用释经那一行：那里经文在前、标题在后，同一行。专题文章有三到七节
+ * 核心经文，手机上经文占掉左半边，标题被挤成每行三四个字。这里标题占第一
+ * 行，经文退到下面一行小字。
+ */
+function TopicEssayLink({ article }: { article: PublicArticleSummary }) {
+  return (
+    <Link
+      href={article.href}
+      className="group flex items-start gap-4 px-5 py-4 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold leading-7 text-stone-900 group-hover:text-amber-900">
+          <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 align-middle text-xs font-semibold text-amber-900">
+            專題
+          </span>
+          {article.title}
+        </span>
+        <span className="mt-1 block font-mono text-sm leading-6 text-amber-800">
+          {article.core_scripture.map((reference) => reference.display).join("；")}
+        </span>
+      </span>
+      <span className="shrink-0 pt-0.5 text-sm text-stone-500 group-hover:text-amber-800">
+        閱讀 <span aria-hidden="true">→</span>
+      </span>
+    </Link>
+  );
+}
+
 /** 一章底下的一组内容——綜合文章或教授原聲。
  *
  * 两组同一个形状。它们的信息结构一样：经节、标题、一行说明。差别由上面的标签
@@ -358,12 +388,7 @@ export default function WangRepositoryPage() {
             <Rows>
               {topicEssays.map((article) => (
                 <li key={article.slug}>
-                  <ArticleLink
-                    article={{
-                      ...article,
-                      passage: article.core_scripture.map((reference) => reference.display).join("；"),
-                    }}
-                  />
+                  <TopicEssayLink article={article} />
                 </li>
               ))}
             </Rows>
