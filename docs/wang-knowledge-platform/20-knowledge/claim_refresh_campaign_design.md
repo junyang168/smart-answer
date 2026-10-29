@@ -121,3 +121,11 @@ flowchart LR
 运行参数显式固定为共享容量目录、最多 4–8 条就绪操作、发出间隔与冷却时间；每家先一个，成功后最多两个。等待名额先于调用意图及 SQL 调用预算预留；已保存回答复用不占名额。预检失败且未产生 transport invocation 不误记成模型调用或供应商故障。限流只推迟新调用，不授权重试原调用。返回 `Retry-After` 时不得提前发出。
 
 旧实现绑定的已暂停 action 保留原执行版本接续或走正式恢复；不能因本次排程升级重写旧审核契约。旧 action 的 completed 是历史事实，仍须按本设计做最终当前资格清账。
+
+## 9 明确授权的 Opus API 切换
+
+负责人于 2026-10-29 授权 Opus 改用 API，并提供 100 美元 credit。新请求可显式选择同一 `claude-opus-5-5`、high effort 的 `anthropic_api`；GPT 继续订阅。旧策略及旧原始答复保留其真实 backend，不改标成 API。
+
+已暂停的未提交 Update 通过唯一 predecessor 接续，授权绑定前任 metadata、原权限、同一模型和共享 100 美元支出目录。旧成功与失败调用都保留并扣除预算；只有有完整退出证据、明确 `usage_limit_reached` 且输入输出均为零的订阅拒绝，才允许按本切换接续，未知调用不放行。已保存的 GPT 候选从 SQL 的前任记录交接并做精确来源校验，API 重新审阅实际候选；尚待 GPT 的任务继续正常判定。
+
+API 仍通过同一名额入口，使用持久 request、invocation、流事件、最终 response 和退出收据；不自动重试，不回退订阅。发出前为请求和最大输出预留费用；已返回调用按 usage 记账，结果不确定时保留预留。该任务共享费用上限为 100 美元，不代表获准花完余额。费用采用 [Anthropic 官方价格](https://platform.claude.com/docs/en/about-claude/pricing) 的 Opus 5.5 标准档：每百万输入 token 4 美元、输出 20 美元；不使用付费服务器工具或加速档。

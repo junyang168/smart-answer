@@ -94,9 +94,16 @@ def claim_management_model_adapter(role, policy, *, live=False):
     from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, JointJsonCandidate, JointReview, MODELS
     if role not in {"gpt", "opus"}:
         raise ValueError("independent Gemini audit uses audit-library's own transport")
-    model, _ = MODELS[role]
-    client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
-        model=model, backend=MODELS[role][1], reasoning_effort="high",
+    model = policy.models[role]['model_id']
+    backend = policy.models[role]['backend']
+    if live and backend == 'anthropic_api':
+        from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
+        client = ClaimAnthropicAPI(model=model, reasoning_effort='high',
+            max_output_tokens=policy.budget.max_output_tokens,
+            spend_root=policy.api_spend['root'])
+    else:
+        client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
+        model=model, backend=backend, reasoning_effort="high",
         max_output_tokens=policy.budget.max_output_tokens)
     client.max_output_tokens = policy.budget.max_output_tokens
     prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"

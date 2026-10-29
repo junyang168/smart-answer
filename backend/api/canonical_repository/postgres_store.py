@@ -3376,7 +3376,7 @@ class PostgresKnowledgeStore:
                                 continuation['prior_findings'] = {**candidate_findings, **continuation['prior_findings']}
                             continuation.setdefault('previous_candidates', {})[child['unit_id']] = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         continue
-                    if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
+                    if (continuation.get('owner_call_extension') or continuation.get('opus_api_transition')) and child['materials']['round_id'] in prior['latest_rounds'].values():
                         if before != child['materials'].get('transaction_before',child['materials']['before']):
                             raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
@@ -3387,7 +3387,7 @@ class PostgresKnowledgeStore:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
-                    elif child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
+                    elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not continuation.get('opus_api_transition')):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
                 if any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
@@ -3553,7 +3553,7 @@ class PostgresKnowledgeStore:
                         or frozen['created_keys'] != parent['created_keys']
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
-                if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension')) and (
+                if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension') or parent.get('continuation', {}).get('opus_api_transition')) and (
                         frozen.get('continuation') != parent['continuation']
                         or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
                         or (round_number == 0 and frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id])):

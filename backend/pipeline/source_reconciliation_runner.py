@@ -453,7 +453,7 @@ class Runner:
                 if reserved:
                     reserved(stage, request)
             client = adapter._client
-            if adapter.backend in {'codex_subscription', 'claude_subscription'}:
+            if adapter.backend in {'codex_subscription', 'claude_subscription', 'anthropic_api'}:
                 client.call_artifacts = artifacts
                 client.replay_only = replay
             elif replay:

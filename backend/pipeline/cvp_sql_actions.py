@@ -170,6 +170,11 @@ def validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         raw = validate_claim_stage(root, 'gpt', policy, cm.model_packet(materials))
         from backend.pipeline.claim_model_output import candidate as expand_candidate
         expected, receipt = expand_candidate(raw['response'], materials)
+    elif materials.get('continuation',{}).get('opus_api_transition'):
+        original = materials['continuation']['previous_candidates'][materials['unit_id']]
+        if original != materials['previous_candidate']:
+            raise ValueError('API handoff altered the saved candidate')
+        expected, receipt = cm.normalize_candidate(original, sources)
     else:
         expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
         _, receipt = cm.normalize_candidate(expected.model_dump(mode='json'), sources)
@@ -626,7 +631,7 @@ def execute_claim_management(store, request, *, root, ports):
                     stages.root = round_root
                     def call(role, packet):
                         guard()
-                        return stages.call_bound(role, packet, ports.claim_management_adapter(role, policy), expected=cm.MODELS[role])
+                        return stages.call_bound(role, packet, ports.claim_management_adapter(role, policy), expected=(policy.models[role]['model_id'], policy.models[role]['backend']))
                     def record(stage, **extra):
                         receipt = {'round_id': rid, 'stage': stage, 'materials': binding(round_root / 'materials.json'),
                                    'candidate': binding(round_root / 'candidate.json'), **extra}
@@ -635,6 +640,7 @@ def execute_claim_management(store, request, *, root, ports):
                         return store.record_claim_management_stage(rid, binding(path))
                     if prior['checkpoint'] == 'prepared':
                         raw_candidate = (call('gpt', cm.model_packet(materials))['response'] if 'gpt' in materials['roles'] else
+                            materials['previous_candidate'] if materials.get('continuation',{}).get('opus_api_transition') else
                             cm.existing_candidate(materials['before'], replacements=materials['replacements']).model_dump(mode='json'))
                         from backend.pipeline.claim_model_output import candidate as expand_candidate
                         candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']

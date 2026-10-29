@@ -69,6 +69,7 @@ class Policy(source.Contract):
     policy_id: str = Field(min_length=1)
     budget: Budget
     models: dict[str, dict[str, str]]
+    api_spend: dict | None = None
     clarification_per_problem: Literal[1] = 1
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
@@ -87,6 +88,8 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
+        if self.api_spend is None:
+            value.pop('api_spend', None)
         for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
             if value[name] is None:
                 value.pop(name)
@@ -109,8 +112,16 @@ class Policy(source.Contract):
         for role, (model, backend) in MODELS.items():
             selected = self.models[role].get('model_id')
             allowed = AUDIT_MODELS if role == 'gemini' else {model}
-            if selected not in allowed or self.models[role] != {"model_id": selected, "backend": backend, "effort": "high"}:
+            selected_backend = self.models[role].get('backend')
+            allowed_backends = {backend, 'anthropic_api'} if role == 'opus' else {backend}
+            if selected not in allowed or selected_backend not in allowed_backends or self.models[role] != {"model_id": selected, "backend": selected_backend, "effort": "high"}:
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
+        if self.models['opus']['backend'] == 'anthropic_api':
+            if (not isinstance(self.api_spend, dict) or set(self.api_spend) != {'root','limit_usd'}
+                    or not Path(self.api_spend['root']).is_absolute() or self.api_spend['limit_usd'] != 100):
+                raise ValueError('Opus API policy requires explicit shared 100 USD spend binding')
+        elif self.api_spend is not None:
+            raise ValueError('subscription policy cannot carry API billing authority')
         if self.source_impact_batch_size and self.review_purpose != 'source_impact':
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
@@ -388,7 +399,7 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
-    files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py']
+    files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -1537,6 +1548,8 @@ def continuation_budget(previous, request, policy):
     original = Policy.model_validate(previous['policy'])
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
+    api_transition = api_authorize(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
     read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh'
         and not request.permissions and not request.creation_permissions)
@@ -1646,6 +1659,11 @@ def continuation_budget(previous, request, policy):
             unknown[key] = {'reservation':binding(intent),'intent_sha256':slot['intent_sha256'],'state':'started'}
             spent[slot['role']] += 1
             continue
+        if api_transition:
+            from backend.pipeline.claim_opus_api_transition import quota_refusal
+            failures[key] = quota_refusal(previous, key, slot)
+            spent[slot['role']] += 1
+            continue
         failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
             raise ValueError('uncertain original call cannot be repeated in a continuation')
@@ -1662,7 +1680,7 @@ def continuation_budget(previous, request, policy):
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if extension_basis == 'unknown_call' and not unknown:
         raise ValueError('owner unknown-call extension requires an actual unknown generation')
-    if (policy.models != original.models or policy.independent_audit != original.independent_audit
+    if (policy.models != original.models and not api_transition or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
             or (not human_follow_up and extension is None and any(policy.budget.limit(role) > remaining[role] for role in MODELS))
             or (not human_follow_up and extension is None and policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values()))
@@ -1677,7 +1695,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
+    return {**({'opus_api_transition':api_transition} if api_transition else {}), 'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
