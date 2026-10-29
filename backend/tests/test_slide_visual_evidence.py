@@ -227,3 +227,41 @@ def test_visual_stage_rejects_different_video_before_any_paid_call(tmp_path, mon
     monkeypatch.setattr(visual, 'extract', lambda *a, **kw: pytest.fail('must not send a paid call'))
     with pytest.raises(ValueError, match='no visual calls sent'):
         audio.main()
+
+
+def test_real_narrow_cjk_label_scales_uniformly_without_distorting_glyphs():
+    value = content()
+    value['text_regions'][0].update(text='理性', bbox=[287, 285, 353, 396])
+    root = ET.fromstring(visual.render_svg(value, 642, 480, 'a' * 64, font_style='kai'))
+    ns = {'s': 'http://www.w3.org/2000/svg'}
+    label = root.find('s:text', ns)
+    assert 40 < float(label.get('font-size')) < 45
+    assert 'Kaiti TC' in label.get('font-family')
+    assert label.find('s:tspan', ns).text == '理性'
+    for span in root.findall('s:text/s:tspan', ns):
+        assert span.get('textLength') is None
+        assert span.get('lengthAdjust') is None
+        assert span.get('transform') is None
+
+
+def test_font_fit_does_not_count_combining_marks_as_new_characters():
+    assert visual.natural_text_size(['e\u0301'], 20, 100) == visual.natural_text_size(['e'], 20, 100)
+    assert visual.natural_text_size(['שָׁלוֹם'], 100, 50) == visual.natural_text_size(['שלום'], 100, 50)
+    assert visual.natural_text_size(['甲乙', '甲'], 40, 100) <= 20
+    with pytest.raises(ValueError, match='font style'):
+        visual.render_svg(content(), 642, 480, 'a' * 64, font_style='unknown')
+
+
+def test_diagram_peer_labels_share_size_despite_bad_ocr_rectangle():
+    value = content()
+    value['edges'] = []
+    value['text_regions'] = [
+        {'id': 'r1', 'text': '理性', 'bbox': [287, 285, 353, 396], 'color': '#FFFFFF', 'uncertain': False},
+        {'id': 'r2', 'text': '情感', 'bbox': [486, 287, 552, 353], 'color': '#FFFFFF', 'uncertain': False},
+        {'id': 'r3', 'text': '意志', 'bbox': [390, 508, 496, 580], 'color': '#FFFFFF', 'uncertain': False}]
+    value['shapes'] = [{'id': 's1', 'kind': 'ellipse', 'points': [[232, 85], [651, 646]],
+        'stroke': '#FFFFFF', 'fill': None, 'dashed': False, 'arrow_start': False, 'arrow_end': False, 'uncertain': False}]
+    ns = {'s': 'http://www.w3.org/2000/svg'}
+    root = ET.fromstring(visual.render_svg(value, 642, 480, 'a'*64))
+    sizes = [float(t.get('font-size')) for t in root.findall('s:text', ns)]
+    assert len(set(sizes)) == 1 and 27 < sizes[0] < 30
