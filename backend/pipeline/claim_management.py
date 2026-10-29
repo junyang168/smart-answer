@@ -1628,8 +1628,8 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
-        from backend.pipeline.claim_review_recovery import consumed_invalid_review
-        if consumed_invalid_review(previous, key, slot):
+        from backend.pipeline.claim_review_recovery import consumed_invalid_review, consumed_rejected_citations
+        if consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot):
             spent[slot['role']] += 1
             continue
         if key in recovery:

@@ -218,3 +218,83 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
         p=root/'paragraphs'/group['paragraph_key']/'prepared.json';p.parent.mkdir(parents=True);p.write_text('{"manifest":null}')
     result=updates.run(store,'S',old,cid,root,'refresh')
     assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
+
+
+@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent'])
+def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
+    from backend.pipeline import claim_management_intake as intake
+    from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    store,old,cid,base=fixture(action);root=base/'proposal-quote';citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    def resolutions(packet,bad=False):
+        return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact source binding',
+            'citations':[{**citation,**({'exact_quote':'教授否定这个译法TYPO。','source_id':'FOREIGN' if defect=='foreign' else 'S'} if bad else {})}],
+            'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own bound evidence'} for fid in packet['unresolved']]
+    def proposal(packet):
+        inputs=packet['original_goal'].get('unaccepted_model_inputs')
+        if inputs:
+            original=inputs[0]['response']
+            original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
+            assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
+        return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+            'reason':'repair bound excerpt','citations':[citation]}],'creations':[],'retirements':[],'findings':[],
+            'finding_resolutions':resolutions(packet,bad=not inputs or defect=='repeat')}
+    def review(packet):
+        value=pass_review(packet);value['prior_findings']=resolutions(packet)
+        if not packet['unresolved']:
+            for assessment in value['binding_assessments']:
+                if assessment['claim_key']=='claims/D':assessment['sufficient']=False
+            value['findings']=[{'target_key':'source_fragments/FD','category':'evidence','component':'binding',
+                'reason':'bound excerpt stale','acceptance_condition':'repair exact excerpt','citations':[citation],
+                'affected_target_keys':['claims/D'],'affected_write_keys':[],'impact_reason':'own evidence'}]
+        if defect=='opus' and not packet['unresolved']:
+            value['findings'][0]['citations']=[{**citation,'exact_quote':'教授否定这个译法TYPO。'}]
+        return value
+    clients={}
+    def execute(manifest,output):
+        for key,(request,execution) in batch.load(manifest,output,store=store)[1].items():
+            port=clients.setdefault(key,SyntheticPorts(store,execution,opus=review,proposal=proposal))
+            execute_claim_management(store,request,root=execution,ports=port)
+    monkeypatch.setattr(batch,'run',execute)
+    policy=json.loads(intake.DEFAULT_POLICY.read_text())
+    if defect in {'budget','repeat'}:policy['budget']['gpt_calls']=1 if defect=='budget' else 2
+    policy_path=root/'selected-policy.json';policy_path.parent.mkdir(parents=True);policy_path.write_text(json.dumps(policy))
+    first=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+    assert first['status']=='paused'
+    aid=first['claims']['D']['action_id'];parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()))
+    role='opus' if defect=='opus' else 'gpt'
+    raw=Path(parent['execution_root'])/rid/(role+'.raw.json');raw_bytes=raw.read_bytes();before=store.get_record_state('source_fragments','FD')
+    initial_calls=['opus'] if defect=='opus' else ['opus','gpt']
+    assert next(iter(clients.values())).calls==initial_calls
+    if defect=='drift':
+        record=store.get_record_state('claims','D')['payload'];record['statement']='external change'
+        store.apply_plan(store.plan_package({'package_id':'external-drift','claims':[record]}))
+    if defect=='intent':
+        from backend.api.canonical_repository.postgres_store import canonical_json
+        broken=deepcopy({k:v for k,v in parent.items() if k not in {'run_id','status','error'}})
+        broken['call_reservations'][rid+':gpt']['intent_sha256']='0'*64
+        with store.connect() as conn:
+            conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(broken),parent['run_id']))
+    if defect=='tamper':
+        raw.write_text(raw.read_text().replace('TYPO','FORGED'));raw_bytes=raw.read_bytes()
+    if defect=='missing':raw.unlink()
+    final=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+    assert not raw.exists() if defect=='missing' else raw.read_bytes()==raw_bytes
+    after=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+    assert after['request']==parent['request'] and after['policy']==parent['policy']
+    if defect not in {'current','opus'}:
+        expected_calls=initial_calls+(['gpt'] if defect=='repeat' else [])
+        assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
+        assert store.get_record_state('source_fragments','FD')==before
+        if defect=='repeat':
+            third=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+            assert third['status']=='paused' and next(iter(clients.values())).calls==expected_calls
+            assert store.get_record_state('source_fragments','FD')==before
+        else:assert not after['original_goal'].get('unaccepted_model_inputs')
+        return
+    assert final['all_actions_completed'],final
+    assert next(iter(clients.values())).calls==initial_calls+['gpt','opus']
+    assert after['call_reservations'][rid+':'+role]==parent['call_reservations'][rid+':'+role]
+    if role=='gpt':assert after['call_reservations'][rid+':opus']['state']=='cancelled'
+    assert consumed_rejected_citations(after,rid+':'+role,after['call_reservations'][rid+':'+role])
+    assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']
+    assert store.claim_management_qualification('D')['ready']

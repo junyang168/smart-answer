@@ -501,7 +501,17 @@ def execute_claim_management(store, request, *, root, ports):
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
         if parent['result'].get('returned_rejected_call'):
-            return parent['result']
+            from backend.pipeline.claim_review_recovery import CITATION_ERROR, resume_rejected_citations
+            rejected = parent['result']['returned_rejected_call']
+            if parent['result'].get('detail') != CITATION_ERROR or request.operation != 'Update' or not policy.all_findings_to_gpt:
+                return parent['result']
+            try:
+                rejected_round, role = rejected.rsplit(':',1)
+                resume_rejected_citations(store,rejected_round,role=role)
+                parent = store.get_cvp_group(parent_id)
+            except (ValueError,RuntimeError,OSError) as exc:
+                return store.pause_claim_management_action(parent_id,
+                    reason='budget_exhausted' if 'budget' in str(exc) else 'engineering_required',detail=str(exc))
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
             return parent['result']
         try:
@@ -549,7 +559,10 @@ def execute_claim_management(store, request, *, root, ports):
                             unit_request.permissions = list(request.permissions)
                             unit_keys.update(cm.audit_keys(unit_request, before))
                         if prior:
-                            unit_keys.update(k for k in cm.audit_keys(unit_request, before, cm.Candidate.model_validate(prior['candidate'])))
+                            if prior.get('candidate'):
+                                unit_keys.update(k for k in cm.audit_keys(unit_request, before, cm.Candidate.model_validate(prior['candidate'])))
+                            elif not prior.get('citation_input_recovery'):
+                                raise ValueError('missing prior candidate requires authenticated rejected-input recovery')
                         if request.operation == 'Create':
                             unit_keys.update(k for k in before if content.split_key(k)[0] in cm.CLAIM_COLLECTIONS)
                         source_ids = {content.split_key(k)[1] for k in unit_keys if k.startswith('source_documents/')}

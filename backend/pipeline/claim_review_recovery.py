@@ -396,3 +396,146 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
         for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',heartbeat_at=now() WHERE run_id=%s",(canonical_json(metadata),rid))
     return str(destination)
+
+
+CITATION_ERROR = 'citation is not an exact quote from the complete own source'
+
+
+def rejected_citation_input(value, parent, role):
+    """Authenticate a returned report and reproduce only its citation rejection."""
+    from backend.pipeline.cvp_sql_actions import validate_claim_stage, claim_management_review_packet
+    from backend.pipeline.claim_model_output import candidate as expand_candidate, review as expand_review
+    materials = value['materials']; policy = cm.Policy.model_validate(materials['policy'])
+    root = Path(value.get('recovery_root', Path(parent['execution_root']) / materials['round_id']))
+    if body(read(root/'materials.json')) != materials:
+        raise ValueError('rejected citation materials drift')
+    slot = parent['call_reservations'][materials['round_id']+':'+role]
+    if (body(read(root/(role+'.reservation.json'))) != slot.get('intent')
+            or sha256_json(slot.get('intent')) != slot.get('intent_sha256')):
+        raise ValueError('rejected citation reservation drift')
+    candidate = cm.Candidate.model_validate(value['candidate']) if role == 'opus' else None
+    packet = cm.model_packet(materials) if role == 'gpt' else claim_management_review_packet(materials,candidate)
+    raw = validate_claim_stage(root,role,policy,packet)
+    if slot.get('rejection') != {'response_state':'returned_rejected','raw':binding(root/(role+'.raw.json')),
+            'detail':CITATION_ERROR,'accepted':False,'automatic_retry':False}:
+        raise ValueError('rejected citation must retain its authenticated rejection')
+    try:
+        request = cm.Request.model_validate(materials['unit_request'])
+        if role == 'gpt':
+            candidate,_ = expand_candidate(raw['response'],materials)
+            cm.validate_candidate(request,materials['before'],candidate,materials['sources'],
+                created_keys=materials['created_keys'],original_replacements=materials['replacements'])
+            cm.validate_proposer_resolutions(candidate,materials['unresolved'],materials['sources'],request=request)
+        else:
+            review = expand_review(raw['response'],materials,candidate)
+            cm.validate_review(candidate,review,packet['denominator'],packet['required_questions'],
+                materials['unresolved'],materials['sources'],request=request,records=materials['before'])
+    except ValueError as exc:
+        if str(exc) != CITATION_ERROR:raise
+    else:raise ValueError('valid model answer cannot enter rejected-citation recovery')
+    bad = []
+    def visit(item):
+        if isinstance(item,list):
+            for child in item:visit(child)
+        elif isinstance(item,dict):
+            if {'source_id','paragraph_key','exact_quote'} <= set(item):
+                citation = cm.Citation.model_validate(item)
+                try:cm.validate_citations([citation],materials['sources'])
+                except ValueError:
+                    source = materials['sources'].get(citation.source_id,{})
+                    if citation.paragraph_key not in source.get('paragraphs',{}):
+                        raise ValueError('citation recovery cannot invent a source or paragraph')
+                    bad.append(citation.model_dump(mode='json'))
+            else:
+                for child in item.values():visit(child)
+    visit(raw['response'])
+    if not bad:raise ValueError('no authenticated non-exact citation to correct')
+    return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
+        'response':raw['response'],'invalid_citations':bad,'review_not_accepted':True,
+        'instruction':'This unchanged rejected answer is input, never approval. Reassess every decision against the complete source, repair exact citations, and satisfy every original obligation through normal proposal and Opus review.'}
+
+
+def resume_rejected_citations(store, round_id, *, role):
+    """Advance to ordinary correction using original authority and remaining slots.
+
+    No fuzzy matching, raw editing, acceptance, new budget or content writes.
+    A rejected proposal has no accepted previous candidate.
+    """
+    if role not in {'gpt','opus'}:raise ValueError('content role required')
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(round_id,)).fetchone()[0]
+        parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(value['parent_run_id'],)).fetchone()[0]
+        if value.get('citation_input_recovery'):
+            check_binding(value['citation_input_recovery'])
+            record=body(read(value['citation_input_recovery']['path']))
+            if record['input']['role']!=role:raise ValueError('recovery belongs to another role')
+            return value['citation_input_recovery']
+        materials = value['materials']; request = cm.Request.model_validate(materials['request'])
+        policy = cm.Policy.model_validate(materials['policy'])
+        slot = parent['call_reservations'].get(round_id+':'+role,{})
+        expected_stages = {'candidate'} if role=='opus' else set()
+        if (request.operation!='Update' or not policy.all_findings_to_gpt
+                or value['checkpoint']!='prepared' or set(value.get('stage_results',{}))!=expected_stages
+                or value.get('change_set_ids') or parent.get('continued_by')
+                or ('candidate' in value)!=(role=='opus')
+                or len(parent['latest_rounds'])!=1 or len(parent['original_goal']['units'])!=1
+                or parent['latest_rounds'].get(value['unit_id'])!=round_id
+                or parent['result'].get('returned_rejected_call')!=round_id+':'+role
+                or slot.get('state')!='started' or slot.get('role')!=role or slot.get('round_id')!=round_id):
+            raise ValueError('citation recovery requires the exact latest uncommitted returned rejection')
+        entry = rejected_citation_input(value,parent,role)
+        # Check the complete next pair before changing any stage or cancelling
+        # its unused slots. Rejected generations remain spent.
+        for next_role in cm.required_roles(request,value['round_number']+1,policy):
+            spent = sum(s['role']==next_role and s['state'] in {'started','completed'} for s in parent['call_reservations'].values())
+            if spent>=policy.budget.limit(next_role):raise ValueError('original Claim budget cannot fund citation correction and review')
+        revisions = dict(parent['revision_rounds'])
+        revisions[round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
+        if sum(bool(v) for v in revisions.values())>=policy.budget.max_revisions:
+            raise ValueError('original Claim revision budget cannot fund citation correction')
+        store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in materials['transaction_before'].items()}))
+        _,sources = cm.load_authority(request,source_documents=cm.source_documents(materials['before']),
+            selected_source_ids=materials['unit_request']['source_bindings'],human_source_decisions=materials.get('human_source_decisions'))
+        if sources!=materials['sources']:raise ValueError('citation recovery source drift')
+        if 'human_source_decisions' in materials:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor,request.source_bindings,materials['human_source_decisions'])
+        destination = Path(parent['execution_root'])/round_id/'rejected-citation-input'
+        contract = cm.audit_contract(destination,policy)
+        if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
+            raise ValueError('citation recovery cannot change original model instructions')
+        original = deepcopy(value); original_parent = deepcopy(parent)
+        first = entry['invalid_citations'][0]
+        exact = sources[first['source_id']]['paragraphs'][first['paragraph_key']]['text']
+        finding = cm.Finding(target_key=request.target_keys[0],category='engineering',component='rejected_model_citations',
+            reason='A returned '+role+' answer failed exact quotation validation. The complete unchanged answer and invalid citations are in original_goal.unaccepted_model_inputs. Reassess all decisions; no candidate or review from this rejection is approved.',
+            acceptance_condition='Repair non-verbatim citations from the complete source and pass ordinary full candidate validation and Opus review.',
+            citations=[cm.Citation(source_id=first['source_id'],paragraph_key=first['paragraph_key'],exact_quote=exact)],
+            affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='the rejected answer cannot be used as approval')
+        parent['findings'][finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
+        parent['original_goal'].setdefault('unaccepted_model_inputs',[]).append(entry)
+        for key,s in parent['call_reservations'].items():
+            if s['round_id']==round_id and s['state']=='planned':
+                s.update(state='cancelled',reason='rejected citation input; ordinary next round required')
+        record = {'original_round':original,'original_parent':original_parent,'input':entry,
+            'authorization':request.authorization.model_dump(mode='json'),'new_budget':False,'model_calls':0,
+            'content_approved':False,'current_contract':contract}
+        write(destination/'engineering-recovery.json',record)
+        parent.update(audit_contract=contract,revision_rounds=revisions,result={'status':'running','reason':'revision_required','round_id':round_id,'unit_id':value['unit_id']})
+        value.update(outcome='revision_required',citation_input_recovery=binding(destination/'engineering-recovery.json'))
+        for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",(canonical_json(metadata),rid))
+        return value['citation_input_recovery']
+
+
+def consumed_rejected_citations(previous,key,slot):
+    entries = [e for e in previous['original_goal'].get('unaccepted_model_inputs',[]) if e['round_id']+':'+e['role']==key]
+    if not entries and slot.get('rejection',{}).get('detail')!=CITATION_ERROR:return False
+    if len(entries)>1 or slot['state']!='started':raise ValueError('rejected citation accounting drift')
+    root = Path(previous['execution_root'])/slot['round_id']
+    materials = body(read(root/'materials.json'))
+    value = {'materials':materials,'candidate':body(read(root/'candidate.json')) if slot['role']=='opus' else None}
+    observed = rejected_citation_input(value,previous,slot['role'])
+    if entries and observed!=entries[0]:raise ValueError('rejected citation input drift')
+    return True
