@@ -416,6 +416,7 @@ def public_article_data(slug: str) -> dict:
             "slug": slug,
             "title": str(item.get("title") or "").strip(),
             "passage": str(item.get("passage") or "").strip(),
+            "reader_summary": str(item.get("reader_summary") or "").strip() or None,
             "markdown": markdown,
             "audio_sections": audio_sections,
             "source_annotations": source_annotations,
@@ -440,6 +441,7 @@ def list_public_articles():
                 "scripture": _public_scripture_reference(item),
                 "product_kind": str(item.get("product_kind") or "").strip() or None,
                 "core_scripture": _core_scripture(item),
+                "reader_intro": str(item.get("reader_intro") or "").strip() or None,
                 "href": f"/resources/wang-repository/articles/{slug}",
             }
         )

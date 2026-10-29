@@ -28,6 +28,7 @@ type PublicArticleSummary = {
   scripture: ScriptureReference | null;
   product_kind: string | null;
   core_scripture: ScriptureReference[];
+  reader_intro?: string | null;
   href: string;
 };
 
@@ -162,6 +163,9 @@ function TopicEssayLink({ article }: { article: PublicArticleSummary }) {
           </span>
           {article.title}
         </span>
+        {article.reader_intro && (
+          <span className="mt-1.5 block text-sm leading-6 text-stone-600">{article.reader_intro}</span>
+        )}
         <span className="mt-1 block font-mono text-sm leading-6 text-amber-800">
           {article.core_scripture.map((reference) => reference.display).join("；")}
         </span>

@@ -49,6 +49,8 @@ class FakeCommands:
             (out / "final-self-check.json").write_text("[]")
         elif stage == "binding":
             _arg(argv, "--output").write_text("{}")
+        elif stage == "blurb":
+            _arg(argv, "--output").write_text("{}")
 
 
 def test_an_essay_run_stops_for_the_owner_and_resumes_without_repeating(tmp_path):
@@ -79,7 +81,7 @@ def test_an_essay_run_stops_for_the_owner_and_resumes_without_repeating(tmp_path
     (tmp_path / "owner-notes" / "01.json").write_text(json.dumps({"notes": [{"anchor": "稿", "summary": "改"}]}))
     stopped = run()
     assert stopped["stage"] == "final_review" and stopped["page"].endswith("/test-essay")
-    assert fake.calls[-3:] == ["owner-round-01", "binding", "register"]
+    assert fake.calls[-4:] == ["owner-round-01", "binding", "blurb", "register"]
 
     # Running again repeats nothing and stops at the same place.
     before = list(fake.calls)
@@ -98,6 +100,7 @@ def test_a_changed_input_reruns_its_stage_and_what_follows(tmp_path):
     first = len(fake.calls)
     (tmp_path / "scope.json").write_text(json.dumps({"reader_question": "改過的問題"}))
     EssayRun(tmp_path, runner=fake).advance()
+    # The rewritten essay came out word for word the same, so its blurb stands.
     assert fake.calls[first:] == ["coverage", "decisions", "packet", "author", "review", "binding", "register"]
     # An unchanged packet does not rewrite the essay.
     (tmp_path / "editorial-selection.json").write_text("{ }")

@@ -1643,6 +1643,17 @@ def _draft_first_annotated_markdown(
     return annotated, annotations, projection_audit, playback_audit
 
 
+def _reader_blurb(blurb: dict[str, Any]) -> dict[str, Any]:
+    """The card intro and opening summary, when the review carries them (#509)."""
+
+    intro = str(blurb.get("reader_intro") or "").strip()
+    summary = str(blurb.get("reader_summary") or "").strip()
+    return {
+        **({"reader_intro": intro} if intro else {}),
+        **({"reader_summary": summary} if summary else {}),
+    }
+
+
 def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, Any]:
     manifest = _read_json(manifest_path)
     if manifest.get("schema_version") != MANIFEST_SCHEMA:
@@ -1703,6 +1714,17 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
                 manifest, bindings_record, evidence_packet, workflow=_read_json(workflow_path)
             )
         )
+    blurb: dict[str, Any] = {}
+    blurb_relative_path = str(manifest.get("reader_blurb_relative_path") or "").strip()
+    if blurb_relative_path:
+        blurb_path = _safe_staging_child(blurb_relative_path)
+        if not blurb_path.is_file():
+            raise ValueError("review reader blurb is missing")
+        blurb = _read_json(blurb_path)
+        integrity_matches = integrity_matches and (
+            str(manifest.get("reader_blurb_sha256") or "") == _sha256(blurb_path)
+            and str(blurb.get("manuscript_sha256") or "") == current_manuscript_sha
+        )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)
     draft_first_report = review_report(workflow_path.parent) if variant == "draft_first" else None
@@ -1730,6 +1752,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             else _stage_checks(workflow)
         ),
         "href": f"/admin/wang/operations/articles/reviews/{review_id}",
+        **_reader_blurb(blurb),
     }
     if include_markdown:
         if integrity != "verified":
@@ -2035,6 +2058,7 @@ def publish_article_review(
                 "title": review.get("title") or review_id,
                 "passage": _primary_passage(str(review.get("passage") or "")),
                 **_topic_essay_fields(manifest_path),
+                **{key: review[key] for key in ("reader_intro", "reader_summary") if review.get(key)},
                 "public_slug": slug,
                 "relative_path": "manuscript.md",
                 "source_annotations_path": "source-annotations.json",
