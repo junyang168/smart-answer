@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import math
+import statistics
 from pathlib import Path
 import re
 import shutil
@@ -159,9 +160,33 @@ def validate_content(content: dict) -> None:
             raise ValueError('Invalid unresolved image region')
 
 
-def render_svg(content: dict, width: int, height: int, image_sha: str, *, allow_text_only: bool = False) -> str:
+SVG_FONT_FAMILIES = {
+    'sans': 'Noto Sans CJK TC, PingFang TC, Arial, sans-serif',
+    'kai': 'Kaiti TC, BiauKai, STKaiti, DFKai-SB, KaiTi, Songti TC, Times New Roman, serif',
+}
+
+
+def natural_text_size(lines: list[str], box_width: float, line_height: float) -> float:
+    """Fit by uniform font size; OCR boxes must never squeeze glyph proportions.
+
+    Advances are estimates, not claims about the source font. Combining marks
+    contribute no separate width; browser shaping keeps Greek/Hebrew intact.
+    """
+    def advance(line):
+        return sum(0 if unicodedata.category(ch).startswith(('M', 'C')) else
+                   .33 if ch.isspace() else
+                   1 if unicodedata.east_asian_width(ch) in ('W', 'F') else .62
+                   for ch in line)
+    widest = max((advance(line) for line in lines), default=0)
+    return min(line_height * .82, box_width * .95 / widest) if widest else line_height * .82
+
+
+def render_svg(content: dict, width: int, height: int, image_sha: str, *,
+               allow_text_only: bool = False, font_style: str = 'sans') -> str:
     """Generate XML from primitives only. Never execute or embed model SVG/HTML."""
     validate_content(content)
+    if font_style not in SVG_FONT_FAMILIES:
+        raise ValueError('Unknown SVG font style')
     if not allow_text_only and (not content['has_diagram'] or not content['shapes']):
         raise ValueError('No visible diagram geometry; do not invent a diagram from prose')
     if not re.fullmatch(r'[0-9a-f]{64}', image_sha) or not 0 < width <= 20000 or not 0 < height <= 20000:
@@ -170,6 +195,8 @@ def render_svg(content: dict, width: int, height: int, image_sha: str, *, allow_
                       viewBox=f'0 0 {width} {height}')
     root.set('data-source-image-sha256', image_sha)
     root.set('data-derivation', 'model_reconstruction_unreviewed')
+    root.set('data-text-renderer', 'natural-proportions.v2')
+    root.set('data-font-style', font_style)
     ET.SubElement(root, 'rect', x='0', y='0', width=str(width), height=str(height), fill=content['background'])
     defs = ET.SubElement(root, 'defs')
     for color in sorted({s['stroke'] for s in content['shapes'] if s['arrow_start'] or s['arrow_end']}):
@@ -199,13 +226,36 @@ def render_svg(content: dict, width: int, height: int, image_sha: str, *, allow_
         if shape['uncertain']:
             attrs['data-uncertain'] = 'true'
         ET.SubElement(root, shape['kind'], attrs)
+    # OCR rectangles are approximate: one tall/narrow box must not make a
+    # peer diagram label huge or squeeze two CJK glyphs into one glyph's width.
+    label_heights = {}
+    for shape in content['shapes']:
+        if shape['kind'] not in ('ellipse', 'rect'):
+            continue
+        (sx1, sy1), (sx2, sy2) = shape['points']
+        peers = []
+        for region in content['text_regions']:
+            text = region['text']
+            x1, y1, x2, y2 = region['bbox']
+            if (1 <= len(text) <= 6 and all(unicodedata.east_asian_width(ch) in ('W', 'F') for ch in text)
+                    and sx1 <= x1 < x2 <= sx2 and sy1 <= y1 < y2 <= sy2):
+                peers.append(region)
+        if len(peers) >= 2:
+            common = statistics.median(r['bbox'][3] - r['bbox'][1] for r in peers)
+            for region in peers:
+                label_heights[region['id']] = common * height / 1000
     for region in content['text_regions']:
         x1, y1, x2, y2 = region['bbox']
         lines = region['text'].split('\n')
-        line_height = (y2-y1) * height / 1000 / len(lines)
+        line_height = label_heights.get(region['id'], (y2-y1) * height / 1000 / len(lines))
+        # Fit to the canvas edge, not an unreliable OCR width. CJK peer labels
+        # retain one font size, and browser shaping supplies natural advances.
+        rtl = next((unicodedata.bidirectional(ch) for ch in lines[0]
+                    if unicodedata.bidirectional(ch) in ('L', 'R', 'AL')), 'L') in ('R', 'AL')
+        available_width = (x2 if rtl else 1000-x1) * width / 1000
         element = ET.SubElement(root, 'text', id=region['id'], fill=region['color'],
-            attrib={'font-family': 'Noto Sans CJK TC, PingFang TC, Arial, sans-serif',
-                    'font-size': str(line_height * .82), 'dominant-baseline': 'hanging'})
+            attrib={'font-family': SVG_FONT_FAMILIES[font_style],
+                    'font-size': str(natural_text_size(lines, available_width, line_height)), 'dominant-baseline': 'hanging'})
         if region['uncertain']:
             element.set('data-uncertain', 'true')
         for i, line in enumerate(lines):
@@ -213,8 +263,6 @@ def render_svg(content: dict, width: int, height: int, image_sha: str, *, allow_
                                    if unicodedata.bidirectional(ch) in ('L', 'R', 'AL')), 'L')
             rtl = base_direction in ('R', 'AL')
             attrs = {'x': str((x2 if rtl else x1) * width / 1000), 'y': str(y1 * height / 1000 + i * line_height)}
-            if line:
-                attrs.update(textLength=str((x2-x1) * width / 1000), lengthAdjust='spacingAndGlyphs')
             if rtl:
                 attrs.update(direction='rtl', **{'unicode-bidi': 'plaintext', 'text-anchor': 'end'})
             ET.SubElement(element, 'tspan', attrs).text = line
