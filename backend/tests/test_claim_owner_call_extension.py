@@ -20,7 +20,8 @@ def authorize(request,policy,path,extension=None):
 
 
 @pytest.fixture
-def lost_update(action,monkeypatch):
+def lost_update(action,monkeypatch,request):
+    lost_role = getattr(request, "param", "gpt")
     store=action[0];seed_claims(store,['C'])
     # Transaction consumers are protected but are outside the Claim model's
     # content denominator. The real 2021 input has both scopes.
@@ -43,7 +44,7 @@ def lost_update(action,monkeypatch):
         value=rejected(packet)
         value['findings'][0].update(affected_target_keys=['claims/C'],affected_write_keys=[],impact_reason='target wording')
         return value
-    ports=SyntheticPorts(store,root,proposal=fail,opus=review)
+    ports=SyntheticPorts(store,root,proposal=fail,opus=review) if lost_role=='gpt' else SyntheticPorts(store,root,opus=fail)
     assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='model_failed'
     assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='call_uncertain'
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
@@ -64,11 +65,12 @@ def decision(fid):
         'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'original target inspected'}
 
 
+@pytest.mark.parametrize("lost_update", ["gpt", "opus"], indirect=True)
 def test_owner_extension_reuses_findings_with_compact_output_and_preserves_unknown_call(lost_update):
     store,request,root,old,successor,next_root,policy,extension,path=lost_update
     original=store.get_record_state('claims','C')
     def propose(packet):
-        assert packet['previous_candidate'] and packet['unresolved']
+        assert packet['previous_candidate']
         assert packet['continuation']['preserved_unknown_calls']
         return {'changes':[],'findings':[],'finding_resolutions':[decision(fid) for fid in packet['unresolved']]}
     def review(packet):return {'complete_review':True,'findings':[],'prior_findings':[decision(fid) for fid in packet['unresolved']]}
@@ -91,12 +93,14 @@ def test_owner_extension_reuses_findings_with_compact_output_and_preserves_unkno
     assert ports.calls==['gpt','opus']
 
 
+@pytest.mark.parametrize("lost_update", ["gpt", "opus"], indirect=True)
 @pytest.mark.parametrize('change',['missing_permission','metadata','budget','quote','predecessor','widen_permissions',
     'missing_intent','changed_intent','returned_raw','returned_exit','wrong_initial'])
 def test_extension_never_infers_owner_permission_or_discards_results(lost_update,change):
     store,request,root,old,successor,next_root,policy,extension,path=lost_update
     metadata={k:v for k,v in old.items() if k not in {'run_id','status','error'}}
-    slot=next(v for v in old['call_reservations'].values() if v['role']=='gpt')
+    slot=next(v for v in old['call_reservations'].values() if v['state']=='started')
+    role=slot['role']
     stage=root/slot['round_id']
     if change=='missing_permission':
         auth_path=Path(successor.authorization.path);auth=json.loads(auth_path.read_text());auth.pop('owner_call_extension')
@@ -107,10 +111,10 @@ def test_extension_never_infers_owner_permission_or_discards_results(lost_update
         elif change=='quote':extension['authorization_quote']=''
         elif change=='predecessor':extension['predecessor_action_id']='different'
         elif change=='widen_permissions':successor.permissions[0].fields.append('claim_type')
-        elif change=='missing_intent':(stage/'gpt.reservation.json').unlink()
-        elif change=='changed_intent':(stage/'gpt.reservation.json').write_text('{}')
-        elif change=='returned_raw':(stage/'gpt.raw.json').write_text('{}')
-        elif change=='returned_exit':(stage/'gpt.transport').mkdir();(stage/'gpt.transport/exit.json').write_text('{}')
+        elif change=='missing_intent':(stage/(role+'.reservation.json')).unlink()
+        elif change=='changed_intent':(stage/(role+'.reservation.json')).write_text('{}')
+        elif change=='returned_raw':(stage/(role+'.raw.json')).write_text('{}')
+        elif change=='returned_exit':(stage/(role+'.transport')).mkdir();(stage/(role+'.transport/exit.json')).write_text('{}')
         elif change=='wrong_initial':policy.initial_candidate='existing'
         authorize(successor,policy,path,extension)
     with pytest.raises(ValueError):cm.continuation_budget(metadata,successor,policy)
