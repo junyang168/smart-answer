@@ -7,6 +7,7 @@
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
 > **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
+> **分区 refresh 排程设计**：2026-10-29，第 11.7 节另行规定按来源串行、GPT／Opus 各两个全局 session、持续补位及供应商限流控制。该编排待实施，不能把旧 batch 的两个 action 上限视为已满足新需求。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
@@ -101,7 +102,7 @@ main 的 `PostgresKnowledgeStore.apply_plan()` 已使用 PostgreSQL transaction 
 
 新增责任集中在现有契约内：operations 的权限与对象映射、有序多轮候选及 findings、各 operation 的完整独立审计问题、Claim-ready 与已存在失效／completion 的对应。复用 SQL 进度、审核记录和 artifact 引用，不建另一套状态数据库或独立证明框架。
 
-沿用单一使用者、受控维护入口和来源不被外部并发修改的运行前提。普通联合 Update 每个 action 只有一个单元，独立组组成批次中的不同 action；其他 operation 保持原有单元契约。不同 action 的有界并行须有原许可，并按第 11.2 节检查交叉写入影响。模型请求重叠不表示数据库同时提交，短事务仍使用共同写锁。本文不新增常驻调度器或不受控并发，也不从多目标参数推导并行写入许可。
+沿用单一使用者、受控维护入口和来源不被外部并发修改的运行前提。普通联合 Update 每个 action 只有一个单元，独立组组成批次中的不同 action；其他 operation 保持原有单元契约。不同 action 的有界并行须有原许可，并按第 11.2 节检查交叉写入影响。模型请求重叠不表示数据库同时提交，短事务仍使用共同写锁。现有入口不新增常驻调度器，也不从多目标参数推导并行写入许可。第 11.7 节的新增受控编排另行设计、实施和验收，不倒改旧任务合同。
 
 ### 3.3 多目标入口与已验收能力的边界
 
@@ -371,7 +372,7 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 已返回但因记录处置清单覆盖不完整而拒收的初始 Update 提案，只有在原 raw、调用意图、prompt、冻结输入与确切拒收原因均可验证时，才能通过正式关联续跑移交剩余预算。该次生成照计，部分候选不接纳，原异议全部保留。正常候选仍走原 checkpoint；语义错误、缺来源或 unknown 不能借此重新生成。
 
-长任务通过 `backend.pipeline.claim_management_batch --detach` 独立运行，manifest 只绑定已有 request 与原 action root，不授予新权限或预算。控制器与子任务共同持有执行锁；同批最多两个 action 并行，读写相交则串行。一组暂停或异常后，其余无冲突工作仍可推进；批次结束重新查询所有目标的当前资格，不以历史完成数替代。
+长任务通过 `backend.pipeline.claim_management_batch --detach` 独立运行，manifest 只绑定已有 request 与原 action root，不授予新权限或预算。控制器与子任务共同持有执行锁；现有该入口同批最多两个 action 并行，读写相交则串行；第 11.7 节另行规定新分区 refresh 的来源串行与模型容量，不声称本入口已经实现。一组暂停或异常后，其余无冲突工作仍可推进；批次结束重新查询所有目标的当前资格，不以历史完成数替代。
 
 共用调用层在发出调用前保存精确输入意图，CLI 输出直接写入持久文件，退出码、错误类别与输出哈希单独落盘。完整成功退出记录且输入／可执行文件／输出均一致时，可以恢复同一次返回，不能再生成；缺退出记录、失败退出或输出漂移继续视为不确定或失败，不重发。状态查询核对实际执行锁，旧 `running` 或旧 PID 不证明仍在运行。恢复命令使用同一 manifest、action root 与原调用账本。
 
@@ -508,7 +509,7 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 
 独立单元可完成，整批仍未完成；只读依赖和写权限分别管理。Split 子对象数不替换原项，第 5.2 节统一约束最终验收。Review 报告完成、内容维护完成和来源覆盖完成分别报告。
 
-指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；同一 own source 的不同 action 必须排队，即使可写对象不相交；不同来源且通过现有读写冲突检查时，才允许显式选择的 `max_workers=2` 并行。不把清单自动变成联合内容修改或 Merge，也不新增 scheduler 或每来源锁服务。
+以下为已实现清单入口的合同，不是第 11.7 节的新排程能力。指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；同一 own source 的不同 action 必须排队，即使可写对象不相交；不同来源且通过现有读写冲突检查时，才允许显式选择的 `max_workers=2` 并行。不把清单自动变成联合内容修改或 Merge，也不新增 scheduler 或每来源锁服务。
 
 CLI 沿用同一 batch 模块：
 
@@ -628,8 +629,14 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 先用真实保存材料零模型、零正式内容写入预检，再在隔离 SQL 验证完整生命周期。联合 Update 至少先用两条共享 E 的 Claim，覆盖逐项审阅、共同修改、晚项失败回滚、已提交响应丢失、零重复调用恢复和双方当前资格；再验证三项传递冲突分组与超容量拒绝、共享片段／owner 变化、范围漂移、只读人工和预算反例。还须验证同一未提交联合单元的人工答复接回全部目标及旧候选，缺候选／分组变化／已提交均拒绝旧人工接续，不能把暂停说成完成。上述隔离验收完成前，不将多目标联合 Update 用于正式批次。合成 reviewer 只证明契约与路由；有界实际模型验收另需授权。性能与人工成本记录有效轮次、重复调用、依赖复验与各类暂停，实测存独立记录，不把局部测试称为全流程完成。
 
+### 11.7 分区 refresh 的持续补位排程
+
+负责人指定分区的全量 refresh 按 [Claim 分区 refresh 与模型容量排程设计](./claim_refresh_campaign_design.md) 实施：同源一次一条、原文顺序；不同来源并行，GPT 与 Opus 各最多两个实际 session，按供应商限流、冷却与下游积压持续补位。该设计只扩展编排，不改变完整自身来源、内容权限、短交易、原预算和当前资格边界。旧 batch 的 action 数量限制、联合组预检和冻结任务保持原合同，不能直接扩大 `max_workers` 冒充实现。
+
+此路径不按跨源 W／R 传递冲突重新合组或加入排程互斥；真实版本冲突仍由共同交易拒绝并保留受影响任务。当前资格、分区原始分母及 CVP 待维护分别清账。新增容量控制与后台恢复须通过该文验收，再按正式授权进入真实执行。
+
 ## 12 实施与阶段交付
 
-先固定包含共同 SQL 能力的合并基线、代码 SHA 与新 policy，再扩展现有运行 metadata 的 action／单元／轮次绑定、问题身份和审核范围，对接 operations、共同 ChangeSet、独立审计与 completion。复用 source／Claim runner、store、pipeline_runs、原 ledger 和独立读取器，不复制未合并实现，不新增 runner／状态库／证明框架。
+先固定包含共同 SQL 能力的合并基线、代码 SHA 与新 policy，再扩展现有运行 metadata 的 action／单元／轮次绑定、问题身份和审核范围，对接 operations、共同 ChangeSet、独立审计与 completion。复用 source／Claim runner、store、pipeline_runs、原 ledger 和独立读取器，不复制未合并实现，不另建内容执行器、状态库或证明框架。第 11.7 节只补现有后台入口的受控编排与容量控制，不能复制 Update 内核。
 
 交付依第 11 节完整路径验收；已有单条和独立并行的验收不替代联合单元验收。多目标这部分先补齐第 11 节的一 action 一单元准入、完整 pins 分组、许可归属和第 7.2 节写入影响门槛，再完成隔离测试，之后才在另有明确授权的有界正式样本上验证；未通过前保持逐条的已验证入口，有交叉影响的组准确合组或暂停，不以串行承诺最终必然稳定；不将多单元排序、创建和部分提交接续作为首个联合样本的附加工程。实现与隔离验收不增加正式模型执行许可；正式多目标验收仍须精确绑定目标、预算与验收 policy。本文不重开旧 campaign，不授权文章、发布、部署、ArgumentRoute 或 #358；#435 与主控工作的未完成项继续保留。
