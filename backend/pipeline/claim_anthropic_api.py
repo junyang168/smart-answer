@@ -33,7 +33,7 @@ class ClaimAnthropicAPI:
     OUTPUT=20/1_000_000
 
     def __init__(self, *, model='claude-opus-5-5', reasoning_effort='high',
-                 max_output_tokens=32000, timeout_seconds=600, spend_root=None, client=None):
+                 max_output_tokens=32000, timeout_seconds=600, spend_root=None, client=None, cache_enabled=False):
         from anthropic import Anthropic
         if model!='claude-opus-5-5' or reasoning_effort!='high':
             raise ValueError('API bridge preserves exact Opus model and effort')
@@ -42,6 +42,7 @@ class ClaimAnthropicAPI:
         self.model=model;self.reasoning_effort=reasoning_effort
         self.max_output_tokens=max_output_tokens;self.timeout_seconds=timeout_seconds
         self.spend_root=Path(spend_root)
+        self.cache_enabled=cache_enabled
         self.client=client or Anthropic(max_retries=0,timeout=timeout_seconds)
         self.last_raw_response=None
 
@@ -53,6 +54,11 @@ class ClaimAnthropicAPI:
             'messages':[{'role':'user','content':user_prompt}],
             'output_config':{'effort':self.reasoning_effort,
                 'format':{'type':'json_schema','schema':transform_schema(schema)}}}
+        if self.cache_enabled:
+            # Exact same strings, explicit 5-minute provider cache breakpoints.
+            control={'type':'ephemeral','ttl':'5m'}
+            request['system']=[{'type':'text','text':system_prompt,'cache_control':control}]
+            request['messages'][0]['content']=[{'type':'text','text':user_prompt,'cache_control':control}]
         root=Path(self.call_artifacts);root.mkdir(parents=True,exist_ok=True)
         wire=json.dumps(request,ensure_ascii=False,sort_keys=True).encode()
         intent={'backend':self.backend,'request_sha256':hashlib.sha256(wire).hexdigest()}
@@ -69,7 +75,7 @@ class ClaimAnthropicAPI:
             if getattr(self,'replay_only',False):raise ValueError('API reservation has no invocation; no retry')
             # Conservative reservation: every serialized UTF-8 byte as one input
             # token, plus schema/service overhead, and all possible output tokens.
-            reserve=(len(wire)+8192)*self.INPUT+self.max_output_tokens*self.OUTPUT
+            reserve=(len(wire)+8192)*(5/1_000_000 if self.cache_enabled else self.INPUT)+self.max_output_tokens*self.OUTPUT
             key=str(root.resolve())
             with spend_state(self.spend_root) as state:
                 if key in state['calls']:raise ValueError('API cost reservation already exists; no retry')
@@ -88,8 +94,13 @@ class ClaimAnthropicAPI:
                     message=stream.get_final_message().model_dump(mode='json')
                 save(response,message)
                 usage=message.get('usage',{})
-                # This client requests no prompt caching or server tools.
-                cost=usage.get('input_tokens',0)*self.INPUT+usage.get('output_tokens',0)*self.OUTPUT
+                creation=usage.get('cache_creation') or {}
+                writes=usage.get('cache_creation_input_tokens',0)
+                hour=creation.get('ephemeral_1h_input_tokens',0)
+                short=creation.get('ephemeral_5m_input_tokens',writes-hour)
+                if short+hour != writes:raise ValueError('cache token accounting does not reconcile')
+                cost=(usage.get('input_tokens',0)*self.INPUT+usage.get('output_tokens',0)*self.OUTPUT
+                    +short*5/1_000_000+hour*8/1_000_000+usage.get('cache_read_input_tokens',0)*.20/1_000_000)
                 with spend_state(self.spend_root) as state:
                     state['calls'][key].update(state='returned',cost_usd=cost,usage=usage)
                 exit_state={'returncode':0}

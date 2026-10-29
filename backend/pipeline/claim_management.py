@@ -70,6 +70,7 @@ class Policy(source.Contract):
     budget: Budget
     models: dict[str, dict[str, str]]
     api_spend: dict | None = None
+    request_encoding_contract: Literal['wkp_shared_shapes_json_v6'] | None = None
     clarification_per_problem: Literal[1] = 1
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
@@ -88,6 +89,8 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
+        if self.request_encoding_contract is None:
+            value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
         for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):

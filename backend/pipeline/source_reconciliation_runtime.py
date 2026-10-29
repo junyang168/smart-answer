@@ -100,12 +100,17 @@ def claim_management_model_adapter(role, policy, *, live=False):
         from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
         client = ClaimAnthropicAPI(model=model, reasoning_effort='high',
             max_output_tokens=policy.budget.max_output_tokens,
-            spend_root=policy.api_spend['root'])
+            spend_root=policy.api_spend['root'],
+            cache_enabled=policy.request_encoding_contract is not None)
     else:
         client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
         model=model, backend=backend, reasoning_effort="high",
         max_output_tokens=policy.budget.max_output_tokens)
     client.max_output_tokens = policy.budget.max_output_tokens
+    if policy.request_encoding_contract and role == 'gpt':
+        client.cache_usage_events = True
+        if policy.api_spend:
+            client.cache_working_directory = str(Path(policy.api_spend['root']).parent / 'codex-cache-context')
     prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
                                           else "claim_management_review_v2.md")).read_text())
     if role == 'gpt':
@@ -138,7 +143,7 @@ def claim_management_model_adapter(role, policy, *, live=False):
         response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = policy.budget.max_request_bytes
-    return adapter
+    return adapter.shared_shapes_v6_copy() if policy.request_encoding_contract else adapter
 
 
 def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict:

@@ -75,3 +75,23 @@ def test_api_http_refusal_has_durable_exit_and_zero_cost(tmp_path):
     assert next(iter(state['calls'].values()))['cost_usd']==0
     with pytest.raises(ValueError):generate(client)
     assert len(calls)==1
+
+
+def test_cache_preserves_text_bills_all_token_categories_and_replays(tmp_path):
+    class CachedStream(Stream):
+        def get_final_message(self):
+            message=super().get_final_message().model_dump()
+            message['usage'].update(cache_creation_input_tokens=2000,
+                cache_creation={'ephemeral_5m_input_tokens':2000,'ephemeral_1h_input_tokens':0},
+                cache_read_input_tokens=3000)
+            return SimpleNamespace(model_dump=lambda **kwargs:message)
+    client,calls=api(tmp_path,CachedStream)
+    client.cache_enabled=True
+    assert generate(client)=={'ok':True}
+    assert calls[0]['system']==[{'type':'text','text':'system',
+        'cache_control':{'type':'ephemeral','ttl':'5m'}}]
+    assert calls[0]['messages'][0]['content'][0]['text']=='user'
+    state=json.loads((tmp_path/'billing/spend.json').read_text())
+    assert next(iter(state['calls'].values()))['cost_usd']==pytest.approx(.0166)
+    client.replay_only=True
+    assert generate(client)=={'ok':True} and len(calls)==1
