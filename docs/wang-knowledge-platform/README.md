@@ -43,6 +43,7 @@
 | 文档 | 它回答什么 |
 | --- | --- |
 | [第一遍普查格式 v1](./10-extraction/corpus_survey_format_v1.md) | 全库普查的 JSON 格式 |
+| [圖文逐字稿同工審核設計](./10-extraction/transcript_human_review_design_v1.md) | 沿用認領與 Markdown 編輯，接入自動保存、slide 審核及精確版本發佈（待實作） |
 | [逐句详细知识整理与双模型复审流程 v1](./10-extraction/detailed_knowledge_extraction_workflow_v1.md) | 一篇讲道怎样被逐句拆成主张与证据 |
 | [來源逐句對帳與 claim 層完整性 v1](./10-extraction/source_to_claim_layer_ledger_v1.md) | 来源里的东西有没有真的进入论证图 |
 | [講道口語抽取實測 v1](./10-extraction/transcript_extraction_on_spoken_sermon_v1.md) | 抽取在口语讲道上的实际表现（记录） |
