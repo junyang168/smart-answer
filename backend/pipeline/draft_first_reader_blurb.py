@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_reader_blurb.md"
 SCHEMA_VERSION = "wang_draft_first_reader_blurb_v1"
 INTRO_MAX = 80
-SUMMARY_MAX = 200
+SUMMARY_MAX = 240
 
 BLURB_SCHEMA: dict[str, Any] = {
     "name": SCHEMA_VERSION,
