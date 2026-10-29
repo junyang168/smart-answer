@@ -26,7 +26,7 @@ export type PublicWangArticle = {
   slug: string;
   title: string;
   passage: string;
-  reader_summary?: string[];
+  reader_summary?: string | null;
   markdown: string;
   audio_sections: PublicAudioSection[];
   audio_section_count: number;

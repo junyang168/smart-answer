@@ -1182,7 +1182,7 @@ def test_the_reader_blurb_is_bound_to_the_manuscript_and_published_with_it(tmp_p
     blurb.write_text(json.dumps({
         "manuscript_sha256": module._sha256(manuscript),
         "reader_intro": "「多人」是一部分人，還是所有的人？",
-        "reader_summary": ["一。", "二。", "三。"],
+        "reader_summary": "多人就是所有的人。",
     }, ensure_ascii=False), encoding="utf-8")
     manifest = {
         "schema_version": module.MANIFEST_SCHEMA,
@@ -1204,7 +1204,7 @@ def test_the_reader_blurb_is_bound_to_the_manuscript_and_published_with_it(tmp_p
     module.publish_article_review("ransom-for-many-v1", actor=actor)
     item = json.loads((publications / "ransom-for-many-v1" / "editorial-draft-manifest.json").read_text())["drafts"][0]
     assert item["reader_intro"] == "「多人」是一部分人，還是所有的人？"
-    assert item["reader_summary"] == ["一。", "二。", "三。"]
+    assert item["reader_summary"] == "多人就是所有的人。"
 
     # A blurb written from another manuscript, or edited after registration, fails integrity.
     blurb.write_text(json.dumps({"manuscript_sha256": "other", "reader_intro": "改過"}), encoding="utf-8")

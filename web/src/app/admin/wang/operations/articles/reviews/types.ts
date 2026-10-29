@@ -21,7 +21,7 @@ export type TopicEssayReviewSummary = {
   stage_checks: ReviewStageCheck[];
   href: string;
   reader_intro?: string;
-  reader_summary?: string[];
+  reader_summary?: string;
 };
 
 export type TopicEssayReview = TopicEssayReviewSummary & {

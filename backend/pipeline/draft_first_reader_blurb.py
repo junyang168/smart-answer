@@ -2,11 +2,12 @@
 
 One model call reads the final manuscript and writes two short texts readers
 see: `reader_intro` on the repository card, to make a reader open the essay,
-and `reader_summary` at the top of the essay, its core viewpoints in order.
+and `reader_summary` at the top of the essay, one paragraph that carries its
+argument to its conclusion (the owner: not a list).
 Both are derived from the manuscript alone and bound to its SHA; the owner
 sees them on the review page with the manuscript and publishes them together.
 
-The checks are the mechanical ones: lengths, item count, and that every 「」
+The checks are the mechanical ones: lengths, one paragraph, and that every 「」
 quotation is text the manuscript actually has. A failed attempt is retried
 once with its problems; a second failure leaves no output.
 
@@ -32,8 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_reader_blurb.md"
 SCHEMA_VERSION = "wang_draft_first_reader_blurb_v1"
 INTRO_MAX = 80
-SUMMARY_ITEMS = (3, 5)
-SUMMARY_ITEM_MAX = 60
+SUMMARY_MAX = 200
 
 BLURB_SCHEMA: dict[str, Any] = {
     "name": SCHEMA_VERSION,
@@ -43,7 +43,7 @@ BLURB_SCHEMA: dict[str, Any] = {
         "additionalProperties": False,
         "properties": {
             "reader_intro": {"type": "string"},
-            "reader_summary": {"type": "array", "items": {"type": "string"}},
+            "reader_summary": {"type": "string"},
         },
         "required": ["reader_intro", "reader_summary"],
     },
@@ -62,21 +62,20 @@ def _plain(markdown: str) -> str:
     return re.sub(r"[\s>*#_`]", "", text)
 
 
-def blurb_problems(intro: str, summary: list[str], manuscript: str) -> list[str]:
+def blurb_problems(intro: str, summary: str, manuscript: str) -> list[str]:
     problems = []
     if not intro.strip():
         problems.append("reader_intro 是空的")
     elif _length(intro) > INTRO_MAX:
         problems.append(f"reader_intro 有 {_length(intro)} 字，超过 {INTRO_MAX} 字")
-    if not SUMMARY_ITEMS[0] <= len(summary) <= SUMMARY_ITEMS[1]:
-        problems.append(f"reader_summary 有 {len(summary)} 条，应为 {SUMMARY_ITEMS[0]}–{SUMMARY_ITEMS[1]} 条")
-    for index, item in enumerate(summary, 1):
-        if not item.strip():
-            problems.append(f"reader_summary 第 {index} 条是空的")
-        elif _length(item) > SUMMARY_ITEM_MAX:
-            problems.append(f"reader_summary 第 {index} 条有 {_length(item)} 字，超过 {SUMMARY_ITEM_MAX} 字")
+    if not summary.strip():
+        problems.append("reader_summary 是空的")
+    elif _length(summary) > SUMMARY_MAX:
+        problems.append(f"reader_summary 有 {_length(summary)} 字，超过 {SUMMARY_MAX} 字")
+    if "\n" in summary.strip() or re.search(r"(^|\s)([-*•]|\d+[.、])\s*\S", summary):
+        problems.append("reader_summary 应是一段连贯的文字，不分条、不换行")
     body = _plain(manuscript)
-    for text in [intro, *summary]:
+    for text in (intro, summary):
         for quoted in re.findall(r"[「『]([^「」『』]+)[」』]", text):
             if re.sub(r"\s", "", quoted) not in body:
                 problems.append(f"引号里的「{quoted}」不是文章里逐字出现的文字")
@@ -93,7 +92,7 @@ def write_blurb(manuscript_path: Path, output: Path, client: Any) -> dict[str, A
             payload["previous_attempt"] = attempts[-1]
         result = client.generate_json(prompt, json.dumps(payload, ensure_ascii=False), BLURB_SCHEMA)
         intro = str(result.get("reader_intro") or "").strip()
-        summary = [str(item).strip() for item in result.get("reader_summary") or []]
+        summary = str(result.get("reader_summary") or "").strip()
         problems = blurb_problems(intro, summary, manuscript)
         attempts.append({"reader_intro": intro, "reader_summary": summary, "problems": problems})
         if not problems:

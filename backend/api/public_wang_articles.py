@@ -416,7 +416,7 @@ def public_article_data(slug: str) -> dict:
             "slug": slug,
             "title": str(item.get("title") or "").strip(),
             "passage": str(item.get("passage") or "").strip(),
-            "reader_summary": [str(point).strip() for point in item.get("reader_summary") or [] if str(point).strip()],
+            "reader_summary": str(item.get("reader_summary") or "").strip() or None,
             "markdown": markdown,
             "audio_sections": audio_sections,
             "source_annotations": source_annotations,

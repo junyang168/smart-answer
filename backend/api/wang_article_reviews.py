@@ -1647,7 +1647,7 @@ def _reader_blurb(blurb: dict[str, Any]) -> dict[str, Any]:
     """The card intro and opening summary, when the review carries them (#509)."""
 
     intro = str(blurb.get("reader_intro") or "").strip()
-    summary = [str(item).strip() for item in blurb.get("reader_summary") or [] if str(item).strip()]
+    summary = str(blurb.get("reader_summary") or "").strip()
     return {
         **({"reader_intro": intro} if intro else {}),
         **({"reader_summary": summary} if summary else {}),

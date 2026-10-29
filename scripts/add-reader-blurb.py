@@ -51,8 +51,7 @@ def main() -> int:
         registered["reader_blurb_sha256"] = _sha256(blurb_path)
         print(f"{review_id}: review manifest reader blurb -> {blurb_relative}")
         print(f"  引言: {blurb['reader_intro']}")
-        for point in blurb["reader_summary"]:
-            print(f"  要點: {point}")
+        print(f"  提要: {blurb['reader_summary']}")
 
         publication = reviews.PUBLICATION_ROOT / review_id
         draft_manifest_path = publication / "editorial-draft-manifest.json"
