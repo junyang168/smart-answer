@@ -6,6 +6,10 @@ import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import "easymde/dist/easymde.min.css";
+import {
+  selectReferenceGroup,
+  type SlideInspection,
+} from "./review-slide-selection";
 
 const MarkdownEditor = dynamic(() => import("react-simplemde-editor"), {
   ssr: false,
@@ -235,9 +239,14 @@ function TranscriptProofreader({
   const [doc, setDoc] = useState(initial);
   const current = useRef(initial);
   const [selected, setSelected] = useState(initial.script[0]?.index || "");
-  const [activeGroup, setActiveGroup] = useState<string>();
+  const [activeGroup, setActiveGroup] = useState<SlideInspection>();
   const [peekSlide, setPeekSlide] = useState<string>();
   const [baseline, setBaseline] = useState<Row[] | null>(null);
+  const selectParagraph = useCallback((id: string) => {
+    setSelected(id);
+    setActiveGroup(undefined);
+    setPeekSlide(undefined);
+  }, []);
   const [status, setStatus] = useState("已自動儲存");
   const [failure, setFailure] = useState("");
   const [ready, setReady] = useState(false);
@@ -628,9 +637,7 @@ function TranscriptProofreader({
         const n = current.current.script.findIndex((p) => p.index === id);
         if (n < current.current.script.length - 1) {
           focusNext.current = true;
-          setActiveGroup(undefined);
-          setPeekSlide(undefined);
-          setSelected(current.current.script[n + 1].index);
+          selectParagraph(current.current.script[n + 1].index);
         }
       }
     } catch (error) {
@@ -699,9 +706,7 @@ function TranscriptProofreader({
   };
   const play = (id: string) => {
     const binding = current.current.context.paragraph_bindings[id];
-    setSelected(id);
-    setActiveGroup(undefined);
-    setPeekSlide(undefined);
+    selectParagraph(id);
     segmentEnd.current = binding.end_ms / 1000;
     if (video.current) {
       video.current.currentTime = binding.start_ms / 1000;
@@ -709,9 +714,7 @@ function TranscriptProofreader({
     }
   };
   const row = doc.script.find((p) => p.index === selected);
-  const group =
-    doc.context.groups.find((g) => g.id === activeGroup) ||
-    doc.context.groups.find((g) => g.before_paragraph_id === selected);
+  const group = selectReferenceGroup(doc.context.groups, selected, activeGroup);
   const shownSlide =
     group && peekSlide && group.member_ids.includes(peekSlide)
       ? peekSlide
@@ -862,7 +865,7 @@ function TranscriptProofreader({
               <button
                 className={button}
                 onClick={() => {
-                  setSelected(doc.context.bookmarks![doc.actor]);
+                  selectParagraph(doc.context.bookmarks![doc.actor]);
                   document
                     .getElementById(
                       `paragraph-${doc.context.bookmarks![doc.actor]}`,
@@ -958,7 +961,7 @@ function TranscriptProofreader({
                 (p) =>
                   doc.context.reviews["p:" + p.index]?.decision !== "confirmed",
               );
-              if (p) setSelected(p.index);
+              if (p) selectParagraph(p.index);
             }}
           >
             前往待核對段落
@@ -1156,7 +1159,11 @@ function TranscriptProofreader({
                 className="max-w-[190px] rounded border p-1 text-sm"
                 value={group?.id || ""}
                 onChange={(e) => {
-                  setActiveGroup(e.target.value);
+                  setActiveGroup(
+                    e.target.value
+                      ? { paragraphId: selected, groupId: e.target.value }
+                      : undefined,
+                  );
                   setPeekSlide(undefined);
                 }}
               >
@@ -1385,14 +1392,18 @@ function TranscriptProofreader({
                     <button
                       key={g.id}
                       className="mb-3 flex w-full items-center gap-2 rounded-md bg-slate-100 p-2 text-left text-sm"
-                      onClick={() => setActiveGroup(g.id)}
+                      onClick={() =>
+                        setActiveGroup({ paragraphId: selected, groupId: g.id })
+                      }
                     >
                       <img
                         className="h-9 w-14 rounded object-contain"
                         alt="投影片錨點"
                         src={`${base}/assets/${doc.context.occurrences[g.slide_id].asset_id}`}
                       />{" "}
-                      投影片 · 檢視原圖與文字
+                      {g.needs_review
+                        ? "待釐清畫面 · 檢視原圖與文字"
+                        : "投影片 · 檢視原圖與文字"}
                     </button>
                   ))}
                 <div className="mb-3 flex items-center justify-between gap-2 text-xs">
@@ -1473,14 +1484,14 @@ function TranscriptProofreader({
                       <button
                         className={button}
                         disabled={i === 0 || busy}
-                        onClick={() => setSelected(doc.script[i - 1].index)}
+                        onClick={() => selectParagraph(doc.script[i - 1].index)}
                       >
                         上一段
                       </button>
                       <button
                         className={button}
                         disabled={i === doc.script.length - 1 || busy}
-                        onClick={() => setSelected(doc.script[i + 1].index)}
+                        onClick={() => selectParagraph(doc.script[i + 1].index)}
                       >
                         下一段
                       </button>
@@ -1490,8 +1501,7 @@ function TranscriptProofreader({
                   <div
                     className="prose max-w-none cursor-text leading-8"
                     onClick={() => {
-                      setSelected(p.index);
-                      setActiveGroup(undefined);
+                      selectParagraph(p.index);
                     }}
                   >
                     <TranscriptText text={p.text} />
