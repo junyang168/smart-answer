@@ -1944,6 +1944,25 @@ def _primary_passage(passage: str) -> str:
     return re.split(r"[；;]", passage or "", maxsplit=1)[0].strip()
 
 
+def _topic_essay_fields(manifest_path: Path) -> dict[str, Any]:
+    """A topic essay carries its kind and every core passage to the public list.
+
+    The list files an article under its passage; a topic essay has several
+    (《萬人的贖價》: 太20:28；太26:28；提前2:4-6), and only the first survived,
+    which shelved the essay as an exposition of 太20:28. Expositions published
+    here keep the one passage they always had.
+    """
+
+    registered = _read_json(manifest_path)
+    if registered.get("product_kind") != "theological_topic_essay":
+        return {}
+    passages = re.split(r"[；;]", str(registered.get("passage") or ""))
+    return {
+        "product_kind": "theological_topic_essay",
+        "core_passages": [passage.strip() for passage in passages if passage.strip()],
+    }
+
+
 @router.post("/{review_id}/publish")
 def publish_article_review(
     review_id: str,
@@ -2015,6 +2034,7 @@ def publish_article_review(
                 "draft_id": review_id,
                 "title": review.get("title") or review_id,
                 "passage": _primary_passage(str(review.get("passage") or "")),
+                **_topic_essay_fields(manifest_path),
                 "public_slug": slug,
                 "relative_path": "manuscript.md",
                 "source_annotations_path": "source-annotations.json",

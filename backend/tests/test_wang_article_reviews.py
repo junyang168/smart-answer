@@ -1040,6 +1040,8 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
     item = draft_manifest["drafts"][0]
     assert item["public_slug"] == "kingdom-keys"
     assert item["passage"] == "太16:19"
+    # 磐石、鑰匙 是釋經：没登记 product_kind 就不带核心经文清单，文库只按太16:19归档。
+    assert "product_kind" not in item and "core_passages" not in item
     # 读者页的「显示原文来源」开关吃的就是这份数据：发布必须随稿落盘。
     assert item["source_annotations_path"] == "source-annotations.json"
     assert item["source_annotations_sha256"] == decision["source_annotations_sha256"]
@@ -1142,3 +1144,20 @@ def test_publication_artifact_replacement_never_exposes_partial_file(tmp_path, m
         module._atomic_write_text(artifact, "new")
     assert artifact.read_text(encoding="utf-8") == "old"
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_a_topic_essay_publishes_every_core_passage(tmp_path: Path) -> None:
+    module = wang_article_reviews
+    registered = tmp_path / "ransom-for-many-v1.json"
+    registered.write_text(
+        json.dumps(
+            {"passage": "太20:28；太26:28；提前2:4-6", "product_kind": "theological_topic_essay"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert module._topic_essay_fields(registered) == {
+        "product_kind": "theological_topic_essay",
+        "core_passages": ["太20:28", "太26:28", "提前2:4-6"],
+    }

@@ -40,6 +40,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--review-id", required=True)
     parser.add_argument("--passage", required=True)
+    parser.add_argument("--product-kind", default="",
+                        help="theological_topic_essay for a topic essay; the public "
+                             "repository files it by every core passage instead of the first")
     parser.add_argument("--review-dir", type=Path, required=True,
                         help="draft_first_review_runner output dir (final.md + review-run.json)")
     parser.add_argument("--bindings", type=Path, required=True,
@@ -94,6 +97,7 @@ def main() -> int:
         "review_id": args.review_id,
         "title": title_match.group(1).strip(),
         "passage": args.passage,
+        **({"product_kind": args.product_kind} if args.product_kind else {}),
         "registered_at": datetime.now(timezone.utc).isoformat(),
         "manuscript_relative_path": _relative_to_staging(manuscript, staging),
         "manuscript_sha256": manuscript_sha,

@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
+from opencc import OpenCC
 
 from backend.api.config import WANG_REPOSITORY_DIR
 from backend.api.canonical_repository.service import CanonicalRepositoryService
@@ -55,6 +56,10 @@ BOOK_METADATA = {
     "約貳": ("2John", "約翰二書"), "約參": ("3John", "約翰三書"), "猶": ("Jude", "猶大書"),
     "啟": ("Rev", "啟示錄"),
 }
+
+# OpenCC turns 启 into 啓 and 叁 into 叄; the table spells them 啟 and 參.
+BOOK_VARIANTS = {"啓": "啟", "約叄": "約參"}
+_TO_TRADITIONAL = OpenCC("s2t")
 
 
 def _read_json(path: Path) -> dict:
@@ -118,13 +123,15 @@ def _manifest_passage_slug(item: dict) -> str:
     return ""
 
 
-def _public_scripture_reference(item: dict) -> dict | None:
-    passage = str(item.get("passage") or "").strip()
+def _scripture_reference(passage: str) -> dict | None:
+    passage = passage.strip()
     match = re.fullmatch(r"([^\d\s]+)\s*(\d+):(\d+)(?:[–—-](?:(\d+):)?(\d+))?", passage)
     if not match:
         return None
     book_display, chapter, verse_start, end_chapter, verse_end = match.groups()
-    metadata = BOOK_METADATA.get(book_display)
+    # 审稿 manifest 里混着简体书卷名（「约20:23」），书卷表是繁体的。
+    book_display = _TO_TRADITIONAL.convert(book_display)
+    metadata = BOOK_METADATA.get(BOOK_VARIANTS.get(book_display, book_display))
     if not metadata:
         return None
     book, book_label = metadata
@@ -139,18 +146,26 @@ def _public_scripture_reference(item: dict) -> dict | None:
     }
 
 
-def _public_topics(item: dict) -> list[str]:
-    configured = item.get("public_topics")
-    if isinstance(configured, list):
-        topics = [str(topic).strip() for topic in configured if str(topic).strip()]
-        if topics:
-            return list(dict.fromkeys(topics))
-    title = str(item.get("title") or "")
-    subtitle = title.split("：", maxsplit=1) if "：" in title else re.split(r":\s+", title, maxsplit=1)
-    if len(subtitle) < 2:
-        return []
-    topics = [topic.strip() for topic in re.split(r"[、，,]|(?:與|和|及)", subtitle[1]) if topic.strip()]
-    return list(dict.fromkeys(topics))
+def _public_scripture_reference(item: dict) -> dict | None:
+    return _scripture_reference(str(item.get("passage") or ""))
+
+
+def _core_scripture(item: dict) -> list[dict]:
+    """Every core passage of the article, parsed.
+
+    A topic essay has several -- 《萬人的贖價》 is 太20:28、太26:28、提前2:4-6 --
+    and filing it under only the first made it read as an exposition of
+    太20:28. An exposition's core passage is just its own passage.
+    """
+
+    configured = item.get("core_passages")
+    passages = (
+        [str(passage) for passage in configured]
+        if isinstance(configured, list) and configured
+        else re.split(r"[；;]", str(item.get("passage") or ""))
+    )
+    references = [_scripture_reference(passage) for passage in passages if passage.strip()]
+    return [reference for reference in references if reference]
 
 
 def _publication_record(manifest_path: Path, item: dict) -> dict | None:
@@ -423,7 +438,8 @@ def list_public_articles():
                 "title": str(item.get("title") or "").strip(),
                 "passage": str(item.get("passage") or "").strip(),
                 "scripture": _public_scripture_reference(item),
-                "topics": _public_topics(item),
+                "product_kind": str(item.get("product_kind") or "").strip() or None,
+                "core_scripture": _core_scripture(item),
                 "href": f"/resources/wang-repository/articles/{slug}",
             }
         )

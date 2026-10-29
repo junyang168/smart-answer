@@ -26,9 +26,33 @@ type PublicArticleSummary = {
   title: string;
   passage: string;
   scripture: ScriptureReference | null;
-  topics: string[];
+  product_kind: string | null;
+  core_scripture: ScriptureReference[];
   href: string;
 };
+
+const TOPIC_ESSAY = "theological_topic_essay";
+
+function isTopicEssay(article: PublicArticleSummary) {
+  return article.product_kind === TOPIC_ESSAY;
+}
+
+/** 按经卷看时，一篇专题文章在它每一节核心经文的那一章下各出现一次。
+ *
+ * 原来只按第一节经文归档：《萬人的贖價》挂在太20下，像是太20:28的释经；
+ * 太26:28、提前2:4-6 底下却找不到它。释经文章只有自己那一段，照旧。
+ */
+function shelvedByScripture(articles: PublicArticleSummary[]): PublicArticleSummary[] {
+  return articles.flatMap((article) =>
+    isTopicEssay(article)
+      ? article.core_scripture.map((reference) => ({
+          ...article,
+          scripture: reference,
+          passage: reference.display,
+        }))
+      : [article],
+  );
+}
 
 type BibleChapterGroup = {
   chapter: number;
@@ -97,18 +121,6 @@ function groupArticlesByBible(articles: PublicArticleSummary[]): BibleBookGroup[
   return [...books.values()];
 }
 
-function groupArticlesByTopic(articles: PublicArticleSummary[]) {
-  const topics = new Map<string, PublicArticleSummary[]>();
-  for (const article of articles) {
-    for (const topic of article.topics ?? []) {
-      const group = topics.get(topic) ?? [];
-      group.push(article);
-      topics.set(topic, group);
-    }
-  }
-  return [...topics.entries()].sort(([left], [right]) => left.localeCompare(right, "zh-Hant"));
-}
-
 function ArticleLink({ article }: { article: PublicArticleSummary }) {
   return (
     <Link
@@ -117,6 +129,11 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
     >
       <span className="font-mono text-sm font-semibold text-amber-800">{article.passage}</span>
       <span className="flex-1 font-semibold text-stone-900 group-hover:text-amber-900">
+        {isTopicEssay(article) && (
+          <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 align-middle text-xs font-semibold text-amber-900">
+            專題
+          </span>
+        )}
         {article.title}
       </span>
       <span className="text-sm text-stone-500 group-hover:text-amber-800">
@@ -203,14 +220,15 @@ export default function WangRepositoryPage() {
   const bibleBooks = useMemo(
     () =>
       kind === "article"
-        ? groupArticlesByBible(articles)
+        ? groupArticlesByBible(shelvedByScripture(articles))
         : groupArticlesByBible(
             audio.map((passage) => ({
               slug: passage.passage,
               title: passage.title || passage.label,
               passage: passage.label,
               scripture: passage.scripture,
-              topics: [],
+              product_kind: null,
+              core_scripture: [passage.scripture],
               href: passage.href,
             })),
           ),
@@ -224,7 +242,9 @@ export default function WangRepositoryPage() {
     }
     return map;
   }, [audio]);
-  const topicGroups = useMemo(() => groupArticlesByTopic(articles), [articles]);
+  // 按講論主題只列专题文章。释经文章没有记录主题，原来拿标题冒号后的半句
+  // 当主题，于是出现「為一部分人」「還是為所有的人？」这样的标题。
+  const topicEssays = useMemo(() => articles.filter(isTopicEssay), [articles]);
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -315,7 +335,7 @@ export default function WangRepositoryPage() {
                       <Rows>
                         {kind === "article"
                           ? chapter.articles.map((article) => (
-                              <li key={article.slug}>
+                              <li key={`${article.slug}-${article.passage}`}>
                                 <ArticleLink article={article} />
                               </li>
                             ))
@@ -333,24 +353,24 @@ export default function WangRepositoryPage() {
               </section>
             ))}
           </div>
-        ) : topicGroups.length > 0 ? (
-          <div className="mt-12 space-y-10">
-            {topicGroups.map(([topic, topicArticles]) => (
-              <section key={topic} aria-labelledby={`topic-${topic}`}>
-                <h2 id={`topic-${topic}`} className="border-b border-stone-300 pb-3 font-serif text-2xl font-bold text-stone-950">{topic}</h2>
-                <Rows>
-                  {topicArticles.map((article) => (
-                    <li key={article.slug}>
-                      <ArticleLink article={article} />
-                    </li>
-                  ))}
-                </Rows>
-              </section>
-            ))}
+        ) : topicEssays.length > 0 ? (
+          <div className="mt-12">
+            <Rows>
+              {topicEssays.map((article) => (
+                <li key={article.slug}>
+                  <ArticleLink
+                    article={{
+                      ...article,
+                      passage: article.core_scripture.map((reference) => reference.display).join("；"),
+                    }}
+                  />
+                </li>
+              ))}
+            </Rows>
           </div>
         ) : (
           <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
-            已發布文章尚未設定公開主題。
+            目前尚無專題文章。
           </div>
         )}
         <p className="mt-14 border-t border-stone-200 pt-6 text-sm text-stone-500">
