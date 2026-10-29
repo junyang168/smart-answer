@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STAGES = ("scope", "coverage", "decisions", "cvp_gap",
-          "packet", "author", "review", "binding", "register", "final_review")
+          "packet", "author", "review", "binding", "blurb", "register", "final_review")
 STOPPED = 3
 
 Runner = Callable[[str, list[str], Path], None]
@@ -249,16 +249,27 @@ class EssayRun:
                               "--packet", str(self.packet), "--output", str(out)])
         self._done("binding", inputs, [out])
 
+    def blurb(self) -> None:
+        latest = Path(self.state["current_review"])
+        inputs, out = [latest / "final.md"], latest / "reader-blurb.json"
+        if self._fresh("blurb", inputs, [out]):
+            return
+        self._run("blurb", ["-m", "backend.pipeline.draft_first_reader_blurb",
+                            "--manuscript", str(inputs[0]), "--output", str(out)])
+        self._done("blurb", inputs, [out])
+
     def register(self) -> None:
         latest = Path(self.state["current_review"])
-        inputs = [latest / "final.md", latest / "source-bindings.json", self.packet, self.p("essay.json")]
+        inputs = [latest / "final.md", latest / "source-bindings.json", latest / "reader-blurb.json",
+                  self.packet, self.p("essay.json")]
         if self._fresh("register", inputs, inputs):
             return
         essay = _json(self.p("essay.json"))
         self._run("register", ["scripts/register-draft-first-review.py", "--review-id", essay["review_id"],
                                "--passage", essay["passage"], "--product-kind", "theological_topic_essay",
                                "--review-dir", str(latest),
-                               "--bindings", str(latest / "source-bindings.json"), "--packet", str(self.packet)])
+                               "--bindings", str(latest / "source-bindings.json"), "--packet", str(self.packet),
+                               "--reader-blurb", str(latest / "reader-blurb.json")])
         self._done("register", inputs, inputs)
 
     def final_review(self) -> None:
@@ -270,7 +281,7 @@ class EssayRun:
     # -- driver --------------------------------------------------------------
     def advance(self) -> dict[str, Any]:
         steps = [self.scope, self.coverage, self.decisions, self.cvp_gap,
-                 self.build_packet, self.author, self.review, self.binding, self.register, self.final_review]
+                 self.build_packet, self.author, self.review, self.binding, self.blurb, self.register, self.final_review]
         try:
             for step in steps:
                 step()

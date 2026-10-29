@@ -352,6 +352,14 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
 
         <section role="tabpanel" aria-label="閱讀文章" aria-hidden={mode !== "read"} className={mode === "read" ? "block" : "hidden"}>
           <article className="mx-auto max-w-3xl rounded-[2rem] bg-[#fffdf9] px-6 py-9 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:px-10 sm:py-12 lg:px-14">
+            {(article.reader_summary ?? []).length > 0 && (
+              <aside aria-label="本文要點" className="mb-9 rounded-2xl border border-amber-200 bg-amber-50/70 px-5 py-4 sm:px-6 sm:py-5">
+                <p className="text-xs font-bold tracking-[0.16em] text-amber-900">本文要點</p>
+                <ol className="mt-3 list-decimal space-y-2 pl-5 text-[1rem] leading-7 text-stone-800 marker:font-semibold marker:text-amber-800">
+                  {article.reader_summary?.map((point) => <li key={point}>{point}</li>)}
+                </ol>
+              </aside>
+            )}
             {sourceAnnotations.size > 0 && (
               <div className="not-prose mb-9 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5">
                 <div className="flex items-center gap-3">

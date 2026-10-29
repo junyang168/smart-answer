@@ -174,6 +174,7 @@ def test_public_article_index_contains_article_navigation_metadata(tmp_path: Pat
                         "display": "太16:13–20",
                     }
                 ],
+                "reader_intro": None,
                 "href": "/resources/wang-repository/articles/matthew-16-13-20",
             }
         ]

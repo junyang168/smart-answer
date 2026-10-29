@@ -49,6 +49,9 @@ def main() -> int:
                         help="source-bindings.json from draft_first_source_binding")
     parser.add_argument("--packet", type=Path, required=True,
                         help="TheologicalEvidencePacket the essay was drafted from")
+    parser.add_argument("--reader-blurb", type=Path,
+                        help="reader-blurb.json from draft_first_reader_blurb: the card intro "
+                             "and opening summary, bound to this final manuscript")
     args = parser.parse_args()
 
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", args.review_id):
@@ -78,6 +81,9 @@ def main() -> int:
         raise SystemExit("review-run.json does not bind this final manuscript")
     if bindings_record.get("manuscript_sha256") != manuscript_sha:
         raise SystemExit("source bindings do not bind this final manuscript")
+    blurb = args.reader_blurb.resolve() if args.reader_blurb else None
+    if blurb and json.loads(blurb.read_text(encoding="utf-8")).get("manuscript_sha256") != manuscript_sha:
+        raise SystemExit("reader blurb was not written from this final manuscript")
     packet_payload = json.loads(packet.read_text(encoding="utf-8"))
     packet_sha = str(
         (packet_payload.get("result") or packet_payload).get("evidence_packet_sha256") or ""
@@ -113,6 +119,8 @@ def main() -> int:
         "evidence_packet_sha256": packet_sha,
         "source_bindings_relative_path": _relative_to_staging(bindings, staging),
         "source_bindings_sha256": _sha256(bindings),
+        **({"reader_blurb_relative_path": _relative_to_staging(blurb, staging),
+            "reader_blurb_sha256": _sha256(blurb)} if blurb else {}),
         "publication_decision": None,
     }
     output = staging / "topic-essay-reviews" / f"{args.review_id}.json"
