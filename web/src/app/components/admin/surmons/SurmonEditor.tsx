@@ -55,9 +55,6 @@ import {
   SurmonSlideGenerationResponse,
   SurmonSlideFrameCoordinates,
   SurmonSlideFrameDimensions,
-  SurmonChatMessage,
-  SurmonChatResponse,
-  SurmonChatReference,
   SurmonCoreBibleVerse,
   SurmonAuditEntry,
   GenerateSubtitlesPayload,
@@ -261,9 +258,6 @@ const SlidePickerModal = ({
         "ordered-list",
         "|",
         "link",
-        "preview",
-        "side-by-side",
-        "fullscreen",
       ],
       status: false,
       spellChecker: false,
@@ -881,10 +875,7 @@ interface SurmonMetadataDraft {
 
 const FALLBACK_USER_ID = "junyang168@gmail.com";
 
-interface SurmonConversationMessage extends SurmonChatMessage {
-  id: string;
-  quotes?: SurmonChatReference[] | null;
-}
+
 
 const ensureSequence = (paragraphs: SurmonScriptParagraph[]) =>
   paragraphs.map((para, index) => ({ ...para, s_index: index }));
@@ -977,10 +968,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [slideGenerationError, setSlideGenerationError] = useState<string | null>(null);
   const [isDrawingFrame, setIsDrawingFrame] = useState(false);
   const [openSlidePickerIndex, setOpenSlidePickerIndex] = useState<number | null>(null);
-  const [chatMessages, setChatMessages] = useState<SurmonConversationMessage[]>([]);
-  const [chatInput, setChatInput] = useState<string>("");
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
   const [highlightedParagraphs, setHighlightedParagraphs] = useState<Set<number>>(() => new Set());
   const [activeHighlightToken, setActiveHighlightToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"metadata" | "script" | "slides">("script");
@@ -996,7 +983,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const scriptEpochRef = useRef(0);
   const activeEditorRef = useRef<SimpleMDEEditor | null>(null);
   const activeEditorIndexRef = useRef<number | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const slidesLoadedRef = useRef(false);
   const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const historyPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -1067,13 +1053,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [historyOpen]);
 
   useEffect(() => {
-    if (chatMessages.length === 0 && !isChatLoading) {
-      return;
-    }
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages, isChatLoading]);
-
-  useEffect(() => {
     setSlideFrame(null);
     setSlideFrameStatus("idle");
     setSlideFrameError(null);
@@ -1104,10 +1083,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [applyFrameSelection, slideFrame]);
 
   useEffect(() => {
-    setChatMessages([]);
-    setChatInput("");
-    setChatError(null);
-    setIsChatLoading(false);
     setHighlightedParagraphs(new Set());
     setActiveHighlightToken(null);
   }, [item]);
@@ -1331,27 +1306,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       void loadHistory();
     }
   }, [historyOpen, historyStatus, loadHistory]);
-
-  const sendChatRequest = useCallback(
-    async (history: SurmonChatMessage[]) => {
-      if (!resolvedUserEmail) {
-        throw new Error("缺少使用者資訊，請重新登入後再試。");
-      }
-      return fetchJSON<SurmonChatResponse>(
-        `${API_PREFIX}/surmon_chat/${encodeURIComponent(resolvedUserEmail)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ item, history }),
-        }
-      );
-    },
-    [fetchJSON, item, resolvedUserEmail]
-  );
-
-  const handleClearChat = useCallback(() => {
-    setChatMessages([]);
-  }, []);
 
   const computeHighlightSet = useCallback(
     (token: string) => {
@@ -2060,57 +2014,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     }
   }, [canEdit, fetchJSON, item, slideFrame?.coordinates]);
 
-  const handleChatInputChange = useCallback((event: ReactChangeEvent<HTMLTextAreaElement>) => {
-    setChatInput(event.target.value);
-  }, []);
-
-  const handleChatSubmit = useCallback(
-    async (event?: ReactFormEvent<HTMLFormElement>) => {
-      event?.preventDefault();
-      const question = chatInput.trim();
-      if (!question || isChatLoading) {
-        return;
-      }
-
-      const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const userMessage: SurmonConversationMessage = {
-        id: messageId,
-        role: "user",
-        content: question,
-      };
-
-      const nextMessages = [...chatMessages, userMessage];
-      setChatMessages(nextMessages);
-      setChatInput("");
-      setIsChatLoading(true);
-      setChatError(null);
-
-      const historyPayload: SurmonChatMessage[] = nextMessages.map(({ role, content }) => ({ role, content }));
-
-      try {
-        const response = await sendChatRequest(historyPayload);
-        if (!response?.answer) {
-          throw new Error("未取得助理回應，請稍後再試。");
-        }
-        const assistantMessage: SurmonConversationMessage = {
-          id: `${messageId}-reply`,
-          role: "assistant",
-          content: response.answer,
-          quotes: response.quotes ?? null,
-        };
-        setChatMessages((prev) => [...prev, assistantMessage]);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "無法取得助理回應，請稍後再試。";
-        setChatError(message);
-        setChatMessages((prev) => prev.filter((entry) => entry.id !== messageId));
-        setChatInput(question);
-      } finally {
-        setIsChatLoading(false);
-      }
-    },
-    [chatInput, chatMessages, isChatLoading, sendChatRequest]
-  );
-
   const handleOpenSlidePicker = useCallback(() => {
     if (!canEdit) {
       return;
@@ -2703,17 +2606,8 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         "code",
         "table",
         "link",
-        {
-          name: "insert-slide",
-          action: () => handleOpenSlidePicker(),
-          className: "fa fa-image",
-          title: "插入投影片",
-        },
         "horizontal-rule",
         "|",
-        "preview",
-        "side-by-side",
-        "fullscreen",
         "guide",
         "|",
         {
@@ -2773,6 +2667,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const editorOptions = useMemo<SimpleMDEOptions>(
     () => ({
+      shortcuts: { togglePreview: null, toggleSideBySide: null, toggleFullScreen: null },
       autofocus: true,
       spellChecker: false,
       status: false,
@@ -3306,93 +3201,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                 <p className="mt-3 text-sm text-gray-500">最後儲存：{lastSavedAt.toLocaleTimeString()}</p>
               )}
             </header>
-            <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col flex-1 min-h-0 max-h-[70vh] overflow-hidden">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-700">講道 AI 助理</h3>
-                <span className="text-xs text-gray-400">Beta</span>
-              </div>
-              <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
-                {chatMessages.length === 0 ? (
-                  <p className="text-sm leading-relaxed text-gray-500">
-                    歡迎提問講道相關問題，助理會根據讲道內容提供回答。
-                  </p>
-                ) : (
-                  chatMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`rounded-lg border px-3 py-2 text-sm leading-relaxed shadow-sm ${message.role === "user"
-                        ? "border-blue-200 bg-blue-50 text-blue-800"
-                        : "border-gray-200 bg-gray-50 text-gray-700"
-                        }`}
-                    >
-                      {message.role === "assistant" ? (
-                        <ReactMarkdown
-                          remarkPlugins={surmonMarkdownRemarkPlugins}
-                          rehypePlugins={surmonMarkdownRehypePlugins}
-                          components={surmonMarkdownComponents}
-                          className="prose prose-sm max-w-none text-gray-700 [&>*:last-child]:mb-0"
-                        >
-                          {message.content}
-                        </ReactMarkdown>
-                      ) : (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
-                      )}
-                      {message.quotes?.length ? (
-                        <ul className="mt-2 space-y-1 border-l border-gray-200 pl-3 text-xs text-gray-500">
-                          {message.quotes.map((quote) => (
-                            <li key={`${message.id}-${quote.Id}`}>
-                              <span className="font-semibold text-gray-600">[{quote.Index}]</span>{" "}
-                              {quote.Title ?? "相關引文"}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
-                  ))
-                )}
-                {isChatLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-blue-600">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    助理正在整理回應...
-                  </div>
-                ) : null}
-                <div ref={chatEndRef} />
-              </div>
-              <form onSubmit={handleChatSubmit} className="mt-3 space-y-2">
-                <textarea
-                  value={chatInput}
-                  onChange={handleChatInputChange}
-                  disabled={isChatLoading}
-                  rows={3}
-                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm shadow-inner focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                  placeholder="輸入想詢問的內容，例如：這段講道的重點是什麼？"
-                />
-                <div className="flex items-center justify-between">
-                  {chatError ? (
-                    <p className="text-xs text-red-600">{chatError}</p>
-                  ) : (
-                    <span className="text-xs text-gray-400">Shift + Enter 換行</span>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleClearChat}
-                      disabled={chatMessages.length === 0}
-                      className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-200 disabled:opacity-50"
-                    >
-                      清除
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isChatLoading || chatInput.trim() === ""}
-                      className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-                    >
-                      發送
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </section>
           </aside>
 
           <section className="xl:col-span-2 space-y-4">
@@ -3419,17 +3227,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                   >
                     講道稿內容
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("slides")}
-                    disabled={header?.type !== "video"}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "slides"
-                      ? "border border-blue-200 bg-blue-100 text-blue-700"
-                      : "border border-transparent text-gray-600 hover:text-blue-700"
-                      } ${header?.type !== "video" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  >
-                    生成 slides
-                  </button>
+
                 </div>
                 {activeTab === "script" && (
                   <div className="flex items-center gap-2">
@@ -3872,33 +3670,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           </section>
         </div>
       </div>
-      <SlidePickerModal
-        open={openSlidePickerIndex != null}
-        slides={slides}
-        status={slidesStatus}
-        error={slidesError}
-        onInsert={(slide) => {
-          if (openSlidePickerIndex != null) {
-            handleInsertSlide(openSlidePickerIndex, slide);
-          }
-        }}
-        onInsertText={(slide, markdown) => {
-          if (openSlidePickerIndex != null) {
-            handleInsertSlideQuote(openSlidePickerIndex, slide, markdown);
-          }
-        }}
-        onExtract={handleExtractSlide}
-        onExtractCapture={handleExtractCaptureSlide}
-        onRetry={handleSlideRetry}
-        onClose={() => setOpenSlidePickerIndex(null)}
-        activeIndex={closestSlideIndex}
-        formatTimestamp={formatTimestamp}
-        canEdit={canEdit}
-        videoSource={mediaSource}
-        paragraphStart={slidePickerTiming.start}
-        paragraphEnd={slidePickerTiming.end}
-        onCaptureFrame={handleCaptureSlideFrame}
-      />
+
     </>
   );
 };

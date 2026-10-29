@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { SurmonEditor } from "@/app/components/admin/surmons/SurmonEditor";
 
+import { TranscriptReviewEntry } from "@/app/components/admin/surmons/TranscriptProofreader";
+
 type PageProps = {
   params: Promise<{ item: string }>;
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -28,7 +30,7 @@ export default async function SurmonEditorPage(props: PageProps) {
 
   return (
     <Suspense fallback={<EditorFallback />}>
-      <SurmonEditor item={item} viewChanges={viewChanges} />
+      <TranscriptReviewEntry item={item} legacy={<SurmonEditor item={item} viewChanges={viewChanges} />} />
     </Suspense>
   );
 }

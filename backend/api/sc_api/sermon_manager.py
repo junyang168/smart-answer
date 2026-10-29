@@ -236,6 +236,8 @@ class SermonManager:
             write_back_generated_subtitles,
         )
 
+        if (Path(self.base_folder)/'transcript_review'/item/'context.json').is_file():
+            raise PermissionError('此講道請透過圖文審核修改；不在背景改寫人工稿')
         source_path = self.authoritative_transcript_path(item)
         report = write_back_generated_subtitles(
             source_path,
@@ -770,6 +772,11 @@ class SermonManager:
         if not permissions.canRead:
             return  {"message": "You don't have permission to update this item"}
 
+        if (Path(self.base_folder)/'transcript_review'/item/'context.json').is_file():
+            from .transcript_review import read
+            published = read(Path(self.base_folder)/'script_published'/f'{item}.json')
+            if published is not None:
+                return published
         sermon = self._sm.get_sermon_metadata(user_id, item)
         status = sermon.status
         sd = ScriptDelta(self.base_folder, item)

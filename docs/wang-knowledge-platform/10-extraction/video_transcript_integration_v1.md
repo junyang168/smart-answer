@@ -2,11 +2,11 @@
 
 > **讀者**：Developer、Solution architect
 > **類型**：說明
-> **狀態**：當前接入方案；格式橋接已實作，正式來源准入尚未接通
-> **與代碼對齊**：2026-10-28（核對到 `919f1a24`）
+> **狀態**：當前接入方案；格式橋接與同工審核核心已實作，正式視覺來源准入尚未接通
+> **與代碼對齊**：2026-10-29（格式橋接基線 `919f1a24`，新增 #522 同工審核接點）
 > **權威範圍**：解釋接入位置與未完成項；不取代來源批准、Claim 或 CVP 的既有規則。
 
-同工端接入的目標流程另見[圖文逐字稿同工審核設計](./transcript_human_review_design_v1.md)；該設計尚未實作，本文所述格式橋接不因此成為已上線審核流程。
+同工端接入的目標流程另見[圖文逐字稿同工審核設計](./transcript_human_review_design_v1.md)；核心已於 #522 接上原 editor 路由；[實作驗證紀錄](./transcript_human_review_implementation_20261029.md)明列本機測試及未部署範圍，不等於正式視覺來源准入。
 
 ## 1. 接在既有流程的哪裡
 
@@ -20,7 +20,7 @@
 
 現有講道編輯器的資料在 `script`、`script_patched`、`script_review`、`script_published`。新處理先輸出獨立候選，不能覆蓋這些目錄中的人工版本。後續「採用候選」需沿用現有版本衝突保護；不能改成背景覆寫。`sermon.json` 保留講道身份與進度，不塞入整份 OCR。
 
-原轉錄系統的歷史批次入口未在本次改動中替換；[ImageToText](../../../backend/api/sc_api/image_to_text.py) 的人工截圖入口也仍存在。新增的 `run` 是來源處理入口，並不表示網頁已接上啟動工作、進度、取消及候選採用功能。
+原轉錄系統的歷史批次入口未在本次改動中替換；[ImageToText](../../../backend/api/sc_api/image_to_text.py) 的人工截圖入口也仍存在。新增的 `run` 是來源處理入口。已處理且完成 `reading-layout/layout.json` 的候選，可由 `backend.pipeline.transcript_review_import` 明確登記，再由認領人在原 editor 頁採用；網頁啟動 AI 工作、背景進度與取消工作尚未接入。
 
 ## 2. 同一份資料，兩種閱讀方式
 

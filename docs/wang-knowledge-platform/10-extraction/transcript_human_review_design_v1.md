@@ -2,9 +2,11 @@
 
 > **讀者**：Solution architect、Developer、負責校對的同工
 > **類型**：規範
-> **狀態**：當前設計，尚未實作；第 12 節小功能清單待使用者選擇
-> **與代碼對齊**：2026-10-29（現況核對到 `def000a2`；下述目標行為尚未實作）
+> **狀態**：當前設計；核心流程已實作於 #522 的本機試用，未部署；第 12 節選配仍待決定
+> **與代碼對齊**：2026-10-29（設計基線 `def000a2`；本次 #522 核心實作另見驗證紀錄）
 > **權威範圍**：新視頻圖文逐字稿接入既有講道編輯器的審核、儲存與發佈契約；不批准文庫主張、不改變平台使命或來源准入規則。
+
+目前實作與已測／未測範圍見[首版實作驗證紀錄](./transcript_human_review_implementation_20261029.md)。本文仍是完整目標契約，不以首版通過的測試代替尚未完成的驗收。
 
 同工繼續使用既有講道編輯頁面：**認領 → 分段聽／看並修改 → 發佈逐字稿 → 取消認領**。文字、投影片辨識內容、代表圖及位置的修改全部自動儲存；發佈是另外一個明確動作。已發佈的版本保持穩定，直到同工再次發佈新版。
 
@@ -29,7 +31,7 @@
 
 ## 1 現有實作與接入限制
 
-現況與目標分開列示；既有功能存在，不等於下列問題已修正。
+下表保留設計時 `def000a2` 的接點盤點，與目標分開；本次修正及首版限制以實作驗證紀錄為準。
 
 | 接點 | 已存在的行為 | 接入時必須處理的限制 |
 | --- | --- | --- |
@@ -252,23 +254,23 @@ metadata 的 `status` 先保留給舊畫面相容顯示：有有效公開快照�
 
 ## 7 接口與程式接點
 
-以下為目標契約，路徑尚未實作；實作可調整命名，不能改變條件、回執及權威資料的含義。
+以下為當前接口契約；尚未採用的候選有獨立入口，不能接受客戶端指定任意來源檔案。瀏覽器使用 `/api/sc_api/`，經 Next.js 登入身份代理到下列 backend 路徑。
 
 | 接口 | 契約 |
 | --- | --- |
-| `GET /sc_api/review_document/{item}` | 共用 resolver；JSON body 是現有正文與附屬資料組合的確切 API 表示，ETag 綁其 bytes；認領代號與權限沿用獨立 permissions 回應，不混入同一 ETag 的表示；仍檢查可讀權限 |
-| `POST /sc_api/review_document/{item}/adopt` | 明確採用候選；帶原稿及候選 SHA，驗證無漂移及人工版本保護；驗證後寫入既有 script／patched／review 格式並增加附屬檔，不另建正文主本 |
+| `GET /sc_api/review_document/{item}` | 共用 resolver；JSON body 是現有正文與附屬資料組合的確切 API 表示，ETag 綁正文、附屬資料及核對目標雜湊的確定性 JSON 表示；認領代號與權限在 `X-Review-Access` 回應標頭，不混入同一 ETag 的 body；仍檢查可讀權限 |
+| `GET/POST /sc_api/review_candidate/{item}` | 明確認領／採用已由 operator 登記的候選；版本綁原稿及候選 SHA，驗證無漂移及人工版本保護；驗證後寫入既有 script／patched／review 格式並增加附屬檔，不另建正文主本 |
 | `PATCH /sc_api/review_document/{item}` | 白名單操作，`If-Match`、工作代號及操作 ID；完整驗證後按第 4.1 節可恢復保存；確認動作也是這裡的操作 |
 | `GET /sc_api/review_document/{item}/operations/{id}` | 核對本人的保存／發佈／認領結果；不可因知道 ID 而繞過 ACL |
 | `GET /sc_api/review_document/{item}/history` | 受 ACL 保護的分頁歷史；整合已提交 revision 與工作事件，支援篩選及穩定事件 ID |
 | `GET /sc_api/review_document/{item}/revisions/{revision}` | 唯讀檢視確切歷史版本及與另一版本的型別化差異；不載入孤立未提交 revision |
 | `POST /sc_api/review_document/{item}/restore` | 選配，非既有功能；僅當前認領人；先排空修改，帶 If-Match、工作代號與操作 ID，建立新草稿 revision |
-| 既有 `/assign` | 保留同工操作，新增工作代號、條件與回執；兩人認領及過期請求在服務端處理 |
-| 既有 `/publish/{user_id}/{item}` | 保留入口或相容代理，身份由認證取得；新格式必須傳預期 revision 與操作 ID；讀回已發佈版本回執 |
+| `POST /sc_api/review_document/{item}/claim` | `claim/takeover/unclaim` 命令帶工作代號、條件與回執；新模式的舊 `/assign` 回 409，引導回審核頁，不能繞過新保護 |
+| `POST /sc_api/review_document/{item}/publish` | 身份由認證取得，帶精確版本與操作 ID；新模式的舊 publish 回 409；未遷移逐字稿保留原流程 |
 
-前端沿用 `SurmonEditor`、SimpleMDE、播放器與編輯歷史；書籤、差異等小功能依第 12 節決定。移除 AI 問答面板、聊天狀態、問答請求及其專用引用 UI。把儲存佇列抽成共用控制器，讓文字與視覺修改一致處理；新增圖文審核卡片。移除 SlidePickerModal、工具列 insert-slide、人工截圖及 OCR 引文插入入口；保留舊 Markdown 圖片顯示及現有靜態資產服務。
+前端在原 editor 路由依模式選擇 `TranscriptProofreader` 或舊 `SurmonEditor`，沿用 SimpleMDE 與媒體來源；書籤、差異等小功能依第 12 節決定。移除 AI 問答面板、聊天狀態、問答請求及其專用引用 UI。新模式中讓正文、OCR、位置及 metadata 走同一串行儲存佇列；新增圖文審核卡片。移除 SlidePickerModal、工具列 insert-slide、人工截圖及 OCR 引文插入入口；保留舊 Markdown 圖片顯示及現有靜態資產服務。
 
-後端由 SermonManager 統一 ACL 與工作命令，新增附屬資料與可恢復操作協調器；ScriptDelta 的儲存容器與既有 script SHA 含義維持相容，重用其可測試的檔案鎖／原子保存機制。新時間解析、公開讀取、metadata、目錄、來源解析與文庫取材都必須經明確版本適配，不能只改前端型別。
+後端以 `ReviewStore` 作為新模式唯一工作命令層，每次重讀現有 ACL 與認領資料；SermonManager 與 ScriptDelta 的舊寫入遇新模式時拒絕，不能繞過協調器；ScriptDelta 的儲存容器與既有 script SHA 含義維持相容，重用其可測試的檔案鎖／原子保存機制。新時間解析、公開讀取、metadata、目錄、來源解析與文庫取材都必須經明確版本適配，不能只改前端型別。
 
 PATCH 的操作白名單至少覆蓋修改段落、修改指定 OCR 區域、選代表圖、指定閱讀段落、隱藏／還原及確認／提出疑問。來源影片 SHA、原始事件時間、審核者與回執不接受前端任意指定；asset ID 必須解析到該候選既有原圖。SVG 只由既有受控圖元產生器重建，不接受任意模型或使用者 HTML／SVG。
 
@@ -318,7 +320,7 @@ PATCH 的操作白名單至少覆蓋修改段落、修改指定 OCR 區域、選
 | 確認段落後立即繼續輸入 | 新文字不能沿用剛才的舊確認；只使該段確認失效 |
 | 服務端已保存但回應遺失 | 查操作回執可確認成功；不重複套用、不把已存資料當失敗丟棄 |
 | 發佈準備或提交後程序崩潰 | 準備前後各有明確提交點；舊版或完整新版可讀，回執可修復 metadata 投影 |
-| 既有 reader／save／publish 讀寫新匯入稿 | review 仍是段落陣列，published 仍是 metadata/script；保存後正文、圖片連結與附屬身份完整，沒有丟字或另切正文主本 |
+| 既有 reader／save／publish 與新匯入稿 | 舊 reader 讀取相同容器；新協調器保存後正文、圖片與附屬身份完整。舊保存／發佈器遇新模式必須拒絕；未遷移稿仍可由真正舊保存／發佈器往返，不能默默丟棄新附屬資料 |
 | 不知道附屬格式的舊只讀工具 | 可讀原位置的逐字稿；新精確核對功能仍要求附屬 SHA 匹配，不把降級顯示冒充已核實來源 |
 | 長視頻及處理視窗接縫 | 新段落使用全片毫秒，後段沒有額外二十分鐘偏移；小數秒不因 API 保存而遺失 |
 | 沒有 slide、教授遮擋、游標移動、重返舊頁 | 空白不補圖，遮擋不補字，游標不造新頁，返回事件仍獨立保留 |

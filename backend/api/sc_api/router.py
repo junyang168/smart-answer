@@ -8,7 +8,7 @@ import datetime
 from pathlib import Path
 from typing import List, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
@@ -32,7 +32,29 @@ qa_manager = qaManager
 
 SLIDE_WEB_PREFIX = "/web/data/slides"
 
+from .transcript_review_router import create_review_router, authenticated_actor
+from .transcript_review import ReviewStore, ReviewError
+
 router = APIRouter(prefix="/sc_api", tags=["sc-api"])
+router.include_router(create_review_router(DATA_BASE_PATH))
+
+
+def legacy_only(item):
+    store = ReviewStore(DATA_BASE_PATH)
+    if store.enabled(item) or store.candidate_path(item).exists():
+        raise HTTPException(409, '此講道已使用圖文審核，請重新開啟審核頁；舊入口不會覆蓋新版稿件')
+
+
+def review_reader(user_id, item, http_request):
+    store = ReviewStore(DATA_BASE_PATH)
+    if store.enabled(item) or store.candidate_path(item).exists():
+        actor = authenticated_actor(http_request)
+        try:
+            store.require(actor, item)
+        except ReviewError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        return actor
+    return user_id
 
 
 class Paragraph(BaseModel):
@@ -235,7 +257,8 @@ def _get_file_path(file_type: str, item: str, ext: str = ".txt") -> Path:
 
 
 @router.get("/load/{user_id}/{file_type}/{item}/{ext}")
-def load(user_id: str, file_type: str, item: str, ext: str = "txt") -> str:
+def load(user_id: str, file_type: str, item: str, http_request: Request, ext: str = "txt") -> str:
+    user_id=review_reader(user_id,item,http_request)
     permissions: Permission = sermon_manager.get_sermon_permissions(user_id, item)
     if not permissions.canRead:
         raise HTTPException(status_code=403, detail="You don't have permission to read this item")
@@ -248,6 +271,7 @@ def load(user_id: str, file_type: str, item: str, ext: str = "txt") -> str:
 
 @router.post("/update_script")
 def update_script(request: UpdateRequest):
+    legacy_only(request.item)
     if request.type not in {"scripts", "slides"}:
         raise HTTPException(status_code=400, detail=f"unsupported update type: {request.type}")
     if request.type == "scripts" and not request.expected_script_sha256:
@@ -273,6 +297,7 @@ def update_script(request: UpdateRequest):
 
 @router.post("/update_header")
 def update_header(request: UpdateHeaderRequest):
+    legacy_only(request.item)
     core_bible_verse = (
         [verse.model_dump(exclude_none=True) for verse in request.core_bible_verse]
         if request.core_bible_verse is not None
@@ -393,7 +418,8 @@ def generate_subtitles(payload: GenerateSubtitlesRequest):
 
 
 @router.get("/sermon/{user_id}/{item}/{changes}")
-def get_sermon(user_id: str, item: str, changes: Optional[str] = None):
+def get_sermon(user_id: str, item: str, http_request: Request, changes: Optional[str] = None):
+    user_id=review_reader(user_id,item,http_request)
     header, script, script_sha256 = sermon_manager.get_sermon_detail(
         user_id, item, changes
     )
@@ -405,7 +431,8 @@ def get_sermon(user_id: str, item: str, changes: Optional[str] = None):
 
 
 @router.get("/sermons/{user_id}/{item}/history")
-def get_sermon_history(user_id: str, item: str, limit: int = 50):
+def get_sermon_history(user_id: str, item: str, http_request: Request, limit: int = 50):
+    user_id=review_reader(user_id,item,http_request)
     permissions: Permission = sermon_manager.get_sermon_permissions(user_id, item)
     if not permissions.canRead:
         raise HTTPException(status_code=403, detail="You don't have permission to view this history")
@@ -424,7 +451,8 @@ def get_slide_image(user_id: str, item: str, timestamp: int):
 
 
 @router.get("/permissions/{user_id}/{item}")
-def get_permissions(user_id: str, item: str) -> Permission:
+def get_permissions(user_id: str, item: str, http_request: Request) -> Permission:
+    user_id=review_reader(user_id,item,http_request)
     return sermon_manager.get_sermon_permissions(user_id, item)
 
 
@@ -440,6 +468,7 @@ def get_surmon_slides(item: str) -> SurmonSlideResponse:
 
 @router.post("/assign")
 def assigned_to(req: AssignRequest):
+    legacy_only(req.item)
     result = sermon_manager.assign(req.user_id, req.item, req.action)
     if result is None:
         raise HTTPException(status_code=403, detail="Assignment action not permitted")
@@ -453,6 +482,7 @@ def get_bookmark(user_id: str, item: str):
 
 @router.put("/bookmark/{user_id}/{item}/{index}")
 def set_bookmark(user_id: str, item: str, index: str):
+    legacy_only(item)
     return sermon_manager.set_bookmark(user_id, item, index)
 
 
@@ -468,11 +498,15 @@ def get_user_info(user_id: str):
 
 @router.put("/publish/{user_id}/{item}")
 def publish(user_id: str, item: str):
+    legacy_only(item)
     return sermon_manager.publish(user_id, item)
 
 
 @router.get("/final_sermon/{user_id}/{item}")
-def get_final_sermon(user_id: str, item: str, remove_tags: bool = True):
+def get_final_sermon(user_id: str, item: str, http_request: Request, remove_tags: bool = True):
+    store=ReviewStore(DATA_BASE_PATH)
+    if store.enabled(item) and not (DATA_BASE_PATH/'script_published'/f'{item}.json').exists():
+        user_id=review_reader(user_id,item,http_request)
     return sermon_manager.get_final_sermon(user_id, item, remove_tags)
 
 

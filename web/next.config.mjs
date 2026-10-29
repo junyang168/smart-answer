@@ -45,7 +45,7 @@ export default (phase, { defaultConfig }) => {
           destination: '/api/fellowship-documents/:path*',
         },
         {
-          source: '/api/:path((?!auth).*)',
+          source: '/api/:path((?!auth|sc_api).*)',
           destination,
         },
       ];

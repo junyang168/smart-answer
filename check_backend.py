@@ -8,7 +8,7 @@ try:
     print("sermon_manager imported.")
     
     print("Attempting to import backend.api.sc_api.router...")
-    from backend.api.sc_api import router
+    from backend.api.sc_api.router import router
     print("router imported.")
     
     print("Backend modules imported successfully.")
