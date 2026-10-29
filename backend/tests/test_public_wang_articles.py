@@ -131,6 +131,9 @@ def test_public_article_requires_approval_and_projects_reader_safe_content(tmp_p
     assert "閱讀提示" in article["markdown"]
     assert article["audio_sections"][0]["clips"][0]["delivered_on"] == "2022-02-07"
     assert "decision_id" not in json.dumps(article)
+    # The page header names the passage from these: an exposition its one passage.
+    assert article["product_kind"] is None
+    assert [ref["display"] for ref in article["core_scripture"]] == ["太16:13–20"]
 
 
 def test_unapproved_article_is_not_publicly_discoverable(tmp_path: Path, monkeypatch) -> None:

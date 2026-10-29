@@ -417,6 +417,8 @@ def public_article_data(slug: str) -> dict:
             "title": str(item.get("title") or "").strip(),
             "passage": str(item.get("passage") or "").strip(),
             "reader_summary": str(item.get("reader_summary") or "").strip() or None,
+            "product_kind": str(item.get("product_kind") or "").strip() or None,
+            "core_scripture": _core_scripture(item),
             "markdown": markdown,
             "audio_sections": audio_sections,
             "source_annotations": source_annotations,
