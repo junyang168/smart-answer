@@ -50,7 +50,8 @@ def test_coordinator_serializes_same_source_and_overlaps_different_sources(tmp_p
 
 
 @pytest.mark.parametrize('same_source',[True,False])
-def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monkeypatch,same_source):
+@pytest.mark.parametrize('as_string',[True,False])
+def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monkeypatch,same_source,as_string):
     from backend.api.canonical_repository import postgres_store as pg,viewpoint_production_safety as safety
     from backend.pipeline import source_reconciliation_runtime as runtime
     @contextmanager
@@ -85,7 +86,7 @@ def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monke
             if self.polls<3:return None
             self.live=False;return 0
     monkeypatch.setattr(batch.subprocess,'Popen',Process)
-    batch.run(manifest,tmp_path,model_capacity=dict(root=str(tmp_path/'capacity'),action_window=4,spacing_seconds=0,cooldown_seconds=1))
+    batch.run(str(manifest) if as_string else manifest,tmp_path,model_capacity=dict(root=str(tmp_path/'capacity'),action_window=4,spacing_seconds=0,cooldown_seconds=1))
     assert max(overlaps)==(1 if same_source else 4)
 
 

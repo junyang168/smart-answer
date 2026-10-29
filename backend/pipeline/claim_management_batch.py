@@ -136,6 +136,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline import claim_management as cm
+    manifest = Path(manifest).resolve()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         lock = stack.enter_context((root / 'controller.lock').open('a'))
