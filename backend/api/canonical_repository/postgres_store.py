@@ -3378,7 +3378,12 @@ class PostgresKnowledgeStore:
                         continue
                     if (continuation.get('owner_call_extension') or continuation.get('opus_api_transition')) and child['materials']['round_id'] in prior['latest_rounds'].values():
                         if before != child['materials'].get('transaction_before',child['materials']['before']):
-                            raise ChangeSetConflict('owner call extension full transaction scope drifted')
+                            # A new API review consumes the same semantic scope
+                            # with fresh transaction pins. CVP-only consumer
+                            # changes cannot alter or discard the saved candidate.
+                            if (not continuation.get('opus_api_transition')
+                                    or goal['original_objects'] != child['materials']['before']):
+                                raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
                         if not candidate:
                             raise ChangeSetConflict('owner call extension requires its saved preceding candidate')

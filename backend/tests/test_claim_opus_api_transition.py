@@ -86,3 +86,29 @@ def test_api_transition_cannot_reset_budget(paused):
     store,old,root,previous,successor,next_root,policy=paused
     policy.budget.opus_calls+=1
     with pytest.raises(ValueError,match='reset or increase'):cm.continuation_budget(previous,successor,policy)
+
+
+def test_api_handoff_refreshes_only_transaction_consumer_pins(paused):
+    store,old,root,previous,successor,next_root,policy=paused
+    # A consumer was detached after the quota refusal. It was never part of
+    # the Claim's semantic packet; the new action reads the current consumers.
+    with store.connect() as conn:
+        for rid in previous['latest_rounds'].values():
+            child=store.get_cvp_group(rid)
+            transaction=deepcopy(child['materials']['before'])
+            transaction['canonical_viewpoints/OLD-CONSUMER']={'revision':1,'content_sha256':'old','retired':False,'payload':{'viewpoint_id':'OLD-CONSUMER'}}
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=jsonb_set(metadata,'{materials,transaction_before}',%s::jsonb) WHERE run_id=%s",(json.dumps(transaction),rid))
+    ports=SyntheticPorts(store,next_root)
+    result=execute_claim_management(store,successor,root=next_root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus']
+
+
+def test_api_handoff_still_refuses_changed_claim_content(paused):
+    store,old,root,previous,successor,next_root,policy=paused
+    payload=deepcopy(store.get_record_state('claims','C')['payload']);payload['statement']='Changed independently'
+    store.apply_plan(store.plan_package({'package_id':'actual-semantic-edit','claims':[payload]}))
+    ports=SyntheticPorts(store,next_root)
+    with pytest.raises((ValueError,RuntimeError),match='drift|changed'):
+        execute_claim_management(store,successor,root=next_root,ports=ports)
+    assert not ports.calls
