@@ -1637,11 +1637,12 @@ def continuation_budget(previous, request, policy):
             from backend.pipeline.cvp_sql_commit import binding
             stage = root / slot['round_id']
             intent = stage / (slot['role'] + '.reservation.json')
-            if (slot['state'] != 'started' or slot['role'] != 'gpt'
+            if (slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}
                     or not intent.is_file() or body(read(intent)) != slot.get('intent')
                     or sha256_json(slot['intent']) != slot.get('intent_sha256')
-                    or (stage/'gpt.raw.json').exists() or (stage/'gpt.transport/exit.json').exists()):
-                raise ValueError('owner extension must preserve an exact unknown GPT call, not discard a returned result')
+                    or (stage/(slot['role']+'.raw.json')).exists()
+                    or (stage/(slot['role']+'.transport/exit.json')).exists()):
+                raise ValueError('owner extension must preserve an exact unknown proposal/review call, not discard a returned result')
             unknown[key] = {'reservation':binding(intent),'intent_sha256':slot['intent_sha256'],'state':'started'}
             spent[slot['role']] += 1
             continue
