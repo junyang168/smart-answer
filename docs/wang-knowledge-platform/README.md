@@ -42,6 +42,8 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
+| [錄像轉錄與投影片時間軸流程 v1](./10-extraction/video_transcription_pipeline_v1.md) | 繁體逐字稿、中文時間對齊、換頁與逐步顯示、原始投影片自動嵌入的待實作流程與驗收契約 |
+| [錄像轉錄與投影片模型能力查證記錄 2026 10 27](./10-extraction/video_transcription_capabilities_20261027.md) | 官方能力、限制及本機舊流程觀察；不是新管線實測成績 |
 | [第一遍普查格式 v1](./10-extraction/corpus_survey_format_v1.md) | 全库普查的 JSON 格式 |
 | [逐句详细知识整理与双模型复审流程 v1](./10-extraction/detailed_knowledge_extraction_workflow_v1.md) | 一篇讲道怎样被逐句拆成主张与证据 |
 | [來源逐句對帳與 claim 層完整性 v1](./10-extraction/source_to_claim_layer_ledger_v1.md) | 来源里的东西有没有真的进入论证图 |
