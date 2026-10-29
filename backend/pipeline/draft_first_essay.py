@@ -256,7 +256,8 @@ class EssayRun:
             return
         essay = _json(self.p("essay.json"))
         self._run("register", ["scripts/register-draft-first-review.py", "--review-id", essay["review_id"],
-                               "--passage", essay["passage"], "--review-dir", str(latest),
+                               "--passage", essay["passage"], "--product-kind", "theological_topic_essay",
+                               "--review-dir", str(latest),
                                "--bindings", str(latest / "source-bindings.json"), "--packet", str(self.packet)])
         self._done("register", inputs, inputs)
 
