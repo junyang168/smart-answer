@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, BookOpenText, CalendarDays, Headphones, Pause, Play, RotateCcw } from "lucide-react";
+import { BookOpen, BookOpenText, CalendarDays, ChevronDown, Headphones, ListOrdered, Pause, Play, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PublicArticleClip, PublicAudioSection, PublicWangArticle } from "../article-types";
@@ -65,6 +65,15 @@ const CHINESE_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八"
 function sectionCountLabel(count: number) {
   const numeral = count >= 1 && count <= 10 ? CHINESE_NUMERALS[count - 1] : String(count);
   return `本文${numeral}節`;
+}
+
+/** 页头的经文：专题文章列全部核心经文，释经文章照旧是「馬太福音 · 章:節」。 */
+function passageLabel(article: PublicWangArticle) {
+  const references = (article.core_scripture ?? []).map((reference) => reference.display);
+  if (article.product_kind === "theological_topic_essay" && references.length > 0) {
+    return `專題 · ${references.join("；")}`;
+  }
+  return `馬太福音 · ${article.passage.replace(/^太/, "")}`;
 }
 
 function formatTime(value: number | null) {
@@ -210,10 +219,15 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
   const [showSources, setShowSources] = useState(false);
   const [activePlayer, setActivePlayer] = useState<{ key: string; label: string; heading: string } | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [siteHeader, setSiteHeader] = useState(139);
+  const [readerOffset, setReaderOffset] = useState(220);
   const players = useRef(new Map<string, HTMLMediaElement>());
+  const barRef = useRef<HTMLDivElement | null>(null);
 
   const hasAudio = article.audio_sections.length > 0;
-  const articleBody = article.markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
+  // 标题已在页头；稿件的 H1 不一定在第一行（专题文章先是「讀者問」），去掉第一个 H1 即可。
+  const articleBody = article.markdown.replace(/^#\s+.+(?:\r?\n)+/m, "");
   const { body: articleProse, footnotes } = useMemo(() => prepareFootnotes(articleBody), [articleBody]);
   const sourceAnnotations = useMemo(
     () => new Map((article.source_annotations ?? []).map((item: ReviewSourceAnnotation) => [item.annotation_id, item.sources])),
@@ -250,6 +264,26 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     return extractArticleToc(articleProse);
   }, [hasAudio, headingGroups, articleProse]);
 
+  // 网站顶栏在笔记本和手机上高度不同，吸顶栏、目录和跳转位置都按实际高度算。
+  useEffect(() => {
+    const measure = () => {
+      const site = document.getElementById("global-site-header")?.offsetHeight ?? 0;
+      const bar = barRef.current?.offsetHeight ?? 0;
+      setSiteHeader(site);
+      setReaderOffset(site + bar + 16);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    const site = document.getElementById("global-site-header");
+    if (site) observer.observe(site);
+    if (barRef.current) observer.observe(barRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
   useEffect(() => {
     if (mode !== "read") return;
     const nodes = sectionHeadings.map((_, index) => document.getElementById(sectionId(index))).filter(Boolean) as HTMLElement[];
@@ -262,6 +296,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
   }, [sectionHeadings, mode]);
 
   const scrollToView = useCallback((targetMode: ViewMode, index: number) => {
+    setTocOpen(false);
     setMode(targetMode);
     setActiveSection(index);
     window.requestAnimationFrame(() => {
@@ -305,59 +340,97 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     );
   };
 
+  const tocItems = sectionHeadings.map((heading, index) => (
+    <li key={heading.id}>
+      <button
+        type="button"
+        onClick={() => scrollToView(mode, index)}
+        aria-current={activeSection === index ? "location" : undefined}
+        className={`w-full rounded-lg px-3 py-2 text-left text-sm leading-6 transition ${
+          activeSection === index ? "bg-amber-100 font-semibold text-amber-950" : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+        }`}
+      >
+        {heading.label}
+      </button>
+    </li>
+  ));
+  const showBar = hasAudio || sectionHeadings.length > 0;
+
   return (
-    <main className="min-h-screen bg-[#f7f4ee] pb-28 text-stone-900">
+    <main
+      className="min-h-screen bg-[#f7f4ee] pb-28 text-stone-900"
+      style={{ "--site-header": `${siteHeader}px`, "--reader-offset": `${readerOffset}px` } as React.CSSProperties}
+    >
       <header className="border-b border-stone-200/80 bg-[#eee7da]">
-        <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
+        <div className="mx-auto max-w-6xl px-5 py-7 sm:px-8 sm:py-10 lg:py-12">
           <Link href="/resources/wang-repository" className="text-sm font-semibold text-amber-900 underline-offset-4 hover:underline">王守仁教授聖經講論文庫</Link>
-          <p className="mt-8 text-sm font-bold tracking-[0.18em] text-amber-900">馬太福音 · {article.passage.replace(/^太/, "")}</p>
-          <h1 className="mt-4 max-w-4xl font-serif text-4xl font-bold leading-[1.2] text-stone-950 sm:text-5xl lg:text-6xl">{article.title}</h1>
-          <p className="mt-6 max-w-2xl text-base leading-8 text-stone-700 sm:text-lg">
-            沿著經文安靜閱讀，也可以隨時翻到王教授的原聲講解；兩個視角會保留在同一個閱讀位置。
-          </p>
+          <p className="mt-5 text-xs font-bold tracking-[0.14em] text-amber-900 sm:text-sm">{passageLabel(article)}</p>
+          <h1 className="mt-3 max-w-4xl text-balance font-serif text-[1.75rem] font-bold leading-[1.3] text-stone-950 sm:text-4xl lg:text-[2.6rem]">{article.title}</h1>
+          {article.reader_summary && (
+            <section aria-label="本文提要" className="mt-6 max-w-3xl border-l-4 border-amber-700/70 pl-4 sm:pl-5">
+              <p className="text-xs font-bold tracking-[0.16em] text-amber-900">本文提要</p>
+              <p className="mt-2 text-[1rem] leading-[1.9] text-stone-800 sm:text-[1.05rem]">{article.reader_summary}</p>
+            </section>
+          )}
         </div>
       </header>
 
-      <div className="sticky top-[139px] z-40 border-b border-stone-200 bg-[#f7f4ee]/95 shadow-sm backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-8">
-          <div className="flex rounded-full border border-stone-300 bg-white p-1" role="tablist" aria-label="文章閱讀方式">
-            <button type="button" role="tab" aria-selected={mode === "read"} onClick={() => scrollToView("read", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${mode === "read" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
-              <BookOpen className="h-4 w-4" />閱讀文章
-            </button>
+      {showBar && (
+        <div
+          ref={barRef}
+          className={`sticky z-40 border-b border-stone-200 bg-[#f7f4ee]/95 shadow-sm backdrop-blur ${hasAudio ? "" : "lg:hidden"}`}
+          style={{ top: "var(--site-header, 0px)" }}
+        >
+          <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-8">
+            {hasAudio ? (
+              <div className="flex rounded-full border border-stone-300 bg-white p-1" role="tablist" aria-label="文章閱讀方式">
+                <button type="button" role="tab" aria-selected={mode === "read"} onClick={() => scrollToView("read", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition sm:px-5 ${mode === "read" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
+                  <BookOpen className="h-4 w-4" />閱讀文章
+                </button>
+                <button type="button" role="tab" aria-selected={mode === "listen"} onClick={() => scrollToView("listen", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition sm:px-5 ${mode === "listen" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
+                  <Headphones className="h-4 w-4" />聆聽原聲
+                </button>
+              </div>
+            ) : (
+              <p className="min-w-0 truncate text-sm font-semibold text-stone-700">{sectionHeadings[activeSection]?.label}</p>
+            )}
             {hasAudio && (
-              <button type="button" role="tab" aria-selected={mode === "listen"} onClick={() => scrollToView("listen", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${mode === "listen" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
-                <Headphones className="h-4 w-4" />聆聽原聲
+              <span className="hidden text-sm text-stone-500 lg:inline">{mode === "read" ? "完整文章" : `${article.audio_section_count} 個原聲段落 · ${article.player_count} 段錄音/錄像`}</span>
+            )}
+            {sectionHeadings.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTocOpen((open) => !open)}
+                aria-expanded={tocOpen}
+                aria-controls="article-toc-mobile"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 lg:hidden"
+              >
+                <ListOrdered className="h-4 w-4" />目錄
+                <ChevronDown className={`h-4 w-4 transition-transform ${tocOpen ? "rotate-180" : ""}`} />
               </button>
             )}
-          </div>
-          <span className="hidden text-sm text-stone-500 sm:inline">{mode === "read" ? "完整文章" : `${article.audio_section_count} 個原聲段落 · ${article.player_count} 段錄音/錄像`}</span>
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
-        {sectionHeadings.length > 0 && (
-          <nav aria-label="本文目錄" className="mb-12 rounded-2xl border border-stone-200 bg-white/70 p-5 sm:p-6">
-            <p className="text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
-            <ol className={`mt-4 grid gap-2 sm:grid-cols-2 ${sectionHeadings.length >= 5 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
-              {sectionHeadings.map((heading, index) => (
-                <li key={heading.id}>
-                  <button type="button" onClick={() => scrollToView(mode, index)} className={`h-full w-full rounded-xl px-3 py-3 text-left text-sm leading-6 transition ${activeSection === index ? "bg-amber-100 font-semibold text-amber-950" : "hover:bg-stone-100"}`}>
-                    <span className="mr-2 text-stone-400">{index + 1}</span>{heading.label}
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </nav>
-        )}
-
-        <section role="tabpanel" aria-label="閱讀文章" aria-hidden={mode !== "read"} className={mode === "read" ? "block" : "hidden"}>
-          <article className="mx-auto max-w-3xl rounded-[2rem] bg-[#fffdf9] px-6 py-9 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:px-10 sm:py-12 lg:px-14">
-            {article.reader_summary && (
-              <aside aria-label="本文提要" className="mb-9 rounded-2xl border border-amber-200 bg-amber-50/70 px-5 py-4 sm:px-6 sm:py-5">
-                <p className="text-xs font-bold tracking-[0.16em] text-amber-900">本文提要</p>
-                <p className="mt-3 text-[1.05rem] leading-8 text-stone-800">{article.reader_summary}</p>
-              </aside>
+            {tocOpen && (
+              <nav id="article-toc-mobile" aria-label="本文目錄" className="absolute inset-x-3 top-full mt-2 max-h-[60vh] overflow-y-auto rounded-2xl border border-stone-200 bg-white p-3 shadow-xl lg:hidden">
+                <p className="px-3 pb-2 text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
+                <ol className="space-y-0.5">{tocItems}</ol>
+              </nav>
             )}
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto max-w-6xl px-3 py-6 sm:px-8 sm:py-10 lg:grid lg:grid-cols-[minmax(0,1fr)_13.5rem] lg:gap-10 lg:py-12">
+        {sectionHeadings.length > 0 && (
+          <aside className="hidden lg:col-start-2 lg:row-start-1 lg:block">
+            <nav aria-label="本文目錄" className="sticky" style={{ top: "var(--reader-offset)" }}>
+              <p className="px-3 text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
+              <ol className="mt-3 space-y-0.5 border-l border-stone-200 pl-2">{tocItems}</ol>
+            </nav>
+          </aside>
+        )}
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+        <section role="tabpanel" aria-label="閱讀文章" aria-hidden={mode !== "read"} className={mode === "read" ? "block" : "hidden"}>
+          <article className="mx-auto max-w-3xl rounded-2xl bg-[#fffdf9] px-5 py-7 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:rounded-[2rem] sm:px-10 sm:py-12 lg:px-14">
             {sourceAnnotations.size > 0 && (
               <div className="not-prose mb-9 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5">
                 <div className="flex items-center gap-3">
@@ -388,7 +461,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                 </button>
               </div>
             )}
-            <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:mt-16 prose-h2:scroll-mt-[220px] prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-2xl prose-h3:mt-14 prose-h3:scroll-mt-[220px] prose-h3:text-2xl prose-p:text-[1.05rem] prose-p:leading-8 prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-li:leading-8 sm:prose-p:text-[1.1rem]">
+            <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:mt-14 prose-h2:scroll-mt-[var(--reader-offset)] prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-[1.45rem] sm:prose-h2:text-2xl prose-h3:mt-14 prose-h3:scroll-mt-[var(--reader-offset)] prose-h3:text-xl sm:prose-h3:text-2xl prose-p:text-[1.05rem] prose-p:leading-[1.9] prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-blockquote:font-normal [&_blockquote_p:first-of-type]:before:content-none [&_blockquote_p:last-of-type]:after:content-none prose-li:leading-8 sm:prose-p:text-[1.1rem]">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -410,7 +483,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                     const index = sectionIndexForHeading(3, title, node?.position?.start.line);
                     const count = clipCounts.get(title) ?? 0;
                     return (
-                      <div id={index >= 0 ? sectionId(index) : undefined} className="group scroll-mt-[220px]">
+                      <div id={index >= 0 ? sectionId(index) : undefined} className="group scroll-mt-[var(--reader-offset)]">
                         <h3>{children}</h3>
                         {hasAudio && index >= 0 && count > 0 && (
                           <button type="button" onClick={() => scrollToView("listen", index)} className="not-prose mt-3 inline-flex items-center gap-2 rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-200">
@@ -428,7 +501,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                 <p className="text-xs font-bold tracking-[0.14em] text-stone-500">注釋</p>
                 <ol className="mt-4 space-y-4 text-sm leading-7 text-stone-600">
                   {footnotes.map((footnote) => (
-                    <li key={footnote.id} id={`article-footnote-${footnote.id}`} className="flex scroll-mt-[220px] items-start gap-2">
+                    <li key={footnote.id} id={`article-footnote-${footnote.id}`} className="flex scroll-mt-[var(--reader-offset)] items-start gap-2">
                       <span className="font-bold text-stone-900">{footnote.id}.</span>
                       <div className="min-w-0 flex-1">
                         <div className="prose prose-stone max-w-none text-sm leading-7 prose-p:m-0">
@@ -450,7 +523,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
         <section role="tabpanel" aria-label="聆聽原聲" aria-hidden={mode !== "listen"} className={mode === "listen" ? "block" : "hidden"}>
           <div className="mx-auto max-w-4xl space-y-14">
             {headingGroups.map((group, sectionIndex) => (
-              <section key={group.heading} id={listenId(sectionIndex)} className="scroll-mt-[220px]" onFocus={() => setActiveSection(sectionIndex)}>
+              <section key={group.heading} id={listenId(sectionIndex)} className="scroll-mt-[var(--reader-offset)]" onFocus={() => setActiveSection(sectionIndex)}>
                 <div className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-300 pb-5">
                   <div>
                     <p className="text-sm font-bold text-amber-900">第 {sectionIndex + 1} 節</p>
@@ -481,6 +554,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
           </div>
         </section>
         )}
+        </div>
       </div>
 
       {activePlayer && (
