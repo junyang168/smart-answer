@@ -6,6 +6,7 @@ import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { editOcrText, ocrText } from "./review-ocr-text";
 import {
   FastForward,
   Pause,
@@ -709,13 +710,17 @@ function TranscriptProofreader({
       setBusy(false);
     }
   };
-  const editOCR = (id: string, region_id: string, text: string) => {
+  const editOCR = (id: string, text: string) => {
     const c = structuredClone(current.current.context);
-    c.visual_assets[id].content.text_regions.find(
-      (r) => r.id === region_id,
-    )!.text = text;
+    const original = c.visual_assets[id].content.text_regions;
+    const updated = editOcrText(original, text);
+    c.visual_assets[id].content.text_regions = updated;
+    c.visual_assets[id].visible_text = ocrText(updated);
     updateDoc({ ...current.current, context: c });
-    enqueue({ kind: "ocr", id, region_id, text });
+    updated.forEach((r, i) => {
+      if (r.text !== original[i].text)
+        enqueue({ kind: "ocr", id, region_id: r.id, text: r.text });
+    });
   };
   const play = (id: string) => {
     const binding = current.current.context.paragraph_bindings[id];
@@ -1384,17 +1389,21 @@ function TranscriptProofreader({
                 <p className="mb-2 mt-4 text-sm font-medium">
                   投影片文字（非口述；修改自動儲存）
                 </p>
-                {asset.content.text_regions.map((r) => (
-                  <textarea
-                    key={r.id}
-                    aria-label={`投影片文字 ${r.id}`}
-                    disabled={disabled}
-                    value={r.text}
-                    className="mb-2 w-full rounded border p-2 text-sm"
-                    rows={Math.max(1, Math.min(6, r.text.split("\n").length))}
-                    onChange={(e) => editOCR(assetId, r.id, e.target.value)}
-                  />
-                ))}
+                <textarea
+                  key={assetId}
+                  aria-label="投影片文字"
+                  disabled={disabled}
+                  value={ocrText(asset.content.text_regions)}
+                  className="mb-2 w-full rounded border p-2 text-sm"
+                  rows={Math.max(
+                    6,
+                    Math.min(
+                      16,
+                      ocrText(asset.content.text_regions).split("\n").length,
+                    ),
+                  )}
+                  onChange={(e) => editOCR(assetId, e.target.value)}
+                />
                 <label className="mt-2 flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
