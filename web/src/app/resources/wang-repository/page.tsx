@@ -212,20 +212,51 @@ function AudioLink({ passage }: { passage: AudioPassage }) {
   );
 }
 
-/** 所选的两个 tab 放在网址里（`?kind=audio&view=topic`）。只放在 state 里，
- * 点进一篇文章再返回，页面重新载入，读者就被送回默认的「綜合文章 / 按經卷章節」。
- * 没有参数、或参数不认识，一律按默认处理。 */
+/** 所选的两个 tab 放在网址里（`?kind=audio&view=topic`），也记在本次浏览的 sessionStorage 里。
+ * 只放在 state 里，点进一篇文章再返回，页面重新载入，读者就被送回默认的
+ * 「綜合文章 / 按經卷章節」。文章页顶上的「文庫」链接是不带参数的普通链接，
+ * 靠 sessionStorage 把读者送回刚才所选的 tab。没有参数、也没有记录，或参数
+ * 不认识，一律按默认处理。 */
+const TABS_KEY = "wang-repository-tabs";
+
+function readSavedTabs(): string {
+  try {
+    return window.sessionStorage.getItem(TABS_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveTabs(query: string) {
+  try {
+    window.sessionStorage.setItem(TABS_KEY, query);
+  } catch {
+    /* 隐私模式等读写不了，就只靠网址 */
+  }
+}
+
 function useRepositoryTabs() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const view: RepositoryView = params.get("view") === "topic" ? "topic" : "bible";
   const kind: RepositoryKind = params.get("kind") === "audio" ? "audio" : "article";
+
+  useEffect(() => {
+    if (params.has("view") || params.has("kind")) {
+      saveTabs(params.toString());
+      return;
+    }
+    const saved = readSavedTabs();
+    if (saved) router.replace(`${pathname}?${saved}`, { scroll: false });
+  }, [params, pathname, router]);
+
   const choose = (key: "view" | "kind", value: string, fallback: string) => {
     const next = new URLSearchParams(params.toString());
     if (value === fallback) next.delete(key);
     else next.set(key, value);
     const query = next.toString();
+    saveTabs(query);
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   };
   return {
