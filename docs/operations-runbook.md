@@ -121,6 +121,26 @@ actor, including mode probes, images, media and published review snapshots.
 Other accounts keep the existing editor. The isolated local preview router does
 not use the production owner restriction.
 
+The activated AI draft has a dedicated owner-only editor at
+`/admin/transcript-beta/S201011` and API namespace `/api/sc_api/beta/`.
+Its persistent data is selected by backend-only `TRANSCRIPT_REVIEW_BETA_DATA_DIR`,
+outside the public web/data tree (production:
+`/opt/homebrew/var/www/smart-answer-config/transcript-review-beta/`); legacy
+manuscripts, claims and publication files remain outside that root. Beta
+publication stays private at `/admin/transcript-beta/S201011/published`.
+The beta API is not mounted without the private data-root setting.
+The editor, API and publication reader all enforce the same owner restriction,
+and beta responses are private/no-store. The original port-8000 service cannot
+write these beta files through its legacy item routes.
+
+Use `scripts/activate-transcript-beta.py --source-root <local-review-data>
+--production-root <production-data> --target-root <private-beta-data> --item S201011` with `backend/.venv/bin/python`
+to activate the owner's completed AI draft. This refuses an existing beta root,
+locks and snapshots the local draft, retains immutable history and source media,
+verifies media/assets, records an activation manifest and claims the imported
+draft for the owner without adding content review decisions. It does not replace
+the existing production manuscript or publish it publicly.
+
 Set `TRANSCRIPT_REVIEW_ACTION_SECRET` to the same randomly generated, server-only
 value in the production web `.env.local` and backend LaunchAgent environment.
 Never set `TRANSCRIPT_REVIEW_DEV_ACTOR` in production. A deployment installs code;
