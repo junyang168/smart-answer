@@ -534,3 +534,24 @@ def test_fragment_rejection_diagnostics_keep_segment_and_paragraph_distinct():
     assert len(fragment_binding_diagnostics(response,materials)[0]['literal_matches'])==2
     materials['before']['source_fragments/F']['payload']['source_id']='foreign'
     assert fragment_binding_diagnostics(response,materials)[0]['literal_matches']==[]
+
+
+@pytest.mark.parametrize('diagnostics',[False,True])
+def test_fragment_accounting_preserves_legacy_input_shape(tmp_path,monkeypatch,diagnostics):
+    from backend.pipeline import claim_review_recovery as recovery
+    response={'changes':[{'record_key':'source_fragments/F','fields_json':json.dumps({'paragraph_key':'S0002'})}]}
+    materials={'before':{'source_fragments/F':{'payload':{'source_id':'S','verbatim_excerpt':'原话'}}},
+               'sources':{'S':{'paragraphs':{'S0001':{'text':'原话'},'S0002':{'text':'其他'}}}}}
+    error='new/updated fragment lacks an exact complete own source paragraph/excerpt'
+    entry={'round_id':'R','role':'gpt','response':response,'instruction':'unchanged original instruction'}
+    saved=deepcopy(entry)
+    if diagnostics:saved['invalid_fragment_bindings']=recovery.fragment_binding_diagnostics(response,materials)
+    previous={'execution_root':str(tmp_path),'original_goal':{'unaccepted_model_inputs':[saved]}}
+    slot={'round_id':'R','role':'gpt','state':'started','rejection':{'detail':error}}
+    monkeypatch.setattr(recovery,'read',lambda path:materials);monkeypatch.setattr(recovery,'body',lambda value:value)
+    monkeypatch.setattr(recovery,'rejected_model_input',lambda *args,**kwargs:deepcopy(entry))
+    assert recovery.consumed_rejected_citations(previous,'R:gpt',slot)
+    if diagnostics:
+        saved['invalid_fragment_bindings'][0]['provided_paragraph_key']='tampered'
+        with pytest.raises(ValueError,match='input drift'):recovery.consumed_rejected_citations(previous,'R:gpt',slot)
+    assert 'invalid_fragment_bindings' not in entry
