@@ -69,6 +69,8 @@ class Policy(source.Contract):
     policy_id: str = Field(min_length=1)
     budget: Budget
     models: dict[str, dict[str, str]]
+    api_spend: dict | None = None
+    request_encoding_contract: Literal['wkp_shared_shapes_json_v6'] | None = None
     clarification_per_problem: Literal[1] = 1
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
@@ -87,6 +89,10 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
+        if self.request_encoding_contract is None:
+            value.pop('request_encoding_contract', None)
+        if self.api_spend is None:
+            value.pop('api_spend', None)
         for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
             if value[name] is None:
                 value.pop(name)
@@ -109,8 +115,16 @@ class Policy(source.Contract):
         for role, (model, backend) in MODELS.items():
             selected = self.models[role].get('model_id')
             allowed = AUDIT_MODELS if role == 'gemini' else {model}
-            if selected not in allowed or self.models[role] != {"model_id": selected, "backend": backend, "effort": "high"}:
+            selected_backend = self.models[role].get('backend')
+            allowed_backends = {backend, 'anthropic_api'} if role == 'opus' else {backend}
+            if selected not in allowed or selected_backend not in allowed_backends or self.models[role] != {"model_id": selected, "backend": selected_backend, "effort": "high"}:
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
+        if self.models['opus']['backend'] == 'anthropic_api':
+            if (not isinstance(self.api_spend, dict) or set(self.api_spend) != {'root','limit_usd'}
+                    or not Path(self.api_spend['root']).is_absolute() or self.api_spend['limit_usd'] != 100):
+                raise ValueError('Opus API policy requires explicit shared 100 USD spend binding')
+        elif self.api_spend is not None:
+            raise ValueError('subscription policy cannot carry API billing authority')
         if self.source_impact_batch_size and self.review_purpose != 'source_impact':
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
@@ -380,7 +394,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -388,7 +402,7 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
-    files += [pipeline/'claim_qualification_refresh.py']
+    files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -487,7 +501,7 @@ def own_source_ids(payload, records):
     return resolve(payload, set())
 
 
-def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None):
+def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None, metadata_projection=None):
     """Validate a complete candidate, never infer semantic or write approval."""
     from backend.pipeline.claim_joint_update import enabled, validate_candidate_scope
     joint = enabled(request)
@@ -498,6 +512,8 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     internal_revision = current_operation == "Update" and request.operation in {"Create", "Restore", "Split", "Merge"}
     if current_operation not in request.allowed_operations and not internal_revision:
         raise ValueError("candidate operation exceeds original authorization")
+    from backend.pipeline.claim_metadata_projection import sampling_keys
+    sampling = sampling_keys(request, before, metadata_projection)
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if len(dispositions) != len(candidate.dispositions):
         raise ValueError("candidate repeats an object disposition")
@@ -526,7 +542,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
             raise ValueError("object disposition exceeds authorized operations")
         if collection not in CLAIM_COLLECTIONS or not disposition.citations:
             raise ValueError("every content disposition requires own-source evidence")
-        if old and old["payload"].get("review_status") in HELD:
+        sampling_update = key in sampling and disposition.action == "update" and payload is not None and payload.get("review_status") == "candidate"
+        sampling_write = sampling_update or key in sampling and disposition.action == "retire"
+        if old and old["payload"].get("review_status") in HELD and not sampling_write:
             raise ValueError("Claim operation cannot override a protected review hold")
         if disposition.action == "create":
             if old is not None or payload is None:
@@ -566,14 +584,14 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 payload = deepcopy(old["payload"])
             elif payload is None:
                 raise ValueError("update/restore requires a complete postimage")
-            allowed_provenance = {'review_status'} if legacy_restore and payload.get('review_status') == 'candidate' else set()
+            allowed_provenance = {'review_status'} if sampling_update or legacy_restore and payload.get('review_status') == 'candidate' else set()
             if legacy_restore and (payload.get('review_status') != 'candidate' or payload.get('superseded_by')):
                 raise ValueError('legacy Restore must clear supersession without manufacturing approval')
             if any(payload.get(k) != old["payload"].get(k) for k in source.PROVENANCE - allowed_provenance):
                 raise ValueError("proposed update cannot manufacture review provenance")
             changed = {k for k in set(old["payload"]) | set(payload) if old["payload"].get(k) != payload.get(k)}
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
-            if changed - set(permission.fields) - mechanical:
+            if changed - set(permission.fields) - mechanical - ({"review_status"} if sampling_update else set()):
                 raise ValueError("updated fields exceed original field permission")
         if disposition.action != "retire":
             post[key] = deepcopy(payload)
@@ -864,7 +882,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
         observed = source.FileBinding.model_validate((archived_sources or {}).get(sid, binding))
         if observed.file_sha256 != binding.file_sha256:
             raise ValueError('archived source differs from the actual original source bytes')
-        sources[sid] = source.source_snapshot(observed, source=(source_documents or {}).get(sid))
+        sources[sid] = source.source_snapshot(observed, source=(source_documents or {}).get(sid),
+            visual_context=request.operation in {'Update', 'Review'} and not is_source_impact(request))
         sources[sid]['file'] = binding.model_dump(mode='json')
     for sid, snapshot in sources.items():
         document = (source_documents or {}).get(sid, {})
@@ -1110,11 +1129,12 @@ def original_goal(request, before):
         policy = json.loads(source.verify_file(request.policy).read_text()) if Path(request.policy.path).is_file() else {}
         if policy.get('model_output_contract') == 'claim_changes_v4':
             allocations = authority.get('claim_creation_allocations', {})
+            from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+            reserved_ids=allocated_ids(allocations)
             if (not isinstance(allocations, dict) or len(allocations) > 1
-                    or any(not isinstance(cid, str) or not cid for cid in allocations.values())
                     or set(allocations) != {p.source_id for p in request.creation_permissions}
-                    or any(source.key('claims', cid) in before for cid in allocations.values())):
-                raise ValueError('compact v4 requires one program-reserved identity per granted own source')
+                    or any(source.key('claims', cid) in before for cid in reserved_ids)):
+                raise ValueError('compact v4 requires program-reserved identities for the granted own source')
             result['claim_creation_allocations'] = dict(allocations)
             result['target_disposition_contract'] = 'reviewed_update_or_retirement_v1'
     from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions
@@ -1218,7 +1238,7 @@ def goal_packet(goal):
 
 def model_packet(materials):
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))
@@ -1535,9 +1555,14 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
-    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
+    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
+    api_transition = api_authorize(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
+    target_extension = owner_target_extension(previous, old, request)
+    support_creation = (request.creation_permissions != old.creation_permissions
+        and finding_permission_extension(previous, old, request))
     read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh'
         and not request.permissions and not request.creation_permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
@@ -1545,19 +1570,22 @@ def continuation_budget(previous, request, policy):
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
             or (request.permissions != old.permissions and not read_only_refresh
                 and not finding_permission_extension(previous, old, request))
-            or policy.joint_update_max_targets != original.joint_update_max_targets
+            or (policy.joint_update_max_targets != original.joint_update_max_targets
+                and not (target_extension and policy.joint_update_max_targets == len(request.target_keys)))
             or len(previous['original_goal']['units']) != 1):
         raise ValueError('joint Update continuation must retain one complete original unit, required maintenance and authority')
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
-            or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
+            or (old.target_keys != request.target_keys and not target_extension) or old.source_bindings != request.source_bindings
             or (request.creation_permissions != old.creation_permissions
-                and not (read_only_refresh and not request.creation_permissions))
+                and not (read_only_refresh and not request.creation_permissions) and not support_creation)
             or (previous.get('created_keys') and not read_only_refresh) or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     permission_follow_up = (extension_basis == 'permission_required'
-        and previous['result'].get('reason') == 'permission_required'
+        and (previous['result'].get('reason') == 'permission_required'
+             or support_creation and previous['result'].get('reason') == 'no_progress'
+             or target_extension and previous['result'].get('reason') == 'budget_exhausted')
         and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
@@ -1577,7 +1605,7 @@ def continuation_budget(previous, request, policy):
     unknown = {}
     if extension is not None:
         extension_keys = {'predecessor_action_id','prior_metadata_sha256','budget','authorization_quote'}
-        if extension_basis != 'unknown_call':
+        if extension_basis != 'unknown_call' or 'current_objects_sha256' in extension:
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
             or permission_follow_up
@@ -1605,6 +1633,7 @@ def continuation_budget(previous, request, policy):
     if not isinstance(proposal_recovery,dict):
         raise ValueError('unaccepted proposal recovery must bind exact returned calls')
     unaccepted_proposals = {}
+    no_progress_returns = {}
     root = Path(previous['execution_root'])
     for key, slot in previous['call_reservations'].items():
         if slot['state'] in {'planned','cancelled'}:
@@ -1612,8 +1641,15 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
-        from backend.pipeline.claim_review_recovery import consumed_invalid_review
-        if consumed_invalid_review(previous, key, slot):
+        if previous['result'].get('reason') == 'no_progress':
+            from backend.pipeline.claim_review_recovery import returned_no_progress_input
+            returned = returned_no_progress_input(previous, key, slot)
+            if returned is not None:
+                no_progress_returns[key] = returned
+                spent[slot['role']] += 1
+                continue
+        from backend.pipeline.claim_review_recovery import consumed_invalid_review, consumed_rejected_citations
+        if consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot):
             spent[slot['role']] += 1
             continue
         if key in recovery:
@@ -1646,6 +1682,11 @@ def continuation_budget(previous, request, policy):
             unknown[key] = {'reservation':binding(intent),'intent_sha256':slot['intent_sha256'],'state':'started'}
             spent[slot['role']] += 1
             continue
+        if api_transition:
+            from backend.pipeline.claim_opus_api_transition import quota_refusal
+            failures[key] = quota_refusal(previous, key, slot)
+            spent[slot['role']] += 1
+            continue
         failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
             raise ValueError('uncertain original call cannot be repeated in a continuation')
@@ -1662,7 +1703,7 @@ def continuation_budget(previous, request, policy):
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if extension_basis == 'unknown_call' and not unknown:
         raise ValueError('owner unknown-call extension requires an actual unknown generation')
-    if (policy.models != original.models or policy.independent_audit != original.independent_audit
+    if (policy.models != original.models and not api_transition or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
             or (not human_follow_up and extension is None and any(policy.budget.limit(role) > remaining[role] for role in MODELS))
             or (not human_follow_up and extension is None and policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values()))
@@ -1677,11 +1718,15 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
+    return {**({'opus_api_transition':api_transition} if api_transition else {}),
+        **({'source_support_creation':True} if support_creation else {}),
+        **({'related_owner_target_extension':True} if target_extension else {}),
+        'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
+        **({'unaccepted_no_progress_calls':no_progress_returns} if no_progress_returns else {}),
         **({'owner_call_extension':deepcopy(extension),'preserved_unknown_calls':unknown,
             'budget_basis':'explicit_owner_call_extension','follow_up_budget':policy.budget.model_dump(mode='json')} if extension is not None else {}),
         **({'human_source_verification':human_follow_up,

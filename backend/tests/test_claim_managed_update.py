@@ -7,7 +7,7 @@ import pytest
 from backend.pipeline import claim_management as cm, claim_management_intake as intake
 from backend.pipeline import claim_management_batch as batch, claim_model_output as wire
 from backend.pipeline.cvp_sql_actions import execute_claim_management
-from backend.api.canonical_repository.claim_identity_allocation import reserve
+from backend.api.canonical_repository.claim_identity_allocation import reserve,allocated_ids
 from backend.tests.test_claim_management_postgres import action, postgres_store, _temporary_postgres
 from backend.tests.test_claim_management_execution_postgres import SyntheticPorts, seed_claims
 from backend.tests.test_claim_management_intake import pass_review
@@ -101,21 +101,23 @@ def test_compact_v4_does_not_allow_identity_or_retirement_scope_expansion(shared
     assert not store.get_record_state('claims', 'D')['retired']
 
 
-def test_list_update_creates_reserved_claim_and_links_its_evidence_and_question(shared, monkeypatch):
+@pytest.mark.parametrize('creation_count',[1,2])
+def test_list_update_creates_reserved_claim_and_links_its_evidence_and_question(shared, monkeypatch,creation_count):
     store, root = shared
     calls = []
     new_ids = []
     def proposal(packet):
-        cid = packet['original_goal']['claim_creation_allocations']['S']
-        new_ids.append(cid)
+        ids=allocated_ids(packet['original_goal']['claim_creation_allocations'])
+        assert len(ids)==creation_count
+        new_ids.extend(ids)
         return {'changes': [
-            {'record_key': 'evidence_steps/E', 'fields_json': json.dumps({'produced_claim_ids': ['C', 'D', cid]}),
+            {'record_key': 'evidence_steps/E', 'fields_json': json.dumps({'produced_claim_ids': ['C', 'D', *ids]}),
              'reason': 'own new judgment', 'citations': [CITATION]},
-            {'record_key': 'questions/Q', 'fields_json': json.dumps({'answer_claim_ids': ['C', 'D', cid]}),
+            {'record_key': 'questions/Q', 'fields_json': json.dumps({'answer_claim_ids': ['C', 'D', *ids]}),
              'reason': 'direct answer retained with the old answers', 'citations': [CITATION]}],
             'creations': [{'collection': 'claims', 'object_id': cid, 'fields_json': json.dumps({
                 'statement': '甲是假设，不是断言。', 'claim_type': 'exegesis', 'evidence_step_ids': ['E'],
-                'occurrences': [{'source_id': 'S', 'anchors': []}]}), 'reason': 'independent own-source judgment', 'citations': [CITATION]}],
+                'occurrences': [{'source_id': 'S', 'anchors': []}]}), 'reason': 'independent own-source judgment', 'citations': [CITATION]} for cid in ids],
             'retirements': [], 'findings': [], 'finding_resolutions': decisions(packet)}
     def execute(manifest, output):
         for request, execution in batch.load(manifest, output, store=store)[1].values():
@@ -124,15 +126,43 @@ def test_list_update_creates_reserved_claim_and_links_its_evidence_and_question(
             result = execute_claim_management(store, request, root=execution, ports=port)
             assert result['status'] == 'completed', result
     monkeypatch.setattr(batch, 'run', execute)
-    result = intake.run(['C'], root, instruction='Extract the omitted independent judgment', store=store)
-    cid = new_ids[0]
-    assert result['all_actions_completed'] and result['created_keys'] == ['claims/' + cid]
-    assert store.claim_management_qualification(cid)['ready']
-    assert cid in store.get_record_state('evidence_steps', 'E')['payload']['produced_claim_ids']
-    assert store.get_record_state('questions', 'Q')['payload']['answer_claim_ids'] == ['C', 'D', cid]
+    result = intake.run(['C'], root, instruction='Extract the omitted independent judgment', store=store,creation_count=creation_count)
+    assert len(new_ids)==creation_count
+    assert result['all_actions_completed'] and result['created_keys'] == ['claims/' + cid for cid in new_ids]
+    assert all(store.claim_management_qualification(cid)['ready'] for cid in new_ids)
+    assert set(new_ids)<=set(store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids'])
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C','D',*new_ids]
     assert calls[0].calls == ['opus', 'gpt', 'opus']
-    assert intake.run(['C'], root, instruction='Extract the omitted independent judgment', store=store) == result
+    assert intake.run(['C'], root, instruction='Extract the omitted independent judgment', store=store,creation_count=creation_count) == result
     assert len(calls) == 1
+
+
+def test_fragment_reanchor_can_update_both_media_endpoints(shared, monkeypatch):
+    store, root = shared
+    doc = deepcopy(store.get_record_state('source_documents', 'S')['payload'])
+    path = Path(doc['source_path'])
+    path.write_text(json.dumps([
+        {'index': 1, 'text': CITATION['exact_quote'], 'start_time': 0, 'end_time': 1},
+        {'index': 2, 'text': CITATION['exact_quote'], 'start_time': 2, 'end_time': 3}], ensure_ascii=False))
+    doc['source_file_sha256'] = intake.binding(path)['file_sha256']
+    old = deepcopy(store.get_record_state('source_fragments', 'F')['payload'])
+    old.update(media_time=0, media_end_time=1, source_segment_index=1)
+    store.apply_plan(store.plan_package({'package_id': 'timed-source', 'source_documents': [doc], 'source_fragments': [old]}))
+    def proposal(packet):
+        return {'changes': [{'record_key': 'source_fragments/F',
+            'fields_json': json.dumps({'paragraph_key': 'S0002', 'source_segment_index': 2,
+                                      'media_time': 2, 'media_end_time': 3}),
+            'reason': 'reanchor the complete media interval', 'citations': [{**CITATION, 'paragraph_key': 'S0002'}]}],
+            'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': decisions(packet)}
+    def execute(manifest, output):
+        for request, execution in batch.load(manifest, output, store=store)[1].values():
+            port = SyntheticPorts(store, execution, proposal=proposal, opus=lambda p: first_objection(p, 'reanchor'))
+            assert execute_claim_management(store, request, root=execution, ports=port)['status'] == 'completed'
+    monkeypatch.setattr(batch, 'run', execute)
+    result = intake.run(['C'], root, instruction='Refresh the complete media locator', store=store)
+    assert result['all_actions_completed']
+    fragment = store.get_record_state('source_fragments', 'F')['payload']
+    assert (fragment['paragraph_key'], fragment['media_time'], fragment['media_end_time']) == ('S0002', 2, 3)
 
 
 @pytest.mark.parametrize('late_failure', [False, True])
@@ -176,3 +206,13 @@ def test_retirement_evidence_and_relations_commit_together_and_resume(shared, mo
     assert result['all_actions_completed'] and result['retired_keys'] == ['claims/C']
     assert not (result['claims']['C']['qualification'] or {}).get('ready')
     assert ports.calls == ['opus', 'gpt', 'opus']
+
+
+def test_multiple_reservations_are_atomic_reusable_and_occupy_every_name(action):
+    store,_,_,_,tmp,_=action
+    kwargs=dict(action_id='two-ids',source_id='S',target_id='C',root=tmp/'two',count=2)
+    assert reserve(store,**kwargs)==['C-CL001','C-CL002']
+    assert reserve(store,**kwargs)==['C-CL001','C-CL002']
+    assert reserve(store,action_id='after-two',source_id='S',target_id='C',root=tmp/'next')=='C-CL003'
+    with pytest.raises(ValueError,match='cannot change'):reserve(store,**{**kwargs,'count':1})
+    with pytest.raises(ValueError,match='repeats'):allocated_ids({'S':['C-CL001','C-CL001']})
