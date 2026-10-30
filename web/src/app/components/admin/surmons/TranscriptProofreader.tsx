@@ -6,6 +6,15 @@ import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  FastForward,
+  Pause,
+  Play,
+  Rewind,
+  RotateCcw,
+  StepBack,
+  StepForward,
+} from "lucide-react";
 import "easymde/dist/easymde.min.css";
 import {
   selectReferenceGroup,
@@ -169,6 +178,8 @@ const stamp = (ms: number) => {
 };
 const button =
   "rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed";
+const transportButton =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1";
 
 export function TranscriptReviewEntry({
   item,
@@ -749,25 +760,61 @@ function TranscriptProofreader({
     <div
       role="group"
       aria-label={label}
-      className="flex flex-wrap items-center gap-2"
+      className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1"
     >
-      <button className={button} onClick={() => seek(-15)}>
-        快退 15 秒
+      <button
+        className={transportButton}
+        aria-label="快退 15 秒"
+        title="快退 15 秒"
+        onClick={() => seek(-15)}
+      >
+        <Rewind aria-hidden="true" size={18} fill="currentColor" />
       </button>
-      <button className={button} onClick={() => seek(-5)}>
-        倒退 5 秒
+      <button
+        className={transportButton}
+        aria-label="倒退 5 秒"
+        title="倒退 5 秒"
+        onClick={() => seek(-5)}
+      >
+        <StepBack aria-hidden="true" size={18} fill="currentColor" />
       </button>
-      <button className={button} onClick={togglePlayback}>
-        {playing ? "暫停" : "繼續播放"}
+      <button
+        className={
+          transportButton + " bg-blue-700 text-white hover:bg-blue-800"
+        }
+        aria-label={playing ? "暫停" : "繼續播放"}
+        title={playing ? "暫停" : "繼續播放"}
+        onClick={togglePlayback}
+      >
+        {playing ? (
+          <Pause aria-hidden="true" size={18} fill="currentColor" />
+        ) : (
+          <Play aria-hidden="true" size={18} fill="currentColor" />
+        )}
       </button>
-      <button className={button} onClick={() => seek(5)}>
-        前進 5 秒
+      <button
+        className={transportButton}
+        aria-label="前進 5 秒"
+        title="前進 5 秒"
+        onClick={() => seek(5)}
+      >
+        <StepForward aria-hidden="true" size={18} fill="currentColor" />
       </button>
-      <button className={button} onClick={() => seek(15)}>
-        快進 15 秒
+      <button
+        className={transportButton}
+        aria-label="快進 15 秒"
+        title="快進 15 秒"
+        onClick={() => seek(15)}
+      >
+        <FastForward aria-hidden="true" size={18} fill="currentColor" />
       </button>
-      <button className={button} onClick={() => row && play(row.index)}>
-        重播本段
+      <button
+        className={transportButton}
+        aria-label="重播本段"
+        title="重播本段"
+        onClick={() => row && play(row.index)}
+      >
+        <RotateCcw aria-hidden="true" size={18} />
       </button>
     </div>
   );
@@ -1488,13 +1535,14 @@ function TranscriptProofreader({
                     </div>
                   </details>
                 )}
-                <div className="mb-3 flex items-center justify-between gap-2 text-xs">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <button
                     className="text-blue-700"
                     onClick={() => play(p.index)}
                   >
                     ▶ {stamp(binding.start_ms)}–{stamp(binding.end_ms)}
                   </button>
+                  {active && doc.can_edit && playbackControls("本段播放控制")}
                   <span
                     className={reviewed ? "text-green-700" : "text-slate-500"}
                   >
@@ -1544,9 +1592,6 @@ function TranscriptProofreader({
                         cm.setOption("readOnly", disabled);
                       }}
                     />
-                    <div className="mt-3 rounded-md bg-slate-50 p-2">
-                      {playbackControls("本段播放控制")}
-                    </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         className={button}
