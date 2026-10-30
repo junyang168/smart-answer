@@ -87,6 +87,56 @@ def test_interrupted_journal_is_not_freed_by_old_pid(tmp_path):
         with gate.call('opus',tmp_path/'new'): pytest.fail('overlap')
 
 
+def test_explicit_stopped_quarantine_preserves_unknown_and_never_retries(tmp_path):
+    gate=capacity(tmp_path);lost=tmp_path/'lost'
+    with gate.call('opus',lost):
+        lost.mkdir();(lost/'invocation.json').write_text('{}')
+        (lost/'stdout.log').write_text('partial')
+    original={p.name:p.read_bytes() for p in lost.iterdir()}
+    proof=gate.quarantine_stopped('opus',lost)
+    assert proof['result_state']=='unknown' and not proof['retry_authorized']
+    assert proof['model_calls']==0 and proof['all_slot_locks_acquired']
+    assert {p.name:p.read_bytes() for p in lost.iterdir()}==original
+    assert not gate._settled(lost) and not (lost/'exit.json').exists()
+    with pytest.raises(CapacityUnavailable,match='same transport cannot be repeated'):
+        with gate.call('opus',lost):pytest.fail('unknown call repeated')
+    with gate.call('opus',tmp_path/'different'):returned(tmp_path/'different')
+
+
+@pytest.mark.parametrize('defect',['live','quota','wrong_artifacts','returned'])
+def test_stopped_quarantine_refuses_live_unrelated_and_settled_calls(tmp_path,defect):
+    import fcntl
+    gate=capacity(tmp_path);lost=tmp_path/'lost'
+    with gate.call('opus',lost):
+        lost.mkdir();(lost/'invocation.json').write_text('{}')
+    state_path=gate.root/'opus/state.json';state=json.loads(state_path.read_text())
+    if defect=='quota':state['blocked']='insufficient_quota';state_path.write_text(json.dumps(state))
+    elif defect=='returned':(lost/'exit.json').write_text('{"returncode":0}')
+    before=state_path.read_bytes()
+    with (gate.root/'opus/slot-0.lock').open('a') as held:
+        if defect=='live':fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with pytest.raises((ValueError,CapacityUnavailable)):
+            gate.quarantine_stopped('opus',tmp_path/'other' if defect=='wrong_artifacts' else lost)
+    assert state_path.read_bytes()==before
+    assert json.loads((gate.root/'opus/slot-0.json').read_text())['active']
+    assert not list((gate.root/'opus').glob('interrupted-*.json'))
+
+
+def test_quarantine_of_one_stopped_call_does_not_hide_a_second(tmp_path):
+    gate=capacity(tmp_path);role=gate.root/'opus';role.mkdir()
+    paths=[tmp_path/'first',tmp_path/'second']
+    for i,path in enumerate(paths):
+        path.mkdir();(path/'invocation.json').write_text('{}')
+        (role/('slot-%s.json'%i)).write_text(json.dumps({'active':True,'artifacts':str(path)}))
+    (role/'state.json').write_text(json.dumps({'allowed':2,'next_start':0,'refusals':0,
+        'blocked':'unsettled previous transport: '+str(paths[1])}))
+    gate.quarantine_stopped('opus',paths[0])
+    assert json.loads((role/'state.json').read_text())['blocked']
+    gate.quarantine_stopped('opus',paths[1])
+    assert 'blocked' not in json.loads((role/'state.json').read_text())
+    with gate.call('opus',tmp_path/'new'):returned(tmp_path/'new')
+
+
 def test_configuration_drift_refused(tmp_path):
     capacity(tmp_path)
     with pytest.raises(ValueError,match='configuration drift'): capacity(tmp_path,spacing_seconds=5)
