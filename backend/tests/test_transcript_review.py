@@ -505,6 +505,25 @@ def test_authenticated_http_etag_tampering_and_public_snapshot(setup, monkeypatc
     assert client.get(path).status_code == 503
 
 
+def test_public_reading_uses_existing_soft_deletion_without_changing_draft(setup):
+    store, root, _ = setup
+    item = "講道 test"
+    doc = adopted(setup)
+    text = "保留~~刪除的\n內容~~結尾"
+    store.mutate("a", item, op(doc, operations=[{"kind": "text", "id": "1", "text": text}]))
+    store.publish("a", item, op(confirmed(store)))
+    app = FastAPI()
+    app.include_router(create_review_router(root), prefix="/sc_api")
+    from urllib.parse import quote
+
+    response = TestClient(app).get("/sc_api/review_public/" + quote(item, safe=""))
+    assert response.status_code == 200
+    assert response.json()["script"][0]["text"] == "保留\n結尾"
+    assert store.document("a", item)["script"][0]["text"] == text
+    _, snapshot = store.published_snapshot(item)
+    assert snapshot["script"][0]["text"] == text
+
+
 def test_catalog_recovery_preserves_another_sermon_and_legacy_cache(setup, monkeypatch):
     store, root, _ = setup
     item = "講道 test"

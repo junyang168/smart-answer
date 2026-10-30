@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from backend.pipeline.source_projection import live_script
 from .transcript_review import ReviewStore, ReviewError
 
 
@@ -230,7 +231,7 @@ def create_review_router(root: Path):
                 c = snapshot["context"]
                 return {
                     "metadata": pub["metadata"],
-                    "script": snapshot["script"],
+                    "script": live_script(snapshot["script"]),
                     "groups": c["groups"],
                     "visual_assets": {
                         k: {x: a[x] for x in ("visible_text", "image_sha256")}
