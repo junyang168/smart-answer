@@ -313,3 +313,55 @@ def test_readonly_refresh_abandons_only_uncommitted_optional_repairs(owner_revie
     assert final.calls==['gpt','opus'] and store.get_record_state('evidence_steps','E')==before
     assert all(store.claim_management_qualification(cid)['ready'] for cid in ['A','B'])
     assert store.get_cvp_group(prior['run_id'])['call_reservations']==prior['call_reservations']
+
+
+@pytest.mark.parametrize('change',['transaction_only','target','evidence'])
+def test_current_bound_remaining_findings_refreshes_only_transaction_consumers(owner_review_follow_up,monkeypatch,change):
+    store,old,parent,successor,root,policy,extension,path,basis=owner_review_follow_up
+    if basis!='remaining_findings':
+        pytest.skip('only uncommitted remaining-findings continuation')
+    # A consumer appearing while paused changes transaction pins but must not
+    # widen the Claim model's content or discard the uncommitted correction.
+    from backend.api.canonical_repository.postgres_store import record_content_sha,ChangeSetConflict
+    payload={'viewpoint_id':'LATER-CONSUMER','revision':1}
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.objects (collection,object_id,revision,content_sha256,payload) VALUES ('canonical_viewpoints','LATER-CONSUMER',1,%s,%s::jsonb)",
+            (record_content_sha(payload),json.dumps(payload)))
+    read_context=store.read_claim_context
+    def complete_context(*args,**kwargs):
+        records=read_context(*args,**kwargs)
+        records['canonical_viewpoints','LATER-CONSUMER']=store.get_record_state('canonical_viewpoints','LATER-CONSUMER')
+        return records
+    monkeypatch.setattr(store,'read_claim_context',complete_context)
+    if change!='transaction_only':
+        col,oid=('claims','A') if change=='target' else ('evidence_steps','E')
+        edited=deepcopy(store.get_record_state(col,oid)['payload']);edited['statement']='changed while paused'
+        store.apply_plan(store.plan_package({'package_id':'semantic-drift','%s'%col:[edited]}))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys])
+    before={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    extension['current_objects_sha256']=cm.sha256_json(before)
+    authorize(successor,policy,path,extension)
+    def decisions(packet):return [dict(decision(fid),affected_target_keys=[]) for fid in packet['unresolved']]
+    def propose(packet):
+        assert packet['previous_candidate']['records']
+        changes=[]
+        for row in packet['previous_candidate']['records']:
+            key=row['collection']+'/'+row['object_id']
+            fields={k:v for k,v in row['payload'].items() if packet['before'][key]['payload'].get(k)!=v}
+            if fields:changes.append({'record_key':key,'fields_json':json.dumps(fields),'reason':'retain accepted candidate','citations':decision('unused')['citations']})
+        return {'changes':changes,'findings':[],'finding_resolutions':decisions(packet)}
+    ports=SyntheticPorts(store,root,proposal=propose,opus=lambda p:{'complete_review':True,'findings':[],'prior_findings':decisions(p)})
+    if change!='transaction_only':
+        with pytest.raises((ValueError,ChangeSetConflict)):
+            execute_claim_management(store,successor,root=root,ports=ports)
+        assert not ports.calls
+        assert store.get_cvp_group(parent['run_id'])==parent
+        return
+    consumer_before=store.get_record_state('canonical_viewpoints','LATER-CONSUMER')
+    result=execute_claim_management(store,successor,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.get_record_state('canonical_viewpoints','LATER-CONSUMER')==consumer_before
+    assert store.get_record_state('evidence_steps','E')['payload']['statement']=='甲是假设，不是断言。'
+    assert all(store.claim_management_qualification(cid)['ready'] for cid in ['A','B'])
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==parent['call_reservations']
