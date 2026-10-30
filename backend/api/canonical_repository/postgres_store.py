@@ -3754,9 +3754,9 @@ class PostgresKnowledgeStore:
                     judged = parent.setdefault('clarified_finding_ids', [])
                     ids = [r.finding_id for r in decisions]
                     if (not cm.Policy.model_validate(materials['policy']).all_findings_to_gpt
-                            or not ids or set(ids) & set(judged)):
+                            or not set(ids) - set(judged)):
                         raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
-                    judged.extend(ids)
+                    judged.extend(sorted(set(ids) - set(judged)))
                 prior.append(fingerprint)
                 parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
                 value['candidate'] = candidate.model_dump(mode='json')

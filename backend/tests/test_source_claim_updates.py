@@ -414,3 +414,81 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
         assert proof['changed_transaction_keys']==['evidence_steps/EN']
         assert proof['content_scope_sha256']==cm.sha256_json(child['materials']['before'])
         assert store.get_record_state('evidence_steps','EN')==consumer_after
+
+
+@pytest.mark.parametrize('defect', ['none','target','evidence','source','scope','raw','candidate','review_started','committed'])
+def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundaries(action,monkeypatch,defect):
+    from backend.pipeline import claim_management_intake as intake
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    from backend.pipeline.source_reconciliation_runner import body,read
+    from backend.api.canonical_repository.postgres_store import canonical_json
+    store,old,cid,base=fixture(action)
+    original_reader=store.read_claim_context
+    def complete_context(*args,**kwargs):
+        records=original_reader(*args,**kwargs)
+        records.update(original_reader([('claims','N')]))
+        return records
+    monkeypatch.setattr(store,'read_claim_context',complete_context)
+    root=base/'pre-review-transaction'
+    prepared=intake.prepare(['D'],root,instruction='full Update',store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    aid,(request,execution)=next(iter(jobs.items()))
+    citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    def resolutions(packet):
+        return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact own excerpt','citations':[citation],
+            'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own Evidence'} for fid in packet['unresolved']]
+    def review(packet):
+        result=pass_review(packet)
+        if not packet['unresolved']:
+            for assessment in result['binding_assessments']:
+                if assessment['claim_key']=='claims/D':assessment['sufficient']=False
+            result['findings']=[{'target_key':'source_fragments/FD','category':'evidence','component':'binding',
+                'reason':'old excerpt','acceptance_condition':'repair exact text','citations':[citation],
+                'affected_target_keys':['claims/D'],'affected_write_keys':[],'impact_reason':'own evidence'}]
+        result['prior_findings']=resolutions(packet)
+        return result
+    def proposal(packet):
+        record=deepcopy(store.get_record_state('evidence_steps','EN')['payload'])
+        record['statement']='changed outside the model scope'
+        store.apply_plan(store.plan_package({'package_id':'external-consumer-edit','evidence_steps':[record]}))
+        return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+            'reason':'repair own evidence','citations':[citation]}],'creations':[],'retirements':[],'findings':[],'finding_resolutions':resolutions(packet)}
+    ports=SyntheticPorts(store,execution,opus=review,proposal=proposal)
+    first=execute_claim_management(store,request,root=execution,ports=ports)
+    assert first['detail']=='transaction current dependency drift: evidence_steps/EN'
+    assert ports.calls==['opus','gpt']
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()));child=store.get_cvp_group(rid)
+    assert child['checkpoint']=='prepared' and not child.get('opus_approved')
+    old_root=Path(parent['execution_root'])/rid;raw=(old_root/'gpt.raw.json').read_bytes();candidate=(old_root/'candidate.json').read_bytes()
+    if defect in {'target','evidence'}:
+        col,oid=('claims','D') if defect=='target' else ('evidence_steps','ED')
+        payload=deepcopy(store.get_record_state(col,oid)['payload']);payload['statement']='real content change'
+        store.apply_plan(store.plan_package({'package_id':'real-content-drift',col:[payload]}))
+    elif defect=='source':
+        source=Path(request.source_bindings['S'].path);source.write_text(source.read_text()+' ')
+    elif defect=='scope':
+        store.apply_plan(store.plan_package({'package_id':'expanded-neighbour','claim_relations':[{'claim_relation_id':'ND','from_id':'N','to_id':'D','relation_type':'supports'}]}))
+    elif defect=='raw':(old_root/'gpt.raw.json').write_text('{}')
+    elif defect=='candidate':(old_root/'candidate.json').write_text('{}')
+    elif defect=='review_started':store.begin_claim_management_call(parent['run_id'],round_id=rid,role='opus',intent={'unknown':True})
+    elif defect=='committed':
+        changed=deepcopy({k:v for k,v in child.items() if k not in {'run_id','status','error'}});changed['change_set_ids']=['applied-fact']
+        with store.connect() as conn:conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(changed),rid))
+    if defect!='none':
+        with pytest.raises((ValueError,RuntimeError)):
+            resume_saved_pre_review(store,rid)
+        assert ports.calls==['opus','gpt']
+        return
+    proof=resume_saved_pre_review(store,rid)
+    assert resume_saved_pre_review(store,rid)==proof
+    rebound=store.get_cvp_group(rid);current=store.get_cvp_group(parent['run_id']);new_root=Path(rebound['recovery_root'])
+    assert cm.model_packet(rebound['materials'])==cm.model_packet(child['materials'])
+    assert current['call_reservations']==parent['call_reservations']
+    assert rebound['candidate']==child['candidate']
+    assert (old_root/'gpt.raw.json').read_bytes()==raw==(new_root/'gpt.raw.json').read_bytes()
+    assert (old_root/'candidate.json').read_bytes()==candidate==(new_root/'candidate.json').read_bytes()
+    assert rebound['materials']['transaction_before']['evidence_steps/EN']['payload']['statement']=='changed outside the model scope'
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus','gpt','opus']  # no second GPT generation
+    assert store.claim_management_qualification('D')['ready']
