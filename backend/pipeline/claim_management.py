@@ -394,7 +394,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -501,7 +501,7 @@ def own_source_ids(payload, records):
     return resolve(payload, set())
 
 
-def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None):
+def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None, metadata_projection=None):
     """Validate a complete candidate, never infer semantic or write approval."""
     from backend.pipeline.claim_joint_update import enabled, validate_candidate_scope
     joint = enabled(request)
@@ -512,6 +512,8 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     internal_revision = current_operation == "Update" and request.operation in {"Create", "Restore", "Split", "Merge"}
     if current_operation not in request.allowed_operations and not internal_revision:
         raise ValueError("candidate operation exceeds original authorization")
+    from backend.pipeline.claim_metadata_projection import sampling_keys
+    sampling = sampling_keys(request, before, metadata_projection)
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if len(dispositions) != len(candidate.dispositions):
         raise ValueError("candidate repeats an object disposition")
@@ -540,7 +542,8 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
             raise ValueError("object disposition exceeds authorized operations")
         if collection not in CLAIM_COLLECTIONS or not disposition.citations:
             raise ValueError("every content disposition requires own-source evidence")
-        if old and old["payload"].get("review_status") in HELD:
+        sampling_update = key in sampling and disposition.action == "update" and payload is not None and payload.get("review_status") == "candidate"
+        if old and old["payload"].get("review_status") in HELD and not sampling_update:
             raise ValueError("Claim operation cannot override a protected review hold")
         if disposition.action == "create":
             if old is not None or payload is None:
@@ -580,14 +583,14 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 payload = deepcopy(old["payload"])
             elif payload is None:
                 raise ValueError("update/restore requires a complete postimage")
-            allowed_provenance = {'review_status'} if legacy_restore and payload.get('review_status') == 'candidate' else set()
+            allowed_provenance = {'review_status'} if sampling_update or legacy_restore and payload.get('review_status') == 'candidate' else set()
             if legacy_restore and (payload.get('review_status') != 'candidate' or payload.get('superseded_by')):
                 raise ValueError('legacy Restore must clear supersession without manufacturing approval')
             if any(payload.get(k) != old["payload"].get(k) for k in source.PROVENANCE - allowed_provenance):
                 raise ValueError("proposed update cannot manufacture review provenance")
             changed = {k for k in set(old["payload"]) | set(payload) if old["payload"].get(k) != payload.get(k)}
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
-            if changed - set(permission.fields) - mechanical:
+            if changed - set(permission.fields) - mechanical - ({"review_status"} if sampling_update else set()):
                 raise ValueError("updated fields exceed original field permission")
         if disposition.action != "retire":
             post[key] = deepcopy(payload)
@@ -1234,7 +1237,7 @@ def goal_packet(goal):
 
 def model_packet(materials):
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))

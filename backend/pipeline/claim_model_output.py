@@ -183,7 +183,11 @@ def candidate(raw, materials):
         raise ValueError('legacy identity recovery cannot upgrade the model output contract')
     managed = materials['policy']['model_output_contract'] == MANAGED_CONTRACT
     creating = materials['policy']['model_output_contract'] in {CREATING_CONTRACT, MANAGED_CONTRACT}
-    wire = (ManagedChanges if managed else CreatingChanges if creating else Changes).model_validate(raw)
+    from backend.pipeline.claim_metadata_projection import project_support_aliases, project_candidate
+    wire_type = ManagedChanges if managed else CreatingChanges if creating else Changes
+    wire = wire_type.model_validate(raw)
+    projected_raw, support_ids = project_support_aliases(raw, materials)
+    if support_ids:wire = wire_type.model_validate(projected_raw)
     request = cm.Request.model_validate(materials['unit_request'])
     if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
@@ -236,7 +240,8 @@ def candidate(raw, materials):
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
-    return result, receipt
+    if support_ids:receipt['support_creation_identities']=support_ids
+    return project_candidate(result, receipt, materials)
 
 
 def review(raw, materials, proposal):

@@ -3305,6 +3305,13 @@ class PostgresKnowledgeStore:
                 goal = {**expected_goal, 'source_transition_context': context}
             from backend.pipeline.claim_joint_update import admission_error
             refusal = admission_error(request, policy, before, goal)
+            if not refusal and request.operation == 'Update':
+                from backend.pipeline.claim_metadata_projection import compile_projection, sampling_keys
+                projection = compile_projection(cursor, request, before, policy)
+                released = sampling_keys(request, before, projection)
+                writable = {p.key for p in request.permissions}
+                if any(k in writable and before[k]['payload'].get('review_status') in cm.HELD and k not in released for k in request.target_keys):
+                    refusal = 'Claim write target has a protected review hold; no model call is authorized'
             value = {**identity, "original_goal": goal, "latest_rounds": {},
                      "source_baselines": source_baselines,
                      "call_reservations": {}, "findings": {}, "created_keys": [],
@@ -3570,6 +3577,9 @@ class PostgresKnowledgeStore:
                     if frozen.get('human_source_decisions') != expected_decisions:
                         raise ChangeSetConflict('Claim round omitted its frozen human source decisions')
                     assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions)
+                if 'program_metadata_projection' in frozen:
+                    from backend.pipeline.claim_metadata_projection import assert_current
+                    assert_current(cursor, Request.model_validate(frozen['unit_request']), frozen['before'], policy, frozen['program_metadata_projection'])
                 from backend.pipeline.claim_management import unit_goal
                 unit_request = Request.model_validate(frozen['unit_request'])
                 original = parent['original_goal']
@@ -8018,7 +8028,14 @@ class PostgresKnowledgeStore:
                         if plan.source_kind=='wang_cvp_management_v2':
                             from .cvp_management_authority import validate_sql_review
                             validate_sql_review(self,cursor,sql_group,sql_group['reviewed']['evidence'],plan)
-                        self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
+                        observed = self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
+                        if 'metadata_projection' in human_scope:
+                            from backend.pipeline import claim_management as cm
+                            from backend.pipeline.claim_metadata_projection import assert_current
+                            projection = human_scope['metadata_projection']
+                            assert_current(cursor, cm.Request.model_validate(projection['request']),
+                                {cm.source.key(*k):cm.model_state(v) for k,v in observed.items()},
+                                cm.Policy.model_validate(projection['policy']), projection['projection'])
                         if plan.review_events:raise ChangeSetConflict('empty business plan cannot write review events')
                         sql_group.update(checkpoint='applied',no_content_write_reviewed_sha256=transaction_context.reviewed_sha256)
                         cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(sql_group),transaction_context.run_id))
@@ -8077,6 +8094,13 @@ class PostgresKnowledgeStore:
                     if plan.source_kind == 'wang_claim_management_v2':
                         scope = sql_group['reviewed']['evidence'].get('claim_management_scope')
                     if scope:
+                        if 'metadata_projection' in scope:
+                            from backend.pipeline import claim_management as cm
+                            from backend.pipeline.claim_metadata_projection import assert_current
+                            projection = scope['metadata_projection']
+                            assert_current(cursor, cm.Request.model_validate(projection['request']),
+                                {cm.source.key(*k):cm.model_state(v) for k,v in transaction_before.items()},
+                                cm.Policy.model_validate(projection['policy']), projection['projection'])
                         if 'human_source_decisions' in scope:
                             from backend.pipeline.claim_human_source import assert_current
                             assert_current(cursor, scope['source_ids'], scope['human_source_decisions'])

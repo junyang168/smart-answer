@@ -239,7 +239,8 @@ def test_existing_intake_keeps_its_frozen_policy_when_new_default_changes(claims
 
 
 @pytest.mark.parametrize('legacy_follow_up',[False,True])
-def test_new_judgment_can_create_its_own_fragment_and_evidence_without_borrowing(claims,legacy_follow_up):
+@pytest.mark.parametrize('occupied_support',[False,True])
+def test_new_judgment_can_create_its_own_fragment_and_evidence_without_borrowing(claims,legacy_follow_up,occupied_support):
     from copy import deepcopy
     from backend.api.canonical_repository.claim_identity_allocation import reserve,allocated_ids
     from backend.pipeline.cvp_sql_commit import binding
@@ -247,6 +248,12 @@ def test_new_judgment_can_create_its_own_fragment_and_evidence_without_borrowing
     path=Path(doc['source_path']);path.write_text(json.dumps({'script':[{'text':'甲是假设，不是断言。'},{'text':'乙是结论。'}]},ensure_ascii=False))
     doc['source_file_sha256']=binding(path)['file_sha256']
     store.apply_plan(store.plan_package({'package_id':'complete-professor-source','source_documents':[doc]}))
+    occupied={}
+    if occupied_support:
+        store.apply_plan(store.plan_package({'package_id':'unrelated-support',
+            'source_fragments':[{'fragment_id':'NEW-F','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'}],
+            'evidence_steps':[{'evidence_step_id':'NEW-E','statement':'甲是假设，不是断言。','source_fragment_ids':['NEW-F'],'produced_claim_ids':[]}]}))
+        occupied={key:store.get_record_state(*key) for key in [('source_fragments','NEW-F'),('evidence_steps','NEW-E')]}
     prepared=intake.prepare(['C'],root,instruction='Full Update including missing independent source judgments',store=store)
     _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
     request,execution=next(iter(jobs.values()))
@@ -301,8 +308,13 @@ def test_new_judgment_can_create_its_own_fragment_and_evidence_without_borrowing
     result=execute_claim_management(store,request,root=execution,ports=ports)
     assert result['status']=='completed',result
     assert ports.calls==(['gpt','opus'] if legacy_follow_up else ['opus','gpt','opus'])
-    assert store.get_record_state('source_fragments','NEW-F')['payload']['paragraph_key']=='S0002'
-    assert store.get_record_state('evidence_steps','NEW-E')['payload']['source_fragment_ids']==['NEW-F']
-    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));created=[k for k in parent['created_keys'] if k.startswith('claims/')]
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    fid=next(k.split('/',1)[1] for k in parent['created_keys'] if k.startswith('source_fragments/'))
+    eid=next(k.split('/',1)[1] for k in parent['created_keys'] if k.startswith('evidence_steps/'))
+    assert fid.startswith('CMF-') and eid.startswith('CME-')
+    assert store.get_record_state('source_fragments',fid)['payload']['paragraph_key']=='S0002'
+    assert store.get_record_state('evidence_steps',eid)['payload']['source_fragment_ids']==[fid]
+    created=[k for k in parent['created_keys'] if k.startswith('claims/')]
     assert len(created)==1 and store.claim_management_qualification(created[0].split('/',1)[1])['ready']
     assert store.claim_management_qualification('C')['ready']
+    for key,state in occupied.items():assert store.get_record_state(*key)==state
