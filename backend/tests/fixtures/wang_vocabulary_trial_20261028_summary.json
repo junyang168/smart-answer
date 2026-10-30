@@ -1,0 +1,90 @@
+{
+  "schema_version": "wang-vocabulary-trial-summary.v1",
+  "source_classification": "Published sermon; known-error development regression, not a blind holdout or unedited sample.",
+  "source_sha256": "160d6288bc20b518d64fbdde789d2eb2a6b2db400cde47b90b22a1123f5251c1",
+  "vocabulary_sha256": "612c1c756438f4ef6a521034904e57aa50caab145f1b41f881a2d6188bc65bf6",
+  "protocol_sha256": "452d9a8b9c46c2fa19dacd73758a63a9089a51e65dc9ee6d7081b790dfad6fa0",
+  "results_sha256": "b08cb5c98b0462b7e578e502ccfea6815417cf84c8da4f23c81bbf7fae68544a",
+  "clip_count": 12,
+  "unique_audio_seconds": 288.32,
+  "target_cases": {
+    "speaker": 3,
+    "seminary": 3,
+    "jesus": 3
+  },
+  "negative_control_clips": 3,
+  "completed_calls": {
+    "asr": 24,
+    "correction_and_structural_repairs": 26
+  },
+  "estimated_usd": 0.10172624999999999,
+  "cost_is_invoice": false,
+  "production_writes": 0,
+  "original_source_artifacts_unchanged": true,
+  "published_reference_sent_to_runtime_models": false,
+  "correction_arms_share_exact_draft_and_audio": true,
+  "independent_asr_veto": false,
+  "findings": [
+    {
+      "case_id": "speaker_quoted",
+      "stage": "asr",
+      "baseline_excerpt": "我從王家說明學會",
+      "vocabulary_excerpt": "我從王教授那裡學會",
+      "assessment": "Targeted name improvement; adjacent pronoun confusion remains."
+    },
+    {
+      "case_id": "speaker_quoted",
+      "stage": "correction",
+      "baseline_excerpt": "我從管教授那學會",
+      "vocabulary_excerpt": "我從王教授那裡學會",
+      "assessment": "Targeted name improvement; vocabulary arm also changes 我 to 他 elsewhere in the quote, so do not claim whole-meaning fidelity."
+    },
+    {
+      "case_id": "seminary_students",
+      "stage": "asr",
+      "baseline_excerpt": "阿斯頓都學生",
+      "vocabulary_excerpt": "阿斯伯里的學生",
+      "assessment": "School spelling improved."
+    },
+    {
+      "case_id": "seminary_career",
+      "stage": "asr",
+      "baseline_excerpt": "安德神學院",
+      "vocabulary_excerpt": "阿斯伯里神學院",
+      "assessment": "School spelling improved."
+    },
+    {
+      "case_id": "seminary_history",
+      "stage": "asr",
+      "baseline_excerpt": "阿茲維神學院",
+      "vocabulary_excerpt": "阿斯伯神學院",
+      "assessment": "Still not the full preferred spelling. Correction uses Asbury, but vocabulary correction leaves 1966 while baseline correction changes to 1960; published reference says 1960. Audio not independently adjudicated."
+    },
+    {
+      "cases": [
+        "jesus_sons",
+        "jesus_exorcism",
+        "jesus_predestined"
+      ],
+      "assessment": "Jesus already correct in both arms; no demonstrated gain."
+    },
+    {
+      "cases": [
+        "control_near_death",
+        "control_dictionary",
+        "control_faith"
+      ],
+      "assessment": "No extra Wang, Asbury or Jesus inserted, but other errors remain; near-death statement becomes a fabricated Cai personal name in both correction arms."
+    }
+  ],
+  "decision": "Keep vocabulary opt-in. Promising proper-name improvement, not evidence of whole-transcript accuracy. No automatic publication or full-video replacement.",
+  "automated_tests_passed": 107,
+  "frontend_typecheck_passed": true,
+  "evaluation_limitations": [
+    "One paired generation per condition, no confidence intervals or generalization claim.",
+    "Known-error published lecture; selection is not blind.",
+    "No real other-Huang-professor acoustic counterexample tested.",
+    "No independent human audio ground truth; findings compare outputs and published text.",
+    "Correction trial uses identical original drafts; it is not the full ASR-to-correction chain."
+  ]
+}

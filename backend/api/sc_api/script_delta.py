@@ -332,7 +332,17 @@ class ScriptDelta:
         )
 
     @staticmethod
-    def save_json_payload(
+    def save_json_payload(base_folder, item_name, folder, payload, *, expected_current_sha256=None):
+        from .transcript_review import ReviewStore
+        store=ReviewStore(Path(base_folder))
+        with store.lock(item_name):
+            if store.enabled(item_name):
+                raise ScriptConflictError('Use the transcript review workflow for this sermon')
+            return ScriptDelta._save_json_payload_legacy(base_folder,item_name,folder,payload,
+                expected_current_sha256=expected_current_sha256)
+
+    @staticmethod
+    def _save_json_payload_legacy(
         base_folder: str,
         item_name: str,
         folder: str,
@@ -349,6 +359,8 @@ class ScriptDelta:
         historical list-only method above.
         """
 
+        if (Path(base_folder)/'transcript_review'/item_name/'context.json').is_file():
+            raise ScriptConflictError('Use the transcript review workflow for this sermon')
         if folder not in ('slide', 'script_review', 'script_published'):
             raise ValueError(f"unsupported script folder: {folder}")
         if folder in ('script_review', 'script_published') and not expected_current_sha256:
@@ -451,7 +463,15 @@ class ScriptDelta:
         return { 'metadata': metadata, 'script': sermon_detail}
 
 
-    def publish(
+    def publish(self,author,*,expected_review_sha256=None):
+        from .transcript_review import ReviewStore
+        store=ReviewStore(Path(self.base_folder))
+        with store.lock(self.item_name):
+            if store.enabled(self.item_name):
+                raise ScriptConflictError('Use the transcript review workflow for this sermon')
+            return self._publish_legacy(author,expected_review_sha256=expected_review_sha256)
+
+    def _publish_legacy(
         self,
         author: str,
         *,
@@ -466,6 +486,8 @@ class ScriptDelta:
         publishes whichever complete snapshot it locks.
         """
 
+        if (Path(self.base_folder)/'transcript_review'/self.item_name/'context.json').is_file():
+            raise ScriptConflictError('Use the transcript review workflow for this sermon')
         review_target = os.path.join(
             self.base_folder, "script_review", self.item_name + ".json"
         )

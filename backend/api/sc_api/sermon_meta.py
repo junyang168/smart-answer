@@ -221,8 +221,22 @@ class SermonMetaManager:
             sermon.core_bible_verse = core_bible_verse
 
     def save_sermon_metadata(self):
-        with open(self.metadata_file_path, "w") as f:
-            json.dump([s.dict() for s in self.sermons], f, ensure_ascii=False, indent=4)
+        # A legacy edit of another sermon must not overwrite review assignments
+        # from this long-lived manager's stale in-memory catalog.
+        import fcntl
+        from .transcript_review import atomic, read
+        with (Path(self.config_folder)/'.sermon-review.lock').open('a+b') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            current = {row['item']: row for row in read(Path(self.metadata_file_path), [])}
+            rows = []
+            for sermon in self.sermons:
+                row = sermon.model_dump()
+                if (Path(self.base_folder)/'transcript_review'/sermon.item/'context.json').is_file() or (Path(self.base_folder)/'transcript_candidates'/f'{sermon.item}.json').is_file():
+                    row = current.get(sermon.item, row)
+                rows.append(row)
+            known = {row['item'] for row in rows}
+            rows.extend(row for item, row in current.items() if item not in known)
+            atomic(Path(self.metadata_file_path), rows)
 
     def generate_sitemap(self, sermons, domain):
         urlset = ET.Element('urlset', xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")

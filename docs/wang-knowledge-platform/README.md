@@ -43,9 +43,20 @@
 | 文档 | 它回答什么 |
 | --- | --- |
 | [第一遍普查格式 v1](./10-extraction/corpus_survey_format_v1.md) | 全库普查的 JSON 格式 |
+| [圖文逐字稿同工審核設計](./10-extraction/transcript_human_review_design_v1.md) | 沿用認領與 Markdown 編輯，接入自動保存、slide 審核及精確版本發佈（待實作） |
 | [逐句详细知识整理与双模型复审流程 v1](./10-extraction/detailed_knowledge_extraction_workflow_v1.md) | 一篇讲道怎样被逐句拆成主张与证据 |
 | [來源逐句對帳與 claim 層完整性 v1](./10-extraction/source_to_claim_layer_ledger_v1.md) | 来源里的东西有没有真的进入论证图 |
 | [講道口語抽取實測 v1](./10-extraction/transcript_extraction_on_spoken_sermon_v1.md) | 抽取在口语讲道上的实际表现（记录） |
+| [投影片換頁辨識試跑](./10-extraction/slide_change_pilot_20261027.md) | 15 分鐘原片的換頁、逐步顯示、游標排除與雙模型實測（記錄） |
+| [音訊轉錄與投影片組合試跑](./10-extraction/transcript_slide_pilot_20261027.md) | 15 分鐘 ASR、中文對齊、標點分段與 24 張原圖的私人圖文試稿（記錄） |
+| [投影片可見性與空白輸出 v1](./10-extraction/slide_visibility_output_v1.md) | 教授單獨入鏡或無法判斷時清空圖片，保留口述與可見性時段 |
+| [投影片文字與圖表證據抽取 v1](./10-extraction/slide_visual_evidence_v1.md) | 可見文字、原圖座標、SVG 派生與論證取材來源分軌 |
+| [投影片文字與 SVG 試跑記錄](./10-extraction/slide_visual_evidence_pilot_20261027.md) | 24 張原圖的 124 個文字區域、獨立抽樣差異與遠端試稿（記錄） |
+| [原聲校對與投影片提示初次試跑](./10-extraction/transcript_audio_correction_pilot_20261027.md) | 已停用的重複 ASR 否決試驗歷史（記錄） |
+| [原聲與投影片校對重跑](./10-extraction/transcript_audio_slide_correction_v2_20261027.md) | 移除重複 ASR 否決，31 處 Gemini 修改及原聲回聽（記錄） |
+| [S 210307 全片圖文校對](./10-extraction/full_video_transcript_s210307_20261027.md) | 71 分鐘全片、閱讀稿清理與重新對齊時間檢查（記錄） |
+| [視頻轉錄與文庫接入 v1](./10-extraction/video_transcript_integration_v1.md) | 來源處理入口、圖文來源格式橋接與尚未接通的正式准入 |
+| [未記錄人工編輯講道的全片試跑](./10-extraction/unedited_video_20190901_20261028.md) | 成聖（II）全片、實體投影、全片清理上下文及文庫格式橋接（記錄） |
 | [分節抽取後獨立複審的價值 v1](./10-extraction/independent_review_value_after_section_extraction_v1.md) | 分节之后 AI 复审还抓得到什么（记录） |
 | [论证层视图 v1](./10-extraction/argument_layer_view_v1.md) | 怎样查看单篇来源的论证层 |
 | [講道目錄分類與 ingestion 邊界](./10-extraction/sermon_catalog_ingestion.md) | 目录导航、内容分类与跨讲归组的分界 |

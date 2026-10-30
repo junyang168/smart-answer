@@ -21,7 +21,7 @@ from .router import (
 )
 from .slides import router as slides_router
 from .scripture import router as scripture_router
-from .sc_api import router as sc_api_router
+from .sc_api.router import router as sc_api_router
 from .sc_api.rag import router as rag_router
 from .sermon_converter_router import router as sermon_converter_router
 from .lecture_router import router as lecture_router, public_router as lecture_public_router

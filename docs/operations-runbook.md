@@ -112,6 +112,24 @@ and checks the owner allow-list again before recording `decided_by` or
 `withdrawn_by`. A missing setting returns 503; do not bypass it by calling the
 backend endpoint directly.
 
+### Transcript proofreading beta
+
+The new transcript review UI and all `review_*` API routes are currently limited
+to the signed-in Google account `junyang168@gmail.com`. The Next.js page and
+proxy check that account; the production backend independently checks the signed
+actor, including mode probes, images, media and published review snapshots.
+Other accounts keep the existing editor. The isolated local preview router does
+not use the production owner restriction.
+
+Set `TRANSCRIPT_REVIEW_ACTION_SECRET` to the same randomly generated, server-only
+value in the production web `.env.local` and backend LaunchAgent environment.
+Never set `TRANSCRIPT_REVIEW_DEV_ACTOR` in production. A deployment installs code;
+it does not register, adopt or overwrite a transcript. Registration and adoption
+remain explicit, SHA-guarded operations; an existing manually edited or published
+transcript must not be replaced by a generated candidate. Before activating a
+shared production transcript, reconcile every legacy writer, including the
+nginx `/sc_api/` service on port 8000, with the migrated-document guards.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from
