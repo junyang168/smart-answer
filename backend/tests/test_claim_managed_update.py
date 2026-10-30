@@ -137,6 +137,34 @@ def test_list_update_creates_reserved_claim_and_links_its_evidence_and_question(
     assert len(calls) == 1
 
 
+def test_fragment_reanchor_can_update_both_media_endpoints(shared, monkeypatch):
+    store, root = shared
+    doc = deepcopy(store.get_record_state('source_documents', 'S')['payload'])
+    path = Path(doc['source_path'])
+    path.write_text(json.dumps([
+        {'index': 1, 'text': CITATION['exact_quote'], 'start_time': 0, 'end_time': 1},
+        {'index': 2, 'text': CITATION['exact_quote'], 'start_time': 2, 'end_time': 3}], ensure_ascii=False))
+    doc['source_file_sha256'] = intake.binding(path)['file_sha256']
+    old = deepcopy(store.get_record_state('source_fragments', 'F')['payload'])
+    old.update(media_time=0, media_end_time=1, source_segment_index=1)
+    store.apply_plan(store.plan_package({'package_id': 'timed-source', 'source_documents': [doc], 'source_fragments': [old]}))
+    def proposal(packet):
+        return {'changes': [{'record_key': 'source_fragments/F',
+            'fields_json': json.dumps({'paragraph_key': 'S0002', 'source_segment_index': 2,
+                                      'media_time': 2, 'media_end_time': 3}),
+            'reason': 'reanchor the complete media interval', 'citations': [{**CITATION, 'paragraph_key': 'S0002'}]}],
+            'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': decisions(packet)}
+    def execute(manifest, output):
+        for request, execution in batch.load(manifest, output, store=store)[1].values():
+            port = SyntheticPorts(store, execution, proposal=proposal, opus=lambda p: first_objection(p, 'reanchor'))
+            assert execute_claim_management(store, request, root=execution, ports=port)['status'] == 'completed'
+    monkeypatch.setattr(batch, 'run', execute)
+    result = intake.run(['C'], root, instruction='Refresh the complete media locator', store=store)
+    assert result['all_actions_completed']
+    fragment = store.get_record_state('source_fragments', 'F')['payload']
+    assert (fragment['paragraph_key'], fragment['media_time'], fragment['media_end_time']) == ('S0002', 2, 3)
+
+
 @pytest.mark.parametrize('late_failure', [False, True])
 def test_retirement_evidence_and_relations_commit_together_and_resume(shared, monkeypatch, late_failure):
     store, root = shared

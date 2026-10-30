@@ -878,7 +878,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
         observed = source.FileBinding.model_validate((archived_sources or {}).get(sid, binding))
         if observed.file_sha256 != binding.file_sha256:
             raise ValueError('archived source differs from the actual original source bytes')
-        sources[sid] = source.source_snapshot(observed, source=(source_documents or {}).get(sid))
+        sources[sid] = source.source_snapshot(observed, source=(source_documents or {}).get(sid),
+            visual_context=request.operation in {'Update', 'Review'} and not is_source_impact(request))
         sources[sid]['file'] = binding.model_dump(mode='json')
     for sid, snapshot in sources.items():
         document = (source_documents or {}).get(sid, {})

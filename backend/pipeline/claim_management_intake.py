@@ -19,7 +19,7 @@ FIELDS = {
                        'source_fragment_ids', 'speaker', 'stance', 'discourse_role',
                        'support_eligibility', 'produced_claim_ids', 'citation_ids'},
     'source_fragments': {'verbatim_excerpt', 'paragraph_key', 'source_segment_index',
-                         'media_time', 'anchor_state'},
+                         'media_time', 'media_end_time', 'anchor_state'},
     'observations': {'statement', 'observation_type', 'argument_role', 'scripture_refs',
                      'source_fragment_id', 'source_fragment_ids'},
     'questions': {'text', 'question_type', 'questioner', 'source_fragment_id',
