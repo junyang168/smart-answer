@@ -55,12 +55,16 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     body = text.length ? text : undefined;
   }
 
-  const guarded = [
-    "review_document",
-    "review_candidate",
-    "review_mode",
-    "review_public",
-  ].includes(params.path?.[0] || "");
+  const reviewEndpoint =
+    params.path?.[0] === "beta" ? params.path?.[1] : params.path?.[0];
+  const guarded =
+    params.path?.[0] === "beta" ||
+    [
+      "review_document",
+      "review_candidate",
+      "review_mode",
+      "review_public",
+    ].includes(reviewEndpoint || "");
   if (guarded && !["GET", "HEAD"].includes(request.method)) {
     const origin = request.headers.get("origin");
     let sameOrigin = false;

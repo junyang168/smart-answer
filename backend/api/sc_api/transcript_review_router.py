@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.routing import APIRoute
 from backend.pipeline.source_projection import live_script
 from .transcript_review import ReviewStore, ReviewError
 
@@ -42,14 +43,28 @@ def authenticated_actor(request: Request, body: bytes = b""):
     return actor
 
 
-def create_review_router(root: Path, *, beta_owner: str | None = None):
+def create_review_router(root: Path, *, beta_owner: str | None = None, api_base="/api/sc_api"):
+    class PrivateReviewRoute(APIRoute):
+        def get_route_handler(self):
+            handler = super().get_route_handler()
+
+            async def private_response(request):
+                response = await handler(request)
+                response.headers["Cache-Control"] = "private, no-store"
+                return response
+
+            return private_response
+
     async def beta_access(request: Request):
         actor = authenticated_actor(request, await request.body())
         if actor != beta_owner:
             raise HTTPException(403, "圖文審核 beta 目前只對指定帳號開放")
 
-    router = APIRouter(dependencies=[Depends(beta_access)] if beta_owner else [])
-    store = ReviewStore(root)
+    router = APIRouter(
+        dependencies=[Depends(beta_access)] if beta_owner else [],
+        route_class=PrivateReviewRoute if beta_owner else APIRoute,
+    )
+    store = ReviewStore(root, public_api_base=api_base + "/review_public")
 
     async def payload_from(request):
         try:

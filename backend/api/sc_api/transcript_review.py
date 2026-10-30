@@ -63,8 +63,9 @@ class ReviewError(Exception):
 
 
 class ReviewStore:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, public_api_base="/api/sc_api/review_public"):
         self.root = Path(root)
+        self.public_api_base = public_api_base
 
     def folder(self, item):
         if (
@@ -653,7 +654,7 @@ class ReviewStore:
                             422,
                             "投影片文字包含無法輸出的內容，請檢查文字或先隱藏該圖片。",
                         ) from exc
-                    image_url = f"/api/sc_api/review_public/{quote(item, safe='')}/assets/{asset_id}"
+                    image_url = f"{self.public_api_base}/{quote(item, safe='')}/assets/{asset_id}"
                     visuals.append(
                         f'<figure data-transcript-slide="v1" data-source-image-sha256="{a["image_sha256"]}">\n<img src="{image_url}" alt="投影片（非口述）" />\n<figcaption>投影片（非口述）</figcaption>\n<details><summary>投影片文字（機器重建，非口述）</summary>\n{svg}\n</details>\n</figure>'
                     )

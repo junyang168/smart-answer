@@ -185,9 +185,11 @@ const transportButton =
 export function TranscriptReviewEntry({
   item,
   legacy,
+  apiBase = "/api/sc_api",
 }: {
   item: string;
   legacy: React.ReactNode;
+  apiBase?: string;
 }) {
   const [state, setState] = useState<{
     doc?: Document;
@@ -198,7 +200,7 @@ export function TranscriptReviewEntry({
   useEffect(() => {
     let alive = true;
     request<{ mode: string }>(
-      `/api/sc_api/review_mode/${encodeURIComponent(item)}`,
+      `${apiBase}/review_mode/${encodeURIComponent(item)}`,
     )
       .then(async ({ mode }) => {
         if (mode === "legacy") {
@@ -207,13 +209,13 @@ export function TranscriptReviewEntry({
         }
         if (mode === "candidate") {
           const candidate = await request<Candidate>(
-            `/api/sc_api/review_candidate/${encodeURIComponent(item)}`,
+            `${apiBase}/review_candidate/${encodeURIComponent(item)}`,
           );
           if (alive) setState({ candidate });
           return;
         }
         const doc = await loadDocument(
-          `/api/sc_api/review_document/${encodeURIComponent(item)}`,
+          `${apiBase}/review_document/${encodeURIComponent(item)}`,
         );
         if (alive) setState({ doc });
       })
@@ -223,13 +225,14 @@ export function TranscriptReviewEntry({
     return () => {
       alive = false;
     };
-  }, [item]);
+  }, [item, apiBase]);
 
   if (state.candidate)
     return (
       <CandidateAdoption
         item={item}
         initial={state.candidate}
+        apiBase={apiBase}
         onAdopt={(doc) => setState({ doc })}
       />
     );
@@ -238,17 +241,26 @@ export function TranscriptReviewEntry({
     return (
       <p className="p-8 text-slate-600">{state.error || "正在載入圖文審核…"}</p>
     );
-  return <TranscriptProofreader key={item} item={item} initial={state.doc} />;
+  return (
+    <TranscriptProofreader
+      key={item}
+      item={item}
+      initial={state.doc}
+      apiBase={apiBase}
+    />
+  );
 }
 
 function TranscriptProofreader({
   item,
   initial,
+  apiBase,
 }: {
   item: string;
   initial: Document;
+  apiBase: string;
 }) {
-  const base = `/api/sc_api/review_document/${encodeURIComponent(item)}`;
+  const base = `${apiBase}/review_document/${encodeURIComponent(item)}`;
   const [doc, setDoc] = useState(initial);
   const current = useRef(initial);
   const [selected, setSelected] = useState(initial.script[0]?.index || "");
@@ -299,7 +311,7 @@ function TranscriptProofreader({
     }
     return id;
   });
-  const identity = `${initial.actor}:${item}:${tabId}`;
+  const identity = `${apiBase === "/api/sc_api" ? "" : apiBase + ":"}${initial.actor}:${item}:${tabId}`;
   const options = useMemo<Options>(
     () => ({
       autofocus: false,
@@ -1923,15 +1935,17 @@ function CandidateAdoption({
   item,
   initial,
   onAdopt,
+  apiBase,
 }: {
   item: string;
   initial: Candidate;
+  apiBase: string;
   onAdopt: (doc: Document) => void;
 }) {
   const [candidate, setCandidate] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const url = `/api/sc_api/review_candidate/${encodeURIComponent(item)}`;
+  const url = `${apiBase}/review_candidate/${encodeURIComponent(item)}`;
   const act = async (action: string) => {
     setBusy(true);
     setError("");
@@ -1953,7 +1967,7 @@ function CandidateAdoption({
       if (action === "adopt")
         onAdopt(
           await loadDocument(
-            `/api/sc_api/review_document/${encodeURIComponent(item)}`,
+            `${apiBase}/review_document/${encodeURIComponent(item)}`,
           ),
         );
       else setCandidate(await request(url));

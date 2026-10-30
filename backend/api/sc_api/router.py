@@ -4,6 +4,7 @@ import json
 import logging
 import traceback
 import datetime
+import os
 
 from pathlib import Path
 from typing import List, Optional, Union
@@ -37,6 +38,16 @@ from .transcript_review import ReviewStore, ReviewError
 
 router = APIRouter(prefix="/sc_api", tags=["sc-api"])
 router.include_router(create_review_router(DATA_BASE_PATH, beta_owner="junyang168@gmail.com"))
+beta_data_dir = os.getenv("TRANSCRIPT_REVIEW_BETA_DATA_DIR")
+if beta_data_dir:
+    router.include_router(
+        create_review_router(
+            Path(beta_data_dir),
+            beta_owner="junyang168@gmail.com",
+            api_base="/api/sc_api/beta",
+        ),
+        prefix="/beta",
+    )
 
 
 def legacy_only(item):

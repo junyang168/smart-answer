@@ -551,7 +551,9 @@ def test_beta_restricts_every_route_including_probe_public_assets_and_writes(set
         assert client.request(method, path).status_code == 401
         assert client.request(method, path, headers=signed(method, path, actor="b")).status_code == 403
     path = "/sc_api/review_document/" + item
-    assert client.get(path, headers=signed("GET", path)).status_code == 200
+    authorized = client.get(path, headers=signed("GET", path))
+    assert authorized.status_code == 200
+    assert authorized.headers["cache-control"] == "private, no-store"
     doc = store.document("a", "講道 test")
     body = json.dumps(op(doc, operations=[{"kind": "text", "id": "1", "text": "beta修改"}])).encode()
     response = client.patch(path, content=body, headers={**signed("PATCH", path, body), "content-type": "application/json", "if-match": doc["version"]})
@@ -671,3 +673,40 @@ def test_history_and_published_snapshot_are_sha_bound_and_media_survives_source_
         store.history("a", item)
     with pytest.raises(ReviewError):
         store.asset_path(item, next(iter(doc["context"]["visual_assets"])), public=True)
+
+
+def test_beta_activation_preserves_local_edits_history_and_legacy_manuscript(setup, tmp_path):
+    import importlib.util
+    script = Path(__file__).resolve().parents[2] / "scripts/activate-transcript-beta.py"
+    spec = importlib.util.spec_from_file_location("activate_beta", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    store, source_root, _ = setup
+    item = "講道 test"
+    doc = adopted(setup)
+    store.mutate("a", item, op(doc, operations=[{"kind": "text", "id": "1", "text": "已校對~~刪除~~正文"}]))
+    original = confirmed(store)
+    history_files = {p.name: file_hash(p) for p in (store.folder(item) / "revisions").glob("*.json")}
+    production = tmp_path / "production"
+    atomic(production / "config/config.json", read(source_root / "config/config.json"))
+    atomic(production / "script_review" / (item + ".json"), [{"index": "old", "text": "原人工稿"}])
+    legacy_sha = file_hash(production / "script_review" / (item + ".json"))
+    module.activate(source_root, production, item, "a")
+    beta_root = production / "transcript-review-beta"
+    beta = ReviewStore(beta_root, public_api_base="/api/sc_api/beta/review_public")
+    copied = beta.document("a", item)
+    assert copied["script"] == original["script"]
+    assert copied["context"]["reviews"] == original["context"]["reviews"]
+    for name, sha in history_files.items():
+        assert file_hash(beta.folder(item) / "revisions" / name) == sha
+    assert beta.history("a", item)
+    assert read(beta_root / "activation.json")["content_review_decisions_added"] == 0
+    assert copied["can_edit"]
+    assert file_hash(production / "script_review" / (item + ".json")) == legacy_sha
+    beta.publish("a", item, op(copied))
+    published = read(beta_root / "script_published" / (item + ".json"))
+    assert "/api/sc_api/beta/review_public/" in published["script"][0]["text"]
+    assert not (production / "script_published" / (item + ".json")).exists()
+    assert store.document("a", item)["version"] == original["version"]
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        module.activate(source_root, production, item, "a")
