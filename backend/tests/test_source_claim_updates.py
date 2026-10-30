@@ -516,3 +516,21 @@ def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundari
     assert result['status']=='completed',result
     assert ports.calls==['opus','gpt','opus']  # no second GPT generation
     assert store.claim_management_qualification('D')['ready']
+
+
+def test_fragment_rejection_diagnostics_keep_segment_and_paragraph_distinct():
+    from backend.pipeline.claim_review_recovery import fragment_binding_diagnostics
+    materials={'before':{'source_fragments/F':{'payload':{'source_id':'S','verbatim_excerpt':'原话'}}},
+        'sources':{'S':{'paragraphs':{'S0001':{'text':'这里有原话。','source_segment_index':7},
+                                    'S0007':{'text':'别的话','source_segment_index':19}}}}}
+    response={'changes':[{'record_key':'source_fragments/F','fields_json':json.dumps({'paragraph_key':'S0007','source_segment_index':7})}]}
+    original=deepcopy(response)
+    assert fragment_binding_diagnostics(response,materials)==[{'record_key':'source_fragments/F','source_id':'S',
+        'provided_paragraph_key':'S0007','literal_matches':[{'paragraph_key':'S0001','source_segment_index':7}]}]
+    assert response==original
+    materials['sources']['S']['paragraphs']['S0007']['text']='重复原话'
+    assert fragment_binding_diagnostics(response,materials)==[]
+    response['changes'][0]['fields_json']=json.dumps({'paragraph_key':'missing'})
+    assert len(fragment_binding_diagnostics(response,materials)[0]['literal_matches'])==2
+    materials['before']['source_fragments/F']['payload']['source_id']='foreign'
+    assert fragment_binding_diagnostics(response,materials)[0]['literal_matches']==[]

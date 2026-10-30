@@ -752,6 +752,26 @@ def test_permission_follow_up_may_add_a_target_claim_named_by_a_finding(added, a
     assert finding_permission_extension(previous, old, request) is allowed
 
 
+@pytest.mark.parametrize('defect',['none','other_source','approval_fields','changed_claim_grant','changed_existing_grant','missing_claim_grant','source_uncertain'])
+def test_source_support_creation_extension_keeps_the_existing_authority_and_source(defect):
+    from types import SimpleNamespace
+    from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+    grant=cm.source.Permission(collection='evidence_steps',object_id='E',fields=['statement'])
+    claim=cm.CreationPermission(collection='claims',source_id='S',fields=['statement','evidence_step_ids'])
+    old=SimpleNamespace(permissions=[grant],creation_permissions=[claim],source_bindings={'S':{}})
+    extra=[cm.CreationPermission(collection=col,source_id='S',fields=sorted(fields)) for col,fields in SUPPORT_CREATION_FIELDS.items()]
+    request=SimpleNamespace(target_keys=['claims/A'],permissions=[grant],creation_permissions=[claim,*extra])
+    previous={'result':{'status':'paused','reason':'no_progress'},'findings':{'F':{'target_key':'evidence_steps/E',
+        'category':'mapping','citations':[{'source_id':'S'}]}},'original_goal':{'original_objects':{'evidence_steps/E':{'retired':False}}}}
+    if defect=='other_source':request.creation_permissions[1]=extra[0].model_copy(update={'source_id':'T'})
+    elif defect=='approval_fields':request.creation_permissions[1]=extra[0].model_copy(update={'fields':extra[0].fields+['review_status']})
+    elif defect=='changed_claim_grant':request.creation_permissions[0]=claim.model_copy(update={'fields':claim.fields+['review_status']})
+    elif defect=='changed_existing_grant':request.permissions=[grant.model_copy(update={'fields':['statement','speaker']})]
+    elif defect=='missing_claim_grant':old.creation_permissions=[]
+    elif defect=='source_uncertain':previous['findings']['F']['category']='source_uncertain'
+    assert joint.finding_permission_extension(previous,old,request) is (defect=='none')
+
+
 def test_a_finding_on_a_written_target_implies_its_own_impact():
     # #459: GPT wrote CL004 and left CL004 out of affected_write_keys.
     from types import SimpleNamespace

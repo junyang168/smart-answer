@@ -182,6 +182,53 @@ def test_unknown_extension_can_bind_current_transaction_consumers_without_changi
     assert store.claim_management_qualification('C')['ready']
 
 
+@pytest.mark.parametrize('defect',['none','missing_scope_authority','unmentioned_owner','approval_field','old_target_removed'])
+def test_explicit_follow_up_can_include_one_frozen_shared_owner_in_same_source(shared,defect):
+    store,request,root,tmp=shared
+    request.target_keys=['claims/A'];request.permissions=[p for p in request.permissions if not p.key.startswith('claims/') or p.key=='claims/A']
+    policy=bind(request,tmp,cap=1,required=['evidence_steps/E'],initial='existing');policy.independent_audit=False;policy.budget.gpt_calls=0
+    policy_path=tmp/'owner-old-policy.json';policy_path.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    from backend.tests.test_claim_management_human_source_follow_up import authorize as bind_authority
+    bind_authority(request,{'required_maintenance_keys':['evidence_steps/E']})
+    def initial_review(packet):return joint_reject(packet,'claims/B',affected=['claims/A'])
+    ports=SyntheticPorts(store,root,opus=initial_review)
+    assert execute_claim_management(store,request,root=root,ports=ports)['status']=='paused'
+    old=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert ports.calls==['opus'] and old['result']['reason']=='budget_exhausted'
+    successor=request.model_copy(deep=True);successor.predecessor_action_id=request.action_id;successor.action_id+='-owner-repair'
+    successor.target_keys=['claims/A','claims/C' if defect=='unmentioned_owner' else 'claims/B']
+    if defect=='old_target_removed':successor.target_keys=['claims/B']
+    added=successor.target_keys[-1]
+    successor.permissions.append(cm.source.Permission(collection='claims',object_id=added.split('/',1)[1],fields=['statement','review_status'] if defect=='approval_field' else ['statement']))
+    policy=policy.model_copy(deep=True);policy.initial_candidate='proposal';policy.joint_update_max_targets=2
+    policy.budget=policy.budget.model_copy(update={'gpt_calls':1,'opus_calls':1,'max_revisions':1})
+    path=tmp/'owner-new-policy.json';path.write_text(policy.model_dump_json());successor.policy=cm.source.FileBinding.model_validate(binding(path))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys]+[('source_documents','S')])
+    before={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    metadata={k:v for k,v in old.items() if k not in {'run_id','status','error'}}
+    auth=json.loads(Path(request.authorization.path).read_text());auth.update(request=successor.model_dump(mode='json',exclude={'authorization','policy'}),policy=successor.policy.model_dump(mode='json'),
+        owner_target_extension={'previous_target_keys':request.target_keys,'added_target_keys':[added]},
+        owner_call_extension={'basis':'permission_required','predecessor_action_id':request.action_id,'prior_metadata_sha256':cm.sha256_json(metadata),
+            'authorization_quote':'include the named shared owner, one GPT and one Opus','budget':policy.budget.model_dump(mode='json'),
+            'current_objects_sha256':cm.sha256_json(before),'related_action_metadata_sha256':{}})
+    if defect=='missing_scope_authority':auth.pop('owner_target_extension')
+    auth_path=tmp/'owner-new-authority.json';auth_path.write_text(json.dumps(auth));successor.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    next_root=tmp/'owner-next';new_ports=SyntheticPorts(store,next_root,proposal=lambda packet:update(packet,keys=('claims/B','evidence_steps/E')),opus=joint_pass)
+    if defect!='none':
+        try:
+            refused=execute_claim_management(store,successor,root=next_root,ports=new_ports)
+        except (ValueError,RuntimeError):
+            pass
+        else:
+            assert refused['status']=='paused' and refused['reason']=='engineering_required',refused
+        assert new_ports.calls==[]
+        return
+    result=execute_claim_management(store,successor,root=next_root,ports=new_ports)
+    assert result['status']=='completed',result
+    assert new_ports.calls==['gpt','opus'] and store.claim_management_qualification('A')['ready'] and store.claim_management_qualification('B')['ready']
+    assert store.get_cvp_group(old['run_id'])['continued_by']=='CMA-'+cm.sha256_json(successor.action_id)
+
+
 @pytest.fixture(params=['remaining_findings','qualification_refresh'])
 def owner_review_follow_up(shared,request):
     store,old,root,tmp=shared

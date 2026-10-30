@@ -474,6 +474,26 @@ def rejected_citation_input(value, parent, role):
     return rejected_model_input(value,parent,role,error=CITATION_ERROR)
 
 
+def fragment_binding_diagnostics(response, materials):
+    """Locate literal excerpts for correction, without repairing the candidate."""
+    invalid=[]
+    for change in response.get('changes',[]):
+        record_key=change.get('record_key','')
+        if not record_key.startswith('source_fragments/'):
+            continue
+        record={**materials['before'].get(record_key,{}).get('payload',{}),
+                **json.loads(change['fields_json'])}
+        sid=record.get('source_id');paragraphs=materials['sources'].get(sid,{}).get('paragraphs',{})
+        excerpt=record.get('verbatim_excerpt','');key=record.get('paragraph_key')
+        if not excerpt or excerpt in paragraphs.get(key,{}).get('text',''):
+            continue
+        invalid.append({'record_key':record_key,
+            'source_id':sid,'provided_paragraph_key':key,
+            'literal_matches':[{'paragraph_key':pk,**{k:v for k,v in paragraph.items() if k!='text'}}
+                for pk,paragraph in paragraphs.items() if excerpt in paragraph.get('text','')]})
+    return invalid
+
+
 def rejected_model_input(value, parent, role, *, error):
     """Authenticate and reproduce a supported rejection; never approve its content."""
     if not isinstance(error,str) or not error or role not in {'gpt','opus'}:
@@ -584,8 +604,10 @@ def rejected_model_input(value, parent, role, *, error):
         if not located:raise ValueError('rejected-input correction requires a bound own-source location')
         return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
             'response':raw['response'],'rejection_detail':error,'correction_citation':located[0],
+            **({'invalid_fragment_bindings':fragment_binding_diagnostics(raw['response'],materials)}
+                if role=='gpt' and error=='new/updated fragment lacks an exact complete own source paragraph/excerpt' else {}),
             'review_not_accepted':True,
-            'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
+            'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. For fragment bindings, paragraph_key and source_segment_index are distinct source metadata: verify each from the literal matching paragraph, never infer one from the other. Literal matches are diagnostics, not an accepted repair. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
     if not bad:raise ValueError('no authenticated non-exact citation to correct')
     return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
         'response':raw['response'],'invalid_citations':bad,'review_not_accepted':True,

@@ -95,7 +95,8 @@ def test_permissions_do_not_turn_related_claims_into_hidden_targets(claims):
     _, jobs = batch.load(prepared['manifest']['path'], root / 'batch', store=store)
     request = next(iter(jobs.values()))[0]
     assert request.target_keys == ['claims/C']
-    assert [(p.collection, p.source_id) for p in request.creation_permissions] == [('claims', 'S')]
+    assert [(p.collection, p.source_id) for p in request.creation_permissions] == [
+        ('claims', 'S'), ('evidence_steps', 'S'), ('source_fragments', 'S')]
     assert not any(p.key == 'claims/D' for p in request.permissions)
     assert all(not set(p.fields) & (cm.source.PROVENANCE | {'visibility', 'claim_id', 'source_id'})
                for p in request.permissions)
@@ -235,3 +236,73 @@ def test_existing_intake_keeps_its_frozen_policy_when_new_default_changes(claims
     request = next(iter(batch.load(saved['manifest']['path'], root / 'batch', store=store)[1].values()))[0]
     assert request.allowed_operations == ['Update'] and not request.creation_permissions
     assert json.loads(Path(request.policy.path).read_text())['model_output_contract'] == 'claim_changes_v2'
+
+
+@pytest.mark.parametrize('legacy_follow_up',[False,True])
+def test_new_judgment_can_create_its_own_fragment_and_evidence_without_borrowing(claims,legacy_follow_up):
+    from copy import deepcopy
+    from backend.api.canonical_repository.claim_identity_allocation import reserve,allocated_ids
+    from backend.pipeline.cvp_sql_commit import binding
+    store,root=claims;doc=deepcopy(store.get_record_state('source_documents','S')['payload'])
+    path=Path(doc['source_path']);path.write_text(json.dumps({'script':[{'text':'甲是假设，不是断言。'},{'text':'乙是结论。'}]},ensure_ascii=False))
+    doc['source_file_sha256']=binding(path)['file_sha256']
+    store.apply_plan(store.plan_package({'package_id':'complete-professor-source','source_documents':[doc]}))
+    prepared=intake.prepare(['C'],root,instruction='Full Update including missing independent source judgments',store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'乙是结论。'}
+    def decisions(packet):
+        return [{'finding_id':fid,'disposition':'resolved','reason':'the new judgment has its own source evidence',
+            'citations':[citation],'affected_target_keys':['claims/C'],'affected_write_keys':[],
+            'impact_reason':'complete source judgment now recorded'} for fid in packet['unresolved']]
+    def review(packet):
+        value=pass_review(packet);value['prior_findings']=decisions(packet)
+        if not packet['unresolved']:
+            value['findings']=[{'target_key':'claims/C','component':'independent_judgement_without_claim','category':'mapping',
+                'reason':'the second paragraph has no Claim or bound Evidence','acceptance_condition':'create its source fragment, Evidence and Claim',
+                'citations':[citation],'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'source teaching omitted'}]
+        return value
+    def proposal(packet):
+        cid=allocated_ids(packet['original_goal']['claim_creation_allocations'])[0]
+        rows=[('source_fragments','NEW-F',{'source_id':'S','paragraph_key':'S0002','verbatim_excerpt':citation['exact_quote'],'anchor_state':'current'}),
+              ('evidence_steps','NEW-E',{'statement':citation['exact_quote'],'source_fragment_ids':['NEW-F'],'produced_claim_ids':[cid],
+                  'speaker':'professor','stance':'asserted','support_eligibility':'eligible_candidate'}),
+              ('claims',cid,{'statement':citation['exact_quote'],'claim_type':'exegesis','attribution':'professor','evidence_step_ids':['NEW-E'],
+                  'occurrences':[{'source_id':'S','anchors':[]}]})]
+        return {'changes':[],'creations':[{'collection':col,'object_id':oid,'fields_json':json.dumps(payload),
+            'reason':'record professor source judgment with its own evidence','citations':[citation]} for col,oid,payload in rows],
+            'retirements':[],'findings':[],'finding_resolutions':decisions(packet)}
+    if legacy_follow_up:
+        policy=cm.Policy.model_validate_json(Path(request.policy.path).read_text());policy.budget.gpt_calls=0
+        policy_path=root/'legacy-policy.json';policy_path.write_text(policy.model_dump_json())
+        request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+        request.creation_permissions=[g for g in request.creation_permissions if g.collection=='claims']
+        auth=json.loads(Path(request.authorization.path).read_text());auth.update(request=request.model_dump(mode='json',exclude={'authorization','policy'}),policy=request.policy.model_dump(mode='json'))
+        auth_path=root/'legacy-authorization.json';auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+        old_ports=SyntheticPorts(store,execution,opus=review,proposal=proposal)
+        assert execute_claim_management(store,request,root=execution,ports=old_ports)['status']=='paused'
+        assert old_ports.calls==['opus']
+        old=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+        store.pause_claim_management_action(old['run_id'],reason='permission_required',detail='Claim Create omitted the necessary same-source support Create grants')
+        old=store.get_cvp_group(old['run_id']);previous={k:v for k,v in old.items() if k not in {'run_id','status','error'}}
+        request=request.model_copy(deep=True);request.predecessor_action_id=request.action_id;request.action_id+='-support-follow-up'
+        request.creation_permissions += [cm.CreationPermission(collection=col,source_id='S',fields=sorted(fields)) for col,fields in intake.SUPPORT_CREATION_FIELDS.items()]
+        policy.initial_candidate='proposal';policy.budget=policy.budget.model_copy(update={'gpt_calls':1,'opus_calls':1,'max_revisions':1})
+        policy_path=root/'follow-policy.json';policy_path.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+        execution=root/'follow-execution'
+        records=store.read_claim_context([('claims','C'),('source_documents','S')]);before={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+        auth.update(request=request.model_dump(mode='json',exclude={'authorization','policy'}),policy=request.policy.model_dump(mode='json'),
+            claim_creation_allocations={'S':reserve(store,action_id=request.action_id,source_id='S',target_id='C',root=execution)},
+            owner_call_extension={'basis':'permission_required','predecessor_action_id':request.predecessor_action_id,'prior_metadata_sha256':cm.sha256_json(previous),
+                'authorization_quote':'engineering repair grants one bounded correction and review','budget':policy.budget.model_dump(mode='json'),
+                'current_objects_sha256':cm.sha256_json(before),'related_action_metadata_sha256':{}})
+        auth_path=root/'follow-authorization.json';auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    ports=SyntheticPorts(store,execution,opus=review,proposal=proposal)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==(['gpt','opus'] if legacy_follow_up else ['opus','gpt','opus'])
+    assert store.get_record_state('source_fragments','NEW-F')['payload']['paragraph_key']=='S0002'
+    assert store.get_record_state('evidence_steps','NEW-E')['payload']['source_fragment_ids']==['NEW-F']
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));created=[k for k in parent['created_keys'] if k.startswith('claims/')]
+    assert len(created)==1 and store.claim_management_qualification(created[0].split('/',1)[1])['ready']
+    assert store.claim_management_qualification('C')['ready']

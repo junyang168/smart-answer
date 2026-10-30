@@ -32,6 +32,13 @@ FIELDS = {
                                   'bidirectional', 'composition_role', 'reason'},
 }
 
+# A new Claim may need a new piece of its own professor source as evidence.
+# These remain content-only grants; source documents and approval stay protected.
+SUPPORT_CREATION_FIELDS = {
+    'evidence_steps': FIELDS['evidence_steps'],
+    'source_fragments': FIELDS['source_fragments'] | {'source_id'},
+}
+
 
 def claim_ids(values):
     if not isinstance(values, list) or not values:
@@ -127,6 +134,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             request.allowed_operations = ['Update', 'Create', 'Retire']
             request.creation_permissions = [cm.CreationPermission(collection='claims', source_id=sid,
                                                                   fields=sorted(FIELDS['claims']))]
+            request.creation_permissions += [cm.CreationPermission(collection=col, source_id=sid,
+                fields=sorted(fields)) for col,fields in SUPPORT_CREATION_FIELDS.items()]
             allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
                                        root=action_dir / 'execution',count=creation_count)
         # A writable relation makes its other Claim reviewed content, so one

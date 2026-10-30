@@ -3346,7 +3346,7 @@ class PostgresKnowledgeStore:
                     # object; the complete transaction snapshot below must
                     # still match the predecessor exactly.
                     permission_follow_up = extension.get('basis') == 'permission_required'
-                    if (not permission_follow_up or any(goal['original_objects'].get(key) != state
+                    if (not (permission_follow_up or continuation.get('related_owner_target_extension')) or any(goal['original_objects'].get(key) != state
                             for key, state in prior['original_goal']['original_objects'].items())):
                         raise ChangeSetConflict('owner call extension original content scope drifted')
                 target_baseline = {key:(value['revision'],value['content_sha256'],value['retired'])
@@ -3386,9 +3386,13 @@ class PostgresKnowledgeStore:
                             # extensions without a current binding stay strict.
                             current_bound_follow_up = (extension
                                 and (extension.get('basis') == 'remaining_findings'
-                                     or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension))
+                                     or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension
+                                     or extension.get('basis') == 'permission_required' and (
+                                         continuation.get('source_support_creation') or continuation.get('related_owner_target_extension'))))
                             if (not (continuation.get('opus_api_transition') or current_bound_follow_up)
-                                    or goal['original_objects'] != child['materials']['before']):
+                                    or (goal['original_objects'] != child['materials']['before']
+                                        and not (continuation.get('related_owner_target_extension') and all(
+                                            goal['original_objects'].get(k)==state for k,state in child['materials']['before'].items())))):
                                 raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
                         if not candidate:
@@ -3410,6 +3414,15 @@ class PostgresKnowledgeStore:
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
                     elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not continuation.get('opus_api_transition')):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
+                if continuation.get('related_owner_target_extension'):
+                    # Adding the explicitly authorized owner changes the joint
+                    # unit identity. Carry the saved candidate into that same
+                    # single successor unit, without rewriting its content.
+                    candidates = continuation.get('previous_candidates', {})
+                    if len(candidates) != 1 or len(goal['units']) != 1:
+                        raise ChangeSetConflict('owner target follow-up requires one saved joint candidate')
+                    continuation['previous_candidates'] = {
+                        next(iter(goal['units'])): next(iter(candidates.values()))}
                 if any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
                 if prior.get('continued_by'):

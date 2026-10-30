@@ -1551,11 +1551,14 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
-    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
+    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
+    target_extension = owner_target_extension(previous, old, request)
+    support_creation = (request.creation_permissions != old.creation_permissions
+        and finding_permission_extension(previous, old, request))
     read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh'
         and not request.permissions and not request.creation_permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
@@ -1563,19 +1566,22 @@ def continuation_budget(previous, request, policy):
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
             or (request.permissions != old.permissions and not read_only_refresh
                 and not finding_permission_extension(previous, old, request))
-            or policy.joint_update_max_targets != original.joint_update_max_targets
+            or (policy.joint_update_max_targets != original.joint_update_max_targets
+                and not (target_extension and policy.joint_update_max_targets == len(request.target_keys)))
             or len(previous['original_goal']['units']) != 1):
         raise ValueError('joint Update continuation must retain one complete original unit, required maintenance and authority')
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
-            or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
+            or (old.target_keys != request.target_keys and not target_extension) or old.source_bindings != request.source_bindings
             or (request.creation_permissions != old.creation_permissions
-                and not (read_only_refresh and not request.creation_permissions))
+                and not (read_only_refresh and not request.creation_permissions) and not support_creation)
             or (previous.get('created_keys') and not read_only_refresh) or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     permission_follow_up = (extension_basis == 'permission_required'
-        and previous['result'].get('reason') == 'permission_required'
+        and (previous['result'].get('reason') == 'permission_required'
+             or support_creation and previous['result'].get('reason') == 'no_progress'
+             or target_extension and previous['result'].get('reason') == 'budget_exhausted')
         and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
@@ -1708,7 +1714,10 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {**({'opus_api_transition':api_transition} if api_transition else {}), 'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
+    return {**({'opus_api_transition':api_transition} if api_transition else {}),
+        **({'source_support_creation':True} if support_creation else {}),
+        **({'related_owner_target_extension':True} if target_extension else {}),
+        'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
