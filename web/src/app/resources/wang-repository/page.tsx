@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 type RepositoryView = "bible" | "topic";
 /** 看的是哪一种内容。
@@ -211,9 +212,40 @@ function AudioLink({ passage }: { passage: AudioPassage }) {
   );
 }
 
+/** 所选的两个 tab 放在网址里（`?kind=audio&view=topic`）。只放在 state 里，
+ * 点进一篇文章再返回，页面重新载入，读者就被送回默认的「綜合文章 / 按經卷章節」。
+ * 没有参数、或参数不认识，一律按默认处理。 */
+function useRepositoryTabs() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const view: RepositoryView = params.get("view") === "topic" ? "topic" : "bible";
+  const kind: RepositoryKind = params.get("kind") === "audio" ? "audio" : "article";
+  const choose = (key: "view" | "kind", value: string, fallback: string) => {
+    const next = new URLSearchParams(params.toString());
+    if (value === fallback) next.delete(key);
+    else next.set(key, value);
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  };
+  return {
+    view,
+    kind,
+    setView: (value: RepositoryView) => choose("view", value, "bible"),
+    setKind: (value: RepositoryKind) => choose("kind", value, "article"),
+  };
+}
+
 export default function WangRepositoryPage() {
-  const [view, setView] = useState<RepositoryView>("bible");
-  const [kind, setKind] = useState<RepositoryKind>("article");
+  return (
+    <Suspense fallback={null}>
+      <WangRepository />
+    </Suspense>
+  );
+}
+
+function WangRepository() {
+  const { view, kind, setView, setKind } = useRepositoryTabs();
   const [articles, setArticles] = useState<PublicArticleSummary[]>([]);
   const [audio, setAudio] = useState<AudioPassage[]>([]);
   const [loading, setLoading] = useState(true);
