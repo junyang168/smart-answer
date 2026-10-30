@@ -3390,8 +3390,18 @@ class PostgresKnowledgeStore:
                                 raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
                         if not candidate:
-                            raise ChangeSetConflict('owner call extension requires its saved preceding candidate')
-                        continuation.setdefault('previous_candidates', {})[child['unit_id']] = candidate
+                            # A returned rejected GPT proposal deliberately has
+                            # no accepted candidate. Preserve it as input, never
+                            # promote invalid content to the previous candidate.
+                            key = child['materials']['round_id'] + ':gpt'
+                            rejection = prior['call_reservations'].get(key, {}).get('rejection')
+                            if not (extension and extension.get('basis') == 'remaining_findings' and rejection):
+                                raise ChangeSetConflict('owner call extension requires its saved preceding candidate')
+                            from backend.pipeline.claim_review_recovery import rejected_model_input
+                            entry = rejected_model_input(child, prior, 'gpt', error=rejection['detail'])
+                            continuation.setdefault('unaccepted_returned_proposals', {})[key] = entry
+                        else:
+                            continuation.setdefault('previous_candidates', {})[child['unit_id']] = candidate
                     if continuation['completed_context_cleanup']:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
@@ -3562,11 +3572,15 @@ class PostgresKnowledgeStore:
                         or frozen['created_keys'] != parent['created_keys']
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
-                if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension') or parent.get('continuation', {}).get('opus_api_transition')) and (
-                        frozen.get('continuation') != parent['continuation']
-                        or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
-                        or (round_number == 0 and frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id])):
-                    raise ChangeSetConflict('human source follow-up omitted its evidence or saved candidate')
+                continuation = parent.get('continuation', {})
+                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition')):
+                    candidate = continuation.get('previous_candidates', {}).get(unit_id)
+                    rejected_proposal = (continuation.get('owner_call_extension', {}).get('basis') == 'remaining_findings'
+                        and bool(continuation.get('unaccepted_returned_proposals')) and candidate is None)
+                    if (frozen.get('continuation') != continuation
+                            or not candidate and not rejected_proposal
+                            or round_number == 0 and frozen.get('previous_candidate') != candidate):
+                        raise ChangeSetConflict('Claim follow-up omitted its evidence or saved candidate')
             previous_id = parent["latest_rounds"].get(unit_id)
             if previous_id:
                 previous = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (previous_id,)).fetchone()[0]
