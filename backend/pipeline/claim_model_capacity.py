@@ -4,6 +4,7 @@ OS locks protect actual CLI lifetimes. Durable slot records retain uncertainty
 when a controller dies before an exit receipt. Waiting consumes no call budget.
 """
 from contextlib import contextmanager
+from contextlib import ExitStack
 from contextvars import ContextVar
 import fcntl
 import json
@@ -12,6 +13,7 @@ import re
 from pathlib import Path
 import time
 import uuid
+import hashlib
 
 _ACTIVE_FDS = ContextVar('claim_model_capacity_fds', default=())
 
@@ -89,12 +91,66 @@ class ClaimModelCapacity:
         return (not (Path(artifacts) / 'invocation.json').exists()
                 or receipt.is_file() and _read(receipt, {}).get('returncode') is not None)
 
+    def quarantine_stopped(self, role, artifacts):
+        """Release only a proved stopped local transport, preserving its unknown result.
+
+        This is an explicit recovery operation, never an automatic retry. The
+        real transport inherits the slot lock, so acquiring every slot proves
+        no admitted child remains. Original files and call accounting stay intact.
+        """
+        if role not in ('gpt', 'opus'):
+            raise ValueError('content role required')
+        artifacts = str(Path(artifacts).resolve())
+        with self._state(role) as (root, state), ExitStack() as held:
+            journals = []
+            for index in range(2):
+                lock = held.enter_context((root / ('slot-%s.lock' % index)).open('a'))
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise CapacityUnavailable('cannot reconcile while a transport holds a slot') from None
+                path = root / ('slot-%s.json' % index)
+                journals.append((path, _read(path, {})))
+            matches = [(path, value) for path, value in journals
+                       if value.get('active') and value.get('artifacts') == artifacts]
+            if len(matches) != 1:
+                raise ValueError('quarantine requires its exact active slot journal')
+            transport = Path(artifacts)
+            if not (transport / 'invocation.json').is_file() or (transport / 'exit.json').exists():
+                raise ValueError('quarantine requires an interrupted invocation without an exit receipt')
+            reasons = ('unsettled transport: ', 'unsettled previous transport: ')
+            blocked = state.get('blocked')
+            if blocked and not any(blocked.startswith(prefix) and
+                    blocked[len(prefix):] in {v.get('artifacts') for _, v in journals if v.get('active')}
+                    for prefix in reasons):
+                raise ValueError('quarantine cannot clear quota, authentication or unrelated blocks')
+            files = {name: hashlib.sha256((transport / name).read_bytes()).hexdigest()
+                     for name in ('invocation.json', 'stdout.log', 'stderr.log', 'response.json')
+                     if (transport / name).is_file()}
+            path, previous = matches[0]
+            proof = root / ('interrupted-' + hashlib.sha256(artifacts.encode()).hexdigest() + '.json')
+            if proof.exists():
+                raise ValueError('interrupted transport already reconciled')
+            record = {'artifacts': artifacts, 'previous_journal': previous, 'files': files,
+                      'result_state': 'unknown', 'model_calls': 0, 'retry_authorized': False,
+                      'all_slot_locks_acquired': True, 'reconciled_at': time.time()}
+            _save(proof, record)
+            _save(path, dict(previous, active=False, interruption_proof=str(proof)))
+            if blocked in tuple(prefix + artifacts for prefix in reasons):
+                state.pop('blocked', None)
+            state['allowed'] = 1
+            state['next_start'] = max(state['next_start'], time.time() + self.config['spacing_seconds'])
+            return record
+
     @contextmanager
     def call(self, role, artifacts):
         if role not in ('gpt', 'opus'):
             raise ValueError('Claim capacity accepts only GPT and Opus')
         root = self.root / role
         root.mkdir(exist_ok=True)
+        quarantine = root / ('interrupted-' + hashlib.sha256(str(Path(artifacts).resolve()).encode()).hexdigest() + '.json')
+        if quarantine.exists():
+            raise CapacityUnavailable('interrupted call remains unknown; the same transport cannot be repeated')
         ticket = root / ('wait-%020d-%s.json' % (time.time_ns(), uuid.uuid4().hex))
         slot = None
         with self._state(role):
