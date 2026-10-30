@@ -770,3 +770,59 @@ def test_a_finding_on_a_written_target_implies_its_own_impact():
             finding_blocks({**finding, 'affected_write_keys': ['claims/Z']}, request, candidate)
     finally:
         ju.required_keys = original
+
+
+@pytest.mark.parametrize('legacy_rejected', [False, True])
+def test_new_context_finding_can_be_adjudicated_alongside_an_old_one_without_new_content(shared,monkeypatch,legacy_rejected):
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    from backend.pipeline.source_reconciliation_runner import body,read
+    store,request,root,tmp=shared
+    store.apply_plan(store.plan_package({'package_id':'two-context-issues',
+        'observations':[{'observation_id':oid,'statement':'甲是假设。'} for oid in ['O1','O2']],
+        'knowledge_relations':[{'relation_id':'R'+oid,'from_id':oid,'to_id':'E','relation_type':'supports','reason':'readonly context'} for oid in ['O1','O2']]}))
+    policy=bind(request,tmp,required=[])
+    policy.budget.gpt_calls=2;policy.budget.opus_calls=3;policy.budget.max_revisions=2
+    policy_path=Path(request.policy.path);policy_path.write_text(policy.model_dump_json())
+    request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    authorize(request,{'required_maintenance_keys':[]})
+    def propose(packet):
+        c=cm.existing_candidate(packet['before']);c.finding_resolutions=resolve(packet,disposition='persistent')
+        return c.model_dump(mode='json')
+    def opus(packet):
+        r=joint_pass(packet)
+        for d in r['prior_findings']:d['disposition']='persistent'
+        keys={f['target_key'] for f in packet['unresolved'].values()}
+        if packet['round_number']<2:
+            key='observations/O'+str(packet['round_number']+1)
+            r['findings']=joint_reject(packet,key,affected=[])['findings'];keys.add(key)
+        for v in r['verdicts']:
+            if v['record_key'] in keys:v.update(approved=False,problems=['readonly context remains'])
+        return r
+    ports=SyntheticPorts(store,tmp,opus=opus,proposal=propose)
+    if legacy_rejected:
+        original=store.record_claim_management_stage
+        def old_overlap_rule(rid,receipt):
+            r=body(read(Path(receipt['path'])))
+            if r['stage']=='candidate' and store.get_cvp_group(rid)['round_number']==2:
+                raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
+            return original(rid,receipt)
+        with monkeypatch.context() as patch:
+            patch.setattr(store,'record_claim_management_stage',old_overlap_rule)
+            first=execute_claim_management(store,request,root=root,ports=ports)
+        assert first['reason']=='no_progress'
+        p=parent(store,request);rid=next(iter(p['latest_rounds'].values()));child=store.get_cvp_group(rid)
+        oldroot=Path(p['execution_root'])/rid;raw=(oldroot/'gpt.raw.json').read_bytes()
+        proof=resume_saved_pre_review(store,rid)
+        restored=store.get_cvp_group(rid)
+        assert not restored.get('stage_results') and not restored.get('candidate')
+        assert cm.model_packet(restored['materials'])==cm.model_packet(child['materials'])
+        assert parent(store,request)['call_reservations']==p['call_reservations']
+        assert (Path(restored['recovery_root'])/'gpt.raw.json').read_bytes()==raw
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus','gpt','opus','gpt','opus']  # reused reply, no third GPT
+    saved=parent(store,request)
+    assert len(saved['clarified_finding_ids'])==len(set(saved['clarified_finding_ids']))==2
+    assert len(saved['context_findings'])==2
+    assert store.claim_management_qualification('A')['ready']

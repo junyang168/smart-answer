@@ -581,7 +581,7 @@ def resume_rejected_citations(store, round_id, *, role):
     return resume_rejected_output(store,round_id,role=role,error=CITATION_ERROR)
 
 
-def _current_rejected_input_context(store, cursor, request, materials):
+def _current_rejected_input_context(store, cursor, request, materials, *, include_records=False):
     """Keep the model input exact while refreshing transaction-only consumers."""
     from backend.pipeline.claim_joint_update import enabled
     keys = {cm.source.split_key(k) for k in request.target_keys}
@@ -597,7 +597,8 @@ def _current_rejected_input_context(store, cursor, request, materials):
     previous = materials['transaction_before']
     if current == previous:
         return None
-    return {'content_scope_sha256': sha256_json(materials['before']),
+    return {**({'current_transaction_before': current} if include_records else {}),
+            'content_scope_sha256': sha256_json(materials['before']),
             'previous_transaction_sha256': sha256_json(previous),
             'current_transaction_sha256': sha256_json(current),
             'current_pins': {cm.source.key(*k): list(v) for k, v in pins(records).items()},
@@ -695,3 +696,118 @@ def consumed_rejected_citations(previous,key,slot):
     observed = rejected_model_input(value,previous,slot['role'],error=error)
     if entries and observed!=entries[0]:raise ValueError('rejected citation input drift')
     return True
+
+
+def resume_saved_pre_review(store, round_id):
+    """Resume an exact saved candidate after one of two verified local fixes.
+
+    Transaction-only drift may rebind consumers; mixed old/new objections may
+    re-enter the normal candidate validator. Neither requires a new GPT call.
+    No Opus invocation may have started. All content, source, model packets,
+    candidate decisions, reservations and their spent states remain unchanged.
+    The original files and SQL metadata are archived in the recovery receipt.
+    """
+    from backend.pipeline.cvp_sql_actions import validate_claim_candidate_origin
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (round_id,)).fetchone()
+        if not row or row[0].get('kind') != 'claim_management_round':
+            raise ValueError('transaction recovery requires its original Claim round')
+        value = row[0]
+        parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (value['parent_run_id'],)).fetchone()[0]
+        prior_recovery = value.get('pre_review_saved_recovery')
+        if prior_recovery:
+            check_binding(prior_recovery)
+            cm.require_current_implementation(parent['audit_contract'])
+            if parent['result'].get('status') == 'running':
+                return prior_recovery
+            raise ValueError('this round already used its transaction-only recovery')
+        unrecorded = (parent['result'].get('reason') == 'no_progress'
+            and parent['result'].get('detail') == 'Claim correction made no semantic progress or repeats a previous candidate')
+        transaction_drift = (parent['result'].get('reason') == 'engineering_required'
+            and parent['result'].get('detail', '').startswith('transaction current dependency drift:'))
+        if (value['checkpoint'] != 'prepared'
+                or set(value.get('stage_results', {})) != (set() if unrecorded else {'candidate'})
+                or bool(value.get('candidate')) != (not unrecorded)
+                or value.get('change_set_ids') or value.get('opus_approved')
+                or parent.get('continued_by') or parent['latest_rounds'].get(value['unit_id']) != round_id
+                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded)):
+            raise ValueError('saved-candidate recovery requires the exact uncommitted pre-review failure')
+        opus = parent['call_reservations'].get(round_id + ':opus', {})
+        if opus.get('state') != 'planned':
+            raise ValueError('transaction recovery cannot repeat an invoked or unknown review')
+        old_root = Path(value.get('recovery_root', Path(parent['execution_root']) / round_id))
+        if any((old_root / name).exists() for name in ('opus.reservation.json', 'opus.raw.json', 'opus.transport/invocation.json')):
+            raise ValueError('transaction recovery cannot repeat an invoked or unknown review')
+        materials = body(read(old_root / 'materials.json'))
+        if materials != value['materials']:
+            raise ValueError('transaction recovery original materials drift')
+        request = cm.Request.model_validate(materials['request'])
+        policy, sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
+            selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
+        if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
+            raise ValueError('transaction recovery source or policy drift')
+        if request.operation != 'Update':
+            raise ValueError('transaction recovery is limited to an existing Update')
+        if 'human_source_decisions' in materials:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+        candidate = cm.Candidate.model_validate(body(read(old_root / 'candidate.json')))
+        if not unrecorded and candidate.model_dump(mode='json') != value['candidate']:
+            raise ValueError('transaction recovery saved candidate drift')
+        validate_claim_candidate_origin(old_root, materials, policy, sources, candidate)
+        cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
+            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+        if 'gpt' in materials['roles']:
+            slot = parent['call_reservations'].get(round_id + ':gpt', {})
+            if slot.get('state') != ('started' if unrecorded else 'completed') or body(read(old_root / 'gpt.reservation.json')) != slot.get('intent') or sha256_json(slot['intent']) != slot.get('intent_sha256'):
+                raise ValueError('transaction recovery original GPT accounting drift')
+            if policy.all_findings_to_gpt:
+                cm.validate_proposer_resolutions(candidate, materials['unresolved'], sources,
+                    request=cm.Request.model_validate(materials['unit_request']))
+        if unrecorded:
+            if 'gpt' not in materials['roles'] or not policy.all_findings_to_gpt:
+                raise ValueError('unrecorded adjudication requires its original GPT reply')
+            ids = {r.finding_id for r in candidate.finding_resolutions or []}
+            judged = set(parent.get('clarified_finding_ids', []))
+            if not ids & judged or not ids - judged:
+                raise ValueError('unrecorded adjudication requires mixed old and genuinely new findings')
+        context = _current_rejected_input_context(store, cursor, request, materials, include_records=True)
+        if context is None and not unrecorded:
+            raise ValueError('transaction recovery requires actual transaction-only drift')
+        current_records = context.pop('current_transaction_before') if context else materials['transaction_before']
+        original_value, original_parent = deepcopy(value), deepcopy(parent)
+        current_contract = cm.audit_contract(old_root / 'transaction-recovery-contract', policy)
+        if any(current_contract['implementation'].get(k) != digest for k, digest in materials['audit_contract']['implementation'].items() if '/prompts/' in k):
+            raise ValueError('transaction recovery cannot change model instructions')
+        root = old_root / ('transaction-only-' + sha256_json(context)[:20])
+        root.mkdir(parents=True, exist_ok=True)
+        for name in ('candidate.json', 'candidate-normalization.json', *(['gpt.packet.json', 'gpt.reservation.json', 'gpt.raw.json'] if 'gpt' in materials['roles'] else [])):
+            payload = (old_root / name).read_bytes()
+            target = root / name
+            if target.exists() and target.read_bytes() != payload:
+                raise ValueError('transaction recovery cannot overwrite an original answer')
+            if not target.exists():
+                with target.open('xb') as stream:
+                    stream.write(payload); stream.flush(); os.fsync(stream.fileno())
+        rebound = deepcopy(materials)
+        rebound.update(transaction_before=current_records, audit_contract=current_contract)
+        if cm.model_packet(rebound) != cm.model_packet(materials):
+            raise ValueError('transaction recovery changed the exact model input')
+        write(root / 'materials.json', rebound)
+        receipt = {'round_id': round_id, 'stage': 'candidate', 'materials': binding(root / 'materials.json'), 'candidate': binding(root / 'candidate.json')}
+        write(root / 'candidate-result.json', receipt)
+        record = {'original_round': original_value, 'original_parent': original_parent,
+            'transaction_context_refresh': context, 'current_contract': current_contract,
+            'recovery_root': str(root), 'unrecorded_new_finding_adjudication': unrecorded,
+            'model_inputs_unchanged': True, 'candidate_sha256': candidate.digest,
+            'model_calls': 0, 'call_reservations_unchanged': True, 'content_approved': False}
+        write(root / 'engineering-recovery.json', record)
+        proof = binding(root / 'engineering-recovery.json')
+        value.update(materials=rebound, recovery_root=str(root), outcome=None, pre_review_saved_recovery=proof)
+        if not unrecorded:
+            value['stage_results']['candidate'] = binding(root / 'candidate-result.json')
+        parent.update(audit_contract=current_contract, result={'status': 'running'})
+        for rid, metadata in ((round_id, value), (value['parent_run_id'], parent)):
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s", (canonical_json(metadata), rid))
+        return proof
