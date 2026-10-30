@@ -9,6 +9,7 @@ import type { PublicArticleClip, PublicAudioSection, PublicWangArticle } from ".
 import { SourceEvidenceDisclosure } from "@/app/admin/wang/operations/articles/reviews/SourceEvidenceDisclosure";
 import type { ReviewSourceAnnotation } from "@/app/admin/wang/operations/articles/reviews/types";
 import { extractArticleToc, type ArticleTocHeading } from "./article-toc";
+import { collectArticleSources } from "./article-sources";
 
 type ViewMode = "read" | "listen";
 
@@ -233,6 +234,8 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     () => new Map((article.source_annotations ?? []).map((item: ReviewSourceAnnotation) => [item.annotation_id, item.sources])),
     [article.source_annotations],
   );
+
+  const articleSources = useMemo(() => collectArticleSources(article.source_annotations ?? []), [article.source_annotations]);
 
   const headingGroups = useMemo(() => {
     const groups: Array<{ heading: string; blocks: PublicAudioSection[] }> = [];
@@ -514,6 +517,38 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                     </li>
                   ))}
                 </ol>
+              </aside>
+            )}
+            {articleSources.length > 0 && (
+              <aside aria-label="參考來源" className="mt-14 border-t border-stone-200 pt-7">
+                <p className="text-xs font-bold tracking-[0.14em] text-stone-500">參考來源</p>
+                <p className="mt-2 text-sm leading-7 text-stone-500">
+                  本文共引用 {[
+                    articleSources.some((source) => source.kind === "sermon") ? `${articleSources.filter((source) => source.kind === "sermon").length} 篇講道` : null,
+                    articleSources.some((source) => source.kind === "notes") ? `${articleSources.filter((source) => source.kind === "notes").length} 章筆記` : null,
+                  ].filter(Boolean).join("、")}；括號內是本文引用它的段數。
+                </p>
+                {(["sermon", "notes"] as const).map((kind) => {
+                  const items = articleSources.filter((source) => source.kind === kind);
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={kind} className="mt-5">
+                      <p className="text-sm font-bold text-stone-800">{kind === "sermon" ? "講道" : "筆記"}</p>
+                      <ul className="mt-2 space-y-2 text-sm leading-7 text-stone-700">
+                        {items.map((source) => (
+                          <li key={`${source.kind}-${source.title}`}>
+                            {source.url ? (
+                              <Link href={source.url} className="font-semibold text-amber-900 underline-offset-4 hover:underline">{source.title}</Link>
+                            ) : (
+                              <span className="font-semibold">{source.title}</span>
+                            )}
+                            <span className="ml-2 text-stone-500">（{source.paragraphs} 段）</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
               </aside>
             )}
           </article>
