@@ -145,6 +145,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
         registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path': str(Path(os.environ['DATA_BASE_DIR']) /
             'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
         plan, jobs = load(manifest, root)
+        job_manifests = {key: manifest for key in jobs}
         store = PostgresKnowledgeStore()
         pending, active, results = list(jobs), {}, {}
         if refill and model_capacity is None:
@@ -165,6 +166,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                 from backend.pipeline.claim_management_intake import immutable
                 immutable(additions / ('%06d.json' % len(list(additions.glob('*.json')))), bound)
             jobs.update(incoming)
+            job_manifests.update({key: supplied for key in incoming})
             pending.extend(incoming)
         for saved in sorted(additions.glob('*.json')):
             append_manifest(json.loads(saved.read_text()), remember=False)
@@ -250,7 +252,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                     output.unlink(missing_ok=True)  # derived worker receipt, never model/action artifacts
                     out = (root / (token + '.stdout.log')).open('a')
                     err = (root / (token + '.stderr.log')).open('a')
-                    command = [sys.executable, '-m', MODULE, '--manifest', str(manifest), '--root', str(root), '--job', key]
+                    command = [sys.executable, '-m', MODULE, '--manifest', str(job_manifests[key]), '--root', str(root), '--job', key]
                     environment = dict(os.environ, WKP_CLAIM_BATCH_LOCK_FDS=','.join(str(h.fileno()) for h in (lock, maintenance, registry)))
                     if capacity:
                         environment['WKP_CLAIM_CAPACITY_CONFIG'] = str(capacity.root / 'configuration.json')
