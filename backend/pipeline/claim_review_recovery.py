@@ -581,6 +581,30 @@ def resume_rejected_citations(store, round_id, *, role):
     return resume_rejected_output(store,round_id,role=role,error=CITATION_ERROR)
 
 
+def _current_rejected_input_context(store, cursor, request, materials):
+    """Keep the model input exact while refreshing transaction-only consumers."""
+    from backend.pipeline.claim_joint_update import enabled
+    keys = {cm.source.split_key(k) for k in request.target_keys}
+    keys.update(('source_documents', sid) for sid in request.source_bindings)
+    if not enabled(request):
+        keys.update((p.collection, p.object_id) for p in request.permissions)
+    reader = store.read_affected_context if cm.is_source_impact(request) else store.read_claim_context
+    records = reader(sorted(keys))
+    locked = store._assert_transaction_read_pins(cursor, pins(records))
+    current = {cm.source.key(*k): cm.model_state(v) for k, v in locked.items()}
+    if cm.original_goal(request, current)['original_objects'] != materials['before']:
+        raise ValueError('rejected-input recovery content scope drift')
+    previous = materials['transaction_before']
+    if current == previous:
+        return None
+    return {'content_scope_sha256': sha256_json(materials['before']),
+            'previous_transaction_sha256': sha256_json(previous),
+            'current_transaction_sha256': sha256_json(current),
+            'current_pins': {cm.source.key(*k): list(v) for k, v in pins(records).items()},
+            'changed_transaction_keys': sorted(k for k in set(previous) | set(current)
+                                               if previous.get(k) != current.get(k))}
+
+
 def resume_rejected_output(store, round_id, *, role, error):
     """Advance to ordinary correction using original authority and remaining slots.
 
@@ -623,7 +647,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         revisions[round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
         if sum(bool(v) for v in revisions.values())>=policy.budget.max_revisions:
             raise ValueError('original Claim revision budget cannot fund citation correction')
-        store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in materials['transaction_before'].items()}))
+        current_context = _current_rejected_input_context(store, cursor, request, materials)
         _,sources = cm.load_authority(request,source_documents=cm.source_documents(materials['before']),
             selected_source_ids=materials['unit_request']['source_bindings'],human_source_decisions=materials.get('human_source_decisions'))
         if sources!=materials['sources']:raise ValueError('citation recovery source drift')
@@ -650,6 +674,8 @@ def resume_rejected_output(store, round_id, *, role, error):
         record = {'original_round':original,'original_parent':original_parent,'input':entry,
             'authorization':request.authorization.model_dump(mode='json'),'new_budget':False,'model_calls':0,
             'content_approved':False,'current_contract':contract}
+        if current_context:
+            record['transaction_context_refresh'] = current_context
         write(destination/'engineering-recovery.json',record)
         parent.update(audit_contract=contract,revision_rounds=revisions,result={'status':'running','reason':'revision_required','round_id':round_id,'unit_id':value['unit_id']})
         value.update(outcome='revision_required',**{marker:binding(destination/'engineering-recovery.json')})
