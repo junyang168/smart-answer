@@ -145,6 +145,43 @@ def test_owner_extension_cannot_silently_cross_changed_sources_or_scope(lost_upd
 from backend.tests.test_claim_joint_update import shared,bind,joint_pass,joint_reject,resolve,update
 
 
+@pytest.mark.parametrize('lost_update',['gpt','opus'],indirect=True)
+@pytest.mark.parametrize('defect',['none','stale_binding','target','new_scope'])
+def test_unknown_extension_can_bind_current_transaction_consumers_without_changing_model_facts(lost_update,defect):
+    store,old,root,parent,successor,next_root,policy,extension,path=lost_update
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET revision=2 WHERE collection='canonical_viewpoints' AND object_id='TRANSACTION-ONLY'")
+    if defect=='target':
+        payload=deepcopy(store.get_record_state('claims','C')['payload']);payload['statement']='a real target change'
+        store.apply_plan(store.plan_package({'package_id':'real-change','claims':[payload]}))
+    if defect=='new_scope':
+        seed_claims(store,['D'])
+        store.apply_plan(store.plan_package({'package_id':'new-neighbour','claim_relations':[{'claim_relation_id':'NEW','from_id':'D','to_id':'C','relation_type':'supports'}]}))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys])
+    current={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    extension.update(basis='unknown_call',current_objects_sha256=cm.sha256_json(current),related_action_metadata_sha256={})
+    authorize(successor,policy,path,extension)
+    if defect=='stale_binding':
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET revision=3 WHERE collection='canonical_viewpoints' AND object_id='TRANSACTION-ONLY'")
+    if defect!='none':
+        with pytest.raises((ValueError,RuntimeError)):
+            execute_claim_management(store,successor,root=next_root,ports=SyntheticPorts(store,next_root))
+        assert store.get_cvp_group(parent['run_id'])==parent
+        return
+    def propose(packet):
+        assert packet['continuation']['preserved_unknown_calls']
+        return {'changes':[],'findings':[],'finding_resolutions':[decision(fid) for fid in packet['unresolved']]}
+    def review(packet):return {'complete_review':True,'findings':[],'prior_findings':[decision(fid) for fid in packet['unresolved']]}
+    ports=SyntheticPorts(store,next_root,proposal=propose,opus=review)
+    result=execute_claim_management(store,successor,root=next_root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    current_parent=store.get_cvp_group(parent['run_id'])
+    assert all(current_parent['call_reservations'][k]==v for k,v in parent['call_reservations'].items() if v['state'] in {'started','completed'})
+    assert store.claim_management_qualification('C')['ready']
+
+
 @pytest.fixture(params=['remaining_findings','qualification_refresh'])
 def owner_review_follow_up(shared,request):
     store,old,root,tmp=shared

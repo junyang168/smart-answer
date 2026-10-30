@@ -3324,7 +3324,8 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
                 refresh = continuation.get('qualification_refresh', False)
                 extension = continuation.get('owner_call_extension')
-                if extension and extension.get('basis', 'unknown_call') != 'unknown_call':
+                if extension and (extension.get('basis', 'unknown_call') != 'unknown_call'
+                        or 'current_objects_sha256' in extension):
                     if extension['current_objects_sha256'] != sha256_json(before):
                         raise ChangeSetConflict('owner follow-up current transaction scope differs from its explicit binding')
                     related = extension['related_action_metadata_sha256']
@@ -3381,10 +3382,11 @@ class PostgresKnowledgeStore:
                             # Explicitly current-bound remaining-findings follow-ups,
                             # like API transitions, can refresh transaction-only
                             # consumers. Their Claim audit scope and saved candidate
-                            # must remain exactly unchanged. Unknown-call extensions
-                            # have no such current-scope binding and stay strict.
+                            # must remain exactly unchanged. Legacy unknown-call
+                            # extensions without a current binding stay strict.
                             current_bound_follow_up = (extension
-                                and extension.get('basis') == 'remaining_findings')
+                                and (extension.get('basis') == 'remaining_findings'
+                                     or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension))
                             if (not (continuation.get('opus_api_transition') or current_bound_follow_up)
                                     or goal['original_objects'] != child['materials']['before']):
                                 raise ChangeSetConflict('owner call extension full transaction scope drifted')
