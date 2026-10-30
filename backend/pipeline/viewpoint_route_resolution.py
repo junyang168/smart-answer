@@ -328,6 +328,7 @@ def build_registry_route_packet(
     unavailable_evidence: list[dict[str, Any]] | None = None,
     claim_evidence_for_intermediate_steps: bool = False,
     observation_supports: bool = False,
+    program_bound_observation_retirements: bool = False,
     existing_observation_supports: list[dict[str, Any]] | None = None,
     unusable_context_claims: list[dict[str, Any]] | None = None,
     approved_connection_judgments: list[dict[str, Any]] | None = None,
@@ -629,6 +630,14 @@ def build_registry_route_packet(
         packet['context_claim_ids'] = sorted(c.claim_id for c in scope_claims if c.claim_id not in linked_claims)
         if unusable_context_claims:
             packet['unusable_context_claims'] = unusable_context_claims
+    if program_bound_observation_retirements:
+        if not observation_supports:
+            raise ValueError('program observation retirements require observation support')
+        from backend.api.canonical_repository.viewpoint_observation_support import revision_retirement_binding
+        packet['observation_retirement_binding'] = revision_retirement_binding(
+            packet['approved_viewpoints'], packet['existing_observation_supports'],
+            claims=packet['claims'], source_revisions=packet['source_revisions'],
+            unusable_context_claims=packet.get('unusable_context_claims', []))
     if approved_connection_judgments is not None:
         links = {l['viewpoint_claim_link_id']:l for l in viewpoint_claim_links
                  if l.get('effective_state') == 'active'}

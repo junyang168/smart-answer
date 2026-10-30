@@ -313,6 +313,10 @@ def merge_delta_scores(
         for item in baseline_review.get("findings") or []
         if item.get("blocking")
     }
+    # A score below its minimum is never inherited: nothing else re-reads it,
+    # and #488 carried round 1's reader_memory_center 3 through four rounds
+    # while the reviewer scored it 4.
+    affected |= set((baseline_review.get("verdict") or {}).get("dimensions_below_minimum") or [])
     baseline_scores = {
         str(item["dimension_id"]): item for item in baseline_review["dimension_scores"]
     }
@@ -862,9 +866,10 @@ def continued_round(
         })
     return manuscript, self_check, {
         **outcome,
-        # Open findings mean the round is not passed, whatever the stopped
-        # run said: an owner note on a passed draft must still be revised.
-        "passed": bool(outcome["passed"]) and not findings,
+        # Passed as a fresh round would be: open findings fail it whatever the
+        # stopped run said (an owner note on a passed draft is still revised),
+        # and a round whose only findings were a check fixed since passes (#488).
+        "passed": not findings and not outcome.get("stage_errors"),
         "quote_report": quote_report,
         "program_check_report": program_report,
         "blocking_findings": findings,
@@ -909,9 +914,6 @@ def main() -> int:
     self_check_path = args.self_check or args.draft.with_name("self-check.json")
     self_check = json.loads(self_check_path.read_text(encoding="utf-8")) if self_check_path.exists() else []
 
-    # A changed prompt or model is a reviewer the owner has not calibrated.
-    from backend.pipeline.draft_first_calibration import require_calibrated
-    require_calibrated(REVIEW_MODEL)
     clients = {
         "blind_read": ClaudeSubscriptionClient(model="claude-haiku-4-5", reasoning_effort="high"),
         "blind_compare": CodexSubscriptionClient(model=REVIEW_MODEL, reasoning_effort="high"),
@@ -941,10 +943,17 @@ def main() -> int:
         baseline_review = seeded.get("review")
     for round_number in range(first_round, last_round + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
-        if seeded is not None and round_number == first_round:
+        # A stopped round with nothing open but a stage error has nothing to
+        # revise: the same draft gets a fresh full review (#488: a review that
+        # passed was stored as an error by a score-merge bug).
+        if seeded is not None and round_number == first_round and not (
+            seeded.get("stage_errors") and not seeded["blocking_findings"]
+        ):
             outcome = seeded
             _write(round_dir / "outcome.json", outcome)
         else:
+            if seeded is not None and round_number == first_round:
+                baseline_review = None
             outcome = run_gates(
                 manuscript=manuscript,
                 packet=packet,

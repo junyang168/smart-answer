@@ -1040,6 +1040,8 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
     item = draft_manifest["drafts"][0]
     assert item["public_slug"] == "kingdom-keys"
     assert item["passage"] == "太16:19"
+    # 磐石、鑰匙 是釋經：没登记 product_kind 就不带核心经文清单，文库只按太16:19归档。
+    assert "product_kind" not in item and "core_passages" not in item
     # 读者页的「显示原文来源」开关吃的就是这份数据：发布必须随稿落盘。
     assert item["source_annotations_path"] == "source-annotations.json"
     assert item["source_annotations_sha256"] == decision["source_annotations_sha256"]
@@ -1142,3 +1144,70 @@ def test_publication_artifact_replacement_never_exposes_partial_file(tmp_path, m
         module._atomic_write_text(artifact, "new")
     assert artifact.read_text(encoding="utf-8") == "old"
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_a_topic_essay_publishes_every_core_passage(tmp_path: Path) -> None:
+    module = wang_article_reviews
+    registered = tmp_path / "ransom-for-many-v1.json"
+    registered.write_text(
+        json.dumps(
+            {"passage": "太20:28；太26:28；提前2:4-6", "product_kind": "theological_topic_essay"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert module._topic_essay_fields(registered) == {
+        "product_kind": "theological_topic_essay",
+        "core_passages": ["太20:28", "太26:28", "提前2:4-6"],
+    }
+
+
+def test_the_reader_blurb_is_bound_to_the_manuscript_and_published_with_it(tmp_path, monkeypatch):
+    from backend.api import wang_article_reviews as module
+
+    staging = tmp_path / "staging"
+    manifests = staging / "article-reviews"
+    manifests.mkdir(parents=True)
+    publications = tmp_path / "repository" / "draft-first-publications"
+    monkeypatch.setattr(module, "WANG_STAGING_DIR", staging)
+    monkeypatch.setattr(module, "REVIEW_MANIFEST_ROOT", manifests)
+    monkeypatch.setattr(module, "PUBLICATION_ROOT", publications)
+
+    manuscript = staging / "final.md"
+    manuscript.write_text("# 萬人的贖價\n\n正文。\n", encoding="utf-8")
+    workflow = staging / "workflow.json"
+    workflow.write_text(json.dumps({"status": "review_passed"}), encoding="utf-8")
+    blurb = staging / "reader-blurb.json"
+    blurb.write_text(json.dumps({
+        "manuscript_sha256": module._sha256(manuscript),
+        "reader_intro": "「多人」是一部分人，還是所有的人？",
+        "reader_summary": "多人就是所有的人。",
+    }, ensure_ascii=False), encoding="utf-8")
+    manifest = {
+        "schema_version": module.MANIFEST_SCHEMA,
+        "review_id": "ransom-for-many-v1",
+        "title": "萬人的贖價",
+        "passage": "太20:28；太26:28",
+        "product_kind": "theological_topic_essay",
+        "manuscript_relative_path": manuscript.name,
+        "manuscript_sha256": module._sha256(manuscript),
+        "workflow_status_relative_path": workflow.name,
+        "workflow_status_sha256": module._sha256(workflow),
+        "reader_blurb_relative_path": blurb.name,
+        "reader_blurb_sha256": module._sha256(blurb),
+    }
+    manifest_path = manifests / "ransom-for-many-v1.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    actor = module.PublicationActor(actor_id="owner-1", role="editor")
+    module.publish_article_review("ransom-for-many-v1", actor=actor)
+    item = json.loads((publications / "ransom-for-many-v1" / "editorial-draft-manifest.json").read_text())["drafts"][0]
+    assert item["reader_intro"] == "「多人」是一部分人，還是所有的人？"
+    assert item["reader_summary"] == "多人就是所有的人。"
+
+    # A blurb written from another manuscript, or edited after registration, fails integrity.
+    blurb.write_text(json.dumps({"manuscript_sha256": "other", "reader_intro": "改過"}), encoding="utf-8")
+    manifest["reader_blurb_sha256"] = module._sha256(blurb)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    assert module._review_data(manifest_path, include_markdown=False)["integrity_status"] == "changed"

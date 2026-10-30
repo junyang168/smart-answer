@@ -1643,6 +1643,17 @@ def _draft_first_annotated_markdown(
     return annotated, annotations, projection_audit, playback_audit
 
 
+def _reader_blurb(blurb: dict[str, Any]) -> dict[str, Any]:
+    """The card intro and opening summary, when the review carries them (#509)."""
+
+    intro = str(blurb.get("reader_intro") or "").strip()
+    summary = str(blurb.get("reader_summary") or "").strip()
+    return {
+        **({"reader_intro": intro} if intro else {}),
+        **({"reader_summary": summary} if summary else {}),
+    }
+
+
 def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, Any]:
     manifest = _read_json(manifest_path)
     if manifest.get("schema_version") != MANIFEST_SCHEMA:
@@ -1703,6 +1714,17 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
                 manifest, bindings_record, evidence_packet, workflow=_read_json(workflow_path)
             )
         )
+    blurb: dict[str, Any] = {}
+    blurb_relative_path = str(manifest.get("reader_blurb_relative_path") or "").strip()
+    if blurb_relative_path:
+        blurb_path = _safe_staging_child(blurb_relative_path)
+        if not blurb_path.is_file():
+            raise ValueError("review reader blurb is missing")
+        blurb = _read_json(blurb_path)
+        integrity_matches = integrity_matches and (
+            str(manifest.get("reader_blurb_sha256") or "") == _sha256(blurb_path)
+            and str(blurb.get("manuscript_sha256") or "") == current_manuscript_sha
+        )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)
     draft_first_report = review_report(workflow_path.parent) if variant == "draft_first" else None
@@ -1730,6 +1752,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             else _stage_checks(workflow)
         ),
         "href": f"/admin/wang/operations/articles/reviews/{review_id}",
+        **_reader_blurb(blurb),
     }
     if include_markdown:
         if integrity != "verified":
@@ -1944,6 +1967,25 @@ def _primary_passage(passage: str) -> str:
     return re.split(r"[；;]", passage or "", maxsplit=1)[0].strip()
 
 
+def _topic_essay_fields(manifest_path: Path) -> dict[str, Any]:
+    """A topic essay carries its kind and every core passage to the public list.
+
+    The list files an article under its passage; a topic essay has several
+    (《萬人的贖價》: 太20:28；太26:28；提前2:4-6), and only the first survived,
+    which shelved the essay as an exposition of 太20:28. Expositions published
+    here keep the one passage they always had.
+    """
+
+    registered = _read_json(manifest_path)
+    if registered.get("product_kind") != "theological_topic_essay":
+        return {}
+    passages = re.split(r"[；;]", str(registered.get("passage") or ""))
+    return {
+        "product_kind": "theological_topic_essay",
+        "core_passages": [passage.strip() for passage in passages if passage.strip()],
+    }
+
+
 @router.post("/{review_id}/publish")
 def publish_article_review(
     review_id: str,
@@ -2015,6 +2057,8 @@ def publish_article_review(
                 "draft_id": review_id,
                 "title": review.get("title") or review_id,
                 "passage": _primary_passage(str(review.get("passage") or "")),
+                **_topic_essay_fields(manifest_path),
+                **{key: review[key] for key in ("reader_intro", "reader_summary") if review.get(key)},
                 "public_slug": slug,
                 "relative_path": "manuscript.md",
                 "source_annotations_path": "source-annotations.json",

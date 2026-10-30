@@ -5778,9 +5778,11 @@ class PostgresKnowledgeStore:
                     result[col,oid] = {"revision":revision,"content_sha256":content_sha,"payload":payload,
                                        "retired_at":retired,"retired":retired is not None}
                     if not historical_pins_only:
-                        ids.update(self._record_reference_ids(payload))
+                        ids.update(self._record_reference_ids(payload,
+                            include_predecessor=col=='argument_route_revisions'))
                     else:
-                        ids.update(self._record_reference_ids(payload,exclude_provenance=True))
+                        ids.update(self._record_reference_ids(payload,exclude_provenance=True,
+                            include_predecessor=col=='argument_route_revisions'))
                         historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
                     if col == "canonical_viewpoints" and retired is None: views.add(oid)
                 new_views = sorted(views - expanded_views)
@@ -5993,18 +5995,23 @@ class PostgresKnowledgeStore:
                 (list(viewpoint_ids),list(viewpoint_ids))).fetchall()
         return self.read_current_records([('viewpoint_relations',r[0]) for r in rows])
 
-    def read_cvp_heads(self):
-        """Current active index cut only: one query, no members or historical chains."""
+    def read_cvp_heads(self, *, viewpoint_ids=None):
+        """Current active cut; optionally only known update identities."""
+        if viewpoint_ids is not None and not viewpoint_ids:return []
         with self.connect() as conn:
-            rows=conn.execute("""SELECT v.object_id,v.payload,v.revision,v.content_sha256,
+            query="""SELECT v.object_id,v.payload,v.revision,v.content_sha256,
                                        r.object_id,r.payload,r.revision,r.content_sha256,r.retired_at
                                 FROM wang_knowledge.objects v
                                 LEFT JOIN wang_knowledge.objects r
                                   ON r.collection='viewpoint_revisions'
                                  AND r.object_id=v.payload->>'current_revision_id'
                                 WHERE v.collection='canonical_viewpoints' AND v.retired_at IS NULL
-                                  AND v.payload->>'identity_status'='active'
-                                ORDER BY v.object_id""").fetchall()
+                                  AND v.payload->>'identity_status'='active'"""
+            if viewpoint_ids is not None:
+                query+=" AND v.object_id=ANY(%s)"
+            query+=" ORDER BY v.object_id"
+            rows=(conn.execute(query,(list(viewpoint_ids),)) if viewpoint_ids is not None
+                  else conn.execute(query)).fetchall()
         result=[]
         for vid,view,vrev,vsha,rid,head,rrev,rsha,retired in rows:
             if (head is None or retired is not None or view.get('viewpoint_id')!=vid
@@ -8757,7 +8764,25 @@ class PostgresKnowledgeStore:
         }
         final_owners = {**current_owners, **arriving_owners}
         for collection, edge_id, from_id, to_id, relation_type in incoming_edges:
-            missing = {from_id, to_id} - set(final_owners)
+            owners = final_owners
+            missing = {from_id, to_id} - set(owners)
+            payload = incoming_payloads[collection, edge_id]
+            if (missing == {to_id} and collection == 'viewpoint_claim_links'
+                    and getattr(plan, 'source_kind', None) == 'wang_cvp_management_v2'
+                    and payload.get('schema_version') == 'wang_viewpoint_claim_link_v2'
+                    and payload.get('effective_state') in {'retired', 'invalidated'}):
+                # An authenticated CVP2 withdrawal asserts no current support.
+                # Keep its exact old source assertion after upstream retirement;
+                # this is never permission for an active edge to use that Claim.
+                old = cursor.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s",
+                                     (collection, edge_id)).fetchone()
+                historical = cursor.execute("SELECT collection FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s AND retired_at IS NOT NULL",
+                                            (to_id,)).fetchone()
+                mutable = {'schema_version','revision','effective_state','decision_id'}
+                if old and historical and {k:v for k,v in old[0].items() if k not in mutable} == {
+                        k:v for k,v in payload.items() if k not in mutable}:
+                    owners = {**final_owners, to_id:'claims'}
+                    missing = set()
             if missing:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} has non-current endpoints: "
@@ -8766,15 +8791,15 @@ class PostgresKnowledgeStore:
             allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
             if collection == 'knowledge_relations':
                 allowed_from, allowed_to = knowledge_relation_endpoints(relation_type)
-            if final_owners[from_id] not in allowed_from:
+            if owners[from_id] not in allowed_from:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "
-                    f"{final_owners[from_id]}, expected {sorted(allowed_from)}"
+                    f"{owners[from_id]}, expected {sorted(allowed_from)}"
                 )
-            if final_owners[to_id] not in allowed_to:
+            if owners[to_id] not in allowed_to:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} to endpoint {to_id} belongs to "
-                    f"{final_owners[to_id]}, expected {sorted(allowed_to)}"
+                    f"{owners[to_id]}, expected {sorted(allowed_to)}"
                 )
 
         signatures = sorted(incoming_signatures)

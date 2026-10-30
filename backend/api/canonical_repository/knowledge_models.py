@@ -1431,10 +1431,10 @@ class ViewpointRelationRecord(StrictViewpointRecord):
 
 class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
     identity_candidate_id: str
-    schema_version: Literal["wang_viewpoint_identity_candidate_v1"] = (
+    schema_version: Literal["wang_viewpoint_identity_candidate_v1", "wang_viewpoint_identity_candidate_v2"] = (
         "wang_viewpoint_identity_candidate_v1"
     )
-    candidate_claim_ids: list[str] = Field(min_length=1)
+    candidate_claim_ids: list[str]
     candidate_viewpoint_ids: list[str] = Field(default_factory=list)
     seed_relation_ids: list[str] = Field(default_factory=list)
     proposed_action: Literal["match_existing", "create_new", "defer"]
@@ -1447,6 +1447,11 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
 
     @model_validator(mode="after")
     def validate_candidate(self) -> "ViewpointIdentityCandidateRecord":
+        if not self.candidate_claim_ids and not (
+                self.schema_version == "wang_viewpoint_identity_candidate_v2"
+                and self.proposed_action == "match_existing" and self.candidate_viewpoint_ids
+                and self.scope_manifest_sha256):
+            raise ValueError("empty Claim cohort is only valid for scoped existing-CVP maintenance")
         if self.candidate_claim_ids != sorted(set(self.candidate_claim_ids)):
             raise ValueError("candidate_claim_ids must be sorted and unique")
         if self.candidate_viewpoint_ids != sorted(set(self.candidate_viewpoint_ids)):

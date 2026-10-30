@@ -4,8 +4,7 @@ Every stage already had a command; what was missing was the order, the memory
 of where a run stands, and the places it must stop for the owner. On the 人子
 essay (#439) those were carried by hand: scope files written in the session,
 coverage decisions made in conversation, an owner-note rerun assembled from
-flags (the first attempt stopped on a stale "passed" flag), a calibration run
-because someone remembered.
+flags (the first attempt stopped on a stale "passed" flag).
 
 A run directory holds the owner's inputs and every stage's output:
 
@@ -40,8 +39,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-STAGES = ("scope", "coverage", "decisions", "cvp_gap", "calibration",
-          "packet", "author", "review", "binding", "register", "final_review")
+STAGES = ("scope", "coverage", "decisions", "cvp_gap",
+          "packet", "author", "review", "binding", "blurb", "register", "final_review")
 STOPPED = 3
 
 Runner = Callable[[str, list[str], Path], None]
@@ -76,11 +75,9 @@ def run_command(name: str, argv: list[str], log: Path) -> None:
 
 
 class EssayRun:
-    def __init__(self, run_dir: Path, runner: Runner = run_command,
-                 calibration_check: Callable[[], None] | None = None):
+    def __init__(self, run_dir: Path, runner: Runner = run_command):
         self.dir = run_dir.resolve()
         self.runner = runner
-        self.calibration_check = calibration_check or _require_calibrated
         self.state_path = self.dir / "state.json"
         self.state = _json(self.state_path) if self.state_path.exists() else {"stages": {}, "history": []}
 
@@ -184,25 +181,6 @@ class EssayRun:
             })
         self._done("cvp_gap", [selection], [selection])
 
-    def calibration(self) -> None:
-        from backend.pipeline.draft_first_calibration import CalibrationRequired
-
-        try:
-            self.calibration_check()
-        except CalibrationRequired as uncalibrated:
-            if "not been calibrated" not in str(uncalibrated):
-                raise Stop("calibration", "whether the review prompt or the owner's key changes",
-                           {"reason": str(uncalibrated)}) from None
-            self._run("calibration", ["scripts/draft-first-calibrate.py",
-                                      "--output-dir", str(self.p("calibration", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")))])
-            try:
-                self.calibration_check()
-            except CalibrationRequired as disagreement:
-                raise Stop("calibration", "whether the review prompt or the owner's key changes",
-                           {"reason": str(disagreement)}) from None
-        self.state["stages"]["calibration"] = {"status": "done", "at": datetime.now(timezone.utc).isoformat()}
-        self._save()
-
     def build_packet(self) -> None:
         inputs = [self.p("scope.json"), self.p("coverage", "editorial-selection.json")]
         if self._fresh("packet", inputs, [self.packet]):
@@ -271,15 +249,27 @@ class EssayRun:
                               "--packet", str(self.packet), "--output", str(out)])
         self._done("binding", inputs, [out])
 
+    def blurb(self) -> None:
+        latest = Path(self.state["current_review"])
+        inputs, out = [latest / "final.md"], latest / "reader-blurb.json"
+        if self._fresh("blurb", inputs, [out]):
+            return
+        self._run("blurb", ["-m", "backend.pipeline.draft_first_reader_blurb",
+                            "--manuscript", str(inputs[0]), "--output", str(out)])
+        self._done("blurb", inputs, [out])
+
     def register(self) -> None:
         latest = Path(self.state["current_review"])
-        inputs = [latest / "final.md", latest / "source-bindings.json", self.packet, self.p("essay.json")]
+        inputs = [latest / "final.md", latest / "source-bindings.json", latest / "reader-blurb.json",
+                  self.packet, self.p("essay.json")]
         if self._fresh("register", inputs, inputs):
             return
         essay = _json(self.p("essay.json"))
         self._run("register", ["scripts/register-draft-first-review.py", "--review-id", essay["review_id"],
-                               "--passage", essay["passage"], "--review-dir", str(latest),
-                               "--bindings", str(latest / "source-bindings.json"), "--packet", str(self.packet)])
+                               "--passage", essay["passage"], "--product-kind", "theological_topic_essay",
+                               "--review-dir", str(latest),
+                               "--bindings", str(latest / "source-bindings.json"), "--packet", str(self.packet),
+                               "--reader-blurb", str(latest / "reader-blurb.json")])
         self._done("register", inputs, inputs)
 
     def final_review(self) -> None:
@@ -290,8 +280,8 @@ class EssayRun:
 
     # -- driver --------------------------------------------------------------
     def advance(self) -> dict[str, Any]:
-        steps = [self.scope, self.coverage, self.decisions, self.cvp_gap, self.calibration,
-                 self.build_packet, self.author, self.review, self.binding, self.register, self.final_review]
+        steps = [self.scope, self.coverage, self.decisions, self.cvp_gap,
+                 self.build_packet, self.author, self.review, self.binding, self.blurb, self.register, self.final_review]
         try:
             for step in steps:
                 step()
@@ -340,13 +330,6 @@ def adopt_existing(stage: str, argv: list[str], log: Path) -> None:
     For a run made before this command (the 人子 essay), and for replaying a
     saved run with zero model calls. A missing output fails the stage.
     """
-
-
-def _require_calibrated() -> None:
-    from backend.pipeline.draft_first_calibration import require_calibrated
-    from backend.pipeline.draft_first_review_runner import REVIEW_MODEL
-
-    require_calibrated(REVIEW_MODEL)
 
 
 def main() -> int:

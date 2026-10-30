@@ -45,6 +45,13 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class CandidateValidationError(ValueError):
+    """Stable error category plus concrete diagnostics for an ordinary correction."""
+    def __init__(self, message, *, details):
+        super().__init__(message)
+        self.details = details
+
+
 class Binding(Contract):
     path: str = Field(min_length=1)
     file_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
@@ -72,6 +79,18 @@ class Permission(Contract):
         return self
 
 
+class UpdateScope(Contract):
+    viewpoint_ids: list[str] = Field(min_length=1)
+    replacement_claim_ids: list[str]
+
+    @model_validator(mode='after')
+    def unique_ids(self):
+        for values in (self.viewpoint_ids,self.replacement_claim_ids):
+            if len(values)!=len(set(values)) or any(not value for value in values):
+                raise ValueError('update identities must be unique and nonempty')
+        return self
+
+
 class Request(Contract):
     schema_version: Literal['wang_cvp_management_v2'] = VERSION
     action_id: str = Field(min_length=1)
@@ -86,6 +105,12 @@ class Request(Contract):
     @model_validator(mode='after')
     def bounded(self):
         verify(self.input, 'wang_cvp_recall_preflight_v1')
+        update=self.input.get('update')
+        if 'update' in self.input:
+            UpdateScope.model_validate(update)
+        if update is not None and (self.mode != 'maintain' or
+                set(update.get('viewpoint_ids',[])) != set(self.maintenance_viewpoint_ids)):
+            raise ValueError('CVP update must bind exactly its maintain viewpoint scope')
         if len(set(self.maintenance_viewpoint_ids)) != len(self.maintenance_viewpoint_ids):
             raise ValueError('duplicate maintenance viewpoint')
         if self.mode == 'create' and (self.maintenance_viewpoint_ids or self.permissions):
@@ -197,9 +222,10 @@ def _request(value):
 def _records(bundle):
     verify(bundle, MATERIAL_VERSION)
     rows = {}
+    unavailable={('claims',cid) for cid in bundle.get('update',{}).get('unavailable_claim_ids',[])}
     for row in bundle['records']:
         key = row['collection'], row['object_id']
-        if (key in rows or row.get('retired') or
+        if (key in rows or (row.get('retired') and key not in unavailable) or
                 semantic_record_sha(row['payload']) != row['content_sha256']):
             raise ValueError('material contains duplicate, retired or inconsistent records')
         rows[key] = row
@@ -213,6 +239,17 @@ def _id(request, kind, ref, group_key):
 def prepare_domain(request, bundle):
     request = _request(request)
     records = _records(bundle)
+    update=request.input.get('update')
+    material_update=bundle.get('update')
+    if (update is None) != (material_update is None) or (update is not None and
+            any(update.get(key)!=material_update.get(key) for key in ('viewpoint_ids','replacement_claim_ids'))):
+        raise ValueError('update material differs from the bound request')
+    if material_update is not None:
+        unavailable=set(material_update['unavailable_claim_ids'])
+        if unavailable & {row['claim_id'] for row in bundle['claim_input']['claims']} or any(
+                ('claims',cid) not in records or not (records['claims',cid].get('retired') or
+                    records['claims',cid]['payload'].get('review_status')=='superseded') for cid in unavailable):
+            raise ValueError('unavailable update Claims are history only')
     if not set(request.maintenance_viewpoint_ids) <= set(bundle.get('maintenance_viewpoint_ids', [])):
         raise ValueError('maintenance needs complete own member support materials')
     refs = {}
@@ -402,6 +439,18 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
     request = _request(request)
     if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
             and previous.get('material_sha256')!=bundle.get('artifact_sha256')
+            and bundle.get('program_validation_feedback') is not None):
+        # Older runners added mechanical error feedback without rebinding the
+        # preceding candidate. Recover ONLY its exact full material preimage:
+        # removing these two program fields must reproduce the saved SHA.
+        # Every record, source, Claim position and authority remains bound.
+        before=seal({k:v for k,v in bundle.items() if k not in {
+            'program_validation_feedback','program_validation_response_shas','artifact_sha256'}})
+        if before['artifact_sha256']==previous['material_sha256']:
+            return rebind_candidate(request,before,bundle,previous,
+                replacement_raw=raw,prior_findings=prior_findings)
+    if (previous is not None and previous.get('schema_version')==VERSION+'_candidate'
+            and previous.get('material_sha256')!=bundle.get('artifact_sha256')
             and bundle.get('summary_enrichment_contract')==SUMMARY_ENRICHMENT_CONTRACT):
         # A historical expansion rebound the candidate before task contracts
         # were attached. Recover only an exact preimage differing in these two
@@ -443,7 +492,12 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             or not discarded <= prior_write_refs | prior_summary_refs
             or discarded & {row.ref for row in raw.changes}
             or discarded & {row.ref for row in raw.summaries}):
-        raise ValueError('discard requires unique previous candidate edits without a conflicting new delta')
+        raise CandidateValidationError('discard requires unique previous candidate edits without a conflicting new delta',
+            details={'discard_refs':raw.discard_refs,
+                'unknown_refs':sorted(discarded-(prior_write_refs|prior_summary_refs)),
+                'conflicting_refs':sorted(discarded & ({row.ref for row in raw.changes}|{row.ref for row in raw.summaries})),
+                'instruction':'Discard only edits still present in previous.writes or previous.summaries. '
+                    'An edit already removed by an accepted earlier proposal must not be discarded again.'})
     plan = _positions(bundle, raw, previous)
     parts = {row['component_ref']: row for row in plan['components']}
     changed_plan = previous is not None and plan['artifact_sha256'] != previous['component_plan']['artifact_sha256']
@@ -558,7 +612,8 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             claim = original.get(('claims', states[key]['claim_id']))
             if claim is not None and states[key]['pinned_claim_revision'] != claim['revision']:
                 pending.append((states[key]['viewpoint_id'], 'pinned_claim_revision'))
-            if 'evidence_bindings' in permission.get(key, set()):
+            if ('evidence_bindings' in permission.get(key, set()) and
+                    (request.input.get('update') is None or ref in link_evidence_choices or ref in link_fragment_choices)):
                 pending.append((states[key]['viewpoint_id'], 'evidence_bindings'))
         if pending and ref not in touched:
             if (request.mode != 'maintain' or _held(row['payload'])
@@ -646,7 +701,14 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             if ref not in component_by_link:
                 # Existing withdrawn links are still explicitly reviewed as objects/members.
                 if is_new:
-                    raise ValueError('new active link needs an explicit component disposition')
+                    raise CandidateValidationError('new active link needs an explicit component disposition',
+                        details={'link_ref': ref, 'claim_ref': cref,
+                            'target_ref': keyrefs.get(('canonical_viewpoints', payload.get('viewpoint_id'))),
+                            'inherited': previous is not None and any(w['ref']==ref for w in previous['writes']),
+                            'instruction': 'Inherited uncommitted new links remain until discard_refs removes them; '
+                                'mentioning a link in a reason does not assign its component. '
+                                'Each component has exactly one disposition; resolve competing new links explicitly '
+                                'without duplicating spans or losing the underlying judgement.'})
                 if payload.get('effective_state', 'active') == 'active' and (col, oid) not in _members(original, set(request.maintenance_viewpoint_ids)):
                     raise ValueError('existing active link is outside complete member maintenance')
             else:
@@ -654,9 +716,20 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                 if component['claim_ref'] != cref:
                     raise ValueError('link component belongs to another Claim')
                 payload.pop('component_ref', None)
-                if payload['link_type'] == 'equivalent_full':
-                    own = [u for u in bundle['claim_input']['text_units'] if u['claim_ref'] == cref]
-                    if len(component['spans']) != len(own) or any(s['start_char'] != 0 or s['end_char'] != len(next(u['text'] for u in own if u['text_ref'] == s['text_ref'])) for s in component['spans']):
+                own = [u for u in bundle['claim_input']['text_units'] if u['claim_ref'] == cref]
+                whole_claim = (len(component['spans']) == len(own) and all(
+                    s['start_char'] == 0 and s['end_char'] == len(next(
+                        u['text'] for u in own if u['text_ref'] == s['text_ref']))
+                    for s in component['spans']))
+                # An existing whole-Claim support/extension remains whole
+                # when repinned. Adding a redundant full-text locator would
+                # falsely turn a retained relationship into a semantic edit.
+                preserve_whole = (not is_new and request.input.get('update') is not None
+                    and not original[key]['payload'].get('component_locator')
+                    and not original[key]['payload'].get('component_position_locator')
+                    and whole_claim)
+                if payload['link_type'] == 'equivalent_full' or preserve_whole:
+                    if not whole_claim:
                         raise ValueError('equivalent_full must represent the full Claim text units')
                     payload['component_locator'] = None
                     payload.pop('component_position_locator', None)
@@ -826,6 +899,12 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         if col == 'canonical_viewpoints' and (col, oid) in original
         and state.get('current_revision_id') != original[col, oid]['payload'].get('current_revision_id')}
     affected_ids = changed_member_targets | created_ids | changed_head_ids
+    if request.input.get('update') is not None:
+        affected_ids.update(request.maintenance_viewpoint_ids)
+        maintenance=set(request.maintenance_viewpoint_ids)
+        object_refs.update(keyrefs[key] for key,row in original.items() if
+            (key[0]=='canonical_viewpoints' and key[1] in maintenance) or
+            (key[0]=='viewpoint_relations' and _maintenance_scope(key[0],row['payload'],original) & maintenance))
     # A correction that withdraws a proposed link also withdraws its incidental
     # summary edit. A separately authorized maintenance edit remains in scope.
     if statement_recall(request):
@@ -878,6 +957,9 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             old_member_ids = {row['payload']['claim_id'] for (col, _), row in original.items()
                 if col == 'viewpoint_claim_links' and row['payload'].get('viewpoint_id') == vid
                 and row['payload'].get('effective_state') == 'active'}
+            if request.input.get('update') is not None:
+                # Withdrawn members are reviewed as history, not support.
+                old_member_ids -= set(bundle.get('update',{}).get('unavailable_claim_ids',[]))
             if not summary or not old_member_ids <= loaded_claim_ids:
                 summary_material_pending.append(ref)
                 continue
@@ -889,7 +971,10 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                 summary_material_pending.append(ref)
                 continue
             if key in original:
-                state['revision'] = original[key]['revision'] + 1
+                unchanged = all(state.get(k)==original[key]['payload'].get(k)
+                    for k in ('summary','summary_basis','identity_status','current_revision_id','redirect_to_viewpoint_id'))
+                if not (request.input.get('update') is not None and unchanged):
+                    state['revision'] = original[key]['revision'] + 1
             states[key] = KNOWLEDGE_COLLECTIONS['canonical_viewpoints'][0].model_validate(state).model_dump(mode='json')
             existing_write = next((write for write in writes if (write['collection'], write['object_id']) == key), None)
             if key in original and semantic_record_sha(states[key]) == original[key]['content_sha256']:
@@ -977,7 +1062,12 @@ def _validate_afterimage(request, original, states, dispositions, parts, refs):
             if (any(s['path'] != ['statement'] for s in parts[ref]['spans'])
                     or locator['claim_sha256'] != current_claim['content_sha256']
                     or locator['canonical_spans'] != expected):
-                raise ValueError('existing statement locator differs from actual component')
+                raise ValueError(f'{ref}: existing statement locator differs from actual component; '
+                    f'link_ref={disposition["link_ref"]}; '
+                    f'fixed_ranges={[(s["start_char"],s["end_char"]) for s in locator["canonical_spans"]]}; '
+                    f'proposed_ranges={[(s["start_char"],s["end_char"]) for s in expected]}. '
+                    'Preserve the exact existing connected range; account for intervening punctuation/connectives '
+                    'as separate unconnected components when necessary, without changing the Claim or other CVP links.')
         view = states['canonical_viewpoints', target]
         if (_held(view) or _held(states['viewpoint_revisions', view['current_revision_id']])
                 or view['identity_status'] != 'active' or payload['validated_against_viewpoint_revision_id'] != view['current_revision_id']):
@@ -1009,6 +1099,35 @@ def _validate_afterimage(request, original, states, dispositions, parts, refs):
             if any(row.get('effective_state') == 'active' and oid in {row['source_viewpoint_id'], row['target_viewpoint_id']}
                    for (c, _), row in states.items() if c == 'viewpoint_relations'):
                 raise ValueError('retire/merge leaves an active relation on an inactive viewpoint')
+    if request.input.get('update') is not None:
+        for (col, _), row in states.items():
+            if col != 'viewpoint_claim_links' or row.get('effective_state') != 'active':
+                continue
+            if row['viewpoint_id'] not in request.maintenance_viewpoint_ids:
+                continue
+            claim=original['claims',row['claim_id']]
+            if (claim.get('retired') or claim['payload'].get('review_status')=='superseded'
+                    or row['pinned_claim_revision']!=claim['revision']):
+                raise ValueError('update leaves unavailable or stale Claim support active')
+            for binding in row.get('evidence_bindings',[]):
+                eid,fid=binding['evidence_step_id'],binding['source_fragment_id']
+                evidence=original.get(('evidence_steps',eid))
+                if (eid not in claim['payload'].get('evidence_step_ids',[]) or not evidence
+                        or evidence['payload'].get('support_eligibility') not in {'eligible','eligible_candidate','eligible_with_label'}
+                        or fid not in evidence_fragment_ids(evidence['payload'])):
+                    raise ValueError('update leaves ineligible Claim evidence active')
+        for (col,_),row in states.items():
+            if col=='viewpoint_relations' and row.get('effective_state')=='active' and (
+                    {row['source_viewpoint_id'],row['target_viewpoint_id']} & set(request.maintenance_viewpoint_ids)):
+                if any(original['claims',cid].get('retired') or
+                        original['claims',cid]['payload'].get('review_status')=='superseded'
+                        for cid in row.get('supporting_claim_ids',[])):
+                    raise ValueError('update leaves unavailable Claim support on an active relation')
+        for vid in request.maintenance_viewpoint_ids:
+            if states['canonical_viewpoints',vid]['identity_status']=='active' and not any(
+                    col=='viewpoint_claim_links' and p['viewpoint_id']==vid and p.get('effective_state')=='active'
+                    for (col,_),p in states.items()):
+                raise ValueError('active update has no current support; disposition or upstream resolution required')
     # Changing a head requires every active member/relationship to follow it.
     for (col, _), row in states.items():
         if col == 'viewpoint_claim_links' and row.get('effective_state') == 'active':
@@ -1088,11 +1207,17 @@ def proposal_packet(request, bundle, *, context=None, previous=None, prior_findi
             if k not in {'old_bundle', 'previous_candidate', 'artifact_sha256'}},
             'schema_version': VERSION + '_rebase_frame_runtime',
             'durable_frame_sha256': previous['artifact_sha256']}
-    return {'schema_version': VERSION + '_proposal_packet',
+    packet = {'schema_version': VERSION + '_proposal_packet',
         'request': request.model_dump(mode='json'), 'material': bundle['material'],
         'input': bundle['claim_input'], 'context': expected,
         'previous': previous, 'prior_findings': list(prior_findings),
         'instructions': 'Output only compact field changes and short references. Empty changes/dispositions/summaries retain previous candidate. Never copy identifiers, hashes, old text or unchanged records. All new viewpoints require same-group novelty review.'}
+    if bundle.get('program_validation_feedback'):
+        packet['program_validation_feedback'] = deepcopy(bundle['program_validation_feedback'])
+        packet['instructions'] += (' The previous raw answer failed program validation and is not an approved candidate. '
+            'Fix the reported errors against this same complete material and permissions; preserve all valid intended decisions. '
+            'Return a corrected compact response, or request genuinely missing material. Do not relax coverage or change readonly connections.')
+    return packet
 
 
 def review_packet(request, bundle, candidate, *, prior_findings=()):
@@ -1171,6 +1296,7 @@ def finalize_package(request, bundle, candidate, approval, provenance):
         if col == 'canonical_viewpoints' and write['before_revision'] is None:
             payload['created_from_candidate_id'] = candidate_id
         identity_candidate = {
+            **({'schema_version':'wang_viewpoint_identity_candidate_v2'} if not targets and request.input.get('update') is not None else {}),
             'identity_candidate_id': candidate_id, 'candidate_claim_ids': targets,
             'candidate_viewpoint_ids': view_ids, 'proposed_action': 'create_new' if identity_action == 'create_new' else 'match_existing',
             'scope_manifest_sha256': candidate['material_sha256'],

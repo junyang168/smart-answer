@@ -332,6 +332,10 @@ def test_delta_scores_inherit_unless_affected():
         "rescored_dimensions": ["b", "c"],
         "inherited_dimensions": ["a"],
     }
+    # #488: a score below its minimum is re-read, not carried forward.
+    merged, provenance = merge_delta_scores({**baseline, "verdict": {"dimensions_below_minimum": ["a"]}}, delta)
+    assert {s["dimension_id"]: s["score"] for s in merged["dimension_scores"]}["a"] == 4
+    assert provenance["inherited_dimensions"] == []
 
 
 def test_gate_outputs_are_sha_bound():
@@ -772,7 +776,7 @@ def test_concise_is_one_standard_and_the_reviewer_knows_what_wordy_looks_like():
     reviewer = (prompts / "draft_first_two_way_review.md").read_text()
     standard = [next(line for line in text.splitlines() if "成功的标准" in line).split("**")[1]
                 for text in (author, reviewer)]
-    assert standard[0] == standard[1] and "言之有物，言简意赅" in standard[0]
+    assert standard[0] == standard[1] and "言之有物，言简意赅，重点突出，不枝不蔓" in standard[0]
     assert "不要原样嵌进正文当总结" in author
     for kind in ("引完经文紧接着", "相邻几段说两三遍", "路标句", "Claim 的原句嵌进正文"):
         assert kind in reviewer
@@ -870,6 +874,45 @@ def test_every_quoted_verse_is_bound_to_where_the_professor_reads_or_names_it():
     assert any(slug.startswith("jhn-5-27") for _, slug in verse_mentions("見約翰福音 5:27。"))
 
 
+def test_an_unlabelled_verse_block_is_found_by_its_cuv_text(monkeypatch):
+    """#488: the reference sat in the sentence before the block, so three cited verses were flagged."""
+
+    from backend.bible_study import cuv
+    from backend.pipeline.draft_first_source_binding import scripture_bindings
+
+    chapters = {
+        ("1CO", 10): {"31": "所以，你們或吃或喝，無論做甚麼，都要為榮耀神而行。",
+                      "33": "就好像我凡事都叫眾人喜歡，不求自己的益處，只求眾人的益處，叫他們得救。"},
+        ("MAT", 20): {"16": "這樣，那在後的將要在前；在前的將要在後了。因為被召的人多，選上的人少。"},
+        ("MAT", 22): {"14": "因為被召的人多，選上的人少。"},
+    }
+    monkeypatch.setattr(cuv, "chapter", lambda book, number: chapters[(book, number)])
+    packet = {"source_originals": {"originals": [
+        {"source_id": "S1", "content": "再看林前10:33，保羅說，就好像我凡事都叫所有的人喜歡。"},
+        {"source_id": "S2", "content": "太20:1 天國好比家主清早去雇人。"},
+        {"source_id": "S3", "content": "你看馬太福音二十二章十四節說：被召的人多。"},
+    ]}}
+    cited = scripture_bindings("> 就好像我凡事都叫眾人喜歡，不求自己的益處，只求眾人的益處，叫他們得救。", packet)
+    assert [(s["source_id"], s["basis"]) for s in cited] == [("S1", "scripture_cited")]
+    # The same words close 太20:16, whose chapter is cited first; 22:14 is the verse a source names,
+    # and only by reading it out.
+    assert [s["source_id"] for s in scripture_bindings("> 因為被召的人多，選上的人少。", packet)] == ["S3"]
+    # 林前10:31: a chapter the sources cite, a verse none of them names.
+    assert scripture_bindings("> 你們或吃或喝，無論做甚麼，都要為榮耀神而行。", packet) == []
+
+
+def test_a_verse_read_out_with_its_book_counts_as_cited_but_a_misspoken_chapter_does_not():
+    """#488: 賽2:2-4 is only read out; 「羅馬書二十二章」 is a slip, Romans has sixteen."""
+
+    from backend.pipeline.draft_first_scripture import cited_chapters
+
+    packet = {"source_originals": {"originals": [
+        {"content": "我再給你看證據。以賽亞書第二章第二節到第四節，末後的日子。"},
+        {"content": "你再看羅馬書二十二章一節到十節。"},
+    ]}}
+    assert cited_chapters(packet) == [("ISA", 2)]
+
+
 def test_a_model_only_chooses_which_program_candidate_is_a_paragraphs_source():
     """Owner, 2026-10-24: every paragraph but the summary should be traceable."""
 
@@ -945,8 +988,8 @@ def test_program_checks_catch_a_stray_character_and_an_unsourced_verse():
     assert [(f["gate"], f["kind"]) for f in findings] == [("program_check", "unsourced_verse")]
 
 
-def test_a_review_refuses_a_reviewer_the_owner_has_not_calibrated(tmp_path):
-    """#451: the 2026-10-24 calibration ran because someone remembered to."""
+def test_a_reviewer_is_calibrated_only_by_a_record_for_its_own_fingerprint(tmp_path):
+    """#451/#494: wrap-up skips the reviewer call when this exact reviewer agreed."""
 
     import pytest
     from backend.pipeline.draft_first_calibration import (
