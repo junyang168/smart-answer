@@ -352,6 +352,45 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
             third=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
             assert third['status']=='paused' and next(iter(clients.values())).calls==expected_calls
             assert store.get_record_state('source_fragments','FD')==before
+            # The once-only owner supplement must also support a known
+            # returned rejection with no accepted candidate at all.
+            from backend.api.canonical_repository.claim_identity_allocation import reserve
+            from backend.pipeline.cvp_sql_commit import binding
+            prior = store.get_cvp_group(after['run_id'])
+            store.pause_claim_management_action(prior['run_id'], reason='budget_exhausted', detail='complete next correction pair exceeds original budget')
+            prior = {k:v for k,v in store.get_cvp_group(prior['run_id']).items() if k not in {'run_id','status','error'}}
+            request = cm.Request.model_validate(prior['request']).model_copy(deep=True)
+            request.predecessor_action_id = request.action_id
+            request.action_id += '-verified-engineering-followup'
+            output = root / 'engineering-followup'
+            output.mkdir()
+            selected = cm.Policy.model_validate(prior['policy'])
+            selected.initial_candidate = 'proposal'
+            selected.budget.gpt_calls = selected.budget.opus_calls = selected.budget.max_revisions = 1
+            selected_path = output/'policy.json';selected_path.write_text(selected.model_dump_json())
+            request.policy = cm.source.FileBinding.model_validate(binding(selected_path))
+            records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
+            current = {cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+            authority = json.loads(Path(request.authorization.path).read_text())
+            authority.update(request=request.model_dump(mode='json',exclude={'authorization','policy'}),policy=request.policy.model_dump(mode='json'),
+                claim_creation_allocations={g.source_id:reserve(store,action_id=request.action_id,source_id=g.source_id,target_id='D',root=output,count=1) for g in request.creation_permissions},
+                owner_call_extension={'basis':'remaining_findings','predecessor_action_id':request.predecessor_action_id,
+                    'prior_metadata_sha256':cm.sha256_json(prior),'budget':selected.budget.model_dump(mode='json'),
+                    'authorization_quote':'one correction after verified engineering repair','current_objects_sha256':cm.sha256_json(current),'related_action_metadata_sha256':{}})
+            auth_path=output/'authority.json';auth_path.write_text(json.dumps(authority));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+            def valid_proposal(packet):
+                assert packet['previous_candidate'] is None
+                rejected=packet['continuation']['unaccepted_returned_proposals'][latest+':gpt']
+                assert rejected['review_not_accepted'] is True
+                assert rejected['response']['finding_resolutions'][0]['citations'][0]['exact_quote'].endswith('TYPO。')
+                return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+                    'reason':'repair exact quote','citations':[citation]}],'creations':[],'retirements':[],'findings':[],
+                    'finding_resolutions':resolutions(packet)}
+            port=SyntheticPorts(store,output,opus=review,proposal=valid_proposal)
+            result=execute_claim_management(store,request,root=output,ports=port)
+            assert result['status']=='completed',result
+            assert port.calls==['gpt','opus']
+            assert store.claim_management_qualification('D')['ready']
         else:assert not after['original_goal'].get('unaccepted_model_inputs')
         return
     assert final['all_actions_completed'],final
