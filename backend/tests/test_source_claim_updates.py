@@ -220,7 +220,7 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
     assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
 
 
-@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent'])
+@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate'])
 def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
     from backend.pipeline import claim_management_intake as intake
     from backend.pipeline.claim_review_recovery import consumed_rejected_citations
@@ -233,11 +233,24 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
         inputs=packet['original_goal'].get('unaccepted_model_inputs')
         if inputs:
             original=inputs[0]['response']
-            original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
-            assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
-        return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
-            'reason':'repair bound excerpt','citations':[citation]}],'creations':[],'retirements':[],'findings':[],
-            'finding_resolutions':resolutions(packet,bad=not inputs or defect=='repeat')}
+            if defect=='creation':
+                assert json.loads(original['creations'][0]['fields_json'])['visibility']=='internal'
+            elif defect=='duplicate':
+                assert original['changes'][0]['record_key']==original['changes'][1]['record_key']
+            else:
+                original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
+                assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
+        creations=[]
+        if defect=='creation' and not inputs:
+            oid=packet['original_goal']['claim_creation_allocations']['S']
+            creations=[{'collection':'claims','object_id':oid,'reason':'new source judgment','citations':[citation],
+                'fields_json':json.dumps({'statement':'教授否定这个译法。','claim_type':'explicit_claim','attribution':'professor',
+                    'occurrences':[{'source_id':'S'}],'evidence_step_ids':['ED'],'visibility':'internal'})}]
+        changes=[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+            'reason':'repair bound excerpt','citations':[citation]}]
+        if defect=='duplicate' and not inputs:changes+=deepcopy(changes)
+        return {'changes':changes,'creations':creations,'retirements':[],'findings':[],
+            'finding_resolutions':resolutions(packet,bad=(not inputs or defect=='repeat') and defect not in {'creation','duplicate'})}
     def review(packet):
         value=pass_review(packet);value['prior_findings']=resolutions(packet)
         if not packet['unresolved']:
@@ -281,7 +294,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     assert not raw.exists() if defect=='missing' else raw.read_bytes()==raw_bytes
     after=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
     assert after['request']==parent['request'] and after['policy']==parent['policy']
-    if defect not in {'current','opus'}:
+    if defect not in {'current','opus','creation','duplicate'}:
         expected_calls=initial_calls+(['gpt'] if defect=='repeat' else [])
         assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
         assert store.get_record_state('source_fragments','FD')==before
@@ -296,5 +309,10 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     assert after['call_reservations'][rid+':'+role]==parent['call_reservations'][rid+':'+role]
     if role=='gpt':assert after['call_reservations'][rid+':opus']['state']=='cancelled'
     assert consumed_rejected_citations(after,rid+':'+role,after['call_reservations'][rid+':'+role])
+    if defect=='duplicate':assert parent['result']['detail']=='changed record repeated or absent from frozen input'
+    if defect=='creation':
+        assert parent['result']['detail']=='created fields exceed creation permission'
+        assert not after.get('created_keys')
+        assert after['request']['creation_permissions']==parent['request']['creation_permissions']
     assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']
     assert store.claim_management_qualification('D')['ready']

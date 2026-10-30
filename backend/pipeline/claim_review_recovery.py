@@ -399,10 +399,19 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
 
 
 CITATION_ERROR = 'citation is not an exact quote from the complete own source'
+CREATION_FIELDS_ERROR = 'created fields exceed creation permission'
+DUPLICATE_CHANGE_ERROR = 'changed record repeated or absent from frozen input'
+RECOVERABLE_OUTPUT_ERRORS = {CITATION_ERROR, CREATION_FIELDS_ERROR, DUPLICATE_CHANGE_ERROR}
 
 
 def rejected_citation_input(value, parent, role):
-    """Authenticate a returned report and reproduce only its citation rejection."""
+    return rejected_model_input(value,parent,role,error=CITATION_ERROR)
+
+
+def rejected_model_input(value, parent, role, *, error):
+    """Authenticate and reproduce a supported rejection; never approve its content."""
+    if error not in RECOVERABLE_OUTPUT_ERRORS or error!=CITATION_ERROR and role!='gpt':
+        raise ValueError('unsupported returned model rejection')
     from backend.pipeline.cvp_sql_actions import validate_claim_stage, claim_management_review_packet
     from backend.pipeline.claim_model_output import candidate as expand_candidate, review as expand_review
     materials = value['materials']; policy = cm.Policy.model_validate(materials['policy'])
@@ -417,7 +426,7 @@ def rejected_citation_input(value, parent, role):
     packet = cm.model_packet(materials) if role == 'gpt' else claim_management_review_packet(materials,candidate)
     raw = validate_claim_stage(root,role,policy,packet)
     if slot.get('rejection') != {'response_state':'returned_rejected','raw':binding(root/(role+'.raw.json')),
-            'detail':CITATION_ERROR,'accepted':False,'automatic_retry':False}:
+            'detail':error,'accepted':False,'automatic_retry':False}:
         raise ValueError('rejected citation must retain its authenticated rejection')
     try:
         request = cm.Request.model_validate(materials['unit_request'])
@@ -431,8 +440,46 @@ def rejected_citation_input(value, parent, role):
             cm.validate_review(candidate,review,packet['denominator'],packet['required_questions'],
                 materials['unresolved'],materials['sources'],request=request,records=materials['before'])
     except ValueError as exc:
-        if str(exc) != CITATION_ERROR:raise
+        if str(exc) != error:raise
     else:raise ValueError('valid model answer cannot enter rejected-citation recovery')
+    if error==DUPLICATE_CHANGE_ERROR:
+        from collections import Counter
+        changes=raw['response'].get('changes',[])
+        keys=[item['record_key'] for item in changes]
+        allowed={p.key for p in request.permissions}
+        if any(key not in materials['before'] or key not in allowed for key in keys):
+            raise ValueError('repeated-change recovery cannot add absent or unauthorized records')
+        repeated=sorted(key for key,n in Counter(keys).items() if n>1)
+        if not repeated:raise ValueError('no authenticated repeated change to correct')
+        evidence=next((item['citations'][0] for item in changes if item['record_key'] in repeated and item['citations']),None)
+        if evidence is None:raise ValueError('repeated-change recovery lacks exact source evidence')
+        cm.validate_citations([cm.Citation.model_validate(evidence)],materials['sources'])
+        return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
+            'response':raw['response'],'rejection_detail':error,'repeated_change_keys':repeated,
+            'correction_citation':evidence,'review_not_accepted':True,
+            'instruction':'This unchanged rejected answer is input, never approval. Reassess all decisions and produce exactly one coherent change per existing authorized record. Reconcile repeated changes yourself; no entry has been merged, discarded or approved. Pass ordinary full validation and Opus review.'}
+    if error==CREATION_FIELDS_ERROR:
+        proposed=cm.source.index(candidate.records)
+        provisional={k:v['payload'] for k,v in materials['before'].items()} | proposed
+        invalid=[];evidence=None
+        for disposition in candidate.dispositions:
+            if disposition.action!='create':continue
+            col,_=cm.source.split_key(disposition.record_key);payload=proposed[disposition.record_key]
+            own=cm.own_source_ids(payload,provisional)
+            grants=[g for g in request.creation_permissions if g.collection==col and g.source_id in own]
+            if len(grants)!=1:raise ValueError('creation recovery requires an existing unique source grant')
+            mechanical=cm.MECHANICAL_FIELDS | (cm.FRAGMENT_HASH_FIELDS if col=='source_fragments' else set())
+            extra=set(payload)-set(grants[0].fields)-mechanical-{cm.KNOWLEDGE_COLLECTIONS[col][1]}
+            if extra:
+                cm.validate_citations(disposition.citations,materials['sources'])
+                if not disposition.citations:raise ValueError('rejected creation lacks exact source evidence')
+                evidence=evidence or disposition.citations[0].model_dump(mode='json')
+                invalid.append({'record_key':disposition.record_key,'ungranted_fields':sorted(extra),'allowed_fields':grants[0].fields})
+        if not invalid:raise ValueError('no authenticated ungranted creation fields to correct')
+        return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
+            'response':raw['response'],'rejection_detail':error,'invalid_creation_fields':invalid,
+            'correction_citation':evidence,'review_not_accepted':True,
+            'instruction':'This unchanged rejected answer is input, never approval. Reassess all decisions, use only the original granted creation fields, and pass ordinary proposal validation and Opus review. Do not widen permissions.'}
     bad = []
     def visit(item):
         if isinstance(item,list):
@@ -456,6 +503,10 @@ def rejected_citation_input(value, parent, role):
 
 
 def resume_rejected_citations(store, round_id, *, role):
+    return resume_rejected_output(store,round_id,role=role,error=CITATION_ERROR)
+
+
+def resume_rejected_output(store, round_id, *, role, error):
     """Advance to ordinary correction using original authority and remaining slots.
 
     No fuzzy matching, raw editing, acceptance, new budget or content writes.
@@ -466,11 +517,14 @@ def resume_rejected_citations(store, round_id, *, role):
         cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
         value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(round_id,)).fetchone()[0]
         parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(value['parent_run_id'],)).fetchone()[0]
-        if value.get('citation_input_recovery'):
-            check_binding(value['citation_input_recovery'])
-            record=body(read(value['citation_input_recovery']['path']))
-            if record['input']['role']!=role:raise ValueError('recovery belongs to another role')
-            return value['citation_input_recovery']
+        marker='citation_input_recovery' if error==CITATION_ERROR else 'model_input_recovery'
+        if error not in RECOVERABLE_OUTPUT_ERRORS:raise ValueError('unsupported returned model rejection')
+        if value.get(marker):
+            check_binding(value[marker])
+            record=body(read(value[marker]['path']))
+            if record['input']['role']!=role or record['input'].get('rejection_detail',CITATION_ERROR)!=error:
+                raise ValueError('recovery belongs to another role or rejection')
+            return value[marker]
         materials = value['materials']; request = cm.Request.model_validate(materials['request'])
         policy = cm.Policy.model_validate(materials['policy'])
         slot = parent['call_reservations'].get(round_id+':'+role,{})
@@ -484,7 +538,7 @@ def resume_rejected_citations(store, round_id, *, role):
                 or parent['result'].get('returned_rejected_call')!=round_id+':'+role
                 or slot.get('state')!='started' or slot.get('role')!=role or slot.get('round_id')!=round_id):
             raise ValueError('citation recovery requires the exact latest uncommitted returned rejection')
-        entry = rejected_citation_input(value,parent,role)
+        entry = rejected_model_input(value,parent,role,error=error)
         # Check the complete next pair before changing any stage or cancelling
         # its unused slots. Rejected generations remain spent.
         for next_role in cm.required_roles(request,value['round_number']+1,policy):
@@ -506,11 +560,11 @@ def resume_rejected_citations(store, round_id, *, role):
         if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
             raise ValueError('citation recovery cannot change original model instructions')
         original = deepcopy(value); original_parent = deepcopy(parent)
-        first = entry['invalid_citations'][0]
+        first = entry['invalid_citations'][0] if error==CITATION_ERROR else entry['correction_citation']
         exact = sources[first['source_id']]['paragraphs'][first['paragraph_key']]['text']
-        finding = cm.Finding(target_key=request.target_keys[0],category='engineering',component='rejected_model_citations',
-            reason='A returned '+role+' answer failed exact quotation validation. The complete unchanged answer and invalid citations are in original_goal.unaccepted_model_inputs. Reassess all decisions; no candidate or review from this rejection is approved.',
-            acceptance_condition='Repair non-verbatim citations from the complete source and pass ordinary full candidate validation and Opus review.',
+        finding = cm.Finding(target_key=request.target_keys[0],category='engineering',component='rejected_model_citations' if error==CITATION_ERROR else 'rejected_model_structure',
+            reason='A returned '+role+' answer failed validation: '+error+'. The unchanged answer and exact rejected elements are in original_goal.unaccepted_model_inputs. Reassess all decisions; this is not approval.',
+            acceptance_condition='Correct rejected elements within the original authority and pass ordinary full candidate validation and Opus review.',
             citations=[cm.Citation(source_id=first['source_id'],paragraph_key=first['paragraph_key'],exact_quote=exact)],
             affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='the rejected answer cannot be used as approval')
         parent['findings'][finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
@@ -523,19 +577,20 @@ def resume_rejected_citations(store, round_id, *, role):
             'content_approved':False,'current_contract':contract}
         write(destination/'engineering-recovery.json',record)
         parent.update(audit_contract=contract,revision_rounds=revisions,result={'status':'running','reason':'revision_required','round_id':round_id,'unit_id':value['unit_id']})
-        value.update(outcome='revision_required',citation_input_recovery=binding(destination/'engineering-recovery.json'))
+        value.update(outcome='revision_required',**{marker:binding(destination/'engineering-recovery.json')})
         for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",(canonical_json(metadata),rid))
-        return value['citation_input_recovery']
+        return value[marker]
 
 
 def consumed_rejected_citations(previous,key,slot):
     entries = [e for e in previous['original_goal'].get('unaccepted_model_inputs',[]) if e['round_id']+':'+e['role']==key]
-    if not entries and slot.get('rejection',{}).get('detail')!=CITATION_ERROR:return False
+    error=slot.get('rejection',{}).get('detail')
+    if not entries and error not in RECOVERABLE_OUTPUT_ERRORS:return False
     if len(entries)>1 or slot['state']!='started':raise ValueError('rejected citation accounting drift')
     root = Path(previous['execution_root'])/slot['round_id']
     materials = body(read(root/'materials.json'))
     value = {'materials':materials,'candidate':body(read(root/'candidate.json')) if slot['role']=='opus' else None}
-    observed = rejected_citation_input(value,previous,slot['role'])
+    observed = rejected_model_input(value,previous,slot['role'],error=error)
     if entries and observed!=entries[0]:raise ValueError('rejected citation input drift')
     return True
