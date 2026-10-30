@@ -371,6 +371,10 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 已登记只读问题造成 `permission_required` 时，负责人可明确补齐该对象字段权限，并通过已有 `owner_call_extension` 关联一次 GPT 修订与一次 Opus 审阅。保留原目标、来源、全部旧权限／维护义务、未提交候选和已消耗调用；只允许新增已登记非原文疑点的非 Claim 对象权限。关系端点的必要证据可进入模型范围，但全部旧模型对象必须保留，完整事务对象必须与上一轮逐项一致，并绑定当前完整事务对象 SHA。来源或对象漂移、未知调用、已提交写入、额外对象权限和重复分叉均不允许；新增许可不是内容批准。
 
+已授权同源 Claim Create，但漏授必要 SourceFragment／EvidenceStep Create 时，可沿唯一关联接续补齐这两类普通内容权限。只限已有 evidence／mapping 异议引用的原来源，全部旧许可、目标及冻结事实保留；不得修改旧 Claim 创建许可、跨来源、授审批字段或同时扩大其他写权。原 no_progress 及已返回提案保持原样验证和计费；真实工程修复经验证后，只能依既有一次补轮授权使用最多 1 GPT＋1 Opus。
+
+共享写入确实被某个已冻结、已有异议的只读 Claim owner 阻挡时，负责人可明确授权将这一条同源 owner 加入原单目标的联合接续，最多两个目标。请求逐项声明旧目标与新增 owner，只补该 owner 的普通 Claim 字段，保留旧目标、旧权限、来源及全部旧模型事实；新联合单元继承原候选与全部异议，不继承内容批准。绑定当前完整事务对象及原 metadata，以最多一次 GPT 修订和一次 Opus 审阅处理；未获负责人授权不得自动扩入邻居，原批次分母不变。
+
 同一负责人追加许可也可精确绑定两种后续：预算耗尽但仍有末轮异议时，保留未提交候选并将全部异议交回 GPT；已完成对象因后续共享输入改变而失效时，保留历史完成与写集，以精确绑定的当前完整 SQL 后像重新审阅，不重放旧候选。 原目标须与上次已完成轮次的提交后回读版本一致，不能误拿该次 Update 修改前的目标作基线；回读缺目标、未核实或目标后来又发生变化均拒绝。两者均保留原目标、来源、字段权限、已消耗调用及唯一接续关系，并绑定当前完整事务对象 SHA；后者可额外绑定同来源已完成 action 的 metadata，导入其全部末轮异议，但不能导入其资格。不得通过此入口丢弃未知调用、改变原 Claim 或声称负责人已作内容判断。
 
 若分歧仅来自尚未提交的可选周边修改，且保存异议明确不影响原目标或必做项，负责人授权的后继可收紧为零写权限，以当前 SQL 重新确认原目标。它必须恢复那些只在未提交候选中被判为已解决的异议，将全部异议再交 GPT／Opus 判定；不得重放被拒写项、丢弃实际目标阻断、跨越来源或当前输入变化。零写权限由程序强制执行，不凭提示词承诺。
@@ -528,7 +532,7 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 清单文件仅含 JSON 数组，不含预制 request。任务保存去重后的原分母、执行方向、policy、各 action/root、来源绑定与授权文件。policy 副本保存在任务内，不依赖开发 worktree 长期存在。后台运行消费冻结清单；`--status --root <同一任务目录>` 核对实际控制器或继承锁的 worker。重启使用同一清单、方向、policy 和 root，不能换址清预算或覆盖旧授权。
 
-此入口使用现有 scoped Opus-only Update，包含必要的 GPT 修订、Opus 复审、短 transaction 与回读，预算和所有退出条件保持原样。新 v8 请求明确授权 Update／Create／Retire：可创建至多一条同源 Claim，并原子补齐已有 Evidence 与 Question 的双向归属；可退休目标 Claim 与有许可的相关关系，并在同一交易清理 Evidence owner、Question answer 等失效引用。不可改写退休历史 payload、退休只读邻居、恢复对象或扩大写入域。新建仍须不重复，退休须审查原教导处置与消费者影响；缺少这种许可的旧任务不能取得新能力。
+此入口使用现有 scoped Opus-only Update，包含必要的 GPT 修订、Opus 复审、短 transaction 与回读，预算和所有退出条件保持原样。新 v8 请求明确授权 Update／Create／Retire：默认可创建至多一条同源 Claim；清单入口可用 `creation_count` 明确冻结多个 SQL 身份，数量不是必须新建的配额。managed compact v4 请求同时明确授予同源 SourceFragment 与 EvidenceStep 的内容 Create 权限，使新判断能引用实际教授原文，并原子补齐 Evidence 与 Question 的双向归属；可退休目标 Claim 与有许可的相关关系，并在同一交易清理 Evidence owner、Question answer 等失效引用。不可改写退休历史 payload、退休只读邻居、恢复对象或扩大写入域。新建仍须不重复，退休须审查原教导处置与消费者影响；缺少这种许可的旧任务不能取得新能力。
 
 逐项结果保留实际暂停原因；起始不存在、已退役或受人工 hold 保护的 ID 不静默丢弃，也不阻止其他独立项执行。清单内 action 历史完成，active 目标及新建对象的当前资格有效，且退休目标有实际 Opus 退休批准与共同完成边界确认的精确当前回读，整批才完成。退休单列于 `retired_keys`，不声称它 Claim-ready；段落交接另列 `retired_claim_ids`。该入口不代替来源版本交接、完整来源覆盖或 CVP／论证层维护。
 
@@ -561,7 +565,7 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 ### 11.3 联合 Update 的范围与执行
 
-联合 Update 的旧 v1–v6 策略只支持既有对象 retain／update，不接受 creation_permissions。v7 明确支持至多一条同源 Claim；v8 保留此能力并要求 SQL 程序预留身份，同时可在精确授权范围内退休目标 Claim 及相关关系。v8 的 compact 输出使用 `creations` 与 `retirements` 列表，未列项仍原样保留；同一对象不能既修改又退休，退休保留历史 payload。新建的实际双向归属、退休的消费者清理及其他修改共同审阅、共同交易，不能先 Create／Retire 再另笔 Update 来拆开原子义务。Restore、Split、Merge 及缺失的新 Evidence／新关系仍不在这条新建能力中；需要范围外能力时保存具体缺口。单条及其他 operations 的原有契约不因此改变。
+联合 Update 的旧 v1–v6 策略只支持既有对象 retain／update，不接受 creation_permissions。v7 明确支持至多一条同源 Claim；v8 保留此能力并要求 SQL 程序预留身份，同时可在精确授权范围内退休目标 Claim 及相关关系。v8 的 compact 输出使用 `creations` 与 `retirements` 列表，未列项仍原样保留；同一对象不能既修改又退休，退休保留历史 payload。新建的实际双向归属、退休的消费者清理及其他修改共同审阅、共同交易，不能先 Create／Retire 再另笔 Update 来拆开原子义务。managed compact v4 的显式许可还可新建同源 SourceFragment／EvidenceStep；只授普通内容字段，不能改来源文件或审批。Claim 仍受自身 SQL 预留身份和数量限制，支持对象不冒用 Claim 身份；旧请求不会自动扩大许可。Restore、Split、Merge 及新关系仍不在这条新建能力中；需要范围外能力时保存具体缺口。单条及其他 operations 的原有契约不因此改变。
 
 请求中全部目标、必做维护对象和许可归属同一单元，单元映射在 prepared 固定。实现须验证一一覆盖；不能只依赖当前 partition_targets 恰好返回一组。一个 E 即使有多个 owner，也只有一份共同后像；Claim 不必因为成为目标而改正文。
 
