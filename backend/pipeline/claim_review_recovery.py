@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 import json
 import os
+import hashlib
 
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
@@ -698,7 +699,7 @@ def consumed_rejected_citations(previous,key,slot):
     return True
 
 
-def resume_saved_pre_review(store, round_id):
+def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
     """Resume an exact saved candidate after one of two verified local fixes.
 
     Transaction-only drift may rebind consumers; mixed old/new objections may
@@ -726,12 +727,32 @@ def resume_saved_pre_review(store, round_id):
             and parent['result'].get('detail') == 'Claim correction made no semantic progress or repeats a previous candidate')
         transaction_drift = (parent['result'].get('reason') == 'engineering_required'
             and parent['result'].get('detail', '').startswith('transaction current dependency drift:'))
+        capacity_stop = False
+        if stopped_capacity_proof is not None:
+            check_binding(stopped_capacity_proof)
+            stopped = json.loads(Path(stopped_capacity_proof['path']).read_text())
+            artifact = stopped.get('artifacts', '')
+            if (stopped.get('result_state') != 'unknown' or stopped.get('retry_authorized') is not False
+                    or stopped.get('all_slot_locks_acquired') is not True or stopped.get('model_calls') != 0
+                    or 'invocation.json' not in stopped.get('files', {})
+                    or not set(stopped['files']) <= {'invocation.json','stdout.log','stderr.log','response.json'}
+                    or not Path(artifact).is_absolute() or not Path(artifact).is_dir()
+                    or (Path(artifact) / 'exit.json').exists()
+                    or any(hashlib.sha256((Path(artifact) / name).read_bytes()).hexdigest() != digest
+                           for name, digest in stopped['files'].items())):
+                raise ValueError('saved-candidate recovery needs the unchanged stopped-capacity proof')
+            capacity_stop = (parent['result'].get('reason') == 'engineering_required'
+                and parent['result'].get('detail') in {
+                    'opus: unsettled previous transport: ' + artifact,
+                    'opus: unsettled transport: ' + artifact})
+            if not capacity_stop:
+                raise ValueError('stopped-capacity proof does not match the exact pre-review block')
         if (value['checkpoint'] != 'prepared'
                 or set(value.get('stage_results', {})) != (set() if unrecorded else {'candidate'})
                 or bool(value.get('candidate')) != (not unrecorded)
                 or value.get('change_set_ids') or value.get('opus_approved')
                 or parent.get('continued_by') or parent['latest_rounds'].get(value['unit_id']) != round_id
-                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded)):
+                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop)):
             raise ValueError('saved-candidate recovery requires the exact uncommitted pre-review failure')
         opus = parent['call_reservations'].get(round_id + ':opus', {})
         if opus.get('state') != 'planned':
@@ -773,7 +794,7 @@ def resume_saved_pre_review(store, round_id):
             if not ids & judged or not ids - judged:
                 raise ValueError('unrecorded adjudication requires mixed old and genuinely new findings')
         context = _current_rejected_input_context(store, cursor, request, materials, include_records=True)
-        if context is None and not unrecorded:
+        if context is None and not (unrecorded or capacity_stop):
             raise ValueError('transaction recovery requires actual transaction-only drift')
         current_records = context.pop('current_transaction_before') if context else materials['transaction_before']
         original_value, original_parent = deepcopy(value), deepcopy(parent)
@@ -800,6 +821,7 @@ def resume_saved_pre_review(store, round_id):
         record = {'original_round': original_value, 'original_parent': original_parent,
             'transaction_context_refresh': context, 'current_contract': current_contract,
             'recovery_root': str(root), 'unrecorded_new_finding_adjudication': unrecorded,
+            'stopped_capacity_proof': stopped_capacity_proof,
             'model_inputs_unchanged': True, 'candidate_sha256': candidate.digest,
             'model_calls': 0, 'call_reservations_unchanged': True, 'content_approved': False}
         write(root / 'engineering-recovery.json', record)
