@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import "easymde/dist/easymde.min.css";
 import {
   selectReferenceGroup,
@@ -274,6 +275,7 @@ function TranscriptProofreader({
   const segmentEnd = useRef<number>();
   const video = useRef<HTMLVideoElement>(null);
   const [segmentPause, setSegmentPause] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const composing = useRef(false);
   const [tabId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -713,6 +715,62 @@ function TranscriptProofreader({
       void video.current.play();
     }
   };
+  const seek = (seconds: number) => {
+    const media = video.current;
+    if (!media) return;
+    const duration = Number.isFinite(media.duration)
+      ? media.duration
+      : Infinity;
+    media.currentTime = Math.max(
+      0,
+      Math.min(duration, media.currentTime + seconds),
+    );
+    const binding = current.current.context.paragraph_bindings[selected];
+    segmentEnd.current =
+      binding && media.currentTime < binding.end_ms / 1000
+        ? binding.end_ms / 1000
+        : undefined;
+  };
+  const togglePlayback = () => {
+    const media = video.current;
+    if (!media) return;
+    if (!media.paused) {
+      media.pause();
+      return;
+    }
+    const binding = current.current.context.paragraph_bindings[selected];
+    segmentEnd.current =
+      binding && media.currentTime < binding.end_ms / 1000
+        ? binding.end_ms / 1000
+        : undefined;
+    void media.play();
+  };
+  const playbackControls = (label: string) => (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex flex-wrap items-center gap-2"
+    >
+      <button className={button} onClick={() => seek(-15)}>
+        快退 15 秒
+      </button>
+      <button className={button} onClick={() => seek(-5)}>
+        倒退 5 秒
+      </button>
+      <button className={button} onClick={togglePlayback}>
+        {playing ? "暫停" : "繼續播放"}
+      </button>
+      <button className={button} onClick={() => seek(5)}>
+        前進 5 秒
+      </button>
+      <button className={button} onClick={() => seek(15)}>
+        快進 15 秒
+      </button>
+      <button className={button} onClick={() => row && play(row.index)}>
+        重播本段
+      </button>
+    </div>
+  );
   const row = doc.script.find((p) => p.index === selected);
   const group = selectReferenceGroup(doc.context.groups, selected, activeGroup);
   const shownSlide =
@@ -1111,36 +1169,23 @@ function TranscriptProofreader({
               preload="metadata"
               src={base + "/media"}
               className="w-full bg-black"
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
               onTimeUpdate={() => {
                 if (
                   segmentPause &&
                   segmentEnd.current !== undefined &&
                   video.current &&
                   video.current.currentTime >= segmentEnd.current
-                )
+                ) {
                   video.current.pause();
+                  segmentEnd.current = undefined;
+                }
               }}
             />
             <div className="flex flex-wrap items-center gap-2 p-3">
-              <button
-                className={button}
-                onClick={() => {
-                  if (video.current) video.current.currentTime -= 5;
-                }}
-              >
-                −5 秒
-              </button>
-              <button className={button} onClick={() => row && play(row.index)}>
-                播放本段
-              </button>
-              <button
-                className={button}
-                onClick={() => {
-                  if (video.current) video.current.currentTime += 5;
-                }}
-              >
-                ＋5 秒
-              </button>
+              {playbackControls("影片播放控制")}
               <label className="text-xs">
                 <input
                   type="checkbox"
@@ -1499,6 +1544,9 @@ function TranscriptProofreader({
                         cm.setOption("readOnly", disabled);
                       }}
                     />
+                    <div className="mt-3 rounded-md bg-slate-50 p-2">
+                      {playbackControls("本段播放控制")}
+                    </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         className={button}
@@ -1634,7 +1682,7 @@ const TranscriptText = memo(function TranscriptText({
 }: {
   text: string;
 }) {
-  return <ReactMarkdown>{text}</ReactMarkdown>;
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 });
 
 function HistoryDiff({
