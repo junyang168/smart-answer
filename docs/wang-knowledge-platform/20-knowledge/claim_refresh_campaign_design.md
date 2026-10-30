@@ -2,8 +2,8 @@
 
 > **读者**：流程负责人、Solution architect、Developer。
 > **类型**：规范。
-> **状态**：容量与持续补位接线已实施，隔离验收通过；真实小批及全分区 refresh 尚未完成。
-> **与代码对齐**：2026-10-29 在 #519 接入既有清单入口、batch、Update 执行器、资格核对和订阅 transport。模型容量由 `claim_model_capacity.py` 共享控制；batch 的显式容量模式支持小窗口与持续补位，旧入口默认行为不变。真实供应商吞吐尚待验收。
+> **状态**：容量、持续补位、拒收恢复及显式多身份预留已实施，有界真实样本已核实；完整分区 refresh 尚未完成。
+> **与代码对齐**：2026-10-29 核对到 `40fb9316`，在 #519 接入既有清单入口、batch、Update 执行器、资格核对和订阅 transport。模型容量由 `claim_model_capacity.py` 共享控制；batch 的显式容量模式支持小窗口与持续补位，旧入口默认行为不变。真实有界样本已确认两家各两个 session；不据此宣称完整分区吞吐或完成。
 > **权威范围**：已指定 Claim 分区的 refresh 编排与验收；不改变 [Claim Management 2.0](./claim_management_2_design.md) 的内容、权限、预算及交易契约，不授权 CVP 更新或模型调用。
 
 ## 1 目标与范围
