@@ -546,7 +546,7 @@ def rejected_model_input(value, parent, role, *, error):
             'response':raw['response'],'rejection_detail':error,'invalid_creation_fields':invalid,
             'correction_citation':evidence,'review_not_accepted':True,
             'instruction':'This unchanged rejected answer is input, never approval. Reassess all decisions, use only the original granted creation fields, and pass ordinary proposal validation and Opus review. Do not widen permissions.'}
-    bad = [];located = []
+    bad = [];located = [];aliases = []
     def visit(item):
         if isinstance(item,list):
             for child in item:visit(child)
@@ -554,9 +554,23 @@ def rejected_model_input(value, parent, role, *, error):
             if {'source_id','paragraph_key','exact_quote'} <= set(item):
                 citation = cm.Citation.model_validate(item)
                 source = materials['sources'].get(citation.source_id,{})
+                original = citation
+                if citation.source_id not in materials['sources']:
+                    matches = {v['payload'].get('source_id') for k,v in materials['before'].items()
+                        if k.startswith('source_documents/')
+                        and v['payload'].get('transcript_id') == citation.source_id
+                        and v['payload'].get('source_id') in materials['sources']}
+                    if len(matches) == 1:
+                        citation = citation.model_copy(update={'source_id':next(iter(matches))})
+                        source = materials['sources'][citation.source_id]
                 if citation.paragraph_key not in source.get('paragraphs',{}):
                     raise ValueError('rejected-input recovery cannot invent a source or paragraph')
                 located.append(citation.model_dump(mode='json'))
+                if citation.source_id != original.source_id:
+                    # Locate the failure only. The original answer stays invalid
+                    # and unchanged; normal GPT correction and Opus are required.
+                    aliases.append({'provided_source_id':original.source_id,'canonical_source_id':citation.source_id})
+                    bad.append(original.model_dump(mode='json'))
                 try:cm.validate_citations([citation],materials['sources'])
                 except ValueError:
                     source = materials['sources'].get(citation.source_id,{})
@@ -575,6 +589,7 @@ def rejected_model_input(value, parent, role, *, error):
     if not bad:raise ValueError('no authenticated non-exact citation to correct')
     return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
         'response':raw['response'],'invalid_citations':bad,'review_not_accepted':True,
+        **({'correction_citation':located[0],'source_identity_aliases':aliases} if aliases else {}),
         'instruction':'This unchanged rejected answer is input, never approval. Reassess every decision against the complete source, repair exact citations, and satisfy every original obligation through normal proposal and Opus review.'}
 
 
@@ -661,7 +676,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
             raise ValueError('citation recovery cannot change original model instructions')
         original = deepcopy(value); original_parent = deepcopy(parent)
-        first = entry['invalid_citations'][0] if error==CITATION_ERROR else entry['correction_citation']
+        first = entry.get('correction_citation') or entry['invalid_citations'][0]
         exact = sources[first['source_id']]['paragraphs'][first['paragraph_key']]['text']
         finding = cm.Finding(target_key=request.target_keys[0],category='engineering',component='rejected_model_citations' if error==CITATION_ERROR else 'rejected_model_structure',
             reason='A returned '+role+' answer failed validation: '+error+'. The unchanged answer and exact rejected elements are in original_goal.unaccepted_model_inputs. Reassess all decisions; this is not approval.',

@@ -220,10 +220,18 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
     assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
 
 
-@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','evidence_drift','scope_drift'])
+@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','evidence_drift','scope_drift','transcript_alias'])
 def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
     from backend.pipeline import claim_management_intake as intake
     from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    alias='the recorded sermon name'
+    if defect=='transcript_alias':
+        # Seed its registered identity before the tested action. A maintenance
+        # Update must never be used to rename an existing source identity.
+        from backend.api.canonical_repository.postgres_store import canonical_json,record_content_sha
+        store=action[0];doc=deepcopy(store.get_record_state('source_documents','S')['payload']);doc['transcript_id']=alias
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET payload=%s::jsonb,content_sha256=%s WHERE collection='source_documents' AND object_id='S'",(canonical_json(doc),record_content_sha(doc)))
     store,old,cid,base=fixture(action)
     consumer = defect in {'transaction_consumer','transaction_consumer_opus'}
     if consumer or defect=='scope_drift':
@@ -236,7 +244,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     root=base/'proposal-quote';citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
     def resolutions(packet,bad=False):
         return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact source binding',
-            'citations':[{**citation,**({'exact_quote':'教授否定这个译法TYPO。','source_id':'FOREIGN' if defect=='foreign' else 'S'} if bad else {})}],
+            'citations':[{**citation,**({'source_id':alias} if bad and defect=='transcript_alias' else {'exact_quote':'教授否定这个译法TYPO。','source_id':'FOREIGN' if defect=='foreign' else 'S'} if bad else {})}],
             'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own bound evidence'} for fid in packet['unresolved']]
     def proposal(packet):
         inputs=packet['original_goal'].get('unaccepted_model_inputs')
@@ -248,6 +256,10 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
                 assert original['changes'][0]['record_key']==original['changes'][1]['record_key']
             elif defect=='missing_reference':
                 assert json.loads(original['changes'][1]['fields_json'])['source_fragment_ids']==['MISSING']
+            elif defect=='transcript_alias':
+                original_citation=original['finding_resolutions'][0]['citations'][0]
+                assert original_citation['source_id']==alias and original_citation['exact_quote']==citation['exact_quote']
+                assert inputs[0]['source_identity_aliases']==[{'provided_source_id':alias,'canonical_source_id':'S'}]
             else:
                 original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
                 assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
@@ -322,7 +334,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     assert not raw.exists() if defect=='missing' else raw.read_bytes()==raw_bytes
     after=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
     assert after['request']==parent['request'] and after['policy']==parent['policy']
-    if defect not in {'current','opus','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus'}:
+    if defect not in {'current','opus','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','transcript_alias'}:
         expected_calls=initial_calls+(['gpt'] if defect=='repeat' else [])
         assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
         assert store.get_record_state('source_fragments','FD')==before
