@@ -222,3 +222,26 @@ def test_saved_failed_proposal_finishes_with_only_its_original_unused_opus(claim
         assert store.get_record_state('evidence_steps','NEW-E')['payload']['statement']=='unrelated old teaching'
         for key in after['created_keys']:
             if key.startswith('claims/'):assert store.claim_management_qualification(key.split('/',1)[1])['ready']
+
+
+@pytest.mark.parametrize('human',[False,True])
+def test_sampling_retirement_keeps_history_and_never_retires_a_human_hold(claims,human):
+    from backend.pipeline.claim_metadata_projection import compile_projection
+    store,root=claims;seed_marker(store,'human' if human else None)
+    prepared=intake.prepare(['C'],root,instruction='Review every authorized disposition',store=store)
+    if human:
+        assert prepared['excluded']['C']['reason']=='human_hold'
+        return
+    request,_=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+    records=store.read_claim_context([('claims','C'),('source_documents','S')]);raw={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    before=cm.original_goal(request,raw)['original_objects'];policy=cm.Policy.model_validate_json(Path(request.policy.path).read_text())
+    with store.connect() as conn:projection=compile_projection(conn.cursor(),request,before,policy)
+    candidate=cm.existing_candidate(before);citation=cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')
+    for d in candidate.dispositions:
+        if d.record_key=='claims/C':d.action='retire';d.citations=[citation]
+        elif d.record_key=='evidence_steps/EC':
+            d.action='update';d.citations=[citation]
+            candidate.records.append(cm.source.Row(collection='evidence_steps',object_id='EC',payload={**before[d.record_key]['payload'],'produced_claim_ids':[]}))
+    _,sources=cm.load_authority(request)
+    _,writes=cm.validate_candidate(request,before,candidate,sources,metadata_projection=projection)
+    assert writes['claims/C']['action']=='retire' and writes['claims/C']['payload']==before['claims/C']['payload']

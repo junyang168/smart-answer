@@ -543,7 +543,8 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
         if collection not in CLAIM_COLLECTIONS or not disposition.citations:
             raise ValueError("every content disposition requires own-source evidence")
         sampling_update = key in sampling and disposition.action == "update" and payload is not None and payload.get("review_status") == "candidate"
-        if old and old["payload"].get("review_status") in HELD and not sampling_update:
+        sampling_write = sampling_update or key in sampling and disposition.action == "retire"
+        if old and old["payload"].get("review_status") in HELD and not sampling_write:
             raise ValueError("Claim operation cannot override a protected review hold")
         if disposition.action == "create":
             if old is not None or payload is None:
