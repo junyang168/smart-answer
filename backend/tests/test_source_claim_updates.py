@@ -416,7 +416,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
         assert store.get_record_state('evidence_steps','EN')==consumer_after
 
 
-@pytest.mark.parametrize('defect', ['none','target','evidence','source','scope','raw','candidate','review_started','committed'])
+@pytest.mark.parametrize('defect', ['none','target','evidence','source','scope','raw','candidate','review_started','committed','capacity_stop','capacity_wrong_proof'])
 def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundaries(action,monkeypatch,defect):
     from backend.pipeline import claim_management_intake as intake
     from backend.pipeline.claim_review_recovery import resume_saved_pre_review
@@ -460,6 +460,18 @@ def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundari
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()));child=store.get_cvp_group(rid)
     assert child['checkpoint']=='prepared' and not child.get('opus_approved')
     old_root=Path(parent['execution_root'])/rid;raw=(old_root/'gpt.raw.json').read_bytes();candidate=(old_root/'candidate.json').read_bytes()
+    capacity_proof = None
+    if defect.startswith('capacity_'):
+        from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+        from backend.pipeline.cvp_sql_commit import binding
+        gate=ClaimModelCapacity({'root':str(base/'capacity'),'action_window':4,'spacing_seconds':0,'cooldown_seconds':1})
+        interrupted=base/'interrupted'
+        with gate.call('opus',interrupted):
+            interrupted.mkdir();(interrupted/'invocation.json').write_text('{}')
+        gate.quarantine_stopped('opus',interrupted)
+        capacity_proof=binding(next((gate.root/'opus').glob('interrupted-*.json')))
+        store.pause_claim_management_action(parent['run_id'],reason='engineering_required',
+            detail='opus: unsettled previous transport: '+str(interrupted if defect=='capacity_stop' else base/'other'))
     if defect in {'target','evidence'}:
         col,oid=('claims','D') if defect=='target' else ('evidence_steps','ED')
         payload=deepcopy(store.get_record_state(col,oid)['payload']);payload['statement']='real content change'
@@ -474,12 +486,12 @@ def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundari
     elif defect=='committed':
         changed=deepcopy({k:v for k,v in child.items() if k not in {'run_id','status','error'}});changed['change_set_ids']=['applied-fact']
         with store.connect() as conn:conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(changed),rid))
-    if defect!='none':
+    if defect not in {'none','capacity_stop'}:
         with pytest.raises((ValueError,RuntimeError)):
-            resume_saved_pre_review(store,rid)
+            resume_saved_pre_review(store,rid,stopped_capacity_proof=capacity_proof)
         assert ports.calls==['opus','gpt']
         return
-    proof=resume_saved_pre_review(store,rid)
+    proof=resume_saved_pre_review(store,rid,stopped_capacity_proof=capacity_proof)
     assert resume_saved_pre_review(store,rid)==proof
     rebound=store.get_cvp_group(rid);current=store.get_cvp_group(parent['run_id']);new_root=Path(rebound['recovery_root'])
     assert cm.model_packet(rebound['materials'])==cm.model_packet(child['materials'])
