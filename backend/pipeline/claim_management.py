@@ -1595,7 +1595,7 @@ def continuation_budget(previous, request, policy):
     unknown = {}
     if extension is not None:
         extension_keys = {'predecessor_action_id','prior_metadata_sha256','budget','authorization_quote'}
-        if extension_basis != 'unknown_call':
+        if extension_basis != 'unknown_call' or 'current_objects_sha256' in extension:
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
             or permission_follow_up
