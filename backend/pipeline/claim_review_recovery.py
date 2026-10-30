@@ -604,10 +604,8 @@ def rejected_model_input(value, parent, role, *, error):
         if not located:raise ValueError('rejected-input correction requires a bound own-source location')
         return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
             'response':raw['response'],'rejection_detail':error,'correction_citation':located[0],
-            **({'invalid_fragment_bindings':fragment_binding_diagnostics(raw['response'],materials)}
-                if role=='gpt' and error=='new/updated fragment lacks an exact complete own source paragraph/excerpt' else {}),
             'review_not_accepted':True,
-            'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. For fragment bindings, paragraph_key and source_segment_index are distinct source metadata: verify each from the literal matching paragraph, never infer one from the other. Literal matches are diagnostics, not an accepted repair. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
+            'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
     if not bad:raise ValueError('no authenticated non-exact citation to correct')
     return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
         'response':raw['response'],'invalid_citations':bad,'review_not_accepted':True,
@@ -677,6 +675,8 @@ def resume_rejected_output(store, round_id, *, role, error):
                 or slot.get('state')!='started' or slot.get('role')!=role or slot.get('round_id')!=round_id):
             raise ValueError('citation recovery requires the exact latest uncommitted returned rejection')
         entry = rejected_model_input(value,parent,role,error=error)
+        if role=='gpt' and error=='new/updated fragment lacks an exact complete own source paragraph/excerpt':
+            entry['invalid_fragment_bindings']=fragment_binding_diagnostics(entry['response'],materials)
         # Check the complete next pair before changing any stage or cancelling
         # its unused slots. Rejected generations remain spent.
         for next_role in cm.required_roles(request,value['round_number']+1,policy):
@@ -732,6 +732,12 @@ def consumed_rejected_citations(previous,key,slot):
     materials = body(read(root/'materials.json'))
     value = {'materials':materials,'candidate':body(read(root/'candidate.json')) if slot['role']=='opus' else None}
     observed = rejected_model_input(value,previous,slot['role'],error=error)
+    # Old saved recovery inputs keep their exact original shape. New fragment
+    # diagnostics are reproduced only when that projection was actually saved.
+    if entries and 'invalid_fragment_bindings' in entries[0]:
+        if slot['role']!='gpt' or error!='new/updated fragment lacks an exact complete own source paragraph/excerpt':
+            raise ValueError('fragment diagnostics belong only to a returned fragment rejection')
+        observed['invalid_fragment_bindings']=fragment_binding_diagnostics(observed['response'],materials)
     if entries and observed!=entries[0]:raise ValueError('rejected citation input drift')
     return True
 
