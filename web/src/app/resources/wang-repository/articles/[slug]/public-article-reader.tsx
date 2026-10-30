@@ -522,7 +522,12 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
             {articleSources.length > 0 && (
               <aside aria-label="參考來源" className="mt-14 border-t border-stone-200 pt-7">
                 <p className="text-xs font-bold tracking-[0.14em] text-stone-500">參考來源</p>
-                <p className="mt-2 text-sm leading-7 text-stone-500">本文引用的講道與筆記；括號內是本文引用它的段數。</p>
+                <p className="mt-2 text-sm leading-7 text-stone-500">
+                  本文共引用 {[
+                    articleSources.some((source) => source.kind === "sermon") ? `${articleSources.filter((source) => source.kind === "sermon").length} 篇講道` : null,
+                    articleSources.some((source) => source.kind === "notes") ? `${articleSources.filter((source) => source.kind === "notes").length} 章筆記` : null,
+                  ].filter(Boolean).join("、")}；括號內是本文引用它的段數。
+                </p>
                 {(["sermon", "notes"] as const).map((kind) => {
                   const items = articleSources.filter((source) => source.kind === kind);
                   if (items.length === 0) return null;
