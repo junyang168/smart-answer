@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from backend.pipeline.source_projection import live_script
 from .transcript_review import ReviewStore, ReviewError
@@ -42,8 +42,13 @@ def authenticated_actor(request: Request, body: bytes = b""):
     return actor
 
 
-def create_review_router(root: Path):
-    router = APIRouter()
+def create_review_router(root: Path, *, beta_owner: str | None = None):
+    async def beta_access(request: Request):
+        actor = authenticated_actor(request, await request.body())
+        if actor != beta_owner:
+            raise HTTPException(403, "圖文審核 beta 目前只對指定帳號開放")
+
+    router = APIRouter(dependencies=[Depends(beta_access)] if beta_owner else [])
     store = ReviewStore(root)
 
     async def payload_from(request):

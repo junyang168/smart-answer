@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/app/utils/auth";
 import { SurmonEditor } from "@/app/components/admin/surmons/SurmonEditor";
 
 import { TranscriptReviewEntry } from "@/app/components/admin/surmons/TranscriptProofreader";
@@ -26,11 +28,17 @@ export default async function SurmonEditorPage(props: PageProps) {
   const params = await props.params;
   const item = decodeURIComponent(params.item);
   const query = searchParams ?? {};
-  const viewChanges = toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
+  const viewChanges =
+    toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
+  const session = await getServerSession(authConfig);
+  const beta =
+    process.env.NODE_ENV === "development" ||
+    session?.user?.email === "junyang168@gmail.com";
+  const legacy = <SurmonEditor item={item} viewChanges={viewChanges} />;
 
   return (
     <Suspense fallback={<EditorFallback />}>
-      <TranscriptReviewEntry item={item} legacy={<SurmonEditor item={item} viewChanges={viewChanges} />} />
+      {beta ? <TranscriptReviewEntry item={item} legacy={legacy} /> : legacy}
     </Suspense>
   );
 }

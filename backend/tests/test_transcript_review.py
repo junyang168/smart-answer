@@ -524,6 +524,41 @@ def test_public_reading_uses_existing_soft_deletion_without_changing_draft(setup
     assert snapshot["script"][0]["text"] == text
 
 
+def test_beta_restricts_every_route_including_probe_public_assets_and_writes(setup, monkeypatch):
+    store, root, _ = setup
+    adopted(setup)
+    monkeypatch.setenv("TRANSCRIPT_REVIEW_ACTION_SECRET", "test-secret")
+    app = FastAPI()
+    app.include_router(create_review_router(root, beta_owner="a"), prefix="/sc_api")
+    client = TestClient(app)
+    from urllib.parse import quote
+
+    item = quote("講道 test", safe="")
+    for method, suffix in [
+        ("GET", f"review_mode/{item}"),
+        ("GET", f"review_candidate/{item}"),
+        ("POST", f"review_candidate/{item}"),
+        ("GET", f"review_document/{item}"),
+        ("PATCH", f"review_document/{item}"),
+        ("POST", f"review_document/{item}/publish"),
+        ("GET", f"review_document/{item}/history"),
+        ("GET", f"review_document/{item}/media"),
+        ("GET", f"review_document/{item}/assets/a1"),
+        ("GET", f"review_public/{item}"),
+        ("GET", f"review_public/{item}/assets/a1"),
+    ]:
+        path = "/sc_api/" + suffix
+        assert client.request(method, path).status_code == 401
+        assert client.request(method, path, headers=signed(method, path, actor="b")).status_code == 403
+    path = "/sc_api/review_document/" + item
+    assert client.get(path, headers=signed("GET", path)).status_code == 200
+    doc = store.document("a", "講道 test")
+    body = json.dumps(op(doc, operations=[{"kind": "text", "id": "1", "text": "beta修改"}])).encode()
+    response = client.patch(path, content=body, headers={**signed("PATCH", path, body), "content-type": "application/json", "if-match": doc["version"]})
+    assert response.status_code == 200
+    assert store.document("a", "講道 test")["script"][0]["text"] == "beta修改"
+
+
 def test_catalog_recovery_preserves_another_sermon_and_legacy_cache(setup, monkeypatch):
     store, root, _ = setup
     item = "講道 test"

@@ -36,7 +36,7 @@ from .transcript_review_router import create_review_router, authenticated_actor
 from .transcript_review import ReviewStore, ReviewError
 
 router = APIRouter(prefix="/sc_api", tags=["sc-api"])
-router.include_router(create_review_router(DATA_BASE_PATH))
+router.include_router(create_review_router(DATA_BASE_PATH, beta_owner="junyang168@gmail.com"))
 
 
 def legacy_only(item):

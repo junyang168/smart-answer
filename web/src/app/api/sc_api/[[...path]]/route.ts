@@ -55,9 +55,12 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     body = text.length ? text : undefined;
   }
 
-  const guarded = ["review_document", "review_candidate"].includes(
-    params.path?.[0] || "",
-  );
+  const guarded = [
+    "review_document",
+    "review_candidate",
+    "review_mode",
+    "review_public",
+  ].includes(params.path?.[0] || "");
   if (guarded && !["GET", "HEAD"].includes(request.method)) {
     const origin = request.headers.get("origin");
     let sameOrigin = false;
@@ -84,6 +87,15 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
       : undefined);
   if (guarded && !actor)
     return NextResponse.json({ detail: "請登入後再操作" }, { status: 401 });
+  if (
+    guarded &&
+    process.env.NODE_ENV === "production" &&
+    actor !== "junyang168@gmail.com"
+  )
+    return NextResponse.json(
+      { detail: "圖文審核 beta 目前只對指定帳號開放" },
+      { status: 403 },
+    );
   const secret = process.env.TRANSCRIPT_REVIEW_ACTION_SECRET;
   if (guarded && !secret)
     return NextResponse.json(
