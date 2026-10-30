@@ -401,6 +401,8 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
 CITATION_ERROR = 'citation is not an exact quote from the complete own source'
 CREATION_FIELDS_ERROR = 'created fields exceed creation permission'
 DUPLICATE_CHANGE_ERROR = 'changed record repeated or absent from frozen input'
+# Named diagnostics remain import-compatible; admission reproduces the actual
+# validator rejection rather than treating this set as a retry whitelist.
 RECOVERABLE_OUTPUT_ERRORS = {CITATION_ERROR, CREATION_FIELDS_ERROR, DUPLICATE_CHANGE_ERROR}
 
 
@@ -410,8 +412,8 @@ def rejected_citation_input(value, parent, role):
 
 def rejected_model_input(value, parent, role, *, error):
     """Authenticate and reproduce a supported rejection; never approve its content."""
-    if error not in RECOVERABLE_OUTPUT_ERRORS or error!=CITATION_ERROR and role!='gpt':
-        raise ValueError('unsupported returned model rejection')
+    if not isinstance(error,str) or not error or role not in {'gpt','opus'}:
+        raise ValueError('exact returned validation rejection and role required')
     from backend.pipeline.cvp_sql_actions import validate_claim_stage, claim_management_review_packet
     from backend.pipeline.claim_model_output import candidate as expand_candidate, review as expand_review
     materials = value['materials']; policy = cm.Policy.model_validate(materials['policy'])
@@ -480,13 +482,17 @@ def rejected_model_input(value, parent, role, *, error):
             'response':raw['response'],'rejection_detail':error,'invalid_creation_fields':invalid,
             'correction_citation':evidence,'review_not_accepted':True,
             'instruction':'This unchanged rejected answer is input, never approval. Reassess all decisions, use only the original granted creation fields, and pass ordinary proposal validation and Opus review. Do not widen permissions.'}
-    bad = []
+    bad = [];located = []
     def visit(item):
         if isinstance(item,list):
             for child in item:visit(child)
         elif isinstance(item,dict):
             if {'source_id','paragraph_key','exact_quote'} <= set(item):
                 citation = cm.Citation.model_validate(item)
+                source = materials['sources'].get(citation.source_id,{})
+                if citation.paragraph_key not in source.get('paragraphs',{}):
+                    raise ValueError('rejected-input recovery cannot invent a source or paragraph')
+                located.append(citation.model_dump(mode='json'))
                 try:cm.validate_citations([citation],materials['sources'])
                 except ValueError:
                     source = materials['sources'].get(citation.source_id,{})
@@ -496,6 +502,12 @@ def rejected_model_input(value, parent, role, *, error):
             else:
                 for child in item.values():visit(child)
     visit(raw['response'])
+    if error!=CITATION_ERROR:
+        if not located:raise ValueError('rejected-input correction requires a bound own-source location')
+        return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
+            'response':raw['response'],'rejection_detail':error,'correction_citation':located[0],
+            'review_not_accepted':True,
+            'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
     if not bad:raise ValueError('no authenticated non-exact citation to correct')
     return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
         'response':raw['response'],'invalid_citations':bad,'review_not_accepted':True,
@@ -518,7 +530,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(round_id,)).fetchone()[0]
         parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(value['parent_run_id'],)).fetchone()[0]
         marker='citation_input_recovery' if error==CITATION_ERROR else 'model_input_recovery'
-        if error not in RECOVERABLE_OUTPUT_ERRORS:raise ValueError('unsupported returned model rejection')
+        if not isinstance(error,str) or not error:raise ValueError('exact returned validation rejection required')
         if value.get(marker):
             check_binding(value[marker])
             record=body(read(value[marker]['path']))

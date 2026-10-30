@@ -508,6 +508,7 @@ def main():
     parser.add_argument('--claim-ids', type=Path, help='JSON list of Claim IDs; prepares and runs ordinary Updates')
     parser.add_argument('--instruction', help='the actual owner direction for the Claim ID list')
     parser.add_argument('--max-workers', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--creation-count',type=int,default=1,help='explicit number of source-scoped Claim identities to reserve per list action')
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--detach', action='store_true')
     parser.add_argument('--status', action='store_true')
@@ -515,6 +516,8 @@ def main():
     parser.add_argument('--model-capacity', type=Path, help='explicit shared GPT/Opus capacity configuration; legacy batches unchanged')
     parser.add_argument('--paragraphs', action='store_true', help='call ordinary batches in source paragraph order')
     args = parser.parse_args()
+    if args.creation_count<1 or args.creation_count!=1 and not args.claim_ids:
+        parser.error('--creation-count must be positive and requires --claim-ids')
     from dotenv import load_dotenv
     load_dotenv('backend/.env'); load_dotenv('.env')
     model_capacity = json.loads(args.model_capacity.read_text()) if args.model_capacity else None
@@ -531,16 +534,17 @@ def main():
         args.root = args.root.resolve()
         ids = json.loads(args.claim_ids.read_text())
         if args.detach:
-            prepared = prepare(ids, args.root, instruction=args.instruction, max_workers=args.max_workers)
+            prepared = prepare(ids, args.root, instruction=args.instruction, max_workers=args.max_workers,creation_count=args.creation_count)
             # Child consumes frozen normalized IDs; caller may move its original file.
             ids_path = args.root / 'claim-ids.json'
             from backend.pipeline.claim_management_intake import immutable
             immutable(ids_path, prepared['claim_ids'])
             detach([sys.executable, '-m', MODULE, '--claim-ids', str(ids_path), '--root', str(args.root),
-                    '--instruction', args.instruction, '--max-workers', str(args.max_workers)], args.root)
+                    '--instruction', args.instruction, '--max-workers', str(args.max_workers),
+                    *(['--creation-count',str(args.creation_count)] if args.creation_count!=1 else [])], args.root)
             return
         result = run_claim_ids(ids, args.root,
-                               instruction=args.instruction, max_workers=args.max_workers, model_capacity=model_capacity)
+                               instruction=args.instruction, max_workers=args.max_workers, model_capacity=model_capacity,creation_count=args.creation_count)
         print(json.dumps(result, ensure_ascii=False)); return
     if not args.manifest:
         parser.error('--manifest required')

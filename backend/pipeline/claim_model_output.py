@@ -8,6 +8,7 @@ from copy import copy, deepcopy
 import json
 from typing import Literal
 
+from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
 from pydantic import Field, create_model
 from backend.pipeline import claim_management as cm
 
@@ -115,11 +116,11 @@ def scoped_adapter(adapter, packet):
             creatable = {p['collection'] for p in request.get('creation_permissions', [])}
             identity = {}
             if contract == MANAGED_CONTRACT:
-                slots = set(packet['original_goal']['claim_creation_allocations'].values())
+                slots = set(allocated_ids(packet['original_goal']['claim_creation_allocations']))
                 identity['object_id'] = (key_type(slots), ...)
             creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...), **identity)
             fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else
-                                                          {'max_length': 1} if contract == MANAGED_CONTRACT else {})))
+                                                          {'max_length': len(slots)} if contract == MANAGED_CONTRACT else {})))
         if contract == MANAGED_CONTRACT:
             allowed = {k for k in writable if k in targets or k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
             if 'Retire' not in request['allowed_operations']:
@@ -204,7 +205,7 @@ def candidate(raw, materials):
         key = cm.source.key(creation.collection, creation.object_id)
         if key in seen or key in before or creation.collection not in cm.KNOWLEDGE_COLLECTIONS:
             raise ValueError('created record repeated, already present or of an unknown collection')
-        if managed and creation.object_id not in materials['original_goal']['claim_creation_allocations'].values():
+        if managed and creation.object_id not in allocated_ids(materials['original_goal']['claim_creation_allocations']):
             raise ValueError('created identity is not a program-reserved Claim slot')
         seen.add(key)
         fields = object_json(creation.fields_json)

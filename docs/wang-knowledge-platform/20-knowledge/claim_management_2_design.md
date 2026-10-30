@@ -137,7 +137,7 @@ Split／Merge 产生新 ID。跨讲同看法交 CVP，不 Merge 成单一 Claim�
 
 ### 4.2 权限与提交边界
 
-Create 的身份缺席必须对全库核对，不能由一跳材料中没有该 ID 推断。候选保存前检查已有身份（含退役对象）；实际 SQL 事务再核对候选中的 create 仍对应计划的 create，禁止 package upsert 将其转成 update。新清单的 v8 请求由程序查询同前缀已登记身份、退休身份与已预留身份，并逐一排除其他 collection 的同名记录；在已有 SQL 运行账本内按原 action／source／root 预留一个 ID。模型只能填写 `original_goal.claim_creation_allocations` 中的身份，动态 schema 及候选／SQL 校验都执行这项约束。重启复用原预留，不另选身份或覆盖碰撞对象。其他已绑定契约保持原规则，不按局部可见序号猜测身份。内容审核不授予覆盖包外对象的权限。
+Create 的身份缺席必须对全库核对，不能由一跳材料中没有该 ID 推断。候选保存前检查已有身份（含退役对象）；实际 SQL 事务再核对候选中的 create 仍对应计划的 create，禁止 package upsert 将其转成 update。新清单的 v8 请求由程序查询同前缀已登记身份、退休身份与已预留身份，并逐一排除其他 collection 的同名记录；在已有 SQL 运行账本内按原 action／source／root 原子预留明确数量的 ID，未指定时仍为一个。多身份请求冻结完整身份清单，重启不得改变数量或替换身份；每个未使用身份也保留预留，其他 action 不复用它。模型只能填写 `original_goal.claim_creation_allocations` 中的身份，动态 schema 及候选／SQL 校验都执行这项约束。重启复用原预留，不另选身份或覆盖碰撞对象。其他已绑定契约保持原规则，不按局部可见序号猜测身份。内容审核不授予覆盖包外对象的权限。
 
 Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文／限定、occurrences、Evidence 表述／绑定／owner／资格和单篇关系。Evidence 补入不批准扩大 Claim；解绑保存理由；最后一个支持 Evidence 被撤回时，Claim 不可继续就绪。反方改标签不能成为教授立场的支持证据。
 

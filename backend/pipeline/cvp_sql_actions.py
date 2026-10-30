@@ -501,9 +501,9 @@ def execute_claim_management(store, request, *, root, ports):
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
         if parent['result'].get('returned_rejected_call'):
-            from backend.pipeline.claim_review_recovery import RECOVERABLE_OUTPUT_ERRORS, resume_rejected_output
+            from backend.pipeline.claim_review_recovery import resume_rejected_output
             rejected = parent['result']['returned_rejected_call']
-            if parent['result'].get('detail') not in RECOVERABLE_OUTPUT_ERRORS or request.operation != 'Update' or not policy.all_findings_to_gpt:
+            if not isinstance(parent['result'].get('detail'),str) or request.operation != 'Update' or not policy.all_findings_to_gpt:
                 return parent['result']
             try:
                 rejected_round, role = rejected.rsplit(':',1)

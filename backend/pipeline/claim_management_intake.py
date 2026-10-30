@@ -50,7 +50,7 @@ def immutable(path, value):
     return binding(path)
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -64,6 +64,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         raise ValueError('the Claim Update direction is required')
     if type(max_workers) is not int or max_workers not in (1, 2):
         raise ValueError('max_workers must be 1 or 2')
+    if type(creation_count) is not int or creation_count<1:raise ValueError('creation_count must be a positive integer')
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if policy is None:
@@ -76,6 +77,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}
+    if creation_count!=1:intent['creation_count']=creation_count
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -126,7 +128,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             request.creation_permissions = [cm.CreationPermission(collection='claims', source_id=sid,
                                                                   fields=sorted(FIELDS['claims']))]
             allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
-                                       root=action_dir / 'execution')
+                                       root=action_dir / 'execution',count=creation_count)
         # A writable relation makes its other Claim reviewed content, so one
         # more pass grants the Evidence and relations that review then shows
         # (#459: CR001 brought CL004's E016/ER011 into review but not into the
@@ -175,7 +177,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=None, model_capacity=None):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None, model_capacity=None, creation_count=1):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()
@@ -186,7 +188,7 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None, mo
     with (root / 'intake.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
-            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy)
+            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy, creation_count=creation_count)
             manifest = prepared['manifest']['path'] if prepared['manifest'] else None
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             original = batch._paragraph_results(store, jobs)

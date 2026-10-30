@@ -1124,11 +1124,12 @@ def original_goal(request, before):
         policy = json.loads(source.verify_file(request.policy).read_text()) if Path(request.policy.path).is_file() else {}
         if policy.get('model_output_contract') == 'claim_changes_v4':
             allocations = authority.get('claim_creation_allocations', {})
+            from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+            reserved_ids=allocated_ids(allocations)
             if (not isinstance(allocations, dict) or len(allocations) > 1
-                    or any(not isinstance(cid, str) or not cid for cid in allocations.values())
                     or set(allocations) != {p.source_id for p in request.creation_permissions}
-                    or any(source.key('claims', cid) in before for cid in allocations.values())):
-                raise ValueError('compact v4 requires one program-reserved identity per granted own source')
+                    or any(source.key('claims', cid) in before for cid in reserved_ids)):
+                raise ValueError('compact v4 requires program-reserved identities for the granted own source')
             result['claim_creation_allocations'] = dict(allocations)
             result['target_disposition_contract'] = 'reviewed_update_or_retirement_v1'
     from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions

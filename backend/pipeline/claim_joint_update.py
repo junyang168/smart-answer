@@ -127,9 +127,16 @@ def validate_candidate_scope(request, before, candidate):
     if candidate.operation not in {None, 'Update'} or candidate.replacements:
         raise ValueError('joint Update supports existing retain/update only')
     created = [d.record_key for d in candidate.dispositions if d.action == 'create']
-    # One new same-source Claim per action, under an explicit creation grant.
-    if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
-        raise ValueError('joint Update may create at most one granted Claim')
+    # Legacy grants retain their single slot; managed actions use only their
+    # exact frozen SQL allocations, which can explicitly contain several IDs.
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    allocations=authority.get('claim_creation_allocations',{})
+    from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+    slots=allocated_ids(allocations)
+    if created and (not request.creation_permissions or len(created)>(len(slots) if slots else 1)
+            or any(not key.startswith('claims/') for key in created)
+            or slots and not {key.split('/',1)[1] for key in created}<=set(slots)):
+        raise ValueError('joint Update creation exceeds the exact granted Claim identities')
     for disposition in candidate.dispositions:
         if disposition.action == 'retire':
             col = disposition.record_key.split('/', 1)[0]
