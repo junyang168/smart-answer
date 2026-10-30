@@ -29,6 +29,10 @@ def claim_management_review_packet(materials, candidate):
     request = Request.model_validate(materials['unit_request'])
     if direct.enabled(request):
         packet['claim_scope'] = direct.scope(request, materials['before'], candidate)
+    if materials.get('program_metadata_projection'):
+        packet['program_metadata_projection'] = {
+            'sampling_status':'Only verified legacy AI sampling markers on updated targets are reset to candidate, never human approval.',
+            'support_identities':'New EvidenceStep/SourceFragment identities and their typed references are assigned by the program. Review actual candidate identities and unchanged teaching, source quotes and links.'}
     from backend.pipeline.claim_evidence_review import add_packet
     return add_packet(packet, candidate)
 
@@ -283,7 +287,7 @@ def validate_claim_management_package(package):
             raise ValueError('joint Update package admission: ' + refusal)
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
     _, writes = cm.validate_candidate(unit_request, materials['before'], candidate, sources,
-        created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+        created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     validate_claim_candidate_origin(root, materials, policy, sources, candidate)
     packet = claim_management_review_packet(materials, candidate)
     raw = validate_claim_stage(root, 'opus', policy, packet)
@@ -366,7 +370,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(request, materials['before'], candidate, sources,
-                          created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                          created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     full_sources = {sid: {'paragraphs': paragraphs} for sid, paragraphs in packet['full_sources'].items()}
     if ({sid: {k: {'text': p['text']} for k, p in v['paragraphs'].items()} for sid, v in sources.items()}
             != packet['full_sources']):
@@ -417,7 +421,7 @@ def validate_claim_stage_receipt(receipt):
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
-                          created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                          created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     if stage == 'candidate':
         validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         if policy.all_findings_to_gpt and 'gpt' in materials['roles']:
@@ -610,6 +614,15 @@ def execute_claim_management(store, request, *, root, ports):
                                 'and superseded_by=null before Opus review. This is not human approval. '
                                 'Review retirement_cause_resolved and not_duplicate against the full current source. '
                                 'All named active targets and permitted Evidence/relations may be maintained in the same transaction.')
+                        from backend.pipeline.claim_metadata_projection import compile_projection, FIELD
+                        with store.connect() as conn, conn.cursor() as cursor:
+                            projection = compile_projection(cursor, unit_request, before, policy)
+                        if projection:
+                            materials[FIELD] = projection
+                            if projection['support_identities']:
+                                materials['program_owned_fields']['support_creation_ids'] = 'New EvidenceStep/SourceFragment object_id values are local aliases for typed references. The program assigns final action-scoped identities. Claim IDs must still use the reserved SQL slots.'
+                            if projection['sampling_markers']:
+                                materials['program_owned_fields']['legacy_ai_sampling'] = 'These target markers are verified historical AI sampling only, not human source holds. Do not edit review provenance; the program resets an updated target to candidate before independent review, never human-approved.'
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)
@@ -626,6 +639,9 @@ def execute_claim_management(store, request, *, root, ports):
                             if 'human_source_decisions' in materials:
                                 from backend.pipeline.claim_human_source import assert_current
                                 assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
+                            if 'program_metadata_projection' in materials:
+                                from backend.pipeline.claim_metadata_projection import assert_current
+                                assert_current(cursor, cm.Request.model_validate(materials['unit_request']), materials['before'], policy, materials['program_metadata_projection'])
                             observed = store._assert_transaction_read_pins(cursor, pins(records))
                             from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
                             if enabled(request) or direct_scope_enabled(request):
@@ -659,7 +675,7 @@ def execute_claim_management(store, request, *, root, ports):
                         candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']
                             else cm.normalize_candidate(raw_candidate, materials['sources']))
                         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
-                            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                            created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))
                         write(round_root / 'candidate-normalization.json', normalization)
                         record('candidate')
@@ -672,7 +688,7 @@ def execute_claim_management(store, request, *, root, ports):
                                 continue
                             break
                         _, writes = cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
-                            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                            created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         package = claim_management_package_body(rid, writes)
                         package['source_repair_application'] = {'schema_version': cm.VERSION, 'run_id': rid,
                             'materials': binding(round_root / 'materials.json'), 'candidate': binding(round_root / 'candidate.json'),

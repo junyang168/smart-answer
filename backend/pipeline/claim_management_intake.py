@@ -99,12 +99,17 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
 
     # Validate the complete denominator before preparing or dispatching any job.
     excluded = {}
+    sampling_candidates = set()
     for cid in ids:
         state = store.get_record_state('claims', cid)
         if state is None or state['retired']:
             excluded[cid] = {'status': 'paused', 'reason': 'missing_claim' if state is None else 'retired_claim'}
         elif state['payload'].get('review_status') in cm.HELD:
-            excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
+            from backend.pipeline.claim_metadata_projection import sampling_marker
+            with store.connect() as conn, conn.cursor() as cursor:
+                sampling = (selected.model_output_contract == 'claim_changes_v4' and sampling_marker(cursor, cid, state))
+            if sampling:sampling_candidates.add(cid)
+            else:excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
     jobs, inputs = [], []
     for cid in ids:
         if cid in excluded:
@@ -156,7 +161,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 if key in granted or col not in FIELDS or (col == 'claims' and oid != cid):
                     continue
                 state = before[key]
-                if state['retired'] or state['payload'].get('review_status') in cm.HELD:
+                if state['retired'] or (state['payload'].get('review_status') in cm.HELD and not (col=='claims' and oid==cid and cid in sampling_candidates)):
                     continue
                 if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
                     continue

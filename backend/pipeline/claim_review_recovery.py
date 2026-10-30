@@ -172,8 +172,8 @@ CANDIDATE_IDENTITY_VERSION = 'wang_claim_candidate_identity_recovery_v1'
 def recover_returned_candidate(store, round_id, *, authorization):
     """Bind one proved mechanical correction; reuse the SAME spent GPT answer.
 
-    Keeps the original request, prompt, packet, source and call slots. Only the
-    program interpretation of a uniquely cited retain key changes. The pending
+    Keeps the original request, prompt, packet, source and call slots. Only proved
+    program-owned identity/provenance metadata may change. The pending
     independent review must still approve the complete corrected candidate.
     """
     from backend.pipeline.claim_model_output import retained_candidate_projection, candidate as expand_candidate
@@ -204,19 +204,46 @@ def recover_returned_candidate(store, round_id, *, authorization):
         if slot.get('state') != 'started' or parent['call_reservations'].get(round_id + ':opus', {}).get('state') != 'planned':
             raise ValueError('identity recovery needs a returned original proposal and its unused independent review')
         material = value['materials']; policy = cm.Policy.model_validate(material['policy'])
-        if policy.model_output_contract or material['request']['operation'] != 'Update':
-            raise ValueError('identity recovery is for a legacy existing Update, not a new output contract')
+        metadata_mode = direction.get('program_metadata_projection') is True
+        if material['request']['operation'] != 'Update' or (policy.model_output_contract and not (metadata_mode and policy.model_output_contract == 'claim_changes_v4')):
+            raise ValueError('identity recovery requires its original legacy or explicitly managed metadata contract')
         old_root = Path(value.get('recovery_root', Path(parent['execution_root']) / round_id))
         intent = body(read(old_root / 'gpt.reservation.json'))
         if intent != slot.get('intent') or sha256_json(intent) != slot.get('intent_sha256'):
             raise ValueError('original GPT reservation drift')
         cm.load_authority(cm.Request.model_validate(material['request']),
             source_documents=cm.source_documents(material['before']), selected_source_ids=material['unit_request']['source_bindings'])
-        store._assert_transaction_read_pins(cursor, pins({cm.source.split_key(k):v for k,v in material['transaction_before'].items()}))
+        context = (_current_rejected_input_context(store, cursor, cm.Request.model_validate(material['request']), material, include_records=True) if metadata_mode else None)
+        if not metadata_mode:
+            store._assert_transaction_read_pins(cursor, pins({cm.source.split_key(k):v for k,v in material['transaction_before'].items()}))
         raw = validate_claim_stage(old_root, 'gpt', policy, cm.model_packet(material))
         if direction.get('original_raw') != binding(old_root / 'gpt.raw.json'):
             raise ValueError('identity recovery direction must bind the exact returned raw')
-        corrected, mappings = retained_candidate_projection(raw['response'], material['before'], material['sources'])
+        if metadata_mode:
+            exit_proof = returned_proposal_transport(old_root, raw)
+            if slot.get('rejection') and slot['rejection'].get('raw') != binding(old_root/'gpt.raw.json'):
+                raise ValueError('recorded rejection does not bind this exact original raw')
+            # Reproduce the original refusal before changing its interpretation.
+            if material.get('program_metadata_projection'):
+                raise ValueError('managed metadata recovery cannot stack or replace a prior projection')
+            old_candidate, old_normalization = expand_candidate(raw['response'], material)
+            error = parent['result'].get('detail')
+            if error == 'Claim operation cannot override a protected review hold':
+                try:
+                    cm.validate_candidate(cm.Request.model_validate(material['unit_request']), material['before'], old_candidate, material['sources'], created_keys=material['created_keys'], original_replacements=material['replacements'], metadata_projection=material.get('program_metadata_projection'))
+                except ValueError as exc:
+                    if str(exc) != error:raise
+                else:raise ValueError('saved proposal no longer reproduces its protected marker refusal')
+            elif isinstance(error,str) and error.startswith('create identity already exists: '):
+                key = error.split(': ',1)[1]
+                if old_candidate.model_dump(mode='json') != body(read(old_root/'candidate.json')) or old_normalization != body(read(old_root/'candidate-normalization.json')):
+                    raise ValueError('unaccepted support candidate differs from its original saved projection')
+                if not any(d.action=='create' and d.record_key==key for d in old_candidate.dispositions) or key.split('/',1)[0] not in {'source_fragments','evidence_steps'} or not cursor.execute('SELECT 1 FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',cm.source.split_key(key)).fetchone():
+                    raise ValueError('saved proposal does not reproduce its support identity collision')
+            else:raise ValueError('managed metadata recovery cannot reinterpret a semantic or unrelated rejection')
+            mappings = []
+        else:
+            corrected, mappings = retained_candidate_projection(raw['response'], material['before'], material['sources'])
         current = cm.audit_contract(old_root / 'recovery-contract', policy)
         for path in ['backend/pipeline/prompts/claim_management_'+role+'_v2.md' for role in ('proposal','review')] + [
                 'backend/pipeline/prompts/claim_management_joint_update_v1.md']:
@@ -235,24 +262,36 @@ def recover_returned_candidate(store, round_id, *, authorization):
                     os.fsync(stream.fileno())
         material = deepcopy(material)
         material['audit_contract'] = current
-        material['candidate_identity_recovery'] = {'rule':'retained_fragment_exact_citation_v1',
-            'raw_response_sha256':sha256_json(raw['response']), 'before_sha256':sha256_json(material['before']),
-            'corrections':mappings}
+        if metadata_mode:
+            from backend.pipeline.claim_metadata_projection import compile_projection, FIELD
+            material[FIELD] = compile_projection(cursor, cm.Request.model_validate(material['unit_request']), material['before'], policy)
+            if not material[FIELD]:raise ValueError('managed metadata recovery has no verified projection')
+            if context:material['transaction_before'] = context['current_transaction_before']
+        else:
+            material['candidate_identity_recovery'] = {'rule':'retained_fragment_exact_citation_v1',
+                'raw_response_sha256':sha256_json(raw['response']), 'before_sha256':sha256_json(material['before']),
+                'corrections':mappings}
         if cm.model_packet(material) != cm.model_packet(value['materials']):
             raise ValueError('identity recovery changed the original complete GPT input')
         candidate, normalization = expand_candidate(raw['response'], material)
         cm.validate_candidate(cm.Request.model_validate(material['unit_request']), material['before'], candidate,
-            material['sources'], created_keys=material['created_keys'], original_replacements=material['replacements'])
+            material['sources'], created_keys=material['created_keys'], original_replacements=material['replacements'], metadata_projection=material.get('program_metadata_projection'))
         if policy.all_findings_to_gpt:
             cm.validate_proposer_resolutions(candidate, material['unresolved'], material['sources'],
                 request=cm.Request.model_validate(material['unit_request']))
+        if metadata_mode:
+            for d in candidate.dispositions:
+                if d.action=='create' and cursor.execute('SELECT 1 FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',cm.source.split_key(d.record_key)).fetchone():
+                    raise ValueError('program-assigned created identity is already occupied')
+            mappings = normalization.get('support_creation_identities', [])
         write(root / 'materials.json', material)
         write(root / 'candidate.json', candidate.model_dump(mode='json'))
         write(root / 'candidate-normalization.json', normalization)
         record = {'authorization':authorization, 'original_round':deepcopy(value), 'original_parent':deepcopy(parent),
             'original_raw':binding(old_root / 'gpt.raw.json'), 'current_contract':current,
             'recovery_root':str(root), 'identity_corrections':mappings, 'model_inputs_unchanged':True,
-            'model_calls':0, 'call_reservations_unchanged':True, 'human_content_approval':False}
+            'model_calls':0, 'call_reservations_unchanged':True, 'human_content_approval':False,
+            **({'transport_exit':exit_proof,'program_metadata_projection':material['program_metadata_projection']} if metadata_mode else {})}
         write(root / 'engineering-recovery.json', record)
         value.update(materials=material, recovery_root=str(root), outcome=None,
                      engineering_candidate_recoveries=history + [record])
@@ -407,6 +446,26 @@ DUPLICATE_CHANGE_ERROR = 'changed record repeated or absent from frozen input'
 RECOVERABLE_OUTPUT_ERRORS = {CITATION_ERROR, CREATION_FIELDS_ERROR, DUPLICATE_CHANGE_ERROR}
 
 
+def returned_proposal_transport(root, raw):
+    """Require a real saved successful CLI exit, not just a raw JSON file."""
+    from backend.pipeline.subscription_process import digest_file
+    import re
+    transport = Path(root) / 'gpt.transport'
+    receipt = json.loads((transport / 'exit.json').read_text())
+    invocation = json.loads((transport / 'invocation.json').read_text())
+    names = ['stdout.log', 'stderr.log', 'response.json']
+    if (receipt.get('returncode') != 0
+            or receipt.get('files') != {n:digest_file(transport/n) for n in names}
+            or raw['response'] != json.loads((transport/'response.json').read_text())
+            or raw.get('provider_raw',{}).get('stdout') != (transport/'stdout.log').read_text()
+            or raw.get('provider_raw',{}).get('stderr') != (transport/'stderr.log').read_text()
+            or invocation.get('cwd') != str(transport)
+            or any(not re.fullmatch('[0-9a-f]{64}',str(invocation.get(k,''))) for k in ('command_sha256','input_sha256','executable_sha256'))
+            or invocation['executable_sha256'] != (raw.get('runtime_identity') or {}).get('file_sha256')):
+        raise ValueError('returned proposal transport drift')
+    return binding(transport/'exit.json')
+
+
 def returned_no_progress_input(previous, key, slot):
     """Account for an authenticated returned proposal, without accepting it.
 
@@ -424,15 +483,10 @@ def returned_no_progress_input(previous, key, slot):
         return None
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.claim_model_output import candidate as expand_candidate
-    from backend.pipeline.subscription_process import digest_file
     material = body(read(root / 'materials.json'))
     raw = read_artifact(root / 'gpt.raw.json')
     intent = body(read(root / 'gpt.reservation.json'))
-    transport = root / 'gpt.transport'
-    exit_receipt = json.loads((transport / 'exit.json').read_text())
-    invocation = json.loads((transport / 'invocation.json').read_text())
-    import re
-    expected_files = ['stdout.log', 'stderr.log', 'response.json']
+    exit_proof = returned_proposal_transport(root, raw)
     if (intent != slot.get('intent') or sha256_json(intent) != slot.get('intent_sha256')
             or any(raw.get(k) != v for k, v in intent.items())
             or raw.get('request_payload_sha256') != sha256_json(cm.model_packet(material))
@@ -440,21 +494,12 @@ def returned_no_progress_input(previous, key, slot):
             or raw.get('provider_raw_sha256') != sha256_json(raw.get('provider_raw'))
             or raw.get('backend') != 'codex_subscription'
             or raw.get('model_id') != previous['policy']['models']['gpt']['model_id']
-            or material['request'] != previous['request'] or material['round_id'] != rid
-            or exit_receipt.get('returncode') != 0
-            or exit_receipt.get('files') != {n: digest_file(transport / n) for n in expected_files}
-            or raw['response'] != json.loads((transport / 'response.json').read_text())
-            or raw['provider_raw'].get('stdout') != (transport / 'stdout.log').read_text()
-            or raw['provider_raw'].get('stderr') != (transport / 'stderr.log').read_text()
-            or invocation.get('cwd') != str(transport)
-            or any(not re.fullmatch('[0-9a-f]{64}', str(invocation.get(k, '')))
-                   for k in ('command_sha256', 'input_sha256', 'executable_sha256'))
-            or invocation['executable_sha256'] != raw.get('runtime_identity', {}).get('file_sha256')):
+            or material['request'] != previous['request'] or material['round_id'] != rid):
         raise ValueError('returned no-progress proposal binding drift')
     candidate, normalization = expand_candidate(raw['response'], material)
     request = cm.Request.model_validate(material['unit_request'])
     cm.validate_candidate(request, material['before'], candidate, material['sources'],
-        created_keys=material['created_keys'], original_replacements=material['replacements'])
+        created_keys=material['created_keys'], original_replacements=material['replacements'], metadata_projection=material.get('program_metadata_projection'))
     cm.validate_proposer_resolutions(candidate, material['unresolved'], material['sources'], request=request)
     repeated = cm.candidate_state(material['before'], candidate) in previous['candidate_fingerprints'].get(material['unit_id'], [])
     existing = cm.candidate_state(material['before'], candidate) == cm.candidate_state(material['before'],
@@ -465,7 +510,7 @@ def returned_no_progress_input(previous, key, slot):
             or normalization != body(read(root / 'candidate-normalization.json'))):
         raise ValueError('returned proposal does not reproduce the no-progress stop')
     return {'round_id': rid, 'role': 'gpt', 'raw': binding(root / 'gpt.raw.json'),
-        'transport_exit': binding(transport / 'exit.json'), 'response': raw['response'],
+        'transport_exit': exit_proof, 'response': raw['response'],
         'original_prompt_sha256': raw['prompt_sha256'], 'response_state': 'returned_unaccepted',
         'content_approved': False, 'reason': 'no_progress'}
 
@@ -519,7 +564,7 @@ def rejected_model_input(value, parent, role, *, error):
         if role == 'gpt':
             candidate,_ = expand_candidate(raw['response'],materials)
             cm.validate_candidate(request,materials['before'],candidate,materials['sources'],
-                created_keys=materials['created_keys'],original_replacements=materials['replacements'])
+                created_keys=materials['created_keys'],original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
             cm.validate_proposer_resolutions(candidate,materials['unresolved'],materials['sources'],request=request)
         else:
             review = expand_review(raw['response'],materials,candidate)
@@ -821,7 +866,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             raise ValueError('transaction recovery saved candidate drift')
         validate_claim_candidate_origin(old_root, materials, policy, sources, candidate)
         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
-            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+            created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
         if 'gpt' in materials['roles']:
             slot = parent['call_reservations'].get(round_id + ':gpt', {})
             if slot.get('state') != ('started' if unrecorded else 'completed') or body(read(old_root / 'gpt.reservation.json')) != slot.get('intent') or sha256_json(slot['intent']) != slot.get('intent_sha256'):
