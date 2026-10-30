@@ -764,13 +764,15 @@ def execute_claim_management(store, request, *, root, ports):
             # Runtime/transport interruption is not a schema rejection. A valid
             # saved reply must still be resumable without another model call.
             for slot in parent['call_reservations'].values() if isinstance(exc, ValueError) and not isinstance(exc, Stop) else []:
-                if slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}:
+                if (slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}
+                        or slot['round_id'] not in parent['latest_rounds'].values()
+                        or slot.get('rejection')):
                     continue
                 child = store.get_cvp_group(slot['round_id'])
                 stage_root = Path(child.get('recovery_root', root / slot['round_id']))
                 if (stage_root / (slot['role'] + '.raw.json')).is_file():
                     try:
-                        store.record_claim_management_returned_rejection(slot['round_id'], role=slot['role'], detail=text)
+                        store.record_claim_management_returned_rejection(slot['round_id'], role=slot['role'], detail=str(exc))
                     except (ValueError, RuntimeError) as recording_error:
                         text += '; returned-answer authentication failed: ' + str(recording_error)
                     else:

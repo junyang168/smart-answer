@@ -327,6 +327,28 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
         assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
         assert store.get_record_state('source_fragments','FD')==before
         if defect=='repeat':
+            from backend.api.canonical_repository.postgres_store import canonical_json
+            latest = next(iter(after['latest_rounds'].values()))
+            error = 'citation is not an exact quote from the complete own source'
+            assert after['result']['detail'] == error
+            current_slot = after['call_reservations'][latest + ':gpt']
+            assert current_slot['rejection']['detail'] == error
+            # Reconcile the exact diagnostic pollution produced by the old
+            # executor; authenticating this never accepts the proposal.
+            broken = deepcopy({k:v for k,v in after.items() if k not in {'run_id','status','error'}})
+            polluted = error + '; returned-answer authentication failed: returned rejection cannot relabel an accepted, committed or superseded result'
+            broken['call_reservations'][latest + ':gpt']['rejection']['detail'] = polluted
+            with store.connect() as conn:
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s', (canonical_json(broken), after['run_id']))
+            with pytest.raises(RuntimeError):
+                store.record_claim_management_returned_rejection(latest, role='gpt', detail=error)
+            with pytest.raises(RuntimeError):
+                store.record_claim_management_returned_rejection(latest, role='gpt', detail='forged validation error', repair_recorded_detail=True)
+            store.record_claim_management_returned_rejection(latest, role='gpt', detail=error, repair_recorded_detail=True)
+            repaired = store.get_cvp_group(after['run_id'])['call_reservations'][latest + ':gpt']
+            assert repaired['rejection']['detail'] == error
+            assert repaired['rejection_history'][-1]['detail'] == polluted
+            assert repaired['state'] == 'started'
             third=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
             assert third['status']=='paused' and next(iter(clients.values())).calls==expected_calls
             assert store.get_record_state('source_fragments','FD')==before

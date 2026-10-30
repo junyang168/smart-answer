@@ -3614,7 +3614,7 @@ class PostgresKnowledgeStore:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
                            (canonical_json(value), action_run_id))
 
-    def record_claim_management_returned_rejection(self, round_id, *, role, detail):
+    def record_claim_management_returned_rejection(self, round_id, *, role, detail, repair_recorded_detail=False):
         """Record an authenticated returned answer that was NOT accepted.
 
         This changes call accounting only: no stage approval, finding resolution,
@@ -3654,9 +3654,24 @@ class PostgresKnowledgeStore:
             rejection = {'response_state': 'returned_rejected', 'raw': binding(root / (role + '.raw.json')), 'detail': detail,
                          'accepted': False, 'automatic_retry': False}
             if slot.get('rejection'):
-                if slot['rejection'] != rejection:
+                if slot['rejection'] == rejection:
+                    return rejection
+                # An older executor appended a failed attempt to authenticate a
+                # superseded call to the next call's real validation error.
+                # Repair accounting only after reproducing the precise error
+                # against the same authenticated raw; keep the old diagnostic.
+                old_rejection = slot['rejection']
+                suffix = '; returned-answer authentication failed: '
+                if (not repair_recorded_detail
+                        or {**old_rejection, 'detail': detail} != rejection
+                        or not old_rejection['detail'].startswith(detail + suffix)):
                     raise ChangeSetConflict('returned rejection already recorded differently')
-                return rejection
+                from copy import deepcopy
+                from backend.pipeline.claim_review_recovery import rejected_model_input
+                authenticated_parent = deepcopy(parent)
+                authenticated_parent['call_reservations'][round_id + ':' + role]['rejection'] = rejection
+                rejected_model_input(value, authenticated_parent, role, error=detail)
+                slot.setdefault('rejection_history', []).append(old_rejection)
             # Keep the original spent reservation and remaining role slots.
             # Reply acceptance is separate from call intent; existing exact
             # recovery can consume this same raw without inventing a new call.
