@@ -220,11 +220,20 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
     assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
 
 
-@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference'])
+@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','evidence_drift','scope_drift'])
 def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
     from backend.pipeline import claim_management_intake as intake
     from backend.pipeline.claim_review_recovery import consumed_rejected_citations
-    store,old,cid,base=fixture(action);root=base/'proposal-quote';citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    store,old,cid,base=fixture(action)
+    consumer = defect in {'transaction_consumer','transaction_consumer_opus'}
+    if consumer or defect=='scope_drift':
+        original_reader=store.read_claim_context
+        def read_with_consumer(*args,**kwargs):
+            records=original_reader(*args,**kwargs)
+            records.update(original_reader([('claims','N')]))
+            return records
+        monkeypatch.setattr(store,'read_claim_context',read_with_consumer)
+    root=base/'proposal-quote';citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
     def resolutions(packet,bad=False):
         return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact source binding',
             'citations':[{**citation,**({'exact_quote':'教授否定这个译法TYPO。','source_id':'FOREIGN' if defect=='foreign' else 'S'} if bad else {})}],
@@ -266,7 +275,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
             value['findings']=[{'target_key':'source_fragments/FD','category':'evidence','component':'binding',
                 'reason':'bound excerpt stale','acceptance_condition':'repair exact excerpt','citations':[citation],
                 'affected_target_keys':['claims/D'],'affected_write_keys':[],'impact_reason':'own evidence'}]
-        if defect=='opus' and not packet['unresolved']:
+        if defect in {'opus','transaction_consumer_opus'} and not packet['unresolved']:
             value['findings'][0]['citations']=[{**citation,'exact_quote':'教授否定这个译法TYPO。'}]
         return value
     clients={}
@@ -281,13 +290,25 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     first=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
     assert first['status']=='paused'
     aid=first['claims']['D']['action_id'];parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()))
-    role='opus' if defect=='opus' else 'gpt'
+    role='opus' if defect in {'opus','transaction_consumer_opus'} else 'gpt'
     raw=Path(parent['execution_root'])/rid/(role+'.raw.json');raw_bytes=raw.read_bytes();before=store.get_record_state('source_fragments','FD')
-    initial_calls=['opus'] if defect=='opus' else ['opus','gpt']
+    initial_calls=['opus'] if defect in {'opus','transaction_consumer_opus'} else ['opus','gpt']
     assert next(iter(clients.values())).calls==initial_calls
     if defect=='drift':
         record=store.get_record_state('claims','D')['payload'];record['statement']='external change'
         store.apply_plan(store.plan_package({'package_id':'external-drift','claims':[record]}))
+    if consumer or defect=='scope_drift':
+        child=store.get_cvp_group(rid)
+        assert 'evidence_steps/EN' in child['materials']['transaction_before']
+        assert 'evidence_steps/EN' not in child['materials']['before']
+    if consumer or defect=='evidence_drift':
+        eid='EN' if consumer else 'ED'
+        record=deepcopy(store.get_record_state('evidence_steps',eid)['payload']);record['statement']='later evidence correction'
+        store.apply_plan(store.plan_package({'package_id':'later-evidence-drift','evidence_steps':[record]}))
+        if consumer:consumer_after=store.get_record_state('evidence_steps','EN')
+    if defect=='scope_drift':
+        store.apply_plan(store.plan_package({'package_id':'new-direct-neighbour','claim_relations':[
+            {'claim_relation_id':'ND','from_id':'N','to_id':'D','relation_type':'supports'}]}))
     if defect=='intent':
         from backend.api.canonical_repository.postgres_store import canonical_json
         broken=deepcopy({k:v for k,v in parent.items() if k not in {'run_id','status','error'}})
@@ -301,7 +322,7 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
     assert not raw.exists() if defect=='missing' else raw.read_bytes()==raw_bytes
     after=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
     assert after['request']==parent['request'] and after['policy']==parent['policy']
-    if defect not in {'current','opus','creation','duplicate','missing_reference'}:
+    if defect not in {'current','opus','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus'}:
         expected_calls=initial_calls+(['gpt'] if defect=='repeat' else [])
         assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
         assert store.get_record_state('source_fragments','FD')==before
@@ -324,3 +345,11 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
         assert after['request']['creation_permissions']==parent['request']['creation_permissions']
     assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']
     assert store.claim_management_qualification('D')['ready']
+
+    if consumer:
+        child=store.get_cvp_group(rid)
+        recovery=json.loads(Path(child['citation_input_recovery']['path']).read_text())
+        proof=recovery['transaction_context_refresh']
+        assert proof['changed_transaction_keys']==['evidence_steps/EN']
+        assert proof['content_scope_sha256']==cm.sha256_json(child['materials']['before'])
+        assert store.get_record_state('evidence_steps','EN')==consumer_after
