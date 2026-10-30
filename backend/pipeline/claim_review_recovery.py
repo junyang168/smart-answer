@@ -406,6 +406,69 @@ DUPLICATE_CHANGE_ERROR = 'changed record repeated or absent from frozen input'
 RECOVERABLE_OUTPUT_ERRORS = {CITATION_ERROR, CREATION_FIELDS_ERROR, DUPLICATE_CHANGE_ERROR}
 
 
+def returned_no_progress_input(previous, key, slot):
+    """Account for an authenticated returned proposal, without accepting it.
+
+    A linked action may change its prompt or granted fields. The old SQL
+    intent and byte-bound transport remain the authority for the old call;
+    do not reinterpret that call as having used the successor's instructions.
+    """
+    if previous.get('result', {}).get('reason') != 'no_progress' or slot.get('role') != 'gpt':
+        return None
+    rid = slot.get('round_id')
+    if slot.get('state') != 'started' or key != str(rid) + ':gpt' or rid not in previous['latest_rounds'].values():
+        return None
+    root = Path(previous['execution_root']) / rid
+    if not (root / 'gpt.raw.json').exists():
+        return None
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.pipeline.claim_model_output import candidate as expand_candidate
+    from backend.pipeline.subscription_process import digest_file
+    material = body(read(root / 'materials.json'))
+    raw = read_artifact(root / 'gpt.raw.json')
+    intent = body(read(root / 'gpt.reservation.json'))
+    transport = root / 'gpt.transport'
+    exit_receipt = json.loads((transport / 'exit.json').read_text())
+    invocation = json.loads((transport / 'invocation.json').read_text())
+    import re
+    expected_files = ['stdout.log', 'stderr.log', 'response.json']
+    if (intent != slot.get('intent') or sha256_json(intent) != slot.get('intent_sha256')
+            or any(raw.get(k) != v for k, v in intent.items())
+            or raw.get('request_payload_sha256') != sha256_json(cm.model_packet(material))
+            or raw.get('response_sha256') != sha256_json(raw.get('response'))
+            or raw.get('provider_raw_sha256') != sha256_json(raw.get('provider_raw'))
+            or raw.get('backend') != 'codex_subscription'
+            or raw.get('model_id') != previous['policy']['models']['gpt']['model_id']
+            or material['request'] != previous['request'] or material['round_id'] != rid
+            or exit_receipt.get('returncode') != 0
+            or exit_receipt.get('files') != {n: digest_file(transport / n) for n in expected_files}
+            or raw['response'] != json.loads((transport / 'response.json').read_text())
+            or raw['provider_raw'].get('stdout') != (transport / 'stdout.log').read_text()
+            or raw['provider_raw'].get('stderr') != (transport / 'stderr.log').read_text()
+            or invocation.get('cwd') != str(transport)
+            or any(not re.fullmatch('[0-9a-f]{64}', str(invocation.get(k, '')))
+                   for k in ('command_sha256', 'input_sha256', 'executable_sha256'))
+            or invocation['executable_sha256'] != raw.get('runtime_identity', {}).get('file_sha256')):
+        raise ValueError('returned no-progress proposal binding drift')
+    candidate, normalization = expand_candidate(raw['response'], material)
+    request = cm.Request.model_validate(material['unit_request'])
+    cm.validate_candidate(request, material['before'], candidate, material['sources'],
+        created_keys=material['created_keys'], original_replacements=material['replacements'])
+    cm.validate_proposer_resolutions(candidate, material['unresolved'], material['sources'], request=request)
+    repeated = cm.candidate_state(material['before'], candidate) in previous['candidate_fingerprints'].get(material['unit_id'], [])
+    existing = cm.candidate_state(material['before'], candidate) == cm.candidate_state(material['before'],
+        cm.existing_candidate(material['before'], replacements=material['replacements']))
+    ids = {r.finding_id for r in candidate.finding_resolutions or []}
+    if (not (repeated or existing) or ids and not ids.intersection(previous.get('clarified_finding_ids', []))
+            or candidate.model_dump(mode='json') != body(read(root / 'candidate.json'))
+            or normalization != body(read(root / 'candidate-normalization.json'))):
+        raise ValueError('returned proposal does not reproduce the no-progress stop')
+    return {'round_id': rid, 'role': 'gpt', 'raw': binding(root / 'gpt.raw.json'),
+        'transport_exit': binding(transport / 'exit.json'), 'response': raw['response'],
+        'original_prompt_sha256': raw['prompt_sha256'], 'response_state': 'returned_unaccepted',
+        'content_approved': False, 'reason': 'no_progress'}
+
+
 def rejected_citation_input(value, parent, role):
     return rejected_model_input(value,parent,role,error=CITATION_ERROR)
 

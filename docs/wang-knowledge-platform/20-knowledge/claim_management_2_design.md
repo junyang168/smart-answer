@@ -7,6 +7,7 @@
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
 > **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
+> **無進展工程接續對齊**：2026-10-29，第 8.1 節核對本工作樹的 `returned_no_progress_input`、`continuation_budget` 與 `finding_permission_extension`；完整返回不等於內容通過，補齊原非 Claim 物件的普通欄位也不增加原調用及修訂預算。
 > **分区 refresh 排程设计**：2026-10-29，第 11.7 节另行规定按来源串行、GPT／Opus 各两个全局 session、持续补位及供应商限流控制。该编排待实施，不能把旧 batch 的两个 action 上限视为已满足新需求。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
@@ -359,6 +360,8 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 恢复同一 action 须有明确原因消解、有效输入、原权限和原预算；语义分歧仍在且没有来源支持的具体修正方向时保持暂停；出现该方向时按第 7.3 节从正常修订恢复，保留原异议及暂停记录。来源版本改变、范围改变或原预算不可继续时，后续 action 必须另有明确授权，关联原目标、未决与已提交事实，不隐藏失败。模型分歧和预算耗尽不单独成为内容人审理由。
 
 联合 Update 因缺权限或预算边界暂停后，明确授权的关联工程接续可为原冻结范围内、已记录为未决异议的只读非 Claim 对象补充写权限。原目标、必做维护和既有权限保持不变，不增加读取范围，不以此处理未澄清的来源问题；仍只使用原操作剩余调用和修订预算，原已提交写入及 unknown 预留的保护照常适用，不能借新目录增加重试。
+
+普通字段漏授使联合 Update 因 `no_progress` 停止时，关联请求也可为原冻结范围内已有未决异议的非 Claim 对象补齐普通维护字段；不得增添对象、删除原字段权利、修改 Claim 邻居或授予身份及审批字段。完整已返回而未接纳的 GPT 提案须按原 SQL 意图、raw、成功 transport 退出及输出文件 SHA 验证，并重现原候选的重复指纹与已用澄清机会，才能作为已耗调用带入接续。原答覆和 prompt 身份保留，不能用新 prompt 追认旧答覆；其完整提案交给后续 GPT 判定，仍须正常 Opus 审阅、交易和回读，调用及修订上限均从前任剩余额度扣除。
 
 负责人明确追加模型调用许可后，可以为答复未定的 Update 建立唯一关联接续：授权绑定原 action 的精确 metadata、原目标／来源／字段权限、追加调用和修订上限；同一次新预算不能再次分叉。未知 GPT 的原预留、intent 和已消耗事实保持，不能改成失败、取消或未调用；已返回 raw 或退出记录须先走原结果核实，不能借追加许可丢弃。
 

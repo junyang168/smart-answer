@@ -1623,6 +1623,7 @@ def continuation_budget(previous, request, policy):
     if not isinstance(proposal_recovery,dict):
         raise ValueError('unaccepted proposal recovery must bind exact returned calls')
     unaccepted_proposals = {}
+    no_progress_returns = {}
     root = Path(previous['execution_root'])
     for key, slot in previous['call_reservations'].items():
         if slot['state'] in {'planned','cancelled'}:
@@ -1630,6 +1631,13 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
+        if previous['result'].get('reason') == 'no_progress':
+            from backend.pipeline.claim_review_recovery import returned_no_progress_input
+            returned = returned_no_progress_input(previous, key, slot)
+            if returned is not None:
+                no_progress_returns[key] = returned
+                spent[slot['role']] += 1
+                continue
         from backend.pipeline.claim_review_recovery import consumed_invalid_review, consumed_rejected_citations
         if consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot):
             spent[slot['role']] += 1
@@ -1705,6 +1713,7 @@ def continuation_budget(previous, request, policy):
         **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
+        **({'unaccepted_no_progress_calls':no_progress_returns} if no_progress_returns else {}),
         **({'owner_call_extension':deepcopy(extension),'preserved_unknown_calls':unknown,
             'budget_basis':'explicit_owner_call_extension','follow_up_budget':policy.budget.model_dump(mode='json')} if extension is not None else {}),
         **({'human_source_verification':human_follow_up,

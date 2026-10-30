@@ -41,7 +41,7 @@ def required_keys(request, *, strict=True):
 
 def finding_permission_extension(previous, old, request):
     """A linked action may authorize a known readonly finding, not widen reads."""
-    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted'}:
+    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted', 'no_progress'}:
         return False
     prior = {p.key: p for p in old.permissions}
     current = {p.key: p for p in request.permissions}
@@ -49,6 +49,18 @@ def finding_permission_extension(previous, old, request):
     findings = {f['target_key'] for f in previous.get('findings', {}).values()
                 if f['category'] != 'source_uncertain'}
     frozen = previous['original_goal']['original_objects']
+    if previous['result']['reason'] == 'no_progress':
+        # An omitted ordinary field can strand a real engineering correction.
+        # The linked request supplies new exact authority, but no new objects,
+        # source scope, Claim neighbours, or call allowance.
+        from backend.pipeline.claim_management_intake import FIELDS
+        extended = {k for k in prior.keys() & current.keys() if prior[k] != current[k]}
+        return bool(not added and extended and extended <= findings and extended <= set(frozen)
+            and set(prior) == set(current)
+            and all(not frozen[k]['retired'] and not k.startswith('claims/')
+                and set(prior[k].fields) < set(current[k].fields)
+                and set(current[k].fields) <= FIELDS.get(current[k].collection, set()) for k in extended)
+            and all(prior[k] == current[k] for k in prior.keys() - extended))
     return bool(added and added <= findings and added <= set(frozen)
         and all(current.get(key) == value for key, value in prior.items())
         # A Claim may be added only when it is already a target: the rule is
