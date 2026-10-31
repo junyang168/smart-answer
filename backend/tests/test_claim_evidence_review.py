@@ -51,6 +51,51 @@ def test_old_compact_pass_no_longer_suffices_for_new_policy(material):
     assert output.review({'complete_review':True,'findings':[],'prior_findings':[]},m,candidate)
 
 
+def test_step_can_also_name_its_exact_bound_fragment(material):
+    m,candidate=material
+    raw=answer(evidence_keys=['evidence_steps/E','source_fragments/F'])
+    parsed=er.BindingFindingsReview.model_validate(raw)
+    er.validate_assessments(parsed,m,candidate)
+    assert parsed.binding_assessments[0].evidence_keys==raw['binding_assessments'][0]['evidence_keys']
+    assert all(v.approved for v in output.review(raw,m,candidate).verdicts)
+
+
+def test_explicit_fragment_uses_candidate_binding_not_previous_binding(material):
+    m,candidate=material
+    step=deepcopy(m['before']['evidence_steps/E']['payload'])
+    fragment=deepcopy(m['before']['source_fragments/F']['payload'])
+    step.update(source_fragment_id=None,source_fragment_ids=['F2'])
+    fragment['fragment_id']='F2'
+    candidate.records=[cm.source.Row(collection='evidence_steps',object_id='E',payload=step),
+        cm.source.Row(collection='source_fragments',object_id='F2',payload=fragment)]
+    er.validate_assessments(er.BindingFindingsReview.model_validate(
+        answer(evidence_keys=['evidence_steps/E','source_fragments/F2'])),m,candidate)
+    with pytest.raises(ValueError,match='borrowed'):
+        er.validate_assessments(er.BindingFindingsReview.model_validate(
+            answer(evidence_keys=['evidence_steps/E','source_fragments/F'])),m,candidate)
+
+
+@pytest.mark.parametrize('extra',['source_fragments/FO','source_documents/S','S0001',
+    'observations/O','source_fragments/F','evidence_steps/OTHER'])
+def test_explicit_fragment_does_not_allow_borrowing_or_duplicate_keys(material,extra):
+    m,candidate=material
+    raw=answer(evidence_keys=['evidence_steps/E','source_fragments/F',extra])
+    with pytest.raises(ValueError,match='borrowed'):
+        er.validate_assessments(er.BindingFindingsReview.model_validate(raw),m,candidate)
+
+
+def test_fragment_requires_its_own_listed_parent_step(material):
+    m,candidate=material
+    second=deepcopy(m['before']['evidence_steps/E']['payload'])
+    second.update(evidence_step_id='E2',source_fragment_ids=['F2'])
+    m['before']['evidence_steps/E2']={'payload':second,'retired':False}
+    m['before']['source_fragments/F2']={'payload':{'source_id':'S'},'retired':False}
+    m['before']['claims/C']['payload']['evidence_step_ids'].append('E2')
+    for keys in [['source_fragments/F'],['evidence_steps/E','source_fragments/F2']]:
+        with pytest.raises(ValueError,match='borrowed'):
+            er.validate_assessments(er.BindingFindingsReview.model_validate(answer(evidence_keys=keys)),m,candidate)
+
+
 @pytest.mark.parametrize('problem',['context','no_fragments','foreign','wrong_owner','missing_claim','duplicate','no_finding'])
 def test_binding_counterexamples_cannot_pass(material, problem):
     m,candidate=material;raw=answer();e=m['before']['evidence_steps/E']['payload']
@@ -113,7 +158,8 @@ from backend.tests.test_claim_management_human_source_follow_up import authorize
 from backend.pipeline.cvp_sql_actions import execute_claim_management
 
 
-def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
+@pytest.mark.parametrize('explicit_fragment',[False,True])
+def test_real_sql_readback_retains_the_explicit_binding_assessment(action,explicit_fragment):
     store, _, _, _, root, _ = action
     store.apply_plan(store.plan_package({'package_id':'own-binding-case',
         'claims':[{'claim_id':'C','statement':'甲是假设。','claim_type':'exegesis',
@@ -128,7 +174,7 @@ def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
     def opus(packet):
         assert er.QUESTIONS <= set(packet['required_questions'])
         assert packet['own_evidence_bindings']['claims/C']['evidence_steps/E']['fragment_keys']==['source_fragments/F']
-        return answer()
+        return answer(evidence_keys=['evidence_steps/E','source_fragments/F'] if explicit_fragment else ['evidence_steps/E'])
     ports=SyntheticPorts(store,root,opus=opus)
     result=execute_claim_management(store,request,root=output_root,ports=ports)
     assert result['status']=='completed',result
@@ -137,6 +183,7 @@ def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
     child=store.get_cvp_group(q['run_id'])
     raw=json.loads((output_root/q['run_id']/'opus.raw.json').read_text())
     assert raw['response']['binding_assessments'][0]['reason']==answer()['binding_assessments'][0]['reason']
+    assert ('source_fragments/F' in raw['response']['binding_assessments'][0]['evidence_keys'])==explicit_fragment
     assert ports.calls==['opus']
     assert execute_claim_management(store,request,root=output_root,ports=ports)==result
     assert ports.calls==['opus']

@@ -91,9 +91,15 @@ def validate_assessments(review, materials, candidate):
     rows.update(cm.source.index(candidate.records))
     for a in assessments:
         steps = table[a.claim_key]
-        if len(a.evidence_keys) != len(set(a.evidence_keys)) or set(a.evidence_keys) - set(steps):
+        listed = set(a.evidence_keys)
+        cited_steps = listed & set(steps)
+        # A reviewer may explicitly name a step's already-bound excerpts as
+        # well as the step. These are redundant references, not extra evidence.
+        # Bare fragments and fragments from an uncited/foreign step stay out.
+        cited_fragments = {f for key in cited_steps for f in steps[key]['fragment_keys']}
+        if len(a.evidence_keys) != len(listed) or listed - cited_steps - cited_fragments:
             raise ValueError('own Evidence assessment borrowed non-owned Evidence or a whole paragraph')
-        for key in a.evidence_keys:
+        for key in cited_steps:
             e = steps[key]
             if not e['reciprocal_owner'] or not e['fragment_keys']:
                 raise ValueError('own Evidence assessment lacks reciprocal owner or bound fragments')
@@ -101,11 +107,11 @@ def validate_assessments(review, materials, candidate):
             if any(f not in rows or rows[f]['source_id'] not in own for f in e['fragment_keys']):
                 raise ValueError('own Evidence assessment uses missing or foreign source fragments')
         if a.sufficient:
-            if not a.evidence_keys:
+            if not cited_steps:
                 raise ValueError('sufficient own Evidence assessment requires bound Evidence')
             if a.claim_use == 'professor_judgment' and not any(
                     steps[k]['support_eligibility'] in {'eligible', 'eligible_candidate'}
-                    for k in a.evidence_keys):
+                    for k in cited_steps):
                 raise ValueError('professor judgment cannot be supported only by context/ineligible Evidence')
         else:
             bound = set(steps) | {f for step in steps.values() for f in step['fragment_keys']}
