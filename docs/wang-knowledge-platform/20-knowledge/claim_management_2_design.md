@@ -4,9 +4,12 @@
 > **类型**：规范。
 > **状态**：当前规范；普通双目标联合 Update 已完成有界真实审阅与回读验收；常规联合策略容量为 2，旧策略保持原契约。
 > **与代码对齐**：第 5.3 节独立判断遗漏的审阅规则、同轮新建同源 Claim 与双向归属校验于 2026-10-22 核对到引入 `one_sided_owner_pairs` 与 `test_claim_hidden_judgement.py` 的提交；概括语义力度的既有审阅理由于 2026-10-18 核对到 `claim_management_review_v2.md`、`claim_management_compact_v1/v2.md` 与 `claim_own_evidence_v1.md`；具体维护问题冻结与已知权限缺口提前暂停于 2026-10-18 核对到 `a60e4bba`；自身证据覆盖与经文论据归属契约于 2026-10-18 核对到 `a14d8242`；已记录只读异议的联合权限接续于 2026-10-17 核对到 `0077424e`；以下既有项目于 2026-10-16 核对：精简模型输出、显式授权接续及只读资格刷新核对到 `4ee96f3`，真实验收见实施检查点；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。第 9.1 节人工修改／确认的持久登记、自动带入和当前证据核实对齐到 `f6101f47`。
+> **程序字段边界对齐**：2026-10-30 核对到 `5866447c`：旧 AI 抽查的准备／资格／写入共用分类、原审阅历史的事务重检、同源支持对象的程序身份，以及复用已返回 GPT、保留原预算的机械候选接续。同一 Update 中的退休分类另核对到 `0dd9e631`，退休保留历史 payload。旧请求只有经过正式恢复才能获得该投影，不改写历史 raw 或解释旧完成事实。
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
 > **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
+> **無進展工程接續對齊**：2026-10-29，第 8.1 節核對本工作樹的 `returned_no_progress_input`、`continuation_budget` 與 `finding_permission_extension`；完整返回不等於內容通過，補齊原非 Claim 物件的普通欄位也不增加原調用及修訂預算。
+> **分区 refresh 排程设计**：2026-10-29，第 11.7 节另行规定按来源串行、GPT／Opus 各两个全局 session、持续补位及供应商限流控制。该编排待实施，不能把旧 batch 的两个 action 上限视为已满足新需求。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
@@ -101,7 +104,7 @@ main 的 `PostgresKnowledgeStore.apply_plan()` 已使用 PostgreSQL transaction 
 
 新增责任集中在现有契约内：operations 的权限与对象映射、有序多轮候选及 findings、各 operation 的完整独立审计问题、Claim-ready 与已存在失效／completion 的对应。复用 SQL 进度、审核记录和 artifact 引用，不建另一套状态数据库或独立证明框架。
 
-沿用单一使用者、受控维护入口和来源不被外部并发修改的运行前提。普通联合 Update 每个 action 只有一个单元，独立组组成批次中的不同 action；其他 operation 保持原有单元契约。不同 action 的有界并行须有原许可，并按第 11.2 节检查交叉写入影响。模型请求重叠不表示数据库同时提交，短事务仍使用共同写锁。本文不新增常驻调度器或不受控并发，也不从多目标参数推导并行写入许可。
+沿用单一使用者、受控维护入口和来源不被外部并发修改的运行前提。普通联合 Update 每个 action 只有一个单元，独立组组成批次中的不同 action；其他 operation 保持原有单元契约。不同 action 的有界并行须有原许可，并按第 11.2 节检查交叉写入影响。模型请求重叠不表示数据库同时提交，短事务仍使用共同写锁。现有入口不新增常驻调度器，也不从多目标参数推导并行写入许可。第 11.7 节的新增受控编排另行设计、实施和验收，不倒改旧任务合同。
 
 ### 3.3 多目标入口与已验收能力的边界
 
@@ -136,7 +139,7 @@ Split／Merge 产生新 ID。跨讲同看法交 CVP，不 Merge 成单一 Claim�
 
 ### 4.2 权限与提交边界
 
-Create 的身份缺席必须对全库核对，不能由一跳材料中没有该 ID 推断。候选保存前检查已有身份（含退役对象）；实际 SQL 事务再核对候选中的 create 仍对应计划的 create，禁止 package upsert 将其转成 update。新清单的 v8 请求由程序查询同前缀已登记身份、退休身份与已预留身份，并逐一排除其他 collection 的同名记录；在已有 SQL 运行账本内按原 action／source／root 预留一个 ID。模型只能填写 `original_goal.claim_creation_allocations` 中的身份，动态 schema 及候选／SQL 校验都执行这项约束。重启复用原预留，不另选身份或覆盖碰撞对象。其他已绑定契约保持原规则，不按局部可见序号猜测身份。内容审核不授予覆盖包外对象的权限。
+Create 的身份缺席必须对全库核对，不能由一跳材料中没有该 ID 推断。候选保存前检查已有身份（含退役对象）；实际 SQL 事务再核对候选中的 create 仍对应计划的 create，禁止 package upsert 将其转成 update。新清单的 v8 请求由程序查询同前缀已登记身份、退休身份与已预留身份，并逐一排除其他 collection 的同名记录；在已有 SQL 运行账本内按原 action／source／root 原子预留明确数量的 ID，未指定时仍为一个。多身份请求冻结完整身份清单，重启不得改变数量或替换身份；每个未使用身份也保留预留，其他 action 不复用它。模型只能填写 `original_goal.claim_creation_allocations` 中的身份，动态 schema 及候选／SQL 校验都执行这项约束。重启复用原预留，不另选身份或覆盖碰撞对象。其他已绑定契约保持原规则，不按局部可见序号猜测身份。内容审核不授予覆盖包外对象的权限。
 
 Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文／限定、occurrences、Evidence 表述／绑定／owner／资格和单篇关系。Evidence 补入不批准扩大 Claim；解绑保存理由；最后一个支持 Evidence 被撤回时，Claim 不可继续就绪。反方改标签不能成为教授立场的支持证据。
 
@@ -344,6 +347,8 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 ### 8.1 结果与暂停原因
 
+旧 AI 抽查标记不等于人工暂停。managed v4 Update 准备、资格查询与写入使用同一分类规则：只接纳当前 revision 的正式旧迁移事件，且独立 AI 复审为 pass、处置为 human_spot_check、没有任何人工审阅历史。修改该目标内容时，程序将其旧标记投影为 candidate，保留全部旧审阅事件及其他 provenance；不授予模型修改审批字段的权利，也不声称人工批准。Opus 审阅实际完整后像，短事务再次核对对象 pins 与审阅事件摘要；新增人工决定、来源疑点、旧审核失败或版本不匹配仍阻挡。同一 Update 中已授权的退休也按此分类，不改写被退休对象的历史 payload。没有实际修改时不清除标记，仍按原只读当前资格规则处理。
+
 结果统一为完成或暂停未完成；暂停原因独立记录，业务结论与 checkpoint 不互相代替。Read 按读取契约完成。新 policy 的 Review 同样先把审计异议交 GPT 判定，内容保持只读；未解决或超预算则暂停，不把报告已产生说成操作完成。执行维护和资格确认按下表结案。
 
 | 结果／原因 | 条件与接续 |
@@ -359,11 +364,21 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 联合 Update 因缺权限或预算边界暂停后，明确授权的关联工程接续可为原冻结范围内、已记录为未决异议的只读非 Claim 对象补充写权限。原目标、必做维护和既有权限保持不变，不增加读取范围，不以此处理未澄清的来源问题；仍只使用原操作剩余调用和修订预算，原已提交写入及 unknown 预留的保护照常适用，不能借新目录增加重试。
 
+已返回的 GPT 提案仅因上述已验证的旧 AI 标记或新支持对象身份问题而停止时，可复用既有机械候选恢复入口：逐项核对原 SQL intent、完整 raw、成功退出收据、输入／输出 SHA、原拒收原因及当前冻结事实，再绑定新的程序投影与实现版本。GPT 原始输入／答复、目标、来源、字段权限和已耗调用不变；投影后仍须正常候选校验、原未用 Opus、事务与回读。事务消费者变化只有在全部模型事实保持一致时可刷新。恢复不增加预算、不批准内容，也不把未知调用当成已返回。
+
+普通字段漏授使联合 Update 因 `no_progress` 停止时，关联请求也可为原冻结范围内已有未决异议的非 Claim 对象补齐普通维护字段；不得增添对象、删除原字段权利、修改 Claim 邻居或授予身份及审批字段。完整已返回而未接纳的 GPT 提案须按原 SQL 意图、raw、成功 transport 退出及输出文件 SHA 验证，并重现原候选的重复指纹与已用澄清机会，才能作为已耗调用带入接续。原答覆和 prompt 身份保留，不能用新 prompt 追认旧答覆；其完整提案交给后续 GPT 判定，仍须正常 Opus 审阅、交易和回读，调用及修订上限均从前任剩余额度扣除。
+
 负责人明确追加模型调用许可后，可以为答复未定的 Update 建立唯一关联接续：授权绑定原 action 的精确 metadata、原目标／来源／字段权限、追加调用和修订上限；同一次新预算不能再次分叉。未知 GPT 的原预留、intent 和已消耗事实保持，不能改成失败、取消或未调用；已返回 raw 或退出记录须先走原结果核实，不能借追加许可丢弃。
+
+负责人也已明确授权真实工程故障修复并验证后自动补一次完整接续轮，最多 1 GPT＋1 Opus。Agent 将这项既有授权逐字绑定到唯一关联请求，并记录原始 action、稳定故障原因、修复版本及测试；同一故障只补一次，不因换 commit、root 或出现内容审阅新异议反复加额。仍使用既有 `owner_call_extension` 与原消耗账本，不新建预算系统；这项补偿不解除 unknown 核实、内容审阅、写权限、来源及事务校验。
 
 完整当前对象须与原冻结范围精确相同，保留已有候选和全部异议，直接从 GPT 修订起步，不重复已完成的 Opus 初审。新调用可选择已实现的精简输出契约，旧 raw 保持原解释。旧计划中未使用的调用明确取消并登记转移；新 budget 是负责人新授予的资源，不声称旧预算恢复。普通继续、工程修改或换目录不产生这种权限。
 
 已登记只读问题造成 `permission_required` 时，负责人可明确补齐该对象字段权限，并通过已有 `owner_call_extension` 关联一次 GPT 修订与一次 Opus 审阅。保留原目标、来源、全部旧权限／维护义务、未提交候选和已消耗调用；只允许新增已登记非原文疑点的非 Claim 对象权限。关系端点的必要证据可进入模型范围，但全部旧模型对象必须保留，完整事务对象必须与上一轮逐项一致，并绑定当前完整事务对象 SHA。来源或对象漂移、未知调用、已提交写入、额外对象权限和重复分叉均不允许；新增许可不是内容批准。
+
+已授权同源 Claim Create，但漏授必要 SourceFragment／EvidenceStep Create 时，可沿唯一关联接续补齐这两类普通内容权限。只限已有 evidence／mapping 异议引用的原来源，全部旧许可、目标及冻结事实保留；不得修改旧 Claim 创建许可、跨来源、授审批字段或同时扩大其他写权。原 no_progress 及已返回提案保持原样验证和计费；真实工程修复经验证后，只能依既有一次补轮授权使用最多 1 GPT＋1 Opus。
+
+共享写入确实被某个已冻结、已有异议的只读 Claim owner 阻挡时，负责人可明确授权将这一条同源 owner 加入原单目标的联合接续，最多两个目标。请求逐项声明旧目标与新增 owner，只补该 owner 的普通 Claim 字段，保留旧目标、旧权限、来源及全部旧模型事实；新联合单元继承原候选与全部异议，不继承内容批准。绑定当前完整事务对象及原 metadata，以最多一次 GPT 修订和一次 Opus 审阅处理；未获负责人授权不得自动扩入邻居，原批次分母不变。
 
 同一负责人追加许可也可精确绑定两种后续：预算耗尽但仍有末轮异议时，保留未提交候选并将全部异议交回 GPT；已完成对象因后续共享输入改变而失效时，保留历史完成与写集，以精确绑定的当前完整 SQL 后像重新审阅，不重放旧候选。 原目标须与上次已完成轮次的提交后回读版本一致，不能误拿该次 Update 修改前的目标作基线；回读缺目标、未核实或目标后来又发生变化均拒绝。两者均保留原目标、来源、字段权限、已消耗调用及唯一接续关系，并绑定当前完整事务对象 SHA；后者可额外绑定同来源已完成 action 的 metadata，导入其全部末轮异议，但不能导入其资格。不得通过此入口丢弃未知调用、改变原 Claim 或声称负责人已作内容判断。
 
@@ -371,7 +386,7 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 已返回但因记录处置清单覆盖不完整而拒收的初始 Update 提案，只有在原 raw、调用意图、prompt、冻结输入与确切拒收原因均可验证时，才能通过正式关联续跑移交剩余预算。该次生成照计，部分候选不接纳，原异议全部保留。正常候选仍走原 checkpoint；语义错误、缺来源或 unknown 不能借此重新生成。
 
-长任务通过 `backend.pipeline.claim_management_batch --detach` 独立运行，manifest 只绑定已有 request 与原 action root，不授予新权限或预算。控制器与子任务共同持有执行锁；同批最多两个 action 并行，读写相交则串行。一组暂停或异常后，其余无冲突工作仍可推进；批次结束重新查询所有目标的当前资格，不以历史完成数替代。
+长任务通过 `backend.pipeline.claim_management_batch --detach` 独立运行，manifest 只绑定已有 request 与原 action root，不授予新权限或预算。控制器与子任务共同持有执行锁；现有该入口同批最多两个 action 并行，读写相交则串行；第 11.7 节另行规定新分区 refresh 的来源串行与模型容量，不声称本入口已经实现。一组暂停或异常后，其余无冲突工作仍可推进；批次结束重新查询所有目标的当前资格，不以历史完成数替代。
 
 共用调用层在发出调用前保存精确输入意图，CLI 输出直接写入持久文件，退出码、错误类别与输出哈希单独落盘。完整成功退出记录且输入／可执行文件／输出均一致时，可以恢复同一次返回，不能再生成；缺退出记录、失败退出或输出漂移继续视为不确定或失败，不重发。状态查询核对实际执行锁，旧 `running` 或旧 PID 不证明仍在运行。恢复命令使用同一 manifest、action root 与原调用账本。
 
@@ -508,7 +523,7 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 
 独立单元可完成，整批仍未完成；只读依赖和写权限分别管理。Split 子对象数不替换原项，第 5.2 节统一约束最终验收。Review 报告完成、内容维护完成和来源覆盖完成分别报告。
 
-指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；同一 own source 的不同 action 必须排队，即使可写对象不相交；不同来源且通过现有读写冲突检查时，才允许显式选择的 `max_workers=2` 并行。不把清单自动变成联合内容修改或 Merge，也不新增 scheduler 或每来源锁服务。
+以下为已实现清单入口的合同，不是第 11.7 节的新排程能力。指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；同一 own source 的不同 action 必须排队，即使可写对象不相交；不同来源且通过现有读写冲突检查时，才允许显式选择的 `max_workers=2` 并行。不把清单自动变成联合内容修改或 Merge，也不新增 scheduler 或每来源锁服务。
 
 CLI 沿用同一 batch 模块：
 
@@ -522,7 +537,7 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 清单文件仅含 JSON 数组，不含预制 request。任务保存去重后的原分母、执行方向、policy、各 action/root、来源绑定与授权文件。policy 副本保存在任务内，不依赖开发 worktree 长期存在。后台运行消费冻结清单；`--status --root <同一任务目录>` 核对实际控制器或继承锁的 worker。重启使用同一清单、方向、policy 和 root，不能换址清预算或覆盖旧授权。
 
-此入口使用现有 scoped Opus-only Update，包含必要的 GPT 修订、Opus 复审、短 transaction 与回读，预算和所有退出条件保持原样。新 v8 请求明确授权 Update／Create／Retire：可创建至多一条同源 Claim，并原子补齐已有 Evidence 与 Question 的双向归属；可退休目标 Claim 与有许可的相关关系，并在同一交易清理 Evidence owner、Question answer 等失效引用。不可改写退休历史 payload、退休只读邻居、恢复对象或扩大写入域。新建仍须不重复，退休须审查原教导处置与消费者影响；缺少这种许可的旧任务不能取得新能力。
+此入口使用现有 scoped Opus-only Update，包含必要的 GPT 修订、Opus 复审、短 transaction 与回读，预算和所有退出条件保持原样。新 v8 请求明确授权 Update／Create／Retire：默认可创建至多一条同源 Claim；清单入口可用 `creation_count` 明确冻结多个 SQL 身份，数量不是必须新建的配额。managed compact v4 请求同时明确授予同源 SourceFragment 与 EvidenceStep 的内容 Create 权限，使新判断能引用实际教授原文，并原子补齐 Evidence 与 Question 的双向归属；可退休目标 Claim 与有许可的相关关系，并在同一交易清理 Evidence owner、Question answer 等失效引用。不可改写退休历史 payload、退休只读邻居、恢复对象或扩大写入域。新建仍须不重复，退休须审查原教导处置与消费者影响；缺少这种许可的旧任务不能取得新能力。
 
 逐项结果保留实际暂停原因；起始不存在、已退役或受人工 hold 保护的 ID 不静默丢弃，也不阻止其他独立项执行。清单内 action 历史完成，active 目标及新建对象的当前资格有效，且退休目标有实际 Opus 退休批准与共同完成边界确认的精确当前回读，整批才完成。退休单列于 `retired_keys`，不声称它 Claim-ready；段落交接另列 `retired_claim_ids`。该入口不代替来源版本交接、完整来源覆盖或 CVP／论证层维护。
 
@@ -555,7 +570,7 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 ### 11.3 联合 Update 的范围与执行
 
-联合 Update 的旧 v1–v6 策略只支持既有对象 retain／update，不接受 creation_permissions。v7 明确支持至多一条同源 Claim；v8 保留此能力并要求 SQL 程序预留身份，同时可在精确授权范围内退休目标 Claim 及相关关系。v8 的 compact 输出使用 `creations` 与 `retirements` 列表，未列项仍原样保留；同一对象不能既修改又退休，退休保留历史 payload。新建的实际双向归属、退休的消费者清理及其他修改共同审阅、共同交易，不能先 Create／Retire 再另笔 Update 来拆开原子义务。Restore、Split、Merge 及缺失的新 Evidence／新关系仍不在这条新建能力中；需要范围外能力时保存具体缺口。单条及其他 operations 的原有契约不因此改变。
+联合 Update 的旧 v1–v6 策略只支持既有对象 retain／update，不接受 creation_permissions。v7 明确支持至多一条同源 Claim；v8 保留此能力并要求 SQL 程序预留身份，同时可在精确授权范围内退休目标 Claim 及相关关系。v8 的 compact 输出使用 `creations` 与 `retirements` 列表，未列项仍原样保留；同一对象不能既修改又退休，退休保留历史 payload。新建的实际双向归属、退休的消费者清理及其他修改共同审阅、共同交易，不能先 Create／Retire 再另笔 Update 来拆开原子义务。 新证据及片段的 object_id 是操作内临时别名；初建身份由程序按 action 与内容分配，Evidence 的片段引用先转换为程序身份；已入库对象的后续 Update 保持原 ID，不重新按内容生成。程序只替换新身份及有类型的引用，不改主张、证据正文、引文、来源或既有对象身份。换别名或调整新建列表顺序不产生新身份或假进展；已在冻结输入中占用的别名、重复／歧义别名、重复 JSON 字段与重复新对象均拒绝。最终全局唯一性仍在原 SQL 创建门槛核实，绝不将 Create 静默变成对既有对象的 Update。旧请求没有明确的程序投影契约时维持旧解释。managed compact v4 的显式许可还可新建同源 SourceFragment／EvidenceStep；只授普通内容字段，不能改来源文件或审批。Claim 仍受自身 SQL 预留身份和数量限制，支持对象不冒用 Claim 身份；旧请求不会自动扩大许可。Restore、Split、Merge 及新关系仍不在这条新建能力中；需要范围外能力时保存具体缺口。单条及其他 operations 的原有契约不因此改变。
 
 请求中全部目标、必做维护对象和许可归属同一单元，单元映射在 prepared 固定。实现须验证一一覆盖；不能只依赖当前 partition_targets 恰好返回一组。一个 E 即使有多个 owner，也只有一份共同后像；Claim 不必因为成为目标而改正文。
 
@@ -628,8 +643,14 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 先用真实保存材料零模型、零正式内容写入预检，再在隔离 SQL 验证完整生命周期。联合 Update 至少先用两条共享 E 的 Claim，覆盖逐项审阅、共同修改、晚项失败回滚、已提交响应丢失、零重复调用恢复和双方当前资格；再验证三项传递冲突分组与超容量拒绝、共享片段／owner 变化、范围漂移、只读人工和预算反例。还须验证同一未提交联合单元的人工答复接回全部目标及旧候选，缺候选／分组变化／已提交均拒绝旧人工接续，不能把暂停说成完成。上述隔离验收完成前，不将多目标联合 Update 用于正式批次。合成 reviewer 只证明契约与路由；有界实际模型验收另需授权。性能与人工成本记录有效轮次、重复调用、依赖复验与各类暂停，实测存独立记录，不把局部测试称为全流程完成。
 
+### 11.7 分区 refresh 的持续补位排程
+
+负责人指定分区的全量 refresh 按 [Claim 分区 refresh 与模型容量排程设计](./claim_refresh_campaign_design.md) 实施：同源一次一条、原文顺序；不同来源并行，GPT 与 Opus 各最多两个实际 session，按供应商限流、冷却与下游积压持续补位。该设计只扩展编排，不改变完整自身来源、内容权限、短交易、原预算和当前资格边界。旧 batch 的 action 数量限制、联合组预检和冻结任务保持原合同，不能直接扩大 `max_workers` 冒充实现。
+
+此路径不按跨源 W／R 传递冲突重新合组或加入排程互斥；真实版本冲突仍由共同交易拒绝并保留受影响任务。当前资格、分区原始分母及 CVP 待维护分别清账。新增容量控制与后台恢复须通过该文验收，再按正式授权进入真实执行。
+
 ## 12 实施与阶段交付
 
-先固定包含共同 SQL 能力的合并基线、代码 SHA 与新 policy，再扩展现有运行 metadata 的 action／单元／轮次绑定、问题身份和审核范围，对接 operations、共同 ChangeSet、独立审计与 completion。复用 source／Claim runner、store、pipeline_runs、原 ledger 和独立读取器，不复制未合并实现，不新增 runner／状态库／证明框架。
+先固定包含共同 SQL 能力的合并基线、代码 SHA 与新 policy，再扩展现有运行 metadata 的 action／单元／轮次绑定、问题身份和审核范围，对接 operations、共同 ChangeSet、独立审计与 completion。复用 source／Claim runner、store、pipeline_runs、原 ledger 和独立读取器，不复制未合并实现，不另建内容执行器、状态库或证明框架。第 11.7 节只补现有后台入口的受控编排与容量控制，不能复制 Update 内核。
 
 交付依第 11 节完整路径验收；已有单条和独立并行的验收不替代联合单元验收。多目标这部分先补齐第 11 节的一 action 一单元准入、完整 pins 分组、许可归属和第 7.2 节写入影响门槛，再完成隔离测试，之后才在另有明确授权的有界正式样本上验证；未通过前保持逐条的已验证入口，有交叉影响的组准确合组或暂停，不以串行承诺最终必然稳定；不将多单元排序、创建和部分提交接续作为首个联合样本的附加工程。实现与隔离验收不增加正式模型执行许可；正式多目标验收仍须精确绑定目标、预算与验收 policy。本文不重开旧 campaign，不授权文章、发布、部署、ArgumentRoute 或 #358；#435 与主控工作的未完成项继续保留。

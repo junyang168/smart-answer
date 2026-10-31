@@ -145,6 +145,90 @@ def test_owner_extension_cannot_silently_cross_changed_sources_or_scope(lost_upd
 from backend.tests.test_claim_joint_update import shared,bind,joint_pass,joint_reject,resolve,update
 
 
+@pytest.mark.parametrize('lost_update',['gpt','opus'],indirect=True)
+@pytest.mark.parametrize('defect',['none','stale_binding','target','new_scope'])
+def test_unknown_extension_can_bind_current_transaction_consumers_without_changing_model_facts(lost_update,defect):
+    store,old,root,parent,successor,next_root,policy,extension,path=lost_update
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET revision=2 WHERE collection='canonical_viewpoints' AND object_id='TRANSACTION-ONLY'")
+    if defect=='target':
+        payload=deepcopy(store.get_record_state('claims','C')['payload']);payload['statement']='a real target change'
+        store.apply_plan(store.plan_package({'package_id':'real-change','claims':[payload]}))
+    if defect=='new_scope':
+        seed_claims(store,['D'])
+        store.apply_plan(store.plan_package({'package_id':'new-neighbour','claim_relations':[{'claim_relation_id':'NEW','from_id':'D','to_id':'C','relation_type':'supports'}]}))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys])
+    current={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    extension.update(basis='unknown_call',current_objects_sha256=cm.sha256_json(current),related_action_metadata_sha256={})
+    authorize(successor,policy,path,extension)
+    if defect=='stale_binding':
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET revision=3 WHERE collection='canonical_viewpoints' AND object_id='TRANSACTION-ONLY'")
+    if defect!='none':
+        with pytest.raises((ValueError,RuntimeError)):
+            execute_claim_management(store,successor,root=next_root,ports=SyntheticPorts(store,next_root))
+        assert store.get_cvp_group(parent['run_id'])==parent
+        return
+    def propose(packet):
+        assert packet['continuation']['preserved_unknown_calls']
+        return {'changes':[],'findings':[],'finding_resolutions':[decision(fid) for fid in packet['unresolved']]}
+    def review(packet):return {'complete_review':True,'findings':[],'prior_findings':[decision(fid) for fid in packet['unresolved']]}
+    ports=SyntheticPorts(store,next_root,proposal=propose,opus=review)
+    result=execute_claim_management(store,successor,root=next_root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    current_parent=store.get_cvp_group(parent['run_id'])
+    assert all(current_parent['call_reservations'][k]==v for k,v in parent['call_reservations'].items() if v['state'] in {'started','completed'})
+    assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('defect',['none','missing_scope_authority','unmentioned_owner','approval_field','old_target_removed'])
+def test_explicit_follow_up_can_include_one_frozen_shared_owner_in_same_source(shared,defect):
+    store,request,root,tmp=shared
+    request.target_keys=['claims/A'];request.permissions=[p for p in request.permissions if not p.key.startswith('claims/') or p.key=='claims/A']
+    policy=bind(request,tmp,cap=1,required=['evidence_steps/E'],initial='existing');policy.independent_audit=False;policy.budget.gpt_calls=0
+    policy_path=tmp/'owner-old-policy.json';policy_path.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    from backend.tests.test_claim_management_human_source_follow_up import authorize as bind_authority
+    bind_authority(request,{'required_maintenance_keys':['evidence_steps/E']})
+    def initial_review(packet):return joint_reject(packet,'claims/B',affected=['claims/A'])
+    ports=SyntheticPorts(store,root,opus=initial_review)
+    assert execute_claim_management(store,request,root=root,ports=ports)['status']=='paused'
+    old=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert ports.calls==['opus'] and old['result']['reason']=='budget_exhausted'
+    successor=request.model_copy(deep=True);successor.predecessor_action_id=request.action_id;successor.action_id+='-owner-repair'
+    successor.target_keys=['claims/A','claims/C' if defect=='unmentioned_owner' else 'claims/B']
+    if defect=='old_target_removed':successor.target_keys=['claims/B']
+    added=successor.target_keys[-1]
+    successor.permissions.append(cm.source.Permission(collection='claims',object_id=added.split('/',1)[1],fields=['statement','review_status'] if defect=='approval_field' else ['statement']))
+    policy=policy.model_copy(deep=True);policy.initial_candidate='proposal';policy.joint_update_max_targets=2
+    policy.budget=policy.budget.model_copy(update={'gpt_calls':1,'opus_calls':1,'max_revisions':1})
+    path=tmp/'owner-new-policy.json';path.write_text(policy.model_dump_json());successor.policy=cm.source.FileBinding.model_validate(binding(path))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys]+[('source_documents','S')])
+    before={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    metadata={k:v for k,v in old.items() if k not in {'run_id','status','error'}}
+    auth=json.loads(Path(request.authorization.path).read_text());auth.update(request=successor.model_dump(mode='json',exclude={'authorization','policy'}),policy=successor.policy.model_dump(mode='json'),
+        owner_target_extension={'previous_target_keys':request.target_keys,'added_target_keys':[added]},
+        owner_call_extension={'basis':'permission_required','predecessor_action_id':request.action_id,'prior_metadata_sha256':cm.sha256_json(metadata),
+            'authorization_quote':'include the named shared owner, one GPT and one Opus','budget':policy.budget.model_dump(mode='json'),
+            'current_objects_sha256':cm.sha256_json(before),'related_action_metadata_sha256':{}})
+    if defect=='missing_scope_authority':auth.pop('owner_target_extension')
+    auth_path=tmp/'owner-new-authority.json';auth_path.write_text(json.dumps(auth));successor.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    next_root=tmp/'owner-next';new_ports=SyntheticPorts(store,next_root,proposal=lambda packet:update(packet,keys=('claims/B','evidence_steps/E')),opus=joint_pass)
+    if defect!='none':
+        try:
+            refused=execute_claim_management(store,successor,root=next_root,ports=new_ports)
+        except (ValueError,RuntimeError):
+            pass
+        else:
+            assert refused['status']=='paused' and refused['reason']=='engineering_required',refused
+        assert new_ports.calls==[]
+        return
+    result=execute_claim_management(store,successor,root=next_root,ports=new_ports)
+    assert result['status']=='completed',result
+    assert new_ports.calls==['gpt','opus'] and store.claim_management_qualification('A')['ready'] and store.claim_management_qualification('B')['ready']
+    assert store.get_cvp_group(old['run_id'])['continued_by']=='CMA-'+cm.sha256_json(successor.action_id)
+
+
 @pytest.fixture(params=['remaining_findings','qualification_refresh'])
 def owner_review_follow_up(shared,request):
     store,old,root,tmp=shared
@@ -313,3 +397,55 @@ def test_readonly_refresh_abandons_only_uncommitted_optional_repairs(owner_revie
     assert final.calls==['gpt','opus'] and store.get_record_state('evidence_steps','E')==before
     assert all(store.claim_management_qualification(cid)['ready'] for cid in ['A','B'])
     assert store.get_cvp_group(prior['run_id'])['call_reservations']==prior['call_reservations']
+
+
+@pytest.mark.parametrize('change',['transaction_only','target','evidence'])
+def test_current_bound_remaining_findings_refreshes_only_transaction_consumers(owner_review_follow_up,monkeypatch,change):
+    store,old,parent,successor,root,policy,extension,path,basis=owner_review_follow_up
+    if basis!='remaining_findings':
+        pytest.skip('only uncommitted remaining-findings continuation')
+    # A consumer appearing while paused changes transaction pins but must not
+    # widen the Claim model's content or discard the uncommitted correction.
+    from backend.api.canonical_repository.postgres_store import record_content_sha,ChangeSetConflict
+    payload={'viewpoint_id':'LATER-CONSUMER','revision':1}
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.objects (collection,object_id,revision,content_sha256,payload) VALUES ('canonical_viewpoints','LATER-CONSUMER',1,%s,%s::jsonb)",
+            (record_content_sha(payload),json.dumps(payload)))
+    read_context=store.read_claim_context
+    def complete_context(*args,**kwargs):
+        records=read_context(*args,**kwargs)
+        records['canonical_viewpoints','LATER-CONSUMER']=store.get_record_state('canonical_viewpoints','LATER-CONSUMER')
+        return records
+    monkeypatch.setattr(store,'read_claim_context',complete_context)
+    if change!='transaction_only':
+        col,oid=('claims','A') if change=='target' else ('evidence_steps','E')
+        edited=deepcopy(store.get_record_state(col,oid)['payload']);edited['statement']='changed while paused'
+        store.apply_plan(store.plan_package({'package_id':'semantic-drift','%s'%col:[edited]}))
+    records=store.read_claim_context([cm.source.split_key(k) for k in successor.target_keys])
+    before={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    extension['current_objects_sha256']=cm.sha256_json(before)
+    authorize(successor,policy,path,extension)
+    def decisions(packet):return [dict(decision(fid),affected_target_keys=[]) for fid in packet['unresolved']]
+    def propose(packet):
+        assert packet['previous_candidate']['records']
+        changes=[]
+        for row in packet['previous_candidate']['records']:
+            key=row['collection']+'/'+row['object_id']
+            fields={k:v for k,v in row['payload'].items() if packet['before'][key]['payload'].get(k)!=v}
+            if fields:changes.append({'record_key':key,'fields_json':json.dumps(fields),'reason':'retain accepted candidate','citations':decision('unused')['citations']})
+        return {'changes':changes,'findings':[],'finding_resolutions':decisions(packet)}
+    ports=SyntheticPorts(store,root,proposal=propose,opus=lambda p:{'complete_review':True,'findings':[],'prior_findings':decisions(p)})
+    if change!='transaction_only':
+        with pytest.raises((ValueError,ChangeSetConflict)):
+            execute_claim_management(store,successor,root=root,ports=ports)
+        assert not ports.calls
+        assert store.get_cvp_group(parent['run_id'])==parent
+        return
+    consumer_before=store.get_record_state('canonical_viewpoints','LATER-CONSUMER')
+    result=execute_claim_management(store,successor,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.get_record_state('canonical_viewpoints','LATER-CONSUMER')==consumer_before
+    assert store.get_record_state('evidence_steps','E')['payload']['statement']=='甲是假设，不是断言。'
+    assert all(store.claim_management_qualification(cid)['ready'] for cid in ['A','B'])
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==parent['call_reservations']

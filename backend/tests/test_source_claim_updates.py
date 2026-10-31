@@ -218,3 +218,340 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
         p=root/'paragraphs'/group['paragraph_key']/'prepared.json';p.parent.mkdir(parents=True);p.write_text('{"manifest":null}')
     result=updates.run(store,'S',old,cid,root,'refresh')
     assert result['downstream_handoff']=={'status':'not_executed','claim_ids':['A'],'retired_claim_ids':['D']}
+
+
+@pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','evidence_drift','scope_drift','transcript_alias'])
+def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
+    from backend.pipeline import claim_management_intake as intake
+    from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    alias='the recorded sermon name'
+    if defect=='transcript_alias':
+        # Seed its registered identity before the tested action. A maintenance
+        # Update must never be used to rename an existing source identity.
+        from backend.api.canonical_repository.postgres_store import canonical_json,record_content_sha
+        store=action[0];doc=deepcopy(store.get_record_state('source_documents','S')['payload']);doc['transcript_id']=alias
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET payload=%s::jsonb,content_sha256=%s WHERE collection='source_documents' AND object_id='S'",(canonical_json(doc),record_content_sha(doc)))
+    store,old,cid,base=fixture(action)
+    consumer = defect in {'transaction_consumer','transaction_consumer_opus'}
+    if consumer or defect=='scope_drift':
+        original_reader=store.read_claim_context
+        def read_with_consumer(*args,**kwargs):
+            records=original_reader(*args,**kwargs)
+            records.update(original_reader([('claims','N')]))
+            return records
+        monkeypatch.setattr(store,'read_claim_context',read_with_consumer)
+    root=base/'proposal-quote';citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    def resolutions(packet,bad=False):
+        return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact source binding',
+            'citations':[{**citation,**({'source_id':alias} if bad and defect=='transcript_alias' else {'exact_quote':'教授否定这个译法TYPO。','source_id':'FOREIGN' if defect=='foreign' else 'S'} if bad else {})}],
+            'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own bound evidence'} for fid in packet['unresolved']]
+    def proposal(packet):
+        inputs=packet['original_goal'].get('unaccepted_model_inputs')
+        if inputs:
+            original=inputs[0]['response']
+            if defect=='creation':
+                assert json.loads(original['creations'][0]['fields_json'])['visibility']=='internal'
+            elif defect=='duplicate':
+                assert original['changes'][0]['record_key']==original['changes'][1]['record_key']
+            elif defect=='missing_reference':
+                assert json.loads(original['changes'][1]['fields_json'])['source_fragment_ids']==['MISSING']
+            elif defect=='transcript_alias':
+                original_citation=original['finding_resolutions'][0]['citations'][0]
+                assert original_citation['source_id']==alias and original_citation['exact_quote']==citation['exact_quote']
+                assert inputs[0]['source_identity_aliases']==[{'provided_source_id':alias,'canonical_source_id':'S'}]
+            else:
+                original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
+                assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
+        creations=[]
+        if defect=='creation' and not inputs:
+            oid=packet['original_goal']['claim_creation_allocations']['S']
+            creations=[{'collection':'claims','object_id':oid,'reason':'new source judgment','citations':[citation],
+                'fields_json':json.dumps({'statement':'教授否定这个译法。','claim_type':'explicit_claim','attribution':'professor',
+                    'occurrences':[{'source_id':'S'}],'evidence_step_ids':['ED'],'visibility':'internal'})}]
+        changes=[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+            'reason':'repair bound excerpt','citations':[citation]}]
+        if defect=='duplicate' and not inputs:changes+=deepcopy(changes)
+        if defect=='missing_reference' and not inputs:
+            changes.extend([{'record_key':'evidence_steps/ED','fields_json':json.dumps({'source_fragment_ids':['MISSING']}),
+                'reason':'returned malformed reference','citations':[citation]},
+                {'record_key':'claims/D','fields_json':json.dumps({'statement':citation['exact_quote']}),
+                 'reason':'source-bound judgment','citations':[citation]}])
+        return {'changes':changes,'creations':creations,'retirements':[],'findings':[],
+            'finding_resolutions':resolutions(packet,bad=(not inputs or defect=='repeat') and defect not in {'creation','duplicate','missing_reference'})}
+    def review(packet):
+        value=pass_review(packet);value['prior_findings']=resolutions(packet)
+        if not packet['unresolved']:
+            for assessment in value['binding_assessments']:
+                if assessment['claim_key']=='claims/D':assessment['sufficient']=False
+            value['findings']=[{'target_key':'source_fragments/FD','category':'evidence','component':'binding',
+                'reason':'bound excerpt stale','acceptance_condition':'repair exact excerpt','citations':[citation],
+                'affected_target_keys':['claims/D'],'affected_write_keys':[],'impact_reason':'own evidence'}]
+        if defect in {'opus','transaction_consumer_opus'} and not packet['unresolved']:
+            value['findings'][0]['citations']=[{**citation,'exact_quote':'教授否定这个译法TYPO。'}]
+        return value
+    clients={}
+    def execute(manifest,output):
+        for key,(request,execution) in batch.load(manifest,output,store=store)[1].items():
+            port=clients.setdefault(key,SyntheticPorts(store,execution,opus=review,proposal=proposal))
+            execute_claim_management(store,request,root=execution,ports=port)
+    monkeypatch.setattr(batch,'run',execute)
+    policy=json.loads(intake.DEFAULT_POLICY.read_text())
+    if defect in {'budget','repeat'}:policy['budget']['gpt_calls']=1 if defect=='budget' else 2
+    policy_path=root/'selected-policy.json';policy_path.parent.mkdir(parents=True);policy_path.write_text(json.dumps(policy))
+    first=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+    assert first['status']=='paused'
+    aid=first['claims']['D']['action_id'];parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()))
+    role='opus' if defect in {'opus','transaction_consumer_opus'} else 'gpt'
+    raw=Path(parent['execution_root'])/rid/(role+'.raw.json');raw_bytes=raw.read_bytes();before=store.get_record_state('source_fragments','FD')
+    initial_calls=['opus'] if defect in {'opus','transaction_consumer_opus'} else ['opus','gpt']
+    assert next(iter(clients.values())).calls==initial_calls
+    if defect=='drift':
+        record=store.get_record_state('claims','D')['payload'];record['statement']='external change'
+        store.apply_plan(store.plan_package({'package_id':'external-drift','claims':[record]}))
+    if consumer or defect=='scope_drift':
+        child=store.get_cvp_group(rid)
+        assert 'evidence_steps/EN' in child['materials']['transaction_before']
+        assert 'evidence_steps/EN' not in child['materials']['before']
+    if consumer or defect=='evidence_drift':
+        eid='EN' if consumer else 'ED'
+        record=deepcopy(store.get_record_state('evidence_steps',eid)['payload']);record['statement']='later evidence correction'
+        store.apply_plan(store.plan_package({'package_id':'later-evidence-drift','evidence_steps':[record]}))
+        if consumer:consumer_after=store.get_record_state('evidence_steps','EN')
+    if defect=='scope_drift':
+        store.apply_plan(store.plan_package({'package_id':'new-direct-neighbour','claim_relations':[
+            {'claim_relation_id':'ND','from_id':'N','to_id':'D','relation_type':'supports'}]}))
+    if defect=='intent':
+        from backend.api.canonical_repository.postgres_store import canonical_json
+        broken=deepcopy({k:v for k,v in parent.items() if k not in {'run_id','status','error'}})
+        broken['call_reservations'][rid+':gpt']['intent_sha256']='0'*64
+        with store.connect() as conn:
+            conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(broken),parent['run_id']))
+    if defect=='tamper':
+        raw.write_text(raw.read_text().replace('TYPO','FORGED'));raw_bytes=raw.read_bytes()
+    if defect=='missing':raw.unlink()
+    final=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+    assert not raw.exists() if defect=='missing' else raw.read_bytes()==raw_bytes
+    after=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+    assert after['request']==parent['request'] and after['policy']==parent['policy']
+    if defect not in {'current','opus','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','transcript_alias'}:
+        expected_calls=initial_calls+(['gpt'] if defect=='repeat' else [])
+        assert final['status']=='paused' and next(iter(clients.values())).calls==expected_calls
+        assert store.get_record_state('source_fragments','FD')==before
+        if defect=='repeat':
+            from backend.api.canonical_repository.postgres_store import canonical_json
+            latest = next(iter(after['latest_rounds'].values()))
+            error = 'citation is not an exact quote from the complete own source'
+            assert after['result']['detail'] == error
+            current_slot = after['call_reservations'][latest + ':gpt']
+            assert current_slot['rejection']['detail'] == error
+            # Reconcile the exact diagnostic pollution produced by the old
+            # executor; authenticating this never accepts the proposal.
+            broken = deepcopy({k:v for k,v in after.items() if k not in {'run_id','status','error'}})
+            polluted = error + '; returned-answer authentication failed: returned rejection cannot relabel an accepted, committed or superseded result'
+            broken['call_reservations'][latest + ':gpt']['rejection']['detail'] = polluted
+            with store.connect() as conn:
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s', (canonical_json(broken), after['run_id']))
+            with pytest.raises(RuntimeError):
+                store.record_claim_management_returned_rejection(latest, role='gpt', detail=error)
+            with pytest.raises(RuntimeError):
+                store.record_claim_management_returned_rejection(latest, role='gpt', detail='forged validation error', repair_recorded_detail=True)
+            store.record_claim_management_returned_rejection(latest, role='gpt', detail=error, repair_recorded_detail=True)
+            repaired = store.get_cvp_group(after['run_id'])['call_reservations'][latest + ':gpt']
+            assert repaired['rejection']['detail'] == error
+            assert repaired['rejection_history'][-1]['detail'] == polluted
+            assert repaired['state'] == 'started'
+            third=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
+            assert third['status']=='paused' and next(iter(clients.values())).calls==expected_calls
+            assert store.get_record_state('source_fragments','FD')==before
+            # The once-only owner supplement must also support a known
+            # returned rejection with no accepted candidate at all.
+            from backend.api.canonical_repository.claim_identity_allocation import reserve
+            from backend.pipeline.cvp_sql_commit import binding
+            prior = store.get_cvp_group(after['run_id'])
+            store.pause_claim_management_action(prior['run_id'], reason='budget_exhausted', detail='complete next correction pair exceeds original budget')
+            prior = {k:v for k,v in store.get_cvp_group(prior['run_id']).items() if k not in {'run_id','status','error'}}
+            request = cm.Request.model_validate(prior['request']).model_copy(deep=True)
+            request.predecessor_action_id = request.action_id
+            request.action_id += '-verified-engineering-followup'
+            output = root / 'engineering-followup'
+            output.mkdir()
+            selected = cm.Policy.model_validate(prior['policy'])
+            selected.initial_candidate = 'proposal'
+            selected.budget.gpt_calls = selected.budget.opus_calls = selected.budget.max_revisions = 1
+            selected_path = output/'policy.json';selected_path.write_text(selected.model_dump_json())
+            request.policy = cm.source.FileBinding.model_validate(binding(selected_path))
+            records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
+            current = {cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+            authority = json.loads(Path(request.authorization.path).read_text())
+            authority.update(request=request.model_dump(mode='json',exclude={'authorization','policy'}),policy=request.policy.model_dump(mode='json'),
+                claim_creation_allocations={g.source_id:reserve(store,action_id=request.action_id,source_id=g.source_id,target_id='D',root=output,count=1) for g in request.creation_permissions},
+                owner_call_extension={'basis':'remaining_findings','predecessor_action_id':request.predecessor_action_id,
+                    'prior_metadata_sha256':cm.sha256_json(prior),'budget':selected.budget.model_dump(mode='json'),
+                    'authorization_quote':'one correction after verified engineering repair','current_objects_sha256':cm.sha256_json(current),'related_action_metadata_sha256':{}})
+            auth_path=output/'authority.json';auth_path.write_text(json.dumps(authority));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+            def valid_proposal(packet):
+                assert packet['previous_candidate'] is None
+                rejected=packet['continuation']['unaccepted_returned_proposals'][latest+':gpt']
+                assert rejected['review_not_accepted'] is True
+                assert rejected['response']['finding_resolutions'][0]['citations'][0]['exact_quote'].endswith('TYPO。')
+                return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+                    'reason':'repair exact quote','citations':[citation]}],'creations':[],'retirements':[],'findings':[],
+                    'finding_resolutions':resolutions(packet)}
+            port=SyntheticPorts(store,output,opus=review,proposal=valid_proposal)
+            result=execute_claim_management(store,request,root=output,ports=port)
+            assert result['status']=='completed',result
+            assert port.calls==['gpt','opus']
+            assert store.claim_management_qualification('D')['ready']
+        else:assert not after['original_goal'].get('unaccepted_model_inputs')
+        return
+    assert final['all_actions_completed'],final
+    assert next(iter(clients.values())).calls==initial_calls+['gpt','opus']
+    assert after['call_reservations'][rid+':'+role]==parent['call_reservations'][rid+':'+role]
+    if role=='gpt':assert after['call_reservations'][rid+':opus']['state']=='cancelled'
+    assert consumed_rejected_citations(after,rid+':'+role,after['call_reservations'][rid+':'+role])
+    if defect=='duplicate':assert parent['result']['detail']=='changed record repeated or absent from frozen input'
+    if defect=='missing_reference':assert 'missing dependency: source_fragments/MISSING' in parent['result']['detail']
+    if defect=='creation':
+        assert parent['result']['detail']=='created fields exceed creation permission'
+        assert not after.get('created_keys')
+        assert after['request']['creation_permissions']==parent['request']['creation_permissions']
+    assert store.get_record_state('source_fragments','FD')['payload']['verbatim_excerpt']==citation['exact_quote']
+    assert store.claim_management_qualification('D')['ready']
+
+    if consumer:
+        child=store.get_cvp_group(rid)
+        recovery=json.loads(Path(child['citation_input_recovery']['path']).read_text())
+        proof=recovery['transaction_context_refresh']
+        assert proof['changed_transaction_keys']==['evidence_steps/EN']
+        assert proof['content_scope_sha256']==cm.sha256_json(child['materials']['before'])
+        assert store.get_record_state('evidence_steps','EN')==consumer_after
+
+
+@pytest.mark.parametrize('defect', ['none','target','evidence','source','scope','raw','candidate','review_started','committed','capacity_stop','capacity_wrong_proof'])
+def test_pre_review_transaction_refresh_reuses_gpt_and_preserves_strict_boundaries(action,monkeypatch,defect):
+    from backend.pipeline import claim_management_intake as intake
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    from backend.pipeline.source_reconciliation_runner import body,read
+    from backend.api.canonical_repository.postgres_store import canonical_json
+    store,old,cid,base=fixture(action)
+    original_reader=store.read_claim_context
+    def complete_context(*args,**kwargs):
+        records=original_reader(*args,**kwargs)
+        records.update(original_reader([('claims','N')]))
+        return records
+    monkeypatch.setattr(store,'read_claim_context',complete_context)
+    root=base/'pre-review-transaction'
+    prepared=intake.prepare(['D'],root,instruction='full Update',store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    aid,(request,execution)=next(iter(jobs.items()))
+    citation={'source_id':'S','paragraph_key':'S0002','exact_quote':'教授否定这个译法。'}
+    def resolutions(packet):
+        return [{'finding_id':fid,'disposition':'resolved','reason':'repair exact own excerpt','citations':[citation],
+            'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own Evidence'} for fid in packet['unresolved']]
+    def review(packet):
+        result=pass_review(packet)
+        if not packet['unresolved']:
+            for assessment in result['binding_assessments']:
+                if assessment['claim_key']=='claims/D':assessment['sufficient']=False
+            result['findings']=[{'target_key':'source_fragments/FD','category':'evidence','component':'binding',
+                'reason':'old excerpt','acceptance_condition':'repair exact text','citations':[citation],
+                'affected_target_keys':['claims/D'],'affected_write_keys':[],'impact_reason':'own evidence'}]
+        result['prior_findings']=resolutions(packet)
+        return result
+    def proposal(packet):
+        record=deepcopy(store.get_record_state('evidence_steps','EN')['payload'])
+        record['statement']='changed outside the model scope'
+        store.apply_plan(store.plan_package({'package_id':'external-consumer-edit','evidence_steps':[record]}))
+        return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
+            'reason':'repair own evidence','citations':[citation]}],'creations':[],'retirements':[],'findings':[],'finding_resolutions':resolutions(packet)}
+    ports=SyntheticPorts(store,execution,opus=review,proposal=proposal)
+    first=execute_claim_management(store,request,root=execution,ports=ports)
+    assert first['detail']=='transaction current dependency drift: evidence_steps/EN'
+    assert ports.calls==['opus','gpt']
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid));rid=next(iter(parent['latest_rounds'].values()));child=store.get_cvp_group(rid)
+    assert child['checkpoint']=='prepared' and not child.get('opus_approved')
+    old_root=Path(parent['execution_root'])/rid;raw=(old_root/'gpt.raw.json').read_bytes();candidate=(old_root/'candidate.json').read_bytes()
+    capacity_proof = None
+    if defect.startswith('capacity_'):
+        from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+        from backend.pipeline.cvp_sql_commit import binding
+        gate=ClaimModelCapacity({'root':str(base/'capacity'),'action_window':4,'spacing_seconds':0,'cooldown_seconds':1})
+        interrupted=base/'interrupted'
+        with gate.call('opus',interrupted):
+            interrupted.mkdir();(interrupted/'invocation.json').write_text('{}')
+        gate.quarantine_stopped('opus',interrupted)
+        capacity_proof=binding(next((gate.root/'opus').glob('interrupted-*.json')))
+        store.pause_claim_management_action(parent['run_id'],reason='engineering_required',
+            detail='opus: unsettled previous transport: '+str(interrupted if defect=='capacity_stop' else base/'other'))
+    if defect in {'target','evidence'}:
+        col,oid=('claims','D') if defect=='target' else ('evidence_steps','ED')
+        payload=deepcopy(store.get_record_state(col,oid)['payload']);payload['statement']='real content change'
+        store.apply_plan(store.plan_package({'package_id':'real-content-drift',col:[payload]}))
+    elif defect=='source':
+        source=Path(request.source_bindings['S'].path);source.write_text(source.read_text()+' ')
+    elif defect=='scope':
+        store.apply_plan(store.plan_package({'package_id':'expanded-neighbour','claim_relations':[{'claim_relation_id':'ND','from_id':'N','to_id':'D','relation_type':'supports'}]}))
+    elif defect=='raw':(old_root/'gpt.raw.json').write_text('{}')
+    elif defect=='candidate':(old_root/'candidate.json').write_text('{}')
+    elif defect=='review_started':store.begin_claim_management_call(parent['run_id'],round_id=rid,role='opus',intent={'unknown':True})
+    elif defect=='committed':
+        changed=deepcopy({k:v for k,v in child.items() if k not in {'run_id','status','error'}});changed['change_set_ids']=['applied-fact']
+        with store.connect() as conn:conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(changed),rid))
+    if defect not in {'none','capacity_stop'}:
+        with pytest.raises((ValueError,RuntimeError)):
+            resume_saved_pre_review(store,rid,stopped_capacity_proof=capacity_proof)
+        assert ports.calls==['opus','gpt']
+        return
+    proof=resume_saved_pre_review(store,rid,stopped_capacity_proof=capacity_proof)
+    assert resume_saved_pre_review(store,rid)==proof
+    rebound=store.get_cvp_group(rid);current=store.get_cvp_group(parent['run_id']);new_root=Path(rebound['recovery_root'])
+    assert cm.model_packet(rebound['materials'])==cm.model_packet(child['materials'])
+    assert current['call_reservations']==parent['call_reservations']
+    assert rebound['candidate']==child['candidate']
+    assert (old_root/'gpt.raw.json').read_bytes()==raw==(new_root/'gpt.raw.json').read_bytes()
+    assert (old_root/'candidate.json').read_bytes()==candidate==(new_root/'candidate.json').read_bytes()
+    assert rebound['materials']['transaction_before']['evidence_steps/EN']['payload']['statement']=='changed outside the model scope'
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus','gpt','opus']  # no second GPT generation
+    assert store.claim_management_qualification('D')['ready']
+
+
+def test_fragment_rejection_diagnostics_keep_segment_and_paragraph_distinct():
+    from backend.pipeline.claim_review_recovery import fragment_binding_diagnostics
+    materials={'before':{'source_fragments/F':{'payload':{'source_id':'S','verbatim_excerpt':'原话'}}},
+        'sources':{'S':{'paragraphs':{'S0001':{'text':'这里有原话。','source_segment_index':7},
+                                    'S0007':{'text':'别的话','source_segment_index':19}}}}}
+    response={'changes':[{'record_key':'source_fragments/F','fields_json':json.dumps({'paragraph_key':'S0007','source_segment_index':7})}]}
+    original=deepcopy(response)
+    assert fragment_binding_diagnostics(response,materials)==[{'record_key':'source_fragments/F','source_id':'S',
+        'provided_paragraph_key':'S0007','literal_matches':[{'paragraph_key':'S0001','source_segment_index':7}]}]
+    assert response==original
+    materials['sources']['S']['paragraphs']['S0007']['text']='重复原话'
+    assert fragment_binding_diagnostics(response,materials)==[]
+    response['changes'][0]['fields_json']=json.dumps({'paragraph_key':'missing'})
+    assert len(fragment_binding_diagnostics(response,materials)[0]['literal_matches'])==2
+    materials['before']['source_fragments/F']['payload']['source_id']='foreign'
+    assert fragment_binding_diagnostics(response,materials)[0]['literal_matches']==[]
+
+
+@pytest.mark.parametrize('diagnostics',[False,True])
+def test_fragment_accounting_preserves_legacy_input_shape(tmp_path,monkeypatch,diagnostics):
+    from backend.pipeline import claim_review_recovery as recovery
+    response={'changes':[{'record_key':'source_fragments/F','fields_json':json.dumps({'paragraph_key':'S0002'})}]}
+    materials={'before':{'source_fragments/F':{'payload':{'source_id':'S','verbatim_excerpt':'原话'}}},
+               'sources':{'S':{'paragraphs':{'S0001':{'text':'原话'},'S0002':{'text':'其他'}}}}}
+    error='new/updated fragment lacks an exact complete own source paragraph/excerpt'
+    entry={'round_id':'R','role':'gpt','response':response,'instruction':'unchanged original instruction'}
+    saved=deepcopy(entry)
+    if diagnostics:saved['invalid_fragment_bindings']=recovery.fragment_binding_diagnostics(response,materials)
+    previous={'execution_root':str(tmp_path),'original_goal':{'unaccepted_model_inputs':[saved]}}
+    slot={'round_id':'R','role':'gpt','state':'started','rejection':{'detail':error}}
+    monkeypatch.setattr(recovery,'read',lambda path:materials);monkeypatch.setattr(recovery,'body',lambda value:value)
+    monkeypatch.setattr(recovery,'rejected_model_input',lambda *args,**kwargs:deepcopy(entry))
+    assert recovery.consumed_rejected_citations(previous,'R:gpt',slot)
+    if diagnostics:
+        saved['invalid_fragment_bindings'][0]['provided_paragraph_key']='tampered'
+        with pytest.raises(ValueError,match='input drift'):recovery.consumed_rejected_citations(previous,'R:gpt',slot)
+    assert 'invalid_fragment_bindings' not in entry

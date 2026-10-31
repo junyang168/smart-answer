@@ -41,7 +41,7 @@ def required_keys(request, *, strict=True):
 
 def finding_permission_extension(previous, old, request):
     """A linked action may authorize a known readonly finding, not widen reads."""
-    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted'}:
+    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted', 'no_progress'}:
         return False
     prior = {p.key: p for p in old.permissions}
     current = {p.key: p for p in request.permissions}
@@ -49,11 +49,65 @@ def finding_permission_extension(previous, old, request):
     findings = {f['target_key'] for f in previous.get('findings', {}).values()
                 if f['category'] != 'source_uncertain'}
     frozen = previous['original_goal']['original_objects']
+    old_creations = getattr(old, 'creation_permissions', [])
+    new_creations = getattr(request, 'creation_permissions', [])
+    if old_creations != new_creations:
+        if prior != current:
+            return False
+        from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+        before = {(p.collection,p.source_id):p for p in old_creations}
+        after = {(p.collection,p.source_id):p for p in new_creations}
+        extra = set(after) - set(before)
+        sources = {p.source_id for p in old_creations if p.collection == 'claims'}
+        cited = {c['source_id'] for f in previous.get('findings',{}).values()
+                 if f['category'] in {'mapping','evidence'} for c in f['citations']}
+        return bool(extra and len(before)==len(old_creations) and len(after)==len(new_creations)
+            and all(after.get(k)==p for k,p in before.items())
+            and all(sid in sources & cited & set(old.source_bindings)
+                and col in SUPPORT_CREATION_FIELDS
+                and set(after[col,sid].fields)<=SUPPORT_CREATION_FIELDS[col] for col,sid in extra))
+    if previous['result']['reason'] == 'no_progress':
+        # An omitted ordinary field can strand a real engineering correction.
+        # The linked request supplies new exact authority, but no new objects,
+        # source scope, Claim neighbours, or call allowance.
+        from backend.pipeline.claim_management_intake import FIELDS
+        extended = {k for k in prior.keys() & current.keys() if prior[k] != current[k]}
+        return bool(not added and extended and extended <= findings and extended <= set(frozen)
+            and set(prior) == set(current)
+            and all(not frozen[k]['retired'] and not k.startswith('claims/')
+                and set(prior[k].fields) < set(current[k].fields)
+                and set(current[k].fields) <= FIELDS.get(current[k].collection, set()) for k in extended)
+            and all(prior[k] == current[k] for k in prior.keys() - extended))
     return bool(added and added <= findings and added <= set(frozen)
         and all(current.get(key) == value for key, value in prior.items())
         # A Claim may be added only when it is already a target: the rule is
         # against hidden Claims, not the action's own (#459: CL004).
         and all((not key.startswith('claims/') or key in request.target_keys) and not frozen[key]['retired'] for key in added))
+
+
+def owner_target_extension(previous, old, request):
+    """An explicit joint follow-up may include one already inspected owner."""
+    from backend.pipeline import claim_management as cm
+    extra=set(request.target_keys)-set(old.target_keys)
+    if (not extra or not set(old.target_keys)<set(request.target_keys) or len(request.target_keys)>2
+            or old.creation_permissions!=request.creation_permissions
+            or not finding_permission_extension(previous,old,request)):
+        return False
+    frozen=previous['original_goal']['original_objects']
+    named={f['target_key'] for f in previous.get('findings',{}).values() if f['category']!='source_uncertain'}
+    old_grants={p.key:p for p in old.permissions};new_grants={p.key:p for p in request.permissions}
+    if not extra<=named & set(frozen) or set(new_grants)-set(old_grants)!=extra:
+        return False
+    from backend.pipeline.claim_management_intake import FIELDS
+    if any(not key.startswith('claims/') or frozen[key]['retired']
+           or not set(new_grants[key].fields)<=FIELDS['claims'] for key in extra):
+        return False
+    payloads={k:v['payload'] for k,v in frozen.items()}
+    if any(not (own:=cm.own_source_ids(payloads[key],payloads)) or not own<=set(old.source_bindings) for key in extra):
+        return False
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    return (authority.get('authorized_by')=='owner' and authority.get('human_content_approval') is False
+        and authority.get('owner_target_extension')=={'previous_target_keys':old.target_keys,'added_target_keys':sorted(extra)})
 
 
 def creates(policy):
@@ -77,14 +131,26 @@ def admission_error(request, policy, before, goal):
     try:
         if len(request.target_keys) > (policy.joint_update_max_targets or 1):
             raise ValueError('joint Update exceeds joint_update_max_targets')
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        if bounded_unit(request, policy):
+            from backend.pipeline import claim_management as cm
+            payloads = {k: v['payload'] for k, v in before.items()}
+            own = [cm.own_source_ids(payloads[k], payloads) for k in request.target_keys]
+            if len(request.source_bindings) != 1 or any(s != set(request.source_bindings) for s in own):
+                raise ValueError('bounded review unit must belong to exactly one same source')
         if request.creation_permissions and not creates(policy):
             raise ValueError('joint Update supports existing retain/update only; creation requires a separate capability')
         if creates(policy) and request.creation_permissions:
             from backend.pipeline import claim_management as cm
             payloads = {k: v['payload'] for k, v in before.items()}
             own = set().union(*(cm.own_source_ids(payloads[k], payloads) for k in request.target_keys))
-            if any(p.collection != 'claims' or p.source_id not in own for p in request.creation_permissions):
-                raise ValueError('joint Update may create only a Claim from a target\'s own source')
+            claims = {p.source_id for p in request.creation_permissions if p.collection == 'claims'}
+            from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+            if any(p.source_id not in own or p.collection != 'claims' and (
+                    policy.model_output_contract != 'claim_changes_v4'
+                    or p.source_id not in claims or p.collection not in SUPPORT_CREATION_FIELDS
+                    or not set(p.fields)<=SUPPORT_CREATION_FIELDS[p.collection]) for p in request.creation_permissions):
+                raise ValueError('joint Update creation requires a target-own Claim or its source-scoped evidence')
         if not policy.all_findings_to_gpt:
             raise ValueError('joint Update must adjudicate all findings with GPT')
         required = required_keys(request)
@@ -127,9 +193,21 @@ def validate_candidate_scope(request, before, candidate):
     if candidate.operation not in {None, 'Update'} or candidate.replacements:
         raise ValueError('joint Update supports existing retain/update only')
     created = [d.record_key for d in candidate.dispositions if d.action == 'create']
-    # One new same-source Claim per action, under an explicit creation grant.
-    if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
-        raise ValueError('joint Update may create at most one granted Claim')
+    # Legacy grants retain their single slot; managed actions use only their
+    # exact frozen SQL allocations, which can explicitly contain several IDs.
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    allocations=authority.get('claim_creation_allocations',{})
+    from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+    slots=allocated_ids(allocations)
+    claim_creations=[key for key in created if key.startswith('claims/')]
+    if claim_creations and (not request.creation_permissions or len(claim_creations)>(len(slots) if slots else 1)
+            or slots and not {key.split('/',1)[1] for key in claim_creations}<=set(slots)):
+        raise ValueError('joint Update creation exceeds the exact granted Claim identities')
+    from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+    granted={p.collection for p in request.creation_permissions}
+    if any(key.split('/',1)[0] not in SUPPORT_CREATION_FIELDS or key.split('/',1)[0] not in granted
+           for key in created if not key.startswith('claims/')):
+        raise ValueError('joint Update support creation exceeds its exact source-scoped grants')
     for disposition in candidate.dispositions:
         if disposition.action == 'retire':
             col = disposition.record_key.split('/', 1)[0]

@@ -1012,10 +1012,10 @@ def test_unrecorded_negative_review_recovery_records_human_outcome_without_calls
         result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='persistent',reason='source needs clarification',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
         return result.model_dump(mode='json')
     actual=cm.finding_blocks
-    def old(finding,request=None,candidate=None):
+    def old(finding,request=None,candidate=None,**kwargs):
         if candidate and not finding.get('affected_target_keys') and any(d.record_key==finding['target_key'] and d.action!='retain' for d in candidate.dispositions):
             raise ValueError('target or actual write finding cannot be dismissed as readonly context')
-        return actual(finding,request,candidate)
+        return actual(finding,request,candidate,**kwargs)
     monkeypatch.setattr(cm,'finding_blocks',old)
     before=store.get_record_state('observations','O');ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=propose)
     result=execute_claim_management(store,request,root=root,ports=ports)

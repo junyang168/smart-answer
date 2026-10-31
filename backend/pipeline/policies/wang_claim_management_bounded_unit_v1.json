@@ -1,0 +1,45 @@
+{
+  "schema_version": "wang_claim_management_v2",
+  "policy_id": "wang_claim_management_bounded_unit_v1",
+  "independent_audit": false,
+  "budget": {
+    "max_revisions": 1,
+    "gpt_calls": 1,
+    "opus_calls": 2,
+    "gemini_calls": 0,
+    "max_request_bytes": 500000,
+    "max_output_tokens": 32000
+  },
+  "models": {
+    "gpt": {
+      "model_id": "gpt-6.1-sol",
+      "backend": "codex_subscription",
+      "effort": "high"
+    },
+    "opus": {
+      "model_id": "claude-opus-5-5",
+      "backend": "anthropic_api",
+      "effort": "high"
+    },
+    "gemini": {
+      "model_id": "gemini-4-argon",
+      "backend": "gemini_api",
+      "effort": "high"
+    }
+  },
+  "clarification_per_problem": 1,
+  "review_purpose": "content",
+  "all_findings_to_gpt": true,
+  "joint_update_contract": "wang_claim_joint_update_v1",
+  "joint_update_max_targets": 10,
+  "model_output_contract": "claim_changes_v4",
+  "initial_candidate": "existing",
+  "claim_scope_contract": "claim_direct_neighbours_v1",
+  "evidence_review_contract": "claim_own_evidence_v1",
+  "review_unit_contract": "claim_bounded_review_unit_v1",
+  "request_encoding_contract": "wkp_shared_shapes_json_v6",
+  "api_spend": {
+    "root": "/Volumes/Jun SSD/wang-knowledge-platform-staging/claim-management-519/matthew-refresh-20261029-v1/api-spend-100usd-v1",
+    "limit_usd": 100
+  }
+}

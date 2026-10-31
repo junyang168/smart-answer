@@ -180,6 +180,7 @@ class CodexSubscriptionClient:
     ) -> dict[str, Any]:
         del temperature  # Codex uses the selected model's supported controls.
         self.last_raw_response = None
+        self.last_usage = None
         self._verify_chatgpt_login()
         effective_timeout = timeout_seconds or self.timeout_seconds
         schema = json_schema.get("schema", json_schema)
@@ -225,6 +226,12 @@ class CodexSubscriptionClient:
                 "--output-last-message",
                 str(output_path),
             ]
+            working_directory=root
+            if getattr(self,'cache_usage_events',False):
+                command.append('--json')
+                if getattr(self,'cache_working_directory',None):
+                    working_directory=Path(self.cache_working_directory)
+                    working_directory.mkdir(parents=True,exist_ok=True)
             for image_path in image_paths or ():
                 resolved = Path(image_path).resolve()
                 if not resolved.is_file():
@@ -237,7 +244,7 @@ class CodexSubscriptionClient:
                 if durable:
                     from backend.pipeline.subscription_process import run
                     completed = run(command, input=prompt, env=self.environment,
-                                    timeout=effective_timeout, directory=root, cwd=root,
+                                    timeout=effective_timeout, directory=root, cwd=working_directory,
                                     replay_only=getattr(self, "replay_only", False))
                 else:
                     completed = subprocess.run(
@@ -245,7 +252,7 @@ class CodexSubscriptionClient:
                         input=prompt,
                         capture_output=True,
                         text=True,
-                        cwd=root,
+                        cwd=working_directory,
                         env=self.environment,
                         timeout=effective_timeout,
                         check=False,
@@ -254,10 +261,18 @@ class CodexSubscriptionClient:
                 raise CodexSubscriptionError(
                     f"Codex subscription transport failed: {type(exc).__name__}: {exc}"
                 ) from exc
+            if getattr(self,'cache_usage_events',False):
+                for line in completed.stdout.splitlines():
+                    try:event=json.loads(line)
+                    except ValueError:continue
+                    if isinstance(event,dict) and event.get('type')=='turn.completed':
+                        self.last_usage=event.get('usage')
             self.last_raw_response = {
                 "stdout": completed.stdout, "stderr": completed.stderr,
                 "last_message": output_path.read_text(encoding="utf-8") if output_path.exists() else None,
             }
+            if getattr(self,'cache_usage_events',False):
+                self.last_raw_response['usage']=self.last_usage
             if completed.returncode != 0:
                 raise CodexSubscriptionError(
                     f"Codex subscription generation failed (exit {completed.returncode}): "

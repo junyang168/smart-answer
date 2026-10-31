@@ -25,6 +25,21 @@ def enabled(request, policy=None):
     return policy.claim_scope_contract == CONTRACT
 
 
+def review_roots(request, *, actual_write_keys=(), bounded=None):
+    """The same semantic frontier for packets, guards, commits and readback."""
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    if bounded is None:
+        bounded = bounded_unit(request)
+    targets = set(request.target_keys)
+    if bounded:
+        from backend.pipeline.claim_joint_update import required_keys
+        maintenance = (set() if request.authorization.file_sha256 == '0' * 64
+                       else set(required_keys(request)))
+    else:
+        maintenance = {p.key for p in request.permissions} - targets
+    return targets | maintenance | set(actual_write_keys)
+
+
 def scope(request, before, candidate=None):
     from backend.pipeline import claim_management as cm
     payloads = {k: v['payload'] for k, v in before.items()}
@@ -32,10 +47,12 @@ def scope(request, before, candidate=None):
     if candidate:
         payloads.update(cm.source.index(candidate.records))
     targets = set(request.target_keys)
-    maintenance = {p.key for p in request.permissions} - targets
-    roots = targets | maintenance
-    if candidate:
-        roots.update(d.record_key for d in candidate.dispositions if d.action != 'retain')
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    bounded = bounded_unit(request)
+    writes = [d.record_key for d in candidate.dispositions if d.action != 'retain'] if candidate else []
+    base_roots = review_roots(request, bounded=bounded)
+    roots = base_roots | set(writes)
+    maintenance = base_roots - targets
     def named(col, oid):
         key = cm.source.key(col, oid)
         if key not in payloads:
@@ -77,6 +94,11 @@ def scope(request, before, candidate=None):
             elif col in cm.RELATION_COLLECTIONS:
                 impact_claims.update(k for k in deps(key, rows) if k.startswith('claims/'))
     content_claims = targets | impact_claims | {k for k in roots if k.startswith('claims/')}
+    if bounded:
+        # An affected owner is inspected for the shared delta, not assigned
+        # another complete Claim review or a new qualification by proximity.
+        content_claims = targets | {k for k in roots if k.startswith('claims/')}
+        impact_context.update(impact_claims)
     core = set()
     support_indexes = {}
     def evidence_chain(seeds, rows, *, leaf_claims=False):
@@ -139,6 +161,32 @@ def scope(request, before, candidate=None):
                 questions.add(key)
     neighbours = {k for k in endpoints if k.startswith('claims/')} - content_claims
     context = (endpoints | questions) - core
+    writable = core | relations | questions
+    if bounded:
+        # Potential shared consumers are reference material, not more review
+        # roots or capabilities. Freeze their necessary evidence before a
+        # proposal can change a shared fragment/step; do not wait until after
+        # GPT to discover that its old owners were missing from the packet.
+        possible = {p.key for p in request.permissions} or writable
+        for rows in [old, payloads]:
+            owners = set()
+            for owner, value in rows.items():
+                col = owner.split('/', 1)[0]
+                if col in cm.CLAIM_COLLECTIONS and col not in {'claims', 'source_fragments'} and deps(owner, rows) & possible:
+                    owners.add(owner)
+                    if col in cm.RELATION_COLLECTIONS:
+                        # A read-only shared-use edge still needs both typed
+                        # endpoints. Otherwise projecting the frozen packet
+                        # again cannot resolve this edge at commit/readback.
+                        owners.update(deps(owner, rows))
+                    elif col == 'evidence_steps':
+                        owners.update(named('claims', cid) for cid in value.get('produced_claim_ids', []))
+                    elif col == 'questions':
+                        owners.update(named('claims', cid) for cid in value.get('answer_claim_ids', []))
+                elif col == 'claims' and deps(owner, rows) & possible:
+                    owners.add(owner)
+            context.update(evidence_chain(owners, rows))
+        neighbours.update(k for k in context if k.startswith('claims/') and k not in content_claims)
     for rows in [old, payloads]:
         context.update(evidence_chain(context & set(rows), rows, leaf_claims=True))
     keys = core | relations | context
@@ -164,17 +212,23 @@ def scope(request, before, candidate=None):
         if any(payloads[k]['source_id'] not in own for k in chain if k.startswith('source_fragments/')):
             raise ValueError('Claim evidence crosses its own source boundary')
     keys.update(named('source_documents', sid) for sid in source_ids)
-    return {'contract': CONTRACT, 'record_keys': sorted(keys),
+    result = {'contract': CONTRACT, 'record_keys': sorted(keys),
             'content_claim_keys': sorted(content_claims), 'neighbour_claim_keys': sorted(neighbours),
             'relation_keys': sorted(relations), 'source_ids': sorted(source_ids),
             'maintenance_keys': sorted(maintenance)}
+    if bounded:
+        result['impact_claim_keys'] = sorted(impact_claims - content_claims)
+        result['writable_record_keys'] = sorted(writable)
+    return result
 
 
-def assert_current(store, cursor, request, records):
+def assert_current(store, cursor, request, records, *, actual_write_keys=()):
     """Check adjacency at roots, not reverse closure at every read endpoint."""
     from backend.pipeline import claim_management as cm
-    roots = {cm.source.split_key(k) for k in request.target_keys}
-    roots.update((p.collection, p.object_id) for p in request.permissions)
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    bounded = bounded_unit(request)
+    roots = {cm.source.split_key(k) for k in review_roots(request,
+        actual_write_keys=actual_write_keys if bounded else (), bounded=bounded)}
     consumers = store._claim_reference_consumers(cursor, roots)
     # New incoming non-Claim support can change the target's argument even
     # when no root row changed. Other Claims sharing evidence stay outside.

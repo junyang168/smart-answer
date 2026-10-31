@@ -19,7 +19,7 @@ FIELDS = {
                        'source_fragment_ids', 'speaker', 'stance', 'discourse_role',
                        'support_eligibility', 'produced_claim_ids', 'citation_ids'},
     'source_fragments': {'verbatim_excerpt', 'paragraph_key', 'source_segment_index',
-                         'media_time', 'anchor_state'},
+                         'media_time', 'media_end_time', 'anchor_state'},
     'observations': {'statement', 'observation_type', 'argument_role', 'scripture_refs',
                      'source_fragment_id', 'source_fragment_ids'},
     'questions': {'text', 'question_type', 'questioner', 'source_fragment_id',
@@ -30,6 +30,13 @@ FIELDS = {
     'knowledge_relations': {'from_id', 'to_id', 'relation_type', 'reason'},
     'claim_relation_constraints': {'source_id', 'target_id', 'forbidden_relation_types',
                                   'bidirectional', 'composition_role', 'reason'},
+}
+
+# A new Claim may need a new piece of its own professor source as evidence.
+# These remain content-only grants; source documents and approval stay protected.
+SUPPORT_CREATION_FIELDS = {
+    'evidence_steps': FIELDS['evidence_steps'],
+    'source_fragments': FIELDS['source_fragments'] | {'source_id'},
 }
 
 
@@ -50,7 +57,7 @@ def immutable(path, value):
     return binding(path)
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -60,15 +67,27 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     from backend.pipeline.claim_direct_scope import scope
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     ids = claim_ids(values)
+    if groups is not None:
+        from backend.pipeline.claim_review_units import validate_members
+        validate_members(groups)
+        if [cid for group in groups for cid in group] != ids:
+            raise ValueError('review unit membership must exactly match the ordered Claim ID list')
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError('the Claim Update direction is required')
     if type(max_workers) is not int or max_workers not in (1, 2):
         raise ValueError('max_workers must be 1 or 2')
+    if type(creation_count) is not int or creation_count<1:raise ValueError('creation_count must be a positive integer')
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if policy is None:
         policy = root / 'policy.json' if (root / 'policy.json').exists() else DEFAULT_POLICY
     selected = cm.Policy.model_validate_json(Path(policy).read_text())
+    if groups is not None:
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        if not bounded_unit(None, selected):
+            raise ValueError('group intake requires an explicitly bound bounded review unit policy')
+        if any(len(group) > selected.joint_update_max_targets for group in groups):
+            raise ValueError('review unit exceeds the selected policy capacity')
     if (selected.review_purpose != 'content' or selected.claim_scope_contract != 'claim_direct_neighbours_v1'
             or selected.independent_audit_required):
         raise ValueError('Claim list intake requires the scoped Opus-only content Update policy')
@@ -76,6 +95,9 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}
+    if groups is not None:
+        intent['groups'] = groups
+    if creation_count!=1:intent['creation_count']=creation_count
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -90,24 +112,35 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
 
     # Validate the complete denominator before preparing or dispatching any job.
     excluded = {}
+    sampling_candidates = set()
     for cid in ids:
         state = store.get_record_state('claims', cid)
         if state is None or state['retired']:
             excluded[cid] = {'status': 'paused', 'reason': 'missing_claim' if state is None else 'retired_claim'}
         elif state['payload'].get('review_status') in cm.HELD:
-            excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
+            from backend.pipeline.claim_metadata_projection import sampling_marker
+            with store.connect() as conn, conn.cursor() as cursor:
+                sampling = (selected.model_output_contract == 'claim_changes_v4' and sampling_marker(cursor, cid, state))
+            if sampling:sampling_candidates.add(cid)
+            else:excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
     jobs, inputs = [], []
-    for cid in ids:
-        if cid in excluded:
+    for members in (groups if groups is not None else [[cid] for cid in ids]):
+        if any(cid in excluded for cid in members):
+            for cid in members:
+                excluded.setdefault(cid, {'status': 'paused', 'reason': 'review_unit_member_unavailable'})
             continue
-        token = cm.sha256_json({'root': str(root), 'claim_id': cid})[:24]
+        cid = members[0]
+        identity = {'root': str(root), 'claim_id': cid} if groups is None else {'root': str(root), 'claim_ids': members}
+        token = cm.sha256_json(identity)[:24]
         action_dir = root / 'claims' / token
-        records = store.read_claim_context([('claims', cid)])
+        records = store.read_claim_context([('claims', member) for member in members])
         before = {cm.source.key(*key): state for key, state in records.items()}
         payloads = {key: state['payload'] for key, state in before.items()}
         own = cm.own_source_ids(payloads['claims/' + cid], payloads)
         if len(own) != 1:
             raise ValueError('Claim needs exactly one complete own source: ' + cid)
+        if any(cm.own_source_ids(payloads['claims/' + member], payloads) != own for member in members):
+            raise ValueError('review unit Claims must belong to the same own source')
         sources = {}
         for sid in own:
             doc = before['source_documents/' + sid]
@@ -116,7 +149,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             sources[sid] = binding(Path(doc['payload']['source_path']).resolve())
         auth_path = action_dir / 'authorization.json'
         request = cm.Request(action_id='claim-list-' + token, operation='Update', allowed_operations=['Update'],
-            target_keys=['claims/' + cid], source_bindings=sources, policy=policy_binding,
+            target_keys=['claims/' + member for member in members], source_bindings=sources, policy=policy_binding,
             authorization={'path': str(auth_path), 'file_sha256': '0' * 64})
         allocations = {}
         if selected.model_output_contract == 'claim_changes_v4':
@@ -125,8 +158,10 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             request.allowed_operations = ['Update', 'Create', 'Retire']
             request.creation_permissions = [cm.CreationPermission(collection='claims', source_id=sid,
                                                                   fields=sorted(FIELDS['claims']))]
+            request.creation_permissions += [cm.CreationPermission(collection=col, source_id=sid,
+                fields=sorted(fields)) for col,fields in SUPPORT_CREATION_FIELDS.items()]
             allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
-                                       root=action_dir / 'execution')
+                                       root=action_dir / 'execution',count=creation_count)
         # A writable relation makes its other Claim reviewed content, so one
         # more pass grants the Evidence and relations that review then shows
         # (#459: CR001 brought CL004's E016/ER011 into review but not into the
@@ -140,12 +175,15 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             shown = request if not passed else request.model_copy(deep=True, update={'permissions': [
                 p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS]})
             added = []
-            for key in scope(shown, before)['record_keys']:
+            shown_scope = scope(shown, before)
+            shown_keys = (shown_scope['writable_record_keys'] if selected.review_unit_contract
+                          else shown_scope['record_keys'])
+            for key in shown_keys:
                 col, oid = cm.source.split_key(key)
-                if key in granted or col not in FIELDS or (col == 'claims' and oid != cid):
+                if key in granted or col not in FIELDS or (col == 'claims' and oid not in members):
                     continue
                 state = before[key]
-                if state['retired'] or state['payload'].get('review_status') in cm.HELD:
+                if state['retired'] or (state['payload'].get('review_status') in cm.HELD and not (col=='claims' and oid==cid and cid in sampling_candidates)):
                     continue
                 if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
                     continue
@@ -175,7 +213,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None, model_capacity=None, creation_count=1):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()
@@ -186,14 +224,15 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
     with (root / 'intake.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
-            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy)
+            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy, creation_count=creation_count)
             manifest = prepared['manifest']['path'] if prepared['manifest'] else None
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             original = batch._paragraph_results(store, jobs)
             if not all(v.get('status') == 'completed' for v in original['results'].values()):
-                batch.run(manifest, root / 'batch')
+                batch.run(manifest, root / 'batch', **({'model_capacity': model_capacity} if model_capacity else {}))
             from backend.pipeline.claim_qualification_refresh import run as refresh_currentness
-            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction)
+            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction,
+                **({'model_capacity': model_capacity} if model_capacity else {}))
             by_claim = {cid: {'action_id': None, 'result': reason, 'qualification': None}
                         for cid, reason in prepared['excluded'].items()}
             for action_id, (request, _) in jobs.items():

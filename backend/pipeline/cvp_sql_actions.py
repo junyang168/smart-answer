@@ -29,6 +29,10 @@ def claim_management_review_packet(materials, candidate):
     request = Request.model_validate(materials['unit_request'])
     if direct.enabled(request):
         packet['claim_scope'] = direct.scope(request, materials['before'], candidate)
+    if materials.get('program_metadata_projection'):
+        packet['program_metadata_projection'] = {
+            'sampling_status':'Only verified legacy AI sampling markers on updated targets are reset to candidate, never human approval.',
+            'support_identities':'New EvidenceStep/SourceFragment identities and their typed references are assigned by the program. Review actual candidate identities and unchanged teaching, source quotes and links.'}
     from backend.pipeline.claim_evidence_review import add_packet
     return add_packet(packet, candidate)
 
@@ -170,6 +174,11 @@ def validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         raw = validate_claim_stage(root, 'gpt', policy, cm.model_packet(materials))
         from backend.pipeline.claim_model_output import candidate as expand_candidate
         expected, receipt = expand_candidate(raw['response'], materials)
+    elif materials.get('continuation',{}).get('opus_api_transition'):
+        original = materials['continuation']['previous_candidates'][materials['unit_id']]
+        if original != materials['previous_candidate']:
+            raise ValueError('API handoff altered the saved candidate')
+        expected, receipt = cm.normalize_candidate(original, sources)
     else:
         expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
         _, receipt = cm.normalize_candidate(expected.model_dump(mode='json'), sources)
@@ -278,7 +287,7 @@ def validate_claim_management_package(package):
             raise ValueError('joint Update package admission: ' + refusal)
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
     _, writes = cm.validate_candidate(unit_request, materials['before'], candidate, sources,
-        created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+        created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     validate_claim_candidate_origin(root, materials, policy, sources, candidate)
     packet = claim_management_review_packet(materials, candidate)
     raw = validate_claim_stage(root, 'opus', policy, packet)
@@ -361,7 +370,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(request, materials['before'], candidate, sources,
-                          created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                          created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     full_sources = {sid: {'paragraphs': paragraphs} for sid, paragraphs in packet['full_sources'].items()}
     if ({sid: {k: {'text': p['text']} for k, p in v['paragraphs'].items()} for sid, v in sources.items()}
             != packet['full_sources']):
@@ -412,7 +421,7 @@ def validate_claim_stage_receipt(receipt):
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
-                          created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                          created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
     if stage == 'candidate':
         validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         if policy.all_findings_to_gpt and 'gpt' in materials['roles']:
@@ -496,7 +505,17 @@ def execute_claim_management(store, request, *, root, ports):
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
         if parent['result'].get('returned_rejected_call'):
-            return parent['result']
+            from backend.pipeline.claim_review_recovery import resume_rejected_output
+            rejected = parent['result']['returned_rejected_call']
+            if not isinstance(parent['result'].get('detail'),str) or request.operation != 'Update' or not policy.all_findings_to_gpt:
+                return parent['result']
+            try:
+                rejected_round, role = rejected.rsplit(':',1)
+                resume_rejected_output(store,rejected_round,role=role,error=parent['result']['detail'])
+                parent = store.get_cvp_group(parent_id)
+            except (ValueError,RuntimeError,OSError) as exc:
+                return store.pause_claim_management_action(parent_id,
+                    reason='budget_exhausted' if 'budget' in str(exc) else 'engineering_required',detail=str(exc))
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
             return parent['result']
         try:
@@ -544,7 +563,10 @@ def execute_claim_management(store, request, *, root, ports):
                             unit_request.permissions = list(request.permissions)
                             unit_keys.update(cm.audit_keys(unit_request, before))
                         if prior:
-                            unit_keys.update(k for k in cm.audit_keys(unit_request, before, cm.Candidate.model_validate(prior['candidate'])))
+                            if prior.get('candidate'):
+                                unit_keys.update(k for k in cm.audit_keys(unit_request, before, cm.Candidate.model_validate(prior['candidate'])))
+                            elif not (prior.get('citation_input_recovery') or prior.get('model_input_recovery')):
+                                raise ValueError('missing prior candidate requires authenticated rejected-input recovery')
                         if request.operation == 'Create':
                             unit_keys.update(k for k in before if content.split_key(k)[0] in cm.CLAIM_COLLECTIONS)
                         source_ids = {content.split_key(k)[1] for k in unit_keys if k.startswith('source_documents/')}
@@ -592,6 +614,15 @@ def execute_claim_management(store, request, *, root, ports):
                                 'and superseded_by=null before Opus review. This is not human approval. '
                                 'Review retirement_cause_resolved and not_duplicate against the full current source. '
                                 'All named active targets and permitted Evidence/relations may be maintained in the same transaction.')
+                        from backend.pipeline.claim_metadata_projection import compile_projection, FIELD
+                        with store.connect() as conn, conn.cursor() as cursor:
+                            projection = compile_projection(cursor, unit_request, before, policy)
+                        if projection:
+                            materials[FIELD] = projection
+                            if projection['support_identities']:
+                                materials['program_owned_fields']['support_creation_ids'] = 'New EvidenceStep/SourceFragment object_id values are local aliases for typed references. The program assigns final action-scoped identities. Claim IDs must still use the reserved SQL slots.'
+                            if projection['sampling_markers']:
+                                materials['program_owned_fields']['legacy_ai_sampling'] = 'These target markers are verified historical AI sampling only, not human source holds. Do not edit review provenance; the program resets an updated target to candidate before independent review, never human-approved.'
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)
@@ -608,6 +639,9 @@ def execute_claim_management(store, request, *, root, ports):
                             if 'human_source_decisions' in materials:
                                 from backend.pipeline.claim_human_source import assert_current
                                 assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
+                            if 'program_metadata_projection' in materials:
+                                from backend.pipeline.claim_metadata_projection import assert_current
+                                assert_current(cursor, cm.Request.model_validate(materials['unit_request']), materials['before'], policy, materials['program_metadata_projection'])
                             observed = store._assert_transaction_read_pins(cursor, pins(records))
                             from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
                             if enabled(request) or direct_scope_enabled(request):
@@ -615,17 +649,24 @@ def execute_claim_management(store, request, *, root, ports):
                                 # content roots expand the semantic audit.
                                 audited = {content.split_key(k) for k in materials['before']}
                                 scope_pins = {k: v for k, v in pins(records).items() if k in audited}
+                                actual_writes = []
+                                candidate_path = round_root/'candidate.json'
+                                if candidate_path.is_file():
+                                    actual_writes = [d['record_key'] for d in body(read(candidate_path))['dispositions']
+                                                     if d['action'] != 'retain']
                                 store._assert_claim_management_scope(cursor, scope_pins,
-                                    records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'])
+                                    records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'],
+                                    actual_write_keys=actual_writes)
                     before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
                     transport = SimpleNamespace(before_model_call=before_call,
+                        model_call_capacity=getattr(ports, 'model_call_capacity', None),
                         model_call_reserved=lambda role, intent: store.begin_claim_management_call(
                             parent_id, round_id=rid, role=role, intent=intent))
                     stages = ModelStages(root, transport)
                     stages.root = round_root
                     def call(role, packet):
                         guard()
-                        return stages.call_bound(role, packet, ports.claim_management_adapter(role, policy), expected=cm.MODELS[role])
+                        return stages.call_bound(role, packet, ports.claim_management_adapter(role, policy), expected=(policy.models[role]['model_id'], policy.models[role]['backend']))
                     def record(stage, **extra):
                         receipt = {'round_id': rid, 'stage': stage, 'materials': binding(round_root / 'materials.json'),
                                    'candidate': binding(round_root / 'candidate.json'), **extra}
@@ -634,12 +675,13 @@ def execute_claim_management(store, request, *, root, ports):
                         return store.record_claim_management_stage(rid, binding(path))
                     if prior['checkpoint'] == 'prepared':
                         raw_candidate = (call('gpt', cm.model_packet(materials))['response'] if 'gpt' in materials['roles'] else
+                            materials['previous_candidate'] if materials.get('continuation',{}).get('opus_api_transition') else
                             cm.existing_candidate(materials['before'], replacements=materials['replacements']).model_dump(mode='json'))
                         from backend.pipeline.claim_model_output import candidate as expand_candidate
                         candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']
                             else cm.normalize_candidate(raw_candidate, materials['sources']))
                         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
-                            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                            created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))
                         write(round_root / 'candidate-normalization.json', normalization)
                         record('candidate')
@@ -652,7 +694,7 @@ def execute_claim_management(store, request, *, root, ports):
                                 continue
                             break
                         _, writes = cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
-                            created_keys=materials['created_keys'], original_replacements=materials['replacements'])
+                            created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         package = claim_management_package_body(rid, writes)
                         package['source_repair_application'] = {'schema_version': cm.VERSION, 'run_id': rid,
                             'materials': binding(round_root / 'materials.json'), 'candidate': binding(round_root / 'candidate.json'),
@@ -737,6 +779,7 @@ def execute_claim_management(store, request, *, root, ports):
             reason = (exc.status if isinstance(exc, Stop) and exc.status in {'model_failed','call_uncertain'} else
                       'no_progress' if 'semantic progress' in text else
                       'budget_exhausted' if 'budget' in text or 'complete next round' in text else
+                      'engineering_required' if text.startswith('transaction current dependency drift:') else
                       'source_drift' if 'source' in text and 'drift' in text else 'engineering_required')
             # Preserve known returned failures as distinct from unknown calls.
             # Authentication failure must never clear a started reservation.
@@ -744,13 +787,15 @@ def execute_claim_management(store, request, *, root, ports):
             # Runtime/transport interruption is not a schema rejection. A valid
             # saved reply must still be resumable without another model call.
             for slot in parent['call_reservations'].values() if isinstance(exc, ValueError) and not isinstance(exc, Stop) else []:
-                if slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}:
+                if (slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}
+                        or slot['round_id'] not in parent['latest_rounds'].values()
+                        or slot.get('rejection')):
                     continue
                 child = store.get_cvp_group(slot['round_id'])
                 stage_root = Path(child.get('recovery_root', root / slot['round_id']))
                 if (stage_root / (slot['role'] + '.raw.json')).is_file():
                     try:
-                        store.record_claim_management_returned_rejection(slot['round_id'], role=slot['role'], detail=text)
+                        store.record_claim_management_returned_rejection(slot['round_id'], role=slot['role'], detail=str(exc))
                     except (ValueError, RuntimeError) as recording_error:
                         text += '; returned-answer authentication failed: ' + str(recording_error)
                     else:
