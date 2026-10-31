@@ -167,8 +167,8 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             return str(root)
         if not passed:raise ValueError('unchanged independent review still rejects this candidate')
         request=cm.Request.model_validate(materials['unit_request'])
-        unresolved=cm.unresolved_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate)
-        context=cm.context_findings_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate)
+        unresolved=cm.unresolved_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate,records=materials['before'])
+        context=cm.context_findings_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate,records=materials['before'])
         if cm.Policy.model_validate(materials['policy']).all_findings_to_gpt:
             pending=cm.review_findings(parent['action_id'],materials['unresolved'],candidate)
             unresolved.update(cm.pending_context_adjudications(pending,candidate,context,request=request))

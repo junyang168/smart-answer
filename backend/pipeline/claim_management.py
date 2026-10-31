@@ -750,11 +750,11 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         if finding.target_key not in expected_keys:
             raise ValueError("review finding outside its declared denominator")
         validate_citations(finding.citations, sources)
-        finding_blocks(finding.model_dump(mode='json'), request, candidate)
+        finding_blocks(finding.model_dump(mode='json'), request, candidate, records=records)
     for resolution in review.prior_findings:
         validate_citations(resolution.citations, sources)
         if resolution.disposition != 'resolved':
-            finding_blocks(resolution_finding(resolution, unresolved), request, candidate)
+            finding_blocks(resolution_finding(resolution, unresolved), request, candidate, records=records)
     rejected = {v.record_key for v in review.verdicts if not v.approved or v.problems}
     explained = {f.target_key for f in review.findings}
     explained.update(unresolved[r.finding_id]["target_key"] for r in review.prior_findings
@@ -773,21 +773,29 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         if r.disposition != 'resolved' and resolution_finding(r, unresolved).get('affected_target_keys') is not None)
     if explicit_issues & approved:
         raise ValueError('finding contradicts an approved object: ' + ', '.join(sorted(explicit_issues & approved)))
-    blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate)]
+    blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate, records=records)]
     context_rejections = {f.target_key for f in review.findings if f not in blocking}
     persistent = [r for r in review.prior_findings if r.disposition != 'resolved']
     context_rejections.update(unresolved[r.finding_id]['target_key'] for r in persistent
-        if not finding_blocks(resolution_finding(r, unresolved), request, candidate))
+        if not finding_blocks(resolution_finding(r, unresolved), request, candidate, records=records))
     return (all(v.approved and not v.problems or v.record_key in context_rejections for v in review.verdicts)
             and not blocking
-            and not any(finding_blocks(resolution_finding(r, unresolved), request, candidate) for r in persistent))
+            and not any(finding_blocks(resolution_finding(r, unresolved), request, candidate, records=records) for r in persistent))
 
 
-def finding_blocks(finding, request=None, candidate=None):
+def finding_blocks(finding, request=None, candidate=None, *, records=None):
     """Reviewer explains target impact; absence preserves conservative old reviews."""
     from backend.pipeline.claim_joint_update import enabled, finding_blocks as joint_blocks
     if request is not None and enabled(request):
-        return joint_blocks(finding, request, candidate)
+        blocks = joint_blocks(finding, request, candidate)
+        from backend.pipeline.claim_review_units import enabled as bounded
+        if not blocks and records is not None and bounded(request):
+            from backend.pipeline.claim_direct_scope import scope
+            # Complete Update includes its own evidence/relations/questions,
+            # even when its Claim sentence is correct and no write exists.
+            # Unused capability and reference-private data do not seed scope.
+            blocks = finding['target_key'] in scope(request, records, candidate)['writable_record_keys']
+        return blocks
     affected = finding.get('affected_target_keys')
     if request is None or is_source_impact(request) or affected is None:
         return True
@@ -815,16 +823,16 @@ def resolution_finding(resolution, unresolved):
     return finding
 
 
-def context_findings_after(action_id, previous, review, *, request, candidate):
+def context_findings_after(action_id, previous, review, *, request, candidate, records=None):
     previous = review_findings(action_id, previous, candidate)
     result = {f.identity(action_id): f.model_dump(mode='json') for f in review.findings
-        if not finding_blocks(f.model_dump(mode='json'), request, candidate)}
+        if not finding_blocks(f.model_dump(mode='json'), request, candidate, records=records)}
     result.update({r.finding_id: resolution_finding(r, previous) for r in review.prior_findings
-        if r.disposition != 'resolved' and not finding_blocks(resolution_finding(r, previous), request, candidate)})
+        if r.disposition != 'resolved' and not finding_blocks(resolution_finding(r, previous), request, candidate, records=records)})
     return result
 
 
-def unresolved_after(action_id, previous, review, *, request=None, candidate=None):
+def unresolved_after(action_id, previous, review, *, request=None, candidate=None, records=None):
     if candidate:
         previous = review_findings(action_id, previous, candidate)
     result = deepcopy(previous)
@@ -833,12 +841,12 @@ def unresolved_after(action_id, previous, review, *, request=None, candidate=Non
             result.pop(resolution.finding_id, None)
         else:
             finding = resolution_finding(resolution, previous)
-            if finding_blocks(finding, request, candidate):
+            if finding_blocks(finding, request, candidate, records=records):
                 result[resolution.finding_id] = finding
             else:
                 result.pop(resolution.finding_id, None)
     for finding in review.findings:
-        if finding_blocks(finding.model_dump(mode='json'), request, candidate):
+        if finding_blocks(finding.model_dump(mode='json'), request, candidate, records=records):
             result[finding.identity(action_id)] = finding.model_dump(mode="json")
     return result
 
@@ -1582,7 +1590,8 @@ def continuation_budget(previous, request, policy):
             not enabled(request, policy)
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
             or (request.permissions != old.permissions and not read_only_refresh
-                and not finding_permission_extension(previous, old, request))
+                and not finding_permission_extension(previous, old, request)
+                and previous['result']['status'] != 'completed')
             or (policy.joint_update_max_targets != original.joint_update_max_targets
                 and not (target_extension and policy.joint_update_max_targets == len(request.target_keys)))
             or len(previous['original_goal']['units']) != 1):
@@ -1604,8 +1613,18 @@ def continuation_budget(previous, request, policy):
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
     permissions = {p.key:set(p.fields) for p in request.permissions}
+    # A saved own-data issue may create its missing Claim. Keep the original
+    # already-read Question link capability required by that creation, while
+    # still forbidding edits to the completed Claims or Question wording.
+    context_keys = {f['target_key'] for f in previous.get('context_findings', {}).values()}
+    question_links = {k for k,fields in old_permissions.items()
+                      if k.startswith('questions/') and 'answer_claim_ids' in fields}
+    if not any(p.collection == 'claims' for p in request.creation_permissions):
+        question_links = set()
     if completed_cleanup and (not previous.get('context_findings') or previous.get('findings')
-            or not permissions or not set(permissions) <= {f['target_key'] for f in previous['context_findings'].values()}
+            or not permissions or not set(permissions) & context_keys
+            or not set(permissions) <= context_keys | question_links
+            or any(fields - {'answer_claim_ids'} for k,fields in permissions.items() if k not in context_keys)
             or set(permissions) & set(request.target_keys)):
         raise ValueError('completed follow-up must address only its saved context issues without rewriting the completed Claims')
     if not completed_cleanup and not read_only_refresh and any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):

@@ -242,8 +242,14 @@ def evidence(value):
     approval=value['reviewed']['evidence']['approval'];check_binding(approval)
     raw=body(read(Path(approval['path'])))['response']
     from backend.pipeline.claim_model_output import review
-    from backend.pipeline.claim_management import Candidate
+    from backend.pipeline.claim_management import Candidate, Request, validate_review, audit_keys, operation_questions
     decoded = review(raw, value['materials'], Candidate.model_validate(value['candidate']))
+    if value['materials']['policy'].get('review_unit_contract'):
+        m=value['materials'];request=Request.model_validate(m['unit_request']);candidate=Candidate.model_validate(value['candidate'])
+        if not validate_review(candidate,decoded,audit_keys(request,m['before'],candidate),
+                operation_questions(m['original_goal'],candidate),m['unresolved'],m['sources'],
+                request=request,records=m['before']):
+            raise ValueError('completed review retains an unresolved own-data issue')
     return bound,decoded.model_dump(mode='json')
 
 

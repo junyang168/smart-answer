@@ -26,7 +26,7 @@ def original_pass(store, root):
     return rid
 
 
-def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52'):
+def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52', own_issue=False):
     path = policy_file(root.parent)
     policy = cm.Policy.model_validate_json(path.read_text())
     policy.initial_candidate = 'proposal'
@@ -48,8 +48,8 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
             assert list(packet['own_evidence_bindings'])==['claims/C']
             assert 'claims/D' in packet['claim_scope']['neighbour_claim_keys']
         result = pass_review(packet)
-        if objection:
-            result['findings']=[{'target_key':'claims/D','component':'synthetic_reference_objection',
+        if objection or own_issue:
+            result['findings']=[{'target_key':'evidence_steps/EC' if own_issue else 'claims/D','component':'synthetic_reference_objection',
                 'category':'content','reason':'unresolved reference concern','acceptance_condition':'adjudicate D',
                 'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
                 'affected_target_keys':[],'affected_write_keys':[], 'impact_reason':'unrelated to C only'}]
@@ -60,6 +60,21 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
     rid = store.claim_management_qualification('C')['run_id']
     assert ports.calls==['gpt','opus']
     return rid, ports
+
+
+def test_old_green_peer_with_unresolved_own_data_cannot_certify_a_handoff(claims,monkeypatch):
+    store,root=claims
+    original_pass(store,root)
+    actual=cm.finding_blocks
+    with monkeypatch.context() as patch:
+        patch.setattr(cm,'finding_blocks',lambda finding,*a,**kw:
+                      False if finding['target_key']=='evidence_steps/EC' else actual(finding,*a,**kw))
+        peer,_=update_neighbour(store,root,own_issue=True)
+    from backend.pipeline.claim_qualification_reuse import evidence
+    with pytest.raises(ValueError,match='own-data issue'):
+        evidence(store.get_cvp_group(peer))
+    q=store.claim_management_qualification('D')
+    assert not q or not q.get('ready')
 
 
 def test_neighbour_delta_preserves_complete_reference_approval_without_re_review(claims):

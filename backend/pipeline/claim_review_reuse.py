@@ -100,7 +100,12 @@ def assert_no_newer_rejection(cursor, claim_id, run_id, protected):
     key = 'claims/' + claim_id
     for findings, context, blocked, targets, outcome, approved, readback, unit in cursor.fetchall():
         if unit == 'claim_bounded_review_unit_v1':
-            context = {}  # Deferred, unadjudicated leads are not formal rejection.
+            # Reference leads stay unadjudicated. An issue on this target's
+            # own data, wrongly deferred by an older classifier, still means
+            # its complete Update is unfinished; do not reuse that old green.
+            context = {fid:f for fid,f in (context or {}).items()
+                       if key in (targets or []) and f.get('target_key') in protected
+                       and not f.get('target_key','').startswith('claims/')}
         if (claim_id in (blocked or [])
                 or any(f.get('target_key') in protected or key in (f.get('affected_target_keys') or [])
                        for f in list((findings or {}).values()) + list((context or {}).values()))):

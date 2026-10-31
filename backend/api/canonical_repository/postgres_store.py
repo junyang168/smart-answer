@@ -3854,9 +3854,9 @@ class PostgresKnowledgeStore:
                 unit_request = cm.Request.model_validate(materials['unit_request'])
                 pending = cm.review_findings(parent['action_id'], materials['unresolved'], candidate)
                 unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review,
-                    request=unit_request, candidate=candidate)
+                    request=unit_request, candidate=candidate, records=materials['before'])
                 context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
-                    request=unit_request, candidate=candidate)
+                    request=unit_request, candidate=candidate, records=materials['before'])
                 qualification_findings = dict(context_findings)
                 if cm.Policy.model_validate(materials['policy']).review_unit_contract:
                     # A deferred reference lead has not undergone GPT
@@ -4096,7 +4096,7 @@ class PostgresKnowledgeStore:
         reads necessary current pins, not an ancestor chain or whole Registry.
         """
         from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
-        from backend.pipeline.claim_management import is_source_impact, Policy
+        from backend.pipeline.claim_management import is_source_impact, Policy, Request
         from backend.pipeline.source_editorial_transition import verify_current_source_binding
         with self.connect() as conn, conn.cursor() as cursor:
             rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
@@ -4203,7 +4203,13 @@ class PostgresKnowledgeStore:
                     result['legacy_ai_spot_check_replaced_by_current_review'] = True
                 from backend.pipeline.claim_review_reuse import assert_no_newer_rejection
                 try:
-                    assert_no_newer_rejection(cursor, claim_id, rid, ['claims/'+claim_id])
+                    protected = ['claims/'+claim_id]
+                    if Policy.model_validate(value['materials']['policy']).review_unit_contract:
+                        from backend.pipeline.claim_direct_scope import scope
+                        own = Request.model_validate(value['materials']['unit_request']).model_copy(
+                            update={'target_keys':['claims/'+claim_id], 'permissions':[]})
+                        protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()})['writable_record_keys']
+                    assert_no_newer_rejection(cursor, claim_id, rid, protected)
                 except ValueError:
                     return {'ready': False, 'reason': 'newer_formal_review_objection', 'run_id': rid}
                 return result
