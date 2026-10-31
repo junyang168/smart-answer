@@ -174,7 +174,12 @@ def scope(request, before, candidate=None):
                 col = owner.split('/', 1)[0]
                 if col in cm.CLAIM_COLLECTIONS and col not in {'claims', 'source_fragments'} and deps(owner, rows) & possible:
                     owners.add(owner)
-                    if col == 'evidence_steps':
+                    if col in cm.RELATION_COLLECTIONS:
+                        # A read-only shared-use edge still needs both typed
+                        # endpoints. Otherwise projecting the frozen packet
+                        # again cannot resolve this edge at commit/readback.
+                        owners.update(deps(owner, rows))
+                    elif col == 'evidence_steps':
                         owners.update(named('claims', cid) for cid in value.get('produced_claim_ids', []))
                     elif col == 'questions':
                         owners.update(named('claims', cid) for cid in value.get('answer_claim_ids', []))

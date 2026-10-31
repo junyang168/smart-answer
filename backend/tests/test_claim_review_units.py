@@ -267,6 +267,28 @@ def test_shared_fragment_consumers_are_frozen_references_not_extra_targets(claim
     assert ports.calls == ['gpt', 'opus']
 
 
+def test_readonly_shared_relation_has_complete_endpoints_after_projection(claims):
+    store, root = claims
+    other = store.get_record_state('evidence_steps', 'ED')['payload']
+    store.apply_plan(store.plan_package({'package_id':'outgoing-shared-reference',
+        'evidence_steps':[dict(other, evidence_step_id='EZ')],
+        'knowledge_relations':[{'relation_id':'K','from_id':'EC','to_id':'EZ',
+                                'relation_type':'supports'}]}))
+    prepared = intake.prepare(['C'], root, instruction='Review C; outgoing use is reference',
+                              groups=[['C']], policy=policy_file(root.parent), store=store)
+    _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    before = {cm.source.key(*k):v for k,v in store.read_claim_context([('claims','C')]).items()}
+    selected = direct.scope(request, before)
+    assert {'knowledge_relations/K','evidence_steps/EZ'} <= set(selected['record_keys'])
+    assert 'evidence_steps/EZ' not in selected['writable_record_keys']
+    projected = {k:before[k] for k in selected['record_keys']}
+    assert direct.scope(request, projected)['record_keys'] == selected['record_keys']
+    result = execute_claim_management(store, request, root=execution,
+        ports=SyntheticPorts(store, execution, opus=pass_review))
+    assert result['status']=='completed', result
+
+
 def test_unstarted_scope_guard_failure_recovers_same_unit_without_spending_or_resetting_budget(claims, monkeypatch):
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     from backend.pipeline.claim_review_recovery import resume_saved_pre_review
