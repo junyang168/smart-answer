@@ -26,7 +26,7 @@ def original_pass(store, root):
     return rid
 
 
-def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52', own_issue=False):
+def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52', own_issue=False, shared=False):
     path = policy_file(root.parent)
     policy = cm.Policy.model_validate_json(path.read_text())
     policy.initial_candidate = 'proposal'
@@ -37,11 +37,20 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
                               groups=[['C']] if bounded else None, policy=path, store=store)
     _, jobs = batch.load(prepared['manifest']['path'], root/'peer'/'batch', store=store)
     request, execution = next(iter(jobs.values()))
+    if shared:
+        from backend.tests.test_claim_management_human_source_follow_up import authorize
+        authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+        request.permissions.append(cm.source.Permission(collection='evidence_steps',object_id='ED',fields=['produced_claim_ids']))
+        authorize(request,{k:v for k,v in authority.items() if k not in {'request','policy'}})
     def propose(packet):
-        return {'changes':[{'record_key':'claims/C',
-            'fields_json':json.dumps({'scripture_refs':[refs]}),
+        changes=[{'record_key':'claims/C',
+            'fields_json':json.dumps({'scripture_refs':[refs], **({'evidence_step_ids':['EC','ED']} if shared else {})}),
             'reason':'synthetic reviewed scope correction',
-            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}],
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}]
+        if shared:
+            changes.append({**changes[0],'record_key':'evidence_steps/ED',
+                            'fields_json':json.dumps({'produced_claim_ids':['D','C']})})
+        return {'changes':changes,
             'creations':[], 'retirements':[], 'findings':[], 'finding_resolutions':[]}
     def review(packet):
         if bounded:
@@ -91,6 +100,49 @@ def test_neighbour_delta_preserves_complete_reference_approval_without_re_review
     with store.connect() as conn, conn.cursor() as cursor:
         assert reuse.revalidate_context(store, cursor, 'D', old, peer)==proof
     assert ports.calls==['gpt','opus']
+
+
+@pytest.mark.parametrize('defect',[None,'owner_addition','own_evidence','incident_relation','reference_objection','legacy_peer'])
+def test_fresh_target_can_join_its_original_pass_to_a_reviewed_neighbour_delta(claims,defect):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'fresh-connected','claim_relations':[
+        {'claim_relation_id':'R','from_id':'D','to_id':'C','relation_type':'supports'}]}))
+    path=policy_file(root.parent)
+    prepared=intake.prepare(['D'],root/'fresh',instruction='Review D as the actual target',
+                           groups=[['D']],policy=path,store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'fresh'/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    initial=SyntheticPorts(store,execution,opus=pass_review)
+    assert execute_claim_management(store,request,root=execution,ports=initial)['status']=='completed'
+    old=store.claim_management_qualification('D')['run_id']
+    assert 'D' not in store.get_cvp_group(old).get('readonly_claim_qualifications',{})
+    if defect=='own_evidence':
+        e=store.get_record_state('evidence_steps','ED')['payload']
+        store.apply_plan(store.plan_package({'package_id':'changed-fresh-basis',
+            'evidence_steps':[dict(e,statement='a different basis')]}))
+    elif defect=='incident_relation':
+        e=store.get_record_state('claim_relations','R')['payload']
+        store.apply_plan(store.plan_package({'package_id':'changed-fresh-edge',
+            'claim_relations':[dict(e,reason='a different argument')]}))
+    peer,ports=update_neighbour(store,root,objection=defect=='reference_objection',bounded=defect!='legacy_peer',shared=defect=='owner_addition')
+    if defect not in (None,'owner_addition'):
+        with pytest.raises(ValueError):reuse.admit(store,'D',old,peer_run_id=peer)
+    else:
+        with pytest.raises(ValueError,match='changed'):reuse.build(store,'D',old)
+        proof=reuse.admit(store,'D',old,peer_run_id=peer)
+        assert proof['contract']==reuse.CONTEXT_CONTRACT
+        assert store.claim_management_qualification('D')['ready']
+    assert initial.calls==['opus'] and ports.calls==['gpt','opus']
+
+
+@pytest.mark.parametrize('after',[
+    {'produced_claim_ids':['C']}, {'produced_claim_ids':['D','C','C']},
+    {'produced_claim_ids':['D','C'],'statement':'changed evidence'},
+    {'produced_claim_ids':['D','C'],'source_fragment_ids':['foreign']},
+])
+def test_additive_owner_guard_rejects_evidence_change_or_lost_owner(after):
+    original={'produced_claim_ids':['D'],'statement':'same evidence','source_fragment_ids':['F']}
+    assert not reuse.owner_extension(original,{**original,**after})
 
 
 def test_later_neighbour_review_replaces_flat_context_proof_without_replaying_original(claims):

@@ -14,7 +14,17 @@ from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows, decod
 CONTEXT_CONTRACT = 'claim_complete_review_context_reuse_v2'
 
 
-def build(store, claim_id, run_id):
+def owner_extension(before, after):
+    """Only additive consumers; the evidence and every old owner stay exact."""
+    ignored = {'revision', 'produced_claim_ids'}
+    if {k:v for k,v in before.items() if k not in ignored} != {k:v for k,v in after.items() if k not in ignored}:
+        return set()
+    old, new = before.get('produced_claim_ids', []), after.get('produced_claim_ids', [])
+    added = set(new) - set(old)
+    return added if added and len(set(new)) == len(new) and [v for v in new if v not in added] == old else set()
+
+
+def build(store, claim_id, run_id, *, peer_run_id=None):
     from backend.pipeline.claim_direct_scope import scope
     from backend.pipeline.claim_model_output import review as decode_review
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
@@ -59,6 +69,8 @@ def build(store, claim_id, run_id):
     own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
     left, right = scope(own, old), scope(own, current)
     required = set(left['record_keys']) | set(right['record_keys'])
+    neighbours = set(left['neighbour_claim_keys']) | set(right['neighbour_claim_keys'])
+    changed_context = set()
     sources = {}
     for sid, bound in materials['request']['source_bindings'].items():
         sources[sid] = verify_current_source_binding(bound)
@@ -72,8 +84,11 @@ def build(store, claim_id, run_id):
         editorial = (record.startswith('source_documents/') and record.split('/', 1)[1] in sources
                      and changes <= {'source_file_sha256', 'editorial_structure_sha256', 'editorial_topology_sha256'})
         if (changes and not editorial) or a['retired'] != b['retired']:
-            raise ValueError('review reuse argument/context changed: ' + record)
-    neighbours = set(left['neighbour_claim_keys']) | set(right['neighbour_claim_keys'])
+            extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb))
+            if (not peer_run_id or not (record in neighbours and record.startswith('claims/') or extension)
+                    or a['retired'] or b['retired']):
+                raise ValueError('review reuse argument/context changed: ' + record)
+            changed_context.add(record)
     if required - neighbours - approved:
         raise ValueError('review reuse cannot conceal an unapproved required object')
     proof = {'contract': 'claim_complete_review_reuse_v1', 'claim_id': claim_id,
@@ -81,10 +96,28 @@ def build(store, claim_id, run_id):
              'source_bindings': sources, 'scope_request': own.model_dump(mode='json'),
              'protected_record_keys': sorted(required - neighbours),
              'read_pins': pin_rows(pins({k:v for k,v in current_states.items() if cm.source.key(*k) in required}))}
+    if changed_context:
+        # A fresh target approval and an admitted bystander approval have the
+        # same own-Claim proof. Join the already reviewed neighbour delta
+        # atomically; never admit an intermediate stale qualification.
+        peer = store.get_cvp_group(peer_run_id)
+        if not peer or not peer.get('reviewed'):
+            raise ValueError('missing completed peer review for changed neighbour')
+        original = decoded_pins(proof['read_pins'])
+        for record in changed_context:
+            row=old[record]
+            original[cm.source.split_key(record)]=(row['revision'],row['content_sha256'],row['retired'])
+        proof.update(contract=CONTEXT_CONTRACT, original_read_pins=pin_rows(original),
+            context_reviews={record:{'round_id':peer_run_id,
+                'approval':peer['reviewed']['evidence']['approval'],
+                'readback':peer['stage_results']['readback']} for record in changed_context})
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION READ ONLY')
         assert_no_newer_rejection(cursor, claim_id, run_id, proof['protected_record_keys'])
     proof['proof_sha256'] = cm.sha256_json(proof)
+    if changed_context:
+        with store.connect() as conn, conn.cursor() as cursor:
+            verify(store,cursor,claim_id,proof)
     return proof
 
 
@@ -149,8 +182,8 @@ def verify(store, cursor, claim_id, proof):
             'independent_audit_complete': False}
 
 
-def admit(store, claim_id, run_id):
-    proof = build(store, claim_id, run_id)
+def admit(store, claim_id, run_id, *, peer_run_id=None):
+    proof = build(store, claim_id, run_id, peer_run_id=peer_run_id)
     from backend.api.canonical_repository.viewpoint_foundation import canonical_json
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (run_id,))
@@ -165,7 +198,8 @@ def admit(store, claim_id, run_id):
 def verify_context_reviews(store, cursor, proof):
     """Old full approval plus a current, role-scoped check of changed neighbours.
 
-    Own Claim/evidence/source/incident edges must remain exactly unchanged.
+    Own Claim, evidence content, source and incident edges stay unchanged.
+    Additive Evidence consumers require the peer's explicit reciprocal review.
     This is not permission to promote a reference into a new full approval.
     One latest review per changed neighbour keeps the proof flat.
     """
@@ -174,11 +208,12 @@ def verify_context_reviews(store, cursor, proof):
     original = decoded_pins(proof['original_read_pins'])
     current = decoded_pins(proof['read_pins'])
     protected = {cm.source.split_key(k) for k in proof['protected_record_keys']}
-    if set(original) != set(current) or any(original[k] != current[k] for k in protected):
+    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] != 'evidence_steps'):
         raise ValueError('context reuse changed the original Claim or its own basis')
     changed = {cm.source.key(*k) for k in original if original[k] != current[k]}
     if not changed or changed != set(proof['context_reviews']) or any(
-            not k.startswith('claims/') or cm.source.split_key(k) in protected for k in changed):
+            not k.startswith(('claims/', 'evidence_steps/')) or
+            k.startswith('claims/') and cm.source.split_key(k) in protected for k in changed):
         raise ValueError('context reuse permits only reviewed direct neighbour changes')
     key = 'claims/' + proof['claim_id']
     peers = {}
@@ -218,19 +253,29 @@ def verify_context_reviews(store, cursor, proof):
                 from backend.pipeline.claim_human_source import assert_current as assert_human_current
                 assert_human_current(cursor, request.source_bindings, peer['materials']['human_source_decisions'])
             peers[rid] = (peer, readback, review, fresh, writes, outstanding,
-                          scope(request, peer['materials']['before'], candidate))
-        peer, readback, review, fresh, writes, outstanding, selected = peers[rid]
+                          scope(request, peer['materials']['before'], candidate), observed)
+        peer, readback, review, fresh, writes, outstanding, selected, observed = peers[rid]
         if saved != {'round_id': rid, 'approval': peer['reviewed']['evidence']['approval'], 'readback': readback}:
             raise ValueError('context reuse peer approval identity drift')
-        if (neighbour not in selected['content_claim_keys'] or neighbour not in writes
+        extension = set()
+        if neighbour.startswith('evidence_steps/'):
+            old_receipt = json.loads(Path(proof['readback']['path']).read_text())
+            old_payload = old_receipt['actual_records'][neighbour]['payload']
+            extension = owner_extension(old_payload, observed[cm.source.split_key(neighbour)]['payload'])
+            if (not extension or any('claims/' + cid not in selected['content_claim_keys'] or
+                    neighbour.split('/',1)[1] not in observed[('claims',cid)]['payload'].get('evidence_step_ids', [])
+                    for cid in extension)):
+                raise ValueError('context reuse changed Evidence beyond reviewed additive owners')
+        if ((not extension and neighbour not in selected['content_claim_keys']) or neighbour not in writes
                 or key not in selected['neighbour_claim_keys']):
             raise ValueError('peer did not review the changed neighbour and original reference role')
         retained = {d['record_key'] for d in peer['candidate']['dispositions'] if d['action'] == 'retain'}
         approved = {v['record_key'] for v in review['verdicts'] if v['approved'] and not v['problems']}
         shared = protected & set(fresh)
-        needed = {cm.source.key(*k) for k in shared} | {key, neighbour}
+        needed = {cm.source.key(*k) for k in shared} | {key, neighbour} | {'claims/' + cid for cid in extension}
         if (not needed <= approved or key not in retained
-                or any(cm.source.key(*k) not in retained or original[k] != fresh[k] for k in shared)
+                or any((cm.source.key(*k) not in retained or original[k] != fresh[k])
+                       and not (k[0] == 'evidence_steps' and cm.source.key(*k) in changed) for k in shared)
                 or fresh.get(cm.source.split_key(neighbour)) != current[cm.source.split_key(neighbour)]):
             raise ValueError('peer omitted or changed the retained original basis')
         # Even a context finding cannot silently negate the preserved Claim.
