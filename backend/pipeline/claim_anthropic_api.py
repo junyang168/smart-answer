@@ -10,6 +10,64 @@ from pathlib import Path
 from backend.pipeline.subscription_process import save, digest_file
 
 
+def consumed_output_limit(previous, key, slot):
+    """A billed, ended call with no text is spent, not an unknown review.
+
+    Authentication only: this never retries or accepts a partial answer.
+    """
+    from backend.pipeline import claim_management as cm
+    from backend.pipeline.source_reconciliation_runner import body, read
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
+    policy = cm.Policy.model_validate(previous['policy'])
+    if (slot['role'] != 'opus' or slot['state'] != 'started'
+            or policy.models['opus']['backend'] != 'anthropic_api'):
+        raise ValueError('output-limit recovery requires the original started Opus API call')
+    stage = Path(previous['execution_root']) / slot['round_id']
+    transport = stage / 'opus.transport'
+    intent = body(read(stage/'opus.reservation.json'))
+    if (intent != slot['intent'] or cm.sha256_json(intent) != slot['intent_sha256']
+            or (stage/'opus.raw.json').exists()):
+        raise ValueError('output-limit recovery cannot replace a returned review or changed intent')
+    receipt = json.loads((transport/'exit.json').read_text())
+    if receipt.get('returncode') != 0 or 'response.json' not in receipt.get('files', {}):
+        raise ValueError('output-limit recovery requires a complete successful transport receipt')
+    for name, digest in receipt['files'].items():
+        check_binding({'path':str(transport/name),'file_sha256':digest})
+    request = json.loads((transport/'request.json').read_text())
+    invocation = json.loads((transport/'invocation.json').read_text())
+    wire_sha = hashlib.sha256(json.dumps(request,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    message = json.loads((transport/'response.json').read_text())
+    usage = message.get('usage', {})
+    def text(value):
+        return value if isinstance(value,str) else ''.join(b.get('text','') for b in value)
+    system = text(request['system'])
+    payload = json.loads(text(request['messages'][0]['content']))
+    from backend.api.canonical_repository import viewpoint_request_encoding as encoding
+    decoders = {'wkp_shared_shapes_json_v4':encoding.decode_shared_shapes_v4,
+                'wkp_shared_shapes_json_v6':encoding.decode_shared_shapes_v6}
+    if payload.get('format') in decoders:
+        payload = decoders[payload['format']](payload)
+    packet = body(read(stage/'opus.packet.json'))
+    if (invocation != {'backend':'anthropic_api','request_sha256':wire_sha}
+            or cm.sha256_json({'prompt':system}) != intent['prompt_sha256']
+            or cm.sha256_json(packet) != intent['request_payload_sha256']
+            or cm.sha256_json(payload) != intent['request_payload_sha256']
+            or request['model'] != policy.models['opus']['model_id']
+            or request['output_config']['effort'] != policy.models['opus']['effort']
+            or request['max_tokens'] != policy.budget.max_output_tokens
+            or message.get('model') != request['model'] or message.get('stop_reason') != 'max_tokens'
+            or usage.get('output_tokens') != request['max_tokens']
+            or not message.get('content')
+            or any(b.get('type') != 'thinking' for b in message['content'])):
+        raise ValueError('not a proved no-text Opus output-token exhaustion')
+    ledger = json.loads((Path(policy.api_spend['root'])/'spend.json').read_text())['calls'][str(transport.resolve())]
+    if (ledger.get('state') != 'returned' or ledger.get('request_sha256') != wire_sha
+            or ledger.get('usage') != usage or not ledger.get('cost_usd',0) > 0):
+        raise ValueError('output-limit recovery must preserve exact billed API usage')
+    return {'slot':key,'spent_call_preserved':True,'usage':usage,
+            **{name:binding(transport/name) for name in ('request.json','invocation.json','response.json','exit.json')}}
+
+
 @contextmanager
 def spend_state(root):
     root = Path(root); root.mkdir(parents=True, exist_ok=True)
