@@ -773,6 +773,7 @@ def execute_claim_management(store, request, *, root, ports):
             reason = (exc.status if isinstance(exc, Stop) and exc.status in {'model_failed','call_uncertain'} else
                       'no_progress' if 'semantic progress' in text else
                       'budget_exhausted' if 'budget' in text or 'complete next round' in text else
+                      'engineering_required' if text.startswith('transaction current dependency drift:') else
                       'source_drift' if 'source' in text and 'drift' in text else 'engineering_required')
             # Preserve known returned failures as distinct from unknown calls.
             # Authentication failure must never clear a started reservation.

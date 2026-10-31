@@ -142,6 +142,76 @@ def test_relation_added_during_model_call_blocks_commit_without_repeating_review
     assert store.get_record_state('claims','A')==original and ports.calls==['opus']
 
 
+@pytest.mark.parametrize('extra_drift', [None, 'content', 'source', 'scope'])
+def test_reviewed_transaction_only_drift_reuses_exact_answers_or_rejects_content_drift(chain, extra_drift):
+    from backend.pipeline.claim_review_recovery import recover_returned_review, VERSION
+    store, request, output, root = chain
+    bind(request, root, proposal=True)
+    eb = deepcopy(store.get_record_state('evidence_steps', 'EB')['payload'])
+    eb['source_fragment_ids'] = ['FB']
+    store.apply_plan(store.plan_package({'package_id': 'readonly-neighbour-fragment',
+        'evidence_steps': [eb], 'source_fragments': [{'fragment_id': 'FB', 'source_id': 'S',
+            'paragraph_key': 'S0001', 'verbatim_excerpt': '甲是假设'}]}))
+    citation = {'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}
+    def propose(packet):
+        return {'changes': [{'record_key': 'claims/A',
+            'fields_json': json.dumps({'statement': '甲是假设，不是断言。'}),
+            'reason': 'faithful correction', 'citations': [citation]}],
+            'findings': [], 'finding_resolutions': []}
+    def opus(packet):
+        assert 'source_fragments/FB' not in packet['before']
+        changed = deepcopy(store.get_record_state('source_fragments', 'FB')['payload'])
+        changed['verbatim_excerpt'] = '甲是假设，不是断言。'
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-readonly-fragment',
+            'source_fragments': [changed]}))
+        return yes(packet)
+    ports = SyntheticPorts(store, root, proposal=propose, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'paused' and 'transaction current dependency drift:' in result['detail'], result
+    assert result['reason'] == 'engineering_required'  # A source_fragments key is not a source-file edit.
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    rid = next(iter(parent['latest_rounds'].values()))
+    saved = store.get_cvp_group(rid)
+    assert saved['checkpoint'] == 'prepared' and saved['opus_approved']
+    assert 'source_fragments/FB' in saved['materials']['transaction_before']
+    old_files = {name: (Path(parent['execution_root']) / rid / name).read_bytes()
+        for name in ('gpt.raw.json', 'opus.raw.json', 'candidate.json')}
+    if extra_drift == 'content':
+        changed = deepcopy(store.get_record_state('claims', 'A')['payload'])
+        changed['statement'] = 'a concurrent different judgment'
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-model-fact', 'claims': [changed]}))
+    elif extra_drift == 'source':
+        Path(request.source_bindings['S'].path).write_text(json.dumps({'script': [{'text': 'changed source'}]}))
+    elif extra_drift == 'scope':
+        store.apply_plan(store.plan_package({'package_id': 'concurrent-model-scope',
+            'claim_relations': [relation('AC', 'A', 'C')]}))
+    direction = root / 'transaction-context-direction.json'
+    direction.write_text(json.dumps({'schema_version': VERSION, 'round_id': rid,
+        'prior_metadata_sha256': cm.sha256_json({k: v for k, v in saved.items() if k not in {'run_id', 'status', 'error'}}), 'authorized_by': 'owner',
+        'authorization_quote': 'continue this original Update without another model call',
+        'human_content_approval': False, 'refresh_transaction_context': True}))
+    if extra_drift:
+        expected = 'physical file missing or changed' if extra_drift == 'source' else 'content scope drift'
+        with pytest.raises(ValueError, match=expected):
+            recover_returned_review(store, rid, authorization=binding(direction))
+        assert store.get_cvp_group(rid) == saved
+    else:
+        recovered = recover_returned_review(store, rid, authorization=binding(direction))
+        assert recover_returned_review(store, rid, authorization=binding(direction)) == recovered
+        now = store.get_cvp_group(rid)
+        after_parent = store.get_cvp_group(parent['run_id'])
+        assert after_parent['call_reservations'] == parent['call_reservations']
+        assert after_parent['request'] == parent['request'] and after_parent['policy'] == parent['policy']
+        assert cm.model_packet(now['materials']) == cm.model_packet(saved['materials'])
+        assert now['candidate'] == saved['candidate']
+        assert now['engineering_review_recoveries'][-1]['transaction_context_refresh']['changed_transaction_keys'] == ['source_fragments/FB']
+        assert all((Path(recovered) / name).read_bytes() == data for name, data in old_files.items())
+        assert all((Path(parent['execution_root']) / rid / name).read_bytes() == data for name, data in old_files.items())
+        assert execute_claim_management(store, request, root=output, ports=ports)['status'] == 'completed'
+        assert store.claim_management_qualification('A')['ready']
+    assert ports.calls == ['gpt', 'opus']
+
+
 def test_shared_evidence_owner_checks_do_not_walk_owners_other_relations(shared):
     store,request,output,root=shared; bind(request,root,required=['evidence_steps/E'])
     store.apply_plan(store.plan_package({'package_id':'owner-neighbour',

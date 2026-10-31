@@ -33,9 +33,10 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         if history and history[-1]['authorization']==authorization:return history[-1]['recovery_root']
         checkpoint=value.get('checkpoint')
         applied=bool(checkpoint=='applied' and direction.get('resume_applied_readback') is True and not unrecorded)
+        transaction_refresh = direction.get('refresh_transaction_context') is True and not unrecorded and not applied
         if (value.get('kind')!='claim_management_round' or checkpoint not in ({'prepared'} if unrecorded else {'prepared','reviewed'}|({'applied'} if applied else set()))
                 or bool(value.get('change_set_ids')) != applied
-                or (value.get('opus_approved') and checkpoint not in {'reviewed','applied'})
+                or (value.get('opus_approved') and checkpoint not in {'reviewed','applied'} and not transaction_refresh)
                 or (checkpoint in {'reviewed','applied'} and not value.get('opus_approved'))
                 or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
                 or sha256_json(value)!=direction.get('prior_metadata_sha256')):
@@ -44,6 +45,9 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             (value['parent_run_id'],)).fetchone()[0]
         if parent.get('continued_by') or len(parent['latest_rounds'])!=1 or parent['latest_rounds'][value['unit_id']]!=round_id:
             raise ValueError('review recovery cannot fork or revise other units')
+        if transaction_refresh and (parent['result'].get('status') != 'paused'
+                or not parent['result'].get('detail', '').startswith('transaction current dependency drift:')):
+            raise ValueError('review recovery requires its exact paused transaction dependency drift')
         for role in value['materials']['roles']:
             slot=parent['call_reservations'].get(round_id+':'+role,{})
             if unrecorded and role=='opus':
@@ -51,7 +55,10 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
                 continue
             if role not in {'gpt','opus'} or slot.get('state')!='completed' or slot.get('result')!=value['stage_results']['candidate' if role=='gpt' else 'opus']:
                 raise ValueError('review recovery cannot repeat an unknown or unrecorded call')
+        transaction_context = None
         if applied:
+            if direction.get('refresh_transaction_context'):
+                raise ValueError('applied readback cannot refresh its committed transaction context')
             # Resume only program readback of the exact committed postimages.
             # The original transaction already checked its broader readset;
             # every model fact must still equal its reviewed postimage now.
@@ -80,6 +87,23 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             if 'human_source_decisions' in value['materials']:
                 from backend.pipeline.claim_human_source import assert_current
                 assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'])
+        elif direction.get('refresh_transaction_context') is True:
+            # A broader SQL consumer may change without changing any fact
+            # actually read by either model. Prove that separation rather
+            # than reusing stale approval after a content or source change.
+            if unrecorded or not value.get('opus_approved'):
+                raise ValueError('transaction context recovery requires an accepted complete review')
+            transaction_context = _current_rejected_input_context(store, cursor,
+                cm.Request.model_validate(value['materials']['request']), value['materials'], include_records=True)
+            if transaction_context is None:
+                raise ValueError('review recovery requires actual transaction-only drift')
+            material = value['materials']
+            request = cm.Request.model_validate(material['request'])
+            _, sources = cm.load_authority(request, source_documents=cm.source_documents(material['before']),
+                selected_source_ids=material['unit_request']['source_bindings'],
+                human_source_decisions=material.get('human_source_decisions'))
+            if sources != material['sources']:
+                raise ValueError('review recovery source drift')
         else:
             store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v
                 for k,v in value['materials']['transaction_before'].items()}))
@@ -114,6 +138,8 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
                 if destination.read_bytes()!=payload:raise ValueError('recovery attempted to overwrite original model evidence')
             else:destination.write_bytes(payload)
         materials=deepcopy(value['materials']);materials['audit_contract']=current_contract
+        if transaction_context:
+            materials['transaction_before'] = transaction_context.pop('current_transaction_before')
         if cm.model_packet(materials)!=cm.model_packet(value['materials']):
             raise ValueError('validator recovery changed the complete model input')
         write(root/'materials.json',materials)
@@ -155,6 +181,8 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         record={'authorization':authorization,'original_round':original,'original_parent':original_parent,
             'recovery_root':str(root),'current_contract':current_contract,'model_inputs_unchanged':True,'model_calls':0,
             'candidate_unchanged':True,'human_content_approval':False}
+        if transaction_context:
+            record['transaction_context_refresh'] = transaction_context
         write(root/'engineering-recovery.json',record)
         if checkpoint=='reviewed':
             value.pop('reviewed',None);value.pop('reviewed_sha256',None)
