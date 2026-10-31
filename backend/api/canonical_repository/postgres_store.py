@@ -3392,7 +3392,7 @@ class PostgresKnowledgeStore:
                             # must remain exactly unchanged. Legacy unknown-call
                             # extensions without a current binding stay strict.
                             current_bound_follow_up = (extension
-                                and (extension.get('basis') == 'remaining_findings'
+                                and (extension.get('basis') in {'remaining_findings','api_output_limit'}
                                      or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension
                                      or extension.get('basis') == 'permission_required' and (
                                          continuation.get('source_support_creation') or continuation.get('related_owner_target_extension'))))

@@ -23,8 +23,21 @@ def overwrite(path,value):
 
 
 @pytest.fixture
-def exhausted(action):
+def exhausted(action,request,monkeypatch):
     store=action[0];seed_claims(store,['C'])
+    drift=getattr(request,'param',None)
+    if drift:
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        payload={'viewpoint_id':'CONSUMER','revision':1}
+        with store.connect() as conn:
+            conn.execute("INSERT INTO wang_knowledge.objects (collection,object_id,revision,content_sha256,payload) VALUES ('canonical_viewpoints','CONSUMER',1,%s,%s::jsonb)",
+                (record_content_sha(payload),json.dumps(payload)))
+        read_context=store.read_claim_context
+        def complete_context(*args,**kwargs):
+            rows=read_context(*args,**kwargs)
+            rows['canonical_viewpoints','CONSUMER']=store.get_record_state('canonical_viewpoints','CONSUMER')
+            return rows
+        monkeypatch.setattr(store,'read_claim_context',complete_context)
     old,root=operation_request(action,'Update',['C'])
     policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v3.json').read_text())
     policy.models['opus']['backend']='anthropic_api'
@@ -51,6 +64,12 @@ def exhausted(action):
     assert execute_claim_management(store,old,root=root,ports=ports)['reason']=='model_failed'
     previous=store.get_cvp_group('CMA-'+cm.sha256_json(old.action_id))
     previous={k:v for k,v in previous.items() if k not in {'run_id','status','error'}}
+    if drift:
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET revision=2 WHERE collection='canonical_viewpoints' AND object_id='CONSUMER'")
+    if drift=='target':
+        payload=store.get_record_state('claims','C')['payload'];payload['statement']='changed outside the task'
+        store.apply_plan(store.plan_package({'package_id':'target-drift','claims':[payload]}))
     new,next_root=operation_request(action,'Update',['C']);new.predecessor_action_id=old.action_id
     new.permissions=old.permissions
     follow=policy.model_copy(deep=True);follow.budget.max_output_tokens=64000
@@ -64,6 +83,7 @@ def exhausted(action):
     return store,old,root,previous,new,next_root,follow,extension
 
 
+@pytest.mark.parametrize('exhausted',[None,'consumer'],indirect=True)
 def test_spent_output_limit_continues_once_without_repeating_completed_work(exhausted):
     store,old,root,previous,new,next_root,policy,extension=exhausted
     before=store.get_record_state('claims','C')
@@ -79,6 +99,15 @@ def test_spent_output_limit_continues_once_without_repeating_completed_work(exha
     assert parent['call_reservations']==previous['call_reservations']
     assert execute_claim_management(store,new,root=next_root,ports=ports)==result
     assert ports.calls==['opus']
+
+
+@pytest.mark.parametrize('exhausted',['target'],indirect=True)
+def test_current_transaction_binding_cannot_hide_real_claim_change(exhausted):
+    store,_,_,_,new,next_root,_,_=exhausted
+    ports=SyntheticPorts(store,next_root)
+    with pytest.raises((ValueError,RuntimeError),match='drift|changed'):
+        execute_claim_management(store,new,root=next_root,ports=ports)
+    assert not ports.calls
 
 
 @pytest.mark.parametrize('defect',['receipt','response_hash','partial_text','not_max_tokens','ledger','prompt','payload'])
