@@ -53,6 +53,22 @@ def test_api_spend_limit_checks_before_dispatch(tmp_path):
     assert not calls and not (tmp_path/'transport/invocation.json').exists()
 
 
+def test_explicit_medium_is_sent_and_cannot_replay_as_high(tmp_path):
+    calls=[]
+    def stream(**request):
+        calls.append(request)
+        return Stream()
+    stub=SimpleNamespace(messages=SimpleNamespace(stream=stream))
+    client=ClaimAnthropicAPI(spend_root=tmp_path/'billing',client=stub,reasoning_effort='medium')
+    client.call_artifacts=tmp_path/'transport'
+    assert generate(client)=={'ok':True}
+    assert calls[0]['output_config']['effort']=='medium'
+    high=ClaimAnthropicAPI(spend_root=tmp_path/'billing',client=stub)
+    high.call_artifacts=client.call_artifacts
+    with pytest.raises(ValueError,match='intent differs'):generate(high)
+    assert len(calls)==1
+
+
 def test_api_unknown_transport_is_not_repeated_and_keeps_cost_reservation(tmp_path):
     def fail():raise TimeoutError('connection lost')
     client,calls=api(tmp_path,fail)

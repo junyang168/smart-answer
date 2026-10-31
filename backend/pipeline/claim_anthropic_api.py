@@ -35,7 +35,7 @@ class ClaimAnthropicAPI:
     def __init__(self, *, model='claude-opus-5-5', reasoning_effort='high',
                  max_output_tokens=32000, timeout_seconds=600, spend_root=None, client=None, cache_enabled=False):
         from anthropic import Anthropic
-        if model!='claude-opus-5-5' or reasoning_effort!='high':
+        if model!='claude-opus-5-5' or reasoning_effort not in {'high','medium'}:
             raise ValueError('API bridge preserves exact Opus model and effort')
         if not spend_root or not Path(spend_root).is_absolute():
             raise ValueError('explicit absolute API spend root required')
