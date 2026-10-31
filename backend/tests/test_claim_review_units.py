@@ -271,11 +271,20 @@ def test_unstarted_scope_guard_failure_recovers_same_unit_without_spending_or_re
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     from backend.pipeline.claim_review_recovery import resume_saved_pre_review
     store, root = claims
+    d = store.get_record_state('evidence_steps', 'ED')['payload']
+    store.apply_plan(store.plan_package({'package_id':'old-missing-shared-reference',
+        'evidence_steps':[dict(d, source_fragment_ids=['FC'])]}))
     prepared = intake.prepare(['C'], root, instruction='Review C only', groups=[['C']],
                               policy=policy_file(root.parent), store=store)
     _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
     request, execution = next(iter(jobs.values()))
     ports = SyntheticPorts(store, execution, opus=pass_review)
+    original_scope = direct.scope
+    def old_projection(*args, **kwargs):
+        result = original_scope(*args, **kwargs)
+        result['record_keys'] = [k for k in result['record_keys'] if k != 'evidence_steps/ED']
+        return result
+    monkeypatch.setattr(direct, 'scope', old_projection)
     original_guard = store._assert_claim_management_scope
     def fail_before_call(*args, **kwargs):
         raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
@@ -287,11 +296,13 @@ def test_unstarted_scope_guard_failure_recovers_same_unit_without_spending_or_re
     slots = parent['call_reservations']
     rid = next(iter(parent['latest_rounds'].values()))
     monkeypatch.setattr(store, '_assert_claim_management_scope', original_guard)
+    monkeypatch.setattr(direct, 'scope', original_scope)
     with pytest.raises(ValueError, match='resume existing actions'):
         claim_review_units.prepare(['C'], root.parent/'duplicate-unit', instruction='Do not reset this work',
                                    policy=policy_file(root.parent), store=store)
     assert store.get_cvp_group(parent_id)['call_reservations'] == slots
     resume_saved_pre_review(store, rid)
+    assert 'evidence_steps/ED' in store.get_cvp_group(rid)['materials']['before']
     assert store.get_cvp_group(parent_id)['call_reservations'] == slots
     result = execute_claim_management(store, request, root=execution, ports=ports)
     assert result['status'] == 'completed', result

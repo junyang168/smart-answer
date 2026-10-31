@@ -914,7 +914,12 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             judged = set(parent.get('clarified_finding_ids', []))
             if not ids & judged or not ids - judged:
                 raise ValueError('unrecorded adjudication requires mixed old and genuinely new findings')
-        context = _current_rejected_input_context(store, cursor, request, materials, include_records=True)
+        # The exact-input helper intentionally rejects a changed projection.
+        # Before the first bounded call, that projection is the defect being
+        # repaired; verify all original transaction pins and the new semantic
+        # frontier below instead of requiring the old projection to recur.
+        context = (None if bounded_guard else
+                   _current_rejected_input_context(store, cursor, request, materials, include_records=True))
         if context is None and not (unrecorded or capacity_stop or bounded_guard):
             raise ValueError('transaction recovery requires actual transaction-only drift')
         if bounded_guard:
