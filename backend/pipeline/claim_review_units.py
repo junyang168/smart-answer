@@ -49,6 +49,7 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
     validate_members([members])
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError('review unit requires a concrete owner instruction')
+    instruction = instruction.strip()
     prior_reviews = prior_reviews or {}
     if set(prior_reviews) - set(members):
         raise ValueError('prior reviews must belong to the fixed review unit')

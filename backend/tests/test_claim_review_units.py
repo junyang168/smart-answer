@@ -10,7 +10,7 @@ from backend.pipeline.cvp_sql_actions import execute_claim_management
 from backend.pipeline.source_reconciliation_runner import binding
 from backend.tests.test_claim_management_intake import claims, pass_review
 from backend.tests.test_claim_management_postgres import action, postgres_store, _temporary_postgres
-from backend.tests.test_claim_management_execution_postgres import SyntheticPorts
+from backend.tests.test_claim_management_execution_postgres import SyntheticPorts, passing
 from backend.tests.test_claim_direct_scope import chain
 from backend.tests.test_claim_joint_update import shared
 from backend.tests.test_claim_management_human_source_follow_up import authorize
@@ -166,6 +166,27 @@ def test_reference_only_reading_cannot_be_imported_as_a_complete_review(claims):
     assert result['status'] == 'completed', result
     with pytest.raises(ValueError, match='reference-only'):
         claim_review_reuse.build(store, 'D', store.claim_management_qualification('C')['run_id'])
+
+
+def test_legacy_complete_review_reuse_does_not_require_neighbours_private_evidence(claims):
+    store, root = claims
+    store.apply_plan(store.plan_package({'package_id': 'legacy-related', 'claim_relations': [
+        {'claim_relation_id': 'R', 'from_id': 'D', 'to_id': 'C', 'relation_type': 'supports'}]}))
+    prepared = intake.prepare(['C'], root, instruction='Legacy full review', store=store)
+    _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    request.policy = cm.source.FileBinding.model_validate(binding(
+        intake.DEFAULT_POLICY.parent/'wang_claim_management_opus_only_v2.json'))
+    request.allowed_operations = ['Update']
+    request.creation_permissions = []
+    authorize(request, {'required_maintenance_keys': []})
+    result = execute_claim_management(store, request, root=execution,
+                                      ports=SyntheticPorts(store, execution, opus=passing))
+    assert result['status'] == 'completed', result
+    rid = store.claim_management_qualification('C')['run_id']
+    proof = claim_review_reuse.admit(store, 'D', rid)
+    assert 'evidence_steps/EC' not in {p['collection']+'/'+p['object_id'] for p in proof['read_pins']}
+    assert store.claim_management_qualification('D')['ready']
 
 
 def test_actual_shared_write_harming_a_reference_still_blocks(shared):

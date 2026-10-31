@@ -122,8 +122,11 @@ def verify(store, cursor, claim_id, proof):
         verify_current_source_binding(bound)
     assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], proof['protected_record_keys'])
     states = store._assert_transaction_read_pins(cursor, decoded_pins(proof['read_pins']))
-    store._assert_claim_management_scope(cursor, decoded_pins(proof['read_pins']), records=states,
-                                         request=proof['scope_request'])
+    # The reused proof explicitly protects a direct Claim basis, even when
+    # its original review used the legacy transitive scope. Dispatching by
+    # that old policy would demand neighbours' private Evidence again.
+    from backend.pipeline.claim_direct_scope import assert_current
+    assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states)
     state = states[('claims', claim_id)]
     if state['retired_at'] is not None or state['payload'].get('review_status') in cm.HELD:
         raise ValueError('review reuse cannot release retired or held content')
