@@ -80,6 +80,7 @@ class Policy(source.Contract):
 
     evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
+    review_unit_contract: Literal['claim_bounded_review_unit_v1'] | None = None
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
@@ -93,7 +94,7 @@ class Policy(source.Contract):
             value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -131,6 +132,10 @@ class Policy(source.Contract):
             raise ValueError('compact model decisions require the joint content Update contract')
         if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
             raise ValueError('own Evidence review requires scoped compact Opus and program readback')
+        if self.review_unit_contract and (self.claim_scope_contract != 'claim_direct_neighbours_v1'
+                or not self.evidence_review_contract or not self.joint_update_contract
+                or not 1 <= (self.joint_update_max_targets or 0) <= 10):
+            raise ValueError('bounded review units require explicit own-evidence/joint scope and capacity 1..10')
         return self
 
 
@@ -403,6 +408,9 @@ def audit_contract(root, policy=None):
         files += [pipeline/'prompts/claim_management_compact_v4.md',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
     files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
+    if policy is not None and policy.review_unit_contract:
+        files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
+                  pipeline/'prompts/claim_bounded_review_unit_v1.md']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -686,6 +694,11 @@ def validate_proposer_resolutions(candidate, previous, sources, *, request=None)
 
 def pending_context_adjudications(previous, candidate, context, *, request):
     """All context objections need GPT; agreed unrelated holds stay in the report."""
+    from backend.pipeline.claim_review_units import enabled
+    if enabled(request):
+        # These are already classified as nonblocking by finding_blocks().
+        # Preserve them as pending leads for their own Claim, never as resolved.
+        return {}
     decisions = {r.finding_id: r for r in candidate.finding_resolutions or []}
     return {fid: finding for fid, finding in context.items()
         if fid not in decisions or fid not in previous

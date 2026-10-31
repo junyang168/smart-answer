@@ -143,7 +143,7 @@ class ClaimModelCapacity:
             return record
 
     @contextmanager
-    def call(self, role, artifacts):
+    def call(self, role, artifacts, *, opus_api=False):
         if role not in ('gpt', 'opus'):
             raise ValueError('Claim capacity accepts only GPT and Opus')
         root = self.root / role
@@ -161,12 +161,14 @@ class ClaimModelCapacity:
             try:
                 while slot is None:
                     with self._state(role) as (root, state):
-                        if state.get('blocked'):
-                            raise CapacityUnavailable(role + ': ' + state['blocked'])
+                        reason = self.block_reason(state, opus_api=opus_api and role == 'opus')
+                        if reason:
+                            raise CapacityUnavailable(role + ': ' + reason)
                         if role == 'gpt':
                             downstream = _read(self.root / 'opus' / 'state.json', {})
-                            if downstream.get('blocked'):
-                                raise CapacityUnavailable('GPT waits for Opus recovery: ' + downstream['blocked'])
+                            reason = self.block_reason(downstream, opus_api=opus_api)
+                            if reason:
+                                raise CapacityUnavailable('GPT waits for Opus recovery: ' + reason)
                         if (self._waiters(root)[:1] == [ticket.name]
                                 and time.time() >= state['next_start']):
                             for index in range(state['allowed']):
@@ -224,7 +226,10 @@ class ClaimModelCapacity:
                         if not settled:
                             state['blocked'] = 'unsettled transport: ' + str(artifacts)
                         elif fatal:
-                            state['blocked'] = fatal
+                            if role == 'opus' and opus_api:
+                                state.setdefault('backend_blocks', {})['anthropic_api'] = fatal
+                            else:
+                                state['blocked'] = fatal
                         elif limited:
                             state['refusals'] += 1
                             state['allowed'] = 1
@@ -240,3 +245,19 @@ class ClaimModelCapacity:
                 ticket.unlink(missing_ok=True)
                 if slot is not None:
                     slot.close()
+
+    @staticmethod
+    def block_reason(state, *, opus_api=False):
+        """One shared slot pool; subscription quota is not an API quota.
+
+        Unknown/interrupted transports remain global blockers. Old journals
+        have subscription-only usage blocks; never clear or overwrite them.
+        """
+        reason = state.get('blocked')
+        if opus_api:
+            api = state.get('backend_blocks', {}).get('anthropic_api')
+            if api:
+                return api
+            if reason in {'usage_limit_reached', 'usage limit reached', "you've hit your limit", "you've hit your session limit"}:
+                return None
+        return reason

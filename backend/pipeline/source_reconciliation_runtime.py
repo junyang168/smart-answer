@@ -139,6 +139,8 @@ def claim_management_model_adapter(role, policy, *, live=False):
         if role == 'opus':
             response_model = BindingFindingsReview
             schema_name = 'claim_own_evidence_review_v1'
+    if policy.review_unit_contract:
+        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_bounded_review_unit_v1.md').read_text())
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
         response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
@@ -201,7 +203,19 @@ class ProductionPorts:
         configuration = os.environ.get('WKP_CLAIM_CAPACITY_CONFIG')
         if configuration:
             from backend.pipeline.claim_model_capacity import ClaimModelCapacity
-            self.model_call_capacity = ClaimModelCapacity(json.loads(Path(configuration).read_text())).call
+            gate = ClaimModelCapacity(json.loads(Path(configuration).read_text()))
+            def capacity_call(role, artifacts):
+                opus_api = False
+                path = Path(artifacts).parent/'materials.json'
+                if path.is_file():
+                    from backend.pipeline import claim_management as cm
+                    materials = json.loads(path.read_text())
+                    if materials.get('schema_version') == cm.VERSION:
+                        request = cm.Request.model_validate(materials['unit_request'])
+                        policy = cm.Policy.model_validate_json(cm.source.verify_file(request.policy).read_text())
+                        opus_api = policy.models['opus']['backend'] == 'anthropic_api'
+                return gate.call(role, artifacts, opus_api=opus_api)
+            self.model_call_capacity = capacity_call
 
     def current_snapshot(self, keys):
         """Fresh exact row identities, including storage metadata; no SELECT-all."""

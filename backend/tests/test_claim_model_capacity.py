@@ -78,6 +78,47 @@ def test_quota_stops_provider_without_probing(tmp_path):
         with gate.call('gpt',tmp_path/'next'): pytest.fail('quota probe')
 
 
+def test_api_uses_shared_slots_without_clearing_subscription_usage_block(tmp_path):
+    gate = capacity(tmp_path)
+    with gate.call('opus', tmp_path/'subscription-limit'):
+        returned(tmp_path/'subscription-limit', 1, 'usage_limit_reached')
+    with pytest.raises(CapacityUnavailable, match='usage_limit_reached'):
+        with gate.call('opus', tmp_path/'no-subscription-probe'):
+            pytest.fail('subscription quota was bypassed')
+    with gate.call('opus', tmp_path/'api-answer', opus_api=True):
+        returned(tmp_path/'api-answer')
+    with gate.call('gpt', tmp_path/'gpt-for-api', opus_api=True):
+        returned(tmp_path/'gpt-for-api')
+    saved = json.loads((gate.root/'opus'/'state.json').read_text())
+    assert saved['blocked'] == 'usage_limit_reached'
+    assert (gate.root/'opus'/'slot-0.lock').exists()
+
+
+def test_api_failure_blocks_api_and_its_gpt_without_erasing_old_subscription_block(tmp_path):
+    gate = capacity(tmp_path)
+    with gate.call('opus', tmp_path/'subscription-limit'):
+        returned(tmp_path/'subscription-limit', 1, 'usage_limit_reached')
+    with gate.call('opus', tmp_path/'api-limit', opus_api=True):
+        returned(tmp_path/'api-limit', 1, 'insufficient_quota')
+    for role in ['opus', 'gpt']:
+        with pytest.raises(CapacityUnavailable, match='insufficient_quota'):
+            with gate.call(role, tmp_path/('blocked-'+role), opus_api=True):
+                pytest.fail('API quota probe')
+    saved = json.loads((gate.root/'opus'/'state.json').read_text())
+    assert saved['blocked'] == 'usage_limit_reached'
+    assert saved['backend_blocks']['anthropic_api'] == 'insufficient_quota'
+
+
+def test_api_never_ignores_an_unsettled_shared_transport(tmp_path):
+    gate = capacity(tmp_path)
+    with gate.call('opus', tmp_path/'unknown'):
+        (tmp_path/'unknown').mkdir()
+        (tmp_path/'unknown'/'invocation.json').write_text('{}')
+    with pytest.raises(CapacityUnavailable, match='unsettled'):
+        with gate.call('opus', tmp_path/'must-not-call', opus_api=True):
+            pytest.fail('unknown shared transport was bypassed')
+
+
 def test_interrupted_journal_is_not_freed_by_old_pid(tmp_path):
     gate=capacity(tmp_path)
     root=gate.root/'opus';root.mkdir()

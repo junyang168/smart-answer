@@ -4102,11 +4102,23 @@ class PostgresKnowledgeStore:
             rows = [(rid, value) for rid, value in rows if
                 claim_id in value.get('blocked_current_claim_ids', [])
                 or 'claims/' + claim_id in value['materials']['original_goal']['target_keys']
+                or claim_id in value.get('readonly_claim_qualifications', {})
                 or any(d['record_key'] == 'claims/' + claim_id and d['action'] != 'retain'
                        for d in value.get('candidate', {}).get('dispositions', []))]
             if not rows:
                 return None
             for rid, value in rows:
+                reused = value.get('readonly_claim_qualifications', {}).get(claim_id)
+                if reused is not None:
+                    from backend.pipeline.claim_review_reuse import verify
+                    try:
+                        if reused.get('review_run_id') != rid:
+                            raise ValueError('review reuse round identity drift')
+                        return verify(self, cursor, claim_id, reused)
+                    except (ValueError, OSError, KeyError, ChangeSetConflict):
+                        # Retain the old record as history, never upgrade a
+                        # changed or newly contradicted bystander from it.
+                        continue
                 if claim_id in value.get('blocked_current_claim_ids', []):
                     # The formal finding was registered against exact current
                     # inputs. A later content change needs its own qualification.

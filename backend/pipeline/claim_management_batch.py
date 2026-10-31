@@ -65,8 +65,10 @@ def load(manifest, root, *, store=None):
         action_root = Path(job['root'])
         if not action_root.is_absolute() or request.action_id in jobs or str(action_root.resolve()) in roots:
             raise ValueError('duplicate action/root or relative execution root')
-        if request.operation != 'Update' or len(request.target_keys) > 2 or targets & set(request.target_keys):
-            raise ValueError('batch requires disjoint Update targets, maximum two per action')
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        maximum = 10 if bounded_unit(request) else 2
+        if request.operation != 'Update' or len(request.target_keys) > maximum or targets & set(request.target_keys):
+            raise ValueError('batch requires disjoint Update targets within its explicitly bound capacity')
         # Authenticate original authorization/policy without changing either.
         if store is None:
             from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
@@ -173,6 +175,8 @@ def run(manifest, root, *, model_capacity=None, refill=None):
         source_locks = {}
         capacity = None
         blocked = {}
+        opus_api = all(cm.Policy.model_validate_json(cm.source.verify_file(request.policy).read_text()).models['opus']['backend'] == 'anthropic_api'
+                       for request, _ in jobs.values())
         if model_capacity is not None:
             from backend.pipeline.claim_model_capacity import ClaimModelCapacity
             from backend.pipeline.claim_management_intake import immutable
@@ -210,7 +214,8 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                             scopes[key] = ({cm.source.key(*k) for k in records} | sources,
                                            {p.key for p in request.permissions} | sources)
                     stale = False
-                blocked = {role: json.loads((capacity.root / role / 'state.json').read_text()).get('blocked')
+                blocked = {role: capacity.block_reason(json.loads((capacity.root / role / 'state.json').read_text()),
+                                                     opus_api=opus_api and role == 'opus')
                            for role in ('gpt', 'opus') if capacity and (capacity.root / role / 'state.json').exists()}
                 blocked = {role: reason for role, reason in blocked.items() if reason}
                 if refill and refill_ready and not blocked:

@@ -71,6 +71,8 @@ def add_packet(packet, candidate=None):
     # is recomputed for candidate postimages by the ordinary review packet.
     content = packet['claim_scope']['content_claim_keys']
     packet['own_evidence_bindings'] = evidence_table(None, packet['before'], candidate, content_keys=content)
+    if packet['policy'].get('review_unit_contract') and len(packet['own_evidence_bindings']) > 10:
+        raise ValueError('active review unit exceeds ten Claims; split the unit before review')
     return packet
 
 

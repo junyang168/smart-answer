@@ -33,6 +33,16 @@ def scope(request, before, candidate=None):
         payloads.update(cm.source.index(candidate.records))
     targets = set(request.target_keys)
     maintenance = {p.key for p in request.permissions} - targets
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    if bounded_unit(request):
+        from backend.pipeline.claim_joint_update import required_keys
+        # Write permission is capability, not an instruction to review its
+        # owners. Actual candidate changes below still expand shared impact.
+        # Intake computes capability before sealing its authorization. Such
+        # draft requests cannot pass load_authority or execute; the final
+        # bound request always reads the real required-maintenance list.
+        maintenance = (set() if request.authorization.file_sha256 == '0' * 64
+                       else set(required_keys(request)))
     roots = targets | maintenance
     if candidate:
         roots.update(d.record_key for d in candidate.dispositions if d.action != 'retain')
@@ -77,6 +87,11 @@ def scope(request, before, candidate=None):
             elif col in cm.RELATION_COLLECTIONS:
                 impact_claims.update(k for k in deps(key, rows) if k.startswith('claims/'))
     content_claims = targets | impact_claims | {k for k in roots if k.startswith('claims/')}
+    if bounded_unit(request):
+        # An affected owner is inspected for the shared delta, not assigned
+        # another complete Claim review or a new qualification by proximity.
+        content_claims = targets | {k for k in roots if k.startswith('claims/')}
+        impact_context.update(impact_claims)
     core = set()
     support_indexes = {}
     def evidence_chain(seeds, rows, *, leaf_claims=False):
@@ -164,10 +179,13 @@ def scope(request, before, candidate=None):
         if any(payloads[k]['source_id'] not in own for k in chain if k.startswith('source_fragments/')):
             raise ValueError('Claim evidence crosses its own source boundary')
     keys.update(named('source_documents', sid) for sid in source_ids)
-    return {'contract': CONTRACT, 'record_keys': sorted(keys),
+    result = {'contract': CONTRACT, 'record_keys': sorted(keys),
             'content_claim_keys': sorted(content_claims), 'neighbour_claim_keys': sorted(neighbours),
             'relation_keys': sorted(relations), 'source_ids': sorted(source_ids),
             'maintenance_keys': sorted(maintenance)}
+    if bounded_unit(request):
+        result['impact_claim_keys'] = sorted(impact_claims - content_claims)
+    return result
 
 
 def assert_current(store, cursor, request, records):

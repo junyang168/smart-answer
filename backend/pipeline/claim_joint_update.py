@@ -131,6 +131,13 @@ def admission_error(request, policy, before, goal):
     try:
         if len(request.target_keys) > (policy.joint_update_max_targets or 1):
             raise ValueError('joint Update exceeds joint_update_max_targets')
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        if bounded_unit(request, policy):
+            from backend.pipeline import claim_management as cm
+            payloads = {k: v['payload'] for k, v in before.items()}
+            own = [cm.own_source_ids(payloads[k], payloads) for k in request.target_keys]
+            if len(request.source_bindings) != 1 or any(s != set(request.source_bindings) for s in own):
+                raise ValueError('bounded review unit must belong to exactly one same source')
         if request.creation_permissions and not creates(policy):
             raise ValueError('joint Update supports existing retain/update only; creation requires a separate capability')
         if creates(policy) and request.creation_permissions:
