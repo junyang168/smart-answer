@@ -816,12 +816,14 @@ def consumed_rejected_citations(previous,key,slot):
 
 
 def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
-    """Resume an exact saved candidate after one of two verified local fixes.
+    """Resume a saved pre-review stage after a verified local fix.
 
     Transaction-only drift may rebind consumers; mixed old/new objections may
     re-enter the normal candidate validator. Neither requires a new GPT call.
-    No Opus invocation may have started. All content, source, model packets,
-    candidate decisions, reservations and their spent states remain unchanged.
+    No Opus invocation may have started. Content, source, candidate decisions,
+    reservations and their spent states remain unchanged. A bounded-unit guard
+    failure before any model call may add only frozen read-only references to
+    the compiled input; other paths preserve the exact model packet.
     The original files and SQL metadata are archived in the recovery receipt.
     """
     from backend.pipeline.cvp_sql_actions import validate_claim_candidate_origin
@@ -843,6 +845,9 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             and parent['result'].get('detail') == 'Claim correction made no semantic progress or repeats a previous candidate')
         transaction_drift = (parent['result'].get('reason') == 'engineering_required'
             and parent['result'].get('detail', '').startswith('transaction current dependency drift:'))
+        bounded_guard = (parent['result'].get('reason') == 'engineering_required'
+            and parent['result'].get('detail') == 'direct Claim scope omitted a current neighbour or maintenance owner'
+            and parent['policy'].get('review_unit_contract') == 'claim_bounded_review_unit_v1')
         capacity_stop = False
         if stopped_capacity_proof is not None:
             check_binding(stopped_capacity_proof)
@@ -868,7 +873,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                 or bool(value.get('candidate')) != (not unrecorded)
                 or value.get('change_set_ids') or value.get('opus_approved')
                 or parent.get('continued_by') or parent['latest_rounds'].get(value['unit_id']) != round_id
-                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop)):
+                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop or bounded_guard)):
             raise ValueError('saved-candidate recovery requires the exact uncommitted pre-review failure')
         opus = parent['call_reservations'].get(round_id + ':opus', {})
         if opus.get('state') != 'planned':
@@ -910,8 +915,26 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             if not ids & judged or not ids - judged:
                 raise ValueError('unrecorded adjudication requires mixed old and genuinely new findings')
         context = _current_rejected_input_context(store, cursor, request, materials, include_records=True)
-        if context is None and not (unrecorded or capacity_stop):
+        if context is None and not (unrecorded or capacity_stop or bounded_guard):
             raise ValueError('transaction recovery requires actual transaction-only drift')
+        if bounded_guard:
+            if context is not None:
+                raise ValueError('bounded scope guard recovery requires unchanged original transaction inputs')
+            if (materials['roles'] != ['opus'] or candidate.records
+                    or any(d.action != 'retain' for d in candidate.dispositions)
+                    or any(s.get('state') != 'planned' for s in parent['call_reservations'].values())):
+                raise ValueError('bounded input repair is only allowed before the first actual model call')
+            from backend.pipeline.claim_direct_scope import scope
+            selected = scope(cm.Request.model_validate(materials['unit_request']), materials['transaction_before'])
+            repaired_before = {k:materials['transaction_before'][k] for k in selected['record_keys']}
+            if any(repaired_before.get(k) != v for k,v in materials['before'].items()):
+                raise ValueError('bounded input repair must preserve every original record unchanged')
+            audited = {cm.source.split_key(k) for k in repaired_before}
+            pins_before = {cm.source.split_key(k):v for k,v in materials['transaction_before'].items()}
+            observed = store._assert_transaction_read_pins(cursor, pins(pins_before))
+            store._assert_claim_management_scope(cursor, {k:v for k,v in pins(pins_before).items() if k in audited},
+                records={k:v for k,v in observed.items() if k in audited}, request=materials['unit_request'],
+                actual_write_keys=[d.record_key for d in candidate.dispositions if d.action != 'retain'])
         current_records = context.pop('current_transaction_before') if context else materials['transaction_before']
         original_value, original_parent = deepcopy(value), deepcopy(parent)
         current_contract = cm.audit_contract(old_root / 'transaction-recovery-contract', policy)
@@ -919,7 +942,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             raise ValueError('transaction recovery cannot change model instructions')
         root = old_root / ('transaction-only-' + sha256_json(context)[:20])
         root.mkdir(parents=True, exist_ok=True)
-        for name in ('candidate.json', 'candidate-normalization.json', *(['gpt.packet.json', 'gpt.reservation.json', 'gpt.raw.json'] if 'gpt' in materials['roles'] else [])):
+        for name in (*([] if bounded_guard else ['candidate.json', 'candidate-normalization.json']), *(['gpt.packet.json', 'gpt.reservation.json', 'gpt.raw.json'] if 'gpt' in materials['roles'] else [])):
             payload = (old_root / name).read_bytes()
             target = root / name
             if target.exists() and target.read_bytes() != payload:
@@ -929,7 +952,21 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                     stream.write(payload); stream.flush(); os.fsync(stream.fileno())
         rebound = deepcopy(materials)
         rebound.update(transaction_before=current_records, audit_contract=current_contract)
-        if cm.model_packet(rebound) != cm.model_packet(materials):
+        if bounded_guard:
+            rebound['before'] = repaired_before
+            # This is the pre-inference compiled read denominator, not an
+            # expansion of owner targets, write authority or maintenance.
+            # Keep the original goal in the recovery archive and extend only
+            # reference facts from the already frozen transaction snapshot.
+            for goal in (rebound['original_goal'], parent['original_goal']):
+                for key in set(repaired_before)-set(materials['before']):
+                    goal['original_objects'][key] = deepcopy(repaired_before[key])
+            candidate, normalized = cm.normalize_candidate(cm.existing_candidate(repaired_before).model_dump(mode='json'), sources)
+            cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), repaired_before, candidate, sources,
+                created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
+            write(root / 'candidate.json', candidate.model_dump(mode='json'))
+            write(root / 'candidate-normalization.json', normalized)
+        if not bounded_guard and cm.model_packet(rebound) != cm.model_packet(materials):
             raise ValueError('transaction recovery changed the exact model input')
         write(root / 'materials.json', rebound)
         receipt = {'round_id': round_id, 'stage': 'candidate', 'materials': binding(root / 'materials.json'), 'candidate': binding(root / 'candidate.json')}
@@ -938,11 +975,18 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             'transaction_context_refresh': context, 'current_contract': current_contract,
             'recovery_root': str(root), 'unrecorded_new_finding_adjudication': unrecorded,
             'stopped_capacity_proof': stopped_capacity_proof,
-            'model_inputs_unchanged': True, 'candidate_sha256': candidate.digest,
+            'bounded_scope_guard_repaired': bounded_guard,
+            'model_inputs_unchanged': not bounded_guard, 'candidate_sha256': candidate.digest,
+            'readonly_context_added_before_first_call': sorted(set(rebound['before'])-set(materials['before'])),
             'model_calls': 0, 'call_reservations_unchanged': True, 'content_approved': False}
         write(root / 'engineering-recovery.json', record)
         proof = binding(root / 'engineering-recovery.json')
         value.update(materials=rebound, recovery_root=str(root), outcome=None, pre_review_saved_recovery=proof)
+        if bounded_guard:
+            value['candidate'] = candidate.model_dump(mode='json')
+            value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
+                cm.Request.model_validate(rebound['unit_request']), rebound['before'], candidate)
+                if k.startswith('claims/')]
         if not unrecorded:
             value['stage_results']['candidate'] = binding(root / 'candidate-result.json')
         parent.update(audit_contract=current_contract, result={'status': 'running'})

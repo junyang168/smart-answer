@@ -175,7 +175,10 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             shown = request if not passed else request.model_copy(deep=True, update={'permissions': [
                 p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS]})
             added = []
-            for key in scope(shown, before)['record_keys']:
+            shown_scope = scope(shown, before)
+            shown_keys = (shown_scope['writable_record_keys'] if selected.review_unit_contract
+                          else shown_scope['record_keys'])
+            for key in shown_keys:
                 col, oid = cm.source.split_key(key)
                 if key in granted or col not in FIELDS or (col == 'claims' and oid not in members):
                     continue

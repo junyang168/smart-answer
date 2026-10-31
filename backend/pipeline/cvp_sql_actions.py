@@ -649,8 +649,14 @@ def execute_claim_management(store, request, *, root, ports):
                                 # content roots expand the semantic audit.
                                 audited = {content.split_key(k) for k in materials['before']}
                                 scope_pins = {k: v for k, v in pins(records).items() if k in audited}
+                                actual_writes = []
+                                candidate_path = round_root/'candidate.json'
+                                if candidate_path.is_file():
+                                    actual_writes = [d['record_key'] for d in body(read(candidate_path))['dispositions']
+                                                     if d['action'] != 'retain']
                                 store._assert_claim_management_scope(cursor, scope_pins,
-                                    records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'])
+                                    records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'],
+                                    actual_write_keys=actual_writes)
                     before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
                     transport = SimpleNamespace(before_model_call=before_call,
                         model_call_capacity=getattr(ports, 'model_call_capacity', None),

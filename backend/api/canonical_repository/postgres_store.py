@@ -3858,6 +3858,12 @@ class PostgresKnowledgeStore:
                 context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
                     request=unit_request, candidate=candidate)
                 qualification_findings = dict(context_findings)
+                if cm.Policy.model_validate(materials['policy']).review_unit_contract:
+                    # A deferred reference lead has not undergone GPT
+                    # adjudication or a full review of that Claim. Preserve
+                    # the lead without revoking its old qualification by
+                    # treating this contextual observation as a new verdict.
+                    qualification_findings = {}
                 adjudicating = cm.Policy.model_validate(materials['policy']).all_findings_to_gpt and not cm.is_source_impact(materials['request'])
                 if adjudicating:
                     pending_context = cm.pending_context_adjudications(pending, candidate, context_findings,
@@ -3997,7 +4003,8 @@ class PostgresKnowledgeStore:
                         assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'])
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'])
+                    self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'],
+                        actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'])
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
                 if not report_only:
@@ -4065,7 +4072,7 @@ class PostgresKnowledgeStore:
                          (canonical_json(value), action_run_id))
         return value['result']
 
-    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None):
+    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None, actual_write_keys=()):
         """New shared owners/relations must not hide behind unchanged row pins."""
         from backend.pipeline.claim_management import CLAIM_COLLECTIONS
         if records is None:
@@ -4075,7 +4082,7 @@ class PostgresKnowledgeStore:
             from backend.pipeline.claim_management import Request
             request = Request.model_validate(request)
             if enabled(request):
-                return assert_current(self, cursor, request, records)
+                return assert_current(self, cursor, request, records, actual_write_keys=actual_write_keys)
         payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
         keys = {key for key in read_pins if key[0] in CLAIM_COLLECTIONS}
         for col, oid in self._claim_reference_consumers(cursor, keys):
@@ -4176,7 +4183,8 @@ class PostgresKnowledgeStore:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'])
+                    self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'],
+                        actual_write_keys=[d['record_key'] for d in value['candidate']['dispositions'] if d['action'] != 'retain'])
                 except (ValueError, OSError, KeyError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))
@@ -4193,6 +4201,11 @@ class PostgresKnowledgeStore:
                     result.update(validation_kind='opus_and_program_readback', independent_audit_complete=False)
                 if replaced_spot_check:
                     result['legacy_ai_spot_check_replaced_by_current_review'] = True
+                from backend.pipeline.claim_review_reuse import assert_no_newer_rejection
+                try:
+                    assert_no_newer_rejection(cursor, claim_id, rid, ['claims/'+claim_id])
+                except ValueError:
+                    return {'ready': False, 'reason': 'newer_formal_review_objection', 'run_id': rid}
                 return result
         reason = ('current_program_readback_required' if any(
             not Policy.model_validate(v['materials']['policy']).independent_audit_required for _,v in rows)
@@ -8120,7 +8133,8 @@ class PostgresKnowledgeStore:
                             audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
                             scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}
                             self._assert_claim_management_scope(cursor, scope_pins,
-                                records={k: v for k, v in transaction_before.items() if k in audited}, request=scope.get('claim_scope_request'))
+                                records={k: v for k, v in transaction_before.items() if k in audited}, request=scope.get('claim_scope_request'),
+                                actual_write_keys=[op.collection+'/'+op.object_id for op in plan.operations])
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
                         if not set(affected)<=set(transaction_context.read_pins):
                             raise ChangeSetConflict('transaction omitted a current affected consumer')

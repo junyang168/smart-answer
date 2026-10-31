@@ -89,6 +89,14 @@ def test_three_member_unit_uses_one_existing_update_and_retains_all_results(clai
     assert request.target_keys == ['claims/C', 'claims/D', 'claims/E']
     def review(packet):
         assert set(packet['claim_scope']['content_claim_keys']) == set(request.target_keys)
+        from backend.pipeline.claim_evidence_review import BindingFindingsReview, validate_assessments
+        from backend.pipeline.source_reconciliation_runner import body, read
+        material = body(read(execution/packet['round_id']/'materials.json'))
+        candidate = cm.Candidate.model_validate(body(read(execution/packet['round_id']/'candidate.json')))
+        incomplete = pass_review(packet)
+        incomplete['binding_assessments'].pop()
+        with pytest.raises(ValueError, match='each content Claim'):
+            validate_assessments(BindingFindingsReview.model_validate(incomplete), material, candidate)
         return pass_review(packet)
     ports = SyntheticPorts(store, execution, opus=review)
     result = execute_claim_management(store, request, root=execution, ports=ports)
@@ -225,3 +233,100 @@ def test_actual_shared_write_harming_a_reference_still_blocks(shared):
     assert result['status'] == 'paused', result
     assert store.get_record_state('evidence_steps', 'E') == old
     assert ports.calls == ['gpt', 'opus']
+
+
+def test_shared_fragment_consumers_are_frozen_references_not_extra_targets(claims):
+    store, root = claims
+    d = store.get_record_state('evidence_steps', 'ED')['payload']
+    store.apply_plan(store.plan_package({'package_id': 'shared-fragment',
+        'evidence_steps': [dict(d, source_fragment_ids=['FC'])]}))
+    path = policy_file(root.parent)
+    policy = cm.Policy.model_validate_json(path.read_text())
+    policy.initial_candidate = 'proposal'
+    path.write_text(policy.model_dump_json())
+    prepared = intake.prepare(['C'], root, instruction='Correct C with shared evidence protected',
+                              groups=[['C']], policy=path, store=store)
+    _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    assert not any(p.key == 'evidence_steps/ED' for p in request.permissions)
+    def propose(packet):
+        assert 'evidence_steps/ED' in packet['before']
+        return {'changes':[{'record_key':'source_fragments/FC',
+            'fields_json':json.dumps({'verbatim_excerpt':'甲是假设'}), 'reason':'synthetic concise bound quote',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设'}]}],
+            'findings':[], 'finding_resolutions':[], 'creations':[], 'retirements':[]}
+    def review(packet):
+        assert list(packet['own_evidence_bindings']) == ['claims/C']
+        assert 'claims/D' in packet['claim_scope']['impact_claim_keys']
+        return pass_review(packet)
+    ports = SyntheticPorts(store, execution, proposal=propose, opus=review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    assert store.claim_management_qualification('C')['ready']
+    assert store.claim_management_qualification('D') is None
+    assert ports.calls == ['gpt', 'opus']
+
+
+def test_unstarted_scope_guard_failure_recovers_same_unit_without_spending_or_resetting_budget(claims, monkeypatch):
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    store, root = claims
+    prepared = intake.prepare(['C'], root, instruction='Review C only', groups=[['C']],
+                              policy=policy_file(root.parent), store=store)
+    _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    ports = SyntheticPorts(store, execution, opus=pass_review)
+    original_guard = store._assert_claim_management_scope
+    def fail_before_call(*args, **kwargs):
+        raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
+    monkeypatch.setattr(store, '_assert_claim_management_scope', fail_before_call)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'paused' and ports.calls == []
+    parent_id = 'CMA-'+cm.sha256_json(request.action_id)
+    parent = store.get_cvp_group(parent_id)
+    slots = parent['call_reservations']
+    rid = next(iter(parent['latest_rounds'].values()))
+    monkeypatch.setattr(store, '_assert_claim_management_scope', original_guard)
+    with pytest.raises(ValueError, match='resume existing actions'):
+        claim_review_units.prepare(['C'], root.parent/'duplicate-unit', instruction='Do not reset this work',
+                                   policy=policy_file(root.parent), store=store)
+    assert store.get_cvp_group(parent_id)['call_reservations'] == slots
+    resume_saved_pre_review(store, rid)
+    assert store.get_cvp_group(parent_id)['call_reservations'] == slots
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus']
+
+
+@pytest.mark.parametrize('affects_target', [False, True])
+def test_reference_lead_and_real_contradiction_have_distinct_qualification_effects(claims, affects_target):
+    store, root = claims
+    store.apply_plan(store.plan_package({'package_id':'reference-edge', 'claim_relations':[
+        {'claim_relation_id':'R','from_id':'C','to_id':'D','relation_type':'supports'}]}))
+    path = policy_file(root.parent)
+    first = intake.prepare(['C'], root/'first', instruction='Review C', groups=[['C']], policy=path, store=store)
+    _, jobs = batch.load(first['manifest']['path'], root/'first'/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    assert execute_claim_management(store, request, root=execution,
+        ports=SyntheticPorts(store, execution, opus=pass_review))['status']=='completed'
+    assert store.claim_management_qualification('C')['ready']
+    p=cm.Policy.model_validate_json(path.read_text());p.budget.max_revisions=0;path.write_text(p.model_dump_json())
+    second = intake.prepare(['D'], root/'second', instruction='Review D; C is reference only',
+                            groups=[['D']], policy=path, store=store)
+    _, jobs = batch.load(second['manifest']['path'], root/'second'/'batch', store=store)
+    request, execution = next(iter(jobs.values()))
+    def review(packet):
+        assert list(packet['own_evidence_bindings']) == ['claims/D']
+        result=pass_review(packet)
+        result['findings']=[{'target_key':'claims/C','component':'synthetic_reference_question','category':'content',
+            'reason':'synthetic reference objection','acceptance_condition':'adjudicate if relevant',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+            'affected_target_keys':['claims/D'] if affects_target else [], 'affected_write_keys':[],
+            'impact_reason':'undermines D premise' if affects_target else 'unrelated reference lead only'}]
+        return result
+    ports=SyntheticPorts(store, execution, opus=review)
+    result=execute_claim_management(store, request, root=execution, ports=ports)
+    assert (result['status']=='completed') is (not affects_target), result
+    q=store.claim_management_qualification('C')
+    assert bool(q and q.get('ready')) is (not affects_target)
+    assert ports.calls==['opus']

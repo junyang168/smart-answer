@@ -294,7 +294,8 @@ def current_pins(store,cursor,value):
         for bound in peer['materials']['unit_request']['source_bindings'].values():
             verify_current_source_binding(bound)
         peer_current=store._assert_transaction_read_pins(cursor,fresh)
-        store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'])
+        store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'],
+            actual_write_keys=[d['record_key'] for d in peer['candidate']['dispositions'] if d['action']!='retain'])
         if 'human_source_decisions' in peer['materials']:
             from backend.pipeline.claim_human_source import assert_current
             assert_current(cursor,peer['materials']['unit_request']['source_bindings'],peer['materials']['human_source_decisions'])
@@ -324,7 +325,8 @@ def admit(store,cursor,original_id,peer_id):
     # Original-only evidence is still covered by the original full review:
     # verify it is exactly unchanged, instead of sending it to the peer model.
     current=store._assert_transaction_read_pins(cursor,{**original,**fresh} if bounded else fresh)
-    store._assert_claim_management_scope(cursor,fresh,records={k:current[k] for k in fresh},request=peer['materials']['unit_request'])
+    store._assert_claim_management_scope(cursor,fresh,records={k:current[k] for k in fresh},request=peer['materials']['unit_request'],
+        actual_write_keys=[d['record_key'] for d in peer['candidate']['dispositions'] if d['action']!='retain'])
     if bounded:
         for value in (old,peer):
             if 'human_source_decisions' in value['materials']:
@@ -353,7 +355,8 @@ def admit(store,cursor,original_id,peer_id):
     if not legacy or has_objections:
         changes,basis,objections=reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review,old_review)
     if not changes:raise ValueError('qualification has no context drift to revalidate')
-    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated},request=old['materials']['unit_request'])
+    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated},request=old['materials']['unit_request'],
+        actual_write_keys=[d['record_key'] for d in old['candidate']['dispositions'] if d['action']!='retain'])
     for key in protected:
         if key.startswith('claims/') and cursor.execute("""SELECT 1 FROM wang_knowledge.pipeline_runs
             WHERE metadata->'blocked_current_claim_ids' ? %s AND started_at>

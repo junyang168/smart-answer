@@ -74,6 +74,9 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
             from backend.pipeline.claim_management_batch import load
             check_binding(update['manifest'])
             load(update['manifest']['path'], root/'update'/'batch', store=store)
+        if any(not (q := store.claim_management_qualification(cid)) or not q.get('ready')
+               for cid in saved['reference_claim_ids']):
+            raise ValueError('an existing reference needs focused reconciliation before dispatch')
         return saved
     records = store.read_claim_context([('claims', cid) for cid in members])
     payloads = {cm.source.key(*k):v['payload'] for k,v in records.items()}
@@ -120,6 +123,17 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
             else:
                 pending.append(cid)
     # Every proposed reuse is checked before any additive registration.
+    if pending:
+        with store.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET TRANSACTION READ ONLY')
+            cursor.execute("""SELECT metadata->>'action_id' FROM wang_knowledge.pipeline_runs
+                WHERE metadata->>'kind'='claim_management_action'
+                  AND metadata->'original_goal'->'target_keys' ?| %s
+                  AND metadata->'result'->>'status' IS DISTINCT FROM 'completed'
+                  AND NOT metadata ? 'continued_by'""", (['claims/'+cid for cid in pending],))
+            existing = [row[0] for row in cursor.fetchall()]
+        if existing:
+            raise ValueError('review unit must resume existing actions without resetting their budget: ' + ', '.join(existing))
     for cid in proofs:
         claim_review_reuse.admit(store, cid, proofs[cid]['review_run_id'])
         q = store.claim_management_qualification(cid)

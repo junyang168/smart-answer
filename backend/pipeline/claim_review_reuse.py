@@ -88,13 +88,16 @@ def build(store, claim_id, run_id):
 def assert_no_newer_rejection(cursor, claim_id, run_id, protected):
     cursor.execute("""SELECT metadata->'findings',metadata->'context_findings',
         metadata->'blocked_current_claim_ids',metadata->'materials'->'original_goal'->'target_keys',
-        metadata->>'outcome',metadata->'opus_approved',metadata->'program_readback_complete'
+        metadata->>'outcome',metadata->'opus_approved',metadata->'program_readback_complete',
+        metadata->'materials'->'policy'->>'review_unit_contract'
         FROM wang_knowledge.pipeline_runs
         WHERE metadata->>'kind'='claim_management_round' AND metadata->'claim_ids' ? %s
           AND started_at >= (SELECT started_at FROM wang_knowledge.pipeline_runs WHERE run_id=%s)
         ORDER BY started_at DESC,run_id DESC""", (claim_id, run_id))
     key = 'claims/' + claim_id
-    for findings, context, blocked, targets, outcome, approved, readback in cursor.fetchall():
+    for findings, context, blocked, targets, outcome, approved, readback, unit in cursor.fetchall():
+        if unit == 'claim_bounded_review_unit_v1':
+            context = {}  # Deferred, unadjudicated leads are not formal rejection.
         if (claim_id in (blocked or [])
                 or any(f.get('target_key') in protected or key in (f.get('affected_target_keys') or [])
                        for f in list((findings or {}).values()) + list((context or {}).values()))):
