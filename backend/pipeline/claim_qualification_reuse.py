@@ -415,4 +415,6 @@ def after_completion(store,cursor,peer_id,peer):
         try:proof=admit(store,cursor,row[0],peer_id)
         except (ValueError,ChangeSetConflict):continue
         restored.extend(proof['event_ids'])
+    from backend.pipeline.claim_review_reuse import after_completion as reuse_context
+    reuse_context(store, cursor, peer_id, peer)
     return sorted(set(restored))
