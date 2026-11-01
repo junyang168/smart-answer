@@ -109,8 +109,6 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
             raise ValueError('Correction must be a bounded nonempty replacement')
         if normalized(row['old']) == normalized(row['new']):
             raise ValueError('This stage must not rewrite punctuation/case alone')
-        if any(c in row['new'] for c in '\n\r'):
-            raise ValueError('Correction cannot insert paragraph breaks')
         p = by_id[row['paragraph_id']]
         model_old = row['old']
         try:
@@ -126,6 +124,14 @@ def validate_proposals(answer: dict, paragraphs: list[dict], slide_ids: set[str]
             start, end = locate(converted, old, occurrence)
         if start and unicodedata.category(p['text'][start]).startswith('M') or end < len(p['text']) and unicodedata.category(p['text'][end]).startswith('M'):
             raise ValueError('Correction would split a combining sequence')
+        # ASR hard wraps already inside a paragraph may survive a local edit.
+        # Bind them to the actual source range, not a model-supplied old quote.
+        source_quote = p['text'][start:end]
+        changes = difflib.SequenceMatcher(None, source_quote, row['new'], autojunk=False).get_opcodes()
+        if any(any(c in row['new'][a:b] for c in '\n\r')
+               and (tag != 'equal' or not row['new'][a:b].strip('\r\n'))
+               for tag, _, _, a, b in changes):
+            raise ValueError('Correction cannot insert paragraph breaks')
         if p['text'][start:end].count('\n')!=model_old.count('\n') or p['text'][start:end].count('\r')!=model_old.count('\r'):
             context['source_linebreak_equivalence_used']=True
         item = {**row, **context, 'old': p['text'][start:end], 'model_old': model_old,
@@ -195,9 +201,9 @@ def withhold_overlap_conflicts(answer, paragraphs, slide_ids):
 def validate_completed_repair(answer: dict, paragraphs: list[dict], slide_ids: set[str]) -> tuple[list[dict], list[dict]]:
     """After the sole structural repair, omit an unlocatable edit, never guess.
 
-    A malformed schema or invented reference still stops. Only an exact-quote
-    failure in a known paragraph can be isolated without interpreting audio or
-    changing the proposed correction. All raw answers remain in the call ledger.
+    A malformed schema or invented reference still stops. Exact-quote failures
+    and punctuation/case-only edits in a known paragraph retain their original
+    text, without interpreting audio. All raw answers remain in the call ledger.
     """
     check_schema(answer, SCHEMA)
     kept, withheld = [], []
@@ -206,11 +212,15 @@ def validate_completed_repair(answer: dict, paragraphs: list[dict], slide_ids: s
         try:
             validate_proposals({'proposals': [row]}, paragraphs, slide_ids)
         except ValueError as error:
-            if str(error) != 'Replacement does not identify an exact original occurrence':
+            statuses = {
+                'Replacement does not identify an exact original occurrence': 'withheld_invalid_exact_range',
+                'This stage must not rewrite punctuation/case alone': 'withheld_punctuation_only',
+            }
+            if str(error) not in statuses:
                 raise
-            withheld.append({**row, 'status': 'withheld_invalid_exact_range',
+            withheld.append({**row, 'status': statuses[str(error)],
                 'paragraph_text_sha256': object_sha(by_id[row['paragraph_id']]['text']),
-                'reason_for_withholding': 'No exact original occurrence after one structural repair; no fuzzy retargeting; original text retained.'})
+                'reason_for_withholding': str(error) + ' after one structural repair; original text retained without retargeting.'})
         else:
             kept.append(row)
     filtered = {'proposals': kept}
@@ -277,7 +287,8 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
     if reason == 'MALFORMED_FUNCTION_CALL':
         stage = 'known_malformed_function_recovery_once'
         recovery_config.update(automatic_function_calling={'disable': True},
-                               tool_config={'function_calling_config': {'mode': 'NONE'}})
+                               tool_config={'function_calling_config': {'mode': 'NONE'}},
+                               response_json_schema=SCHEMA)
     recovery = {**request, 'stage': stage, 'config': recovery_config,
                 'parent_response_sha256': object_sha(raw)}
     cached = (out / 'calls' / object_sha(recovery) / 'state.json').exists()

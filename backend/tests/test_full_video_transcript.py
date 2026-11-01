@@ -270,3 +270,49 @@ def test_audio_only_source_retains_clock_without_inventing_frames(tmp_path, monk
     local = full.local_slides(out, master['windows'][0])
     assert full.read(local / 'report.json')['events'] == []
     assert master['windows'][-1]['end_sample'] == len(samples)
+
+
+def test_late_partial_alignment_retries_after_previous_speech_and_keeps_original(tmp_path, monkeypatch):
+    import numpy as np
+    from backend.pipeline import full_video_transcript as full
+    folder=tmp_path/'windows/w00';original=folder/'initial'
+    full.write_audio(tmp_path/'master.wav',np.zeros(10*SR,dtype=np.int16))
+    full.save(tmp_path/'master.json',{'windows':[{'id':'w00','start_ms':0}]})
+    paragraphs=[{'id':'p0','text':'甲','start_ms':1000,'end_ms':1600},
+                {'id':'p1','text':'乙丙丁','start_ms':2000,'end_ms':3000}]
+    full.save(folder/'editorial/reading_view.json',{'paragraphs':paragraphs})
+    full.save(folder/'final_alignment_ref.json',{'folder':'initial','reading_view_sha256':full.sha(folder/'editorial/reading_view.json')})
+    chunks=[]
+    for p in paragraphs:
+        path=original/f'audio/{p["id"]}.wav';full.write_audio(path,np.zeros(10*SR,dtype=np.int16))
+        c={'id':p['id'],'text':p['text'],'audio':f'audio/{p["id"]}.wav','audio_sha256':full.sha(path),'source_origin_sample':0,'sample_count':10*SR};chunks.append(c)
+        items=([{'text':'甲','start_ms':1000,'end_ms':1600}] if p['id']=='p0' else
+               [{'text':'乙','start_ms':7000,'end_ms':7200},{'text':'丙','start_ms':0,'end_ms':0},{'text':'丁','start_ms':0,'end_ms':0}])
+        full.save(original/f'alignment/{p["id"]}.json',{'identity':{'text_sha256':text_sha(p['text']),'audio_sha256':c['audio_sha256']},'items':items})
+    full.save(original/'asr.json',{'chunks':chunks})
+    def align(path, python):
+        c=full.read(path/'asr.json')['chunks'][1]
+        assert c['source_origin_sample']==1600*16
+        assert c['timing_refinement']['reason']=='late_partial_alignment_in_preceding_speech_padding'
+        full.save(path/'alignment/p1.json',{'identity':{'text_sha256':text_sha('乙丙丁'),'audio_sha256':c['audio_sha256']},
+                  'items':[{'text':char,'start_ms':200+i*100,'end_ms':300+i*100} for i,char in enumerate('乙丙丁')]})
+    monkeypatch.setattr(full,'align',align)
+    full.refine_backward_predictions(tmp_path,tmp_path/'python')
+    assert full.read(original/'alignment/p1.json')['items'][0]['start_ms']==7000
+    ref=full.read(folder/'final_alignment_ref.json');refined=folder/ref['folder'];c=full.read(refined/'asr.json')['chunks'][1]
+    assert full.resolve_final_paragraph(paragraphs[1],c,full.read(refined/'alignment/p1.json'))['start_ms']==1800
+    assert c['text']=='乙丙丁'
+
+
+def test_conservative_retention_keeps_uncertain_teaching_and_is_bound_to_source_text():
+    from backend.pipeline.full_video_transcript import retain_uncertain_paragraphs, apply_exclusions
+    paragraphs=[{'id':'p0','text':'來，站在那裡。好了，所以他們把他殺了。'}, {'id':'p1','text':'電腦出問題。'}]
+    deletions=[{'paragraph_id':'p0','old':'來，站在那裡。好了，','reason':'模型判作現場指示','kind':'logistics'},
+               {'paragraph_id':'p1','old':'電腦出問題。','reason':'設備故障','kind':'technical_setup'}]
+    reviews=[{'paragraph_id':'p0','source_text_sha256':text_sha(paragraphs[0]['text']),'reason':'可能是正在讀的經文，原文保留待核對'}]
+    kept, withheld=retain_uncertain_paragraphs(paragraphs,deletions,reviews)
+    reading,_=apply_exclusions(paragraphs,{'deletions':kept})
+    assert reading==[paragraphs[0]]
+    assert withheld[0]['status']=='retained_uncertain_content' and withheld[0]['human_confirmed'] is False
+    with pytest.raises(ValueError,match='another paragraph revision'):
+        retain_uncertain_paragraphs(paragraphs,deletions,[{**reviews[0],'source_text_sha256':'stale'}])

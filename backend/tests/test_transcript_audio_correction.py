@@ -257,6 +257,41 @@ def test_known_malformed_function_response_has_one_recorded_tools_disabled_recov
     assert adapter.generations == 2
     assert adapter.configs[1]['automatic_function_calling']['disable'] is True
     assert adapter.configs[1]['tool_config']['function_calling_config']['mode'] == 'NONE'
+    from backend.pipeline.transcript_audio_correction import SCHEMA
+    assert adapter.configs[1]['response_json_schema'] == SCHEMA
     assert adapter.config == request['config']
     assert proposal_response(adapter, [], request, tmp_path) == result
     assert adapter.generations == 2
+
+
+def test_local_correction_can_preserve_existing_asr_hard_wrap():
+    p = paragraph('神\n要為著拯救我們。')
+    edit = proposal(p, old='神\n要為著拯救我們', new='神預定耶穌基督\n要為著拯救我們')
+    result = apply_corrections([p], [{**edit, **audio_decision(p, edit)}])
+    assert result[0]['text'] == '神預定耶穌基督\n要為著拯救我們。'
+    assert p['text'] == '神\n要為著拯救我們。'
+
+
+@pytest.mark.parametrize('source,old,new', [
+    ('神要拯救我們。', '神要拯救我們', '神\n要拯救信徒'),
+    ('神要拯救我們。', '神\n要拯救我們', '神\n要拯救信徒'),
+    ('甲\n乙丙。', '甲\n乙丙', '甲乙\n丁'),
+])
+def test_correction_cannot_add_or_move_linebreaks_even_when_model_old_contains_them(source, old, new):
+    with pytest.raises(ValueError, match='paragraph breaks|exact original'):
+        proposal(paragraph(source), old=old, new=new)
+
+
+def test_completed_repair_keeps_valid_audio_edits_and_withholds_case_only_changes():
+    from backend.pipeline.transcript_audio_correction import SCHEMA, validate_completed_repair
+    p = paragraph('他用了 in how 和 Irresistible calling。')
+    fields = SCHEMA['properties']['proposals']['items']['properties']
+    valid = {k:v for k,v in proposal(p).items() if k in fields}
+    case = {**valid, 'old':'Irresistible calling', 'new':'irresistible calling'}
+    edits, withheld = validate_completed_repair({'proposals':[valid,case]},[p],set())
+    assert len(edits) == len(withheld) == 1
+    assert withheld[0]['status'] == 'withheld_punctuation_only'
+    assert 'start' not in withheld[0]
+    assert p['text'] == '他用了 in how 和 Irresistible calling。'
+    with pytest.raises(ValueError, match='invented'):
+        validate_completed_repair({'proposals':[{**case,'paragraph_id':'invented'}]},[p],set())

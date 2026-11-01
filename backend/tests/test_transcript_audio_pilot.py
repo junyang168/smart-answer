@@ -251,3 +251,20 @@ def test_audio_only_inventory_passes_assembly_without_claiming_visual_coverage(t
     assert result['visibility_available'] is False
     assert result['slides'] == []
     assert slide_at_time(result['visibility'], 1500) is None
+
+
+def test_chinese_separator_between_foreign_words_can_be_formatted_without_changing_words():
+    text = 'NYN，synagogue。'
+    units, plan = layout_plan(text)
+    plan['operations'] = [{'unit_id': 'u0000', 'offset': 3, 'delete': '，', 'insert': '。'}]
+    result = apply_layout(text, units, plan)
+    assert ''.join(p['text'] for p in result['paragraphs']) == 'NYN。synagogue。'
+    assert result['content_characters_preserved']
+
+
+@pytest.mark.parametrize('text, offset', [('3：16', 1), ('John：3', 4), ('1，000', 1), ('3.14', 1), ('e.g.', 1)])
+def test_numeric_and_foreign_internal_punctuation_remains_protected(text, offset):
+    units, plan = layout_plan(text)
+    plan['operations'] = [{'unit_id': units[0]['id'], 'offset': offset, 'delete': text[offset], 'insert': '。'}]
+    with pytest.raises(ValueError, match='protected'):
+        apply_layout(text, units, plan)
