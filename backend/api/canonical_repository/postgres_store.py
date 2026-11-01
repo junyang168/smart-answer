@@ -3327,7 +3327,12 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
-                if continuation.get('human_source_verification') and before != prior['original_goal']['original_objects']:
+                # Human answers bind the original review scope. The locked
+                # transaction readset also contains downstream consumers that
+                # were never source evidence; keep their current pins without
+                # mistaking their presence for a change to the question.
+                if (continuation.get('human_source_verification')
+                        and goal['original_objects'] != prior['original_goal']['original_objects']):
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
                 refresh = continuation.get('qualification_refresh', False)
                 extension = continuation.get('owner_call_extension')
