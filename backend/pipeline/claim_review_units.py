@@ -36,7 +36,7 @@ def validate_members(groups):
     return groups
 
 
-def prepare(members, root, *, instruction, prior_reviews=None, policy=None, store=None):
+def prepare(members, root, *, instruction, prior_reviews=None, policy=None, store=None, creation_count=1):
     """One frozen unit; previous passes are references, never model targets.
 
     Prior review IDs identify SQL history, not caller-provided approval JSON.
@@ -47,6 +47,8 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
     from backend.pipeline import claim_review_reuse
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     validate_members([members])
+    if type(creation_count) is not int or creation_count < 1:
+        raise ValueError('creation_count must be a positive integer')
     if not isinstance(instruction, str) or not instruction.strip():
         raise ValueError('review unit requires a concrete owner instruction')
     instruction = instruction.strip()
@@ -62,6 +64,8 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
         raise ValueError('unit requires an explicit bounded policy with sufficient capacity')
     pb = intake.immutable(root/'unit-policy.json', selected.model_dump(mode='json'))
     intent = {'members':members, 'prior_reviews':prior_reviews, 'instruction':instruction, 'policy':pb}
+    if creation_count != 1:
+        intent['creation_count'] = creation_count
     intake.immutable(root/'unit-intent.json', intent)
     saved_path = root/'unit-prepared.json'
     if saved_path.exists():
@@ -141,7 +145,7 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
             raise ValueError('admitted review reuse is no longer current: ' + cid)
         references[cid] = q
     prepared = intake.prepare(pending, root/'update', instruction=instruction, groups=[pending],
-        policy=pb['path'], store=store) if pending else None
+        policy=pb['path'], store=store, creation_count=creation_count) if pending else None
     result = {'members':members, 'reference_claim_ids':[cid for cid in members if cid in references],
               'target_claim_ids':pending, 'reference_qualifications':references,
               'prepared_update':prepared, 'model_calls':0}
@@ -159,12 +163,13 @@ def finish(prepared, *, store):
             'completed':all(q and q.get('ready') for q in qualifications.values())}
 
 
-def run(members, root, *, instruction, prior_reviews=None, policy=None, store=None, model_capacity=None):
+def run(members, root, *, instruction, prior_reviews=None, policy=None, store=None, model_capacity=None, creation_count=1):
     """Dispatch only the existing batch, then verify the fixed whole unit."""
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline import claim_management_batch as batch
     store = store or PostgresKnowledgeStore()
-    prepared = prepare(members, root, instruction=instruction, prior_reviews=prior_reviews, policy=policy, store=store)
+    prepared = prepare(members, root, instruction=instruction, prior_reviews=prior_reviews, policy=policy, store=store,
+                       creation_count=creation_count)
     update = prepared['prepared_update']
     if update and update['manifest']:
         batch.run(update['manifest']['path'], Path(root)/'update'/'batch', model_capacity=model_capacity)
@@ -182,11 +187,12 @@ def main():
     parser.add_argument('--instruction-file', required=True)
     parser.add_argument('--root', required=True)
     parser.add_argument('--policy')
+    parser.add_argument('--creation-count', type=int, default=1)
     parser.add_argument('--prior-reviews-file')
     parser.add_argument('--capacity-file')
     parser.add_argument('--run', action='store_true', help='Otherwise only prepare; no model dispatch')
     args = parser.parse_args()
-    kwargs = dict(instruction=Path(args.instruction_file).read_text(), policy=args.policy,
+    kwargs = dict(instruction=Path(args.instruction_file).read_text(), policy=args.policy, creation_count=args.creation_count,
                   prior_reviews=json.loads(Path(args.prior_reviews_file).read_text()) if args.prior_reviews_file else None)
     if args.run:
         kwargs['model_capacity'] = json.loads(Path(args.capacity_file).read_text()) if args.capacity_file else None

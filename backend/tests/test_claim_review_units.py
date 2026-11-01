@@ -27,6 +27,59 @@ def policy_file(root):
     return path
 
 
+def test_unit_can_reserve_and_commit_two_claims_without_extra_model_rounds(claims):
+    from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+    store,root=claims
+    policy=policy_file(root.parent)
+    prepared=claim_review_units.prepare(['C'],root,instruction='Review C and its two unrecorded source judgments',
+        creation_count=2,policy=policy,store=store)
+    _,jobs=batch.load(prepared['prepared_update']['manifest']['path'],root/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    ids=allocated_ids(authority['claim_creation_allocations'])
+    assert len(ids)==len(set(ids))==2
+    citation={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def review(packet):
+        result=pass_review(packet)
+        if not packet['unresolved']:
+            result['findings']=[{'target_key':'evidence_steps/EC','component':'independent_judgement_without_claim',
+                'category':'mapping','reason':'synthetic two source judgments need Claim records',
+                'acceptance_condition':'create both separately and retain the old owner','citations':[citation],
+                'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'own evidence maintenance'}]
+        else:
+            result['prior_findings']=[{'finding_id':fid,'disposition':'resolved','reason':'both created',
+                'citations':[citation],'affected_target_keys':['claims/C'],
+                'affected_write_keys':['evidence_steps/EC'],'impact_reason':'reciprocal owners preserved'} for fid in packet['unresolved']]
+        return result
+    def propose(packet):
+        return {'changes':[{'record_key':'evidence_steps/EC',
+            'fields_json':json.dumps({'statement':'甲是假设，不是断言。','produced_claim_ids':['C',*ids]}),
+            'reason':'retain old owner and bind both new records','citations':[citation]}],
+            'creations':[{'collection':'claims','object_id':cid,'fields_json':json.dumps({
+                'statement':statement,'claim_type':'exegesis','evidence_step_ids':['EC'],
+                'occurrences':[{'source_id':'S','anchors':[]}]}),'reason':'synthetic independent judgment','citations':[citation]}
+                for cid,statement in zip(ids,['甲是假设。','甲不是断言。'])],
+            'retirements':[],'findings':[],'finding_resolutions':[{'finding_id':fid,'disposition':'resolved',
+                'reason':'both created','citations':[citation],'affected_target_keys':['claims/C'],
+                'affected_write_keys':['evidence_steps/EC'],'impact_reason':'both claims bind existing evidence'} for fid in packet['unresolved']]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=review)
+    assert execute_claim_management(store,request,root=execution,ports=ports)['status']=='completed'
+    assert ports.calls==['opus','gpt','opus']
+    assert store.get_record_state('evidence_steps','EC')['payload']['produced_claim_ids']==['C',*ids]
+    assert all(store.claim_management_qualification(cid)['ready'] for cid in ids)
+    assert claim_review_units.prepare(['C'],root,instruction='Review C and its two unrecorded source judgments',
+        creation_count=2,policy=policy,store=store)==prepared
+    with pytest.raises(ValueError):
+        claim_review_units.prepare(['C'],root,instruction='Review C and its two unrecorded source judgments',
+            creation_count=3,policy=policy,store=store)
+
+
+@pytest.mark.parametrize('count',[0,-1,True,1.5])
+def test_unit_rejects_invalid_creation_count_before_preparing(tmp_path,count):
+    with pytest.raises(ValueError,match='positive integer'):
+        claim_review_units.prepare(['C'],tmp_path,instruction='Review C',creation_count=count)
+
+
 @pytest.mark.parametrize('groups', [[[]], [['A'] * 2], [['A'], ['A']], [[str(i) for i in range(11)]]])
 def test_membership_rejects_duplicates_and_oversized_units(groups):
     with pytest.raises(ValueError):
