@@ -209,8 +209,12 @@ class Assistant:
                 if owner and owner["message_id"] != msg.message_id and datetime.fromisoformat(owner["sent_at"]) == msg.sent_at and current != op["after"]:
                     raise ValueError("同一時間有不同安排，請核對消息先後並從表單處理")
                 if not approved and current != op["after"]:
-                    # Nonempty form fields and absence removals require either ownership or explicit review.
-                    if (owner and json.loads(owner["value"]) != current) or (current and not owner):
+                    # Adding an absence unions the new dates with the exact saved
+                    # snapshot, preserving every manually entered date. Removals
+                    # and replacement content still require ownership or review.
+                    additive_absence = op["kind"] == "absence" and op.get("reports") and all(
+                        r["operation"] == "add" for r in op["reports"])
+                    if not additive_absence and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
                         raise ValueError("此欄位已有人工資料，請核對後批准")
             with self.store.db() as db:
                 db.execute("UPDATE proposals SET status='applying',updated_at=? WHERE id=?", (now_text(), proposal_id))

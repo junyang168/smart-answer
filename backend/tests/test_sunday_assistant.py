@@ -102,6 +102,28 @@ def test_spouses_absence_is_saved_before_ack_and_replay_sends_once(agent):
     assert len(agent.bridge.sent) == 1
 
 
+def test_additive_absence_preserves_manual_dates_without_review(agent):
+    agent.repository.workers["王明"] = SundayWorker(name="王明", unavailableRanges=[
+        {"startDate": "2026-10-01", "endDate": "2026-10-03"}])
+    receive(agent, {"absence_changes": [{"worker": "王明", "start": "2026-11-15", "end": "2026-11-29", "evidence": "我11/15到29日不在"}]},
+            group="111@g.us", text="我11/15到29日不在")
+    worker = agent.repository.workers["王明"]
+    assert not worker.is_available_on("2026-10-02")
+    assert not worker.is_available_on("2026-11-22")
+    assert agent.store.proposals()[0]["status"] == "applied"
+    assert len(agent.bridge.sent) == 1
+
+
+def test_removing_manual_absence_requires_review(agent):
+    agent.repository.workers["王明"] = SundayWorker(name="王明", unavailableRanges=[
+        {"startDate": "2026-11-15", "endDate": "2026-11-29"}])
+    receive(agent, {"absence_changes": [{"worker": "王明", "start": "2026-11-22", "end": "2026-11-29", "operation": "remove", "evidence": "我22日起可以安排"}]},
+            group="111@g.us", text="我22日起可以安排")
+    assert agent.store.proposals()[0]["status"] == "review"
+    assert not agent.repository.workers["王明"].is_available_on("2026-11-22")
+    assert not agent.bridge.sent
+
+
 def test_earlier_return_removes_only_restored_dates(agent):
     receive(agent, {"absence_changes": [{"worker": "王明", "start": "2026-11-15", "end": "2026-11-29", "evidence": "我11/15到29日不在"}]},
             group="111@g.us", text="我11/15到29日不在")

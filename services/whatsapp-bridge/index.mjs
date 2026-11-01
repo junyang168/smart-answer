@@ -3,6 +3,7 @@ import { timingSafeEqual, createHash } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
+import { senderId } from "./sender.mjs";
 
 const secret = process.env.SUNDAY_ASSISTANT_SECRET;
 const stateDir = resolve(process.env.SUNDAY_WHATSAPP_STATE_DIR || "./.state");
@@ -46,7 +47,7 @@ async function capture(message, edited = false, initialSync = false) {
   }
   const id = message.id._serialized + ":v:" + createHash("sha256").update(JSON.stringify([message.body || "", message.type])).digest("hex").slice(0, 16);
   journal.enqueue({ message_id: id, group_id: group,
-    sender_id: message.author || (message.fromMe ? client.info.wid._serialized : message.from),
+    sender_id: senderId(message, client.info.wid._serialized),
     sent_at: new Date(message.timestamp * 1000).toISOString(), text: message.body || "",
     source_id: message.id._serialized, quoted_message_id: quoted, unsupported_media: message.type !== "chat", initial_sync: initialSync });
 }
@@ -73,7 +74,7 @@ async function connect() {
       if (!config.enabled || !config.groups.includes(group)) return;
       synced = false;
       journal.enqueue({ message_id: message.id._serialized + ":revoked", group_id: group,
-        sender_id: message.author || (message.fromMe ? client.info.wid._serialized : message.from),
+        sender_id: senderId(message, client.info.wid._serialized),
         sent_at: new Date().toISOString(), text: "已撤回的消息：" + (before?.body || "（原文無法取得）"), revoked: true });
     });
     await client.initialize();
