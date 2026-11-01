@@ -114,6 +114,49 @@ def test_additive_absence_preserves_manual_dates_without_review(agent):
     assert len(agent.bridge.sent) == 1
 
 
+def test_same_sender_can_correct_spouses_absence_from_applied_context(agent):
+    settings = agent.store.settings()
+    settings.sender_workers = {"sender": ["王明"], "old-device": ["王明"]}
+    settings.trusted_senders.append("old-device")
+    agent.store.put("settings", settings.model_dump())
+    text = "王明和李芳11/15到29日不在"
+    receive(agent, {"absence_changes": [{"worker": n, "start": "2026-11-15", "end": "2026-11-29", "evidence": text}
+                                       for n in ["王明", "李芳"]]}, group="111@g.us", text=text)
+    # An explicitly configured alias is the same person after device migration.
+    with agent.store.db() as db:
+        row = db.execute("SELECT payload FROM messages WHERE id='m1'").fetchone()
+        payload = json.loads(row[0]); payload["sender_id"] = "old-device"
+        db.execute("UPDATE messages SET payload=? WHERE id='m1'", (json.dumps(payload),))
+    receive(agent, {"absence_changes": [{"worker": n, "start": "2026-11-15", "end": "2026-12-02", "evidence": "記錯了，應該到12/2", "context_message_id": "m1"}
+                                       for n in ["王明", "李芳"]]}, group="111@g.us", text="記錯了，應該到12/2", id="m2", at="2026-11-03T16:00:00+00:00")
+    assert agent.store.proposals()[0]["status"] == "applied"
+    assert all(not agent.repository.workers[n].is_available_on("2026-12-02") for n in ["王明", "李芳"])
+    assert len(agent.bridge.sent) == 2
+    assert "李芳：2026-11-15 至 2026-12-02" in agent.bridge.sent[-1][2]
+
+
+@pytest.mark.parametrize("reason", ["other_sender", "other_group", "unapplied"])
+def test_context_does_not_authorize_unrelated_or_unapplied_absence(agent, reason):
+    settings = agent.store.settings(); settings.sender_workers = {"sender": ["王明"]}
+    if reason == "unapplied":
+        settings.auto_apply = False
+    agent.store.put("settings", settings.model_dump())
+    text = "李芳11/15到29日不在"
+    receive(agent, {"absence_changes": [{"worker": "李芳", "start": "2026-11-15", "end": "2026-11-29", "evidence": text}]}, group="111@g.us", text=text)
+    if reason in {"other_sender", "other_group"}:
+        with agent.store.db() as db:
+            row = db.execute("SELECT payload FROM messages WHERE id='m1'").fetchone()
+            payload = json.loads(row[0]); payload["sender_id" if reason == "other_sender" else "group_id"] = "someone-else" if reason == "other_sender" else "222@g.us"
+            db.execute("UPDATE messages SET payload=? WHERE id='m1'", (json.dumps(payload),))
+    settings.auto_apply = True; agent.store.put("settings", settings.model_dump())
+    receive(agent, {"absence_changes": [{"worker": "李芳", "start": "2026-11-15", "end": "2026-12-02", "evidence": "記錯了，應該到12/2", "context_message_id": "m1"}]},
+            group="111@g.us", text="記錯了，應該到12/2", id="m2", at="2026-11-03T16:00:00+00:00")
+    p = agent.store.proposals()[0]
+    assert p["status"] == "review"
+    assert p["payload"]["questions"]
+    assert agent.repository.workers["李芳"].is_available_on("2026-12-02")
+
+
 def test_removing_manual_absence_requires_review(agent):
     agent.repository.workers["王明"] = SundayWorker(name="王明", unavailableRanges=[
         {"startDate": "2026-11-15", "endDate": "2026-11-29"}])

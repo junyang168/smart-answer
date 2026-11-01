@@ -57,7 +57,9 @@ def extract_message(message, settings, context, workers, songs) -> Extraction:
 以消息發送時間的 America/Chicago 當地日期解析「本主日/這個主日/下周」。
 同一消息可安排多個未來主日。更正只抽取明確修改的欄位；引用和前文只用來解讀日期與更正對象。
 同工名字必須使用提供的精確名單；「我」「我們夫妻」只能由 sender_workers 明確對應，否則提出 questions。
+同一發送人更正先前已登記的外出時，可沿用 earlier_messages 中 same_sender=true 且 applied_absence_workers 所列的人名；每項 context_message_id 必須填該前文的 message_id，不能沿用其他人的登記。
 外出以含首尾日區間表示；提前回來應 remove 原外出區間中已恢復可服事的日期；不確定邊界就提出 questions。
+延長外出時 add 完整的更正後區間，讓回覆可顯示完整日期，而不是只列新增的幾天。
 只在外出群產生 absence_changes；只在崇拜群產生 service_changes。
 詩歌需對應詩歌目錄中精確題名，編號只有對得上目錄時才轉為題名。無對應時提出 questions。
 讀經值是網站經文 slug 的陣列，例如馬太福音20章28節為 mat-20-28，約翰福音3章16至18節為 jhn-3-16-18。
@@ -95,6 +97,13 @@ class Assistant:
     def worker_map(self):
         return {x.name: x for x in self.repository.list_sunday_workers()}
 
+    def same_sender(self, first, second):
+        if first == second:
+            return True
+        aliases = self.store.settings().sender_workers
+        # Explicitly configured identity aliases also cover old linked-device IDs.
+        return bool(aliases.get(first)) and set(aliases[first]) == set(aliases.get(second, []))
+
     def context(self, msg):
         rows = [x["payload"] for x in self.store.messages(200)
                 if x["payload"]["group_id"] == msg.group_id
@@ -106,7 +115,24 @@ class Assistant:
             quoted = next((x for x in rows if x["message_id"] == msg.quoted_message_id or x.get("source_id") == msg.quoted_message_id), None)
             if quoted and quoted not in recent:
                 recent.insert(0, quoted)
-        return [{k: x[k] for k in ("message_id", "sender_id", "sent_at", "text")} for x in recent]
+        context = []
+        with self.store.db() as db:
+            for x in recent:
+                item = {k: x[k] for k in ("message_id", "sender_id", "sent_at", "text")}
+                item["same_sender"] = self.same_sender(msg.sender_id, x["sender_id"])
+                prior = db.execute("SELECT payload FROM proposals WHERE message_id=? AND status='applied'", (x["message_id"],)).fetchone()
+                item["applied_absence_workers"] = sorted({op["worker"] for op in json.loads(prior[0])["operations"]
+                                                          if op["kind"] == "absence"}) if prior else []
+                context.append(item)
+        return context
+
+    def referenced_absence_worker(self, msg, change):
+        if not change.context_message_id:
+            return False
+        # References must have been supplied in this message's bounded context,
+        # belong to this author/group, and name a successfully applied worker.
+        prior = next((x for x in self.context(msg) if x["message_id"] == change.context_message_id), None)
+        return bool(prior and prior["same_sender"] and change.worker in prior["applied_absence_workers"])
 
     def build_plan(self, msg, result):
         settings = self.store.settings()
@@ -157,7 +183,8 @@ class Assistant:
             from opencc import OpenCC
             normalize = OpenCC("t2s").convert
             mapped = settings.sender_workers.get(msg.sender_id, [])
-            if normalize(change.worker) not in normalize(msg.text) and change.worker not in mapped:
+            if (normalize(change.worker) not in normalize(msg.text) and change.worker not in mapped
+                    and not self.referenced_absence_worker(msg, change)):
                 plan["questions"].append(f"請確認此發送人是否代表 {change.worker} 登記外出")
                 continue
             key = f"worker:{change.worker}:unavailableRanges"

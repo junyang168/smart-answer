@@ -81,6 +81,7 @@ class AbsenceChange(BaseModel):
     end: date
     operation: Literal["add", "remove"] = "add"
     evidence: str = Field(min_length=1)
+    context_message_id: str | None = Field(default=None, max_length=240)
 
     @model_validator(mode="after")
     def ordered(self):
