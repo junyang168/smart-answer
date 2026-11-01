@@ -1050,6 +1050,7 @@ class ReviewStore:
                 "script_sha256": digest(rows),
                 "source_video_sha256": record["source_sha256"],
                 "source_record_sha256": digest(record),
+                "media_mime_type": record.get("media_mime_type", "video/mp4"),
                 "source_input_file_sha256": file_hash(source / "full_transcript.json"),
                 "source_record_path": f"transcript_review/{item}/source-record.json",
                 "paragraph_bindings": bindings,
