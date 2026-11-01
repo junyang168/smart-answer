@@ -7,6 +7,7 @@ import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
+import { toggleParagraphPlayback } from "./review-playback";
 import { documentVersion, recoverTransportVersion } from "./review-version";
 import {
   FastForward,
@@ -274,11 +275,6 @@ function TranscriptProofreader({
   const [activeGroup, setActiveGroup] = useState<SlideInspection>();
   const [peekSlide, setPeekSlide] = useState<string>();
   const [baseline, setBaseline] = useState<Row[] | null>(null);
-  const selectParagraph = useCallback((id: string) => {
-    setSelected(id);
-    setActiveGroup(undefined);
-    setPeekSlide(undefined);
-  }, []);
   const [status, setStatus] = useState("已自動儲存");
   const [failure, setFailure] = useState("");
   const [ready, setReady] = useState(false);
@@ -307,6 +303,20 @@ function TranscriptProofreader({
   const video = useRef<HTMLVideoElement>(null);
   const [segmentPause, setSegmentPause] = useState(true);
   const [playing, setPlaying] = useState(false);
+  const selectedParagraph = useRef(initial.script[0]?.index || "");
+  const playbackParagraph = useRef<string>();
+  const selectParagraph = useCallback((id: string) => {
+    if (selectedParagraph.current !== id) {
+      video.current?.pause();
+      setPlaying(false);
+      segmentEnd.current = undefined;
+      playbackParagraph.current = undefined;
+      selectedParagraph.current = id;
+    }
+    setSelected(id);
+    setActiveGroup(undefined);
+    setPeekSlide(undefined);
+  }, []);
   const composing = useRef(false);
   const [tabId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -744,6 +754,7 @@ function TranscriptProofreader({
   const play = (id: string) => {
     const binding = current.current.context.paragraph_bindings[id];
     selectParagraph(id);
+    playbackParagraph.current = id;
     segmentEnd.current = binding.end_ms / 1000;
     if (video.current) {
       video.current.currentTime = binding.start_ms / 1000;
@@ -753,6 +764,12 @@ function TranscriptProofreader({
   const seek = (seconds: number) => {
     const media = video.current;
     if (!media) return;
+    const selectedBinding =
+      current.current.context.paragraph_bindings[selected];
+    if (playbackParagraph.current !== selected && selectedBinding) {
+      media.currentTime = selectedBinding.start_ms / 1000;
+      playbackParagraph.current = selected;
+    }
     const duration = Number.isFinite(media.duration)
       ? media.duration
       : Infinity;
@@ -769,16 +786,12 @@ function TranscriptProofreader({
   const togglePlayback = () => {
     const media = video.current;
     if (!media) return;
-    if (!media.paused) {
-      media.pause();
-      return;
-    }
-    const binding = current.current.context.paragraph_bindings[selected];
-    segmentEnd.current =
-      binding && media.currentTime < binding.end_ms / 1000
-        ? binding.end_ms / 1000
-        : undefined;
-    void media.play();
+    segmentEnd.current = toggleParagraphPlayback(
+      media,
+      current.current.context.paragraph_bindings[selected],
+      playbackParagraph.current !== selected,
+    );
+    playbackParagraph.current = selected;
   };
   const playbackControls = (label: string) => (
     <div
@@ -1240,7 +1253,16 @@ function TranscriptProofreader({
               preload="metadata"
               src={base + "/media"}
               className="w-full bg-black"
-              onPlay={() => setPlaying(true)}
+              onPlay={() => {
+                const id = selectedParagraph.current;
+                const binding = current.current.context.paragraph_bindings[id];
+                if (playbackParagraph.current !== id && video.current && binding) {
+                  video.current.currentTime = binding.start_ms / 1000;
+                  segmentEnd.current = binding.end_ms / 1000;
+                  playbackParagraph.current = id;
+                }
+                setPlaying(true);
+              }}
               onPause={() => setPlaying(false)}
               onEnded={() => setPlaying(false)}
               onTimeUpdate={() => {
@@ -1347,6 +1369,7 @@ function TranscriptProofreader({
                   onClick={() => {
                     if (video.current) {
                       segmentEnd.current = undefined;
+                      playbackParagraph.current = selected;
                       video.current.currentTime =
                         (doc.context.occurrences[shownSlide!].time_ms || 0) /
                         1000;
