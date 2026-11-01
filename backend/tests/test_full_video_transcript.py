@@ -244,3 +244,27 @@ def test_local_movie_preview_supports_byte_ranges_for_late_video_seeks(tmp_path)
         assert response.headers['content-range']=='bytes 150-159/200'
         assert response.content==bytes(range(150,160))
         assert client.get('/source.mp4',headers={'Range':'bytes=300-399'}).status_code==416
+
+
+def test_audio_only_source_retains_clock_without_inventing_frames(tmp_path, monkeypatch):
+    import numpy as np
+    from backend.pipeline import full_video_transcript as full
+    source = tmp_path / '講道.mp3'
+    source.write_bytes(b'original audio')
+    out = tmp_path / 'out'
+    samples = np.full(full.SR * 2, 100, dtype=np.int16)
+    probe = {'streams': [{'codec_type': 'audio', 'start_time': '0'}],
+             'format': {'duration': '2'}}
+    monkeypatch.setattr(full.subprocess, 'check_output', lambda *a, **k: json.dumps(probe))
+    monkeypatch.setattr(full.subprocess, 'run', lambda *a, **k: full.write_audio(out / 'master.wav', samples))
+    master = full.prepare(source, out)
+    assert master['media_type'] == 'audio' and master['media_mime_type'] == 'audio/mpeg'
+    assert master['source_sha256'] == full.sha(source)
+    full.prepare_audio_visuals(out)
+    assert full.read(out / 'slides/report.json')['events'] == []
+    assert full.read(out / 'slides/report.json')['visibility']['spans'] == []
+    assert full.read(out / 'visual-evidence/slide_evidence.json')['assets'] == []
+    assert full.read(out / 'frame_pts_audit.json')['applicable'] is False
+    local = full.local_slides(out, master['windows'][0])
+    assert full.read(local / 'report.json')['events'] == []
+    assert master['windows'][-1]['end_sample'] == len(samples)

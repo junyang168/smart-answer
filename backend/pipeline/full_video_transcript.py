@@ -13,6 +13,7 @@ import hashlib
 import html
 import json
 import math
+import mimetypes
 import os
 from pathlib import Path
 import shutil
@@ -61,8 +62,9 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
         return result
     probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
         'format=start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
-    v = next(s for s in probe['streams'] if s['codec_type'] == 'video')
-    if abs(float(v['start_time'])) > .001:
+    video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
+    v = video_stream or next(s for s in probe['streams'] if s['codec_type'] == 'audio')
+    if abs(float(v.get('start_time', 0))) > .001:
         raise ValueError('Nonzero movie origin needs an explicit source-clock mapping')
     subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-copyts', '-i', str(video),
         '-map', '0:a:0', '-af', 'aresample=16000:async=1:first_pts=0', '-ac', '1', '-ar', str(SR),
@@ -74,6 +76,8 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
         raise ValueError('Decoded sample clock differs from the media duration')
     result = {'schema_version': 'source-sample-clock.v1', 'lecture_id':video.stem, 'source_sha256': sha(video),
         'audio_sha256': sha(out / 'master.wav'), 'source_path': str(video.resolve()),
+        'media_type': 'video' if video_stream else 'audio',
+        'media_mime_type': mimetypes.guess_type(str(video))[0] or 'application/octet-stream',
         'samples': len(audio), 'covered_samples': usable, 'discarded_tail_samples': len(audio) - usable,
         'sample_rate': SR, 'duration_ms': sample_ms(usable), 'probe': probe, 'windows': []}
     for i, (begin, end) in enumerate(partition_samples(usable)):
@@ -105,6 +109,27 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
             'start_ms': sample_ms(begin), 'end_ms': sample_ms(end), 'audio': str(folder.relative_to(out))})
     save(proof, result)
     return result
+
+
+def prepare_audio_visuals(out: Path) -> None:
+    """An audio source supplies no visual evidence, including no inferred slides."""
+    master = read(out / 'master.json')
+    if master.get('media_type') != 'audio':
+        raise ValueError('Empty visual inventory is only for audio-only sources')
+    save(out / 'slides/report.json', {
+        'source_sha256': master['source_sha256'], 'events': [],
+        'visibility': {'start_ms': 0, 'end_ms': master['duration_ms'], 'spans': [],
+                       'available': False, 'reason': 'audio_only_source'},
+    })
+    save(out / 'visual-evidence/slide_evidence.json', {
+        'schema_version': 'slide-visual-evidence-collection.v1',
+        'source_video_sha256': master['source_sha256'], 'assets': [], 'occurrences': [],
+        'visual_evidence_available': False, 'reason': 'audio_only_source',
+    })
+    save(out / 'frame_pts_audit.json', {
+        'applicable': False, 'reason': 'audio_only_source',
+        'source_sha256': master['source_sha256'],
+    })
 
 
 def classify_slides(out: Path) -> dict:
@@ -628,6 +653,8 @@ def finish(out: Path, video: Path) -> dict:
         'native_frame_pts':read(out/'frame_pts_audit.json')}
     save(out/'timing_audit.json',audit)
     record = {'schema_version':'full-illustrated-corrected-transcript.v1','lecture_id':master.get('lecture_id',video.stem),'source_sha256':master['source_sha256'],
+        'media_type':master.get('media_type', 'video'),
+        'media_mime_type':master.get('media_mime_type', mimetypes.guess_type(str(video))[0] or 'video/mp4'),
         'duration_ms':master['duration_ms'],'paragraphs':paragraphs,'original_paragraphs':originals,
         'uncut_corrected_paragraphs':uncut,'slides':placements,
         'visual_assets':evidence['assets'],'decisions':decisions,'editorial_exclusions':exclusions,'visibility':report['visibility'],
@@ -744,12 +771,18 @@ def main():
             master['speaker_name']=args.speaker_name;save(out/'master.json',master)
         configure_vocabulary(out,args.vocabulary)
         master=read(out/'master.json')
-        manifest=slides.sample_video(args.video,out/'slides',start_ms=0,end_ms=master['duration_ms'])
-        if args.projected_screen:
-            from backend.pipeline.projected_slide_region import calibrate
-            manifest=calibrate(out/'slides')
-        if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest)
-        classify_slides(out);extract_slides(out,args.pilot_evidence)
+        manifest = None
+        if master.get('media_type') == 'audio':
+            if args.projected_screen:
+                p.error('An audio-only source has no projection screen')
+            prepare_audio_visuals(out)
+        else:
+            manifest=slides.sample_video(args.video,out/'slides',start_ms=0,end_ms=master['duration_ms'])
+            if args.projected_screen:
+                from backend.pipeline.projected_slide_region import calibrate
+                manifest=calibrate(out/'slides')
+            if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest)
+            classify_slides(out);extract_slides(out,args.pilot_evidence)
         process_windows(out,args.aligner_python,args.pilot_correction)
         prepare_final_alignment(out)
         for w in master['windows']:
@@ -762,7 +795,8 @@ def main():
                 folder=out/f'windows/{wid}'
                 align(folder/read(folder/'final_alignment_ref.json')['folder'],args.aligner_python)
         refine_backward_predictions(out,args.aligner_python)
-        save(out/'frame_pts_audit.json',audit_frame_pts(args.video,manifest))
+        if manifest is not None:
+            save(out/'frame_pts_audit.json',audit_frame_pts(args.video,manifest))
         print(finish(out,args.video),flush=True)
     elif args.stage=='handoff':
         from backend.pipeline.video_transcript_handoff import export_handoff

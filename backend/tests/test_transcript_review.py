@@ -710,3 +710,57 @@ def test_beta_activation_preserves_local_edits_history_and_legacy_manuscript(set
     assert store.document("a", item)["version"] == original["version"]
     with pytest.raises(ValueError, match="refusing to overwrite"):
         module.activate(source_root, production, item, "a")
+
+
+def test_audio_candidate_media_has_correct_mime_and_byte_ranges(setup, monkeypatch):
+    from urllib.parse import quote
+    store, root, source = setup
+    record = read(source / 'full_transcript.json')
+    record.update(media_type='audio', media_mime_type='audio/mpeg')
+    atomic(source / 'full_transcript.json', record)
+    layout = read(source / 'reading-layout/layout.json')
+    from backend.pipeline.slide_change_pilot import object_sha
+    layout['source_record_sha256'] = object_sha(record)
+    atomic(source / 'reading-layout/layout.json', layout)
+    store.import_candidate("講道 test", source, expected_script_sha256=None)
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET', 'test-secret')
+    app = FastAPI()
+    app.include_router(create_review_router(root, beta_owner='a'), prefix='/sc_api')
+    path = '/sc_api/review_document/' + quote('講道 test', safe='') + '/media'
+    response = TestClient(app).get(path, headers={**signed('GET', path), 'range': 'bytes=0-5'})
+    assert response.status_code == 206
+    assert response.content == b'source'
+    assert response.headers['content-type'] == 'audio/mpeg'
+    assert response.headers['cache-control'] == 'private, no-store'
+
+
+def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_path):
+    import importlib.util
+    script = Path(__file__).resolve().parents[2] / 'scripts/activate-transcript-beta.py'
+    spec = importlib.util.spec_from_file_location('activate_beta_append', script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    store, source_root, _ = setup
+    adopted(setup)
+    production = tmp_path / 'production'
+    atomic(production / 'config/config.json', read(source_root / 'config/config.json'))
+    target = tmp_path / 'private-beta'
+    module.activate(source_root, production, '講道 test', 'a', target)
+    beta = ReviewStore(target)
+    original = beta.document('a', '講道 test')
+    new = '第二講'
+    meta = read(source_root / 'config/sermon.json')
+    meta.append({**meta[0], 'item': new, 'assigned_to': None, 'status': 'ready'})
+    atomic(source_root / 'config/sermon.json', meta)
+    store.import_candidate(new, setup[2], expected_script_sha256=None)
+    before = {str(p.relative_to(target)): file_hash(p) for p in target.rglob('*')
+              if p.is_file() and p.name != 'workflow.lock'}
+    module.activate(source_root, production, new, 'a', target, append=True)
+    for path, sha in before.items():
+        if path != 'config/sermon.json':
+            assert file_hash(target / path) == sha
+    assert beta.document('a', '講道 test')['version'] == original['version']
+    assert beta.document('a', new)['can_edit']
+    assert len(read(target / 'config/sermon.json')) == 2
+    with pytest.raises(ValueError, match='refusing to overwrite'):
+        module.activate(source_root, production, new, 'a', target, append=True)

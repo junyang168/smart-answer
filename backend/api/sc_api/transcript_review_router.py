@@ -222,15 +222,19 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, api_base=
         def path():
             with store.lock(item):
                 store.require(actor, item)
-                store.load(item)
+                _, context = store.load(item)
                 path = store.folder(item) / "source.mp4"
                 if not path.exists():
                     raise ReviewError(404, "此講道沒有本機影片")
-                return path
+                mime = context.get("media_mime_type", "video/mp4")
+                if mime not in {"audio/mpeg", "audio/mp4", "audio/wav", "audio/x-wav", "video/mp4"}:
+                    raise ReviewError(400, "不支援此媒體格式")
+                return path, mime
 
+        source, mime = call(path)
         return FileResponse(
-            call(path),
-            media_type="video/mp4",
+            source,
+            media_type=mime,
             headers={"Cache-Control": "private, no-store"},
         )
 

@@ -141,6 +141,20 @@ verifies media/assets, records an activation manifest and claims the imported
 draft for the owner without adding content review decisions. It does not replace
 the existing production manuscript or publish it publicly.
 
+For another lecture, add `--append` with its exact catalog item ID. This only
+adds an absent item; it refuses existing manuscripts or review folders. Existing
+beta claims and revisions stay intact. Additions are serialized, existing item
+workflow locks protect the shared catalog update, and the catalog row is installed
+last. Each added item keeps its activation manifest inside its review folder.
+
+The full transcription runner also accepts audio-only sources with `--video`
+(the CLI argument name is retained for compatibility). It records the original
+audio file hash and sample clock, creates an explicitly unavailable, empty visual
+inventory, and skips frame detection/OCR. Review media retains its original bytes;
+the historical storage filename `source.mp4` does not determine its MIME type.
+The authenticated media route uses the candidate's `media_mime_type`, defaulting
+to MP4 for older video drafts, and retains HTTP byte-range seeking.
+
 Set `TRANSCRIPT_REVIEW_ACTION_SECRET` to the same randomly generated, server-only
 value in the production web `.env.local` and backend LaunchAgent environment.
 Never set `TRANSCRIPT_REVIEW_DEV_ACTOR` in production. A deployment installs code;
