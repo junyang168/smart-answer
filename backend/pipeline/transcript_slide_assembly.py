@@ -126,7 +126,7 @@ def assemble(out: Path, slide_out: Path) -> dict:
         'timed_text_sha256': file_sha(out / 'timed_text.json'), 'format_plan_sha256': object_sha(plan),
         'formatted_text_sha256': file_sha(out / 'formatted_text.json'),
         'slide_report_sha256': file_sha(slide_out / 'report.json'), 'paragraphs': paragraphs, 'slides': placements,
-        'visibility': visibility, 'visibility_available': visibility is not None,
+        'visibility': visibility, 'visibility_available': visibility is not None and visibility.get('available', True),
         'token_timing_counts': counts, 'review_candidates': flags, 'seam_review': timed['issues'],
         'content_characters_preserved': True, 'human_confirmed': False,
         'asr_estimated_usd': read_json(out / 'asr.json')['estimated_usd'],

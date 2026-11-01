@@ -118,7 +118,10 @@ def prepare_audio_visuals(out: Path) -> None:
         raise ValueError('Empty visual inventory is only for audio-only sources')
     save(out / 'slides/report.json', {
         'source_sha256': master['source_sha256'], 'events': [],
-        'visibility': {'start_ms': 0, 'end_ms': master['duration_ms'], 'spans': [],
+        'visibility': {'start_ms': 0, 'end_ms': master['duration_ms'],
+                       'spans': [{'start_ms': 0, 'end_ms': master['duration_ms'],
+                                  'state': 'unknown', 'image': None, 'slide_event_id': None,
+                                  'reason': 'audio_only_source'}],
                        'available': False, 'reason': 'audio_only_source'},
     })
     save(out / 'visual-evidence/slide_evidence.json', {

@@ -262,7 +262,9 @@ def test_audio_only_source_retains_clock_without_inventing_frames(tmp_path, monk
     assert master['source_sha256'] == full.sha(source)
     full.prepare_audio_visuals(out)
     assert full.read(out / 'slides/report.json')['events'] == []
-    assert full.read(out / 'slides/report.json')['visibility']['spans'] == []
+    span, = full.read(out / 'slides/report.json')['visibility']['spans']
+    assert span['state'] == 'unknown' and span['image'] is None
+    assert (span['start_ms'], span['end_ms']) == (0, 2000)
     assert full.read(out / 'visual-evidence/slide_evidence.json')['assets'] == []
     assert full.read(out / 'frame_pts_audit.json')['applicable'] is False
     local = full.local_slides(out, master['windows'][0])
