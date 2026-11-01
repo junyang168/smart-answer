@@ -78,6 +78,43 @@ def test_quota_stops_provider_without_probing(tmp_path):
         with gate.call('gpt',tmp_path/'next'): pytest.fail('quota probe')
 
 
+def test_owner_can_resume_a_settled_subscription_quota_once_without_replaying(tmp_path):
+    gate=capacity(tmp_path)
+    with gate.call('opus',tmp_path/'old-limit'):
+        returned(tmp_path/'old-limit',1,'usage_limit_reached')
+    record=gate.resume_opus_subscription(owner_direction='Quota reset; resume Claude subscription',recovery_id='next-four')
+    assert record['previous_state']['blocked']=='usage_limit_reached'
+    assert record['model_calls']==0 and record['budget_extension'] is False
+    assert json.loads((gate.root/'opus/state.json').read_text())['allowed']==1
+    with gate.call('opus',tmp_path/'new-work'):
+        returned(tmp_path/'new-work',1,'usage_limit_reached')
+    with pytest.raises(ValueError,match='already consumed'):
+        gate.resume_opus_subscription(owner_direction='Quota reset; resume Claude subscription',recovery_id='next-four')
+    assert json.loads((gate.root/'opus/state.json').read_text())['blocked']=='usage_limit_reached'
+
+
+@pytest.mark.parametrize('block',['authentication failed','unsettled transport: lost','insufficient_quota'])
+def test_owner_subscription_resumption_cannot_clear_other_block_types(tmp_path,block):
+    gate=capacity(tmp_path)
+    with gate._state('opus') as (_,state):state['blocked']=block
+    with pytest.raises(ValueError,match='unrelated block'):
+        gate.resume_opus_subscription(owner_direction='Resume subscription',recovery_id='owner-run')
+    assert json.loads((gate.root/'opus/state.json').read_text())['blocked']==block
+
+
+def test_subscription_resumption_preserves_api_block_and_rejects_active_transport(tmp_path):
+    gate=capacity(tmp_path)
+    with gate._state('opus') as (root,state):
+        state.update(blocked='usage_limit_reached',backend_blocks={'anthropic_api':'insufficient_quota'})
+        (root/'slot-0.json').write_text(json.dumps({'active':True,'artifacts':str(tmp_path/'unknown')}))
+    with pytest.raises(CapacityUnavailable,match='unsettled transport'):
+        gate.resume_opus_subscription(owner_direction='Resume subscription',recovery_id='owner-run')
+    with gate._state('opus') as (root,state):
+        (root/'slot-0.json').write_text('{}')
+    gate.resume_opus_subscription(owner_direction='Resume subscription',recovery_id='owner-run')
+    assert json.loads((gate.root/'opus/state.json').read_text())['backend_blocks']=={'anthropic_api':'insufficient_quota'}
+
+
 def test_api_uses_shared_slots_without_clearing_subscription_usage_block(tmp_path):
     gate = capacity(tmp_path)
     with gate.call('opus', tmp_path/'subscription-limit'):

@@ -91,6 +91,36 @@ class ClaimModelCapacity:
         return (not (Path(artifacts) / 'invocation.json').exists()
                 or receipt.is_file() and _read(receipt, {}).get('returncode') is not None)
 
+    def resume_opus_subscription(self, *, owner_direction, recovery_id):
+        """One explicit owner resumption; no probe, retry or budget extension."""
+        if any(not isinstance(v, str) or not v.strip() for v in (owner_direction, recovery_id)):
+            raise ValueError('subscription resumption requires an owner direction and stable recovery identity')
+        identity = {'owner_direction': owner_direction, 'recovery_id': recovery_id}
+        with self._state('opus') as (root, state), ExitStack() as held:
+            proof = root / ('quota-resume-' + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest() + '.json')
+            if proof.exists():
+                raise ValueError('this subscription resumption was already consumed')
+            if state.get('blocked') not in {'usage_limit_reached', 'usage limit reached', "you've hit your limit", "you've hit your session limit"}:
+                raise ValueError('subscription resumption cannot clear an unrelated block')
+            journals = []
+            for index in range(2):
+                lock = held.enter_context((root / ('slot-%s.lock' % index)).open('a'))
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise CapacityUnavailable('subscription resumption requires all transports stopped') from None
+                journal = _read(root / ('slot-%s.json' % index), {})
+                if journal.get('active') or journal.get('artifacts') and not self._settled(journal['artifacts']):
+                    raise CapacityUnavailable('subscription resumption cannot release an unsettled transport')
+                journals.append(journal)
+            record = {**identity, 'previous_state': dict(state), 'slot_journals': journals,
+                      'model_calls': 0, 'budget_extension': False, 'resumed_at': time.time()}
+            _save(proof, record)
+            state.pop('blocked')
+            state['allowed'] = 1
+            state['next_start'] = max(state['next_start'], time.time() + self.config['spacing_seconds'])
+            return record
+
     def quarantine_stopped(self, role, artifacts):
         """Release only a proved stopped local transport, preserving its unknown result.
 
