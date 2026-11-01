@@ -228,3 +228,26 @@ def test_assembled_artifact_keeps_speech_but_no_image_in_lecturer_only_interval(
     save_json(slides / 'report.json', report)
     with pytest.raises(ValueError, match='empty image'):
         assemble(out, slides)
+
+
+def test_audio_only_inventory_passes_assembly_without_claiming_visual_coverage(tmp_path):
+    from backend.pipeline.full_video_transcript import prepare_audio_visuals, local_slides
+    from backend.pipeline.slide_change_pilot import save_json
+    from backend.pipeline.transcript_slide_assembly import assemble, slide_at_time
+    text = '只有聲音。'
+    units, plan = layout_plan(text, boundaries=['u0000'])
+    out = tmp_path / 'windows/w00/audio'
+    save_json(tmp_path / 'master.json', {'media_type': 'audio', 'source_sha256': 'source', 'duration_ms': 8000})
+    prepare_audio_visuals(tmp_path)
+    slides = local_slides(tmp_path, {'id': 'w00', 'start_ms': 0, 'end_ms': 8000})
+    save_json(out / 'audio_manifest.json', {'source_sha256': 'source', 'duration_ms': 8000})
+    save_json(out / 'asr.json', {'estimated_usd': 0})
+    save_json(out / 'timed_text.json', {'text': text, 'asr_sha256': file_sha(out / 'asr.json'), 'issues': [], 'tokens': [
+        {'start': 0, 'end': len(text), 'audio_start_ms': 1000, 'audio_end_ms': 5000, 'timing_precision': 'word'}]})
+    save_json(out / 'format_plan.json', plan)
+    save_json(out / 'formatted_text.json', {**apply_layout(text, units, plan), 'estimated_usd_upper': 0})
+    result = assemble(out, slides)
+    assert [p['text'] for p in result['paragraphs']] == [text]
+    assert result['visibility_available'] is False
+    assert result['slides'] == []
+    assert slide_at_time(result['visibility'], 1500) is None
