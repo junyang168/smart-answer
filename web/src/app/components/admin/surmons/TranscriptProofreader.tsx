@@ -7,6 +7,7 @@ import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
+import { documentVersion, recoverTransportVersion } from "./review-version";
 import {
   FastForward,
   Pause,
@@ -132,10 +133,11 @@ async function loadDocument(url: string): Promise<Document> {
     const body = await response.json().catch(() => null);
     throw new RequestError(body?.detail || "載入失敗", response.status);
   }
+  const body = await response.json();
   return {
-    ...(await response.json()),
+    ...body,
     ...JSON.parse(response.headers.get("x-review-access") || "{}"),
-    version: response.headers.get("etag")?.replaceAll('"', ""),
+    version: documentVersion(body.version, response.headers.get("etag")),
   };
 }
 async function draftStorage(
@@ -161,7 +163,12 @@ async function draftStorage(
           : value === null
             ? store.delete(key)
             : store.put(value, key);
-      tx.oncomplete = () => resolve(value === undefined ? r.result : undefined);
+      tx.oncomplete = () =>
+        resolve(
+          value === undefined && r.result
+            ? recoverTransportVersion(r.result)
+            : undefined,
+        );
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
     });
