@@ -93,7 +93,9 @@ def project_support_aliases(raw,materials):
     creations=result.get('creations',[]);aliases=[r['object_id'] for r in creations]
     existing_ids={key.split('/',1)[1] for key in before}
     granted={g['collection'] for g in request.get('creation_permissions',[])}
-    refs={'source_fragment_id':'source_fragments','source_fragment_ids':'source_fragments','evidence_step_ids':'evidence_steps'}
+    refs={'source_fragment_id':'source_fragments','source_fragment_ids':'source_fragments',
+          'evidence_step_ids':'evidence_steps','canonical_evidence_step_ids':'evidence_steps',
+          'evidence_step_id':'evidence_steps','evidence_id':'evidence_steps'}
     def rewrite(value,col):
         fields=refs | ({k:None for k in ('from_id','to_id','source_id','target_id')} if col in cm.RELATION_COLLECTIONS else {})
         def convert(item,kind):

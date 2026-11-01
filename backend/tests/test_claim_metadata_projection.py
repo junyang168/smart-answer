@@ -91,26 +91,51 @@ def alias_materials():
 
 
 def test_support_aliases_change_only_identities_and_typed_references():
-    raw={'changes':[{'record_key':'claims/C','fields_json':json.dumps({'evidence_step_ids':['E'],'statement':'E and F are words','occurrences':[{'anchors':[{'source_fragment_id':'F'}]}]})}],
+    raw={'changes':[{'record_key':'claims/C','fields_json':json.dumps({'evidence_step_ids':['E'],'statement':'E and F are words',
+         'occurrences':[{'canonical_evidence_step_ids':['E'],'local_source_evidence_ids':['legacy-E'],
+                         'anchors':[{'source_fragment_id':'F','evidence_id':'E','proposed_highlight':{'text':'E and F are words'}}]}]})}],
          'creations':[{'collection':'source_fragments','object_id':'F','fields_json':json.dumps({'source_id':'S','verbatim_excerpt':'E and F are words'})},
                       {'collection':'evidence_steps','object_id':'E','fields_json':json.dumps({'source_fragment_ids':['F'],'statement':'E and F are words'})}]}
     original=deepcopy(raw);result,mappings=project_support_aliases(raw,alias_materials());ids={m['alias']:m['object_id'] for m in mappings}
     assert raw==original and ids['F']!=ids['E']
     c=json.loads(result['changes'][0]['fields_json']);assert c['evidence_step_ids']==[ids['E']] and c['statement']=='E and F are words'
     assert c['occurrences'][0]['anchors'][0]['source_fragment_id']==ids['F']
+    assert c['occurrences'][0]['anchors'][0]['evidence_id']==ids['E']
+    assert c['occurrences'][0]['canonical_evidence_step_ids']==[ids['E']]
+    assert c['occurrences'][0]['local_source_evidence_ids']==['legacy-E']
+    assert c['occurrences'][0]['anchors'][0]['proposed_highlight']['text']=='E and F are words'
     assert json.loads(result['creations'][0]['fields_json'])=={'source_id':'S','verbatim_excerpt':'E and F are words'}
     assert json.loads(result['creations'][1]['fields_json'])=={'source_fragment_ids':[ids['F']],'statement':'E and F are words'}
     assert project_support_aliases(raw,alias_materials())== (result,mappings)
     renamed=deepcopy(raw)
     renamed['creations'][0]['object_id']='U';renamed['creations'][1]['object_id']='V'
     e=json.loads(renamed['creations'][1]['fields_json']);e['source_fragment_ids']=['U'];renamed['creations'][1]['fields_json']=json.dumps(e)
-    c=json.loads(renamed['changes'][0]['fields_json']);c['evidence_step_ids']=['V'];c['occurrences'][0]['anchors'][0]['source_fragment_id']='U';renamed['changes'][0]['fields_json']=json.dumps(c)
+    c=json.loads(renamed['changes'][0]['fields_json']);c['evidence_step_ids']=['V'];c['occurrences'][0]['anchors'][0]['source_fragment_id']='U'
+    c['occurrences'][0]['anchors'][0]['evidence_id']='V';c['occurrences'][0]['canonical_evidence_step_ids']=['V'];renamed['changes'][0]['fields_json']=json.dumps(c)
     renamed['creations'].reverse()
     same,renamed_maps=project_support_aliases(renamed,alias_materials())
     assert {m['object_id'] for m in renamed_maps}==set(ids.values())
     assert same['changes']==result['changes']
     different=alias_materials();different['unit_request']['action_id']='B'
     assert project_support_aliases(raw,different)[1]!=mappings
+
+
+def test_new_claim_anchor_references_use_only_the_evidence_identity_mapping():
+    raw={'creations':[
+        {'collection':'source_fragments','object_id':'F','fields_json':json.dumps({'source_id':'S','verbatim_excerpt':'E'})},
+        {'collection':'evidence_steps','object_id':'E','fields_json':json.dumps({'statement':'E','source_fragment_ids':['F']})},
+        {'collection':'claims','object_id':'C','fields_json':json.dumps({'statement':'E','evidence_step_ids':['E'],
+            'occurrences':[{'anchors':[{'evidence_id':'E','evidence_step_id':'E','source_fragment_id':'F'},
+                                      {'evidence_id':'F','source_fragment_id':'E'}]}]})}]}
+    original=deepcopy(raw);projected,mappings=project_support_aliases(raw,alias_materials())
+    ids={m['alias']:m['object_id'] for m in mappings}
+    claim=json.loads(projected['creations'][2]['fields_json'])
+    assert claim['evidence_step_ids']==[ids['E']]
+    assert claim['occurrences'][0]['anchors'][0]=={
+        'evidence_id':ids['E'],'evidence_step_id':ids['E'],'source_fragment_id':ids['F']}
+    # Projection must not reinterpret an ID of the wrong collection or prose.
+    assert claim['occurrences'][0]['anchors'][1]=={'evidence_id':'F','source_fragment_id':'E'}
+    assert claim['statement']=='E' and raw==original
 
 
 @pytest.mark.parametrize('fault',['known_id','duplicate_alias','duplicate_json','no_grant','empty_alias','padded_alias'])
@@ -177,7 +202,9 @@ def test_saved_failed_proposal_finishes_with_only_its_original_unused_opus(claim
             cid=allocated_ids(packet['original_goal']['claim_creation_allocations'])[0]
             for col,oid,payload in [('source_fragments','NEW-F',{'source_id':'S','paragraph_key':'S0002','verbatim_excerpt':cit['exact_quote']}),
                 ('evidence_steps','NEW-E',{'statement':cit['exact_quote'],'source_fragment_ids':['NEW-F'],'produced_claim_ids':[cid],'speaker':'professor','stance':'asserted','support_eligibility':'eligible_candidate'}),
-                ('claims',cid,{'claim_type':'exegesis','attribution':'professor','statement':cit['exact_quote'],'evidence_step_ids':['NEW-E'],'occurrences':[{'source_id':'S','anchors':[]}]})]:
+                ('claims',cid,{'claim_type':'exegesis','attribution':'professor','statement':cit['exact_quote'],'evidence_step_ids':['NEW-E'],
+                    'occurrences':[{'source_id':'S','anchors':[{'paragraph_key':'S0002','evidence_id':'NEW-E',
+                        'proposed_highlight':{'text':cit['exact_quote']}}]}]})]:
                 value['creations'].append({'collection':col,'object_id':oid,'fields_json':json.dumps(payload),'citations':[cit],'reason':'record an independent professor judgment'})
         return value
     real_compile=projection.compile_projection;calls=[]
@@ -221,7 +248,11 @@ def test_saved_failed_proposal_finishes_with_only_its_original_unused_opus(claim
     if case=='supports':
         assert store.get_record_state('evidence_steps','NEW-E')['payload']['statement']=='unrelated old teaching'
         for key in after['created_keys']:
-            if key.startswith('claims/'):assert store.claim_management_qualification(key.split('/',1)[1])['ready']
+            if key.startswith('claims/'):
+                cid=key.split('/',1)[1]
+                assert store.claim_management_qualification(cid)['ready']
+                claim=store.get_record_state('claims',cid)['payload']
+                assert claim['occurrences'][0]['anchors'][0]['evidence_id']==claim['evidence_step_ids'][0]
 
 
 @pytest.mark.parametrize('human',[False,True])
