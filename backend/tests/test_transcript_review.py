@@ -479,7 +479,8 @@ def test_authenticated_http_etag_tampering_and_public_snapshot(setup, monkeypatc
     assert client.get(path).status_code == 401
     response = client.get(path, headers=signed("GET", path))
     assert response.status_code == 200
-    assert response.headers["etag"].strip('"') == digest(response.json())
+    assert response.headers["etag"].strip('"') == response.json()["version"]
+    assert response.json()["version"] == digest({k: v for k, v in response.json().items() if k != "version"})
     doc = store.document("a", "講道 test")
     body = json.dumps(
         op(doc, operations=[{"kind": "text", "id": "1", "text": "合法"}])
@@ -764,3 +765,34 @@ def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_pat
     assert len(read(target / 'config/sermon.json')) == 2
     with pytest.raises(ValueError, match='refusing to overwrite'):
         module.activate(source_root, production, new, 'a', target, append=True)
+
+
+def test_document_body_version_confirms_paragraph_and_stale_versions_still_fail(setup, monkeypatch):
+    from urllib.parse import quote
+    store, root, _ = setup
+    adopted(setup)
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET', 'test-secret')
+    app = FastAPI()
+    app.include_router(create_review_router(root), prefix='/sc_api')
+    @app.middleware("http")
+    async def compressed_transport(request, call_next):
+        response = await call_next(request)
+        if response.headers.get('etag'):
+            response.headers['etag'] = 'W/' + response.headers['etag']
+        return response
+    client = TestClient(app)
+    path = '/sc_api/review_document/' + quote('講道 test', safe='')
+    response = client.get(path, headers=signed('GET', path))
+    doc = response.json()
+    assert response.headers['etag'].startswith('W/')
+    assert not doc['version'].startswith('W/')
+    access = json.loads(response.headers['x-review-access'])
+    packet = {'version': doc['version'], 'epoch': access['epoch'], 'operation_id': uuid.uuid4().hex,
+              'operations': [{'kind': 'paragraph_review', 'id': '1', 'decision': 'confirmed', 'content_sha256': doc['paragraph_shas']['1']}]}
+    def patch(value):
+        body = json.dumps(value).encode()
+        return client.patch(path, content=body, headers={**signed('PATCH', path, body), 'content-type': 'application/json', 'if-match': '"' + value['version'] + '"'})
+    result = patch(packet)
+    assert result.status_code == 200
+    assert store.document('a', '講道 test')['context']['reviews']['p:1']['decision'] == 'confirmed'
+    assert patch({**packet, 'operation_id': uuid.uuid4().hex}).status_code == 412

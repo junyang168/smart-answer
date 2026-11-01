@@ -141,7 +141,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, api_base=
             if k not in ("script", "context", "version", "paragraph_shas", "group_shas")
         }
         return JSONResponse(
-            {k: doc[k] for k in ("script", "context", "paragraph_shas", "group_shas")},
+            {k: doc[k] for k in ("script", "context", "version", "paragraph_shas", "group_shas")},
             headers={
                 "ETag": '"' + doc["version"] + '"',
                 "X-Review-Access": json.dumps(access, ensure_ascii=True),
