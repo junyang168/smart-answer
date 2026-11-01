@@ -297,6 +297,29 @@ def apply_exclusions(paragraphs: list[dict], answer: dict) -> tuple[list[dict], 
     return result,changes
 
 
+def retain_uncertain_paragraphs(paragraphs, deletions, reviews):
+    """A source-bound conservative retention can only keep existing speech."""
+    by_id = {p['id']: p for p in paragraphs}
+    retained = {}
+    for review in reviews:
+        paragraph = by_id.get(review['paragraph_id'])
+        if paragraph is None or text_sha(paragraph['text']) != review['source_text_sha256']:
+            raise ValueError('Retention review belongs to another paragraph revision')
+        if not isinstance(review['reason'], str) or not review['reason'].strip():
+            raise ValueError('Retention review requires a reason')
+        retained[review['paragraph_id']] = review
+    kept, withheld = [], []
+    for deletion in deletions:
+        review = retained.get(deletion['paragraph_id'])
+        if review:
+            withheld.append({**deletion, 'status': 'retained_uncertain_content',
+                'retention_review': review, 'review_origin': 'operator_conservative_retention',
+                'human_confirmed': False})
+        else:
+            kept.append(deletion)
+    return kept, withheld
+
+
 def clean_window(folder: Path) -> dict:
     source_path = folder/'correction/correction_trial.json'
     trial = read(source_path)
@@ -358,9 +381,14 @@ def clean_full_transcript(out: Path) -> dict:
         try:apply_exclusions(paragraphs,{'deletions':[proposal]})
         except ValueError as error:withheld.append({**proposal,'status':'withheld_invalid_exact_range','validation_error':str(error)})
         else:valid.append(proposal)
+    retention_path = out / 'editorial-retentions.json'
+    retentions = read(retention_path)['retentions'] if retention_path.exists() else []
+    valid, retained = retain_uncertain_paragraphs(paragraphs, valid, retentions)
     cleaned,exclusions=apply_exclusions(paragraphs,{'deletions':valid})
     proof={'schema_version':'whole-video-reading-view.v1','sources':bindings,'paragraphs':cleaned,'exclusions':exclusions,
-           'withheld_deletions':withheld,'request_sha256':slides.object_sha(request),'model':adapter.model,'estimated_usd_upper':adapter.usage(raw)['estimated_usd_upper']}
+           'withheld_deletions':withheld,'retained_exclusions':retained,
+           'retention_review_sha256':sha(retention_path) if retention_path.exists() else None,
+           'request_sha256':slides.object_sha(request),'model':adapter.model,'estimated_usd_upper':adapter.usage(raw)['estimated_usd_upper']}
     save(out/'editorial-full/reading_view.json',proof)
     for w in master['windows']:
         folder=out/f'windows/{w["id"]}';path=folder/'editorial/reading_view.json'
@@ -546,7 +574,7 @@ def audit_frame_pts(video: Path, manifest: dict) -> dict:
 
 
 def refine_backward_predictions(out: Path, python: Path) -> None:
-    """One acoustic retry excluding preceding speech, with originals retained."""
+    """One acoustic retry for backward/late partial timing, retaining originals."""
     master=read(out/'master.json');samples=read_audio(out/'master.wav');previous=None
     for w in master['windows']:
         folder=out/f'windows/{w["id"]}';ref=read(folder/'final_alignment_ref.json');final=folder/ref['folder']
@@ -554,20 +582,31 @@ def refine_backward_predictions(out: Path, python: Path) -> None:
         for p,c in zip(reading['paragraphs'],source['chunks'],strict=True):
             raw=read(final/f'alignment/{p["id"]}.json');resolved=resolve_final_paragraph(p,c,raw)
             if resolved['start_ms'] is not None:
+                late_retry = False
                 if previous and resolved['start_ms']<previous['start_ms']:
-                    bad.append((p['id'],max(c['source_origin_sample'],previous['end_ms']*16),slides.object_sha(raw)))
-                previous=resolved
+                    bad.append((p['id'],max(c['source_origin_sample'],previous['end_ms']*16),slides.object_sha(raw),
+                                'backward_prediction_in_preceding_speech_padding'))
+                elif previous and p['start_ms'] is not None:
+                    prior_start = w.get('start_ms', 0) + p['start_ms']
+                    begin = previous['end_ms'] * 16
+                    partial = resolved['invalid_or_foreign_units'] > resolved['acoustic_anchor_count'] / 2
+                    if (partial and resolved['start_ms'] - prior_start > 3000
+                        and c['source_origin_sample'] < begin < c['source_origin_sample'] + c['sample_count']):
+                        bad.append((p['id'],begin,slides.object_sha(raw),'late_partial_alignment_in_preceding_speech_padding'))
+                        late_retry = True
+                if not late_retry:
+                    previous=resolved
         if not bad:continue
         if ref.get('timing_refinement'):raise ValueError('Backward timing remains after the one bounded acoustic retry')
         refined=folder/'final-alignment'/('timing-r1-'+sha(final/'asr.json')[:16])
         shutil.copytree(final,refined,dirs_exist_ok=True)
-        for pid,begin,raw_sha in bad:
+        for pid,begin,raw_sha,reason in bad:
             c=next(c for c in source['chunks'] if c['id']==pid)
             end=c['source_origin_sample']+c['sample_count']
             if begin>=end:raise ValueError('Neighbouring acoustic bounds leave no paragraph audio')
             path=refined/f'audio/{pid}-r1.wav';write_audio(path,samples[begin:end])
             c.update(audio=str(path.relative_to(refined)),audio_sha256=sha(path),source_origin_sample=begin,sample_count=end-begin,
-                timing_refinement={'reason':'backward_prediction_in_preceding_speech_padding','prior_alignment_sha256':raw_sha,
+                timing_refinement={'reason':reason,'prior_alignment_sha256':raw_sha,
                                    'prior_folder':str(final.relative_to(folder))})
             # This is only the copied output; the complete original is retained.
             (refined/f'alignment/{pid}.json').unlink()
@@ -664,6 +703,10 @@ def finish(out: Path, video: Path) -> dict:
         'withheld_correction_proposals':withheld,
         'human_confirmed':False,'repeat_asr_verification_calls':0,'timing_audit_sha256':sha(out/'timing_audit.json')}
     from importlib.metadata import version
+    cleanup = out / 'editorial-full/reading_view.json'
+    if cleanup.exists() and read(cleanup).get('retained_exclusions'):
+        record['editorial_retention_reviews'] = read(cleanup)['retained_exclusions']
+        record['editorial_cleanup_sha256'] = sha(cleanup)
     record['script_converter']={'config':'OpenCC s2t','version':version('opencc-python-reimplemented')}
     if vocabulary_from_manifest(master) is not None:
         record['vocabulary_hint'] = master['vocabulary_hint']

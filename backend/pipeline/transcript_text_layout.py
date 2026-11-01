@@ -148,6 +148,10 @@ def protected_punctuation(text: str, at: int) -> bool:
     # Numeric references, decimal points and punctuation inside foreign words
     # are content, not formatting. Also protect abbreviation-ending dots.
     if at and at + 1 < len(text):
+        # Chinese sentence separators between Latin/Greek words are formatting,
+        # not part of a foreign token. Still protect numeric forms such as 3：16.
+        if text[at] in '，。！？；、' and not (text[at - 1].isdecimal() and text[at + 1].isdecimal()):
+            return False
         if text[at - 1].isalnum() and text[at + 1].isalnum() and not cjk(text[at - 1]) and not cjk(text[at + 1]):
             return True
     return at > 0 and text[at] == '.' and text[at - 1].isascii() and text[at - 1].isalpha()
