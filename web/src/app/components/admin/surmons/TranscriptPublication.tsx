@@ -21,7 +21,8 @@ export default function TranscriptPublication({
   params: Promise<{ item: string }>;
   apiBase?: string;
 }) {
-  const { item } = use(params);
+  const routeParams = use(params);
+  const item = decodeURIComponent(routeParams.item);
   const [publication, setPublication] = useState<Publication>();
   const [error, setError] = useState("");
   const base = `${apiBase}/review_public/${encodeURIComponent(item)}`;

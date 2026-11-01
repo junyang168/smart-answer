@@ -6,7 +6,8 @@ export default async function BetaEditor({
 }: {
   params: Promise<{ item: string }>;
 }) {
-  const { item } = await params;
+  const routeParams = await params;
+  const item = decodeURIComponent(routeParams.item);
   return (
     <>
       <div className="mb-3 flex items-center justify-between text-sm text-slate-600">
