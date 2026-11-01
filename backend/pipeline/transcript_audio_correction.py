@@ -265,14 +265,20 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
     raw = saved_call(out, request, (count * .75 * 1.2 + adapter.config.get('max_output_tokens', 8192) * 3.75) / 1_000_000,
                      lambda: adapter.generate(parts), max_calls=48, budget_usd=3)
     cost = adapter.usage(raw)['estimated_usd_upper']
-    if raw.get('candidates', [{}])[0].get('finish_reason') != 'MAX_TOKENS':
+    reason = raw.get('candidates', [{}])[0].get('finish_reason')
+    if reason not in ('MAX_TOKENS', 'MALFORMED_FUNCTION_CALL'):
         return raw, cost, object_sha(request)
-    # Only a known completed-but-truncated response gets one corrected request.
-    # Unknown outcomes, timeouts, safety refusals and a second truncation stop.
+    # Only known terminal format failures get one distinct corrected request.
+    # Unknown outcomes, timeouts, safety refusals and a second failure stop.
     base_config = adapter.config
     recovery_config = {**base_config, 'max_output_tokens': 16384,
                        'thinking_config': {'thinking_level': 'LOW'}}
-    recovery = {**request, 'stage': 'known_truncation_recovery_once', 'config': recovery_config,
+    stage = 'known_truncation_recovery_once'
+    if reason == 'MALFORMED_FUNCTION_CALL':
+        stage = 'known_malformed_function_recovery_once'
+        recovery_config.update(automatic_function_calling={'disable': True},
+                               tool_config={'function_calling_config': {'mode': 'NONE'}})
+    recovery = {**request, 'stage': stage, 'config': recovery_config,
                 'parent_response_sha256': object_sha(raw)}
     cached = (out / 'calls' / object_sha(recovery) / 'state.json').exists()
     adapter.config = recovery_config
