@@ -26,6 +26,7 @@ type Data = {
 const labels: Record<string, string> = {
   queued: "等待處理", processing: "正在整理消息", review: "待核對", done: "已完成", applied: "已更新網站",
   irrelevant: "無須更新", error: "處理失敗", dismissed: "已略過", applying: "正在儲存",
+  waiting_reply: "已在群內提問，等待回答", resolved: "已由後續回答處理", cancelled: "已取消",
   sent: "已發送", sending: "發送中", unknown: "發送結果待確認", ready: "已連線", disconnected: "未連接",
   offline: "橋接器未啟動", connecting: "連接中", qr: "等待手機掃碼", auth_failure: "需要重新登入",
   paused: "已暫停", idle: "等待新消息", waiting_for_messages: "有資料待處理，暫緩提醒",
@@ -33,7 +34,7 @@ const labels: Record<string, string> = {
   bridge_unavailable: "WhatsApp 未連線，暫緩提醒", bridge_not_synced: "等待群消息同步",
   bridge_stale: "同步狀態過期，暫緩提醒", complete: "資料齊全", not_due: "尚未到提醒時間",
   schedule_conflict: "本主日同工安排有衝突，請先處理",
-  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文",
+  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻",
 };
 const display = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value ?? "未填");
 const card = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
@@ -77,12 +78,12 @@ export default function SundayAssistantPage() {
     const saved = await call<Settings>("settings", "PUT", settings);
     setSettings(saved); dirtyRef.current = false; setDirty(false);
   }, "設定已儲存");
-  const pending = data?.proposals.filter(p => !["applied", "dismissed"].includes(p.status)) || [];
+  const pending = data?.proposals.filter(p => !["applied", "dismissed", "resolved"].includes(p.status)) || [];
   return <div className="mx-auto max-w-5xl space-y-5 px-2 pb-16">
     <header className="rounded-2xl bg-slate-900 p-6 text-white">
       <p className="text-sm text-indigo-200">主日服事 · WhatsApp</p>
       <h1 className="mt-1 text-2xl font-bold">主日資料助理</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌與讀經。請假資料成功更新後回覆原群；周五下午 5 點檢查本主日缺項並提醒。</p>
+      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時在原群追問，收到回答後繼續登記。請假資料成功更新後回覆原群；周五下午 5 點檢查崇拜準備資料的缺項並提醒。</p>
       <div className="mt-4 flex flex-wrap gap-4 text-sm underline"><Link href="/admin/sunday-service">主日表單</Link><Link href="/admin/sunday-workers">同工及外出日期</Link></div>
     </header>
     {error && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error}</div>}
@@ -106,18 +107,17 @@ export default function SundayAssistantPage() {
         </div>
         <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           <label><input type="checkbox" checked={settings.enabled} onChange={e => patch({ enabled: e.target.checked })} /> 啟用消息收集與整理</label>
-          <label><input type="checkbox" checked={settings.auto_apply} onChange={e => patch({ auto_apply: e.target.checked })} /> 自動套用可信發送人的明確資料</label>
+          <label><input type="checkbox" checked={settings.auto_apply} onChange={e => patch({ auto_apply: e.target.checked })} /> 自動登記所選群內的明確資料</label>
           <label><input type="checkbox" checked={settings.reminders_enabled} onChange={e => patch({ reminders_enabled: e.target.checked })} /> 啟用周五缺項提醒</label>
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>
-        <p className="mt-3 text-xs text-slate-500">自動套用需指定可信發送人；其他資料會進入待核對。已有人工內容或日期不清時也會保留待核對。</p>
-        <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">姓名對應與可信發送人</summary>
+        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。不清楚時在原群追問；已有人工內容衝突時保留待核對。首次歷史同步只提供預覽。</p>
+        <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>
           <p className="mt-3 text-sm">從下方原消息複製發送人 ID，對應到既有同工。夫妻可選兩人，以便理解「我們夫妻」。</p>
           <input className={`${input} mt-3`} placeholder="WhatsApp 發送人 ID" value={sender} onChange={e => setSender(e.target.value)} />
           <div className="my-3 flex max-h-40 flex-wrap gap-3 overflow-auto text-sm">{data.workers.map(name => <label key={name}><input type="checkbox" checked={selectedWorkers.includes(name)} onChange={e => setSelectedWorkers(e.target.checked ? [...selectedWorkers, name] : selectedWorkers.filter(n => n !== name))} /> {name}</label>)}</div>
-          <div className="flex flex-wrap gap-3"><button className={button} disabled={!sender.trim() || !selectedWorkers.length} onClick={() => { patch({ sender_workers: { ...settings.sender_workers, [sender.trim()]: selectedWorkers } }); setSelectedWorkers([]); }}>加入姓名對應</button><button className={button} disabled={!sender.trim()} onClick={() => patch({ trusted_senders: [...new Set([...settings.trusted_senders, sender.trim()])] })}>加入可信發送人</button></div>
+          <div className="flex flex-wrap gap-3"><button className={button} disabled={!sender.trim() || !selectedWorkers.length} onClick={() => { patch({ sender_workers: { ...settings.sender_workers, [sender.trim()]: selectedWorkers } }); setSelectedWorkers([]); }}>加入姓名對應</button></div>
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(settings.sender_workers).map(([id, names]) => <li key={id} className="break-all">{id} → {names.join("、")} <button className="text-red-700 underline" onClick={() => { const next = { ...settings.sender_workers }; delete next[id]; patch({ sender_workers: next }); }}>移除</button></li>)}</ul>
-          <ul className="mt-3 space-y-2 text-sm">{settings.trusted_senders.map(id => <li key={id} className="break-all">可信：{id} <button className="text-red-700 underline" onClick={() => patch({ trusted_senders: settings.trusted_senders.filter(x => x !== id) })}>移除</button></li>)}</ul>
         </details>
         <div className="mt-5 flex flex-wrap gap-3"><button className={button} disabled={busy || !dirty} onClick={() => void save()}>儲存設定</button><button className={button} disabled={busy || dirty || !settings.enabled} onClick={() => void action(() => call("tick", "POST", {}), "已要求處理待辦，進度會自動更新")}>處理待辦</button>{dirty && <span className="self-center text-sm text-amber-800">有尚未儲存的設定</span>}</div>
       </section>
@@ -129,7 +129,7 @@ export default function SundayAssistantPage() {
           {p.payload.operations.map((op, i) => <div key={i} className="rounded-lg border border-indigo-100 p-3 text-sm"><p className="font-semibold">{op.kind === "service" ? `${op.date} · ${labels[op.field || ""]}` : `${op.worker} · 不能服事日期`}</p><p className="mt-2 break-words text-slate-500">目前：{display(op.before)}</p><p className="mt-1 break-words">更新為：{display(op.after)}</p><p className="mt-2 whitespace-pre-wrap text-xs text-slate-500">依據：{op.evidence}</p></div>)}
           {p.payload.questions.map((q, i) => <p key={i} className="text-sm text-amber-800">需確認：{q}</p>)}
           {p.error && <p className="text-sm text-red-700">{p.error}</p>}
-          <div className="flex flex-wrap gap-3">{!p.payload.questions.length && <button className={button} disabled={busy} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "apply" }), "已更新網站；請假回覆已列入發送佇列")}>核對並更新</button>}<button className={button} disabled={busy} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "retry" }), "已排入重新整理")}>重新整理</button><button className="text-sm text-slate-600 underline" disabled={busy} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "dismiss" }), "已略過此更新")}>略過（已由表單處理或無須更新）</button></div>
+          <div className="flex flex-wrap gap-3">{!p.payload.questions.length && <button className={button} disabled={busy} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "apply" }), "已更新網站；請假回覆已列入發送佇列")}>核對並更新</button>}<button className={button} disabled={busy || p.status === "waiting_reply"} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "retry" }), "已排入重新整理")}>重新整理</button><button className="text-sm text-slate-600 underline" disabled={busy} onClick={() => void action(() => call(`proposals/${p.id}`, "POST", { action: "dismiss" }), "已略過此更新")}>略過（已由表單處理或無須更新）</button></div>
         </article>; })}
       </section>
       <section className={card}><h2 className="text-lg font-bold">最近消息</h2><div className="mt-4 max-h-96 space-y-4 overflow-auto">{data.messages.map(m => <article key={m.id} className="border-b pb-3 text-sm"><div className="flex justify-between gap-3"><span>{new Date(m.payload.sent_at).toLocaleString()}</span><span>{labels[m.status] || m.status}</span></div><p className="mt-1 break-all text-xs text-slate-500">{m.payload.sender_id}</p><p className="mt-2 whitespace-pre-wrap">{m.payload.text || "語音、圖片或附件，待人工確認"}</p>{m.error && <p className="mt-2 text-red-700">{m.error}</p>}{m.status === "error" && <button className="mt-2 underline" disabled={busy} onClick={() => void action(() => call(`messages/${encodeURIComponent(m.id)}/retry`, "POST", {}), "已排入重試")}>重試</button>}</article>)}</div></section>

@@ -100,8 +100,10 @@ def decide(proposal_id: int, payload: Decision):
             row = db.execute("SELECT * FROM proposals WHERE id=?", (proposal_id,)).fetchone()
         if not row:
             raise HTTPException(404, "找不到此更新")
-        if row["status"] in {"applied", "dismissed"}:
+        if row["status"] in {"applied", "dismissed", "resolved"}:
             raise HTTPException(409, "此更新已處理")
+        if row["status"] == "waiting_reply" and payload.action == "retry":
+            raise HTTPException(409, "此事項正在群內追問，請直接在群內回答；若不再需要登記，可略過此事項")
         if payload.action == "apply":
             try:
                 agent.apply(proposal_id, approved=True)
@@ -113,11 +115,20 @@ def decide(proposal_id: int, payload: Decision):
             status = "done"
         elif payload.action == "dismiss":
             with agent.store.db() as db:
+                dialogue = db.execute("SELECT id FROM clarifications WHERE proposal_id=? AND status='waiting'", (proposal_id,)).fetchone()
+                if dialogue:
+                    import json
+                    message = ChatMessage.model_validate(json.loads(row["payload"])["message"])
+                    agent.finish_dialogue(db, {"clarification_id": dialogue[0]}, message, "dismissed")
+                    db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key LIKE ? AND status='queued'",
+                               (now_text(), f"clarify:{dialogue[0]}:%"))
                 db.execute("UPDATE proposals SET status='dismissed',updated_at=? WHERE id=?", (now_text(), proposal_id))
+                db.execute("UPDATE clarifications SET status='dismissed',updated_at=? WHERE proposal_id=?", (now_text(), proposal_id))
             status = "dismissed"
         else:
             status = "queued"
             with agent.store.db() as db:
+                db.execute("UPDATE clarifications SET status='dismissed',updated_at=? WHERE proposal_id=?", (now_text(), proposal_id))
                 db.execute("DELETE FROM proposals WHERE id=?", (proposal_id,))
         with agent.store.db() as db:
             db.execute("UPDATE messages SET status=?,error=NULL WHERE id=?", (status, row["message_id"]))

@@ -4,6 +4,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
 import { senderId } from "./sender.mjs";
+import { registeredMessage } from "./outgoing.mjs";
 
 const secret = process.env.SUNDAY_ASSISTANT_SECRET;
 const stateDir = resolve(process.env.SUNDAY_WHATSAPP_STATE_DIR || "./.state");
@@ -161,9 +162,8 @@ const server = http.createServer(async (req, res) => {
       // Refresh authorization immediately before an external action.
       config = await backendCall("bridge-config");
       if (state !== "ready" || !config.enabled || !config.groups.includes(group_id)) return reply(409, { error: "Group is not connected/enabled" });
-      if (typeof key !== "string" || key.length > 300 || typeof text !== "string" || text.length > 12000 ||
-          !((key.startsWith("ack:") && text.startsWith("【請假登記回覆】")) || (key.startsWith("friday:") && text.startsWith("【主日資料提醒】")))) {
-        return reply(422, { error: "Only registered acknowledgements and Friday reminders may be sent" });
+      if (!registeredMessage(key, text)) {
+        return reply(422, { error: "Only registered assistant replies, questions and Friday reminders may be sent" });
       }
       if (key.startsWith("friday:") && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
         return reply(200, { status: "deferred" });

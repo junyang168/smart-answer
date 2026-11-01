@@ -4,11 +4,12 @@ from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ZONE = ZoneInfo("America/Chicago")
 SERVICE_FIELDS = {"sermonSpeaker": "講員", "sermonTitle": "講道題目", "hymn": "詩歌",
-                  "responseHymn": "回應詩歌", "scripture": "讀經經文"}
+                  "responseHymn": "回應詩歌", "scripture": "讀經經文", "donationAmount": "本週奉獻"}
+FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field != "donationAmount"}
 
 
 class Settings(BaseModel):
@@ -23,6 +24,7 @@ class Settings(BaseModel):
     friday_minute: int = Field(default=0, ge=0, le=59)
     # WhatsApp author IDs -> exact names in the existing worker list, including spouses.
     sender_workers: dict[str, list[str]] = Field(default_factory=dict)
+    # Retained for old settings files; collection is authorized by selected group.
     trusted_senders: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -59,15 +61,28 @@ class ChatMessage(BaseModel):
 
 class ServiceChange(BaseModel):
     date: date
-    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture"]
-    value: str | list[str]
+    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount"]
+    value: str | list[str] | float
     evidence: str = Field(min_length=1)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def reject_boolean_amount(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("欄位值不可為布林值")
+        return value
 
     @model_validator(mode="after")
     def valid_value(self):
         if self.date.weekday() != 6:
             raise ValueError("崇拜日期必須是主日")
-        if self.field == "scripture":
+        if self.field == "donationAmount":
+            import math
+            if isinstance(self.value, bool) or not isinstance(self.value, (int, float)) or not math.isfinite(self.value) or self.value < 0:
+                raise ValueError("奉獻金額需為明確的非負金額")
+            if round(self.value, 2) != self.value:
+                raise ValueError("奉獻金額最多保留兩位小數")
+        elif self.field == "scripture":
             if not isinstance(self.value, list) or not self.value or any(not x.strip() for x in self.value):
                 raise ValueError("讀經需列出完整經文範圍")
         elif not isinstance(self.value, str) or not self.value.strip():
@@ -91,6 +106,8 @@ class AbsenceChange(BaseModel):
 
 
 class Extraction(BaseModel):
+    clarification_id: int | None = Field(default=None, ge=1)
+    cancel_clarification: bool = False
     service_changes: list[ServiceChange] = Field(default_factory=list, max_length=60)
     absence_changes: list[AbsenceChange] = Field(default_factory=list, max_length=60)
     questions: list[str] = Field(default_factory=list)

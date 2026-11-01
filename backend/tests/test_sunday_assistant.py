@@ -152,7 +152,7 @@ def test_context_does_not_authorize_unrelated_or_unapplied_absence(agent, reason
     receive(agent, {"absence_changes": [{"worker": "李芳", "start": "2026-11-15", "end": "2026-12-02", "evidence": "記錯了，應該到12/2", "context_message_id": "m1"}]},
             group="111@g.us", text="記錯了，應該到12/2", id="m2", at="2026-11-03T16:00:00+00:00")
     p = agent.store.proposals()[0]
-    assert p["status"] == "review"
+    assert p["status"] == "waiting_reply"
     assert p["payload"]["questions"]
     assert agent.repository.workers["李芳"].is_available_on("2026-12-02")
 
@@ -201,7 +201,8 @@ def test_questions_or_unknown_identity_never_acknowledge_success(agent):
             group="111@g.us", text="我不在")
     p = agent.store.proposals()[0]
     assert p["payload"]["questions"]
-    assert not agent.bridge.sent
+    assert len(agent.bridge.sent) == 1
+    assert agent.bridge.sent[0][2].startswith("【主日助理提問】")
     with pytest.raises(ValueError, match="疑問"):
         agent.apply(p["id"], approved=True)
 
@@ -351,9 +352,10 @@ def test_retracted_message_creates_persistent_review_not_a_silent_success(agent)
     msg = ChatMessage(message_id="revoked", group_id="222@g.us", sender_id="sender", sent_at=FRIDAY, text="原消息已撤回", revoked=True)
     agent.store.receive(msg)
     agent.tick(FRIDAY)
-    assert agent.store.messages()[0]["status"] == "review"
+    assert agent.store.messages()[0]["status"] == "waiting_reply"
     assert "撤回" in agent.store.proposals()[0]["payload"]["questions"][0]
-    assert not agent.bridge.sent
+    assert len(agent.bridge.sent) == 1
+    assert agent.bridge.sent[0][2].startswith("【主日助理提問】")
 
 
 def test_real_form_and_agent_repository_writes_share_lock(tmp_path, monkeypatch):

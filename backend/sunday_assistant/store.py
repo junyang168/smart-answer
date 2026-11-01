@@ -39,6 +39,11 @@ class Store:
                 CREATE TABLE IF NOT EXISTS outbox (
                     key TEXT PRIMARY KEY, group_id TEXT NOT NULL, text TEXT NOT NULL,
                     status TEXT NOT NULL, remote_id TEXT, error TEXT, updated_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS clarifications (
+                    id INTEGER PRIMARY KEY, proposal_id INTEGER NOT NULL,
+                    group_id TEXT NOT NULL, sender_id TEXT NOT NULL,
+                    history TEXT NOT NULL, questions TEXT NOT NULL,
+                    status TEXT NOT NULL, resolved_by TEXT, updated_at TEXT NOT NULL);
             """)
         os.chmod(self.path, 0o600)
 
@@ -75,7 +80,7 @@ class Store:
         settings = self.settings()
         if message.group_id not in {settings.availability_group, settings.service_group}:
             raise ValueError("此群未設定為資料來源")
-        if message.text.startswith(("【主日資料提醒】", "【請假登記回覆】")):
+        if message.text.startswith(("【主日資料提醒】", "【請假登記回覆】", "【主日助理提問】", "【主日資料回覆】")):
             return False
         with self.db() as db:
             cur = db.execute("INSERT OR IGNORE INTO messages(id,payload,status,received_at) VALUES (?,?,?,?)",
