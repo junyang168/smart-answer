@@ -83,6 +83,7 @@ async function connect() {
 async function poll() {
   try {
     const nextConfig = await backendCall("bridge-config");
+    if (lastError === "fetch failed" || lastError?.startsWith("Backend bridge-config:")) lastError = null;
     if (JSON.stringify(nextConfig) !== JSON.stringify(config)) { synced = false; lastHistorySync = 0; }
     config = nextConfig;
     if (state === "ready" && config.enabled) {
