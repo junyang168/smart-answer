@@ -234,3 +234,29 @@ def test_existing_internal_linebreak_does_not_block_a_clear_word_correction():
     corrected = apply_corrections([p], [{**edit, **audio_decision(p, edit)}])
     assert len(corrected) == 1 and corrected[0]['id'] == p['id']
     assert corrected[0]['text'] == '這個不是屬靈，不是有恩賜你就屬靈。'
+
+
+@pytest.mark.parametrize('second_reason', ['STOP', 'MALFORMED_FUNCTION_CALL'])
+def test_known_malformed_function_response_has_one_recorded_tools_disabled_recovery(tmp_path, second_reason):
+    class Adapter:
+        def __init__(self):
+            self.config = {'max_output_tokens': 16384}
+            self.generations = 0
+            self.configs = []
+        def count(self, parts): return 100
+        def generate(self, parts):
+            self.generations += 1
+            self.configs.append(copy.deepcopy(self.config))
+            return {'candidates': [{'finish_reason': 'MALFORMED_FUNCTION_CALL' if self.generations == 1 else second_reason}]}
+        def usage(self, raw): return {'estimated_usd_upper': .01}
+    adapter = Adapter()
+    request = {'stage': 'test-malformed', 'config': adapter.config}
+    result = proposal_response(adapter, [], request, tmp_path)
+    assert result[0]['candidates'][0]['finish_reason'] == second_reason
+    assert result[1] == .02
+    assert adapter.generations == 2
+    assert adapter.configs[1]['automatic_function_calling']['disable'] is True
+    assert adapter.configs[1]['tool_config']['function_calling_config']['mode'] == 'NONE'
+    assert adapter.config == request['config']
+    assert proposal_response(adapter, [], request, tmp_path) == result
+    assert adapter.generations == 2
