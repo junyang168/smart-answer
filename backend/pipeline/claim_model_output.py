@@ -36,7 +36,7 @@ class Changes(cm.source.Contract):
 class Creation(cm.source.Contract):
     collection: str
     object_id: str = Field(description='New identity; must not exist in the frozen input.')
-    fields_json: str = Field(description='JSON object containing the complete new content using ONLY keys in the matching unit_request.creation_permissions.fields. Omit every other key even if examples or record shapes show defaults. Do not fill program-managed identity, provenance, hashes or optional metadata.')
+    fields_json: str = Field(description='JSON object with the complete new record, without identity, provenance or derived hashes.')
     reason: str = Field(min_length=1)
     citations: list[cm.Citation] = Field(min_length=1)
 
