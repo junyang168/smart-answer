@@ -189,10 +189,10 @@ const server = http.createServer(async (req, res) => {
       if (state !== "ready") return reply(409, { error: "WhatsApp not ready" });
       if (typeof key !== "string" || !allowedDestination(sendConfig, key, group_id)) return reply(403, { error: "Destination is not authorized for this message type" });
       if (!registeredMessage(key, text)) {
-        return reply(422, { error: "Only registered assistant replies, questions and Friday reminders may be sent" });
+        return reply(422, { error: "Only registered assistant messages may be sent" });
       }
       if (!allowedBySettings(sendConfig, key)) return reply(200, { status: "held", reason: "disabled_by_settings" });
-      if (key.startsWith("friday:") && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
+      if ((key.startsWith("friday:") || key.startsWith("ppt-ready:")) && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
         return reply(200, { status: "deferred" });
       }
       const result = await journal.send(key, group_id, text, async () => {

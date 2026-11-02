@@ -35,3 +35,15 @@ test("cached admin authorization never permits a source group as the admin desti
   saveAdminConfig(path, { ...config, admin_group: "1@g.us" }, 1000);
   assert.equal(allowedDestination(loadAdminConfig(path, 2000), "admin-help:a", "1@g.us"), false);
 });
+
+test('PPT ready notices reach only the configured admin group with fresh explicit enablement', () => {
+  const enabled = { ...config, allow_admin_help: false, allow_ppt_ready: true };
+  assert.ok(registeredMessage('ppt-ready:date:version', '【主日PPT已準備好】可以下載'));
+  assert.ok(allowedDestination(enabled, 'ppt-ready:date:version', '2@g.us'));
+  assert.ok(allowedBySettings(enabled, 'ppt-ready:date:version'));
+  assert.equal(allowedDestination(enabled, 'ppt-ready:date:version', '1@g.us'), false);
+  assert.equal(allowedDestination(config, 'ppt-ready:date:version', '2@g.us'), false);
+  assert.equal(allowedBySettings({...enabled,enabled:false}, 'ppt-ready:date:version'), false);
+  assert.equal(allowedDestination({...enabled,admin_group:'1@g.us'}, 'ppt-ready:date:version', '1@g.us'), false);
+  assert.equal(registeredMessage('ppt-ready:date:version', '任意自由文字'), false);
+});

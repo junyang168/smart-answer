@@ -1808,7 +1808,7 @@ def delete_micro_sermon(sermon_id: str) -> None:
         _raise_value_error(exc)
 
 
-def generate_sunday_service_ppt(date: str) -> Path:
+def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, require_complete: bool = False) -> Path:
     service = get_sunday_service(date)
     from backend.sunday_service_skeletons import maintain_skeletons
     from backend.sunday_assistant.store import Store
@@ -1864,6 +1864,8 @@ def generate_sunday_service_ppt(date: str) -> Path:
             }
 
     scripture_sections = _fetch_scripture_sections(service.scripture)
+    if require_complete and (len(scripture_sections) != len(service.scripture) or any(not section.get('verses') for section in scripture_sections)):
+        raise HTTPException(status_code=503, detail="讀經經文內容擷取未完成，PPT 尚未準備好；請稍後重試")
     replacements["scriptureReference"] = "；".join(section["display"] for section in scripture_sections) or replacements.get("scripture", "")
 
     summary_data: list[dict[str, str]] = []
@@ -1896,7 +1898,8 @@ def generate_sunday_service_ppt(date: str) -> Path:
 
     SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
     filename = _build_ppt_filename(date, service)
-    output_path = SUNDAY_WORSHIP_DIR / filename
+    output_path = output_path or SUNDAY_WORSHIP_DIR / filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     holy_comm_config: dict[str, str] | None = None
     if getattr(service, "hold_holy_communion", False):
@@ -2289,7 +2292,7 @@ def _split_lyrics_sections(raw: str) -> list[list[str]]:
     text = raw.strip()
     if not text:
         return []
-    sections = re.split(r"(?:\r?\n){2,}", text)
+    sections = re.split(r"\r?\n[ \t]*(?:\r?\n[ \t]*)+", text)
     result: list[list[str]] = []
     for section in sections:
         lines = [line.strip() for line in section.splitlines() if line.strip()]

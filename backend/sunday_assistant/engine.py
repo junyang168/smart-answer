@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 
 from backend.sunday_data_lock import sunday_data_lock
+from .fast_path import standalone_acknowledgement
 from .models import ChatMessage, Extraction, SERVICE_FIELDS, FRIDAY_FIELDS, ZONE
 from .store import Store, dump, now_text
 
@@ -454,6 +455,21 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('ppt-ready:'):
+                        from .ppt_ready import PptReady
+                        parts = row['key'].split(':')
+                        try:
+                            if not (settings.enabled and settings.auto_apply and settings.auto_generate_ppt
+                                    and settings.admin_group == row['group_id']):
+                                raise ValueError('PPT 管理員通知已停用或目的群已改變')
+                            ppt = PptReady(self)
+                            ppt.downloadable(parts[1], parts[2])
+                            if not ppt.synced(datetime.now(timezone.utc)):
+                                continue
+                        except (ValueError, OSError):
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(), row['key']))
+                            continue
                     if ((row['key'].startswith('clarify:') and not settings.group_questions_enabled)
                             or (row['key'].startswith('friday:') and not settings.reminders_enabled)):
                         with self.store.db() as db:
@@ -466,10 +482,20 @@ class Assistant:
                     from urllib.parse import quote
                     result = self.bridge.request("GET", "/outbox/" + quote(row["key"], safe=""))
                 state = result.get('status') if result.get('status') in {'sent', 'held'} else 'unknown'
+                if row['key'].startswith('ppt-ready:') and result.get('status') == 'deferred':
+                    state = 'queued'
                 error = None if state in {'sent', 'held'} else "發送結果待確認，未重複發送"
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
+                if row['key'].startswith('ppt-ready:'):
+                    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                        state = 'queued'  # Not submitted; a later tick can retry.
+                    elif isinstance(exc, httpx.HTTPStatusError):
+                        if exc.response.status_code in {409, 503}:
+                            state = 'queued'
+                        elif exc.response.status_code == 403:
+                            state = 'held'
             with self.store.db() as db:
                 db.execute("UPDATE outbox SET status=?,error=?,remote_id=?,updated_at=? WHERE key=?",
                            (state, error, remote, now_text(), row["key"]))
@@ -527,7 +553,24 @@ class Assistant:
             db.execute("UPDATE messages SET status=?,result=?,error=NULL WHERE id=?", (status, result.model_dump_json(), msg.message_id))
         return {"status": status, "request": result.model_dump(mode="json")}
 
+    def fast_path_ignore(self, msg, row):
+        # Never bypass a resumed graph, partial write, or unresolved conversation.
+        if row["status"] != "queued" or row["attempts"] or not standalone_acknowledgement(msg):
+            return False
+        with self.store.db() as db:
+            if db.execute("SELECT 1 FROM proposals WHERE message_id=? LIMIT 1", (msg.message_id,)).fetchone():
+                return False
+            if db.execute("SELECT 1 FROM clarifications WHERE group_id=? AND status='waiting' LIMIT 1",
+                          (msg.group_id,)).fetchone():
+                return False
+            result = Extraction().model_dump(mode="json")
+            result["processing_path"] = "fast_path_ignore"
+            db.execute("UPDATE messages SET status='irrelevant',result=?,error=NULL WHERE id=?", (dump(result), msg.message_id))
+        return True
+
     def process_message(self, row):
+        if row["status"] == "irrelevant":
+            return
         msg = ChatMessage.model_validate_json(row["payload"])
         with self.store.db() as db:
             saved = db.execute("SELECT status FROM proposals WHERE message_id=? AND COALESCE(json_extract(payload,'$.partial_action'),0)=0 "
@@ -545,6 +588,8 @@ class Assistant:
                 self.execute_request(msg, Extraction(questions=["此群消息已撤回，請確認原先安排是否取消或另有更正？"]))
             elif msg.unverified_edit:
                 self.execute_request(msg, Extraction(questions=["這則消息已編輯，但無法核對編輯版本時間。請另發一則更正，說明要登記的姓名、日期或欄位內容。 "]))
+            elif self.fast_path_ignore(msg, row):
+                return
             elif self.extractor is not None:
                 # Dependency injection for deterministic business-rule tests.
                 result = self.extractor(msg, settings, self.context(msg), list(self.worker_map()),
@@ -723,6 +768,9 @@ class Assistant:
                 self.store.put("worker", {"at": now_text(), "status": "processing", "message_id": row["id"]})
                 self.process_message(row)
             self.maintain_future_forms(now)
+            from .ppt_ready import PptReady
+            if settings.auto_apply and settings.auto_generate_ppt and settings.admin_group:
+                PptReady(self).tick(now)
             self.deliver_outbox()
             reminder = self.remind(now)
             self.store.put("worker", {"at": now_text(), "status": "idle", "reminder": reminder})

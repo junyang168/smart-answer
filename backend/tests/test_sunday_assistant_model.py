@@ -289,3 +289,28 @@ def test_model_disabled_group_questions_keep_uncertainty_internal_then_accept_ne
     event(agent,'我是李芳，外出日期是12月5日至12月17日。',group='111@g.us',sender='quiet-mode-member',at='2026-11-02T16:01:00+00:00')
     assert not agent.repository.workers['李芳'].is_available_on('2026-12-06')
     assert all(not text.startswith('【主日助理提問】') for _,_,text in agent.bridge.sent)
+
+
+def test_model_two_missing_songs_finish_within_eight_decisions(agent, monkeypatch):
+    """Real planner; fixed external catalog/lyric I/O isolates the turn budget."""
+    from backend.api.models import HymnMetadata, SundaySong
+    from backend.sunday_assistant import hymn_import as h
+    from backend.sunday_assistant.grounding import GroundingVerdict
+    settings = agent.store.settings()
+    settings.songs_group = '333@g.us'
+    agent.store.put('settings', settings.model_dump())
+    titles = {17: '測試聖詩甲', 18: '測試聖詩乙'}
+    monkeypatch.setattr(agent.repository, 'get_hymn_metadata', lambda number: HymnMetadata(
+        index=number, title=titles[number], lyricsUrl=f'https://fcccc.net/hymns/Hymns_HymnsForChurch/{number:03}.htm'), raising=False)
+    def create(payload):
+        song = SundaySong(id=f'import-{payload.hymnal_index}', **payload.model_dump())
+        agent.repository.songs.append(song)
+        return song
+    monkeypatch.setattr(agent.repository, 'create_sunday_song', create, raising=False)
+    monkeypatch.setattr(h, 'fetch_lyrics_text', lambda _: '測試歌詞\n1 甲乙丙丁。\n2 戊己庚辛。')
+    monkeypatch.setattr(h, 'complete', lambda schema, *_: h.LyricLayout(
+        start_line=1, end_line=2, lyrics='甲乙丙丁。\n\n戊己庚辛。') if schema == h.LyricLayout else GroundingVerdict(supported=True))
+    event(agent, '11月8日主日詩歌第17首「測試聖詩甲」，回應詩歌第18首「測試聖詩乙」。', group='333@g.us')
+    entry = agent.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn) == (titles[17], titles[18])
+    assert len([song for song in agent.repository.songs if song.id.startswith('import-')]) == 2

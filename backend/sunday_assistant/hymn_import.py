@@ -46,6 +46,24 @@ def normalize_lyric_words(text):
     return re.sub(r'[^\w\u3400-\u9fff]', '', text).replace('_', '')
 
 
+def source_verse_layout(body):
+    """Retain the source's slide/line boundaries for numbered HTML verses."""
+    blocks = re.split(r"\n[ \t]*\n", body.strip())
+    verses = []
+    for index, block in enumerate(blocks, 1):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return None  # Legacy flattened/plain-text source still needs layout.
+        match = re.match(r"^(\d{1,2})[.、．:：)）]?\s+(.+)$", lines[0])
+        if not match or int(match[1]) != index:
+            return None
+        if any(re.match(r"^\d{1,2}[.、．:：)）]?\s+", line) for line in lines[1:]):
+            return None
+        lines[0] = match[2]
+        verses.append("\n".join(lines))
+    return "\n\n".join(verses)
+
+
 def prepare_lyrics(metadata, raw):
     raw = OpenCC('s2t').convert(raw.strip())
     if not raw or len(raw) > 40000:
@@ -55,11 +73,16 @@ def prepare_lyrics(metadata, raw):
 找出完整歌詞連續範圍（start_line/end_line 為含首尾的0起算行號），排除網頁導航、歌名及編號抬頭。
 所有詩節、副歌及原順序都要保留；不得加字、改字、補寫重複副歌或從記憶補歌詞。
 原文已轉繁體。lyrics 僅調整換行、空行及移除每段開頭的阿拉伯詩節序號，保留歌詞文字與標點。
-每個詩節間空一行，句子依原文標點與語意換行，使段落可供主日PPT使用。不要加入標題、說明、程式碼框或Markdown標記。''',
+原文已有的行與詩節分段須保留；單個換行是同一張投影片內的下一行，空行才開始下一張，不合併或拆分既有段落。只有來源原本無換行結構時才依原文標點整理。每個詩節間空一行。不要加入標題、說明、程式碼框或Markdown標記。''',
         {'hymn': metadata.model_dump(mode='json'), 'source_lines': [{'line': i, 'text': line} for i, line in enumerate(lines)]})
     if layout.end_line >= len(lines) or layout.start_line > layout.end_line:
         raise ValueError('歌詞範圍無法對回來源，尚未匯入')
     body = '\n'.join(lines[layout.start_line:layout.end_line + 1])
+    preserved = source_verse_layout(body)
+    if preserved is not None:
+        # HTML already supplies trustworthy lines and verse breaks. The model
+        # selects the lyric range; it cannot change those slide boundaries.
+        layout.lyrics = preserved
     if '\ufffd' in body or '\ufffd' in layout.lyrics:
         raise ValueError('歌詞含無法解碼的文字，尚未匯入')
     if not normalize_lyric_words(body) or normalize_lyric_words(body) != normalize_lyric_words(layout.lyrics):
@@ -73,7 +96,8 @@ def prepare_lyrics(metadata, raw):
         raise ValueError('歌詞來源或完整性核對未通過：' + '；'.join(verdict.questions))
     return {'lyrics': layout.lyrics.strip(), 'raw_source': raw, 'source_sha256': sha256(raw.encode()).hexdigest(),
             'lyrics_sha256': sha256(layout.lyrics.strip().encode()).hexdigest(),
-            'source_range': [layout.start_line, layout.end_line], 'format_version': 1}
+            'source_range': [layout.start_line, layout.end_line], 'format_version': 2,
+            'layout_source': 'source_verses' if preserved is not None else 'model'}
 
 
 def metadata_for(agent, number):
