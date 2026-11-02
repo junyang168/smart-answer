@@ -691,7 +691,7 @@ class Assistant:
                     with self.store.db() as db:
                         db.execute("UPDATE proposals SET status='review',error=? WHERE id=?", (str(exc)[:1000], p[0]))
             with self.store.db() as db:
-                rows = db.execute("SELECT * FROM messages WHERE status='queued' ORDER BY json_extract(payload,'$.sent_at'),received_at LIMIT 1").fetchall()
+                rows = db.execute("SELECT * FROM messages WHERE status='queued' ORDER BY COALESCE(json_extract(payload,'$.initial_sync'),0),json_extract(payload,'$.sent_at'),received_at LIMIT 1").fetchall()
             for row in rows:
                 self.store.put("worker", {"at": now_text(), "status": "processing", "message_id": row["id"]})
                 self.process_message(row)
