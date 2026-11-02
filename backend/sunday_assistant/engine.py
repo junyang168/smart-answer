@@ -455,6 +455,21 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('ppt-ready:'):
+                        from .ppt_ready import PptReady
+                        parts = row['key'].split(':')
+                        try:
+                            if not (settings.enabled and settings.auto_apply and settings.auto_generate_ppt
+                                    and settings.admin_group == row['group_id']):
+                                raise ValueError('PPT 管理員通知已停用或目的群已改變')
+                            ppt = PptReady(self)
+                            ppt.downloadable(parts[1], parts[2])
+                            if not ppt.synced(datetime.now(timezone.utc)):
+                                continue
+                        except (ValueError, OSError):
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(), row['key']))
+                            continue
                     if ((row['key'].startswith('clarify:') and not settings.group_questions_enabled)
                             or (row['key'].startswith('friday:') and not settings.reminders_enabled)):
                         with self.store.db() as db:
@@ -467,10 +482,20 @@ class Assistant:
                     from urllib.parse import quote
                     result = self.bridge.request("GET", "/outbox/" + quote(row["key"], safe=""))
                 state = result.get('status') if result.get('status') in {'sent', 'held'} else 'unknown'
+                if row['key'].startswith('ppt-ready:') and result.get('status') == 'deferred':
+                    state = 'queued'
                 error = None if state in {'sent', 'held'} else "發送結果待確認，未重複發送"
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
+                if row['key'].startswith('ppt-ready:'):
+                    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+                        state = 'queued'  # Not submitted; a later tick can retry.
+                    elif isinstance(exc, httpx.HTTPStatusError):
+                        if exc.response.status_code in {409, 503}:
+                            state = 'queued'
+                        elif exc.response.status_code == 403:
+                            state = 'held'
             with self.store.db() as db:
                 db.execute("UPDATE outbox SET status=?,error=?,remote_id=?,updated_at=? WHERE key=?",
                            (state, error, remote, now_text(), row["key"]))
@@ -743,6 +768,9 @@ class Assistant:
                 self.store.put("worker", {"at": now_text(), "status": "processing", "message_id": row["id"]})
                 self.process_message(row)
             self.maintain_future_forms(now)
+            from .ppt_ready import PptReady
+            if settings.auto_apply and settings.auto_generate_ppt and settings.admin_group:
+                PptReady(self).tick(now)
             self.deliver_outbox()
             reminder = self.remind(now)
             self.store.put("worker", {"at": now_text(), "status": "idle", "reminder": reminder})

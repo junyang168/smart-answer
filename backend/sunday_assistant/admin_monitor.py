@@ -48,6 +48,11 @@ class AdminMonitor:
             row = db.execute("SELECT value FROM kv WHERE key='worker'").fetchone()
             worker = json.loads(row[0]) if row else {}
             errors = db.execute("SELECT COUNT(*) FROM messages WHERE status='error'").fetchone()[0]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ppt_jobs'").fetchone():
+                errors += db.execute("SELECT COUNT(*) FROM ppt_jobs WHERE status='error' AND day>=date('now','-1 day')").fetchone()[0]
+            ppt = db.execute("SELECT value FROM kv WHERE key='ppt_readiness'").fetchone()
+            if ppt and json.loads(ppt[0]).get('status') == 'error':
+                errors += 1
         return settings, worker, errors
 
     def record_exit(self, now=None):

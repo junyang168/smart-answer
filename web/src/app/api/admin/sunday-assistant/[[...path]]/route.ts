@@ -14,8 +14,8 @@ async function proxy(request: NextRequest, props: { params: Promise<{ path?: str
   const { path = [] } = await props.params;
   const joined = path.join("/");
   // Ingestion/config endpoints are for the local bridge, never browser clients.
-  const allowed = request.method === "GET" ? /^(state|groups)$/ :
-    request.method === "PUT" ? /^settings$/ : /^(connect|tick|identity-audit|admin-help-test|proposals\/\d+|messages\/[^/]+\/retry)$/;
+  const allowed = request.method === "GET" ? /^(state|groups|ppt-ready\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{64})$/ :
+    request.method === "PUT" ? /^settings$/ : /^(connect|tick|identity-audit|admin-help-test|proposals\/\d+|messages\/[^/]+\/retry|ppt-retry\/\d{4}-\d{2}-\d{2})$/;
   if (!allowed.test(joined)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (request.method !== "GET") {
     const origin = request.headers.get("origin");
@@ -30,6 +30,13 @@ async function proxy(request: NextRequest, props: { params: Promise<{ path?: str
       body: request.method === "GET" ? undefined : await request.text(),
       cache: "no-store", signal: AbortSignal.timeout(20000),
     });
+    if (joined.startsWith("ppt-ready/") && response.ok) {
+      return new NextResponse(await response.arrayBuffer(), { status: response.status, headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "Content-Disposition": response.headers.get("Content-Disposition") || "attachment",
+        "Cache-Control": "no-store",
+      } });
+    }
     return new NextResponse(await response.text(), { status: response.status,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   } catch {

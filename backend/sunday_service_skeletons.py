@@ -39,28 +39,33 @@ def maintain_skeletons(repository, store, as_of):
                 repository.create_sunday_service(entry)
                 entries[key] = entry
             entry = entries[key]
-            rotation = store.settings().worship_rotation
+            rotation = store.settings().worship_rotation or sorted(name for name, worker in workers.items() if '領詩' in worker.preferred_roles)
             leader_receipt = store.get('auto_worshipLeader:' + key)
             leader_owned = leader_receipt and leader_receipt.get('status') in {'applied', 'applying'} and leader_receipt.get('after') == entry.worship_leader
-            needs_leader = not entry.worship_leader or (leader_owned and entry.worship_leader in workers and not workers[entry.worship_leader].is_available_on(key))
+            occupied_roles = {entry.presider, entry.sermon_speaker, entry.pianist, *entry.scripture_readers}
+            needs_leader = not entry.worship_leader or (leader_owned and entry.worship_leader in workers and
+                (not workers[entry.worship_leader].is_available_on(key) or entry.worship_leader in occupied_roles))
             if needs_leader and rotation:
                 previous = sorted((prior for prior in entries.values() if prior.date < key and prior.worship_leader in rotation), key=lambda prior: prior.date)
-                if previous:
-                    anchor = previous[-1]
+                anchor = previous[-1] if previous else None
+                expected = None
+                if anchor:
                     weeks = (day - date.fromisoformat(anchor.date)).days // 7
                     expected = rotation[(rotation.index(anchor.worship_leader) + weeks) % len(rotation)]
-                    chosen_leader = expected if expected in workers and workers[expected].is_available_on(key) else None
-                    if chosen_leader != entry.worship_leader:
-                        receipt = {'before': entry.worship_leader, 'after': chosen_leader, 'status': 'applying', 'basis': 'existing_prepopulation_rotation', 'anchor_date': anchor.date}
-                        store.put('auto_worshipLeader:' + key, receipt)
-                        updated = entry.model_copy(update={'worship_leader': chosen_leader})
-                        try:
-                            repository.update_sunday_service(key, updated)
-                        except ValueError as exc:
-                            store.put('auto_worshipLeader:' + key, {**receipt, 'status': 'blocked', 'error': str(exc)})
-                        else:
-                            entries[key] = entry = updated
-                            store.put('auto_worshipLeader:' + key, {**receipt, 'status': 'applied'})
+                available_leaders = [name for name in rotation if name in workers and workers[name].is_available_on(key)]
+                preferred_leaders = [name for name in available_leaders if name not in occupied_roles] or available_leaders
+                chosen_leader = expected if expected in preferred_leaders else next(iter(preferred_leaders), None)
+                if chosen_leader != entry.worship_leader:
+                    receipt = {'before': entry.worship_leader, 'after': chosen_leader, 'status': 'applying', 'basis': 'existing_prepopulation_rotation', 'anchor_date': anchor.date if anchor else None}
+                    store.put('auto_worshipLeader:' + key, receipt)
+                    updated = entry.model_copy(update={'worship_leader': chosen_leader})
+                    try:
+                        repository.update_sunday_service(key, updated)
+                    except ValueError as exc:
+                        store.put('auto_worshipLeader:' + key, {**receipt, 'status': 'blocked', 'error': str(exc)})
+                    else:
+                        entries[key] = entry = updated
+                        store.put('auto_worshipLeader:' + key, {**receipt, 'status': 'applied'})
             ownership = store.get('auto_presider:' + key)
             owned = ownership and ownership.get('status') in {'applied', 'applying'} and ownership.get('after') == entry.presider
             occupied = {entry.worship_leader, entry.sermon_speaker, entry.pianist, *entry.scripture_readers}

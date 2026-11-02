@@ -7,6 +7,7 @@ import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from fastapi.responses import FileResponse
 
 from backend.sunday_assistant.engine import get_assistant, upcoming_sunday
 from backend.sunday_assistant.models import ChatMessage, Settings, ZONE
@@ -58,7 +59,34 @@ def state():
             "workers": list(agent.worker_map()), "identities": agent.store.identities(),
             "skeletons": skeleton_status(agent.repository, datetime.now(ZONE).date()),
             "identity_audit": audit(agent.store, agent.worker_map()),
-            "admin_monitor": admin_monitor_state(agent.store.root)}
+            "admin_monitor": admin_monitor_state(agent.store.root),
+            "ppt_readiness": agent.store.get('ppt_readiness'), "ppt_jobs": ppt_jobs(agent)}
+
+
+def ppt_jobs(agent):
+    with agent.store.db() as db:
+        return [dict(row) for row in db.execute("SELECT day,version,status,error,updated_at FROM ppt_jobs ORDER BY updated_at DESC LIMIT 20")]
+
+
+@router.get("/ppt-ready/{day}/{version}")
+def download_ready_ppt(day: str, version: str):
+    from backend.sunday_assistant.ppt_ready import PptReady
+    try:
+        path = PptReady(get_assistant()).downloadable(day,version)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return FileResponse(path, filename=f"主日崇拜-{day}-{version[:8]}.pptx",
+                        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.post("/ppt-retry/{day}")
+def retry_ready_ppt(day: str):
+    from backend.sunday_assistant.ppt_ready import PptReady
+    agent = get_assistant()
+    with available_worker(agent):
+        PptReady(agent).retry(day)
+    return {"status": "queued"}
 
 
 @router.put("/settings")
@@ -114,7 +142,8 @@ def bridge_config():
     config = get_assistant().store.settings()
     return {"enabled": config.enabled, "groups": sorted(config.source_group_ids),
             "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled,
-            "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group}
+            "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group,
+            "allow_ppt_ready": config.enabled and config.auto_apply and config.auto_generate_ppt}
 
 
 @router.post("/ingest")

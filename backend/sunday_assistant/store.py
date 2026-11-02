@@ -43,6 +43,10 @@ class Store:
                     group_id TEXT NOT NULL, sender_id TEXT NOT NULL,
                     history TEXT NOT NULL, questions TEXT NOT NULL,
                     status TEXT NOT NULL, resolved_by TEXT, updated_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS ppt_jobs (
+                    day TEXT NOT NULL, version TEXT NOT NULL, status TEXT NOT NULL,
+                    artifact_sha TEXT, error TEXT, updated_at TEXT NOT NULL,
+                    PRIMARY KEY(day,version));
                 CREATE TABLE IF NOT EXISTS identities (
                     sender_id TEXT PRIMARY KEY, worker_name TEXT NOT NULL,
                     evidence_message_id TEXT NOT NULL, updated_at TEXT NOT NULL);
