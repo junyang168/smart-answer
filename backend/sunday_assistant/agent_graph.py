@@ -267,12 +267,18 @@ def make_tools(agent, msg):
             read_worker_availability, update_records, ask_group, cancel_pending, ignore_message]
 
 
+# One decision and one tool node per turn, plus room to raise our own budget
+# error on the next decision. This is a graph-node limit, not model-call count.
+MAX_MODEL_DECISIONS = 8
+GRAPH_RECURSION_LIMIT = 2 * MAX_MODEL_DECISIONS + 2
+
+
 def build_graph(agent, msg, model, checkpointer):
     tools = make_tools(agent, msg)
     bound = model.bind_tools(tools, tool_choice="required", parallel_tool_calls=False)
 
     def decide(state):
-        if state.get("calls", 0) >= 20:
+        if state.get("calls", 0) >= MAX_MODEL_DECISIONS:
             raise ValueError("本次處理已達工具決策上限，請檢查執行記錄後重試")
         agent.store.put("worker", {"at": now_text(), "status": "processing", "message_id": msg.message_id})
         response = bound.invoke(state["messages"])
@@ -337,7 +343,7 @@ ask_group/cancel_pending/ignore_message 或 update_records(finish_event=True) �
                "pending_cases": [{"id": d["clarification_id"], "questions": d["questions"], "original": d["source_messages"][0]["text"][:400]}
                                  for d in agent.pending_dialogues(msg)]}
     revision = agent.store.get("graph_revision:" + msg.message_id, 0)
-    config = {"configurable": {"thread_id": "sunday-agent-v1:" + sha256(msg.message_id.encode()).hexdigest() + f":{revision}"}, "recursion_limit": 44}
+    config = {"configurable": {"thread_id": "sunday-agent-v1:" + sha256(msg.message_id.encode()).hexdigest() + f":{revision}"}, "recursion_limit": GRAPH_RECURSION_LIMIT}
     path = agent.store.root / "agent-checkpoints.sqlite3"
     # No external trace service receives private church messages by default.
     with tracing_context(enabled=False), SqliteSaver.from_conn_string(str(path)) as saver:

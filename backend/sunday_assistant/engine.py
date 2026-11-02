@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 
 from backend.sunday_data_lock import sunday_data_lock
+from .fast_path import standalone_acknowledgement
 from .models import ChatMessage, Extraction, SERVICE_FIELDS, FRIDAY_FIELDS, ZONE
 from .store import Store, dump, now_text
 
@@ -527,7 +528,24 @@ class Assistant:
             db.execute("UPDATE messages SET status=?,result=?,error=NULL WHERE id=?", (status, result.model_dump_json(), msg.message_id))
         return {"status": status, "request": result.model_dump(mode="json")}
 
+    def fast_path_ignore(self, msg, row):
+        # Never bypass a resumed graph, partial write, or unresolved conversation.
+        if row["status"] != "queued" or row["attempts"] or not standalone_acknowledgement(msg):
+            return False
+        with self.store.db() as db:
+            if db.execute("SELECT 1 FROM proposals WHERE message_id=? LIMIT 1", (msg.message_id,)).fetchone():
+                return False
+            if db.execute("SELECT 1 FROM clarifications WHERE group_id=? AND status='waiting' LIMIT 1",
+                          (msg.group_id,)).fetchone():
+                return False
+            result = Extraction().model_dump(mode="json")
+            result["processing_path"] = "fast_path_ignore"
+            db.execute("UPDATE messages SET status='irrelevant',result=?,error=NULL WHERE id=?", (dump(result), msg.message_id))
+        return True
+
     def process_message(self, row):
+        if row["status"] == "irrelevant":
+            return
         msg = ChatMessage.model_validate_json(row["payload"])
         with self.store.db() as db:
             saved = db.execute("SELECT status FROM proposals WHERE message_id=? AND COALESCE(json_extract(payload,'$.partial_action'),0)=0 "
@@ -545,6 +563,8 @@ class Assistant:
                 self.execute_request(msg, Extraction(questions=["此群消息已撤回，請確認原先安排是否取消或另有更正？"]))
             elif msg.unverified_edit:
                 self.execute_request(msg, Extraction(questions=["這則消息已編輯，但無法核對編輯版本時間。請另發一則更正，說明要登記的姓名、日期或欄位內容。 "]))
+            elif self.fast_path_ignore(msg, row):
+                return
             elif self.extractor is not None:
                 # Dependency injection for deterministic business-rule tests.
                 result = self.extractor(msg, settings, self.context(msg), list(self.worker_map()),
