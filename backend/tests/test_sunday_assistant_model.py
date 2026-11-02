@@ -4,10 +4,12 @@ RUN_SUNDAY_AGENT_MODEL_TESTS=1 backend/.venv/bin/python -m pytest -q -s \
     backend/tests/test_sunday_assistant_model.py --junitxml=/tmp/sunday-model-evals.xml
 """
 import os
+import json
+from pathlib import Path
 
 import pytest
 
-from backend.api.models import SundayServiceEntry
+from backend.api.models import SundayServiceEntry, SundaySong
 from backend.sunday_assistant.agent_graph import run_agent
 from backend.sunday_assistant.models import ChatMessage
 from backend.tests.test_sunday_assistant import agent
@@ -38,6 +40,64 @@ def event(agent, text, *, group="222@g.us", sender="sender", at="2026-11-02T16:0
     agent.deliver_outbox()
     print(f"model-eval {message_id}: {result['status']}", flush=True)
     return msg, result
+
+
+def oct4_case(agent):
+    case = json.loads((Path(__file__).parent / "fixtures/sunday_oct4_four_readings.json").read_text())
+    settings = agent.store.settings()
+    settings.group_questions_enabled = False
+    settings.reminders_enabled = False
+    settings.auto_generate_ppt = False
+    agent.store.put("settings", settings.model_dump())
+    agent.repository.songs.append(SundaySong(id="harmony", title="合神心意", lyricsMarkdown="既有完整歌詞"))
+    agent.repository.services[case["date"]] = SundayServiceEntry(
+        date=case["date"], sermonSpeaker="陳牧師", hymn="奇異恩典", hymnNotes="只唱第一節",
+        presider="王明", worshipLeader="李芳", pianist="李芳", scriptureReaders=["王明", "李芳"],
+        donationAmount=100, announcementsMarkdown="手工報告保留",
+    )
+    return case
+
+
+def test_model_oct4_compact_readings_preserve_four_boundaries_and_other_fields(agent):
+    case = oct4_case(agent)
+    before = agent.repository.services[case["date"]].model_dump(by_alias=True)
+    event(agent, case["text"], sender="unverified-author", at=case["sent_at"])
+    after = agent.repository.services[case["date"]].model_dump(by_alias=True)
+    assert set(agent.repository.services) == {case["date"]}
+    for field, expected in case["expected"].items():
+        assert after[field] == expected
+    assert {field for field in before if before[field] != after[field]} == set(case["expected"])
+    assert not agent.bridge.sent
+
+
+def test_model_oct4_existing_different_reading_boundaries_are_held_without_group_post(agent):
+    case = oct4_case(agent)
+    entry = agent.repository.services[case["date"]]
+    entry.sermon_title = case["expected"]["sermonTitle"]
+    entry.response_hymn = case["expected"]["responseHymn"]
+    entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
+    before = entry.model_dump(by_alias=True)
+    event(agent, case["text"], sender="unverified-author", at=case["sent_at"])
+    assert agent.repository.services[case["date"]].model_dump(by_alias=True) == before
+    with agent.store.db() as db:
+        assert db.execute("SELECT 1 FROM clarifications WHERE status='waiting'").fetchone()
+        assert db.execute("SELECT 1 FROM outbox WHERE status='held'").fetchone()
+    assert not agent.bridge.sent
+
+
+def test_model_oct4_explicit_reading_correction_can_replace_manual_boundaries(agent):
+    case = oct4_case(agent)
+    entry = agent.repository.services[case["date"]]
+    entry.sermon_title = case["expected"]["sermonTitle"]
+    entry.response_hymn = case["expected"]["responseHymn"]
+    entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
+    before = entry.model_dump(by_alias=True)
+    text = "更正10/4已存的讀經分段，請把原來5:21-25、5:26-29改成以下消息的四段，以這次更正為準：\n" + case["text"]
+    event(agent, text, sender="unverified-author", at=case["sent_at"])
+    after = agent.repository.services[case["date"]].model_dump(by_alias=True)
+    assert after["scripture"] == case["expected"]["scripture"]
+    assert {field for field in before if before[field] != after[field]} == {"scripture"}
+    assert not agent.bridge.sent
 
 
 def test_model_different_people_contribute_partial_fields(agent):

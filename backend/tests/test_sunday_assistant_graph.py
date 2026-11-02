@@ -106,6 +106,36 @@ def test_graph_can_apply_explicit_correction_after_reading_existing_record(agent
     assert agent.repository.services["2026-11-08"].pianist == "李芳"
 
 
+def test_graph_rechecks_scripture_grounding_after_manual_conflict_is_resolved(agent, monkeypatch):
+    from backend.sunday_assistant import agent_graph
+    from backend.sunday_assistant.grounding import scripture_context
+
+    msg = incoming(agent, text="10/4讀經創世記5:21-24；25-29")
+    before = ["gen-5-21-25", "gen-5-26-29"]
+    after = ["gen-5-21-24", "gen-5-25-29"]
+    agent.repository.services["2026-10-04"] = SundayServiceEntry(date="2026-10-04", scripture=before)
+    request = {"service_changes": [service("2026-10-04", "scripture", after, evidence=msg.text)]}
+    checked = []
+
+    def verify(agent, msg, request):
+        current = scripture_context(agent, request)[0]["current"]
+        checked.append(list(current))
+        return {"supported": current == after, "questions": [] if current == after else ["請確認不同的讀經分段"]}
+
+    def human_resolves_conflict():
+        agent.repository.services["2026-10-04"].scripture = list(after)
+        return "read_sunday_record", {"day": "2026-10-04"}
+
+    monkeypatch.setattr(agent_graph, "verify_grounding", verify)
+    model = ScriptModel(("read_sunday_record", {"day": "2026-10-04"}),
+                        ("update_records", {"request": request, "replace_existing": True}),
+                        human_resolves_conflict,
+                        ("update_records", {"request": request, "replace_existing": True}))
+    assert run_agent(agent, msg, model=model)["status"] == "done"
+    assert checked == [before, after]
+    assert agent.repository.services["2026-10-04"].scripture == after
+
+
 def test_graph_read_ask_reply_and_update_use_same_business_dialogue(agent):
     original = incoming(agent, "王明和李芳11月要外出", group="111@g.us", id="original")
     result = run_agent(agent, original, model=ScriptModel(("ask_group", {"request": {"questions": ["請問起訖日期？"]}})))

@@ -24,7 +24,7 @@ from openai import APIConnectionError, InternalServerError, RateLimitError
 from backend.sunday_data_lock import sunday_data_lock
 from .models import Extraction, SERVICE_FIELDS, ZONE
 from .store import dump, now_text
-from .grounding import verify_grounding, verify_identity
+from .grounding import scripture_context, verify_grounding, verify_identity
 
 
 class AgentState(MessagesState):
@@ -43,6 +43,7 @@ def make_tools(agent, msg):
     def grounding_key(request):
         return sha256(dump({"absence": [c.model_dump(mode="json") for c in request.absence_changes],
                             "offering": [c.model_dump(mode="json") for c in request.service_changes if c.field == "donationAmount"],
+                            "scripture": scripture_context(agent, request),
                             "clarification_id": request.clarification_id}).encode()).hexdigest()
 
     def update(call_id, content, **fields):
