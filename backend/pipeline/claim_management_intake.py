@@ -197,6 +197,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
             'policy': policy_binding, 'required_maintenance_keys': [],
             'review_questions': [instruction]}
+        if selected.review_unit_contract:
+            authorization.update(reuse_initial_claim_assessments=True, include_existing_evidence_owners=True)
         if selected.model_output_contract == 'claim_changes_v4':
             authorization['claim_creation_allocations'] = allocations
         request.authorization = cm.source.FileBinding.model_validate(immutable(auth_path, authorization))

@@ -138,6 +138,33 @@ def test_new_claim_anchor_references_use_only_the_evidence_identity_mapping():
     assert claim['statement']=='E' and raw==original
 
 
+@pytest.mark.parametrize('fault', [None, 'teaching', 'disposition', 'identity', 'mapping', 'normalization'])
+def test_accepted_support_reference_refresh_cannot_reinterpret_a_proposal(fault):
+    from backend.pipeline.claim_metadata_projection import accepted_support_reference_projection
+    old = cm.Candidate(records=[cm.source.Row(collection='claims', object_id='C', payload={
+        'claim_id': 'C', 'statement': 'E remains literal teaching',
+        'occurrences': [{'anchors': [{'evidence_id': 'E'}]}]})], dispositions=[])
+    new = old.model_copy(deep=True)
+    new.records[0].payload['occurrences'][0]['anchors'][0]['evidence_id'] = 'CME-final'
+    mappings = [{'collection': 'evidence_steps', 'alias': 'E', 'object_id': 'CME-final'}]
+    a = {'candidate_sha256': old.digest, 'raw_candidate_sha256': 'old',
+         'model_response_sha256': 'same raw', 'support_creation_identities': mappings}
+    b = {**a, 'candidate_sha256': new.digest, 'raw_candidate_sha256': 'new'}
+    if fault == 'teaching': new.records[0].payload['statement'] += ' changed'
+    if fault == 'disposition':
+        new.dispositions.append(cm.ObjectDisposition(record_key='claims/C', action='update', reason='new decision'))
+    if fault == 'identity': new.records[0].object_id = 'D'
+    if fault == 'mapping': b['support_creation_identities'] = []
+    if fault == 'normalization': b['model_response_sha256'] = 'different raw'
+    b['candidate_sha256'] = new.digest
+    if fault:
+        with pytest.raises(ValueError): accepted_support_reference_projection(old, new, a, b)
+    else:
+        proof = accepted_support_reference_projection(old, new, a, b)
+        assert proof['paths'] == [['records', 0, 'payload', 'occurrences', 0, 'anchors', 0, 'evidence_id']]
+        assert old.records[0].payload['occurrences'][0]['anchors'][0]['evidence_id'] == 'E'
+
+
 @pytest.mark.parametrize('fault',['known_id','duplicate_alias','duplicate_json','no_grant','empty_alias','padded_alias'])
 def test_support_projection_refuses_ambiguous_or_invalid_input(fault):
     m=alias_materials();raw={'creations':[{'collection':'source_fragments','object_id':'F','fields_json':'{"source_id":"S"}'}]}

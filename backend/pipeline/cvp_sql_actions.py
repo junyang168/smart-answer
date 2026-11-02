@@ -34,7 +34,12 @@ def claim_management_review_packet(materials, candidate):
             'sampling_status':'Only verified legacy AI sampling markers on updated targets are reset to candidate, never human approval.',
             'support_identities':'New EvidenceStep/SourceFragment identities and their typed references are assigned by the program. Review actual candidate identities and unchanged teaching, source quotes and links.'}
     from backend.pipeline.claim_evidence_review import add_packet
-    return add_packet(packet, candidate)
+    if materials.get('initial_assessment_reuse') and 'existing_evidence_owner_claims' not in packet:
+        refs = direct.evidence_owner_references(request, materials['before'], materials['transaction_before'])
+        if refs:
+            packet['existing_evidence_owner_claims'] = refs
+            packet['program_owned_fields']['existing_evidence_owner_claims'] = direct.EVIDENCE_OWNER_NOTE
+    return add_packet(packet, candidate, materials=materials)
 
 
 def claim_source_transition_context(store, request, before):
@@ -623,6 +628,16 @@ def execute_claim_management(store, request, *, root, ports):
                                 materials['program_owned_fields']['support_creation_ids'] = 'New EvidenceStep/SourceFragment object_id values are local aliases for typed references. The program assigns final action-scoped identities. Claim IDs must still use the reserved SQL slots.'
                             if projection['sampling_markers']:
                                 materials['program_owned_fields']['legacy_ai_sampling'] = 'These target markers are verified historical AI sampling only, not human source holds. Do not edit review provenance; the program resets an updated target to candidate before independent review, never human-approved.'
+                        from backend.pipeline.claim_evidence_review import freeze_initial_review_reuse
+                        reuse = freeze_initial_review_reuse(store, unit_request)
+                        if reuse:
+                            materials['initial_assessment_reuse'] = reuse
+                        direction = json.loads(content.verify_file(request.authorization).read_text())
+                        if direction.get('include_existing_evidence_owners') is True:
+                            from backend.pipeline.claim_direct_scope import evidence_owner_references, EVIDENCE_OWNER_NOTE
+                            materials['existing_evidence_owner_claims'] = evidence_owner_references(
+                                unit_request, before, transaction_before)
+                            materials['program_owned_fields']['existing_evidence_owner_claims'] = EVIDENCE_OWNER_NOTE
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)

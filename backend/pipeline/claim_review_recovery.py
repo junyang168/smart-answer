@@ -824,6 +824,8 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
     reservations and their spent states remain unchanged. A bounded-unit guard
     failure before any model call may add only frozen read-only references to
     the compiled input; other paths preserve the exact model packet.
+    A pre-review capacity stop may reuse exact individual initial approvals
+    and complete already allocated support references, without another GPT.
     The original files and SQL metadata are archived in the recovery receipt.
     """
     from backend.pipeline.cvp_sql_actions import validate_claim_candidate_origin
@@ -847,6 +849,9 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             and parent['result'].get('detail', '').startswith('transaction current dependency drift:'))
         bounded_guard = (parent['result'].get('reason') == 'engineering_required'
             and parent['result'].get('detail') == 'direct Claim scope omitted a current neighbour or maintenance owner'
+            and parent['policy'].get('review_unit_contract') == 'claim_bounded_review_unit_v1')
+        bounded_capacity = (parent['result'].get('reason') == 'engineering_required'
+            and parent['result'].get('detail') == 'active review unit exceeds ten Claims; split the unit before review'
             and parent['policy'].get('review_unit_contract') == 'claim_bounded_review_unit_v1')
         capacity_stop = False
         if stopped_capacity_proof is not None:
@@ -873,7 +878,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                 or bool(value.get('candidate')) != (not unrecorded)
                 or value.get('change_set_ids') or value.get('opus_approved')
                 or parent.get('continued_by') or parent['latest_rounds'].get(value['unit_id']) != round_id
-                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop or bounded_guard)):
+                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop or bounded_guard or bounded_capacity)):
             raise ValueError('saved-candidate recovery requires the exact uncommitted pre-review failure')
         opus = parent['call_reservations'].get(round_id + ':opus', {})
         if opus.get('state') != 'planned':
@@ -897,7 +902,21 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         candidate = cm.Candidate.model_validate(body(read(old_root / 'candidate.json')))
         if not unrecorded and candidate.model_dump(mode='json') != value['candidate']:
             raise ValueError('transaction recovery saved candidate drift')
-        validate_claim_candidate_origin(old_root, materials, policy, sources, candidate)
+        support_projection = None
+        if bounded_capacity:
+            # The saved model answer remains exact. A repaired mapper may only
+            # complete its declared support-ID references before first review.
+            from backend.pipeline.cvp_sql_actions import validate_claim_stage
+            from backend.pipeline.claim_model_output import candidate as expand_candidate
+            raw = validate_claim_stage(old_root, 'gpt', policy, cm.model_packet(materials))
+            projected, normalization = expand_candidate(raw['response'], materials)
+            old_normalization = body(read(old_root/'candidate-normalization.json'))
+            if projected != candidate or normalization != old_normalization:
+                from backend.pipeline.claim_metadata_projection import accepted_support_reference_projection
+                support_projection = accepted_support_reference_projection(candidate, projected, old_normalization, normalization)
+                candidate = projected
+        else:
+            validate_claim_candidate_origin(old_root, materials, policy, sources, candidate)
         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
             created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
         if 'gpt' in materials['roles']:
@@ -920,7 +939,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         # frontier below instead of requiring the old projection to recur.
         context = (None if bounded_guard else
                    _current_rejected_input_context(store, cursor, request, materials, include_records=True))
-        if context is None and not (unrecorded or capacity_stop or bounded_guard):
+        if context is None and not (unrecorded or capacity_stop or bounded_guard or bounded_capacity):
             raise ValueError('transaction recovery requires actual transaction-only drift')
         if bounded_guard:
             if context is not None:
@@ -947,7 +966,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             raise ValueError('transaction recovery cannot change model instructions')
         root = old_root / ('transaction-only-' + sha256_json(context)[:20])
         root.mkdir(parents=True, exist_ok=True)
-        for name in (*([] if bounded_guard else ['candidate.json', 'candidate-normalization.json']), *(['gpt.packet.json', 'gpt.reservation.json', 'gpt.raw.json'] if 'gpt' in materials['roles'] else [])):
+        for name in (*([] if bounded_guard or support_projection else ['candidate.json', 'candidate-normalization.json']), *(['gpt.packet.json', 'gpt.reservation.json', 'gpt.raw.json'] if 'gpt' in materials['roles'] else [])):
             payload = (old_root / name).read_bytes()
             target = root / name
             if target.exists() and target.read_bytes() != payload:
@@ -957,6 +976,18 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                     stream.write(payload); stream.flush(); os.fsync(stream.fileno())
         rebound = deepcopy(materials)
         rebound.update(transaction_before=current_records, audit_contract=current_contract)
+        if bounded_capacity:
+            from backend.pipeline.claim_evidence_review import freeze_initial_review_reuse
+            from backend.pipeline.cvp_sql_actions import claim_management_review_packet
+            initial = [s['round_id'] for s in parent['call_reservations'].values()
+                       if s['role'] == 'opus' and s['state'] == 'completed']
+            if len(initial) != 1:
+                raise ValueError('saved capacity recovery requires exactly one accepted initial review')
+            rebound['initial_assessment_reuse'] = freeze_initial_review_reuse(store,
+                cm.Request.model_validate(materials['unit_request']), initial_round_id=initial[0])
+            # Reuses only exact unaffected individual passes. If active work
+            # still exceeds ten, this raises before changing any SQL stage.
+            claim_management_review_packet(rebound, candidate)
         if bounded_guard:
             rebound['before'] = repaired_before
             # This is the pre-inference compiled read denominator, not an
@@ -974,6 +1005,10 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         if not bounded_guard and cm.model_packet(rebound) != cm.model_packet(materials):
             raise ValueError('transaction recovery changed the exact model input')
         write(root / 'materials.json', rebound)
+        if support_projection:
+            # Original candidate/receipt remain archived at old_root.
+            write(root/'candidate.json', candidate.model_dump(mode='json'))
+            write(root/'candidate-normalization.json', normalization)
         receipt = {'round_id': round_id, 'stage': 'candidate', 'materials': binding(root / 'materials.json'), 'candidate': binding(root / 'candidate.json')}
         write(root / 'candidate-result.json', receipt)
         record = {'original_round': original_value, 'original_parent': original_parent,
@@ -981,13 +1016,15 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             'recovery_root': str(root), 'unrecorded_new_finding_adjudication': unrecorded,
             'stopped_capacity_proof': stopped_capacity_proof,
             'bounded_scope_guard_repaired': bounded_guard,
+            **({'initial_review_reuse': rebound['initial_assessment_reuse'],
+                'support_reference_projection': support_projection} if bounded_capacity else {}),
             'model_inputs_unchanged': not bounded_guard, 'candidate_sha256': candidate.digest,
             'readonly_context_added_before_first_call': sorted(set(rebound['before'])-set(materials['before'])),
             'model_calls': 0, 'call_reservations_unchanged': True, 'content_approved': False}
         write(root / 'engineering-recovery.json', record)
         proof = binding(root / 'engineering-recovery.json')
         value.update(materials=rebound, recovery_root=str(root), outcome=None, pre_review_saved_recovery=proof)
-        if bounded_guard:
+        if bounded_guard or support_projection:
             value['candidate'] = candidate.model_dump(mode='json')
             value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
                 cm.Request.model_validate(rebound['unit_request']), rebound['before'], candidate)

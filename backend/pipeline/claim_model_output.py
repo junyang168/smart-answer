@@ -106,6 +106,12 @@ def scoped_adapter(adapter, packet):
         base = BindingFindingsReview if binding_enabled(packet['policy']) else FindingsReview
         fields = dict(findings=(list[finding], ...),
             prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+        if binding_enabled(packet['policy']) and packet.get('initial_review_references'):
+            from backend.pipeline.claim_evidence_review import BindingAssessment
+            fresh = set(packet['own_evidence_bindings'])
+            assessment = create_model('ScopedFreshBindingAssessment', __base__=BindingAssessment,
+                claim_key=(key_type(fresh), Field(description='Only a currently pending own-evidence Claim; reused approvals are references.')))
+            fields['binding_assessments'] = (list[assessment], Field(min_length=len(fresh), max_length=len(fresh)))
         if packet['policy'].get('review_unit_contract'):
             fields['complete_review'] = (Literal[True], Field(description=
                 'Every content Claim was reviewed individually; references were checked only for their role '
@@ -251,9 +257,14 @@ def candidate(raw, materials):
 def review(raw, materials, proposal):
     if not enabled(materials):
         return cm.Review.model_validate(raw)
-    from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments
+    from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments, reused_assessments
     binding = binding_enabled(materials['policy'])
     wire = (BindingFindingsReview if binding else FindingsReview).model_validate(raw)
+    reused = reused_assessments(materials, proposal) if binding else {}
+    if reused:
+        if set(reused) & {a.claim_key for a in wire.binding_assessments}:
+            raise ValueError('initially approved unchanged Claims are references, not fresh assessments')
+        wire = wire.model_copy(update={'binding_assessments': [*wire.binding_assessments, *reused.values()]})
     if binding:
         validate_assessments(wire, materials, proposal)
     request = cm.Request.model_validate(materials['unit_request'])
@@ -268,6 +279,8 @@ def review(raw, materials, proposal):
     if rejected - set(denominator):
         raise ValueError('review finding outside complete frozen scope')
     assessments = {a.claim_key: a.reason for a in wire.binding_assessments} if binding else {}
+    for key in reused:
+        assessments[key] = 'Reused the exact unchanged initial Claim assessment; not a new model vote. ' + assessments[key]
     bounded = bool(materials['policy'].get('review_unit_contract'))
     return cm.Review(proposal_sha256=proposal.digest, verdicts=[cm.source.Verdict(
         record_key=key, approved=key not in rejected,

@@ -1258,8 +1258,14 @@ def goal_packet(goal):
 
 
 def model_packet(materials):
+    if 'existing_evidence_owner_claims' in materials:
+        from backend.pipeline.claim_direct_scope import evidence_owner_references
+        expected = evidence_owner_references(Request.model_validate(materials['unit_request']),
+            materials['before'], materials['transaction_before'])
+        if materials['existing_evidence_owner_claims'] != expected:
+            raise ValueError('existing Evidence owner reference facts drifted from frozen transaction context')
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))

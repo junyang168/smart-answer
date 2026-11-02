@@ -6,6 +6,40 @@ from backend.api.canonical_repository.postgres_store import sha256_json
 CONTRACT='claim_metadata_projection_v1'
 FIELD='program_metadata_projection'
 SUPPORT={'source_fragments':'CMF','evidence_steps':'CME'}
+EVIDENCE_REFERENCES = {'evidence_step_ids', 'canonical_evidence_step_ids', 'evidence_step_id', 'evidence_id'}
+
+
+def accepted_support_reference_projection(old, new, old_receipt, new_receipt):
+    """Prove a saved candidate differs only by already allocated typed IDs."""
+    mappings = old_receipt.get('support_creation_identities', [])
+    if mappings != new_receipt.get('support_creation_identities', []):
+        raise ValueError('accepted candidate support identities changed')
+    ignored = {'raw_candidate_sha256', 'candidate_sha256'}
+    if ({k:v for k,v in old_receipt.items() if k not in ignored}
+            != {k:v for k,v in new_receipt.items() if k not in ignored}
+            or old_receipt.get('candidate_sha256') != old.digest
+            or new_receipt.get('candidate_sha256') != new.digest):
+        raise ValueError('accepted candidate normalization changed beyond typed references')
+    ids = {m['alias']:m['object_id'] for m in mappings if m['collection'] == 'evidence_steps'}
+    changes = []
+    def convert(value, path):
+        if isinstance(value, list):
+            return [convert(v, path + [i]) for i,v in enumerate(value)]
+        if isinstance(value, str) and value in ids:
+            changes.append(path)
+            return ids[value]
+        return value
+    def walk(value, path):
+        if isinstance(value, list):return [walk(v, path + [i]) for i,v in enumerate(value)]
+        if not isinstance(value, dict):return value
+        return {k:convert(v, path + [k]) if k in EVIDENCE_REFERENCES else walk(v, path + [k]) for k,v in value.items()}
+    expected = old.model_dump(mode='json')
+    for i,row in enumerate(expected['records']):
+        row['payload'] = walk(row['payload'], ['records', i, 'payload'])
+    if not changes or expected != new.model_dump(mode='json'):
+        raise ValueError('accepted candidate changed teaching, citations or unrelated metadata')
+    return {'rule': 'allocated_evidence_reference_completion_v1', 'paths': changes,
+            'old_candidate_sha256': old.digest, 'new_candidate_sha256': new.digest}
 
 
 def sampling_marker(cursor,cid,state):
@@ -94,8 +128,7 @@ def project_support_aliases(raw,materials):
     existing_ids={key.split('/',1)[1] for key in before}
     granted={g['collection'] for g in request.get('creation_permissions',[])}
     refs={'source_fragment_id':'source_fragments','source_fragment_ids':'source_fragments',
-          'evidence_step_ids':'evidence_steps','canonical_evidence_step_ids':'evidence_steps',
-          'evidence_step_id':'evidence_steps','evidence_id':'evidence_steps'}
+          **dict.fromkeys(EVIDENCE_REFERENCES, 'evidence_steps')}
     def rewrite(value,col):
         fields=refs | ({k:None for k in ('from_id','to_id','source_id','target_id')} if col in cm.RELATION_COLLECTIONS else {})
         def convert(item,kind):

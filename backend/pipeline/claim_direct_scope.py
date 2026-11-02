@@ -7,6 +7,34 @@ import json
 from pathlib import Path
 
 CONTRACT = 'claim_direct_neighbours_v1'
+EVIDENCE_OWNER_NOTE = (
+    'Exact frozen same-source Claim records explicitly named by Evidence.produced_claim_ids but absent from before. '
+    'Use only to check existing ownership and duplicate judgments before approving Claim creation. '
+    'They are reference facts, not new review roots, writable objects or approvals. '
+    'Compare the full statement, attribution and limitations against the professor source; existence alone '
+    'does not prove an equivalent judgment. '
+    'Do not infer absence from this unit or from a missing owner payload; do not recreate a judgment '
+    'already stated by a listed active Claim.')
+
+
+def evidence_owner_references(request, before, transaction_before):
+    """Resolve declared owners for duplicate checks, without traversing Claims."""
+    from copy import deepcopy
+    from backend.pipeline import claim_management as cm
+    rows = {k:v['payload'] for k,v in transaction_before.items()}
+    ids = {cid for key,state in before.items() if key.startswith('evidence_steps/')
+           for cid in state['payload'].get('produced_claim_ids', [])}
+    result = {}
+    for cid in sorted(ids):
+        key = cm.source.key('claims', cid)
+        if key in before:
+            continue
+        if key not in transaction_before:
+            raise ValueError('declared Evidence owner missing from frozen transaction context: ' + key)
+        own = cm.own_source_ids(rows[key], rows)
+        if own and own <= set(request.source_bindings):
+            result[key] = deepcopy(transaction_before[key])
+    return result
 
 
 def enabled(request, policy=None):
