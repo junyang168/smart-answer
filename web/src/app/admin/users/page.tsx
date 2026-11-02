@@ -89,7 +89,7 @@ export default function UsersManagementPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    action: modalMode,
+                    action: modalMode === 'edit' ? 'update' : 'add',
                     user: { id: formData.email.trim(), name: formData.name },
                     role: formData.role
                 })
