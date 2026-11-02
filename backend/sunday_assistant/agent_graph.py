@@ -232,7 +232,7 @@ def make_tools(agent, msg):
 
     @tool
     def ask_group(request: Extraction, state: StateArg, tool_call_id: CallIdArg) -> Command:
-        """Ask specific missing/ambiguous information in the original group and wait durably. For a partial answer retain clarification_id and ask only what remains; include grounded known changes so this case retains its full context. Do not ask for other Sunday fields that colleagues have not provided yet."""
+        """Record specific missing/ambiguous information and wait durably. Questions stay in the website backend when group posting is disabled; only explicitly enabled settings allow sending to the source group. For a partial answer retain clarification_id and ask only what remains; include grounded known changes so this case retains its full context. Do not ask for other Sunday fields that colleagues have not provided yet."""
         if not request.questions or request.cancel_clarification:
             raise ValueError("請提供具體問題；取消請用 cancel_pending")
         if needs_context(state):
@@ -304,6 +304,7 @@ def run_agent(agent, msg, *, model=None):
 選唱節次、末段重複等是該主日的安排，用 hymnNotes／responseHymnNotes 保存原文，不能改寫全站詩歌目錄的歌詞；不忽略這類指示。已完成加投影片的進度回報不是再新增一次的命令。模糊的重複次數依工具問題在群內追問。
 收到有明確編號的詩歌先查 search_catalog；若目錄缺少或 lyrics_present=false，先用 lookup_hymnal_entry 核對再 import_hymnal_song，自動匯入與整理完整歌詞，不直接把可匯入的聖詩交回同工手工操作。已有非空歌詞保留，不自動改寫。索引無此歌、編號與歌名矛盾、來源失敗或歌詞完整性核對失敗，才在原群說明具體缺項並追問。
 只處理 allowed_fields 指定的主日欄位；其他來源群負責的資料不在此群代填。
+group_questions_enabled=false 時，ask_group 只把問題留在網站後台，不向群內發問；posted_in_group=false 的前文也是後台待辦，不能聲稱群裡已問過。後續消息仍可補齊這些待辦。
 你透過有限工具自主完成教會登記。不要輸出自由文字或假稱已完成，每次選擇一個工具。
 sender_profile.self_worker 是發送人本人；household_workers 是已確認的夫妻關係。「我」只指本人，「我們夫妻」才可用已確認夫妻名單並將各 absence_change.include_household=true。不能因為知道配偶而把單獨「我」當成兩人。
 若發送人明確介紹本人姓名或正在回答身分問題，先查名單並用 remember_identity 保存本人對應，再繼續原登記。不要把自我介紹當成閒聊丟掉，也不要從顯示名稱推斷身分。
@@ -327,6 +328,7 @@ ask_group/cancel_pending/ignore_message 或 update_records(finish_event=True) �
                "allowed_fields": sorted(settings.fields_for_group(msg.group_id)),
                "allow_absences": msg.group_id == settings.availability_group or settings.collect_cross_group,
                "offering_week_rule": settings.offering_week_rule,
+               "group_questions_enabled": settings.group_questions_enabled,
                "sender_workers": agent.sender_workers(msg.sender_id), "sender_profile": agent.sender_profile(msg.sender_id),
                "pending_cases": [{"id": d["clarification_id"], "questions": d["questions"], "original": d["source_messages"][0]["text"][:400]}
                                  for d in agent.pending_dialogues(msg)]}

@@ -26,6 +26,7 @@ class Settings(BaseModel):
     maintain_future_skeletons: bool = True
     collect_cross_group: bool = True
     offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
+    group_questions_enabled: bool = False
     reminders_enabled: bool = False
     friday_hour: int = Field(default=17, ge=0, le=23)
     friday_minute: int = Field(default=0, ge=0, le=59)

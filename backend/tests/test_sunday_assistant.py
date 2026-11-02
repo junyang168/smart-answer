@@ -58,7 +58,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_BASE_DIR", str(tmp_path))
     store = Store(tmp_path / "assistant")
     store.put("settings", Settings(enabled=True, availability_group="111@g.us", service_group="222@g.us",
-                                   auto_apply=True, collect_cross_group=False, maintain_future_skeletons=False, reminders_enabled=True, trusted_senders=["sender"],
+                                   auto_apply=True, group_questions_enabled=True, collect_cross_group=False, maintain_future_skeletons=False, reminders_enabled=True, trusted_senders=["sender"],
                                    sender_workers={"sender": ["王明"]}, households=[["王明", "李芳"]]).model_dump())
     return Assistant(store, Repo(), bridge=Bridge())
 

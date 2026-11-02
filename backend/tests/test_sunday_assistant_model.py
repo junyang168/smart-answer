@@ -264,3 +264,13 @@ def test_model_any_group_member_answers_a_scheduled_required_role_question(agent
     agent.maintain_future_forms(datetime(2026,11,2,17,tzinfo=timezone.utc))
     with agent.store.db() as db:
         assert db.execute("SELECT count(*) FROM clarifications WHERE status='waiting'").fetchone()[0]==1
+
+
+def test_model_disabled_group_questions_keep_uncertainty_internal_then_accept_new_information(agent):
+    settings=agent.store.settings();settings.group_questions_enabled=False;agent.store.put('settings',settings.model_dump())
+    event(agent,'我12月要外出，不能服事。',group='111@g.us',sender='quiet-mode-member')
+    assert not agent.bridge.sent
+    assert any(item['status']=='held' for item in agent.store.outbox())
+    event(agent,'我是李芳，外出日期是12月5日至12月17日。',group='111@g.us',sender='quiet-mode-member',at='2026-11-02T16:01:00+00:00')
+    assert not agent.repository.workers['李芳'].is_available_on('2026-12-06')
+    assert all(not text.startswith('【主日助理提問】') for _,_,text in agent.bridge.sent)

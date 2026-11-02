@@ -542,3 +542,40 @@ def test_confirmed_cross_group_collection_accepts_offering_but_reminder_destinat
     assert settings.field_destinations()['donationAmount']=='111@g.us'
     assert settings.field_destinations()['sermonSpeaker']=='222@g.us'
     assert settings.field_destinations()['worshipLeader']=='333@g.us'
+
+
+def test_questions_disabled_stay_internal_and_later_messages_can_complete_them(agent):
+    settings=agent.store.settings();settings.group_questions_enabled=False;agent.store.put('settings',settings.model_dump())
+    msg=incoming(agent,'11月8日回應詩歌待確認',id='internal-question')
+    run_agent(agent,msg,model=ScriptModel(('ask_group',{'request':{'questions':['請提供回應詩歌歌名？']}})))
+    agent.deliver_outbox()
+    assert not agent.bridge.sent
+    assert agent.store.outbox()[0]['status']=='held'
+    reply=incoming(agent,'回應詩歌用奇異恩典',id='internal-answer',at='2026-11-02T16:01:00+00:00')
+    pending=agent.pending_dialogues(reply)
+    assert len(pending)==1 and pending[0]['posted_in_group'] is False
+    request={'clarification_id':pending[0]['clarification_id'],'service_changes':[service(field='responseHymn',value='奇異恩典',evidence='奇異恩典')]}
+    assert run_agent(agent,reply,model=ScriptModel(('read_group_context',{}),('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request})))['status']=='done'
+    assert agent.repository.services['2026-11-08'].response_hymn=='奇異恩典'
+
+
+def test_turning_questions_off_holds_queued_question_and_does_not_flush_backlog_on_enable(agent):
+    msg=incoming(agent,'回應詩歌尚未指定',id='queued-question')
+    run_agent(agent,msg,model=ScriptModel(('ask_group',{'request':{'questions':['請提供歌名？']}})))
+    assert agent.store.outbox()[0]['status']=='queued'
+    settings=agent.store.settings();settings.group_questions_enabled=False;agent.store.put('settings',settings.model_dump())
+    agent.deliver_outbox()
+    assert not agent.bridge.sent
+    assert agent.store.outbox()[0]['status']=='held'
+    settings.group_questions_enabled=True;agent.store.put('settings',settings.model_dump())
+    agent.deliver_outbox()
+    assert not agent.bridge.sent
+
+
+def test_bridge_question_guard_race_is_known_held_instead_of_unknown_delivery(agent):
+    msg=incoming(agent,'需要補充回應詩歌',id='race-held')
+    run_agent(agent,msg,model=ScriptModel(('ask_group',{'request':{'questions':['請提供歌名？']}})))
+    agent.bridge.send=lambda *_:{'status':'held'}
+    agent.deliver_outbox()
+    assert agent.store.outbox()[0]['status']=='held'
+    assert agent.store.outbox()[0]['error'] is None

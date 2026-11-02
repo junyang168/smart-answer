@@ -4,7 +4,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
 import { senderId } from "./sender.mjs";
-import { registeredMessage } from "./outgoing.mjs";
+import { registeredMessage, allowedBySettings } from "./outgoing.mjs";
 import { messageVersion } from "./message-version.mjs";
 
 const secret = process.env.SUNDAY_ASSISTANT_SECRET;
@@ -166,6 +166,7 @@ const server = http.createServer(async (req, res) => {
       if (!registeredMessage(key, text)) {
         return reply(422, { error: "Only registered assistant replies, questions and Friday reminders may be sent" });
       }
+      if (!allowedBySettings(config, key)) return reply(200, { status: "held", reason: "disabled_by_settings" });
       if (key.startsWith("friday:") && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
         return reply(200, { status: "deferred" });
       }

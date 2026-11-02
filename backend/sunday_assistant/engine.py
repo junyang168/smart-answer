@@ -137,7 +137,7 @@ class Assistant:
                     continue
                 question = db.execute("SELECT remote_id,status,text FROM outbox WHERE key=?",
                                       (f"clarify:{row['id']}:{row['proposal_id']}",)).fetchone()
-                if not question or question["status"] not in {"sent", "unknown"}:
+                if not question or question["status"] not in {"sent", "unknown", "held"}:
                     continue
                 if not self.same_sender(msg.sender_id, row["sender_id"]):
                     quoted = question["remote_id"] and msg.quoted_message_id == question["remote_id"]
@@ -145,6 +145,7 @@ class Assistant:
                         continue
                 result.append({"clarification_id": row["id"], "questions": json.loads(row["questions"]),
                                "question_message_id": question["remote_id"], "question_text": question["text"],
+                               "posted_in_group": question["status"] in {"sent", "unknown"},
                                "source_messages": sources})
             return result
 
@@ -300,8 +301,8 @@ class Assistant:
             excerpt = msg.text[:160].replace("\n", " ")
             text = f"【主日助理提問】問題 #{dialogue_id}\n關於「{excerpt}」：\n" + "\n".join(
                 f"• {q[:600]}" for q in plan["questions"][:5]) + "\n請直接回覆這則提問，補充後我會接著登記。"
-            db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'queued',?)",
-                       (f"clarify:{dialogue_id}:{proposal_id}", msg.group_id, text, now_text()))
+            db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,?,?)",
+                       (f"clarify:{dialogue_id}:{proposal_id}", msg.group_id, text, "queued" if settings.group_questions_enabled else "held", now_text()))
             db.execute("UPDATE proposals SET status='waiting_reply',updated_at=? WHERE id=?", (now_text(), proposal_id))
         return True
 
@@ -425,14 +426,20 @@ class Assistant:
         for row in pending:
             try:
                 if row["status"] == "queued":
+                    settings = self.store.settings()
+                    if ((row['key'].startswith('clarify:') and not settings.group_questions_enabled)
+                            or (row['key'].startswith('friday:') and not settings.reminders_enabled)):
+                        with self.store.db() as db:
+                            db.execute("UPDATE outbox SET status='held',updated_at=? WHERE key=?", (now_text(), row['key']))
+                        continue
                     with self.store.db() as db:
                         db.execute("UPDATE outbox SET status='sending',updated_at=? WHERE key=?", (now_text(), row["key"]))
                     result = self.bridge.send(row["key"], row["group_id"], row["text"])
                 else:
                     from urllib.parse import quote
                     result = self.bridge.request("GET", "/outbox/" + quote(row["key"], safe=""))
-                state = "sent" if result.get("status") == "sent" else "unknown"
-                error = None if state == "sent" else "發送結果待確認，未重複發送"
+                state = result.get('status') if result.get('status') in {'sent', 'held'} else 'unknown'
+                error = None if state in {'sent', 'held'} else "發送結果待確認，未重複發送"
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
@@ -616,7 +623,7 @@ class Assistant:
                     db.execute("DELETE FROM outbox WHERE key=?", (key,))
                 return "waiting_for_messages"
             state, remote = result.get("status", "unknown"), result.get("message_id")
-            if state not in {"sent", "unknown"}:
+            if state not in {"sent", "unknown", "held"}:
                 state = "unknown"
             error = None
         except Exception as exc:

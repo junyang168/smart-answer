@@ -6,7 +6,7 @@ import Link from "next/link";
 type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
   availability_group_name: string; service_group_name: string; songs_group_name: string;
-  auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
   households: string[][]; worker_aliases: Record<string, string>; worship_rotation: string[];
 };
@@ -29,8 +29,8 @@ type Data = {
 const labels: Record<string, string> = {
   queued: "等待處理", processing: "正在整理消息", review: "待核對", done: "已完成", applied: "已更新網站",
   irrelevant: "無須更新", error: "處理失敗", dismissed: "已略過", applying: "正在儲存",
-  waiting_reply: "已在群內提問，等待回答", resolved: "已由後續回答處理", cancelled: "已取消",
-  sent: "已發送", sending: "發送中", unknown: "發送結果待確認", ready: "已連線", disconnected: "未連接",
+  waiting_reply: "待補充／核對", resolved: "已由後續回答處理", cancelled: "已取消",
+  held: "僅後台保留（未發送）", sent: "已發送", sending: "發送中", unknown: "發送結果待確認", ready: "已連線", disconnected: "未連接",
   offline: "橋接器未啟動", connecting: "連接中", qr: "等待手機掃碼", auth_failure: "需要重新登入",
   paused: "已暫停", idle: "等待新消息", waiting_for_messages: "有資料待處理，暫緩提醒",
   stale: "處理程序未更新",
@@ -90,7 +90,7 @@ export default function SundayAssistantPage() {
     <header className="rounded-2xl bg-slate-900 p-6 text-white">
       <p className="text-sm text-indigo-200">主日服事 · WhatsApp</p>
       <h1 className="mt-1 text-2xl font-bold">主日資料助理</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時在原群追問，收到回答後繼續登記。請假資料成功更新後回覆原群；周五下午 5 點檢查崇拜準備資料的缺項，分別在講道與詩歌群提醒。</p>
+      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時先留在後台，獲准群內提問後才發問；補充資料後繼續登記。請假資料成功更新後回覆原群；啟用周五提醒後，下午 5 點檢查崇拜準備資料缺項，分別在負責群提醒。</p>
       <div className="mt-4 flex flex-wrap gap-4 text-sm underline"><Link href="/admin/sunday-service">主日表單</Link><Link href="/admin/sunday-workers">同工及外出日期</Link></div>
     </header>
     {(error || loadError) && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || loadError}</div>}
@@ -120,12 +120,13 @@ export default function SundayAssistantPage() {
         <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           <label><input type="checkbox" checked={settings.enabled} onChange={e => patch({ enabled: e.target.checked })} /> 啟用消息收集與整理</label>
           <label><input type="checkbox" checked={settings.auto_apply} onChange={e => patch({ auto_apply: e.target.checked })} /> 自動登記所選群內的明確資料</label>
-          <label><input type="checkbox" checked={settings.maintain_future_skeletons ?? true} onChange={e => patch({ maintain_future_skeletons: e.target.checked })} /> 維持未來兩個主日骨架，缺項在負責群提問</label>
+          <label><input type="checkbox" checked={settings.maintain_future_skeletons ?? true} onChange={e => patch({ maintain_future_skeletons: e.target.checked })} /> 維持未來兩個主日骨架，缺項依發問設定留後台或在負責群提問</label>
           <label><input type="checkbox" checked={settings.collect_cross_group ?? true} onChange={e => patch({ collect_cross_group: e.target.checked })} /> 收集三個來源群中的明確跨群資料</label>
+          <label><input type="checkbox" checked={settings.group_questions_enabled ?? false} onChange={e => patch({ group_questions_enabled: e.target.checked })} /> 允許在來源群發送追問（關閉時問題只留後台）</label>
           <label><input type="checkbox" checked={settings.reminders_enabled} onChange={e => patch({ reminders_enabled: e.target.checked })} /> 啟用周五缺項提醒</label>
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>
-        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時在原群追問。首次歷史同步只提供預覽。</p>
+        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時依設定保留後台，只有允許發問才送到原群。首次歷史同步只提供預覽。</p>
         <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>
           <p className="mt-3 text-sm">從下方原消息複製發送人 ID，對應到既有同工。每個帳號只對應本人；夫妻關係另存。首次自報姓名核對後會記住，下次「我」不再重問。</p>
           <input className={`${input} mt-3`} placeholder="WhatsApp 發送人 ID" value={sender} onChange={e => setSender(e.target.value)} />

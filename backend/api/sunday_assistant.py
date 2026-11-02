@@ -76,7 +76,8 @@ def settings(payload: Settings):
 @router.get("/bridge-config")
 def bridge_config():
     config = get_assistant().store.settings()
-    return {"enabled": config.enabled, "groups": sorted(config.source_group_ids)}
+    return {"enabled": config.enabled, "groups": sorted(config.source_group_ids),
+            "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled}
 
 
 @router.post("/ingest")

@@ -4,3 +4,11 @@ export function registeredMessage(key, text) {
     ["clarify:", "【主日助理提問】"], ["confirmed:", "【主日資料回覆】"]]
     .some(([keyPrefix, textPrefix]) => key.startsWith(keyPrefix) && text.startsWith(textPrefix));
 }
+
+
+export function allowedBySettings(config, key) {
+  if (typeof key !== "string") return false;
+  if (key.startsWith("clarify:")) return config.allow_questions === true;
+  if (key.startsWith("friday:")) return config.allow_reminders === true;
+  return true;
+}
