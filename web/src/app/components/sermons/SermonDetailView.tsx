@@ -1,6 +1,6 @@
 // components/sermons/SermonDetailView.tsx
-import { hasEditorAccess } from "@/app/utils/roles";
 "use client";
+import { hasEditorAccess } from "@/app/utils/roles";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, notFound, useSearchParams } from 'next/navigation';

@@ -1,7 +1,7 @@
 
-import { hasEditorAccess } from "@/app/utils/roles";
 // components/series/SeriesPlayerView.tsx
 "use client";
+import { hasEditorAccess } from "@/app/utils/roles";
 
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams, notFound } from 'next/navigation';
