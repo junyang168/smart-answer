@@ -323,3 +323,140 @@ def test_an_unreviewed_new_answer_cannot_inherit_an_old_claim_approval(claims):
     with pytest.raises(ValueError,match='reviewed additive'):
         reuse.admit(store,'D',old,peer_run_id=peer)
     assert ports.calls==['gpt','opus']
+
+
+def run_scoped_peer(store, root, targets, proposal, *, review=pass_review, permissions=(), initial='proposal'):
+    path=policy_file(root.parent)
+    policy=cm.Policy.model_validate_json(path.read_text());policy.initial_candidate=initial
+    path.write_text(policy.model_dump_json())
+    prepared=intake.prepare(targets,root,instruction='Review the specified delta; preserve reference owners',
+                            groups=[targets],policy=path,store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    if permissions:
+        from backend.tests.test_claim_management_human_source_follow_up import authorize
+        authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+        request.permissions.extend(permissions)
+        authorize(request,{k:v for k,v in authority.items() if k not in {'request','policy'}})
+    ports=SyntheticPorts(store,execution,proposal=proposal,opus=review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    return store.claim_management_qualification(targets[0])['run_id'],ports
+
+
+def test_a_peer_unrelated_private_evidence_drift_does_not_repeat_the_preserved_claim(claims):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'separate-peer-member',
+        'claims':[{'claim_id':'X','statement':'甲是假设。','claim_type':'exegesis',
+                   'occurrences':[{'source_id':'S','anchors':[]}],'evidence_step_ids':['EX']}],
+        'evidence_steps':[{'evidence_step_id':'EX','statement':'甲是假设。','produced_claim_ids':['X'],
+                          'source_fragment_ids':['FX'],'support_eligibility':'eligible_candidate',
+                          'speaker':'professor','stance':'asserted'}],
+        'source_fragments':[{'fragment_id':'FX','source_id':'S','paragraph_key':'S0001',
+                             'verbatim_excerpt':'甲是假设，不是断言。'}],
+        'questions':[{'question_id':'Q','text':'甲是斷言嗎？','question_type':'clarification',
+                      'answer_state':'answered','answer_claim_ids':['D'],'source_fragment_ids':['FC']}]}))
+    old=original_pass(store,root)
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def proposal(packet):
+        return {'changes':[{'record_key':'questions/Q','fields_json':json.dumps({'answer_claim_ids':['D','C']}),
+                            'reason':'add the reviewed answer','citations':[cite]}],
+                'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    peer,ports=run_scoped_peer(store,root/'broad-peer',['C','X'],proposal,
+        permissions=[cm.source.Permission(collection='questions',object_id='Q',fields=['answer_claim_ids'])])
+    proof=store.get_cvp_group(old)['readonly_claim_qualifications']['D']
+    def later(packet):
+        return {'changes':[{'record_key':'evidence_steps/EX','fields_json':json.dumps({'statement':'甲不是断言。'}),
+                            'reason':'another member own correction','citations':[cite]}],
+                'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    run_scoped_peer(store,root/'later-private-correction',['X'],later)
+    assert store.claim_management_qualification('D')['ready']
+    assert store.get_cvp_group(old)['readonly_claim_qualifications']['D']==proof
+    assert ports.calls==['gpt','opus']
+    # The new answer's own evidence is still protected, despite excluding X.
+    own=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'relevant-answer-drift',
+        'evidence_steps':[{**own,'statement':'a changed answer basis'}]}))
+    assert not store.claim_management_qualification('D')['ready']
+
+
+def test_a_resolved_shared_finding_keeps_its_history_without_blocking_the_old_owner(claims):
+    store,root=claims;old=original_pass(store,root)
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def proposal(packet):
+        return {'changes':[{'record_key':'claims/C','fields_json':json.dumps({'evidence_step_ids':['EC','ED']}),
+                            'reason':'bind the existing shared step','citations':[cite]},
+                           {'record_key':'evidence_steps/ED','fields_json':json.dumps({'produced_claim_ids':['D','C']}),
+                            'reason':'preserve old owner and add C','citations':[cite]}],
+                'creations':[],'retirements':[],'findings':[],
+                'finding_resolutions':[{'finding_id':fid,'disposition':'resolved','reason':'reciprocal binding added',
+                    'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':['evidence_steps/ED'],
+                    'impact_reason':'old owner and evidence preserved'} for fid in packet['unresolved']]}
+    def review(packet):
+        value=pass_review(packet)
+        if not packet['unresolved']:
+            value['findings']=[{'target_key':'evidence_steps/ED','component':'shared_binding','category':'mapping',
+                'reason':'C needs the shared step','acceptance_condition':'bind C reciprocally','citations':[cite],
+                'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'shared support'}]
+        else:
+            value['prior_findings']=[{'finding_id':fid,'disposition':'resolved','reason':'reciprocal binding correct',
+                'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':['evidence_steps/ED'],
+                'impact_reason':'old owner preserved'} for fid in packet['unresolved']]
+        return value
+    peer,ports=run_scoped_peer(store,root/'shared-adjudication',['C'],proposal,review=review,initial='existing',
+        permissions=[cm.source.Permission(collection='evidence_steps',object_id='ED',fields=['produced_claim_ids'])])
+    assert store.claim_management_qualification('D')['ready']
+    assert reuse.admit(store,'D',old,peer_run_id=peer)['contract']==reuse.CONTEXT_CONTRACT
+    assert ports.calls==['opus','gpt','opus']
+    # A newer independent rejection remains blocking; no blanket green flag.
+    rejected=store.get_cvp_group(peer)
+    for field in ('run_id','status','error'):
+        rejected.pop(field,None)
+    rejected.update(outcome='revision_required',opus_approved=False,
+                    program_readback_complete=False,blocked_current_claim_ids=['D'],
+                    findings=rejected['materials']['unresolved'])
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.pipeline_runs (run_id,subject_id,stage,trigger,status,metadata) VALUES ('new-rejection','D','review','cli','succeeded',%s::jsonb)",
+            (json.dumps(rejected),))
+    assert not store.claim_management_qualification('D')['ready']
+    with pytest.raises(ValueError,match='newer unresolved'):
+        reuse.admit(store,'D',old,peer_run_id=peer)
+
+
+@pytest.mark.parametrize('direction',['outgoing','incoming'])
+def test_reviewed_incident_edge_retirement_keeps_the_active_reference_claim(claims,direction):
+    store,root=claims;old=original_pass(store,root)
+    if direction=='incoming':
+        # Establish a separate real full pass with the incoming qualifier.
+        relation=store.get_record_state('claim_relations','R')['payload']
+        store.apply_plan(store.plan_package({'package_id':'incoming-qualifier',
+            'claim_relations':[{**relation,'from_id':'C','to_id':'D','relation_type':'qualifies'}]}))
+        prepared=intake.prepare(['D'],root/'incoming-full',instruction='Review D and its current qualifier',
+            groups=[['D']],policy=policy_file(root.parent),store=store)
+        _,jobs=batch.load(prepared['manifest']['path'],root/'incoming-full'/'batch',store=store)
+        request,execution=next(iter(jobs.values()))
+        assert execute_claim_management(store,request,root=execution,
+            ports=SyntheticPorts(store,execution,opus=pass_review))['status']=='completed'
+        old=store.claim_management_qualification('D')['run_id']
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def proposal(packet):
+        return {'changes':[],'creations':[],'findings':[],'finding_resolutions':[],
+                'retirements':[{'record_key':'claim_relations/R','reason':'source does not establish this edge','citations':[cite]}]}
+    peer,ports=run_scoped_peer(store,root/'retire-edge',['C'],proposal)
+    assert store.get_record_state('claim_relations','R')['retired']
+    proof=reuse.admit(store,'D',old,peer_run_id=peer)
+    assert 'claim_relations/R' in proof['context_reviews']
+    assert store.claim_management_qualification('D')['ready']
+    assert not store.get_record_state('claims','D')['retired']
+    assert ports.calls==['gpt','opus']
+
+
+def test_an_unreviewed_retirement_cannot_reuse_an_unrelated_peer_pass(claims):
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,root=claims;old=original_pass(store,root)
+    peer,_=update_neighbour(store,root)
+    # Fault injection: the peer did not review or retire this edge.
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET retired_at=now(),revision=revision+1 WHERE collection='claim_relations' AND object_id='R'")
+    with pytest.raises((ValueError,ChangeSetConflict)):
+        reuse.admit(store,'D',old,peer_run_id=peer)
