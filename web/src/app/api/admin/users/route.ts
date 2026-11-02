@@ -58,7 +58,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "請從本網站提交修改" }, { status: 403 });
   try {
     const body = await request.json();
-    const { action, user, role } = body;
+    const { user, role } = body;
+    // Existing open tabs submit the form mode `edit`; the API uses `update`.
+    const action = body.action === "edit" ? "update" : body.action;
 
     // action: "add", "update", "delete"
     if (!["add", "update", "delete"].includes(action)) {
