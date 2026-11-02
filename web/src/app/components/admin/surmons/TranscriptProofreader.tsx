@@ -8,6 +8,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
 import { toggleParagraphPlayback } from "./review-playback";
+import {
+  paragraphIsConfirmed,
+  scrollToReviewParagraph,
+} from "./review-navigation";
 import { documentVersion, recoverTransportVersion } from "./review-version";
 import {
   FastForward,
@@ -272,6 +276,8 @@ function TranscriptProofreader({
   const base = `${apiBase}/review_document/${encodeURIComponent(item)}`;
   const [doc, setDoc] = useState(initial);
   const current = useRef(initial);
+  const reviewHeader = useRef<HTMLElement>(null);
+  const [navigationTarget, setNavigationTarget] = useState<{ id: string }>();
   const [selected, setSelected] = useState(initial.script[0]?.index || "");
   const [activeGroup, setActiveGroup] = useState<SlideInspection>();
   const [peekSlide, setPeekSlide] = useState<string>();
@@ -864,12 +870,31 @@ function TranscriptProofreader({
       : group?.slide_id;
   const assetId = shownSlide && doc.context.occurrences[shownSlide]?.asset_id;
   const asset = assetId && doc.context.visual_assets[assetId];
-  const confirmed = doc.script.filter(
-    (p) =>
-      doc.context.reviews["p:" + p.index]?.decision === "confirmed" &&
-      doc.context.reviews["p:" + p.index]?.sha256 ===
-        doc.paragraph_shas[p.index],
-  ).length;
+  const editedParagraphIds = new Set(
+    [...queue.current, ...(packet.current?.operations || [])]
+      .filter((op) => op.kind === "text" && op.id)
+      .map((op) => op.id!),
+  );
+  const paragraphReviewed = (id: string) =>
+    paragraphIsConfirmed(
+      id,
+      doc.context.reviews,
+      doc.paragraph_shas,
+      editedParagraphIds,
+    );
+  const confirmed = doc.script.filter((p) => paragraphReviewed(p.index)).length;
+  const pendingParagraph = doc.script.find((p) => !paragraphReviewed(p.index));
+  useEffect(() => {
+    if (!navigationTarget) return;
+    // Wait until React has opened the destination editor, including re-clicks.
+    const frame = requestAnimationFrame(() => {
+      scrollToReviewParagraph(
+        document.getElementById(`paragraph-${navigationTarget.id}`),
+        reviewHeader.current,
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [navigationTarget]);
   const groupsConfirmed = doc.context.groups.filter(
     (g) =>
       doc.context.reviews["g:" + g.id]?.decision === "confirmed" &&
@@ -969,7 +994,10 @@ function TranscriptProofreader({
       }}
       className="mx-auto max-w-[1700px] p-3 md:p-6 text-slate-800"
     >
-      <header className="sticky top-0 z-20 rounded-xl border bg-white/95 p-4 shadow-sm backdrop-blur">
+      <header
+        ref={reviewHeader}
+        className="sticky top-0 z-20 rounded-xl border bg-white/95 p-4 shadow-sm backdrop-blur"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xs text-slate-500">講道圖文審核 · {item}</div>
@@ -1100,16 +1128,15 @@ function TranscriptProofreader({
             圖片已處理 {groupsConfirmed}/{doc.context.groups.length}
           </span>
           <button
-            className="text-blue-700"
+            className="text-blue-700 disabled:text-slate-400"
+            disabled={!pendingParagraph || busy}
             onClick={() => {
-              const p = doc.script.find(
-                (p) =>
-                  doc.context.reviews["p:" + p.index]?.decision !== "confirmed",
-              );
-              if (p) selectParagraph(p.index);
+              if (!pendingParagraph) return;
+              selectParagraph(pendingParagraph.index);
+              setNavigationTarget({ id: pendingParagraph.index });
             }}
           >
-            前往待核對段落
+            {pendingParagraph ? "前往待核對段落" : "所有段落已核對"}
           </button>
         </div>
         {failure && (
@@ -1532,15 +1559,7 @@ function TranscriptProofreader({
                 g.needs_review &&
                 g.before_paragraph_id === p.index,
             );
-            const reviewed =
-              review?.sha256 === doc.paragraph_shas[p.index] &&
-              review.decision === "confirmed" &&
-              !queue.current.some(
-                (o) => o.id === p.index && o.kind === "text",
-              ) &&
-              !packet.current?.operations?.some(
-                (o) => o.id === p.index && o.kind === "text",
-              );
+            const reviewed = paragraphReviewed(p.index);
             return (
               <article
                 key={p.index}
