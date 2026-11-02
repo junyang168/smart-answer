@@ -4,6 +4,8 @@ import json
 from backend.api.canonical_repository.postgres_store import sha256_json
 
 CONTRACT='claim_metadata_projection_v1'
+STALE_CONTRACT='claim_metadata_projection_v2'
+RESET={'review_status':'candidate','reviewed_by':None,'reviewed_at':None,'review_note':None}
 FIELD='program_metadata_projection'
 SUPPORT={'source_fragments':'CMF','evidence_steps':'CME'}
 EVIDENCE_REFERENCES = {'evidence_step_ids', 'canonical_evidence_step_ids', 'evidence_step_id', 'evidence_id'}
@@ -66,8 +68,42 @@ def compile_projection(cursor,request,before,policy):
         if key in writable and key.startswith('claims/'):
             marker=sampling_marker(cursor,key.split('/',1)[1],before[key])
             if marker:markers[key]=marker
+    stale={key:proof for key in request.target_keys if key in writable and key.startswith('claims/')
+           and (proof:=stale_review_marker(cursor,key.split('/',1)[1],before[key]))}
     support=any(p.collection in SUPPORT for p in request.creation_permissions)
-    return {'contract':CONTRACT,'sampling_markers':markers,'support_identities':support} if markers or support else None
+    result={'contract':CONTRACT,'sampling_markers':markers,'support_identities':support}
+    if stale:result.update(contract=STALE_CONTRACT,stale_review_markers=stale)
+    from backend.pipeline import claim_management as cm
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    repair=authority.get('stale_ai_provenance_repair')
+    if repair and result!=repair['projection']:
+        raise ValueError('stale AI provenance repair differs from current SQL proof')
+    return result if markers or stale or support else None
+
+
+def stale_review_marker(cursor,cid,state):
+    """An AI review of a different statement is not current approval.
+
+    Read one exact historical version, never replay an import or infer whether
+    its teaching is right. The old version and every review event stay intact.
+    """
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    payload=state['payload']
+    if state.get('retired') or payload.get('review_status')!='ai_consensus_reviewed':return None
+    if cursor.execute("SELECT 1 FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s AND reviewer_kind='human' LIMIT 1",(cid,)).fetchone():return None
+    event=cursor.execute("""SELECT review_event_id,object_revision,reviewer_kind,decision,reviewer_id,reason,artifact
+        FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s
+        ORDER BY created_at DESC,review_event_id DESC LIMIT 1""",(cid,)).fetchone()
+    if not event or event[2:4]!=('ai','ai_consensus_reviewed') or event[1]>=state['revision']:return None
+    row=cursor.execute("""SELECT v.payload,v.content_sha256 FROM wang_knowledge.object_versions v
+        JOIN wang_knowledge.change_sets c USING(change_set_id)
+        WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s AND c.status='applied'""",(cid,event[1])).fetchone()
+    if (not row or record_content_sha(row[0])!=row[1]
+            or not row[0].get('statement') or not payload.get('statement')
+            or row[0]['statement']==payload['statement']
+            or any(row[0].get(k)!=payload.get(k) for k in RESET)):return None
+    return {'before_pin':[state['revision'],state['content_sha256'],False],
+            'reviewed_revision':event[1],'reviewed_version_sha256':row[1],'review_event_sha256':sha256_json(event)}
 
 
 def assert_current(cursor,request,before,policy,projection):
@@ -78,8 +114,10 @@ def assert_current(cursor,request,before,policy,projection):
 
 def sampling_keys(request,before,projection):
     if not projection:return set()
-    if (not isinstance(projection,dict) or set(projection)!={'contract','sampling_markers','support_identities'}
-        or projection['contract']!=CONTRACT or not isinstance(projection['sampling_markers'],dict)
+    if (not isinstance(projection,dict) or projection.get('contract') not in {CONTRACT,STALE_CONTRACT}
+        or set(projection)!=({'contract','sampling_markers','support_identities'} |
+            ({'stale_review_markers'} if projection['contract']==STALE_CONTRACT else set()))
+        or not isinstance(projection['sampling_markers'],dict)
         or type(projection['support_identities']) is not bool):
         raise ValueError('unknown Claim program metadata projection')
     result=set(projection['sampling_markers']);allowed={p.key for p in request.permissions}
@@ -95,6 +133,68 @@ def sampling_keys(request,before,projection):
     return result
 
 
+def stale_review_keys(request,before,projection):
+    sampling_keys(request,before,projection)
+    if not projection or projection['contract']!=STALE_CONTRACT:return set()
+    markers=projection['stale_review_markers'];allowed={p.key for p in request.permissions}
+    if not isinstance(markers,dict) or not markers:raise ValueError('invalid stale AI provenance projection')
+    for key,proof in markers.items():
+        state=before.get(key)
+        if (key not in request.target_keys or key not in allowed or not key.startswith('claims/') or not state
+                or state['retired'] or request.operation!='Update'
+                or state['payload'].get('review_status')!='ai_consensus_reviewed'
+                or set(proof)!={'before_pin','reviewed_revision','reviewed_version_sha256','review_event_sha256'}
+                or proof['before_pin']!=[state['revision'],state['content_sha256'],False]
+                or type(proof['reviewed_revision']) is not int or not 0<proof['reviewed_revision']<state['revision']
+                or any(not isinstance(proof[k],str) or len(proof[k])!=64
+                    or any(c not in '0123456789abcdef' for c in proof[k])
+                    for k in ('reviewed_version_sha256','review_event_sha256'))):
+            raise ValueError('invalid stale AI provenance projection scope')
+    return set(markers)
+
+
+def repair_extension(previous,request,policy,authority):
+    """Consume one standing engineering pair for this proven defect only."""
+    repair=authority.get('stale_ai_provenance_repair')
+    if repair is None:return None
+    if not isinstance(repair,dict):raise ValueError('invalid stale AI provenance repair authority')
+    from pathlib import Path
+    import hashlib
+    from backend.pipeline import claim_management as cm
+    defect='stale_ai_review_provenance_v1'
+    fields={'defect','predecessor_action_id','prior_metadata_sha256','finding_id','projection',
+            'fixed_commit','implementation','test_evidence'}
+    old=cm.Request.model_validate(previous['request'])
+    finding=previous.get('findings',{}).get(repair.get('finding_id'),{})
+    if (set(repair)!=fields or repair['defect']!=defect or repair['predecessor_action_id']!=old.action_id
+            or repair['prior_metadata_sha256']!=sha256_json(previous)
+            or previous['result'].get('reason')!='engineering_required'
+            or defect in previous['original_goal'].get('engineering_repair_defects',[])
+            or finding.get('category')!='engineering' or 'review_note' not in finding.get('component','')
+            or request.target_keys!=old.target_keys or request.permissions!=old.permissions
+            or request.creation_permissions!=old.creation_permissions
+            or request.allowed_operations!=old.allowed_operations or request.source_bindings!=old.source_bindings
+            or policy.models!=previous['policy']['models']
+            or any(policy.model_dump(mode='json').get(k)!=previous['policy'].get(k)
+                for k in ('api_spend','model_output_contract','claim_scope_contract','review_unit_contract'))
+            or policy.budget.gpt_calls!=1 or policy.budget.opus_calls!=1 or policy.budget.gemini_calls
+            or policy.budget.max_revisions!=1 or policy.independent_audit_required
+            or not isinstance(repair['fixed_commit'],str) or len(repair['fixed_commit'])!=40
+            or any(c not in '0123456789abcdef' for c in repair['fixed_commit'])):
+        raise ValueError('invalid one-time stale AI provenance engineering repair')
+    keys=stale_review_keys(old,previous['original_goal']['original_objects'],repair['projection'])
+    if not keys or not keys<=set(finding.get('affected_target_keys',[]))|{finding.get('target_key')}:
+        raise ValueError('stale AI repair lacks exact affected-target proof')
+    expected={str(Path('backend/pipeline')/name):hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
+        for name in ('claim_metadata_projection.py','claim_management.py','cvp_sql_actions.py')}
+    if repair['implementation']!=expected:
+        raise ValueError('stale AI repair fixed implementation drift')
+    report=json.loads(cm.source.verify_file(cm.source.FileBinding.model_validate(repair['test_evidence'])).read_text())
+    if report.get('failed')!=0 or not report.get('passed',0)>0 or report.get('implementation')!=expected:
+        raise ValueError('stale AI repair requires bound passing fixed-code tests')
+    return deepcopy(repair)
+
+
 def project_candidate(candidate,receipt,materials):
     from backend.pipeline import claim_management as cm
     request=cm.Request.model_validate(materials['unit_request'])
@@ -106,6 +206,24 @@ def project_candidate(candidate,receipt,materials):
             if row.payload.get('review_status')!=materials['before'][row.key]['payload'].get('review_status'):
                 raise ValueError('model cannot release or approve a review marker')
             row.payload['review_status']='candidate';changed.append(row.key)
+    stale=stale_review_keys(request,materials['before'],materials.get(FIELD));reset=[]
+    rows={r.key:r for r in result.records}
+    for key in sorted(stale):
+        disposition=dispositions[key]
+        if disposition.action not in {'retain','update'}:continue
+        row=rows.get(key)
+        if row is None:
+            col,oid=cm.source.split_key(key)
+            row=cm.source.Row(collection=col,object_id=oid,payload=deepcopy(materials['before'][key]['payload']))
+            result.records.append(row)
+        if any(row.payload.get(k)!=materials['before'][key]['payload'].get(k) for k in RESET):
+            raise ValueError('model cannot alter stale review provenance')
+        row.payload.update(RESET);reset.append(key)
+        if disposition.action=='retain':
+            disposition.action='update'
+            disposition.reason='Program-only reset of inherited AI review of a different historical statement; no teaching edit or approval. Original version and events preserved.'
+    if reset:receipt={**receipt,'candidate_sha256':result.digest,'stale_ai_provenance_reset':reset,
+                      'stale_review_reset_status':'candidate_not_approved_history_preserved'}
     if changed:receipt={**receipt,'candidate_sha256':result.digest,'legacy_ai_sampling_reset':sorted(changed),
                          'sampling_reset_status':'candidate_not_human_approved'}
     return result,receipt
@@ -121,7 +239,7 @@ def project_support_aliases(raw,materials):
     if not p or not p.get('support_identities'):return raw,[]
     from backend.pipeline import claim_management as cm
     from backend.pipeline.claim_model_output import object_json
-    if p.get('contract')!=CONTRACT or materials['policy']['model_output_contract']!='claim_changes_v4':
+    if p.get('contract') not in {CONTRACT,STALE_CONTRACT} or materials['policy']['model_output_contract']!='claim_changes_v4':
         raise ValueError('support identity projection requires managed Update')
     result=deepcopy(raw);maps={};before=materials['before'];request=materials['unit_request']
     creations=result.get('creations',[]);aliases=[r['object_id'] for r in creations]

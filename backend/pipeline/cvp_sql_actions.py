@@ -187,6 +187,8 @@ def validate_claim_candidate_origin(root, materials, policy, sources, candidate)
     else:
         expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
         _, receipt = cm.normalize_candidate(expected.model_dump(mode='json'), sources)
+        from backend.pipeline.claim_metadata_projection import project_candidate
+        expected,receipt=project_candidate(expected,receipt,materials)
     if candidate != expected or body(read(root / 'candidate-normalization.json')) != receipt:
         raise ValueError('candidate differs from exact raw and proved metadata-only projection')
 
@@ -631,7 +633,7 @@ def execute_claim_management(store, request, *, root, ports):
                                 'and superseded_by=null before Opus review. This is not human approval. '
                                 'Review retirement_cause_resolved and not_duplicate against the full current source. '
                                 'All named active targets and permitted Evidence/relations may be maintained in the same transaction.')
-                        from backend.pipeline.claim_metadata_projection import compile_projection, FIELD
+                        from backend.pipeline.claim_metadata_projection import compile_projection, FIELD, RESET
                         with store.connect() as conn, conn.cursor() as cursor:
                             projection = compile_projection(cursor, unit_request, before, policy)
                         if projection:
@@ -640,6 +642,10 @@ def execute_claim_management(store, request, *, root, ports):
                                 materials['program_owned_fields']['support_creation_ids'] = 'New EvidenceStep/SourceFragment object_id values are local aliases for typed references. The program assigns final action-scoped identities. Claim IDs must still use the reserved SQL slots.'
                             if projection['sampling_markers']:
                                 materials['program_owned_fields']['legacy_ai_sampling'] = 'These target markers are verified historical AI sampling only, not human source holds. Do not edit review provenance; the program resets an updated target to candidate before independent review, never human-approved.'
+                            if projection.get('stale_review_markers'):
+                                materials['program_owned_fields']['stale_ai_review_provenance'] = {
+                                    'target_keys':sorted(projection['stale_review_markers']), 'projected_fields':RESET,
+                                    'rule':'An exact committed historical version and AI review event prove these targets inherited review fields from a different statement. The program resets only the listed current fields before Opus, including otherwise retained targets. All historical versions/events remain unchanged. This is not content approval; review the complete projected postimage. Models cannot edit review fields.'}
                         from backend.pipeline.claim_evidence_review import freeze_initial_review_reuse
                         reuse = freeze_initial_review_reuse(store, unit_request)
                         if reuse:
@@ -707,6 +713,11 @@ def execute_claim_management(store, request, *, root, ports):
                         from backend.pipeline.claim_model_output import candidate as expand_candidate
                         candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']
                             else cm.normalize_candidate(raw_candidate, materials['sources']))
+                        if ('gpt' not in materials['roles'] and not
+                                (materials.get('continuation',{}).get('opus_api_transition') or
+                                 materials.get('continuation',{}).get('opus_subscription_resumption'))):
+                            from backend.pipeline.claim_metadata_projection import project_candidate
+                            candidate,normalization=project_candidate(candidate,normalization,materials)
                         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
                             created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))

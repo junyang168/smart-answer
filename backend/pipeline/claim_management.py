@@ -523,8 +523,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     internal_revision = current_operation == "Update" and request.operation in {"Create", "Restore", "Split", "Merge"}
     if current_operation not in request.allowed_operations and not internal_revision:
         raise ValueError("candidate operation exceeds original authorization")
-    from backend.pipeline.claim_metadata_projection import sampling_keys
+    from backend.pipeline.claim_metadata_projection import sampling_keys,stale_review_keys,RESET
     sampling = sampling_keys(request, before, metadata_projection)
+    stale = stale_review_keys(request, before, metadata_projection)
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if len(dispositions) != len(candidate.dispositions):
         raise ValueError("candidate repeats an object disposition")
@@ -551,7 +552,11 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
         structural = current_operation in {"Split", "Merge"} and disposition.action in {"create", "retire"}
         if operation not in request.allowed_operations and not structural and not (internal_revision and operation == "Update"):
             raise ValueError("object disposition exceeds authorized operations")
-        if collection not in CLAIM_COLLECTIONS or not disposition.citations:
+        stale_reset = (key in stale and disposition.action=='update' and payload is not None
+            and all(payload.get(k)==v for k,v in RESET.items()))
+        metadata_only_reset = stale_reset and all(payload.get(k)==old['payload'].get(k)
+            for k in set(payload)|set(old['payload']) if k not in RESET)
+        if collection not in CLAIM_COLLECTIONS or not disposition.citations and not metadata_only_reset:
             raise ValueError("every content disposition requires own-source evidence")
         sampling_update = key in sampling and disposition.action == "update" and payload is not None and payload.get("review_status") == "candidate"
         sampling_write = sampling_update or key in sampling and disposition.action == "retire"
@@ -595,7 +600,7 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 payload = deepcopy(old["payload"])
             elif payload is None:
                 raise ValueError("update/restore requires a complete postimage")
-            allowed_provenance = {'review_status'} if sampling_update or legacy_restore and payload.get('review_status') == 'candidate' else set()
+            allowed_provenance = set(RESET) if stale_reset else {'review_status'} if sampling_update or legacy_restore and payload.get('review_status') == 'candidate' else set()
             if legacy_restore and (payload.get('review_status') != 'candidate' or payload.get('superseded_by')):
                 raise ValueError('legacy Restore must clear supersession without manufacturing approval')
             if any(payload.get(k) != old["payload"].get(k) for k in source.PROVENANCE - allowed_provenance):
@@ -1592,6 +1597,8 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
     subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
+    from backend.pipeline.claim_metadata_projection import repair_extension
+    engineering_repair = repair_extension(previous,request,policy,authority)
     target_extension = owner_target_extension(previous, old, request)
     support_creation = (request.creation_permissions != old.creation_permissions
         and finding_permission_extension(previous, old, request))
@@ -1660,6 +1667,7 @@ def continuation_budget(previous, request, policy):
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
             or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
+            or extension_basis == 'engineering_repair' and engineering_repair is not None
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
                 and bool(previous['findings'])
@@ -1794,6 +1802,9 @@ def continuation_budget(previous, request, policy):
     if set(historical_stages) != set(historical_inputs):
         raise ValueError('historical rejected-stage proof names an unconsumed call')
     continued_goal = deepcopy(previous['original_goal'])
+    if engineering_repair:
+        if extension_basis!='engineering_repair':raise ValueError('stale AI repair requires explicit engineering budget basis')
+        continued_goal.setdefault('engineering_repair_defects',[]).append(engineering_repair['defect'])
     for entry in historical_inputs.values():
         if entry not in continued_goal.get('unaccepted_model_inputs', []):
             continued_goal.setdefault('unaccepted_model_inputs', []).append(entry)
@@ -1824,6 +1835,7 @@ def continuation_budget(previous, request, policy):
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
+        **({'engineering_repair':engineering_repair} if engineering_repair else {}),
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
         **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),
