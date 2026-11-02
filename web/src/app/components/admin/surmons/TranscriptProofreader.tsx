@@ -1018,6 +1018,15 @@ function TranscriptProofreader({
       setBusy(false);
     }
   };
+  const saveStatus = !ready
+    ? "正在檢查本機草稿…"
+    : recovered
+      ? "本機草稿待確認"
+      : blocked.current
+        ? durable.current
+          ? "同步已暫停；請檢查下方提示"
+          : "尚未同步；請下載備份"
+        : status;
   const audioOnly = doc.context.media_mime_type?.startsWith("audio/") ?? false;
   const MediaPlayer = audioOnly ? "audio" : "video";
   return (
@@ -1046,7 +1055,9 @@ function TranscriptProofreader({
                 ? `認領人：${doc.header.assigned_to_name}`
                 : "尚未認領"}{" "}
               · 第 {doc.context.revision} 版 ·{" "}
-              <span role="status">{status}</span>
+              <span role="status" aria-live="polite">
+                {saveStatus}
+              </span>
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
