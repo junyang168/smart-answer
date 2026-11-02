@@ -980,6 +980,9 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         bounded_capacity = (parent['result'].get('reason') == 'engineering_required'
             and parent['result'].get('detail') == 'active review unit exceeds ten Claims; split the unit before review'
             and parent['policy'].get('review_unit_contract') == 'claim_bounded_review_unit_v1')
+        initial_source_reuse = (parent['result'].get('reason') == 'engineering_required'
+            and parent['result'].get('detail') == 'initial assessment reuse changed its original targets or source evidence'
+            and parent['policy'].get('review_unit_contract') == 'claim_bounded_review_unit_v1')
         capacity_stop = False
         if stopped_capacity_proof is not None:
             check_binding(stopped_capacity_proof)
@@ -1005,7 +1008,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                 or bool(value.get('candidate')) != (not unrecorded)
                 or value.get('change_set_ids') or value.get('opus_approved')
                 or parent.get('continued_by') or parent['latest_rounds'].get(value['unit_id']) != round_id
-                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop or bounded_guard or bounded_capacity)):
+                or len(parent['latest_rounds']) != 1 or not (transaction_drift or unrecorded or capacity_stop or bounded_guard or bounded_capacity or initial_source_reuse)):
             raise ValueError('saved-candidate recovery requires the exact uncommitted pre-review failure')
         opus = parent['call_reservations'].get(round_id + ':opus', {})
         if opus.get('state') != 'planned':
@@ -1029,6 +1032,10 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         candidate = cm.Candidate.model_validate(body(read(old_root / 'candidate.json')))
         if not unrecorded and candidate.model_dump(mode='json') != value['candidate']:
             raise ValueError('transaction recovery saved candidate drift')
+        if initial_source_reuse:
+            from backend.pipeline.claim_evidence_review import reused_assessments
+            if not materials.get('initial_assessment_reuse') or reused_assessments(materials, candidate):
+                raise ValueError('source-clarification recovery requires invalidated initial passes and full fresh review')
         support_projection = None
         if bounded_capacity:
             # The saved model answer remains exact. A repaired mapper may only
@@ -1066,7 +1073,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         # frontier below instead of requiring the old projection to recur.
         context = (None if bounded_guard else
                    _current_rejected_input_context(store, cursor, request, materials, include_records=True))
-        if context is None and not (unrecorded or capacity_stop or bounded_guard or bounded_capacity):
+        if context is None and not (unrecorded or capacity_stop or bounded_guard or bounded_capacity or initial_source_reuse):
             raise ValueError('transaction recovery requires actual transaction-only drift')
         if bounded_guard:
             if context is not None:
@@ -1118,6 +1125,9 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             # Reuses only exact unaffected individual passes. If active work
             # still exceeds ten, this raises before changing any SQL stage.
             claim_management_review_packet(rebound, candidate)
+        if initial_source_reuse:
+            from backend.pipeline.cvp_sql_actions import claim_management_review_packet
+            claim_management_review_packet(rebound, candidate)  # full, still uninvoked review must fit its bound
         if bounded_guard:
             rebound['before'] = repaired_before
             # This is the pre-inference compiled read denominator, not an
@@ -1146,6 +1156,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             'recovery_root': str(root), 'unrecorded_new_finding_adjudication': unrecorded,
             'stopped_capacity_proof': stopped_capacity_proof,
             'bounded_scope_guard_repaired': bounded_guard,
+            **({'initial_source_reuse_invalidated': True} if initial_source_reuse else {}),
             **({'initial_review_reuse': rebound['initial_assessment_reuse'],
                 'support_reference_projection': support_projection} if bounded_capacity else {}),
             'model_inputs_unchanged': not bounded_guard, 'candidate_sha256': candidate.digest,

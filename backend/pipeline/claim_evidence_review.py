@@ -151,8 +151,13 @@ def reused_assessments(materials, candidate):
     if (proof['review_action_id'] not in allowed
             or request.target_keys != old['unit_request']['target_keys']
             or request.model_dump(mode='json')['source_bindings'] != old['unit_request']['source_bindings']
-            or materials['sources'] != old['sources']):
+            or {sid: {k:v for k,v in value.items() if k != 'human_source_decisions'} for sid,value in materials['sources'].items()}
+                != {sid: {k:v for k,v in value.items() if k != 'human_source_decisions'} for sid,value in old['sources'].items()}):
         raise ValueError('initial assessment reuse changed its original targets or source evidence')
+    if materials['sources'] != old['sources']:
+        # A newly recorded human clarification invalidates the cached passes,
+        # not the lawful successor. Review every target on the current facts.
+        return {}
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
     current = deepcopy(materials['before'])
     current.update({row.key: {'payload': row.payload, 'retired': False} for row in candidate.records})

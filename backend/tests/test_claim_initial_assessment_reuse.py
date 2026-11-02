@@ -278,7 +278,7 @@ def test_withdrawn_draft_blocker_reaches_the_same_unit_successor(interrupted_uni
     assert all(store.claim_management_qualification('C'+str(n))['ready'] for n in range(9))
 
 
-@pytest.mark.parametrize('change', ['claim', 'evidence', 'fragment', 'source', 'finding', 'raw'])
+@pytest.mark.parametrize('change', ['claim', 'evidence', 'fragment', 'source', 'human_source', 'finding', 'raw'])
 def test_initial_reuse_refuses_changed_basis_new_objections_and_tampered_proof(interrupted_unit, change):
     store, _, request, _, root, initial, _, _ = interrupted_unit
     proof = evidence.freeze_initial_review_reuse(store, request)
@@ -290,6 +290,8 @@ def test_initial_reuse_refuses_changed_basis_new_objections_and_tampered_proof(i
     assert 'claims/C1' in evidence.reused_assessments(m, candidate)
     if change == 'source':
         m['sources']['S']['paragraphs']['S0001']['text'] += ' changed'
+    elif change == 'human_source':
+        m['sources']['S']['human_source_decisions'] = {'new_verified_fact': 'otherwise connection'}
     elif change == 'raw':
         Path(proof['raw']['path']).write_text('{}')
     elif change == 'finding':
@@ -302,6 +304,8 @@ def test_initial_reuse_refuses_changed_basis_new_objections_and_tampered_proof(i
         candidate.records.append(cm.source.Row(collection=col, object_id=oid, payload=payload))
     if change in {'source', 'raw'}:
         with pytest.raises(ValueError): evidence.reused_assessments(m, candidate)
+    elif change == 'human_source':
+        assert evidence.reused_assessments(m, candidate) == {}
     else:
         assert 'claims/C1' not in evidence.reused_assessments(m, candidate)
 
@@ -404,3 +408,70 @@ def test_capacity_stop_uses_saved_gpt_and_only_the_original_unused_opus(interrup
     assert all(store.claim_management_qualification('C' + str(n))['ready'] for n in range(9))
     after = store.get_cvp_group(parent_id)
     assert sum(s['role'] == 'gpt' and s['state'] == 'completed' for s in after['call_reservations'].values()) == 1
+
+
+def test_human_clarification_resumes_saved_gpt_with_full_unused_review(claims,monkeypatch):
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    store,root=claims
+    p=cm.Policy.model_validate_json(intake.DEFAULT_POLICY.read_text());p.review_unit_contract=units.CONTRACT;p.joint_update_max_targets=10
+    pp=root.parent/'human-reuse-policy.json';pp.write_text(p.model_dump_json())
+    prepared=intake.prepare(['C','D'],root,instruction='Review both own Claims',policy=pp,groups=[['C','D']],store=store)
+    original,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def resolutions(packet,disposition):
+        return [{'finding_id':fid,'disposition':disposition,'reason':'synthetic speaker clarification',
+            'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':['evidence_steps/EC'],
+            'impact_reason':'EC belongs to C'} for fid in packet['unresolved']]
+    def proposal(packet):
+        return {'changes':[{'record_key':'evidence_steps/EC','fields_json':json.dumps({'statement':cite['exact_quote']}),
+            'reason':'complete exact evidence wording','citations':[cite]}], 'creations':[],'retirements':[],'findings':[],
+            'finding_resolutions':resolutions(packet,'resolved' if packet.get('continuation') else 'persistent')}
+    def pending_review(packet):
+        result=pass_review(packet)
+        if not packet['unresolved']:
+            result['findings']=[{'target_key':'source_fragments/FC','component':'speaker','category':'source_uncertain',
+                'reason':'speaker unknown','human_question':'Who spoke?','acceptance_condition':'Confirm speaker',
+                'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':[],
+                'impact_reason':'C uses this evidence'}]
+        else:result['prior_findings']=resolutions(packet,'persistent')
+        return result
+    stopped=execute_claim_management(store,original,root=execution,
+        ports=SyntheticPorts(store,execution,proposal=proposal,opus=pending_review))
+    assert stopped['reason']=='human_required',stopped
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(original.action_id));fid,finding=next(iter(parent['findings'].items()))
+    answer={'schema_version':'wang_claim_human_source_verification_v1','verified_by':'user','human_content_approval':False,
+        'predecessor_action_id':original.action_id,'source_bindings':original.model_dump(mode='json')['source_bindings'],
+        'user_confirmation':'是教授本人的話','answers':[{'finding_id':fid,'question':finding['human_question'],
+            'answer':'The speaker is the professor','citation':deepcopy(finding['citations'][0])}]}
+    af=root/'human-fact.json';af.write_text(json.dumps(answer))
+    p.initial_candidate='proposal';p.budget.gpt_calls=p.budget.opus_calls=1;p.budget.max_revisions=1
+    pf=root/'followup-policy.json';pf.write_text(p.model_dump_json())
+    successor=original.model_copy(deep=True);successor.action_id+='-human';successor.predecessor_action_id=original.action_id
+    successor.policy=cm.source.FileBinding.model_validate(binding(pf));successor.authorization=cm.source.FileBinding(path=str(root/'followup-auth.json'),file_sha256='0'*64)
+    oldauth=json.loads(Path(original.authorization.path).read_text())
+    allocations={sid:reserve(store,action_id=successor.action_id,source_id=sid,target_id='C',root=root/'followup',count=len(ids))
+        for sid,ids in oldauth['claim_creation_allocations'].items()}
+    authorize(successor,{'human_source_verification':binding(af),'required_maintenance_keys':[],
+        'claim_creation_allocations':allocations,'reuse_initial_claim_assessments':True})
+    def complete(packet):
+        assert set(packet['own_evidence_bindings'])=={'claims/C','claims/D'}
+        result=pass_review(packet);result['prior_findings']=resolutions(packet,'resolved');return result
+    ports=SyntheticPorts(store,root/'followup',proposal=proposal,opus=complete)
+    original_reuse=evidence.reused_assessments
+    def old_reuse(materials,candidate):
+        proof=materials.get('initial_assessment_reuse')
+        if proof and materials['sources']!=json.loads(Path(proof['materials']['path']).read_text())['sources']:
+            raise ValueError('initial assessment reuse changed its original targets or source evidence')
+        return original_reuse(materials,candidate)
+    with monkeypatch.context() as patch:
+        patch.setattr(evidence,'reused_assessments',old_reuse)
+        stopped=execute_claim_management(store,successor,root=root/'followup',ports=ports)
+    assert stopped['detail']=='initial assessment reuse changed its original targets or source evidence',stopped
+    assert ports.calls==['gpt']
+    current=store.get_cvp_group('CMA-'+cm.sha256_json(successor.action_id));rid=next(iter(current['latest_rounds'].values()))
+    resume_saved_pre_review(store,rid)
+    result=execute_claim_management(store,successor,root=root/'followup',ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.claim_management_qualification('C')['ready'] and store.claim_management_qualification('D')['ready']
