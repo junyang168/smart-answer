@@ -17,12 +17,15 @@ const specific={
      19:box(.65,2.0,12.03,1.15),12:box(.65,3.25,12.03,.35),3:box(.65,3.7,12.03,.4),
      22:box(.65,4.15,12.03,1.05),4:box(2.28,5.45,8.78,1.22),3075:box(.65,6.95,12.03,.3)},
   2:{2:box(.65,.35,12.03,.6),4:box(.65,1.1,12.03,5.1),3:box(8.68,6.85,4,.3)},
+  5:{11266:box(1.62,.3,10.093,6.43)},
   7:{3:box(.65,.75,12.03,1.85),112:box(1.65,3.15,10.03,.7)},
   9:{2:box(.85,1.8,11.63,4.95)},
+  11:{3:box(.65,.65,12.03,6.2)},
   12:{6:box(.65,.35,12.03,.6),4:box(.65,1.1,12.03,5.6)},
   13:{11:box(.65,.35,12.03,.5),2:box(.65,1.2,12.03,1.6),5:box(.65,3,12.03,.4),
       3:box(.65,3.55,12.03,.8),7:box(.65,4.6,12.03,2.48)},
   14:{2:box(.65,.35,12.03,.9),4:box(.65,1.75,12.03,4.9),3:box(.65,.4,1.5,.4)},
+  15:{2:box(.65,.65,12.03,6.2)},
 };
 
 function planElement(element, slideNumber){
@@ -48,7 +51,10 @@ function planElement(element, slideNumber){
   if(slideNumber===14&&element.id==='4')fontCap=36;
   if(slideNumber===14&&element.id==='2')fontCap=48;
   if(slideNumber===5&&text.includes('主禱文'))fontCap=30;
-  const alignment=slideNumber===1&&element.id==='3'?'ctr':null;
+  const centered=(slideNumber===11&&element.id==='3')||(slideNumber===15&&element.id==='2');
+  const alignment=(slideNumber===1&&element.id==='3')||centered?'ctr':null;
+  const noBorder=slideNumber===1&&element.id==='19';
+  if(noBorder)element.shape.line.fill={type:0,gradientStops:[],pictureEffects:[]};
   if(alignment)for(const paragraph of element.paragraphs||[])paragraph.textStyle={...paragraph.textStyle,alignment:2};
   const doxology=slideNumber===14&&element.id==='4';
   if(doxology)for(const paragraph of element.paragraphs||[])paragraph.paragraphStyle={...paragraph.paragraphStyle,
@@ -63,7 +69,7 @@ function planElement(element, slideNumber){
     const cap=x=>{if(!x||typeof x!=='object')return;for(const[k,v]of Object.entries(x)){if(k==='fontSize'&&typeof v==='number')x[k]=Math.min(v,fontCap*100);else cap(v);}};
     cap(element);
   }
-  return {id:element.id,bbox:b,oldBbox:old,fontCap,footer,alignment,table:element.type===9,
+  return {id:element.id,bbox:b,oldBbox:old,fontCap,footer,alignment,centered,noBorder,table:element.type===9,
     doxology,sermon:slideNumber===9&&element.id==='2'};
 }
 function attrs(tag,values){
@@ -101,6 +107,8 @@ function partGeometry(xml){
 }
 function applyElement(block,plan){
   const b=plan.bbox;if(!b)return block;
+  if(plan.noBorder)block=block.replace(/<a:ln\b[^>]*>[\s\S]*?<\/a:ln>/,'<a:ln><a:noFill/></a:ln>');
+  if(plan.centered)block=block.replace(/<a:bodyPr\b[^>]*>/,tag=>attrs(tag,{anchor:'ctr'}));
   const frame=block.match(/<(?:a|p):xfrm\b[\s\S]*?<\/(?:a|p):xfrm>/);
   if(frame)block=block.replace(frame[0],xfrm(frame[0],b));
   else if(block.startsWith('<p:sp')){
