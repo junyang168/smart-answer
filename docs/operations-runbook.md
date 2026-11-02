@@ -359,6 +359,15 @@ normal deploy path never passes `--force` and never invokes the reminder job.
 
 ### Sunday WhatsApp assistant
 
+The Sunday Presenter website integration and OneDrive PPT storage configuration
+are documented in [Sunday Presenter and OneDrive](sunday-presenter.md). Its
+server-side configuration is outside Git at
+`$DATA_BASE_DIR/config/sunday_presenter.json`. Activate it alongside the reviewed
+website change; without it, existing installations retain local PPT storage.
+The host's OneDrive Mac client performs upload, so a successful local write is
+not a cloud-delivery confirmation. The presenter installer contains no Microsoft
+session or host-specific storage configuration.
+
 Prepare its protected shared secret/configuration and LaunchAgent once with
 `backend/.venv/bin/python scripts/install-sunday-assistant-agent.py`. This only
 writes configuration; it does not load the service or enable collection.

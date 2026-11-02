@@ -12,6 +12,13 @@
   <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>專心帶領，輕鬆切換。</h1>
     <p><strong>⌘P</strong> 顯示 / 隱藏控制台。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
   </header>
+  <section class="sunday-folder" aria-label="本主日簡報">
+    <strong id="sunday-date">正在取得本主日資料夾…</strong>
+    <p id="sunday-status" role="status"></p>
+    <div class="transport"><button data-folder="worship" disabled>開啟主日崇拜資料夾</button>
+      <button data-folder="sermon" disabled>開啟講道資料夾</button>
+      <button data-action="refresh-folder">更新連結</button></div>
+  </section>
   <section class="onair"><span id="live" role="status">輸出：黑屏</span><div class="switches">
     <button data-take="worship" class="take" disabled>主日崇拜</button>
     <button data-take="sermon" class="take" disabled>講道</button>

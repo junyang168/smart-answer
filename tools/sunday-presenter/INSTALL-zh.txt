@@ -1,0 +1,18 @@
+Sunday Presenter — Apple Silicon Mac
+
+1. 打開 DMG，把 Sunday Presenter 拖進 Applications。
+2. 從 Applications 或 Spotlight 開啟 Sunday Presenter。
+3. 按 ⌘P 顯示控制台。App 會向教會網站取得本主日的 OneDrive 連結。
+4. 開啟主日崇拜／講道資料夾，在 app 內登入 Microsoft 並選取簡報。
+5. 啟動投影片放映，檢查後按「設為觀眾畫面」，然後切換輸出。
+6. Google Meet 只分享「Sunday Presenter — OUTPUT」視窗。
+
+⌘P：顯示／隱藏控制台。⌘Q：離開 app。
+
+需要網路、Apple Silicon Mac 及 macOS 13 或以上。App 不需要安裝 Node.js。
+每台電腦須自行登入 Microsoft；安裝包不包含帳號、登入資料或簡報檔案。
+雲端新檔案以 OneDrive 完成同步為準。
+
+這是尚未簽章／公證的測試版本。若 macOS 阻擋開啟，請在確認來源後，
+到「系統設定 → 隱私權與安全性」按「仍要打開」。不要關閉系統安全保護。
+本主日 API 需要先部署網站整合版本；網站尚未更新時，控制台可手動貼上簡報連結。

@@ -1,15 +1,30 @@
 # Sunday Presenter — Mac prototype (#590)
 
 Two original PowerPoint presentations, one persistent audience window. This is
-a standalone local Electron prototype. It does not use the Sunday Agent,
-backend, website, production church groups, or deployment scripts.
+a packaged Electron app. At startup it calls the church website's upcoming-Sunday
+API for the dated OneDrive folder. The website saves newly generated and uploaded
+PPTs into that same OneDrive sync tree. It does not send church group messages.
 
 **Status: technical prototype. The owner's Microsoft sign-in and two real slide
 shows work; a second signed-in Meet client received switching in the windowed
-baseline. Full-screen capture and media/audio acceptance remain separate checks.** See
+baseline, and the owner subsequently reported successful full-screen sharing.
+Media/audio and broader animation acceptance remain separate checks.** See
 [acceptance.md](acceptance.md) for observations and the remaining checks.
 
-## Start on Mac
+## Install on another Mac
+
+Use `dist/Sunday-Presenter-0.2.0-mac-arm64.dmg` on an Apple Silicon Mac running
+macOS 13 or newer. Drag **Sunday Presenter** into **Applications**. A ZIP of the
+app is also produced. Node.js is not needed on the receiving laptop. The package
+contains an independent app icon, but no Microsoft account/session or private
+folder configuration. Sign in inside the app on each Mac.
+
+This test build is unsigned and not notarized; macOS may require **System
+Settings → Privacy & Security → Open Anyway** after the first blocked launch.
+The website integration must be deployed before automatic links work; manual
+PowerPoint links remain usable while the website is unavailable.
+
+## Start from source
 
 Requires Node 22.12 or newer and internet access.
 
@@ -36,6 +51,13 @@ Click **Microsoft 登入 / 選檔** to open PowerPoint web privately. Sign in **
 this app**; Chrome's Microsoft session is separate. Alternatively paste an existing
 OneDrive, SharePoint, or PowerPoint HTTPS link in a deck's input. A OneDrive
 folder is useful for finding a file; it is not itself a slideshow.
+
+The **本主日簡報** card displays the date returned by the website, calculated in
+America/Chicago (Sunday itself is included). Open the dated folder for either
+deck. Startup and each explicit folder-open fetch a fresh link; an offline or
+stale-date reply clears the link and shows a retry message. Refreshing never
+reloads or switches an existing presentation. The app reads the API only; missing
+date directories are created when the website generates or uploads a PPT.
 
 1. Open the worship file under **主日崇拜**. Enter PowerPoint's slide show mode.
 2. A popup, if any, appears as a new row in the corresponding deck. It stays
@@ -108,14 +130,17 @@ fullscreen/resizing caused by a webpage is disabled to retain the shared window.
 - Google documents [window/desktop audio sharing requirements](https://support.google.com/meet/answer/16581830),
   including macOS 14.2 or newer. Muting WebContents is not evidence that Meet
   transmits the intended audio; verify with a separate receiving device.
-- Local PPT intake, automatic OneDrive upload, Agent integration, code signing,
-  notarization, and an updater are outside this prototype.
+- OneDrive upload uses the host Mac's existing sync client. Filesystem success
+  is not proof of cloud availability; the API reports cloud status unverified.
+  Agent file intake, code signing, notarization, and an updater remain outside
+  this prototype.
 
 ## Verification and packaging
 
 ```sh
 npm test
 npm run smoke
+npm run icons
 npm run package:mac
 ```
 
@@ -128,9 +153,12 @@ flags, resize, redirect, and a renderer crash. Results and synthetic screenshots
 are written to ignored `output/smoke/`. It does not test Microsoft or Meet.
 
 Packaging writes an unsigned `Sunday Presenter.app` under ignored `dist/` for
-the current Mac architecture. It omits tests, screenshots, node_modules used
+Apple Silicon, plus a drag-to-Applications DMG and ZIP. It omits tests, screenshots, node_modules used
 only for development, and account data. Do not distribute it as an accepted
 Sunday production app before completing the account/deck/Meet checks.
+
+Website/storage configuration, migration and API contract:
+[integration runbook](../../docs/sunday-presenter.md).
 
 Electron references: [WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view),
 [popup creation](https://www.electronjs.org/docs/latest/api/web-contents#contentssetwindowopenhandlerhandler),

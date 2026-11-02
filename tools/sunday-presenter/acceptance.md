@@ -126,3 +126,54 @@ last exchange. The earlier same-Mac rendering anomaly remains unresolved; it
 must not be conflated with the later inactive-share incident. Audible delivery,
 timed-media behavior and broader animation coverage remain pending. Keep #590
 open and the PR in draft until the remaining acceptance evidence is complete.
+
+## Website / OneDrive integration and portable package — 2026-11-02
+
+The owner extended the scope to website integration and confirmed the existing
+OneDrive Personal Sunday sync root and unpadded month-day-year date directories.
+Generation and final uploads now create the relevant missing date directory and
+save deliverables there. Generated output and human final uploads use separate
+names. The assistant publishes only revalidated artifacts, before marking jobs
+ready. Final downloads and email attachment resolution use the new location.
+Service metadata, templates and immutable assistant artifacts remain internal.
+
+The website exposes a no-store upcoming-Sunday API and a management-page folder
+entry. The app fetches it at startup and before opening the folder, validates
+the Chicago date and OneDrive destination, and clears stale/failed links.
+Reading the API does not create a folder. Website generation/upload creates it
+when needed. Refresh failure leaves the live deck unchanged.
+
+Validation: 59 backend tests passed (including missing directories, Sunday/DST/
+year boundaries, direct website generation, final upload/download/email paths,
+superseded input exclusion, copy failure, ready-after-publication and migration
+collisions); eight Node tests passed; website TypeScript passed. The real Mac
+Electron smoke also passed with website HTTP fetch/render and a failed refresh
+while a presentation remained live, alongside its existing 20-switch checks.
+
+Under the owner's requested migration, 103 historical PPTs were copied into 51
+dated OneDrive folders. Every original and copy was read back against its SHA;
+the originals were retained. Templates/lock files/JSON were excluded. Private
+manifests are in ignored `output/sunday-presenter-integration/`. The upcoming
+11-8-2026 folder was also created and observed on OneDrive's actual website,
+empty as expected. A local write is not proof of cloud completion for every
+migrated file; the API does not claim cloud verification.
+
+Version 0.2.0 has a custom vector/native icon, arm64 DMG and ZIP with installation
+instructions, bundle ID `org.dallas-hlc.sunday-presenter`, and minimum macOS 13.
+DMG checksums and ZIP integrity were verified. Packaging now verifies the actual
+app executable and portable internal symlinks; an initial nested-bundle mistake
+and a filesystem-copy symlink-resolution defect were caught in installation
+checks and fixed before delivery. The final DMG app was installed into
+`~/Applications/Sunday Presenter.app`, launched successfully and accepted ⌘P.
+Its controller displayed 2026-11-08 / 11-8-2026 from this worktree's actual
+website API; its folder button then opened that exact OneDrive folder inside
+PRIVATE PREPARATION using the retained Microsoft session. Installers were copied
+to `~/Downloads/` with byte-hash comparison.
+They contain no Microsoft session or host-specific OneDrive configuration.
+
+The installed app is running against the local website preview for this check.
+Distributables default to the production website. Website code/config activation
+has **not** been deployed; production activation remains required before another
+laptop can obtain automatic links. The package is unsigned and not notarized.
+The second laptop itself, audible Meet delivery and broader real animation
+coverage have not been tested.

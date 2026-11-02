@@ -15,6 +15,7 @@ button:disabled { opacity: .4; cursor: default; }
 .take:hover { background: #c3f0e8; }
 .black { background: #0b1017; }
 .deck { padding: 20px; border: 1px solid #354153; border-radius: 12px; margin: 14px 0; }
+.sunday-folder { padding: 18px; background: #172b32; border-radius: 12px; margin-top: 20px; }
 .deck.live { border-color: #aadbd0; }
 .deck h2 { font-size: 19px; margin: 0 0 15px; display: flex; justify-content: space-between; align-items: center; }
 form { display: flex; gap: 8px; }

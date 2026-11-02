@@ -23,11 +23,20 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
-  let postedBody;
+  let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
-    if (request.url === '/post') {
+    if (request.url === '/api/upcoming') {
+      apiCalls++;
+      if (apiFailure) { response.writeHead(503); response.end(); return; }
+      const date = require('../website.cjs').comingSunday();
+      const [year, month, day] = date.split('-').map(Number);
+      const folderName = `${month}-${day}-${year}`;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ date, folderName, timezone: 'America/Chicago', folderExists: true,
+        folderUrl: `https://onedrive.live.com/my?id=%2Fpersonal%2Ffixture%2FDocuments%2F${folderName}` }));
+    } else if (request.url === '/post') {
       postedBody = '';
       request.on('data', data => { postedBody += data; });
       request.on('end', () => { response.setHeader('Content-Type', 'text/html'); response.end(fixture); });
@@ -62,6 +71,13 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.deepEqual(output.getBounds(), screen.getDisplayMatching(output.getBounds()).bounds);
     toggleControls(); assert.equal(controller.isVisible(), true);
     toggleControls(); assert.equal(controller.isVisible(), false);
+    website.apiURL = origin + '/api/upcoming';
+    await act('refresh-folder');
+    assert.equal(apiCalls, 1);
+    assert.equal(website.state.status, 'ready');
+    await until(async () => (await controller.webContents.executeJavaScript("document.querySelector('#sunday-date').textContent")).includes(website.state.folder.date), 'website date shown');
+    assert.equal(stage.pages.size, 0);
+    assert.equal(controller.isVisible(), false);
     console.log('smoke: loading');
     const worship = await load('worship'), sermon = await load('sermon');
     const tokens = await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token')));
@@ -88,6 +104,13 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     console.log('smoke: switching passed');
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token'))), tokens);
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('steps'))), [10, 10]);
+    const liveBeforeRefresh = stage.active;
+    apiFailure = true;
+    await assert.rejects(act('refresh-folder'), /503/);
+    assert.equal(stage.active, liveBeforeRefresh);
+    assert.equal(website.state.folder, null);
+    apiFailure = false; await act('refresh-folder');
+    assert.equal(stage.active, liveBeforeRefresh);
     toggleControls();
     await controller.webContents.executeJavaScript(`void (window.savedArm = document.querySelector('[data-page="${worship.id}"] [data-action="arm"]'))`);
     worship.title = 'Fixture title update'; stage.changed();
@@ -155,6 +178,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       navigationAndCrashBlackout: true, popupPostPreserved: true, fullscreenOutput: true,
       controlsHiddenByDefault: true, commandPRegistered: true, stableControlButtons: true,
       presentationCommandPIntercepted: true,
+      websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));

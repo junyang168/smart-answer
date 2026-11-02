@@ -2,6 +2,7 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu,
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
+const { Website } = require('./website.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -9,6 +10,7 @@ else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
 let controller, output, preparation, stage, officeSession, quitting = false, testOrigin;
+let website;
 const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
 const controlShortcut = 'CommandOrControl+P';
@@ -24,8 +26,10 @@ function toggleControls() {
 }
 
 function changed() {
-  if (controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', stage.snapshot());
+  if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
+
+function snapshot() { return { ...stage.snapshot(), website: website?.state }; }
 
 function remotePreferences() {
   return { session: officeSession, nodeIntegration: false, nodeIntegrationInSubFrames: false,
@@ -94,7 +98,14 @@ function createPage(deck, popupOptions = {}) {
 
 async function act(action, args = {}) {
   switch (action) {
-    case 'state': return stage.snapshot();
+    case 'state': return snapshot();
+    case 'refresh-folder': await website.refresh(); break;
+    case 'sunday-folder': {
+      if (!Object.hasOwn(labels, args.deck)) throw Error('Unknown deck');
+      // Fetch again on each open: never silently reuse last Sunday's link.
+      const folder = await website.refresh();
+      return act('open', { deck: args.deck, url: folder.folderUrl });
+    }
     case 'office': return act('open', { deck: args.deck, url: 'https://www.microsoft365.com/launch/powerpoint' });
     case 'open': {
       if (!Object.hasOwn(labels, args.deck) || typeof args.url !== 'string' ||
@@ -142,7 +153,7 @@ async function act(action, args = {}) {
     case 'show-output': output.show(); break;
     default: throw Error('Unknown action');
   }
-  return stage.snapshot();
+  return snapshot();
 }
 
 app.whenReady().then(async () => {
@@ -184,6 +195,7 @@ app.whenReady().then(async () => {
   }
   preparation.setAlwaysOnTop(true);
   stage = new Stage(output, preparation, changed);
+  website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
   stage.layout();
   preparation.setPosition(...output.getPosition());
   if (!globalShortcut.register(controlShortcut, toggleControls)) {
@@ -208,10 +220,11 @@ app.whenReady().then(async () => {
     catch (error) { return { error: error.message }; }
   });
   await controller.loadFile(path.join(__dirname, 'control.html'));
+  if (!smoke) website.refresh().catch(() => {});
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        setOrigin: origin => { testOrigin = origin; } });
+        website, setOrigin: origin => { testOrigin = origin; } });
       console.log('SMOKE PASS');
       app.quit();
     } catch (error) { console.error(error); app.exit(1); }

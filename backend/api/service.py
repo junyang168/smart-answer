@@ -1809,6 +1809,14 @@ def delete_micro_sermon(sermon_id: str) -> None:
 
 
 def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, require_complete: bool = False) -> Path:
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        cloud_target = cloud.generated(service_day(date)) if cloud and output_path is None else None
+        if cloud_target:
+            cloud_target.parent.mkdir(exist_ok=True)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     service = get_sunday_service(date)
     from backend.sunday_service_skeletons import maintain_skeletons
     from backend.sunday_assistant.store import Store
@@ -1898,7 +1906,8 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
 
     SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
     filename = _build_ppt_filename(date, service)
-    output_path = output_path or SUNDAY_WORSHIP_DIR / filename
+    render_directory = tempfile.TemporaryDirectory(prefix="sunday-ppt-") if cloud_target else None
+    output_path = output_path or (Path(render_directory.name) / filename if render_directory else SUNDAY_WORSHIP_DIR / filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     holy_comm_config: dict[str, str] | None = None
@@ -1925,10 +1934,17 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
             holy_communion=holy_comm_config,
             hidden_slide_numbers=hidden_slide_numbers,
         )
+        if cloud_target:
+            try:
+                return cloud.publish_generated(service_day(date), output_path)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(status_code=503, detail="PPT 已生成，但無法存入 OneDrive；請重試：" + str(exc)) from exc
+        return output_path
     except PptTextOverflowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return output_path
+    finally:
+        if render_directory:
+            render_directory.cleanup()
 
 
 def email_sunday_service(date: str):
@@ -1948,8 +1964,13 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
 
     service = get_sunday_service(date)
     output_filename = _build_final_ppt_filename(service.date or date)
-    SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = SUNDAY_WORSHIP_DIR / output_filename
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        output_path = cloud.file(service_day(date), output_filename) if cloud else SUNDAY_WORSHIP_DIR / output_filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     temp_path = output_path.with_suffix(output_path.suffix + ".uploading")
 
     try:
@@ -1987,7 +2008,15 @@ def get_final_sunday_service_ppt(date: str) -> Path:
     filename = service.final_ppt_filename
     if not filename:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="尚未上傳最終 PPT")
-    ppt_path = SUNDAY_WORSHIP_DIR / filename
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        ppt_path = cloud.file(service_day(date), filename) if cloud else SUNDAY_WORSHIP_DIR / filename
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # Historical uploads remain downloadable; new uploads always use OneDrive.
+    if cloud and not ppt_path.exists():
+        ppt_path = SUNDAY_WORSHIP_DIR / filename
     if not ppt_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="找不到已上傳的 PPT 檔案")
     return ppt_path

@@ -28,6 +28,14 @@ async function act(action, args) {
   } catch { error.textContent = '操作未完成，請重試。'; return false; }
 }
 function render(state) {
+  const website = state.website;
+  const folder = website?.folder;
+  document.querySelector('#sunday-date').textContent = folder ? `本主日：${folder.date} · ${folder.folderName}` : '本主日簡報';
+  document.querySelector('#sunday-status').textContent = website?.status === 'loading' ? '正在向教會網站取得連結…' :
+    website?.error || (folder ? (folder.folderExists ? 'OneDrive 資料夾已建立；雲端檔案以 OneDrive 同步狀態為準。' :
+      '本週資料夾尚未建立；網站生成或上傳 PPT 後會建立，請稍後更新。') : '請更新連結。');
+  for (const button of document.querySelectorAll('[data-folder]')) button.disabled = !folder;
+  document.querySelector('[data-action="refresh-folder"]').disabled = website?.status === 'loading';
   const active = state.pages.find(page => page.id === state.active);
   document.querySelector('#live').textContent = active ? `輸出：${labels[active.deck]}` : '輸出：黑屏（全部靜音）';
   for (const deck of Object.keys(labels)) {
@@ -62,5 +70,6 @@ function render(state) {
 for (const button of document.querySelectorAll('[data-action]')) button.onclick = () => act(button.dataset.action);
 for (const button of document.querySelectorAll('[data-key]')) button.onclick = () => act('key', { key: button.dataset.key });
 for (const button of document.querySelectorAll('[data-take]')) button.onclick = () => act('take', { deck: button.dataset.take });
+for (const button of document.querySelectorAll('[data-folder]')) button.onclick = () => act('sunday-folder', { deck: button.dataset.folder });
 window.presenter.onState(render);
 act('state');
