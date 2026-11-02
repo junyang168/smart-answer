@@ -1701,6 +1701,11 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
+        from backend.pipeline.claim_review_recovery import pre_transport_login_refusal
+        login_refusal = pre_transport_login_refusal(previous, key, slot)
+        if login_refusal is not None:
+            failures[key] = login_refusal
+            continue
         if subscription_limit and slot['role'] == 'gpt' and (root/slot['round_id']/'gpt.failure.json').is_file():
             from backend.pipeline.claim_review_recovery import consumed_subscription_output_limit
             output_failures[key] = consumed_subscription_output_limit(previous,key,slot)

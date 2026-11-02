@@ -18,6 +18,54 @@ from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVIS
 VERSION='wang_claim_review_engineering_recovery_v1'
 
 
+def pre_transport_login_refusal(previous, key, slot):
+    """Recognize the Claude login check that precedes any generation process.
+
+    No failed artifact or input is removed. This proof only lets a formal
+    successor inherit the original unspent generation budget.
+    """
+    if slot.get('role') != 'opus' or previous['policy']['models']['opus']['backend'] != 'claude_subscription':
+        return None
+    stage = Path(previous['execution_root']) / slot['round_id']
+    failure_path = stage / 'opus.failure.json'
+    if not failure_path.is_file():
+        return None
+    failure = body(read(failure_path))
+    prefix = 'claude-subscription requires an active claude.ai Pro, Max, Team, or Enterprise login; received: '
+    error = failure.get('error', '')
+    if not isinstance(error, str) or not error.startswith(prefix):
+        return None
+    try:
+        status = json.loads(error[len(prefix):])
+    except (ValueError, TypeError) as exc:
+        raise ValueError('unverifiable Claude login refusal') from exc
+    transport = stage / 'opus.transport'
+    intent = body(read(stage/'opus.reservation.json'))
+    materials = body(read(stage/'materials.json'))
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet
+    packet = body(read(stage/'opus.packet.json'))
+    expected = claim_management_review_packet(materials, cm.Candidate.model_validate(body(read(stage/'candidate.json'))))
+    if (slot['state'] != 'started' or key != slot['round_id'] + ':opus'
+            or status.get('loggedIn') is not False or status.get('authMethod') != 'none'
+            or failure.get('provider_raw') is not None or failure.get('automatic_retry') is not False
+            or failure.get('transport_directory') != str(transport)
+            or intent != slot.get('intent') or sha256_json(intent) != slot.get('intent_sha256')
+            or packet != expected or sha256_json(packet) != intent['request_payload_sha256']
+            or (stage/'opus.raw.json').exists() or (transport.exists() and any(transport.iterdir()))):
+        raise ValueError('Claude login refusal cannot conceal a changed input or started transport')
+    from backend.pipeline.source_reconciliation_runner import stage_adapter
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    adapter = stage_adapter(claim_management_model_adapter('opus', cm.Policy.model_validate(previous['policy'])),
+                            packet, stage/'opus.raw.json', saved=intent)
+    if (any(intent[name] != getattr(adapter, name) for name in
+            ('model_id','backend','prompt_sha256','generation_config_sha256'))
+            or intent['request_encoding_proof'] != adapter.request_encoding_proof(packet)):
+        raise ValueError('Claude login refusal model/prompt/wire drift')
+    return {'kind': 'subscription_login_refused_before_transport',
+            'failure': binding(failure_path), 'reservation': binding(stage/'opus.reservation.json'),
+            'packet': binding(stage/'opus.packet.json'), 'model_calls': 0}
+
+
 def consumed_subscription_output_limit(previous, key, slot):
     """Authenticate a finished Codex truncation, without accepting partial JSON."""
     from types import SimpleNamespace
