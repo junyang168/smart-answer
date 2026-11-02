@@ -14,6 +14,48 @@ from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows, decod
 CONTEXT_CONTRACT = 'claim_complete_review_context_reuse_v2'
 
 
+def human_evidence_snapshot(cursor, source_ids, frozen, records):
+    """An unrelated paragraph confirmation does not undo an unchanged review.
+
+    Bind the entire current decision snapshot afterwards: a later change must
+    be explicitly reconciled again, never silently inherited by this proof.
+    """
+    from backend.pipeline.claim_human_source import snapshot
+    current = snapshot(cursor, source_ids)
+    if current == frozen:
+        return current
+    positions = {sid: set() for sid in source_ids}
+
+    def visit(value, inherited):
+        if isinstance(value, dict):
+            sid = value.get('source_id')
+            sources = {sid} if sid in positions else inherited
+            if value.get('paragraph_key'):
+                for source_id in sources:
+                    positions[source_id].add(value['paragraph_key'])
+            for child in value.values():
+                visit(child, sources)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, inherited)
+
+    for key, row in records.items():
+        if not key.startswith('source_documents/'):
+            visit(row['payload'], set(source_ids))
+    before = {v['decision_id']: v for v in frozen}
+    after = {v['decision_id']: v for v in current}
+    for ident in before.keys() | after.keys():
+        if before.get(ident) == after.get(ident):
+            continue
+        for value in (before.get(ident), after.get(ident)):
+            if value is None:
+                continue
+            located = positions.get(value['source_id'], set())
+            if not located or located & set(value['paragraph_sha256']):
+                raise ValueError('review reuse human source evidence changed in the Claim scope')
+    return current
+
+
 def owner_extension(before, after):
     """Only additive consumers; the evidence and every old owner stay exact."""
     ignored = {'revision', 'produced_claim_ids'}
@@ -114,6 +156,9 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION READ ONLY')
         assert_no_newer_rejection(cursor, claim_id, run_id, proof['protected_record_keys'])
+        proof['human_source_decisions'] = human_evidence_snapshot(
+            cursor, request.source_bindings, materials.get('human_source_decisions', []),
+            {k: current[k] for k in required})
     proof['proof_sha256'] = cm.sha256_json(proof)
     if changed_context:
         with store.connect() as conn, conn.cursor() as cursor:
@@ -164,6 +209,15 @@ def verify(store, cursor, claim_id, proof):
         check_binding(proof[name])
     for bound in proof['source_bindings'].values():
         verify_current_source_binding(bound)
+    from backend.pipeline.claim_human_source import assert_current as assert_human_current
+    if 'human_source_decisions' in proof:
+        assert_human_current(cursor, proof['source_bindings'], proof['human_source_decisions'])
+    else:
+        # Historical proofs did not pin this separate evidence registry.
+        # They can only keep their original exact decision snapshot.
+        material = cursor.execute('SELECT metadata->\'materials\' FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                                  (proof['review_run_id'],)).fetchone()[0]
+        assert_human_current(cursor, proof['source_bindings'], material.get('human_source_decisions', []))
     assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], proof['protected_record_keys'])
     states = store._assert_transaction_read_pins(cursor, decoded_pins(proof['read_pins']))
     if proof['contract'] == CONTEXT_CONTRACT:

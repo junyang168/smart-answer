@@ -70,7 +70,11 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
 
 def scope(request, before, candidate=None, *, include_write_context=True):
     from backend.pipeline import claim_management as cm
-    payloads = {k: v['payload'] for k, v in before.items()}
+    # A completed readback includes tombstones for reviewed retirements.
+    # They are history, not active incident edges in a read-only footprint.
+    # Live proposals retain the entire pre/post scope and write protections.
+    payloads = {k: v['payload'] for k, v in before.items()
+                if include_write_context or candidate is not None or not v.get('retired', False)}
     old = dict(payloads)
     if candidate:
         payloads.update(cm.source.index(candidate.records))

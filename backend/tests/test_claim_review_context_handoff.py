@@ -223,3 +223,50 @@ def test_context_handoff_cannot_create_a_missing_original_qualification(claims):
     with store.connect() as conn,conn.cursor() as cursor:
         with pytest.raises(ValueError,match='existing complete qualification'):
             reuse.revalidate_context(store,cursor,'never-reviewed',old,peer)
+
+
+@pytest.mark.parametrize('paragraph,located,allowed',[
+    ('S0002', True, True), ('S0001', True, False), ('S0002', False, False),
+])
+def test_readonly_reuse_reconciles_only_unrelated_human_source_decisions(monkeypatch,paragraph,located,allowed):
+    from backend.pipeline import claim_human_source as human
+    decision={'decision_id':'new','source_id':'S','paragraph_sha256':{paragraph:'a'*64}}
+    monkeypatch.setattr(human,'snapshot',lambda cursor,sources:[decision])
+    rows={'claims/C':{'payload':{'occurrences':[{'source_id':'S','anchors':[
+        {'paragraph_key':'S0001'}] if located else []}]}}}
+    if allowed:
+        assert reuse.human_evidence_snapshot(None,{'S':{}},[],rows)==[decision]
+    else:
+        with pytest.raises(ValueError,match='human source evidence changed'):
+            reuse.human_evidence_snapshot(None,{'S':{}},[],rows)
+
+
+def test_reused_complete_qualification_cannot_ignore_later_human_source_evidence(claims):
+    from backend.tests.test_claim_human_source_decisions import facts,save
+    store,root=claims
+    old=original_pass(store,root)
+    value=store.get_cvp_group(old)
+    request=cm.Request.model_validate(value['materials']['request'])
+    _,entries=facts(request,root)
+    save(store,entries)
+    assert not store.claim_management_qualification('D')['ready']
+    with pytest.raises(ValueError,match='human source evidence changed'):
+        reuse.admit(store,'D',old)
+
+
+def test_readonly_scope_does_not_resurrect_a_reviewed_retired_edge(claims):
+    from backend.pipeline.claim_direct_scope import scope
+    store,root=claims
+    old=original_pass(store,root)
+    value=store.get_cvp_group(old)
+    request=cm.Request.model_validate(value['materials']['unit_request']).model_copy(
+        update={'target_keys':['claims/C'],'permissions':[]})
+    rows={cm.source.key(*k):cm.model_state(v)
+          for k,v in store.read_claim_context([('claims','C')]).items()}
+    rows['claim_relations/R']['retired']=True
+    rows.pop('claims/D')
+    selected=scope(request,rows,include_write_context=False)
+    assert 'claim_relations/R' not in selected['record_keys']
+    assert 'claims/D' not in selected['neighbour_claim_keys']
+    with pytest.raises(ValueError):
+        scope(request,rows)
