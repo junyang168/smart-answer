@@ -6,7 +6,7 @@ import Link from "next/link";
 type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
   availability_group_name: string; service_group_name: string; songs_group_name: string;
-  auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  auto_generate_ppt: boolean; auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
   admin_help_enabled: boolean; admin_group: string; admin_group_name: string;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
   households: string[][]; worker_aliases: Record<string, string>; worship_rotation: string[];
@@ -19,6 +19,8 @@ type Proposal = { id: number; message_id: string; status: string; error?: string
   payload: { operations: Operation[]; questions: string[] } };
 type IdentityAudit = { checked_at?: string; members: { id: string; ids: string[]; labels: string[]; groups: string[]; saved_contact: boolean; worker?: string; candidates: string[]; status: string; reason?: string; lookup_errors: string[] }[]; workers_without_account: string[]; unseen_mappings: { id: string; workers: string[] }[] };
 type Data = {
+  ppt_readiness?: { date: string; version?: string; status: string; missing?: string[]; error?: string };
+  ppt_jobs?: { day: string; version: string; status: string; error?: string }[];
   identity_audit?: IdentityAudit;
   admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number }[]; notices: { key: string; phase: string; status: string }[] };
   identities?: { sender_id: string; worker_name: string }[];
@@ -105,6 +107,16 @@ export default function SundayAssistantPage() {
         <section className={card}><h2 className="font-semibold">整理進度</h2><p className="mt-2">{labels[data.worker?.status || ""] || "處理程序尚未啟動"}</p><p className="mt-2 text-sm">{pending.length} 項待核對</p>{data.worker && <p className="mt-1 text-xs text-slate-500">最近更新 {new Date(data.worker.at).toLocaleString()}</p>}{data.worker?.error && <p className="mt-2 text-sm text-amber-800">{data.worker.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">{data.sunday} 主日資料</h2><p className="mt-2 text-sm">{data.missing.length ? `尚缺：${data.missing.join("、")}` : "已齊全"}</p><p className="mt-2 text-xs text-slate-500">{labels[data.worker?.reminder || ""] || ""}</p></section>
       </div>
+      <section className={card}><h2 className="text-lg font-bold">主日 PPT</h2>
+        <label className="mt-3 block"><input type="checkbox" checked={settings.auto_generate_ppt ?? true} onChange={e => patch({ auto_generate_ppt: e.target.checked })} /> 資料齊備後自動產生 PPT 並通知網站管理員群</label>
+        <p className="mt-2 text-sm text-slate-600">司琴可留空。生成前檢查歌詞、讀經安排及未來兩週骨架；資料更正後產生新版。</p>
+        {data.ppt_readiness && <div className="mt-3 text-sm"><p>{data.ppt_readiness.date} · {data.ppt_readiness.status === "ready" ? "PPT 已準備好" : data.ppt_readiness.status === "error" ? "PPT 產生失敗" : "等待資料齊備"}</p>
+          {!!data.ppt_readiness.missing?.length && <p className="mt-2">{data.ppt_readiness.missing.join("、")}</p>}
+          {data.ppt_readiness.error && <p className="mt-2 text-red-700">{data.ppt_readiness.error}</p>}
+          {data.ppt_readiness.status === "ready" && data.ppt_readiness.version && <a className="mt-2 inline-block underline" href={`/api/admin/sunday-assistant/ppt-ready/${data.ppt_readiness.date}/${data.ppt_readiness.version}`}>下載已產生 PPT</a>}
+          {data.ppt_readiness.status === "error" && <button className={`${button} mt-2`} disabled={busy} onClick={() => void action(() => call(`ppt-retry/${data.ppt_readiness?.date}`, "POST"), "已排入重新產生 PPT")}>重新產生 PPT</button>}
+        </div>}
+      </section>
       {!!data.skeletons?.length && <section className={card}><h2 className="text-lg font-bold">未來兩週主日骨架</h2><p className="mt-2 text-sm text-slate-600">先確定講員、司會、領詩；其餘資料可在主日前補齊。已有預填安排保留，司會缺項自動按資格、輪值及請假資料分配。</p>{!!settings.worship_rotation?.length && <p className="mt-2 text-sm">領詩輪值：{settings.worship_rotation.join(" ／ ")}；沿用已有預填安排，群內明確更正優先。</p>}{data.skeletons.map(row => <p className="mt-2 text-sm" key={row.date}>{row.date} · {row.complete ? "骨架齊全" : `待補：${row.missing.join("、")}`}</p>)}</section>}
       <section className={card}>
         <h2 className="text-lg font-bold">連接與設定</h2>

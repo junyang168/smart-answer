@@ -23,6 +23,7 @@ class Settings(BaseModel):
     service_group_name: str = "主日讲道联络群"
     songs_group_name: str = "主日诗歌服侍交流群"
     auto_apply: bool = False
+    auto_generate_ppt: bool = True
     maintain_future_skeletons: bool = True
     collect_cross_group: bool = True
     offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
