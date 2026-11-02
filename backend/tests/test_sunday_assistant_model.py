@@ -75,6 +75,7 @@ def test_model_oct4_existing_different_reading_boundaries_are_held_without_group
     entry = agent.repository.services[case["date"]]
     entry.sermon_title = case["expected"]["sermonTitle"]
     entry.response_hymn = case["expected"]["responseHymn"]
+    entry.response_hymn_youtube_url = case["expected"]["responseHymnYoutubeUrl"]
     entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
     before = entry.model_dump(by_alias=True)
     event(agent, case["text"], sender="unverified-author", at=case["sent_at"])
@@ -90,6 +91,7 @@ def test_model_oct4_explicit_reading_correction_can_replace_manual_boundaries(ag
     entry = agent.repository.services[case["date"]]
     entry.sermon_title = case["expected"]["sermonTitle"]
     entry.response_hymn = case["expected"]["responseHymn"]
+    entry.response_hymn_youtube_url = case["expected"]["responseHymnYoutubeUrl"]
     entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
     before = entry.model_dump(by_alias=True)
     text = "更正10/4已存的讀經分段，請把原來5:21-25、5:26-29改成以下消息的四段，以這次更正為準：\n" + case["text"]
@@ -374,3 +376,29 @@ def test_model_two_missing_songs_finish_within_eight_decisions(agent, monkeypatc
     entry = agent.repository.services['2026-11-08']
     assert (entry.hymn, entry.response_hymn) == (titles[17], titles[18])
     assert len([song for song in agent.repository.songs if song.id.startswith('import-')]) == 2
+
+
+def test_model_oct4_video_does_not_require_catalog_or_lyrics(agent):
+    case=oct4_case(agent)
+    agent.repository.songs=[song for song in agent.repository.songs if song.title!='合神心意']
+    before_songs=[song.model_dump() for song in agent.repository.songs]
+    event(agent,case['text'],sender='unverified-author',at=case['sent_at'])
+    saved=agent.repository.services[case['date']].model_dump(by_alias=True)
+    for field,value in case['expected'].items():
+        assert saved[field]==value
+    assert [song.model_dump() for song in agent.repository.songs]==before_songs
+    assert not agent.bridge.sent
+    with agent.store.db() as db:
+        assert not db.execute("SELECT 1 FROM clarifications WHERE status='waiting'").fetchone()
+
+
+def test_model_adds_only_response_video_to_existing_form(agent):
+    case=oct4_case(agent)
+    agent.repository.services[case['date']].response_hymn='合神心意'
+    before=agent.repository.services[case['date']].model_dump(by_alias=True)
+    url='https://youtu.be/5IIV-vdSq7c?t=30'
+    event(agent,'10/4 回應詩歌影片連結：'+url,sender='unverified-author',at=case['sent_at'])
+    after=agent.repository.services[case['date']].model_dump(by_alias=True)
+    assert after['responseHymnYoutubeUrl']==url
+    assert {key for key in before if before[key]!=after[key]}=={'responseHymnYoutubeUrl'}
+    assert not agent.bridge.sent

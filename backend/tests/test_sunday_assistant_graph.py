@@ -621,3 +621,40 @@ def test_graph_can_finish_on_last_allowed_decision(agent):
                           for _ in range(MAX_MODEL_DECISIONS - 1)], ("ignore_message", {}))
     assert run_agent(agent, msg, model=model)["status"] == "irrelevant"
     assert len(model.seen) == MAX_MODEL_DECISIONS
+
+
+def test_graph_saves_video_song_without_catalog_and_preserves_other_fields(agent):
+    url='https://youtu.be/5IIV-vdSq7c?t=30'
+    msg=incoming(agent,text='11/8 回應詩歌：合神心意 '+url)
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',hymn='奇異恩典',pianist='李芳')
+    request={'service_changes':[service(field='responseHymn',value='合神心意',evidence=msg.text),
+                                 service(field='responseHymnYoutubeUrl',value=url,evidence=msg.text)]}
+    model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request}))
+    assert run_agent(agent,msg,model=model)['status']=='done'
+    saved=agent.repository.services['2026-11-08']
+    assert saved.response_hymn_youtube_url==url
+    assert saved.response_hymn=='合神心意'
+    assert saved.hymn=='奇異恩典' and saved.pianist=='李芳'
+    assert not agent.bridge.sent
+
+
+def test_graph_replacing_song_clears_previous_video_in_same_patch(agent):
+    msg=incoming(agent,text='11/8 第二首歌改成奇異恩典，改用歌詞')
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',
+        responseHymn='合神心意',responseHymnYoutubeUrl='https://youtu.be/5IIV-vdSq7c',pianist='李芳')
+    request={'service_changes':[service(field='responseHymn',value='奇異恩典',evidence=msg.text)]}
+    model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request,'replace_existing':True}))
+    assert run_agent(agent,msg,model=model)['status']=='done'
+    saved=agent.repository.services['2026-11-08']
+    assert saved.response_hymn=='奇異恩典' and saved.response_hymn_youtube_url is None
+    assert saved.pianist=='李芳'
+
+
+def test_graph_rejects_video_link_not_in_source(agent):
+    msg=incoming(agent,text='11/8 回應詩歌：奇異恩典')
+    request={'service_changes':[service(field='responseHymn',value='奇異恩典',evidence=msg.text),
+        service(field='responseHymnYoutubeUrl',value='https://youtu.be/5IIV-vdSq7c',evidence=msg.text)]}
+    model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request}),
+        ('ask_group',{'request':{'questions':['請提供影片連結']}}))
+    assert run_agent(agent,msg,model=model)['status']=='waiting_reply'
+    assert not agent.repository.services
