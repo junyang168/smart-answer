@@ -15,6 +15,21 @@ from backend.tests.test_sunday_assistant import agent
 pytestmark = pytest.mark.skipif(os.getenv("RUN_SUNDAY_AGENT_MODEL_TESTS") != "1", reason="real model evaluation is opt-in")
 
 
+def test_model_verified_lid_alias_resolves_couple_without_question(agent):
+    from datetime import datetime, timezone
+    from backend.sunday_assistant.member_identity import Member, Roster, save_roster
+    settings = agent.store.settings()
+    settings.sender_workers = {"1555@c.us": ["李芳"]}
+    settings.group_questions_enabled = False
+    agent.store.put("settings", settings.model_dump())
+    save_roster(agent.store, Roster(groups=sorted(settings.source_group_ids), checked_at=datetime.now(timezone.utc),
+                members=[Member(id="999@lid", ids=["999@lid", "1555@c.us"], groups=["111@g.us"], push_name="王明")]))
+    event(agent, "我俩12/7-12/22不在这里，外出。", group="111@g.us", sender="999:2@lid")
+    assert agent.sender_profile("999@lid")["self_worker"] == "李芳"
+    assert all(not agent.repository.workers[name].is_available_on("2026-12-22") for name in ["王明", "李芳"])
+    assert len(agent.bridge.sent) == 1 and agent.bridge.sent[0][2].startswith("【請假登記回覆】")
+
+
 def event(agent, text, *, group="222@g.us", sender="sender", at="2026-11-02T16:00:00+00:00"):
     message_id = f"eval-{len(agent.store.messages()) + 1}"
     msg = ChatMessage(message_id=message_id, group_id=group, sender_id=sender, sent_at=at, text=text)

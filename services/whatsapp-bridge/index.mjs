@@ -4,6 +4,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
 import { senderId } from "./sender.mjs";
+import { readMembers } from "./members.mjs";
 import { registeredMessage, allowedBySettings } from "./outgoing.mjs";
 import { messageVersion } from "./message-version.mjs";
 
@@ -21,6 +22,13 @@ const journal = new Durable(join(stateDir, "journal.json"));
 let client, connecting = false, qr = null, state = "disconnected", lastError = null;
 let groups = [], config = { enabled: false, groups: [] }, synced = false, lastSyncAt = null;
 let lastHistorySync = 0;
+let roster = null, rosterAt = 0;
+async function refreshRoster() {
+  roster = await readMembers(client, config.groups);
+  await backendCall("identity-roster", roster);
+  rosterAt = Date.now();
+  return roster;
+}
 
 async function backendCall(path, data) {
   const response = await fetch(backend + "/admin/sunday-assistant/" + path, {
@@ -87,9 +95,10 @@ async function poll() {
   try {
     const nextConfig = await backendCall("bridge-config");
     if (lastError === "fetch failed" || lastError?.startsWith("Backend bridge-config:")) lastError = null;
-    if (JSON.stringify(nextConfig) !== JSON.stringify(config)) { synced = false; lastHistorySync = 0; }
+    if (JSON.stringify(nextConfig) !== JSON.stringify(config)) { synced = false; lastHistorySync = 0; rosterAt = 0; }
     config = nextConfig;
     if (state === "ready" && config.enabled) {
+      if (Date.now() - rosterAt > 600000) await refreshRoster();
       if (Date.now() - lastHistorySync > 60000) {
         synced = false;
         const chats = await client.getChats();
@@ -151,6 +160,11 @@ const server = http.createServer(async (req, res) => {
       if (state !== "ready") return reply(409, { error: "WhatsApp not ready" });
       groups = (await client.getChats()).filter(c => c.isGroup).map(c => ({ id: c.id._serialized, name: c.name }));
       return reply(200, { groups });
+    }
+    if (req.method === "GET" && req.url === "/members") {
+      if (state !== "ready") return reply(409, { error: "WhatsApp not ready" });
+      config = await backendCall("bridge-config");
+      return reply(200, await refreshRoster());
     }
     if (req.method === "POST" && req.url === "/connect") { void connect(); return reply(202, { state: "connecting" }); }
     if (req.method === "GET" && req.url.startsWith("/outbox/")) {

@@ -452,7 +452,7 @@ def test_legacy_family_mapping_does_not_make_both_people_the_sender(agent):
     settings = agent.store.settings()
     settings.sender_workers['sender'] = ['王明', '李芳']
     agent.store.put('settings', settings.model_dump())
-    assert agent.sender_profile('sender') == {'self_worker': None, 'household_workers': ['王明', '李芳']}
+    assert agent.sender_profile('sender') == {'self_worker': None, 'household_workers': [], 'identity_conflict': 'multiple_workers'}
     from backend.sunday_assistant.models import Extraction
     msg = incoming(agent, '我12月5日至17日不在。', group='111@g.us', id='ambiguous-legacy-self')
     plan = agent.build_plan(msg, Extraction(absence_changes=[{'worker': '李芳', 'start': '2026-12-05', 'end': '2026-12-17', 'evidence': msg.text}]))

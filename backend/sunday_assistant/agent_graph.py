@@ -117,7 +117,10 @@ def make_tools(agent, msg):
             raise ValueError("身分依據需來自同群、同一發送人的現時自我介紹，不能用他人或歷史同步消息")
         if not agent.mentions_worker(worker_name, [source["text"]]):
             raise ValueError("原消息未明確提供這個姓名或已確認的別名")
-        current = agent.sender_profile(msg.sender_id)["self_worker"]
+        profile = agent.sender_profile(msg.sender_id)
+        if profile.get("identity_conflict"):
+            return {"accepted": False, "reason": "identity_conflict", "instruction": "WhatsApp帳號對應有衝突，需操作者核對，不自動改綁。"}
+        current = profile["self_worker"]
         if current and current != worker_name:
             return {"accepted": False, "reason": "identity_conflict", "existing_worker": current,
                     "instruction": "此帳號已有不同本人對應，請核對是否共用帳號，不自動改綁。"}
