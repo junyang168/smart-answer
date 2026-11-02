@@ -1911,15 +1911,20 @@ def generate_sunday_service_ppt(date: str) -> Path:
     if not _sermon_speaker_has_pastor_title(service.sermon_speaker):
         hidden_slide_numbers.append(21)
 
-    generate_presentation_from_template(
-        PPT_TEMPLATE_FILE,
-        replacements,
-        output_path,
-        section_configs=section_configs,
-        scripture_summary=summary_data,
-        holy_communion=holy_comm_config,
-        hidden_slide_numbers=hidden_slide_numbers,
-    )
+    from backend.ppt_text_layout import PptTextOverflowError
+    try:
+        generate_presentation_from_template(
+            PPT_TEMPLATE_FILE,
+            replacements,
+            output_path,
+            section_configs=section_configs,
+            scripture_summary=summary_data,
+            holy_communion=holy_comm_config,
+            hidden_slide_numbers=hidden_slide_numbers,
+        )
+    except PptTextOverflowError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return output_path
 
 
