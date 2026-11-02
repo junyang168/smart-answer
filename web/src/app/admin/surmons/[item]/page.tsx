@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { getServerSession } from "next-auth";
+import { hasTranscriptBetaAccess } from "@/app/utils/roles";
 import { authConfig } from "@/app/utils/auth";
 import { SurmonEditor } from "@/app/components/admin/surmons/SurmonEditor";
 
@@ -33,7 +34,7 @@ export default async function SurmonEditorPage(props: PageProps) {
   const session = await getServerSession(authConfig);
   const beta =
     process.env.NODE_ENV === "development" ||
-    session?.user?.email === "junyang168@gmail.com";
+    hasTranscriptBetaAccess(session?.user?.email, session?.user?.role);
   const legacy = <SurmonEditor item={item} viewChanges={viewChanges} />;
 
   return (

@@ -1,3 +1,4 @@
+import { hasEditorAccess } from "@/app/utils/roles";
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
@@ -7,8 +8,9 @@ export default withAuth(
     const pathname = req.nextUrl.pathname;
 
     const isApiRequest = pathname.startsWith("/api/");
-    const isNotesToManuscriptResources =
-      pathname.startsWith("/resources/notes_to_manuscript_series");
+    const isNotesToManuscriptResources = pathname.startsWith(
+      "/resources/notes_to_manuscript_series",
+    );
 
     if (isNotesToManuscriptResources) {
       if (!token) {
@@ -19,7 +21,7 @@ export default withAuth(
       return NextResponse.next();
     }
 
-    if (token?.role === "editor" || token?.role === "admin") {
+    if (hasEditorAccess(token?.role)) {
       return NextResponse.next();
     }
 

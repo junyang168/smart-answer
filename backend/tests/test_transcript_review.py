@@ -756,7 +756,12 @@ def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_pat
     store.import_candidate(new, setup[2], expected_script_sha256=None)
     before = {str(p.relative_to(target)): file_hash(p) for p in target.rglob('*')
               if p.is_file() and p.name != 'workflow.lock'}
+    # New role assignments are authoritative in production, not the old beta snapshot.
+    config = read(production / 'config/config.json')
+    config['user_roles'].append({'user': 'b', 'role': 'beta_tester'})
+    atomic(production / 'config/config.json', config)
     module.activate(source_root, production, new, 'a', target, append=True)
+    assert ReviewStore(target, permission_root=production).permissions('b') == store.permissions('a')
     for path, sha in before.items():
         if path != 'config/sermon.json':
             assert file_hash(target / path) == sha
@@ -796,3 +801,61 @@ def test_document_body_version_confirms_paragraph_and_stale_versions_still_fail(
     assert result.status_code == 200
     assert store.document('a', '講道 test')['context']['reviews']['p:1']['decision'] == 'confirmed'
     assert patch({**packet, 'operation_id': uuid.uuid4().hex}).status_code == 412
+
+
+def test_beta_role_uses_current_master_permissions_and_preserves_single_editor(setup, monkeypatch, tmp_path):
+    from backend.api.sc_api.access_control import AccessControl
+    from urllib.parse import quote
+    store, root, _ = setup
+    adopted(setup)
+    item = "講道 test"
+    master = tmp_path / "master"
+    config = read(root / "config/config.json")
+    for row in config["user_roles"]:
+        if row["user"] == "b":
+            row["role"] = "beta_tester"
+    atomic(master / "config/config.json", config)
+    # Private beta snapshots must not grant/revoke current membership.
+    private = read(root / "config/config.json")
+    private["users"] = [u for u in private["users"] if u["id"] != "b"]
+    atomic(root / "config/config.json", private)
+    beta = ReviewStore(root, permission_root=master)
+    assert beta.permissions("b") == beta.permissions("a")
+    assert "assign_any_item" not in beta.permissions("b")
+    assert set(AccessControl(str(master)).get_user_permissions("b")) == beta.permissions("a")
+    monkeypatch.setenv("TRANSCRIPT_REVIEW_ACTION_SECRET", "test-secret")
+    app = FastAPI()
+    app.include_router(create_review_router(root, role_root=master), prefix="/sc_api")
+    client = TestClient(app)
+    encoded = quote(item, safe="")
+    path = "/sc_api/review_document/" + encoded
+    assert client.get(path, headers=signed("GET", path, actor="b")).status_code == 200
+    for actor in ["a", "admin", "reader", "unknown"]:
+        assert client.get(path, headers=signed("GET", path, actor=actor)).status_code == 403
+    assert not beta.document("b", item)["can_edit"]
+    with pytest.raises(ReviewError):
+        beta.claim("b", item, op(beta.document("b", item), action="takeover"))
+    beta.claim("a", item, op(beta.document("a", item), action="unclaim"))
+    beta.claim("b", item, op(beta.document("b", item), action="claim"))
+    doc = beta.document("b", item)
+    assert doc["can_edit"]
+    assert doc["header"]["assigned_to_name"] == "b"
+    body = json.dumps(op(doc, operations=[{"kind": "text", "id": "1", "text": "beta 校對"}])).encode()
+    assert client.patch(path, content=body, headers={**signed("PATCH", path, body, actor="b"), "if-match": doc["version"], "content-type": "application/json"}).status_code == 200
+    for row in config["user_roles"]:
+        if row["user"] == "b":
+            row["role"] = "editor"
+    atomic(master / "config/config.json", config)
+    for suffix in ["", "/history", "/media", "/assets/a1"]:
+        target = path + suffix
+        assert client.get(target, headers=signed("GET", target, actor="b")).status_code == 403
+    for target in ["/sc_api/review_items", "/sc_api/review_mode/" + encoded, "/sc_api/review_public/" + encoded]:
+        assert client.get(target, headers=signed("GET", target, actor="b")).status_code == 403
+    assert beta.document("b", item)["script"][0]["text"] == "beta 校對"
+
+
+def test_deleted_user_cannot_retain_beta_role():
+    from backend.api.sc_api.roles import user_roles, role_permissions
+    config = {"users": [], "user_roles": [{"user": "gone", "role": "beta_tester"}], "role_permissions": [{"role": "editor", "permission": "read_any_item"}]}
+    assert user_roles(config, "gone") == set()
+    assert role_permissions(config, "gone") == set()

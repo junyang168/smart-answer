@@ -1,4 +1,5 @@
 
+import { hasEditorAccess } from "@/app/utils/roles";
 // components/series/SeriesPlayerView.tsx
 "use client";
 
@@ -153,7 +154,7 @@ export const SeriesPlayerView = () => {
         <div className="flex-1">
           <div className="flex items-center gap-4">
             <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
-            {session?.user?.role === 'editor' && (
+            {hasEditorAccess(session?.user?.role) && (
               <button
                 onClick={handleCopyMarkdown}
                 disabled={isCopying}

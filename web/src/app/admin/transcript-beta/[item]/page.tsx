@@ -11,7 +11,7 @@ export default async function BetaEditor({
   return (
     <>
       <div className="mb-3 flex items-center justify-between text-sm text-slate-600">
-        <span>圖文審核 Beta · 只對你開放</span>
+        <span>圖文審核 Beta · 測試同工專用</span>
         <Link
           className="text-blue-700 underline"
           href={`/admin/transcript-beta/${encodeURIComponent(item)}/published`}

@@ -1,4 +1,5 @@
 "use client";
+import { hasEditorAccess } from "@/app/utils/roles";
 import { useState } from 'react';
 import React, { FC } from "react";
 import { UserProfile, UserProfile_with_signin } from "./user_profile";  
@@ -20,7 +21,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { data: session } = useSession();
   const userRole = session?.user?.role;
-  const canAccessAdmin = userRole === "editor" || userRole === "admin";
+  const canAccessAdmin = hasEditorAccess(userRole);
 
   return (
     <header id="global-site-header" className="bg-white/95 backdrop-blur-sm sticky top-0 z-50 shadow-md">

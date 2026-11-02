@@ -1,15 +1,15 @@
 import { NextAuthOptions, getServerSession } from "next-auth";
 
+import { normalizeRole } from "./roles";
 import GoogleProvider from "next-auth/providers/google";
-import { getUserByEmail } from "./user-db"
-
+import { getUserByEmail } from "./user-db";
 
 export const authConfig: NextAuthOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID as string,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
-    })
+    }),
   ],
 
   // ✅ 添加 callbacks 配置
@@ -23,26 +23,9 @@ export const authConfig: NextAuthOptions = {
     async jwt({ token, user, account }) {
       // 这个回调在 JWT 被创建或更新时触发（例如，在登录时）
 
-      // 1. 登录时 (user 对象存在)
-      if (user && account) {
-        // 2. 根据登录用户的 email，从我们的数据库中查找附加信息
-        const internalUser = await getUserByEmail(user.email);
-
-        if (internalUser) {
-          // 3. 将我们的自定义数据（角色和ID）附加到 JWT token 上
-          const normalizedRole = internalUser.role?.toLowerCase();
-          if (normalizedRole === "editor") {
-            token.role = "editor";
-          } else if (normalizedRole === "admin") {
-            token.role = "admin";
-          } else if (normalizedRole === "member") {
-            token.role = "member";
-          } else {
-            token.role = undefined;
-          }
-          token.internalId = internalUser.internalId;
-        }
-      }
+      const internalUser = await getUserByEmail(user?.email || token.email);
+      token.role = normalizeRole(internalUser?.role);
+      token.internalId = internalUser?.internalId;
 
       // 4. 返回更新后的 token
       return token;
@@ -57,21 +40,19 @@ export const authConfig: NextAuthOptions = {
       // 这个回调在 session 被访问时触发（例如，客户端调用 useSession()）
 
       // DEV ENVIRONMENT: Hardcode role to 'editor' when Google Auth is not working
-      if (process.env.NODE_ENV === 'development') {
+      if (process.env.NODE_ENV === "development") {
         if (session.user) {
-          session.user.role = 'editor';
-          session.user.internalId = 'dev-user';
+          session.user.role = "editor";
+          session.user.internalId = "dev-user";
         }
         return session;
       }
 
-      // PRODUCTION: Use token data from JWT callback
-      // 1. 我们将 JWT token 中的自定义数据，同步到客户端可以访问的 session.user 对象上
-      if (token.role && session.user) {
-        session.user.role = token.role;
-      }
-      if (token.internalId && session.user) {
-        session.user.internalId = token.internalId;
+      // Re-read current roles; a signed-in tester can be revoked without token expiry.
+      if (session.user) {
+        const user = await getUserByEmail(session.user.email);
+        session.user.role = normalizeRole(user?.role);
+        session.user.internalId = user?.internalId;
       }
 
       // 2. 返回更新后的 session 对象
@@ -98,13 +79,13 @@ export async function getSessionWithDevFallback() {
   }
 
   // In development, return a mock editor session
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === "development") {
     return {
       user: {
-        name: 'Dev User',
-        email: 'dev@example.com',
-        role: 'editor' as const,
-        internalId: 'dev-user',
+        name: "Dev User",
+        email: "dev@example.com",
+        role: "editor" as const,
+        internalId: "dev-user",
       },
       expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
     };
