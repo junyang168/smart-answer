@@ -20,18 +20,19 @@ type CachedUser = {
   internalId: string;
 };
 
-let cachedUsers: CachedUser[] | null = null;
+export const getUserConfigPath = () =>
+  path.join(
+    process.env.DATA_BASE_DIR || path.join(process.cwd(), "data"),
+    "config",
+    "config.json",
+  );
 
 export function clearUserCache() {
-  cachedUsers = null;
+  // Roles are read on every request so revocation does not wait for a restart.
 }
 
 async function loadUsers(): Promise<CachedUser[]> {
-  if (cachedUsers) {
-    return cachedUsers;
-  }
-
-  const configPath = path.join(process.cwd(),  "data", "config", "config.json");
+  const configPath = getUserConfigPath();
   const fileContent = await fs.readFile(configPath, "utf-8");
   const config = JSON.parse(fileContent) as {
     users?: ConfigUser[];
@@ -43,7 +44,7 @@ async function loadUsers(): Promise<CachedUser[]> {
     userRoles.set(entry.user.toLowerCase(), entry.role);
   });
 
-  cachedUsers = (config.users ?? []).map((user) => {
+  const users = (config.users ?? []).map((user) => {
     const email = user.id.toLowerCase();
     return {
       email,
@@ -53,7 +54,7 @@ async function loadUsers(): Promise<CachedUser[]> {
     };
   });
 
-  return cachedUsers;
+  return users;
 }
 
 export async function getUserByEmail(email: string | null | undefined) {

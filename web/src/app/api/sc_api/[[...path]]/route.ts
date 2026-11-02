@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, createHmac } from "node:crypto";
 import { getServerSession } from "next-auth";
+import { hasTranscriptBetaAccess } from "@/app/utils/roles";
 import { authConfig } from "@/app/utils/auth";
 
 const RAW_BASE =
@@ -94,7 +95,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (
     guarded &&
     process.env.NODE_ENV === "production" &&
-    actor !== "junyang168@gmail.com"
+    !hasTranscriptBetaAccess(actor, session?.user?.role)
   )
     return NextResponse.json(
       { detail: "圖文審核 beta 目前只對指定帳號開放" },

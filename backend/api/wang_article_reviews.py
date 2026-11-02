@@ -1914,7 +1914,7 @@ def _verified_publication_actor(
     }
     if not secret or not owners:
         raise HTTPException(status_code=503, detail="发布负责人验证尚未配置。")
-    if role not in {"admin", "editor"} or actor_id not in owners:
+    if role not in {"admin", "editor", "beta_tester"} or actor_id not in owners:
         raise HTTPException(status_code=403, detail="只有指定负责人可以发布或撤下文章。")
     try:
         age = abs(time.time() - int(timestamp))

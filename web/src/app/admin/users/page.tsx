@@ -1,5 +1,6 @@
 "use client";
 
+import { roleLabel } from "@/app/utils/roles";
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, User, Shield, Edit2, Trash2, Plus, X, ServerCrash } from 'lucide-react';
@@ -196,12 +197,12 @@ export default function UsersManagementPage() {
                                             <td className="px-6 py-4">
                                                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium 
                                                     ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                                                      user.role === 'editor' ? 'bg-green-100 text-green-700' :
+                                                      (user.role === 'editor' || user.role === 'beta_tester') ? 'bg-green-100 text-green-700' :
                                                       user.role === 'reviewer' ? 'bg-orange-100 text-orange-700' :
                                                       'bg-gray-100 text-gray-700'}`}
                                                 >
                                                     <Shield className="h-3 w-3" />
-                                                    {user.role}
+                                                    {roleLabel(user.role)}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 text-right">
@@ -287,7 +288,7 @@ export default function UsersManagementPage() {
                                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                                 >
                                     {availableRoles.map(r => (
-                                        <option key={r} value={r}>{r}</option>
+                                        <option key={r} value={r}>{roleLabel(r)}</option>
                                     ))}
                                 </select>
                             </div>

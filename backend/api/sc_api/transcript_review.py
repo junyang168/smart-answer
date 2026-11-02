@@ -56,15 +56,19 @@ def atomic(path: Path, value):
             os.unlink(name)
 
 
+from .roles import role_permissions
+
 class ReviewError(Exception):
     def __init__(self, status, message):
         self.status, self.message = status, message
         super().__init__(message)
 
 
+
 class ReviewStore:
-    def __init__(self, root: Path, *, public_api_base="/api/sc_api/review_public"):
+    def __init__(self, root: Path, *, public_api_base="/api/sc_api/review_public", permission_root: Path | None = None):
         self.root = Path(root)
+        self.permission_root = Path(permission_root) if permission_root is not None else self.root
         self.public_api_base = public_api_base
 
     def folder(self, item):
@@ -180,17 +184,8 @@ class ReviewStore:
                 atomic(target, entry["value"])
 
     def permissions(self, actor):
-        config = read(self.root / "config/config.json", {})
-        if actor not in {u["id"] for u in config.get("users", [])}:
-            return set()
-        roles = {
-            r["role"] for r in config.get("user_roles", []) if r["user"] == actor
-        } or {"reader"}
-        return {
-            r["permission"]
-            for r in config.get("role_permissions", [])
-            if r["role"] in roles
-        }
+        config = read(self.permission_root / "config/config.json", {})
+        return role_permissions(config, actor)
 
     def meta(self, item):
         rows = read(self.root / "config/sermon.json", [])
@@ -546,7 +541,7 @@ class ReviewStore:
                 else:
                     raise ReviewError(400, "無效認領操作")
                 meta["assignment_epoch"] = uuid.uuid4().hex
-                config = read(self.root / "config/config.json", {})
+                config = read(self.permission_root / "config/config.json", {})
                 meta["assigned_to_name"] = next(
                     (
                         u.get("name", actor)
@@ -891,7 +886,7 @@ class ReviewStore:
                 else:
                     raise ReviewError(400, "無效候選操作")
                 meta["assignment_epoch"] = uuid.uuid4().hex
-                config = read(self.root / "config/config.json", {})
+                config = read(self.permission_root / "config/config.json", {})
                 meta["assigned_to_name"] = next(
                     (
                         u.get("name", actor)

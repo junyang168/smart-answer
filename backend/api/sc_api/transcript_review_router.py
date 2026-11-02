@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from backend.pipeline.source_projection import live_script
 from .transcript_review import ReviewStore, ReviewError
+from .roles import current_beta_access
 
 
 def authenticated_actor(request: Request, body: bytes = b""):
@@ -43,7 +44,7 @@ def authenticated_actor(request: Request, body: bytes = b""):
     return actor
 
 
-def create_review_router(root: Path, *, beta_owner: str | None = None, api_base="/api/sc_api"):
+def create_review_router(root: Path, *, beta_owner: str | None = None, role_root: Path | None = None, api_base="/api/sc_api"):
     class PrivateReviewRoute(APIRoute):
         def get_route_handler(self):
             handler = super().get_route_handler()
@@ -57,14 +58,20 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, api_base=
 
     async def beta_access(request: Request):
         actor = authenticated_actor(request, await request.body())
-        if actor != beta_owner:
-            raise HTTPException(403, "圖文審核 beta 目前只對指定帳號開放")
+        allowed = actor == beta_owner
+        if role_root is not None:
+            try:
+                allowed = current_beta_access(role_root, actor) or allowed
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HTTPException(503, "無法讀取 beta 角色設定")
+        if not allowed:
+            raise HTTPException(403, "需要 beta tester 角色")
 
     router = APIRouter(
-        dependencies=[Depends(beta_access)] if beta_owner else [],
-        route_class=PrivateReviewRoute if beta_owner else APIRoute,
+        dependencies=[Depends(beta_access)] if (beta_owner or role_root is not None) else [],
+        route_class=PrivateReviewRoute if (beta_owner or role_root is not None) else APIRoute,
     )
-    store = ReviewStore(root, public_api_base=api_base + "/review_public")
+    store = ReviewStore(root, public_api_base=api_base + "/review_public", permission_root=role_root)
 
     async def payload_from(request):
         try:
@@ -96,6 +103,17 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, api_base=
             return fn()
         except ReviewError as error:
             raise HTTPException(error.status, error.message) from error
+
+    @router.get("/review_items")
+    async def review_items(request: Request):
+        actor = authenticated_actor(request, await request.body())
+        rows = json.loads((store.root / "config/sermon.json").read_text())
+        items = []
+        for row in rows:
+            if store.enabled(row["item"]):
+                store.require(actor, row["item"])
+                items.append({key: row.get(key) for key in ("item", "title", "assigned_to_name", "status")})
+        return items
 
     @router.get("/review_mode/{item}")
     def mode(item: str):

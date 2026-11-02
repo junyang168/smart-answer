@@ -1,4 +1,5 @@
 // components/sermons/SermonDetailView.tsx
+import { hasEditorAccess } from "@/app/utils/roles";
 "use client";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect, useCallback } from 'react';
@@ -44,7 +45,7 @@ export const SermonDetailView = () => {
   const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
   let status = sessionStatus;
   const userRole = session?.user?.role;
-  let isEditor = userRole === "editor" || userRole === "admin";
+  let isEditor = hasEditorAccess(userRole);
 
   if (process.env.NODE_ENV !== 'production') {
     status = 'authenticated';

@@ -114,14 +114,20 @@ backend endpoint directly.
 
 ### Transcript proofreading beta
 
-The new transcript review UI and all `review_*` API routes are currently limited
-to the signed-in Google account `junyang168@gmail.com`. The Next.js page and
-proxy check that account; the production backend independently checks the signed
-actor, including mode probes, images, media and published review snapshots.
-Other accounts keep the existing editor. The isolated local preview router does
-not use the production owner restriction.
+The transcript beta is available to registered users assigned `beta_tester` in
+`DATA_BASE_DIR/config/config.json`, plus the original owner `junyang168@gmail.com`.
+Use `/admin/users` to assign the displayed **beta tester** role. It has the same
+permissions as editor, including the single-claim editing rule, and no admin
+takeover permission. The owner and admins manage users; testers cannot grant roles.
+The Next.js page/proxy and signed backend routes independently check access.
+Backend checks use the current central config on every request, including media,
+assets, history, mode probes and private publication. The beta data directory's
+old config snapshot is not authorization authority. Role removal takes effect on
+the next request; existing manuscript/history/claim data is retained. Newly
+promoted accounts may need to sign in again to refresh middleware's JWT role.
+The beta list is `/admin/transcript-beta`. Ordinary editors retain the legacy entry.
 
-The activated AI draft has a dedicated owner-only editor at
+The activated AI draft has a dedicated beta editor at
 `/admin/transcript-beta/S201011` and API namespace `/api/sc_api/beta/`.
 Its persistent data is selected by backend-only `TRANSCRIPT_REVIEW_BETA_DATA_DIR`,
 outside the public web/data tree (production:
@@ -129,7 +135,7 @@ outside the public web/data tree (production:
 manuscripts, claims and publication files remain outside that root. Beta
 publication stays private at `/admin/transcript-beta/S201011/published`.
 The beta API is not mounted without the private data-root setting.
-The editor, API and publication reader all enforce the same owner restriction,
+The editor, API and publication reader all enforce the same beta-role restriction,
 and beta responses are private/no-store. The original port-8000 service cannot
 write these beta files through its legacy item routes.
 
@@ -146,6 +152,8 @@ adds an absent item; it refuses existing manuscripts or review folders. Existing
 beta claims and revisions stay intact. Additions are serialized, existing item
 workflow locks protect the shared catalog update, and the catalog row is installed
 last. Each added item keeps its activation manifest inside its review folder.
+Activation compares staged roles against the current production config rather
+than a historical beta snapshot; it never replaces existing beta manuscripts or claims.
 
 The full transcription runner also accepts audio-only sources with `--video`
 (the CLI argument name is retained for compatibility). It records the original

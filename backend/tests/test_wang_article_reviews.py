@@ -1093,6 +1093,14 @@ def test_publication_actor_assertion_is_signed_fresh_and_owner_scoped(monkeypatc
     )
     assert actor == module.PublicationActor(actor_id="owner-1", role="editor")
 
+    beta_signature = module._publication_signature(
+        action="publish", review_id="review-v1", actor_id="owner-1",
+        role="beta_tester", timestamp=timestamp, secret="test-secret",
+    )
+    assert module._verified_publication_actor(
+        "review-v1", "publish", "owner-1", "beta_tester", timestamp, beta_signature
+    ) == module.PublicationActor(actor_id="owner-1", role="beta_tester")
+
     with _pytest.raises(HTTPException) as wrong_action:
         module._verified_publication_actor(
             "review-v1", "unpublish", "owner-1", "editor", timestamp, signature

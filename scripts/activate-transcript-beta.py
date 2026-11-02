@@ -74,7 +74,7 @@ def activate(source_root: Path, production_root: Path, item: str, owner: str, ta
         if target.exists():
             if not append:
                 raise ValueError("Beta data appeared during preparation; refusing to overwrite it")
-            append_staged(staging, target, item)
+            append_staged(staging, target, item, permission_root=production_root)
         else:
             os.rename(staging, target)
         return {"root": str(target), "item": item, "paragraphs": len(document["script"]), "groups": len(document["context"]["groups"]), "owner": owner}
@@ -83,7 +83,7 @@ def activate(source_root: Path, production_root: Path, item: str, owner: str, ta
             shutil.rmtree(staging)
 
 
-def append_staged(staging: Path, target: Path, item: str):
+def append_staged(staging: Path, target: Path, item: str, *, permission_root: Path | None = None):
     """Add a new item, retaining existing manuscripts, claims and history.
 
     Hold every current item's workflow lock while updating the shared catalog,
@@ -101,7 +101,7 @@ def append_staged(staging: Path, target: Path, item: str):
             catalog = read(target / 'config/sermon.json', [])
             if any(m['item'] == item for m in catalog) or store.folder(item).exists():
                 raise ValueError('Beta item already exists; refusing to overwrite it')
-            if read(staging / 'config/config.json') != read(target / 'config/config.json'):
+            if read(staging / 'config/config.json') != read((permission_root or target) / 'config/config.json'):
                 raise ValueError('Beta permissions differ; refusing implicit permission changes')
             files = [(staging / folder / (item + '.json'), target / folder / (item + '.json'))
                      for folder in ('script', 'script_patched', 'script_review', 'script_published')]
