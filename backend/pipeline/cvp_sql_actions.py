@@ -595,6 +595,13 @@ def execute_claim_management(store, request, *, root, ports):
                         unit_goal = cm.unit_goal(parent['original_goal'], unit_request)
                         roles = cm.required_roles(request, ordinal, policy)
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
+                        # A withdrawn draft has no current SQL object, but its
+                        # blocking finding still belongs to this sole unit.
+                        # Forward it for adjudication without adding objects,
+                        # write grants or a new full-review root.
+                        whole_unit_findings = (set(parent['findings']) if request.operation == 'Update'
+                            and len(parent['original_goal']['units']) == 1
+                            and not parent.get('continuation', {}).get('read_only_refresh') else set())
                         materials = {'schema_version': cm.VERSION, 'round_id': rid, 'unit_id': unit_id,
                             'packet_profile':'claim_single_record_table_v2',
                             'round_number': ordinal, 'request': request.model_dump(mode='json'),
@@ -607,7 +614,7 @@ def execute_claim_management(store, request, *, root, ports):
                                 'review_provenance': sorted(cm.source.PROVENANCE), 'reader_visible_text_changes': False},
                             'created_keys': parent['created_keys'], 'replacements': parent.get('replacements', {}),
                             'unresolved': {k: v for k, v in {**parent.get('context_findings', {}), **parent['findings']}.items()
-                                if v['target_key'] in unit_keys},
+                                if v['target_key'] in unit_keys or k in whole_unit_findings},
                             'previous_candidate': (prior.get('candidate') if prior else
                                 parent.get('continuation', {}).get('previous_candidates', {}).get(unit_id)),
                             'claim_ids': [k.split('/',1)[1] for k in unit_keys if k.startswith('claims/')],

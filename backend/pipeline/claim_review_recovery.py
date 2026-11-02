@@ -539,7 +539,6 @@ CREATION_FIELDS_ERROR = 'created fields exceed creation permission'
 DUPLICATE_CHANGE_ERROR = 'changed record repeated or absent from frozen input'
 # Named diagnostics remain import-compatible; admission reproduces the actual
 # validator rejection rather than treating this set as a retry whitelist.
-RECOVERABLE_OUTPUT_ERRORS = {CITATION_ERROR, CREATION_FIELDS_ERROR, DUPLICATE_CHANGE_ERROR}
 
 
 def returned_proposal_transport(root, raw):
@@ -662,6 +661,9 @@ def rejected_model_input(value, parent, role, *, error):
             cm.validate_candidate(request,materials['before'],candidate,materials['sources'],
                 created_keys=materials['created_keys'],original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
             cm.validate_proposer_resolutions(candidate,materials['unresolved'],materials['sources'],request=request)
+            # Candidate admission also checks the actual direct evidence
+            # closure. Reproduce that same gate, not just field/citation checks.
+            cm.audit_keys(request, materials['before'], candidate)
         else:
             review = expand_review(raw['response'],materials,candidate)
             cm.validate_review(candidate,review,packet['denominator'],packet['required_questions'],
@@ -865,9 +867,12 @@ def resume_rejected_output(store, round_id, *, role, error):
 
 
 def consumed_rejected_citations(previous,key,slot):
+    """Count any authenticated source-bound validation rejection, not just quotes."""
     entries = [e for e in previous['original_goal'].get('unaccepted_model_inputs',[]) if e['round_id']+':'+e['role']==key]
     error=slot.get('rejection',{}).get('detail')
-    if not entries and error not in RECOVERABLE_OUTPUT_ERRORS:return False
+    if not entries and not (isinstance(error, str) and error
+            and slot.get('rejection', {}).get('response_state') == 'returned_rejected'):
+        return False
     if len(entries)>1 or slot['state']!='started':raise ValueError('rejected citation accounting drift')
     root = Path(previous['execution_root'])/slot['round_id']
     materials = body(read(root/'materials.json'))

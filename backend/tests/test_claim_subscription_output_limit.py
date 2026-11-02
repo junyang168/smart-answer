@@ -59,8 +59,12 @@ def truncated(action, monkeypatch):
     return store, old, root, previous, new, next_root, follow, extension
 
 
-def test_truncated_proposal_continues_with_one_pair_and_keeps_spend(truncated):
-    store, old, root, previous, new, next_root, policy, _ = truncated
+@pytest.mark.parametrize('compatibility', [False, True])
+def test_truncated_proposal_continues_with_one_pair_and_keeps_spend(truncated, compatibility):
+    store, old, root, previous, new, next_root, policy, extension = truncated
+    if compatibility:
+        policy.proposal_empty_arrays = 'program_validated_v1'
+        authorize(new, policy, next_root.with_suffix('.policy.json'), extension)
     proof = cm.continuation_budget(previous, new, policy)
     assert proof['spent_generations']['gpt'] == 1
     assert proof['subscription_output_limit_recovery'] and not proof['preserved_unknown_calls']

@@ -81,6 +81,35 @@ def test_legacy_output_schema_is_unchanged(material):
     assert adapter._response_model.model_json_schema() == schema and adapter.generation_config_sha256 == identity
 
 
+def test_missing_fragment_is_a_spent_rejected_reply_not_an_unknown_call(shared):
+    from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    store, request, root, tmp = shared
+    payload = store.get_record_state('evidence_steps', 'E')['payload']
+    store.apply_plan(store.plan_package({'package_id': 'own-fragment',
+        'evidence_steps': [{**payload, 'source_fragment_ids': ['F']}],
+        'source_fragments': [{'fragment_id': 'F', 'source_id': 'S', 'paragraph_key': 'S0001',
+                              'verbatim_excerpt': '甲是假设，不是断言。'}]}))
+    for grant in request.permissions:
+        if grant.key == 'evidence_steps/E': grant.fields.append('source_fragment_ids')
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v5.json').read_text())
+    policy.initial_candidate = 'proposal'; policy.claim_scope_contract = 'claim_direct_neighbours_v1'
+    path = tmp/'fragment-policy.json'; path.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    authorize(request, {'required_maintenance_keys': ['evidence_steps/E']})
+    before = store.get_record_state('evidence_steps', 'E')
+    c = change('evidence_steps/E', {'source_fragment_ids': ['MISSING']})
+    c['citations'][0]['exact_quote'] = '甲是假设，不是断言。'
+    ports = SyntheticPorts(store, tmp, proposal=lambda p: {**empty(), 'changes': [c]})
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    assert result['detail'] == 'direct Claim evidence chain is incomplete: source_fragments/MISSING'
+    parent = store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    key, slot = next((k, v) for k, v in parent['call_reservations'].items() if v['role'] == 'gpt')
+    assert consumed_rejected_citations(parent, key, slot)
+    assert slot['state'] == 'started' and store.get_record_state('evidence_steps', 'E') == before
+    raw = root/slot['round_id']/'gpt.raw.json'; raw.write_text('{}')
+    with pytest.raises(ValueError): consumed_rejected_citations(parent, key, slot)
+
+
 def test_empty_array_wire_hint_is_optional_but_program_still_forbids_items(material):
     legacy, _ = scoped(material)
     old_schema = legacy._response_model.model_json_schema()

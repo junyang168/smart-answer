@@ -196,6 +196,54 @@ def test_recovery_chain_keeps_original_passes_and_refuses_foreign_history(interr
         assert len(evidence.reused_assessments(materials, cm.Candidate.model_validate(old['candidate']))) == 8
 
 
+def test_withdrawn_draft_blocker_reaches_the_same_unit_successor(interrupted_unit):
+    from backend.pipeline.claim_review_recovery import resume_saved_pre_review
+    store, original, successor, output, root, _, _, propose = interrupted_unit
+    pid = 'CMA-'+cm.sha256_json(original.action_id)
+    parent = store.get_cvp_group(pid); rid = next(iter(parent['latest_rounds'].values()))
+    store.pause_claim_management_action(pid, reason='engineering_required',
+        detail='active review unit exceeds ten Claims; split the unit before review')
+    resume_saved_pre_review(store, rid)
+    def complete(packet):
+        result = pass_review(packet)
+        result['prior_findings'] = [{'finding_id': fid, 'disposition': 'resolved',
+            'reason': 'the original draft was withdrawn and its judgment has a valid current carrier',
+            'citations': [f['citations'][0]], 'affected_target_keys': ['claims/C0'],
+            'affected_write_keys': ['evidence_steps/EC0'], 'impact_reason': 'same own evidence'}
+            for fid, f in packet['unresolved'].items()]
+        return result
+    draft = None
+    def reject(packet):
+        nonlocal draft
+        draft = 'claims/'+allocated_ids(packet['original_goal']['claim_creation_allocations'])[0]
+        result = complete(packet)
+        result['findings'] = [{'target_key': draft, 'component': 'carrier', 'category': 'mapping',
+            'reason': 'verify the proposed judgment carrier', 'acceptance_condition': 'a valid current carrier',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}],
+            'affected_target_keys': ['claims/C0'], 'affected_write_keys': [draft], 'impact_reason': 'new own judgment'}]
+        for item in result['binding_assessments']:
+            if item['claim_key'] == draft: item.update(sufficient=False, reason='carrier unresolved')
+        return result
+    result = execute_claim_management(store, original, root=root, ports=SyntheticPorts(store, root, opus=reject))
+    assert result['reason'] == 'budget_exhausted', result
+    parent = store.get_cvp_group(pid)
+    assert any(f['target_key'] == draft for f in parent['findings'].values())
+    assert store.get_record_state(*draft.split('/', 1)) is None
+    path = Path(successor.authorization.path); auth = json.loads(path.read_text())
+    auth['owner_call_extension']['prior_metadata_sha256'] = cm.sha256_json({k:v for k,v in parent.items() if k not in {'run_id','status','error'}})
+    path.write_text(json.dumps(auth)); successor.authorization = cm.source.FileBinding.model_validate(binding(path))
+    def repair(packet):
+        assert draft not in packet['before']
+        assert any(f['target_key'] == draft for f in packet['unresolved'].values())
+        return propose(packet)
+    ports = SyntheticPorts(store, output, proposal=repair, opus=complete)
+    result = execute_claim_management(store, successor, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus']
+    assert store.get_record_state(*draft.split('/', 1)) is None
+    assert all(store.claim_management_qualification('C'+str(n))['ready'] for n in range(9))
+
+
 @pytest.mark.parametrize('change', ['claim', 'evidence', 'fragment', 'source', 'finding', 'raw'])
 def test_initial_reuse_refuses_changed_basis_new_objections_and_tampered_proof(interrupted_unit, change):
     store, _, request, _, root, initial, _, _ = interrupted_unit
