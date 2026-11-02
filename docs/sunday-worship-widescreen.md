@@ -27,6 +27,7 @@ coordinates so its children remain visible. The address is centered. The
 mission statement has no surrounding outline. The Lord's Prayer content uses
 a narrower, horizontally centered block with left-aligned paragraphs, while
 the communion and benediction title pages center their text on both axes. The
+communion title uses 66pt type, matching the Lord's Prayer title page. The
 reading introduction reserves a separate table area; each reader row is 0.7
 inch high and at most 30pt. Four rows fit within the canvas. Scripture and lyric
 body frames have 0.65-inch side margins and use the existing template font.
