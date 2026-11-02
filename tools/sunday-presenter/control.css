@@ -1,0 +1,31 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #e9edf5; background: #121923; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 30px; }
+.eyebrow { color: #9fbbce; font-size: 11px; letter-spacing: .16em; }
+h1 { margin: 12px 0; font-size: 28px; font-weight: 550; }
+p { color: #aab9c9; font-size: 13px; line-height: 1.7; }
+.onair { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px; background: #202c3b; border-radius: 10px; margin-top: 24px; box-shadow: 0 8px 18px #121923; }
+.switches { display: flex; gap: 6px; }
+button, input { font: inherit; border-radius: 7px; border: 1px solid #435269; padding: 10px 12px; }
+button { cursor: pointer; background: #263447; color: #e9edf5; white-space: nowrap; flex-shrink: 0; }
+button:hover { background: #354a63; }
+button:focus-visible, input:focus-visible { outline: 2px solid #91d8cf; outline-offset: 3px; }
+button:disabled { opacity: .4; cursor: default; }
+.take { background: #aadbd0; color: #122a28; border: 0; font-weight: 650; }
+.take:hover { background: #c3f0e8; }
+.black { background: #0b1017; }
+.deck { padding: 20px; border: 1px solid #354153; border-radius: 12px; margin: 14px 0; }
+.sunday-folder { padding: 18px; background: #172b32; border-radius: 12px; margin-top: 20px; }
+.deck.live { border-color: #aadbd0; }
+.deck h2 { font-size: 19px; margin: 0 0 15px; display: flex; justify-content: space-between; align-items: center; }
+form { display: flex; gap: 8px; }
+input { width: 100%; min-width: 0; color: #e9edf5; background: #172231; font-size: 13px; }
+.pages { margin-top: 12px; }
+.office { margin-top: 9px; font-size: 12px; }
+.page { padding: 12px 0; border-top: 1px solid #354153; }
+.title { font-size: 13px; overflow-wrap: anywhere; margin-bottom: 8px; }
+.page button { padding: 6px 9px; font-size: 12px; margin-right: 6px; }
+.badge { color: #aadbd0; font-size: 11px; }
+.transport { display: flex; gap: 8px; flex-wrap: wrap; }
+.note { font-size: 12px; color: #8e9eb1; }
+#error { color: #ffbaa8; min-height: 0; }

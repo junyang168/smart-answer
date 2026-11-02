@@ -18,6 +18,7 @@ import {
   fetchSundayServiceEmailBody,
 } from "@/app/admin/sunday-service/api";
 import { SundaySongPicker } from "@/app/components/admin/sundayService/SundaySongPicker";
+import { SundayPresenterFolder } from "@/app/components/admin/sundayService/SundayPresenterFolder";
 import {
   SUNDAY_WORKER_ROLE_OPTIONS,
   SundayServiceEntry,
@@ -1254,6 +1255,8 @@ export function SundayServiceManager() {
           </div>
         </div>
       </header>
+
+      <SundayPresenterFolder />
 
       {error && (
         <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">

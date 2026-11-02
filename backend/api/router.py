@@ -4,7 +4,7 @@ import re
 from email.utils import parseaddr
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -340,6 +340,16 @@ def delete_sermon_series_entry(series_id: str) -> None:
 
 
 sunday_service_router = APIRouter(prefix="/admin/sunday-services", tags=["sunday-services"])
+
+
+@sunday_service_router.get("/presenter/upcoming")
+def get_presenter_folder(response: Response) -> dict:
+    from backend.sunday_presenter import upcoming_folder
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return upcoming_folder()
+    except (ValueError, OSError) as exc:
+        raise HTTPException(503, str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
 @sunday_service_router.get("", response_model=list[SundayServiceEntry])

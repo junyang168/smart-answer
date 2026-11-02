@@ -45,6 +45,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     headers,
     body,
     redirect: "manual",
+    cache: "no-store",
   });
 
   const responseBody = await backendResponse.arrayBuffer();

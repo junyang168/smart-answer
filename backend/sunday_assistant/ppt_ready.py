@@ -147,6 +147,7 @@ class PptReady:
                 if job and job['status'] in {'error', 'blocked'}:
                     self.store.put('ppt_readiness', {'date': day, 'status': 'error', 'error': job['error']} if job['status'] == 'error' else {'date': day, 'status': 'waiting', 'missing': [job['error']]})
                     return  # explicit retry or a changed input; no expensive retry loop
+                built = False
                 if not job or job['status'] != 'ready' or not self.valid_artifact(path, job['artifact_sha']):
                     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                     with self.store.db() as db:
@@ -165,6 +166,16 @@ class PptReady:
                     temp.chmod(0o600)
                     temp.replace(path)
                     digest = sha256(path.read_bytes()).hexdigest()
+                    built = True
+                # Publish only after the complete saved input and artifact were
+                # revalidated. Custom render paths remain private until here.
+                from backend.sunday_presenter import OneDrivePpts, service_day
+                cloud = OneDrivePpts.configured()
+                if cloud:
+                    target = cloud.generated(service_day(day))
+                    if not target.exists() or sha256(target.read_bytes()).hexdigest() != sha256(path.read_bytes()).hexdigest():
+                        cloud.publish_generated(service_day(day), path)
+                if built:
                     with self.store.db() as db:
                         db.execute("UPDATE ppt_jobs SET status='ready',artifact_sha=?,error=NULL,updated_at=? WHERE day=? AND version=?", (digest, now_text(), day, version))
                         db.execute("UPDATE ppt_jobs SET status='superseded' WHERE day=? AND version!=? AND status='error'", (day,version))
