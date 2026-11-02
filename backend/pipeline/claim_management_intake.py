@@ -57,6 +57,18 @@ def immutable(path, value):
     return binding(path)
 
 
+def relation_endpoint_instruction():
+    """Expose the same typed endpoints that candidate validation enforces."""
+    from backend.api.canonical_repository.knowledge_models import knowledge_relation_endpoints
+    rules = {}
+    for label, relation_type in [('all_non_answers', 'supports'), ('answers', 'answers')]:
+        start, end = knowledge_relation_endpoints(relation_type)
+        rules[label] = {'from_collections': sorted(start), 'to_collections': sorted(end)}
+    return ('Program endpoint contract, not professor source: knowledge_relations must use '
+            'these collections; changing relation_type does not permit Position endpoints. '
+            + json.dumps(rules, ensure_ascii=False, sort_keys=True))
+
+
 def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
@@ -208,6 +220,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
             'policy': policy_binding, 'required_maintenance_keys': [],
             'review_questions': [instruction]}
+        if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
+            authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:
             authorization.update(reuse_initial_claim_assessments=True, include_existing_evidence_owners=True)
         if selected.model_output_contract == 'claim_changes_v4':
