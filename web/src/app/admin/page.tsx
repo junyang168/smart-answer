@@ -57,6 +57,7 @@ const groups: AdminGroup[] = [
     accent: "bg-emerald-100 text-emerald-700",
     items: [
       { title: "主日服事", description: "安排同工、詩歌、讀經與家事報告。", href: "/admin/sunday-service" },
+      { title: "主日資料助理", description: "從 WhatsApp 整理外出與主日資料，追蹤缺項及群提醒。", href: "/admin/sunday-assistant" },
       { title: "團契資料", description: "維護團契時間、主題與主領資訊。", href: "/admin/fellowship" },
     ],
   },

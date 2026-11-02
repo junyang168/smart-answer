@@ -42,6 +42,7 @@ from .wang_operations import router as wang_operations_router
 from .wang_articles import router as wang_articles_router
 from .wang_article_reviews import router as wang_article_reviews_router
 from .viewpoint_admin import router as viewpoint_admin_router
+from .sunday_assistant import router as sunday_assistant_router
 from .wang_essay_runs import router as wang_essay_runs_router
 from .wang_inbox import router as wang_inbox_router
 from .wang_knowledge_graph import router as wang_knowledge_graph_router
@@ -92,6 +93,7 @@ app.include_router(wang_operations_router)
 app.include_router(wang_articles_router)
 app.include_router(wang_article_reviews_router)
 app.include_router(viewpoint_admin_router)
+app.include_router(sunday_assistant_router)
 app.include_router(wang_essay_runs_router)
 app.include_router(wang_inbox_router)
 app.include_router(wang_knowledge_graph_router)
