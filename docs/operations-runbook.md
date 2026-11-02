@@ -349,6 +349,27 @@ launchctl print "gui/$(id -u)/com.smartanswer.fellowshipreminder" \
 Do not run the reminder with `--force` while diagnosing: that sends mail. The
 normal deploy path never passes `--force` and never invokes the reminder job.
 
+### Sunday WhatsApp assistant
+
+Prepare its protected shared secret/configuration and LaunchAgent once with
+`backend/.venv/bin/python scripts/install-sunday-assistant-agent.py`. This only
+writes configuration; it does not load the service or enable collection.
+The configuration lives in `smart-answer-config/sunday-assistant.env`; account
+state and the durable queue live under `$DATA_BASE_DIR/sunday-assistant/`.
+Never copy test forms, queues or group IDs into production.
+
+`deploy.sh` installs the pinned WhatsApp bridge dependencies with browser download
+disabled, stops the old supervisor before changing API code, and rebinds the
+interpreter, supervisor script and working directory to the active release.
+`KeepAlive` and `RunAtLoad` recover the bridge/worker pair after process failure
+or user login. Rollback starts the matching supervisor, or unloads it when the
+older release has no Sunday assistant. Group posting controls remain persistent
+settings; deployment never turns questions or reminders on.
+
+The admin page `/admin/sunday-assistant` shows account, synchronization and worker
+health. Log: `~/Library/Logs/smart-answer/sunday-assistant.log`. Check those after
+switching; a healthy website alone does not prove WhatsApp is connected.
+
 ### Reference commentary scan inbox
 
 The owner scans Carson pages with the iPhone Files app into

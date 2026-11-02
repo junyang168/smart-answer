@@ -56,7 +56,7 @@ flowchart LR
 
 ## 設定和啟動
 
-先依 [operations-runbook.md](operations-runbook.md) 準備環境。開發使用自己的 worktree 及 `scripts/dev.sh`，production 部署仍只有 `scripts/deploy.sh`。以下是程式啟動方式，不會部署、切換服務或替 production 建立 LaunchAgent。
+先依 [operations-runbook.md](operations-runbook.md) 準備環境。開發使用自己的 worktree 及 `scripts/dev.sh`，production 部署仍只有 `scripts/deploy.sh`。正式環境先以 `backend/.venv/bin/python scripts/install-sunday-assistant-agent.py` 準備共享密鑰、設定及 LaunchAgent（不載入服務、不啟用收集），再由唯一入口 `scripts/deploy.sh` 安裝橋接依賴並切換／核對常駐服務。以下是本機程式啟動方式。
 
 1. 在 worktree 的 `services/whatsapp-bridge` 安裝獨立依賴：
 
@@ -86,7 +86,7 @@ flowchart LR
    backend/.venv/bin/python scripts/run-sunday-assistant.py --config /absolute/path/to/assistant.env
    ```
 
-   Supervisor 同時管理 Node 橋接器和 Python worker，持有獨占工作階段鎖。任一退出就停止另一個，外部服務管理器可重新啟動整對程序。若 production 日後設定 LaunchAgent，將其 WorkingDirectory 和 Python 路徑固定到實際 release，將本設定與 WhatsApp 狀態放在 release 之外；未完成此配置時不能宣稱已常駐啟用。
+   Supervisor 同時管理 Node 橋接器和 Python worker，持有獨占工作階段鎖。任一退出就停止另一個，外部服務管理器可重新啟動整對程序。正式 LaunchAgent 的 WorkingDirectory 和 Python 路徑由 deploy 固定到實際 release，設定與 WhatsApp 狀態放在 release 之外；切換前停止舊 worker，回滾同步恢復對應版本。
 
 4. 開啟 `/admin/sunday-assistant`。用手機 WhatsApp → 設定 → 連結裝置掃碼，讀取群名單、核對帳號與三個群，再保存群設定及啟用收集。
 
@@ -121,7 +121,7 @@ flowchart LR
 
 ## 上線狀態核對
 
-本卡的程式與測試可供合併審閱；發布腳本 dry-run 只驗證部署路徑與既有環境，不代表已完成正式建置或常駐接入。正式前端／backend 的共享 `SUNDAY_ASSISTANT_SECRET`、橋接器依賴安裝、Sunday assistant 常駐 LaunchAgent 及發布／回滾時的 release 綁定仍需完成。未完成前不宣稱正式群已可運行。正式設定維持收集、發問及提醒關閉。
+正式啟用需完成共享密鑰、橋接依賴與 LaunchAgent 的配置、發布及健康核對。安裝器與 deploy 已提供此流程；發布 dry-run 只驗證前置條件，不能當成已建置或已連線。首次群歷史同步僅供核對，不自動寫入或補發舊回覆。正式收集與自動登記需明確啟用，群內追問及催補提醒仍保持關閉。
 
 ## 恢復和核對
 
@@ -152,7 +152,7 @@ cd web && ./node_modules/.bin/tsc --noEmit
 真實帳號掃碼、讀取三個指定群及真實回覆，是需在接入時另外核對的現場驗收；程序及模型測試使用合成資料，不發正式群消息。
 
 
-本卡最後一輪驗證：162 項相關 Python 程序測試、29 項真實模型案例（完整 28 項及另行排程追問案例）及 10 項 Node 測試通過；前端型別檢查及私有 Python 環境依賴檢查通過。全庫文件檢查仍有另一專案原有的 `functional_spec.md:120` 錨點錯誤，本卡未改該檔。
+本卡最後一輪驗證：165 項相關 Python 程序測試、30 項真實模型案例（完整 28 項及另行排程追問、禁止發問案例）及 11 項 Node 測試通過；前端型別檢查及私有 Python 環境依賴檢查通過。全庫文件檢查仍有另一專案原有的 `functional_spec.md:120` 錨點錯誤，本卡未改該檔。
 
 ### 本卡驗證範圍
 
