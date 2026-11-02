@@ -53,6 +53,7 @@ type Metadata = {
   core_bible_verse?: Verse[];
 };
 type Context = {
+  media_mime_type?: string;
   revision: number;
   paragraph_bindings: Record<
     string,
@@ -300,7 +301,7 @@ function TranscriptProofreader({
   const persistTail = useRef(Promise.resolve());
   const durable = useRef(true);
   const segmentEnd = useRef<number>();
-  const video = useRef<HTMLVideoElement>(null);
+  const video = useRef<HTMLMediaElement | null>(null);
   const [segmentPause, setSegmentPause] = useState(true);
   const [playing, setPlaying] = useState(false);
   const selectedParagraph = useRef(initial.script[0]?.index || "");
@@ -955,6 +956,8 @@ function TranscriptProofreader({
       setBusy(false);
     }
   };
+  const audioOnly = doc.context.media_mime_type?.startsWith("audio/") ?? false;
+  const MediaPlayer = audioOnly ? "audio" : "video";
   return (
     <main
       onCompositionStartCapture={() => {
@@ -1247,16 +1250,25 @@ function TranscriptProofreader({
       <div className="mt-4 grid items-start gap-5 lg:grid-cols-[minmax(310px,0.85fr)_minmax(0,1.6fr)]">
         <aside className="space-y-4 lg:sticky lg:top-40 max-h-[calc(100vh-11rem)] overflow-y-auto">
           <section className="overflow-hidden rounded-xl border bg-white">
-            <video
-              ref={video}
+            <MediaPlayer
+              ref={(element) => {
+                video.current = element;
+              }}
               controls
               preload="metadata"
               src={base + "/media"}
-              className="w-full bg-black"
+              aria-label={audioOnly ? "講道音訊" : "講道影片"}
+              className={
+                audioOnly ? "block h-14 w-full" : "block w-full bg-black"
+              }
               onPlay={() => {
                 const id = selectedParagraph.current;
                 const binding = current.current.context.paragraph_bindings[id];
-                if (playbackParagraph.current !== id && video.current && binding) {
+                if (
+                  playbackParagraph.current !== id &&
+                  video.current &&
+                  binding
+                ) {
                   video.current.currentTime = binding.start_ms / 1000;
                   segmentEnd.current = binding.end_ms / 1000;
                   playbackParagraph.current = id;
@@ -1278,7 +1290,7 @@ function TranscriptProofreader({
               }}
             />
             <div className="flex flex-wrap items-center gap-2 p-3">
-              {playbackControls("影片播放控制")}
+              {playbackControls(audioOnly ? "音訊播放控制" : "影片播放控制")}
               <label className="text-xs">
                 <input
                   type="checkbox"
