@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from backend.api.models import SundayServiceEntry
-from backend.sunday_assistant.agent_graph import run_agent
+from backend.sunday_assistant.agent_graph import MAX_MODEL_DECISIONS, run_agent
 from backend.sunday_assistant.engine import Assistant
 from backend.sunday_assistant.models import ChatMessage
 from backend.sunday_assistant.store import Store
@@ -155,7 +155,11 @@ def test_graph_loop_has_a_finite_budget(agent):
     model = ScriptModel(*[("search_catalog", {"kind": "workers", "query": "陳"}) for _ in range(21)])
     with pytest.raises(ValueError, match="決策上限"):
         run_agent(agent, msg, model=model)
-    assert len(model.seen) == 20
+    assert len(model.seen) == MAX_MODEL_DECISIONS
+    resumed = ScriptModel()
+    with pytest.raises(ValueError, match="決策上限"):
+        run_agent(agent, msg, model=resumed)
+    assert not resumed.seen  # restart cannot reset the persisted decision budget
     assert not agent.repository.services
     assert not agent.bridge.sent
 
@@ -579,3 +583,11 @@ def test_bridge_question_guard_race_is_known_held_instead_of_unknown_delivery(ag
     agent.deliver_outbox()
     assert agent.store.outbox()[0]['status']=='held'
     assert agent.store.outbox()[0]['error'] is None
+
+
+def test_graph_can_finish_on_last_allowed_decision(agent):
+    msg = incoming(agent)
+    model = ScriptModel(*[("search_catalog", {"kind": "workers", "query": "陳"})
+                          for _ in range(MAX_MODEL_DECISIONS - 1)], ("ignore_message", {}))
+    assert run_agent(agent, msg, model=model)["status"] == "irrelevant"
+    assert len(model.seen) == MAX_MODEL_DECISIONS
