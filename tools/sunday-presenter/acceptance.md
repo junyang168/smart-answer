@@ -97,10 +97,17 @@ The installed app's actual worship slideshow accepted Command-P and showed the
 controls; the sermon was also loaded and designated ready. Both remain loaded.
 
 The full-screen Meet re-test rejoined the same private room with camera and
-microphone off. Meet returned “Unable to share your screen / An error occurred
-while sharing your screen. Please try again” before a new picker appeared.
-Automatic Dock activation timed out; manual foreground activation / picker
-verification was requested. This is **not** a full-screen Meet acceptance pass.
-The earlier second-client windowed reception remains valid but does not prove
-the new full-screen capture path. Full-screen capture, control-overlay exclusion,
-audible delivery and broader animation coverage remain pending; keep #590 open.
+microphone off. Automation initially received “Unable to share your screen /
+An error occurred while sharing your screen. Please try again” before a picker
+appeared. The owner then manually shared the app window successfully.
+
+A second signed-in Chrome window joined and initially received the complete
+borderless worship slide. The operator control window was shown and was absent
+from the received picture, but the same-Mac receiver subsequently showed partial
+slide painting and then a blank presentation region during switching. The local
+app output still displayed the complete sermon slide. Meet's receiver popout
+also appeared blank. This does not distinguish a transmission problem from
+background rendering in the same-Mac/Space test setup; it is **not** a stable
+full-screen reception acceptance pass. A receiving phone/other computer was
+requested to resolve that uncertainty. Full-screen reception stability, audible
+delivery and broader animation coverage remain pending; keep #590 open.
