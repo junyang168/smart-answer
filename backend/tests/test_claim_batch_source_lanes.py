@@ -7,6 +7,15 @@ from types import SimpleNamespace
 import pytest
 from backend.pipeline import claim_management as cm, claim_management_batch as batch
 
+POLICY = cm.source.FileBinding.model_validate(batch.binding(cm.DEFAULT_POLICY))
+
+
+def completed_batch(store, jobs):
+    return {'all_actions_completed': True, 'created_keys': [],
+            'current_qualifications': {key: store.claim_management_qualification(key.split('/', 1)[1])
+                for request, _ in jobs.values() for key in request.target_keys},
+            'unfinished_claims': {}, 'unfinished_actions': {}}
+
 
 @pytest.mark.parametrize('same_source', [True, False])
 def test_coordinator_serializes_same_source_and_overlaps_different_sources(tmp_path, monkeypatch, same_source):
@@ -20,12 +29,12 @@ def test_coordinator_serializes_same_source_and_overlaps_different_sources(tmp_p
     monkeypatch.setattr(safety, 'exclusive_cvp_run_lock', locked)
     monkeypatch.setattr(batch.time, 'sleep', lambda _: None)
     monkeypatch.setenv('DATA_BASE_DIR', str(tmp_path))
-    jobs = {key: (SimpleNamespace(target_keys=['claims/' + key], source_bindings={
+    jobs = {key: (SimpleNamespace(policy=POLICY, target_keys=['claims/' + key], source_bindings={
         'S' if same_source else 'S-' + key: {}}, permissions=[
         cm.source.Permission(collection='claims', object_id=key, fields=['statement'])]), tmp_path / key)
         for key in ['a', 'b']}
     monkeypatch.setattr(batch, 'load', lambda *args: ({'max_workers': 2}, jobs))
-    monkeypatch.setattr(batch, '_paragraph_results', lambda *args: {'all_actions_completed': True, 'created_keys': []})
+    monkeypatch.setattr(batch, '_paragraph_results', completed_batch)
     class Store:
         def read_claim_context(self, keys): return {keys[0]: {}}
         def claim_management_qualification(self, cid): return {'ready': True}
@@ -63,11 +72,11 @@ def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monke
     monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
     class Request(SimpleNamespace):
         def model_dump(self,**kwargs): return {'target_keys':self.target_keys}
-    jobs={key:(Request(target_keys=['claims/'+key],source_bindings={'S' if same_source else 'S-'+key:{}},
+    jobs={key:(Request(policy=POLICY, target_keys=['claims/'+key],source_bindings={'S' if same_source else 'S-'+key:{}},
         permissions=[SimpleNamespace(key='shared-cross-source-object')]),tmp_path/key) for key in 'abcd'}
     manifest=tmp_path/'manifest.json';manifest.write_text('{}')
     monkeypatch.setattr(batch,'load',lambda *a:({'max_workers':2},jobs))
-    monkeypatch.setattr(batch,'_paragraph_results',lambda *a:{'all_actions_completed':True,'created_keys':[]})
+    monkeypatch.setattr(batch,'_paragraph_results',completed_batch)
     class Store:
         def get_cvp_group(self,key): return None
         def read_claim_context(self,keys): pytest.fail('cross-source W/R scope used for scheduling')
@@ -102,11 +111,11 @@ def test_refill_starts_next_source_without_waiting_for_slow_action(tmp_path,monk
     monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
     class Request(SimpleNamespace):
         def model_dump(self,**kwargs):return {'target_keys':self.target_keys}
-    def job(key):return (Request(target_keys=['claims/'+key],source_bindings={'S-'+key:{}},permissions=[]),tmp_path/key)
+    def job(key):return (Request(policy=POLICY, target_keys=['claims/'+key],source_bindings={'S-'+key:{}},permissions=[]),tmp_path/key)
     original=tmp_path/'manifest.json';original.write_text('{}')
     extra=tmp_path/'extra/manifest.json';extra.parent.mkdir();extra.write_text('{}')
     monkeypatch.setattr(batch,'load',lambda path,*a,**k:({'max_workers':2},{'a':job('a')} if Path(path)==original else {'b':job('b')}))
-    monkeypatch.setattr(batch,'_paragraph_results',lambda *a:{'all_actions_completed':True,'created_keys':[]})
+    monkeypatch.setattr(batch,'_paragraph_results',completed_batch)
     class Store:
         def get_cvp_group(self,key):return None
         def claim_management_qualification(self,cid):return {'ready':True}
@@ -150,9 +159,9 @@ def test_refill_and_restart_pass_the_bound_manifest_to_real_children(tmp_path,mo
         def model_dump(self,**kwargs):return {'target_keys':self.target_keys}
     def load(path,*args,**kwargs):
         plan=json.loads(Path(path).read_text())
-        return plan,{key:(Request(target_keys=['claims/'+key],source_bindings={'S-'+key:{}},permissions=[]),tmp_path/key) for key in plan['jobs']}
+        return plan,{key:(Request(policy=POLICY, target_keys=['claims/'+key],source_bindings={'S-'+key:{}},permissions=[]),tmp_path/key) for key in plan['jobs']}
     monkeypatch.setattr(batch,'load',load)
-    monkeypatch.setattr(batch,'_paragraph_results',lambda *a:{'all_actions_completed':True,'created_keys':[]})
+    monkeypatch.setattr(batch,'_paragraph_results',completed_batch)
     class Store:
         def get_cvp_group(self,key):return None
         def claim_management_qualification(self,cid):return {'ready':True}

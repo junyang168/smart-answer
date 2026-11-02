@@ -159,7 +159,9 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
 def finish(prepared, *, store):
     """Recheck every original member after the ordinary transaction/readback."""
     qualifications = {cid:store.claim_management_qualification(cid) for cid in prepared['members']}
+    from backend.pipeline.claim_refresh_handoff import completion_details
     return {'members':prepared['members'], 'qualifications':qualifications,
+            **completion_details(qualifications),
             'completed':all(q and q.get('ready') for q in qualifications.values())}
 
 

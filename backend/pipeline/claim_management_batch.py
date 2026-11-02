@@ -285,11 +285,13 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                     break
                 if pending or active:
                     time.sleep(1)
-            current = {key: {k: store.claim_management_qualification(k.split('/', 1)[1])
-                              for k in request.target_keys} for key, (request, _) in jobs.items()}
             completion = _paragraph_results(store, jobs)
+            current = {key: {k: completion['current_qualifications'][k] for k in request.target_keys}
+                       for key, (request, _) in jobs.items()}
             progress(root / 'result.json', {'results': results, 'current_qualifications': current,
                 'created_keys': completion['created_keys'], 'retired_keys': completion.get('retired_keys', []),
+                'unfinished_claims': completion['unfinished_claims'],
+                'unfinished_actions': completion['unfinished_actions'],
                 'pending': pending, 'provider_blocks': blocked,
                 'all_actions_completed': completion['all_actions_completed']})
         except BaseException as exc:
@@ -421,7 +423,9 @@ def _paragraph_results(store, jobs):
                     results[action_id] = {'status': 'paused', 'reason': 'retirement_readback_changed', 'detail': str(exc)}
     for key in set(k for request, _ in jobs.values() for k in request.target_keys) | created:
         qualifications[key] = store.claim_management_qualification(key.split('/', 1)[1])
+    from backend.pipeline.claim_refresh_handoff import completion_details
     return {'results': results, 'current_qualifications': qualifications, 'created_keys': sorted(created),
+            **completion_details(qualifications, results, retired),
             **({'retired_keys': sorted(retired)} if retired else {}),
             'all_actions_completed': all(result.get('status') == 'completed' for result in results.values())
             and all(key in retired or (q and q.get('ready')) for key, q in qualifications.items())}
@@ -519,14 +523,25 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--detach', action='store_true')
     parser.add_argument('--status', action='store_true')
+    parser.add_argument('--inspect', action='store_true', help='read saved batch inputs, SQL stop details and current qualifications; no calls or repairs')
+    parser.add_argument('--resume', action='store_true', help='reuse this batch root\'s saved manifest and capacity; no new intake or budget')
     parser.add_argument('--job')
     parser.add_argument('--model-capacity', type=Path, help='explicit shared GPT/Opus capacity configuration; legacy batches unchanged')
     parser.add_argument('--paragraphs', action='store_true', help='call ordinary batches in source paragraph order')
     args = parser.parse_args()
+    if args.inspect or args.resume:
+        if (args.inspect and args.resume or args.manifest or args.claim_ids or args.instruction or args.job
+                or args.paragraphs or args.detach or args.status or args.model_capacity or args.creation_count != 1
+                or args.max_workers != 1):
+            parser.error('--inspect/--resume use only --root pointing at an existing batch directory')
     if args.creation_count<1 or args.creation_count!=1 and not args.claim_ids:
         parser.error('--creation-count must be positive and requires --claim-ids')
     from dotenv import load_dotenv
     load_dotenv('backend/.env'); load_dotenv('.env')
+    if args.inspect or args.resume:
+        from backend.pipeline.claim_refresh_handoff import inspect, resume
+        print(json.dumps((resume if args.resume else inspect)(args.root), ensure_ascii=False))
+        return
     model_capacity = json.loads(args.model_capacity.read_text()) if args.model_capacity else None
     if model_capacity and (args.detach or args.paragraphs or args.job):
         parser.error('--model-capacity requires direct batch or Claim list execution')
