@@ -16,7 +16,9 @@ type Operation = { kind: string; date?: string; worker?: string; field?: string;
   before: unknown; after: unknown; evidence: string };
 type Proposal = { id: number; message_id: string; status: string; error?: string;
   payload: { operations: Operation[]; questions: string[] } };
+type IdentityAudit = { checked_at?: string; members: { id: string; ids: string[]; labels: string[]; groups: string[]; saved_contact: boolean; worker?: string; candidates: string[]; status: string; reason?: string; lookup_errors: string[] }[]; workers_without_account: string[]; unseen_mappings: { id: string; workers: string[] }[] };
 type Data = {
+  identity_audit?: IdentityAudit;
   identities?: { sender_id: string; worker_name: string }[];
   settings: Settings; messages: Message[]; proposals: Proposal[];
   outbox: { key: string; text: string; status: string; error?: string; updated_at: string }[];
@@ -150,6 +152,18 @@ export default function SundayAssistantPage() {
           <p className="mt-3 text-xs text-slate-500">修改後請按「儲存設定」。對應保存在網站後端，重新整理或重啟後仍保留；只識別登記對象，不建立登入帳號或授予權限。</p>
         </details>
         <div className="mt-5 flex flex-wrap gap-3"><button className={button} disabled={busy || !dirty} onClick={() => void save()}>儲存設定</button><button className={button} disabled={busy || dirty || !settings.enabled} onClick={() => void action(() => call("tick", "POST", {}), "已要求處理待辦，進度會自動更新")}>處理待辦</button>{dirty && <span className="self-center text-sm text-amber-800">有尚未儲存的設定</span>}</div>
+      </section>
+      <section className={card}>
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">WhatsApp 身分核對</h2><button className={button} disabled={busy || dirty || data.bridge.state !== "ready"} onClick={() => void action(() => call("identity-audit", "POST", {}), "已核對三群成員；姓名候選尚未自動採用")}>重新核對三群成員</button></div>
+        <p className="mt-3 text-sm">只用 WhatsApp 回傳的 LID／電話帳號關係連接 ID；顯示名稱只供核對，不自動認人。每個帳號對應本人，夫妻關係分開保存。有衝突時停止身分推定。</p>
+        <p className="mt-2 text-xs text-slate-500">{data.identity_audit?.checked_at ? `最近核對：${new Date(data.identity_audit.checked_at).toLocaleString()}` : "尚未取得群成員名冊"}</p>
+        <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">WhatsApp 聯絡人／ID</th><th className="p-2">狀態與姓名候選</th><th className="p-2">網站同工本人</th></tr></thead><tbody>{data.identity_audit?.members.map(member => <tr key={member.id} className="border-t align-top">
+          <td className="p-2"><p>{member.labels.join(" ／ ") || "沒有姓名"}{member.saved_contact ? "（手機聯絡人）" : ""}</p>{member.ids.map(id => <p className="break-all text-xs text-slate-500" key={id}>{id}</p>)}</td>
+          <td className="p-2"><p className={member.status === "conflict" ? "text-red-700" : member.status === "confirmed" ? "text-emerald-700" : "text-amber-800"}>{member.status === "conflict" ? "衝突，需核對" : member.status === "confirmed" ? "已對應" : "待你確認"}</p>{!!member.candidates.length && <p className="mt-1">候選：{member.candidates.join("、")}</p>}{!!member.lookup_errors.length && <p className="mt-1 text-xs text-amber-800">部分帳號或姓名無法查回，保留原 ID</p>}</td>
+          <td className="p-2"><select className={input} aria-label={`核對 ${member.labels.join("、") || member.id} 的本人`} disabled={member.status === "conflict"} value={settings.sender_workers[member.id]?.[0] || member.worker || ""} onChange={event => { const next = { ...settings.sender_workers }; for (const id of member.ids) { if (event.target.value) next[id] = [event.target.value]; else delete next[id]; } patch({ sender_workers: next }); }}><option value="">尚未確認（不推定本人）</option>{data.workers.map(name => <option key={name}>{name}</option>)}</select></td>
+        </tr>)}</tbody></table></div>
+        {!!data.identity_audit?.unseen_mappings?.length && <p className="mt-3 text-sm text-amber-800">既有對應未出現在本次群名冊，需另外核對：{data.identity_audit.unseen_mappings.map(item => `${item.workers.join("、")}（${item.id}）`).join("；")}</p>}
+        <p className="mt-3 text-xs text-slate-500">選定姓名後按上方「儲存設定」才生效；不會向群發問。未對應帳號：{data.identity_audit?.workers_without_account.join("、") || "無"}</p>
       </section>
       {!!data.conflicts.length && <section className="rounded-xl border border-amber-300 bg-amber-50 p-5"><h2 className="font-bold">外出日期與現有安排衝突</h2><ul className="mt-3 space-y-2">{data.conflicts.map((c, i) => <li key={i}>{c.date} · {c.role}：{c.worker} 不能服事</li>)}</ul><Link className="mt-3 inline-block underline" href="/admin/sunday-service">開啟主日表單調整</Link></section>}
       <section className={card}><h2 className="text-lg font-bold">待核對更新</h2>{!pending.length && <p className="mt-3 text-sm text-slate-500">目前沒有待核對資料。</p>}

@@ -12,6 +12,7 @@ from backend.sunday_assistant.engine import get_assistant, upcoming_sunday
 from backend.sunday_assistant.models import ChatMessage, Settings, ZONE
 from backend.sunday_assistant.store import now_text
 from backend.sunday_service_skeletons import skeleton_status
+from backend.sunday_assistant.member_identity import Roster, save_roster, audit, waiting_identity_states, recheck_waiting
 
 
 def authenticated(authorization: str | None = Header(default=None)):
@@ -54,7 +55,8 @@ def state():
             "worker": worker, "bridge": bridge,
             "conflicts": agent.conflicts(), "sunday": day, "missing": agent.missing(day),
             "workers": list(agent.worker_map()), "identities": agent.store.identities(),
-            "skeletons": skeleton_status(agent.repository, datetime.now(ZONE).date())}
+            "skeletons": skeleton_status(agent.repository, datetime.now(ZONE).date()),
+            "identity_audit": audit(agent.store, agent.worker_map())}
 
 
 @router.put("/settings")
@@ -69,8 +71,30 @@ def settings(payload: Settings):
         raise HTTPException(422, "夫妻對應的姓名必須存在於同工名單")
     if any(target not in names or (alias in names and alias != target) for alias, target in payload.worker_aliases.items()):
         raise HTTPException(422, "姓名別名需對應現有同工，不能改指向另一位現有同工")
+    before = waiting_identity_states(agent.store)
     agent.store.put("settings", payload.model_dump())
+    recheck_waiting(agent.store, before)
     return payload
+
+
+@router.post("/identity-roster")
+def identity_roster(payload: Roster):
+    try:
+        save_roster(get_assistant().store, payload)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"accepted": True}
+
+
+@router.post("/identity-audit")
+def refresh_identity_audit():
+    agent = get_assistant()
+    try:
+        payload = Roster.model_validate(agent.bridge.request("GET", "/members"))
+        save_roster(agent.store, payload)
+    except Exception as exc:
+        raise HTTPException(503, "無法完成群成員核對，既有對應保留；請查看橋接狀態") from exc
+    return audit(agent.store, agent.worker_map())
 
 
 @router.get("/bridge-config")

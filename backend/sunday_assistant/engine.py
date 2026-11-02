@@ -85,13 +85,8 @@ class Assistant:
         return {x.name: x for x in self.repository.list_sunday_workers()}
 
     def sender_workers(self, sender_id):
-        configured = self.store.settings().sender_workers.get(sender_id, [])
-        if configured:
-            return configured
-        with self.store.db() as db:
-            identity = db.execute("SELECT worker_name FROM identities WHERE sender_id=?", (sender_id,)).fetchone()
-        # A renamed/deleted worker needs a fresh match, never a guessed binding.
-        return [identity[0]] if identity and identity[0] in self.worker_map() else []
+        from .member_identity import resolution
+        return resolution(self.store, sender_id, self.worker_map())["workers"]
 
     def sender_profile(self, sender_id):
         names = self.sender_workers(sender_id)
@@ -101,7 +96,12 @@ class Assistant:
         households = self.store.settings().households
         pair = next((pair for pair in households if person and person in pair), [])
         # Legacy multi-name mappings are household hints, never two selves.
-        return {"self_worker": person, "household_workers": pair or (names if len(names) > 1 else [])}
+        from .member_identity import resolution
+        identity = resolution(self.store, sender_id, self.worker_map())
+        profile = {"self_worker": person, "household_workers": pair or (names if len(names) > 1 else [])}
+        if identity["conflict"]:
+            profile["identity_conflict"] = identity["conflict"]
+        return profile
 
     def mentions_worker(self, name, texts):
         from opencc import OpenCC
