@@ -12,6 +12,7 @@ from backend.sunday_assistant.engine import get_assistant, upcoming_sunday
 from backend.sunday_assistant.models import ChatMessage, Settings, ZONE
 from backend.sunday_assistant.store import now_text
 from backend.sunday_service_skeletons import skeleton_status
+from backend.sunday_assistant.admin_monitor import AdminMonitor, monitor_state as admin_monitor_state
 from backend.sunday_assistant.member_identity import Roster, save_roster, audit, waiting_identity_states, recheck_waiting
 
 
@@ -56,7 +57,8 @@ def state():
             "conflicts": agent.conflicts(), "sunday": day, "missing": agent.missing(day),
             "workers": list(agent.worker_map()), "identities": agent.store.identities(),
             "skeletons": skeleton_status(agent.repository, datetime.now(ZONE).date()),
-            "identity_audit": audit(agent.store, agent.worker_map())}
+            "identity_audit": audit(agent.store, agent.worker_map()),
+            "admin_monitor": admin_monitor_state(agent.store.root)}
 
 
 @router.put("/settings")
@@ -75,6 +77,16 @@ def settings(payload: Settings):
     agent.store.put("settings", payload.model_dump())
     recheck_waiting(agent.store, before)
     return payload
+
+
+@router.post("/admin-help-test")
+def admin_help_test():
+    agent = get_assistant()
+    try:
+        key = AdminMonitor(agent.store.root).queue_test(agent.store.settings().model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"status": "queued", "key": key}
 
 
 @router.post("/identity-roster")
@@ -101,7 +113,8 @@ def refresh_identity_audit():
 def bridge_config():
     config = get_assistant().store.settings()
     return {"enabled": config.enabled, "groups": sorted(config.source_group_ids),
-            "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled}
+            "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled,
+            "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group}
 
 
 @router.post("/ingest")

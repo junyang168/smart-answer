@@ -28,6 +28,9 @@ class Settings(BaseModel):
     offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
     group_questions_enabled: bool = False
     reminders_enabled: bool = False
+    admin_help_enabled: bool = False
+    admin_group: str = ""
+    admin_group_name: str = "網站管理員"
     friday_hour: int = Field(default=17, ge=0, le=23)
     friday_minute: int = Field(default=0, ge=0, le=59)
     # WhatsApp author IDs -> self. Legacy multiple names are household hints only.
@@ -41,10 +44,14 @@ class Settings(BaseModel):
     @model_validator(mode="after")
     def groups(self):
         import re
-        for group in (self.availability_group, self.service_group, self.songs_group):
+        for group in (self.availability_group, self.service_group, self.songs_group, self.admin_group):
             if group and not re.fullmatch(r"[0-9]+(?:-[0-9]+)?@g\.us", group):
                 raise ValueError("請選擇有效的 WhatsApp 群 ID")
         groups = [g for g in (self.availability_group, self.service_group, self.songs_group) if g]
+        if self.admin_help_enabled and not self.admin_group:
+            raise ValueError("請先指定網站管理員求助群")
+        if self.admin_group and self.admin_group in groups:
+            raise ValueError("系統求助群需與三個資料來源群分開")
         if len(groups) != len(set(groups)):
             raise ValueError("各資料來源需指定不同的群")
         if any(g and g not in groups for g in (self.response_hymn_group, self.offering_group)):

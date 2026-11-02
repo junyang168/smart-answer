@@ -5,7 +5,8 @@ import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
 import { senderId } from "./sender.mjs";
 import { readMembers } from "./members.mjs";
-import { registeredMessage, allowedBySettings } from "./outgoing.mjs";
+import { registeredMessage, allowedBySettings, allowedDestination } from "./outgoing.mjs";
+import { saveAdminConfig, loadAdminConfig } from "./admin-config.mjs";
 import { messageVersion } from "./message-version.mjs";
 
 const secret = process.env.SUNDAY_ASSISTANT_SECRET;
@@ -94,6 +95,7 @@ async function connect() {
 async function poll() {
   try {
     const nextConfig = await backendCall("bridge-config");
+    saveAdminConfig(join(stateDir, "admin-config.json"), nextConfig);
     if (lastError === "fetch failed" || lastError?.startsWith("Backend bridge-config:")) lastError = null;
     if (JSON.stringify(nextConfig) !== JSON.stringify(config)) { synced = false; lastHistorySync = 0; rosterAt = 0; }
     config = nextConfig;
@@ -175,12 +177,21 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/send") {
       const { key, group_id, text } = await bodyOf(req);
       // Refresh authorization immediately before an external action.
-      config = await backendCall("bridge-config");
-      if (state !== "ready" || !config.enabled || !config.groups.includes(group_id)) return reply(409, { error: "Group is not connected/enabled" });
+      let sendConfig;
+      try {
+        sendConfig = await backendCall("bridge-config");
+        saveAdminConfig(join(stateDir, "admin-config.json"), sendConfig);
+      } catch (error) {
+        if (typeof key !== "string" || !key.startsWith("admin-help:")) throw error;
+        sendConfig = loadAdminConfig(join(stateDir, "admin-config.json"));
+        if (!sendConfig) return reply(503, { error: "Administrator destination cannot be verified" });
+      }
+      if (state !== "ready") return reply(409, { error: "WhatsApp not ready" });
+      if (typeof key !== "string" || !allowedDestination(sendConfig, key, group_id)) return reply(403, { error: "Destination is not authorized for this message type" });
       if (!registeredMessage(key, text)) {
         return reply(422, { error: "Only registered assistant replies, questions and Friday reminders may be sent" });
       }
-      if (!allowedBySettings(config, key)) return reply(200, { status: "held", reason: "disabled_by_settings" });
+      if (!allowedBySettings(sendConfig, key)) return reply(200, { status: "held", reason: "disabled_by_settings" });
       if (key.startsWith("friday:") && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
         return reply(200, { status: "deferred" });
       }
