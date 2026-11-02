@@ -240,14 +240,17 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     # SQL applied and resumes this read; it never calls apply a second time.
     history = store.get_change_history(plan.change_set_id)
     if not history or history["status"] != "applied": raise ValueError("committed ChangeSet not visible")
+    planned_payloads = {(op.collection, op.object_id): op.payload for op in plan.operations}
     for operation in history['operations']:
         actual=store.get_record_state(operation['collection'],operation['object_id'])
         expected_payload=operation['after']
-        # Retirement advances storage/history revision while deliberately
-        # preserving the original object payload byte for byte. Do not treat
-        # that documented distinction as a missing commit or reapply it.
-        if operation['operation']=='retire':
-            expected_payload={**expected_payload,'revision':operation['before_revision']}
+        # Lifecycle-only writes preserve the bound original payload even
+        # after earlier retire/revive cycles. History projects storage revisions
+        # and cannot reconstruct that payload revision. Claim Restore is the
+        # exception: it writes the reviewed full postimage, including revision.
+        if operation['operation']=='retire' or (operation['operation']=='revive'
+                and plan.source_kind!='wang_claim_management_v2'):
+            expected_payload=planned_payloads[operation['collection'],operation['object_id']]
         if (actual is None or actual['payload']!=expected_payload
                 or actual['revision']!=operation['after_revision']
                 or actual['content_sha256']!=operation['after_sha256']
