@@ -1597,8 +1597,9 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
     subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
-    from backend.pipeline.claim_metadata_projection import repair_extension
+    from backend.pipeline.claim_metadata_projection import repair_extension,repair_defects
     engineering_repair = repair_extension(previous,request,policy,authority)
+    used_engineering_repairs = repair_defects(previous)
     target_extension = owner_target_extension(previous, old, request)
     support_creation = (request.creation_permissions != old.creation_permissions
         and finding_permission_extension(previous, old, request))
@@ -1804,7 +1805,9 @@ def continuation_budget(previous, request, policy):
     continued_goal = deepcopy(previous['original_goal'])
     if engineering_repair:
         if extension_basis!='remaining_findings':raise ValueError('stale AI repair requires the existing bounded findings continuation')
-        continued_goal.setdefault('engineering_repair_defects',[]).append(engineering_repair['defect'])
+        used_engineering_repairs.append(engineering_repair['defect'])
+    if used_engineering_repairs:
+        continued_goal['engineering_repair_defects'] = used_engineering_repairs
     for entry in historical_inputs.values():
         if entry not in continued_goal.get('unaccepted_model_inputs', []):
             continued_goal.setdefault('unaccepted_model_inputs', []).append(entry)
@@ -1836,6 +1839,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('original remaining budget cannot fund correction and review')
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
+        **({'engineering_repair_defects':used_engineering_repairs} if used_engineering_repairs else {}),
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
         **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),

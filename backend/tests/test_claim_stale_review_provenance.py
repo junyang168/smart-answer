@@ -148,3 +148,30 @@ def test_one_engineering_pair_is_bound_to_the_fixed_defect_and_history(claims,fa
         assert value['engineering_repair']==proof
         assert value['original_goal']['engineering_repair_defects']==[proof['defect']]
         assert value['prior_call_reservations']==previous['call_reservations']
+        # SQL stores each successor's fresh original_goal separately from its
+        # continuation. A later ordinary handoff must not erase the old repair.
+        hop=deepcopy(previous)
+        hop.update(request=successor.model_dump(mode='json'),policy=policy.model_dump(mode='json'),
+                   original_goal=cm.original_goal(successor,before),continuation=value)
+        assert not hop['original_goal'].get('engineering_repair_defects')
+        repeated=deepcopy(proof)
+        repeated.update(predecessor_action_id=successor.action_id,prior_metadata_sha256=cm.sha256_json(hop))
+        with pytest.raises(ValueError,match='one-time'):
+            repair_extension(hop,successor,policy,{'stale_ai_provenance_repair':repeated})
+        hop['result']={'status':'paused','reason':'budget_exhausted'}
+        ordinary=successor.model_copy(deep=True,update={'action_id':successor.action_id+'-ordinary',
+                                                      'predecessor_action_id':successor.action_id})
+        ordinary_auth=deepcopy(original_auth)
+        ordinary_auth.pop('stale_ai_provenance_repair')
+        ordinary_auth['owner_call_extension'].update(predecessor_action_id=successor.action_id,
+                                                    prior_metadata_sha256=cm.sha256_json(hop))
+        ordinary.authorization=cm.source.FileBinding.model_validate(intake.immutable(root/'ordinary-authority.json',ordinary_auth))
+        carried=cm.continuation_budget(hop,ordinary,policy)
+        assert carried['engineering_repair_defects']==[proof['defect']]
+        assert 'engineering_repair' not in carried  # carry usage, never another grant
+        later=deepcopy(hop)
+        later.update(request=ordinary.model_dump(mode='json'),original_goal=cm.original_goal(ordinary,before),
+                     continuation=carried,result={'status':'paused','reason':'engineering_required'})
+        repeated.update(predecessor_action_id=ordinary.action_id,prior_metadata_sha256=cm.sha256_json(later))
+        with pytest.raises(ValueError,match='one-time'):
+            repair_extension(later,ordinary,policy,{'stale_ai_provenance_repair':repeated})

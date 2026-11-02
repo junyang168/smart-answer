@@ -153,6 +153,16 @@ def stale_review_keys(request,before,projection):
     return set(markers)
 
 
+def repair_defects(previous):
+    """Carry used repairs across the SQL parent/continuation boundary."""
+    continuation=previous.get('continuation') or {}
+    defects=set(previous['original_goal'].get('engineering_repair_defects',[]))
+    defects.update(continuation.get('engineering_repair_defects',[]))
+    defects.update(continuation.get('original_goal',{}).get('engineering_repair_defects',[]))
+    if continuation.get('engineering_repair'):defects.add(continuation['engineering_repair']['defect'])
+    return sorted(defects)
+
+
 def repair_extension(previous,request,policy,authority):
     """Consume one standing engineering pair for this proven defect only."""
     repair=authority.get('stale_ai_provenance_repair')
@@ -169,7 +179,7 @@ def repair_extension(previous,request,policy,authority):
     if (set(repair)!=fields or repair['defect']!=defect or repair['predecessor_action_id']!=old.action_id
             or repair['prior_metadata_sha256']!=sha256_json(previous)
             or previous['result'].get('reason')!='engineering_required'
-            or defect in previous['original_goal'].get('engineering_repair_defects',[])
+            or defect in repair_defects(previous)
             or finding.get('category')!='engineering' or 'review_note' not in finding.get('component','')
             or request.target_keys!=old.target_keys or request.permissions!=old.permissions
             or request.creation_permissions!=old.creation_permissions
