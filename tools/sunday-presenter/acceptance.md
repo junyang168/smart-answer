@@ -31,7 +31,7 @@ Generated proof: `output/smoke/result.json`, `control.png`, and `slide.png` (ign
 synthetic content only). These prove local runtime behavior, not Meet reception,
 real Office rendering, actual sound output, or a Microsoft login.
 
-## Account, real-deck and Meet checks — pending
+## Account, real-deck and Meet checks
 
 The owner completed Microsoft sign-in inside PRIVATE PREPARATION. The supplied
 OneDrive folder displayed both actual PPT files. After quitting and relaunching
@@ -54,7 +54,7 @@ Record the following before selecting this architecture or closing #590:
 | Office slideshow/popup | Both actual audience pages enter slide show while output window identity stays fixed | Passed for both files in windowed baseline |
 | Repeated switching | Worship → sermon → worship; note actual slide and animation state before/after | Windowed baseline retained worship slide 1 and sermon slide 2 on return; broader animation coverage pending |
 | Notes/control exclusion | Independent receiving client sees slides only during preparation, switching, and slide show exit | Received slides without operator controls during baseline switching; full-screen overlay/exit checks pending |
-| Meet video | Continuous window share on an actual Meet with a separate receiving client | Passed in windowed baseline using a second signed-in Chrome window on the same Mac/account; full-screen revision still to verify |
+| Meet video | Continuous window share on an actual Meet with a separate receiving client | Windowed baseline observed on a second signed-in Chrome window; after rejoining and restoring the full-screen share, owner reported “work like a charm!”; see scope below |
 | Meet audio | Active audio/video heard remotely; inactive deck inaudible, including during switches/black | Pending |
 | Timed media | Document whether background auto-advance/media continues and whether that meets the operator's need | Pending |
 | Unsupported features | Test actual sermon effects, triggers, fonts, videos, links and transitions; list deviations | Pending |
@@ -109,5 +109,20 @@ app output still displayed the complete sermon slide. Meet's receiver popout
 also appeared blank. This does not distinguish a transmission problem from
 background rendering in the same-Mac/Space test setup; it is **not** a stable
 full-screen reception acceptance pass. A receiving phone/other computer was
-requested to resolve that uncertainty. Full-screen reception stability, audible
-delivery and broader animation coverage remain pending; keep #590 open.
+requested to resolve that uncertainty.
+
+During the owner's subsequent test, a blank-screen report was initially treated
+as a capture failure. A fresh check instead found both Chrome windows at the
+Meet home page: there was no active call/share at that point. That report is
+therefore **not evidence of a full-screen capture defect**. The test room was
+rejoined with microphone and camera off, and Meet again displayed “You're
+presenting” with a slide visible in its presentation preview. The owner then
+reported **“work like a charm!”**. Record this as a successful owner-reported
+live sharing check after restoring the meeting/share, not as a code fix.
+
+The final source-picker selection, receiving-device identity and an exact
+repeated-switch/animation sequence were not independently recorded in that
+last exchange. The earlier same-Mac rendering anomaly remains unresolved; it
+must not be conflated with the later inactive-share incident. Audible delivery,
+timed-media behavior and broader animation coverage remain pending. Keep #590
+open and the PR in draft until the remaining acceptance evidence is complete.
