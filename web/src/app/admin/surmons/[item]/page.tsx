@@ -39,7 +39,18 @@ export default async function SurmonEditorPage(props: PageProps) {
 
   return (
     <Suspense fallback={<EditorFallback />}>
-      {beta ? <TranscriptReviewEntry item={item} legacy={legacy} /> : legacy}
+      {beta ? (
+        <TranscriptReviewEntry
+          item={item}
+          legacy={legacy}
+          preferBeta={hasTranscriptBetaAccess(
+            session?.user?.email,
+            session?.user?.role,
+          )}
+        />
+      ) : (
+        legacy
+      )}
     </Suspense>
   );
 }
