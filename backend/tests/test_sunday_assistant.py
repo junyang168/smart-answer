@@ -59,7 +59,7 @@ def agent(tmp_path, monkeypatch):
     store = Store(tmp_path / "assistant")
     store.put("settings", Settings(enabled=True, availability_group="111@g.us", service_group="222@g.us",
                                    auto_apply=True, reminders_enabled=True, trusted_senders=["sender"],
-                                   sender_workers={"sender": ["王明", "李芳"]}).model_dump())
+                                   sender_workers={"sender": ["王明"]}, households=[["王明", "李芳"]]).model_dump())
     return Assistant(store, Repo(), bridge=Bridge())
 
 
@@ -85,7 +85,7 @@ def test_future_speakers_and_partial_update_preserve_other_fields(agent):
 
 
 def test_spouses_absence_is_saved_before_ack_and_replay_sends_once(agent):
-    result = {"absence_changes": [{"worker": n, "start": "2026-11-15", "end": "2026-11-29", "evidence": "我們夫妻11/15到29日不在"}
+    result = {"absence_changes": [{"worker": n, "start": "2026-11-15", "end": "2026-11-29", "evidence": "我們夫妻11/15到29日不在", "include_household": True}
                                   for n in ["王明", "李芳"]]}
     old_send = agent.bridge.send
     def check_saved(*args):

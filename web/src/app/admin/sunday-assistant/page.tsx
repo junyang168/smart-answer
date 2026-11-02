@@ -8,6 +8,7 @@ type Settings = {
   availability_group_name: string; service_group_name: string;
   auto_apply: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
+  households: string[][]; worker_aliases: Record<string, string>;
 };
 type Message = { id: string; status: string; error?: string;
   payload: { sender_id: string; group_id: string; sent_at: string; text: string; unsupported_media: boolean } };
@@ -16,6 +17,7 @@ type Operation = { kind: string; date?: string; worker?: string; field?: string;
 type Proposal = { id: number; message_id: string; status: string; error?: string;
   payload: { operations: Operation[]; questions: string[] } };
 type Data = {
+  identities?: { sender_id: string; worker_name: string }[];
   settings: Settings; messages: Message[]; proposals: Proposal[];
   outbox: { key: string; text: string; status: string; error?: string; updated_at: string }[];
   bridge: { state: string; qr?: string; error?: string; account?: string; synced?: boolean; pending?: number; lastSyncAt?: string };
@@ -56,6 +58,7 @@ export default function SundayAssistantPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -63,8 +66,8 @@ export default function SundayAssistantPage() {
   const [sender, setSender] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
   const load = useCallback(async () => {
-    try { const next = await call<Data>("state"); setData(next); if (!dirtyRef.current) setSettings(next.settings); }
-    catch (e) { setError(e instanceof Error ? e.message : "無法載入"); }
+    try { const next = await call<Data>("state"); setData(next); setLoadError(""); if (!dirtyRef.current) setSettings(next.settings); }
+    catch (e) { setLoadError(e instanceof Error ? e.message : "無法載入"); }
   }, []);
   useEffect(() => { void load(); const id = setInterval(() => void load(), 5000); return () => clearInterval(id); }, [load]);
   function patch(update: Partial<Settings>) { dirtyRef.current = true; setSettings(old => old && { ...old, ...update }); setDirty(true); }
@@ -86,7 +89,7 @@ export default function SundayAssistantPage() {
       <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時在原群追問，收到回答後繼續登記。請假資料成功更新後回覆原群；周五下午 5 點檢查崇拜準備資料的缺項並提醒。</p>
       <div className="mt-4 flex flex-wrap gap-4 text-sm underline"><Link href="/admin/sunday-service">主日表單</Link><Link href="/admin/sunday-workers">同工及外出日期</Link></div>
     </header>
-    {error && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error}</div>}
+    {(error || loadError) && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || loadError}</div>}
     {feedback && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-800">{feedback}</p>}
     {!data || !settings ? <p>正在載入助理狀態…</p> : <>
       <div className="grid gap-4 sm:grid-cols-3">
@@ -111,13 +114,18 @@ export default function SundayAssistantPage() {
           <label><input type="checkbox" checked={settings.reminders_enabled} onChange={e => patch({ reminders_enabled: e.target.checked })} /> 啟用周五缺項提醒</label>
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>
-        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。不清楚時在原群追問；已有人工內容衝突時保留待核對。首次歷史同步只提供預覽。</p>
+        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時在原群追問。首次歷史同步只提供預覽。</p>
         <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>
-          <p className="mt-3 text-sm">從下方原消息複製發送人 ID，對應到既有同工。夫妻可選兩人，以便理解「我們夫妻」。</p>
+          <p className="mt-3 text-sm">從下方原消息複製發送人 ID，對應到既有同工。每個帳號只對應本人；夫妻關係另存。首次自報姓名核對後會記住，下次「我」不再重問。</p>
           <input className={`${input} mt-3`} placeholder="WhatsApp 發送人 ID" value={sender} onChange={e => setSender(e.target.value)} />
-          <div className="my-3 flex max-h-40 flex-wrap gap-3 overflow-auto text-sm">{data.workers.map(name => <label key={name}><input type="checkbox" checked={selectedWorkers.includes(name)} onChange={e => setSelectedWorkers(e.target.checked ? [...selectedWorkers, name] : selectedWorkers.filter(n => n !== name))} /> {name}</label>)}</div>
+          <div className="my-3 flex max-h-40 flex-wrap gap-3 overflow-auto text-sm">{data.workers.map(name => <label key={name}><input type="radio" name="sender-worker" checked={selectedWorkers.includes(name)} onChange={() => setSelectedWorkers([name])} /> {name}</label>)}</div>
           <div className="flex flex-wrap gap-3"><button className={button} disabled={!sender.trim() || !selectedWorkers.length} onClick={() => { patch({ sender_workers: { ...settings.sender_workers, [sender.trim()]: selectedWorkers } }); setSelectedWorkers([]); }}>加入姓名對應</button></div>
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(settings.sender_workers).map(([id, names]) => <li key={id} className="break-all">{id} → {names.join("、")} <button className="text-red-700 underline" onClick={() => { const next = { ...settings.sender_workers }; delete next[id]; patch({ sender_workers: next }); }}>移除</button></li>)}</ul>
+          {!!data.identities?.length && <div className="mt-3 text-sm"><p className="font-semibold">已核對的自我介紹</p>{data.identities.map(item => <p className="break-all" key={item.sender_id}>{item.sender_id} → {item.worker_name}</p>)}</div>}
+          <p className="mt-4 text-sm font-semibold">已確認夫妻</p>
+          {(settings.households || []).map(pair => <p className="mt-1 text-sm" key={pair.join("/")}>{pair.join(" ／ ")}</p>)}
+          <p className="mt-4 text-sm font-semibold">已確認姓名別名</p>
+          {Object.entries(settings.worker_aliases || {}).map(([alias, name]) => <p className="mt-1 text-sm" key={alias}>{alias} → {name}</p>)}
         </details>
         <div className="mt-5 flex flex-wrap gap-3"><button className={button} disabled={busy || !dirty} onClick={() => void save()}>儲存設定</button><button className={button} disabled={busy || dirty || !settings.enabled} onClick={() => void action(() => call("tick", "POST", {}), "已要求處理待辦，進度會自動更新")}>處理待辦</button>{dirty && <span className="self-center text-sm text-amber-800">有尚未儲存的設定</span>}</div>
       </section>

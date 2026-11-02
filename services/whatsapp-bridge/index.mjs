@@ -1,10 +1,11 @@
 import http from "node:http";
-import { timingSafeEqual, createHash } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { Durable } from "./durable.mjs";
 import { senderId } from "./sender.mjs";
 import { registeredMessage } from "./outgoing.mjs";
+import { messageVersion } from "./message-version.mjs";
 
 const secret = process.env.SUNDAY_ASSISTANT_SECRET;
 const stateDir = resolve(process.env.SUNDAY_WHATSAPP_STATE_DIR || "./.state");
@@ -46,10 +47,10 @@ async function capture(message, edited = false, initialSync = false) {
   if (message.hasQuotedMsg) {
     try { quoted = (await message.getQuotedMessage()).id._serialized; } catch { /* context remains optional */ }
   }
-  const id = message.id._serialized + ":v:" + createHash("sha256").update(JSON.stringify([message.body || "", message.type])).digest("hex").slice(0, 16);
-  journal.enqueue({ message_id: id, group_id: group,
+  const version = messageVersion(message, edited);
+  journal.enqueue({ message_id: version.id, group_id: group,
     sender_id: senderId(message, client.info.wid._serialized),
-    sent_at: new Date(message.timestamp * 1000).toISOString(), text: message.body || "",
+    sent_at: version.sent_at, source_sent_at: version.source_sent_at, unverified_edit: version.unverified_edit, text: message.body || "",
     source_id: message.id._serialized, quoted_message_id: quoted, unsupported_media: message.type !== "chat", initial_sync: initialSync });
 }
 

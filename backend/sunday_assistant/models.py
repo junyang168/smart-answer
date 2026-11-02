@@ -22,8 +22,10 @@ class Settings(BaseModel):
     reminders_enabled: bool = False
     friday_hour: int = Field(default=17, ge=0, le=23)
     friday_minute: int = Field(default=0, ge=0, le=59)
-    # WhatsApp author IDs -> exact names in the existing worker list, including spouses.
+    # WhatsApp author IDs -> self. Legacy multiple names are household hints only.
     sender_workers: dict[str, list[str]] = Field(default_factory=dict)
+    households: list[list[str]] = Field(default_factory=list, max_length=200)
+    worker_aliases: dict[str, str] = Field(default_factory=dict)
     # Retained for old settings files; collection is authorized by selected group.
     trusted_senders: list[str] = Field(default_factory=list)
 
@@ -37,6 +39,13 @@ class Settings(BaseModel):
             raise ValueError("兩種資料需指定不同的群")
         if self.enabled and not (self.availability_group and self.service_group):
             raise ValueError("請先指定兩個群")
+        members = []
+        for pair in self.households:
+            if len(pair) != 2 or not all(name.strip() for name in pair) or pair[0] == pair[1]:
+                raise ValueError("夫妻對應需列出兩位不同同工")
+            members.extend(pair)
+        if len(set(members)) != len(members):
+            raise ValueError("同一位同工不可同時出現在不同夫妻對應中")
         return self
 
 
@@ -45,6 +54,8 @@ class ChatMessage(BaseModel):
     group_id: str = Field(min_length=1, max_length=160)
     sender_id: str = Field(min_length=1, max_length=160)
     sent_at: datetime
+    source_sent_at: datetime | None = None
+    unverified_edit: bool = False
     text: str = Field(default="", max_length=20000)
     quoted_message_id: str | None = Field(default=None, max_length=240)
     source_id: str | None = Field(default=None, max_length=240)
@@ -56,6 +67,8 @@ class ChatMessage(BaseModel):
     def timezone_required(self):
         if self.sent_at.tzinfo is None:
             raise ValueError("消息時間必須包含時區")
+        if self.source_sent_at is not None and self.source_sent_at.tzinfo is None:
+            raise ValueError("原消息時間必須包含時區")
         return self
 
 
@@ -97,6 +110,7 @@ class AbsenceChange(BaseModel):
     operation: Literal["add", "remove"] = "add"
     evidence: str = Field(min_length=1)
     context_message_id: str | None = Field(default=None, max_length=240)
+    include_household: bool = False
 
     @model_validator(mode="after")
     def ordered(self):

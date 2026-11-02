@@ -33,7 +33,6 @@ class Store:
                 CREATE TABLE IF NOT EXISTS proposals (
                     id INTEGER PRIMARY KEY, message_id TEXT NOT NULL, payload TEXT NOT NULL,
                     status TEXT NOT NULL, error TEXT, updated_at TEXT NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS proposal_message ON proposals(message_id);
                 CREATE TABLE IF NOT EXISTS ownership (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL, sent_at TEXT NOT NULL, message_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS outbox (
@@ -44,7 +43,15 @@ class Store:
                     group_id TEXT NOT NULL, sender_id TEXT NOT NULL,
                     history TEXT NOT NULL, questions TEXT NOT NULL,
                     status TEXT NOT NULL, resolved_by TEXT, updated_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS identities (
+                    sender_id TEXT PRIMARY KEY, worker_name TEXT NOT NULL,
+                    evidence_message_id TEXT NOT NULL, updated_at TEXT NOT NULL);
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(proposals)")}
+            if "action_key" not in columns:
+                db.execute("ALTER TABLE proposals ADD COLUMN action_key TEXT NOT NULL DEFAULT ''")
+            db.execute("DROP INDEX IF EXISTS proposal_message")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS proposal_action ON proposals(message_id,action_key)")
         os.chmod(self.path, 0o600)
 
     @contextmanager
@@ -75,6 +82,15 @@ class Store:
 
     def settings(self):
         return Settings.model_validate(self.get("settings", {}))
+
+    def restart_execution(self, message_id):
+        """Explicit operator retries start a new trace; crash recovery resumes it."""
+        key = "graph_revision:" + message_id
+        self.put(key, self.get(key, 0) + 1)
+
+    def identities(self):
+        with self.db() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM identities ORDER BY updated_at DESC")]
 
     def receive(self, message):
         settings = self.settings()

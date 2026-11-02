@@ -177,3 +177,23 @@ def test_dismissing_pending_dialogue_closes_history_and_cancels_unsent_question(
     with agent.store.db() as db:
         assert db.execute("SELECT status FROM clarifications WHERE id=?", (dialogue_id,)).fetchone()[0] == "dismissed"
         assert db.execute("SELECT status FROM outbox WHERE key=?", (f"clarify:{dialogue_id}:{current}",)).fetchone()[0] == "cancelled"
+
+
+def test_restart_recovers_second_worker_write_failure_without_early_success(agent):
+    original = agent.repository.update_sunday_worker
+    fail_once = {"pending": True}
+    def update(name, worker):
+        if name == "李芳" and fail_once["pending"]:
+            fail_once["pending"] = False
+            raise OSError("second worker write unavailable")
+        original(name, worker)
+    agent.repository.update_sunday_worker = update
+    text = "王明和李芳11月15日至29日不能服事"
+    receive(agent, {"absence_changes": absence(evidence=text)}, group="111@g.us", text=text)
+    assert not agent.bridge.sent
+    assert agent.store.proposals()[0]["status"] == "applying"
+    restarted = Assistant(Store(agent.store.root), agent.repository, bridge=agent.bridge)
+    restarted.tick(datetime(2026, 11, 3, 17, tzinfo=timezone.utc))
+    assert all(not agent.repository.workers[name].is_available_on("2026-11-22") for name in ["王明", "李芳"])
+    assert restarted.store.messages()[0]["status"] == "done"
+    assert len(agent.bridge.sent) == 1

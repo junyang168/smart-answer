@@ -52,7 +52,7 @@ def state():
             "proposals": agent.store.proposals(), "outbox": agent.store.outbox(),
             "worker": worker, "bridge": bridge,
             "conflicts": agent.conflicts(), "sunday": day, "missing": agent.missing(day),
-            "workers": list(agent.worker_map())}
+            "workers": list(agent.worker_map()), "identities": agent.store.identities()}
 
 
 @router.put("/settings")
@@ -61,6 +61,10 @@ def settings(payload: Settings):
     names = set(agent.worker_map())
     if any(name not in names for values in payload.sender_workers.values() for name in values):
         raise HTTPException(422, "發送人對應的姓名必須存在於同工名單")
+    if any(name not in names for pair in payload.households for name in pair):
+        raise HTTPException(422, "夫妻對應的姓名必須存在於同工名單")
+    if any(target not in names or (alias in names and alias != target) for alias, target in payload.worker_aliases.items()):
+        raise HTTPException(422, "姓名別名需對應現有同工，不能改指向另一位現有同工")
     agent.store.put("settings", payload.model_dump())
     return payload
 
@@ -127,6 +131,7 @@ def decide(proposal_id: int, payload: Decision):
             status = "dismissed"
         else:
             status = "queued"
+            agent.store.restart_execution(row["message_id"])
             with agent.store.db() as db:
                 db.execute("UPDATE clarifications SET status='dismissed',updated_at=? WHERE proposal_id=?", (now_text(), proposal_id))
                 db.execute("DELETE FROM proposals WHERE id=?", (proposal_id,))
@@ -144,6 +149,7 @@ def retry(message_id: str):
             raise HTTPException(404, "找不到消息")
         if row[0] != "error":
             raise HTTPException(409, "只有失敗消息需要重試")
+        agent.store.restart_execution(message_id)
         db.execute("UPDATE messages SET status='queued',error=NULL WHERE id=?", (message_id,))
     return {"status": "queued"}
 
