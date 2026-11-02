@@ -87,6 +87,24 @@ def load(manifest, root, *, store=None):
     return plan, jobs
 
 
+def worker_jobs(manifest, root, *, store=None):
+    """Authenticate refill membership without replacing the coordinator plan."""
+    manifest, root = Path(manifest).resolve(), Path(root).resolve()
+    original = json.loads((root / 'plan.json').read_text())['manifest']
+    check_binding(original)
+    supplied = binding(manifest)
+    if supplied == original:
+        plan_root = root
+    else:
+        admitted = [json.loads(p.read_text()) for p in
+                    sorted((root / 'dispatch-inputs').glob('*.json'))]
+        if supplied not in admitted:
+            raise ValueError('worker manifest was not admitted by this coordinator')
+        # append_manifest freezes this per-input plan before dispatching.
+        plan_root = manifest.parent / 'batch'
+    return load(manifest, plan_root, store=store)
+
+
 def worker(manifest, root, key):
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline.cvp_sql_actions import execute_claim_management
@@ -111,7 +129,7 @@ def worker(manifest, root, key):
             except BlockingIOError:
                 continue
             raise ValueError('worker inherited an unlocked descriptor')
-    _, jobs = load(manifest, root)
+    _, jobs = worker_jobs(manifest, root)
     request, action_root = jobs[key]
     store = PostgresKnowledgeStore()
     ports = ProductionPorts(store)
