@@ -682,7 +682,7 @@ def fragment_binding_diagnostics(response, materials):
     return invalid
 
 
-def rejected_model_input(value, parent, role, *, error):
+def rejected_model_input(value, parent, role, *, error, historical_validation=None):
     """Authenticate and reproduce a supported rejection; never approve its content."""
     if not isinstance(error,str) or not error or role not in {'gpt','opus'}:
         raise ValueError('exact returned validation rejection and role required')
@@ -698,7 +698,13 @@ def rejected_model_input(value, parent, role, *, error):
         raise ValueError('rejected citation reservation drift')
     candidate = cm.Candidate.model_validate(value['candidate']) if role == 'opus' else None
     packet = cm.model_packet(materials) if role == 'gpt' else claim_management_review_packet(materials,candidate)
-    raw = validate_claim_stage(root,role,policy,packet)
+    if historical_validation is None:
+        raw = validate_claim_stage(root,role,policy,packet)
+    else:
+        from backend.pipeline.claim_historical_stage import verify
+        raw = verify(materials,root,role,historical_validation)
+        if raw['request_payload_sha256'] != sha256_json(packet):
+            raise ValueError('historical rejected-input semantic packet drift')
     if slot.get('rejection') != {'response_state':'returned_rejected','raw':binding(root/(role+'.raw.json')),
             'detail':error,'accepted':False,'automatic_retry':False}:
         raise ValueError('rejected citation must retain its authenticated rejection')
@@ -914,7 +920,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         return value[marker]
 
 
-def consumed_rejected_citations(previous,key,slot):
+def consumed_rejected_citations(previous,key,slot, *, historical_validation=None, return_details=False):
     """Count any authenticated source-bound validation rejection, not just quotes."""
     entries = [e for e in previous['original_goal'].get('unaccepted_model_inputs',[]) if e['round_id']+':'+e['role']==key]
     error=slot.get('rejection',{}).get('detail')
@@ -925,7 +931,7 @@ def consumed_rejected_citations(previous,key,slot):
     root = Path(previous['execution_root'])/slot['round_id']
     materials = body(read(root/'materials.json'))
     value = {'materials':materials,'candidate':body(read(root/'candidate.json')) if slot['role']=='opus' else None}
-    observed = rejected_model_input(value,previous,slot['role'],error=error)
+    observed = rejected_model_input(value,previous,slot['role'],error=error,historical_validation=historical_validation)
     # Old saved recovery inputs keep their exact original shape. New fragment
     # diagnostics are reproduced only when that projection was actually saved.
     if entries and 'invalid_fragment_bindings' in entries[0]:
@@ -933,7 +939,7 @@ def consumed_rejected_citations(previous,key,slot):
             raise ValueError('fragment diagnostics belong only to a returned fragment rejection')
         observed['invalid_fragment_bindings']=fragment_binding_diagnostics(observed['response'],materials)
     if entries and observed!=entries[0]:raise ValueError('rejected citation input drift')
-    return True
+    return observed if return_details else True
 
 
 def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):

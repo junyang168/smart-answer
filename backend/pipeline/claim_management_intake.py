@@ -183,7 +183,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 if key in granted or col not in FIELDS or (col == 'claims' and oid not in members):
                     continue
                 state = before[key]
-                if state['retired'] or (state['payload'].get('review_status') in cm.HELD and not (col=='claims' and oid==cid and cid in sampling_candidates)):
+                if state['retired'] or (state['payload'].get('review_status') in cm.HELD and not (col=='claims' and oid in members and oid in sampling_candidates)):
                     continue
                 if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
                     continue
@@ -192,6 +192,17 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 break
             granted.update(p.key for p in added)
             request.permissions.extend(added)
+        # Claim creation may answer a Question already read as shared context.
+        # Match the existing creation gate, with link-only authority outside
+        # target-owned writable Questions; never promote reference Claims.
+        for key in cm.unlinkable_questions(request, before):
+            state = before[key]
+            if state['payload'].get('review_status') in cm.HELD:
+                raise ValueError('Claim creation needs protected Question disposition: ' + key)
+            if cm.own_source_ids(state['payload'], payloads) != own:
+                raise ValueError('Claim creation Question must belong to the target own source: ' + key)
+            request.permissions.append(cm.source.Permission(collection='questions',
+                object_id=key.split('/', 1)[1], fields=['answer_claim_ids']))
         authorization = {'schema_version': cm.VERSION, 'authorized_by': 'owner',
             'authorization_quote': instruction, 'human_content_approval': False,
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),

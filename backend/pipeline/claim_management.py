@@ -402,7 +402,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_historical_stage.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -1691,6 +1691,10 @@ def continuation_budget(previous, request, policy):
     proposal_recovery = authority.get('unaccepted_proposal_recovery', {})
     if not isinstance(proposal_recovery,dict):
         raise ValueError('unaccepted proposal recovery must bind exact returned calls')
+    historical_stages = authority.get('historical_rejected_stages', {})
+    if not isinstance(historical_stages, dict):
+        raise ValueError('historical rejected stages require exact bound call proofs')
+    historical_inputs = {}
     unaccepted_proposals = {}
     no_progress_returns = {}
     root = Path(previous['execution_root'])
@@ -1724,6 +1728,13 @@ def continuation_budget(previous, request, policy):
                 spent[slot['role']] += 1
                 continue
         from backend.pipeline.claim_review_recovery import consumed_invalid_review, consumed_rejected_citations
+        if key in historical_stages:
+            entry = consumed_rejected_citations(previous,key,slot,
+                historical_validation=historical_stages[key],return_details=True)
+            if not entry:raise ValueError('historical stage is not an authenticated returned rejection')
+            historical_inputs[key] = entry
+            spent[slot['role']] += 1
+            continue
         if consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot):
             spent[slot['role']] += 1
             continue
@@ -1775,6 +1786,12 @@ def continuation_budget(previous, request, policy):
         raise ValueError('unaccepted recovery contains an unbound or already recorded call')
     if set(proposal_recovery) != set(unaccepted_proposals):
         raise ValueError('unaccepted proposal recovery contains an unbound or already recorded call')
+    if set(historical_stages) != set(historical_inputs):
+        raise ValueError('historical rejected-stage proof names an unconsumed call')
+    continued_goal = deepcopy(previous['original_goal'])
+    for entry in historical_inputs.values():
+        if entry not in continued_goal.get('unaccepted_model_inputs', []):
+            continued_goal.setdefault('unaccepted_model_inputs', []).append(entry)
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if output_limit and (len(output_failures) != 1 or spent['gpt'] or spent['opus'] != 1
             or previous.get('findings') or any(previous['revision_rounds'].values())):
@@ -1806,7 +1823,8 @@ def continuation_budget(previous, request, policy):
         **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),
         **({'source_support_creation':True} if support_creation else {}),
         **({'related_owner_target_extension':True} if target_extension else {}),
-        'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
+        'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':continued_goal,
+        **({'historical_rejected_stages':historical_stages} if historical_stages else {}),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         **({'predecessor_created_keys':deepcopy(previous['created_keys'])} if read_only_refresh and previous.get('created_keys') else {}),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
