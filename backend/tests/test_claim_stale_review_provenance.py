@@ -141,7 +141,7 @@ def test_one_engineering_pair_is_bound_to_the_fixed_defect_and_history(claims,fa
         original_auth=json.loads(cm.source.verify_file(request.authorization).read_text())
         original_auth.update(authority)
         original_auth['owner_call_extension']={'predecessor_action_id':request.action_id,'prior_metadata_sha256':cm.sha256_json(previous),
-            'budget':policy.budget.model_dump(mode='json'),'authorization_quote':'工程修复后大模型调动应该自动增加一次','basis':'engineering_repair',
+            'budget':policy.budget.model_dump(mode='json'),'authorization_quote':'工程修复后大模型调动应该自动增加一次','basis':'remaining_findings',
             'current_objects_sha256':cm.sha256_json(before),'related_action_metadata_sha256':{}}
         successor.authorization=cm.source.FileBinding.model_validate(intake.immutable(root/'engineering-authority.json',original_auth))
         value=cm.continuation_budget(previous,successor,policy)

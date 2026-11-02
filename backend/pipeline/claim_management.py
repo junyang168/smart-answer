@@ -1666,8 +1666,8 @@ def continuation_budget(previous, request, policy):
             or output_limit and previous['result'].get('reason') == 'model_failed'
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
-            or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
-            or extension_basis == 'engineering_repair' and engineering_repair is not None
+            or extension_basis == 'remaining_findings' and bool(previous['findings'])
+                and (previous['result'].get('reason') == 'budget_exhausted' or engineering_repair is not None)
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
                 and bool(previous['findings'])
@@ -1803,7 +1803,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('historical rejected-stage proof names an unconsumed call')
     continued_goal = deepcopy(previous['original_goal'])
     if engineering_repair:
-        if extension_basis!='engineering_repair':raise ValueError('stale AI repair requires explicit engineering budget basis')
+        if extension_basis!='remaining_findings':raise ValueError('stale AI repair requires the existing bounded findings continuation')
         continued_goal.setdefault('engineering_repair_defects',[]).append(engineering_repair['defect'])
     for entry in historical_inputs.values():
         if entry not in continued_goal.get('unaccepted_model_inputs', []):
