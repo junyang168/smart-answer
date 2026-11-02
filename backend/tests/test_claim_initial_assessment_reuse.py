@@ -159,6 +159,43 @@ def test_initial_passes_are_references_but_do_not_complete_the_pending_operation
             assert store.claim_management_qualification(key.split('/', 1)[1])['ready']
 
 
+@pytest.mark.parametrize('defect', [None, 'fork', 'cycle', 'scope', 'proof'])
+def test_recovery_chain_keeps_original_passes_and_refuses_foreign_history(interrupted_unit, monkeypatch, defect):
+    store, original, middle, output, root, initial, _, _ = interrupted_unit
+    path = Path(middle.authorization.path)
+    authority = json.loads(path.read_text())
+    authority.pop('reuse_initial_review_round')
+    authority['reuse_initial_claim_assessments'] = True
+    path.write_text(json.dumps(authority))
+    middle.authorization = cm.source.FileBinding.model_validate(binding(path))
+    current = middle.model_copy(deep=True)
+    current.action_id += '-next'; current.predecessor_action_id = middle.action_id
+    direction = deepcopy(authority)
+    direction['request'] = current.model_dump(mode='json', exclude={'authorization', 'policy'})
+    current_file = path.with_name('next-authority.json'); current_file.write_text(json.dumps(direction))
+    current.authorization = cm.source.FileBinding.model_validate(binding(current_file))
+    parent = {'request': middle.model_dump(mode='json'), 'call_reservations': {}, 'continued_by': None}
+    if defect == 'fork': parent['continued_by'] = 'CMA-other'
+    elif defect == 'cycle': parent['request']['predecessor_action_id'] = middle.action_id
+    elif defect == 'scope': parent['request']['target_keys'] = ['claims/foreign']
+    get = store.get_cvp_group
+    monkeypatch.setattr(store, 'get_cvp_group', lambda rid: parent if rid == 'CMA-'+cm.sha256_json(middle.action_id) else get(rid))
+    if defect in {'fork', 'cycle', 'scope'}:
+        with pytest.raises(ValueError): evidence.freeze_initial_review_reuse(store, current)
+        return
+    proof = evidence.freeze_initial_review_reuse(store, current)
+    assert proof['review_action_id'] == original.action_id and len(proof['predecessor_authorizations']) == 1
+    old = get(next(iter(get('CMA-'+cm.sha256_json(original.action_id))['latest_rounds'].values())))
+    materials = deepcopy(old['materials']); materials['unit_request'] = current.model_dump(mode='json')
+    materials['initial_assessment_reuse'] = proof
+    if defect == 'proof':
+        authority['request']['predecessor_action_id'] = 'foreign-action'
+        path.write_text(json.dumps(authority)); proof['predecessor_authorizations'] = [binding(path)]
+        with pytest.raises(ValueError): evidence.reused_assessments(materials, cm.Candidate.model_validate(old['candidate']))
+    else:
+        assert len(evidence.reused_assessments(materials, cm.Candidate.model_validate(old['candidate']))) == 8
+
+
 @pytest.mark.parametrize('change', ['claim', 'evidence', 'fragment', 'source', 'finding', 'raw'])
 def test_initial_reuse_refuses_changed_basis_new_objections_and_tampered_proof(interrupted_unit, change):
     store, _, request, _, root, initial, _, _ = interrupted_unit

@@ -23,15 +23,30 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
     direction = json.loads(cm.source.verify_file(request.authorization).read_text())
     rid = initial_round_id or direction.get('reuse_initial_review_round')
     origin = request.action_id if initial_round_id else request.predecessor_action_id
+    lineage = []
+    expected_child = request.action_id
     if rid is None:
         if direction.get('reuse_initial_claim_assessments') is not True:
             return None
-        eligible = []
-        for origin in (request.action_id, request.predecessor_action_id):
-            if not origin:
-                continue
+        eligible, visited = [], set()
+        origin = request.action_id
+        while origin:
+            if origin in visited:
+                raise ValueError('initial review continuation cycle')
+            visited.add(origin)
             parent = store.get_cvp_group('CMA-' + cm.sha256_json(origin))
-            for slot in (parent or {}).get('call_reservations', {}).values():
+            if not parent:
+                if origin != request.action_id:
+                    raise ValueError('initial review predecessor is missing')
+                origin = request.predecessor_action_id
+                continue
+            prior_request = cm.Request.model_validate(parent['request'])
+            if (prior_request.target_keys != request.target_keys
+                    or prior_request.source_bindings != request.source_bindings
+                    or prior_request.operation != 'Update'
+                    or parent.get('continued_by') not in {None, 'CMA-' + cm.sha256_json(expected_child)}):
+                raise ValueError('initial review continuation changed its exact source/targets or forked')
+            for slot in parent.get('call_reservations', {}).values():
                 if slot['role'] != 'opus' or slot['state'] != 'completed':
                     continue
                 prior = store.get_cvp_group(slot['round_id'])
@@ -40,6 +55,13 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
                     eligible.append(slot['round_id'])
             if eligible:
                 break
+            if origin != request.action_id:
+                authority = json.loads(cm.source.verify_file(prior_request.authorization).read_text())
+                if authority['request'] != prior_request.model_dump(mode='json', exclude={'authorization', 'policy'}):
+                    raise ValueError('initial review predecessor authority drift')
+                lineage.append(prior_request.authorization.model_dump(mode='json'))
+            expected_child = origin
+            origin = prior_request.predecessor_action_id
         if not eligible:
             return None
         if len(eligible) != 1:
@@ -49,7 +71,7 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
     old = store.get_cvp_group(rid)
     if (request.operation != 'Update' or not previous or not old or old.get('kind') != 'claim_management_round'
             or old.get('parent_run_id') != previous['run_id']
-            or previous.get('continued_by') not in {None, 'CMA-' + cm.sha256_json(request.action_id)}
+            or previous.get('continued_by') not in {None, 'CMA-' + cm.sha256_json(expected_child)}
             or previous['request']['target_keys'] != request.target_keys
             or previous['request']['source_bindings'] != request.model_dump(mode='json')['source_bindings']
             or old['materials']['round_number'] != 0 or old['materials']['roles'] != ['opus']
@@ -66,6 +88,8 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
              'round_id': rid, 'receipt': old['stage_results']['opus'],
              'materials': receipt['materials'], 'candidate': receipt['candidate'],
              'raw': binding(Path(receipt['materials']['path']).parent / 'opus.raw.json')}
+    if lineage:
+        proof['predecessor_authorizations'] = lineage
     material, candidate, _ = _initial_review(proof)
     if material != old['materials'] or candidate.model_dump(mode='json') != old['candidate']:
         raise ValueError('initial assessment reuse SQL and saved review disagree')
@@ -77,7 +101,7 @@ def _initial_review(proof):
     from backend.pipeline.source_reconciliation_runner import body, read
     from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_stage
     from backend.pipeline.claim_model_output import review as expand_review
-    if set(proof) != {'contract', 'review_action_id', 'round_id', 'receipt', 'materials', 'candidate', 'raw'} or proof['contract'] != INITIAL_REUSE:
+    if set(proof) - {'predecessor_authorizations'} != {'contract', 'review_action_id', 'round_id', 'receipt', 'materials', 'candidate', 'raw'} or proof['contract'] != INITIAL_REUSE:
         raise ValueError('invalid initial assessment reuse proof')
     for key in ('receipt', 'materials', 'candidate', 'raw'):
         check_binding(proof[key])
@@ -111,7 +135,20 @@ def reused_assessments(materials, candidate):
     from backend.pipeline.claim_direct_scope import scope
     old, _, (wire, review) = _initial_review(proof)
     request = cm.Request.model_validate(materials['unit_request'])
-    if (proof['review_action_id'] not in {request.action_id, request.predecessor_action_id}
+    origin = request.predecessor_action_id
+    visited = set()
+    for bound in proof.get('predecessor_authorizations', []):
+        authority = json.loads(cm.source.verify_file(cm.source.FileBinding.model_validate(bound)).read_text())
+        prior = authority.get('request', {})
+        if (not origin or origin in visited or prior.get('action_id') != origin
+                or prior.get('target_keys') != request.target_keys
+                or prior.get('source_bindings') != request.model_dump(mode='json')['source_bindings']
+                or prior.get('operation') != 'Update'):
+            raise ValueError('initial review continuation authority chain drift')
+        visited.add(origin)
+        origin = prior.get('predecessor_action_id')
+    allowed = {origin} if proof.get('predecessor_authorizations') else {request.action_id, request.predecessor_action_id}
+    if (proof['review_action_id'] not in allowed
             or request.target_keys != old['unit_request']['target_keys']
             or request.model_dump(mode='json')['source_bindings'] != old['unit_request']['source_bindings']
             or materials['sources'] != old['sources']):
