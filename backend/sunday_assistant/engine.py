@@ -229,10 +229,14 @@ class Assistant:
                 existing = services.get(change.date.isoformat())
                 title = proposed or (existing.model_dump(by_alias=True).get(target_field) if existing else None)
                 song = next((song for song in self.repository.list_sunday_songs() if song.title == title), None)
+                plan.setdefault("dependencies", []).append({"key": f"service:{change.date}:{target_field}", "date": str(change.date), "field": target_field, "before": existing.model_dump(by_alias=True).get(target_field) if existing else None})
                 try:
-                    if not song or not song.lyrics_markdown:
+                    if change.value is None:
+                        pass
+                    elif not song or not song.lyrics_markdown:
                         raise ValueError("請先確認詩歌及完整歌詞，再處理當週演唱說明")
-                    apply_song_notes(_split_lyrics_sections(song.lyrics_markdown), change.value)
+                    else:
+                        apply_song_notes(_split_lyrics_sections(song.lyrics_markdown), change.value)
                 except ValueError as exc:
                     plan['questions'].append(str(exc))
                     continue
@@ -252,6 +256,22 @@ class Assistant:
             before = existing.model_dump(by_alias=True).get(change.field) if existing else None
             plan["operations"].append({"key": key, "kind": "service", "date": day, "field": change.field,
                                        "before": before, "after": change.value, "evidence": change.evidence})
+        # Performance instructions belong to a specific song. A new song without
+        # new instructions resets the old instructions in the same guarded write.
+        for operation in list(plan["operations"]):
+            field = operation.get("field")
+            if field not in {"hymn", "responseHymn"} or operation["before"] == operation["after"]:
+                continue
+            notes_field = "hymnNotes" if field == "hymn" else "responseHymnNotes"
+            notes_key = f"service:{operation['date']}:{notes_field}"
+            if notes_key in seen:
+                continue
+            entry = services.get(operation["date"])
+            old_notes = entry.model_dump(by_alias=True).get(notes_field) if entry else None
+            if old_notes:
+                plan["operations"].append({"key": notes_key, "kind": "service", "date": operation["date"], "field": notes_field,
+                    "before": old_notes, "after": None, "evidence": operation["evidence"], "derived_from": operation["key"],
+                    "reason": "song_replacement_invalidates_old_performance_notes"})
         for change in result.absence_changes:
             if not any(change.evidence in source for source in sources):
                 raise ValueError("外出依據無法對回原消息")
@@ -343,6 +363,12 @@ class Assistant:
                 raise ValueError("此群內提問已由另一則回答處理")
         with sunday_data_lock():
             workers, services = self.worker_map(), self.services()
+            for dependency in plan.get("dependencies", []):
+                entry = services.get(dependency["date"])
+                value = entry.model_dump(by_alias=True).get(dependency["field"]) if entry else None
+                allowed = [dependency["before"], *[op["after"] for op in plan["operations"] if op["key"] == dependency["key"]]]
+                if value not in allowed:
+                    raise ValueError("演唱說明所對應的詩歌已變更，請重新讀取，避免套用到另一首歌")
             # Validate every operation first. Applying a multi-date message is resumable.
             for op in plan["operations"]:
                 if op["kind"] == "service":
@@ -367,7 +393,8 @@ class Assistant:
                         r["operation"] == "add" for r in op["reports"])
                     automatic = self.store.get(f"auto_{'presider' if op.get('field') == 'presider' else 'worshipLeader'}:{op.get('date')}") if op.get('field') in {'presider', 'worshipLeader'} else None
                     replaces_automatic = automatic and automatic.get('status') in {'applied', 'applying'} and automatic.get('after') == current
-                    if not additive_absence and not replaces_automatic and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
+                    song_note_reset = op.get("reason") == "song_replacement_invalidates_old_performance_notes"
+                    if not additive_absence and not replaces_automatic and not song_note_reset and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
                         raise ValueError("此欄位已有人工資料，請核對後批准")
             with self.store.db() as db:
                 db.execute("UPDATE proposals SET status='applying',updated_at=? WHERE id=?", (now_text(), proposal_id))
@@ -413,7 +440,7 @@ class Assistant:
                     db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'queued',?)",
                                ("ack:" + msg.message_id + (":" + plan["action_key"] if plan.get("action_key") else ""), msg.group_id, text, now_text()))
                 elif plan.get("clarification_id") and not msg.initial_sync:
-                    lines = [f"{op['date']} · {SERVICE_FIELDS[op['field']]}：{op['after']}" for op in plan["operations"]]
+                    lines = [f"{op['date']} · {SERVICE_FIELDS[op['field']]}：{op['after'] if op['after'] is not None else '已清除'}" for op in plan["operations"]]
                     db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'queued',?)",
                                ("confirmed:" + msg.message_id + (":" + plan["action_key"] if plan.get("action_key") else ""), msg.group_id, "【主日資料回覆】收到，已更新：\n" + "\n".join(lines), now_text()))
                 if not plan.get("partial_action"):

@@ -130,7 +130,7 @@ class ChatMessage(BaseModel):
 class ServiceChange(BaseModel):
     date: date
     field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes"]
-    value: str | list[str] | float
+    value: str | list[str] | float | None
     evidence: str = Field(min_length=1)
 
     @field_validator("value", mode="before")
@@ -153,6 +153,10 @@ class ServiceChange(BaseModel):
         elif self.field == "scripture":
             if not isinstance(self.value, list) or not self.value or any(not x.strip() for x in self.value):
                 raise ValueError("讀經需列出完整經文範圍")
+        elif self.field in {"hymnNotes", "responseHymnNotes"}:
+            if self.value is not None and not isinstance(self.value, str):
+                raise ValueError("演唱說明需為文字或空值")
+            self.value = self.value.strip() or None if isinstance(self.value, str) else None
         elif not isinstance(self.value, str) or not self.value.strip():
             raise ValueError("欄位不可為空")
         return self
