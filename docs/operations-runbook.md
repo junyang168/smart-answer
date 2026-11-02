@@ -136,8 +136,8 @@ manuscripts, claims and publication files remain outside that root. Beta
 publication stays private at `/admin/transcript-beta/S201011/published`.
 The beta API is not mounted without the private data-root setting.
 The editor, API and publication reader all enforce the same beta-role restriction,
-and beta responses are private/no-store. The original port-8000 service cannot
-write these beta files through its legacy item routes.
+and beta responses are private/no-store. The original port-8000 service was
+retired in #591; compatibility API URLs go through the modern Next.js proxy.
 
 Use `scripts/activate-transcript-beta.py --source-root <local-review-data>
 --production-root <production-data> --target-root <private-beta-data> --item S201011` with `backend/.venv/bin/python`
@@ -169,8 +169,9 @@ Never set `TRANSCRIPT_REVIEW_DEV_ACTOR` in production. A deployment installs cod
 it does not register, adopt or overwrite a transcript. Registration and adoption
 remain explicit, SHA-guarded operations; an existing manually edited or published
 transcript must not be replaced by a generated candidate. Before activating a
-shared production transcript, reconcile every legacy writer, including the
-nginx `/sc_api/` service on port 8000, with the migrated-document guards.
+shared production transcript, reconcile every writer with the migrated-document
+guards. Legacy nginx `/sc_api/` URLs now pass through the modern Next.js proxy;
+the former port-8000 writer was retired in #591.
 
 ### Python
 
@@ -183,7 +184,7 @@ rejected.
 
 ```
 /usr/bin/python3           3.9.6
-/usr/local/bin/python3     3.12.8   ← the test suite runs on this
+/usr/local/bin/python3     3.12.8   ← separate python.org install, not our test environment
 /opt/homebrew/bin/python3  3.13.2   ← production runs this
 ```
 
@@ -191,9 +192,44 @@ A deploy from a shell with `/usr/bin` first built a 3.9.6 venv. The build
 succeeded; the service then died at import on `MicroSermon | None`, which 3.9
 cannot evaluate. Nothing before the health check had any reason to object.
 
-Note that the test suite and production are still on different minor versions.
-Running the suite on 3.13 would settle it; until then, a green test run is not
-proof for production.
+Run tests with `backend/.venv`, the pinned 3.13 environment. Root `.venv` is a
+compatibility symlink to it; the separate 3.11 development environment was
+removed in #591. A bare `python3` still does not select the test interpreter.
+
+### Retiring the pre-release script editor
+
+The old `script_editor_api:app` on port 8000 is separate from the release-bound
+backend on 8555. Modern Next.js `/api/sc_api/…` requests already use
+`SC_API_SERVICE_URL`, falling back to `FULL_ARTICLE_SERVICE_URL` (8555 in
+production). Retiring the old process must preserve the older direct nginx
+URLs before disabling its LaunchAgent or uninstalling its Python interpreter.
+
+`config/nginx/retired-script-editor-locations.conf` provides that compatibility:
+
+- `/sc_api/…` proxies through Next.js `/api/sc_api/…`, retaining the current
+  session, origin and signed-actor checks rather than exposing the backend
+  directly;
+- `/public/<item>` redirects to `/resources/sermons/<item>` and `/public`
+  redirects to the sermon catalog;
+- the obsolete `/public/sitemap` returns 410 (retired);
+- `/static/…` serves the preserved legacy assets directly, without Python.
+
+Install this fragment under `/opt/homebrew/etc/nginx/snippets/` and include it
+in the production HTTP and HTTPS server blocks, replacing their three old
+port-8000 locations. Keep copies and hashes of the original server configs.
+Test a separate unprivileged nginx preview with the new fragment first: compare
+the API responses to the modern proxy, check redirects/410, and compare static
+asset bytes. Validate the entire configuration before reloading it.
+
+The production nginx master runs as root. Editing its user-owned config is not
+enough to apply a change: `nginx -t` and `nginx -s reload` require administrator
+authentication for its logs, PID file and master process. Until reload and live
+checks pass, leave the old 8000 process available. Then disable and unload
+`gui/501/script_editor.service`, archive its LaunchAgent plist outside
+`~/Library/LaunchAgents`, verify port 8000 and Python 3.11 processes are gone,
+and remove the retired virtual environment and Homebrew `python@3.11`. Keep
+the old API source, published manuscripts and shared data. A temporary 3.13
+replacement for the retired app is not required.
 
 ---
 
@@ -236,7 +272,7 @@ that way. `.github/pull_request_template.md` carries the rule.
 | — | Fellowship email reminder, daily schedule check at 10:00 | LaunchAgent `com.smartanswer.fellowshipreminder` | no |
 | — | Reference commentary scan inbox, every 3 minutes | LaunchAgent `com.smart_answer.referencecommentaryinbox` | no |
 | 3003 | Next.js, older build | not in any deploy path (#78) | via nginx 8888 |
-| 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
+| 8000 | retired in #591; no listener | LaunchAgent disabled and archived | compatibility URLs handled by nginx/Next.js |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
 
 Cloudflare Tunnel publishes `https://dallas-hlc.org` (and
