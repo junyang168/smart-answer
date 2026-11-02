@@ -65,6 +65,9 @@ export default function SundayAssistantPage() {
   const dirtyRef = useRef(false);
   const [sender, setSender] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
+  const [alias, setAlias] = useState("");
+  const [aliasWorker, setAliasWorker] = useState("");
+  const [spouses, setSpouses] = useState<[string, string]>(["", ""]);
   const load = useCallback(async () => {
     try { const next = await call<Data>("state"); setData(next); setLoadError(""); if (!dirtyRef.current) setSettings(next.settings); }
     catch (e) { setLoadError(e instanceof Error ? e.message : "無法載入"); }
@@ -123,9 +126,19 @@ export default function SundayAssistantPage() {
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(settings.sender_workers).map(([id, names]) => <li key={id} className="break-all">{id} → {names.join("、")} <button className="text-red-700 underline" onClick={() => { const next = { ...settings.sender_workers }; delete next[id]; patch({ sender_workers: next }); }}>移除</button></li>)}</ul>
           {!!data.identities?.length && <div className="mt-3 text-sm"><p className="font-semibold">已核對的自我介紹</p>{data.identities.map(item => <p className="break-all" key={item.sender_id}>{item.sender_id} → {item.worker_name}</p>)}</div>}
           <p className="mt-4 text-sm font-semibold">已確認夫妻</p>
-          {(settings.households || []).map(pair => <p className="mt-1 text-sm" key={pair.join("/")}>{pair.join(" ／ ")}</p>)}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {([0, 1] as const).map(index => <select aria-label={index === 0 ? "夫妻第一位" : "夫妻第二位"} className={`${input} sm:w-auto`} key={index} value={spouses[index]} onChange={e => setSpouses(old => index === 0 ? [e.target.value, old[1]] : [old[0], e.target.value])}><option value="">選擇同工</option>{data.workers.map(name => <option key={name}>{name}</option>)}</select>)}
+            <button className={button} disabled={!spouses[0] || !spouses[1] || spouses[0] === spouses[1] || (settings.households || []).some(pair => pair.some(name => spouses.includes(name)))} onClick={() => { patch({ households: [...(settings.households || []), spouses] }); setSpouses(["", ""]); }}>加入夫妻關係</button>
+          </div>
+          {(settings.households || []).map(pair => <p className="mt-2 text-sm" key={pair.join("/")}>{pair.join(" ／ ")} <button aria-label={`移除夫妻關係 ${pair.join("、")}`} className="ml-2 text-red-700 underline" onClick={() => patch({ households: settings.households.filter(item => item !== pair) })}>移除</button></p>)}
           <p className="mt-4 text-sm font-semibold">已確認姓名別名</p>
-          {Object.entries(settings.worker_aliases || {}).map(([alias, name]) => <p className="mt-1 text-sm" key={alias}>{alias} → {name}</p>)}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input aria-label="姓名別名" className={`${input} sm:w-auto`} placeholder="WhatsApp 稱呼或英文名" value={alias} onChange={e => setAlias(e.target.value)} />
+            <select aria-label="別名對應同工" className={`${input} sm:w-auto`} value={aliasWorker} onChange={e => setAliasWorker(e.target.value)}><option value="">對應網站同工</option>{data.workers.map(name => <option key={name}>{name}</option>)}</select>
+            <button className={button} disabled={!alias.trim() || !aliasWorker} onClick={() => { patch({ worker_aliases: { ...(settings.worker_aliases || {}), [alias.trim()]: aliasWorker } }); setAlias(""); setAliasWorker(""); }}>加入或更新別名</button>
+          </div>
+          {Object.entries(settings.worker_aliases || {}).map(([alias, name]) => <p className="mt-2 text-sm" key={alias}>{alias} → {name} <button aria-label={`移除別名 ${alias}`} className="ml-2 text-red-700 underline" onClick={() => { const next = { ...settings.worker_aliases }; delete next[alias]; patch({ worker_aliases: next }); }}>移除</button></p>)}
+          <p className="mt-3 text-xs text-slate-500">修改後請按「儲存設定」。對應保存在網站後端，重新整理或重啟後仍保留；只識別登記對象，不建立登入帳號或授予權限。</p>
         </details>
         <div className="mt-5 flex flex-wrap gap-3"><button className={button} disabled={busy || !dirty} onClick={() => void save()}>儲存設定</button><button className={button} disabled={busy || dirty || !settings.enabled} onClick={() => void action(() => call("tick", "POST", {}), "已要求處理待辦，進度會自動更新")}>處理待辦</button>{dirty && <span className="self-center text-sm text-amber-800">有尚未儲存的設定</span>}</div>
       </section>

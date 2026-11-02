@@ -110,7 +110,7 @@ class Assistant:
         def present(spelling, text):
             needle, haystack = normalize(spelling).lower(), normalize(text).lower()
             if len(needle) == 1:
-                return bool(re.search(r"(?<![\w\u3400-\u9fff])" + re.escape(needle) + r"(?![\w\u3400-\u9fff])", haystack))
+                return bool(re.search(r"(?<![\w\u3400-\u9fff])" + re.escape(needle) + r"(?=$|[^\w\u3400-\u9fff]|[于於在和与與及]|[0-9])", haystack))
             return needle in haystack
         return any(present(spelling, text) for spelling in spellings for text in texts)
 

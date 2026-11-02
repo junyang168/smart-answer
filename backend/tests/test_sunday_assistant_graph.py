@@ -428,6 +428,9 @@ def test_single_character_alias_does_not_match_inside_unrelated_word(agent):
     agent.store.put('settings', settings.model_dump())
     assert agent.mentions_worker('王明', ['王：12月5日不在'])
     assert not agent.mentions_worker('王明', ['王子12月5日不在'])
+    assert agent.mentions_worker('王明', ['王於2027年7月3日至7月11日不在'])
+    assert agent.mentions_worker('王明', ['王在7月3日至11日不在'])
+    assert not agent.mentions_worker('王明', ['國王於7月3日不在'])
 
 
 @pytest.mark.parametrize('preview', [False, True])
@@ -454,3 +457,10 @@ def test_legacy_family_mapping_does_not_make_both_people_the_sender(agent):
     msg = incoming(agent, '我12月5日至17日不在。', group='111@g.us', id='ambiguous-legacy-self')
     plan = agent.build_plan(msg, Extraction(absence_changes=[{'worker': '李芳', 'start': '2026-12-05', 'end': '2026-12-17', 'evidence': msg.text}]))
     assert plan['questions']
+
+
+@pytest.mark.parametrize("aliases", [{"": "李芳"}, {" ": "李芳"}, {"Mary ": "李芳"}, {"Mary": ""}])
+def test_alias_settings_reject_empty_names(aliases):
+    from backend.sunday_assistant.models import Settings
+    with pytest.raises(ValueError, match="不可空白"):
+        Settings(worker_aliases=aliases)

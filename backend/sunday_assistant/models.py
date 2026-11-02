@@ -39,6 +39,8 @@ class Settings(BaseModel):
             raise ValueError("兩種資料需指定不同的群")
         if self.enabled and not (self.availability_group and self.service_group):
             raise ValueError("請先指定兩個群")
+        if any(not alias.strip() or alias != alias.strip() or not target.strip() for alias, target in self.worker_aliases.items()):
+            raise ValueError("姓名別名及對應同工不可空白，別名首尾不可有空格")
         members = []
         for pair in self.households:
             if len(pair) != 2 or not all(name.strip() for name in pair) or pair[0] == pair[1]:

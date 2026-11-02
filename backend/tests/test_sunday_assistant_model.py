@@ -160,3 +160,14 @@ def test_model_spouse_introduction_does_not_bind_sender_to_spouse(agent):
     assert not agent.sender_profile('unbound-husband')['self_worker']
     assert not agent.repository.workers['李芳'].is_available_on('2026-12-06')
     assert agent.repository.workers['王明'].is_available_on('2026-12-06')
+
+
+def test_model_single_character_operator_alias_with_chinese_date_connector(agent):
+    settings = agent.store.settings()
+    settings.worker_aliases = {'芳': '李芳'}
+    agent.store.put('settings', settings.model_dump())
+    event(agent, '另一項表單：芳於2027年8月7日至8月15日不在，這段時間不能安排服事。', group='111@g.us')
+    assert not agent.repository.workers['李芳'].is_available_on('2027-08-08')
+    assert agent.repository.workers['王明'].is_available_on('2027-08-08')
+    assert len(agent.bridge.sent) == 1
+    assert agent.bridge.sent[0][2].startswith('【請假登記回覆】')
