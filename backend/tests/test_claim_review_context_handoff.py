@@ -26,7 +26,7 @@ def original_pass(store, root):
     return rid
 
 
-def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52', own_issue=False, shared=False):
+def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太福音13:1-52', own_issue=False, shared=False, question=False):
     path = policy_file(root.parent)
     policy = cm.Policy.model_validate_json(path.read_text())
     policy.initial_candidate = 'proposal'
@@ -37,10 +37,11 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
                               groups=[['C']] if bounded else None, policy=path, store=store)
     _, jobs = batch.load(prepared['manifest']['path'], root/'peer'/'batch', store=store)
     request, execution = next(iter(jobs.values()))
-    if shared:
+    if shared or question:
         from backend.tests.test_claim_management_human_source_follow_up import authorize
         authority=json.loads(cm.source.verify_file(request.authorization).read_text())
-        request.permissions.append(cm.source.Permission(collection='evidence_steps',object_id='ED',fields=['produced_claim_ids']))
+        request.permissions.append(cm.source.Permission(collection='questions' if question else 'evidence_steps',
+            object_id='Q' if question else 'ED',fields=['answer_claim_ids'] if question else ['produced_claim_ids']))
         authorize(request,{k:v for k,v in authority.items() if k not in {'request','policy'}})
     def propose(packet):
         changes=[{'record_key':'claims/C',
@@ -50,6 +51,9 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
         if shared:
             changes.append({**changes[0],'record_key':'evidence_steps/ED',
                             'fields_json':json.dumps({'produced_claim_ids':['D','C']})})
+        if question:
+            changes.append({**changes[0],'record_key':'questions/Q',
+                            'fields_json':json.dumps({'answer_claim_ids':question if isinstance(question,list) else ['D','C']})})
         return {'changes':changes,
             'creations':[], 'retirements':[], 'findings':[], 'finding_resolutions':[]}
     def review(packet):
@@ -143,6 +147,37 @@ def test_fresh_target_can_join_its_original_pass_to_a_reviewed_neighbour_delta(c
 def test_additive_owner_guard_rejects_evidence_change_or_lost_owner(after):
     original={'produced_claim_ids':['D'],'statement':'same evidence','source_fragment_ids':['F']}
     assert not reuse.owner_extension(original,{**original,**after})
+
+
+def test_reviewed_answer_addition_preserves_old_full_approval_without_new_calls(claims):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'own-question','questions':[
+        {'question_id':'Q','text':'甲是斷言嗎？','question_type':'clarification',
+         'answer_state':'answered','answer_claim_ids':['D'],'source_fragment_ids':['FC']}]}))
+    old=original_pass(store,root)
+    peer,ports=update_neighbour(store,root,question=True)
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['D','C']
+    assert store.claim_management_qualification('D')['ready']
+    proof=reuse.admit(store,'D',old,peer_run_id=peer)
+    assert 'questions/Q' in proof['context_reviews']
+    assert ports.calls==['gpt','opus']
+    question=store.get_record_state('questions','Q')['payload']
+    store.apply_plan(store.plan_package({'package_id':'question-content-drift',
+        'questions':[{**question,'text':'改了問題本身。'}]}))
+    assert not store.claim_management_qualification('D')['ready']
+    with pytest.raises(ValueError):reuse.admit(store,'D',old,peer_run_id=peer)
+
+
+@pytest.mark.parametrize('after',[
+    {'answer_claim_ids':['C']}, {'answer_claim_ids':['D','C','C']},
+    {'answer_claim_ids':['D','C'],'text':'different question'},
+    {'answer_claim_ids':['D','C'],'source_fragment_ids':['foreign']},
+    {'answer_claim_ids':['D','C'],'answer_state':'unanswered'},
+])
+def test_answer_addition_cannot_hide_question_or_old_answer_changes(after):
+    original={'answer_claim_ids':['D'],'text':'same question',
+              'source_fragment_ids':['F'],'answer_state':'answered'}
+    assert not reuse.answer_extension(original,{**original,**after})
 
 
 def test_later_neighbour_review_replaces_flat_context_proof_without_replaying_original(claims):
@@ -270,3 +305,21 @@ def test_readonly_scope_does_not_resurrect_a_reviewed_retired_edge(claims):
     assert 'claims/D' not in selected['neighbour_claim_keys']
     with pytest.raises(ValueError):
         scope(request,rows)
+
+
+def test_an_unreviewed_new_answer_cannot_inherit_an_old_claim_approval(claims):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'question-with-unreviewed-answer',
+        'claims':[{'claim_id':'X','statement':'甲是假设。','claim_type':'exegesis',
+                   'occurrences':[{'source_id':'S','anchors':[]}],'evidence_step_ids':['EX']}],
+        'evidence_steps':[{'evidence_step_id':'EX','statement':'甲是假设。','produced_claim_ids':['X'],
+                          'source_fragment_ids':['FC'],'support_eligibility':'eligible_candidate',
+                          'speaker':'professor','stance':'asserted'}],
+        'questions':[{'question_id':'Q','text':'甲是斷言嗎？','question_type':'clarification',
+                      'answer_state':'answered','answer_claim_ids':['D'],'source_fragment_ids':['FC']}]}))
+    old=original_pass(store,root)
+    peer,ports=update_neighbour(store,root,question=['D','X'])
+    assert not store.claim_management_qualification('D')['ready']
+    with pytest.raises(ValueError,match='reviewed additive'):
+        reuse.admit(store,'D',old,peer_run_id=peer)
+    assert ports.calls==['gpt','opus']

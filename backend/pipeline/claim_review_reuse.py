@@ -56,14 +56,19 @@ def human_evidence_snapshot(cursor, source_ids, frozen, records):
     return current
 
 
-def owner_extension(before, after):
-    """Only additive consumers; the evidence and every old owner stay exact."""
-    ignored = {'revision', 'produced_claim_ids'}
+def owner_extension(before, after, *, field="produced_claim_ids"):
+    """Only additive Claim references; all other content stays exact."""
+    ignored = {'revision', field}
     if {k:v for k,v in before.items() if k not in ignored} != {k:v for k,v in after.items() if k not in ignored}:
         return set()
-    old, new = before.get('produced_claim_ids', []), after.get('produced_claim_ids', [])
+    old, new = before.get(field, []), after.get(field, [])
     added = set(new) - set(old)
     return added if added and len(set(new)) == len(new) and [v for v in new if v not in added] == old else set()
+
+
+def answer_extension(before, after):
+    """A reviewed additional answer cannot change the question or old answers."""
+    return owner_extension(before, after, field="answer_claim_ids")
 
 
 def build(store, claim_id, run_id, *, peer_run_id=None):
@@ -126,7 +131,8 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
         editorial = (record.startswith('source_documents/') and record.split('/', 1)[1] in sources
                      and changes <= {'source_file_sha256', 'editorial_structure_sha256', 'editorial_topology_sha256'})
         if (changes and not editorial) or a['retired'] != b['retired']:
-            extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb))
+            extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb)
+                         or record.startswith('questions/') and answer_extension(pa, pb))
             if (not peer_run_id or not (record in neighbours and record.startswith('claims/') or extension)
                     or a['retired'] or b['retired']):
                 raise ValueError('review reuse argument/context changed: ' + record)
@@ -254,7 +260,8 @@ def verify_context_reviews(store, cursor, proof):
     """Old full approval plus a current, role-scoped check of changed neighbours.
 
     Own Claim, evidence content, source and incident edges stay unchanged.
-    Additive Evidence consumers require the peer's explicit reciprocal review.
+    Additive Evidence consumers and Question answers require a full peer review
+    of each added Claim and the shared update, preserving the original role.
     This is not permission to promote a reference into a new full approval.
     One latest review per changed neighbour keeps the proof flat.
     """
@@ -263,11 +270,11 @@ def verify_context_reviews(store, cursor, proof):
     original = decoded_pins(proof['original_read_pins'])
     current = decoded_pins(proof['read_pins'])
     protected = {cm.source.split_key(k) for k in proof['protected_record_keys']}
-    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] != 'evidence_steps'):
+    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] not in {'evidence_steps', 'questions'}):
         raise ValueError('context reuse changed the original Claim or its own basis')
     changed = {cm.source.key(*k) for k in original if original[k] != current[k]}
     if not changed or changed != set(proof['context_reviews']) or any(
-            not k.startswith(('claims/', 'evidence_steps/')) or
+            not k.startswith(('claims/', 'evidence_steps/', 'questions/')) or
             k.startswith('claims/') and cm.source.split_key(k) in protected for k in changed):
         raise ValueError('context reuse permits only reviewed direct neighbour changes')
     key = 'claims/' + proof['claim_id']
@@ -313,14 +320,16 @@ def verify_context_reviews(store, cursor, proof):
         if saved != {'round_id': rid, 'approval': peer['reviewed']['evidence']['approval'], 'readback': readback}:
             raise ValueError('context reuse peer approval identity drift')
         extension = set()
-        if neighbour.startswith('evidence_steps/'):
+        if neighbour.startswith(('evidence_steps/', 'questions/')):
             old_receipt = json.loads(Path(proof['readback']['path']).read_text())
             old_payload = old_receipt['actual_records'][neighbour]['payload']
-            extension = owner_extension(old_payload, observed[cm.source.split_key(neighbour)]['payload'])
+            is_evidence = neighbour.startswith('evidence_steps/')
+            extension = (owner_extension if is_evidence else answer_extension)(
+                old_payload, observed[cm.source.split_key(neighbour)]['payload'])
             if (not extension or any('claims/' + cid not in selected['content_claim_keys'] or
-                    neighbour.split('/',1)[1] not in observed[('claims',cid)]['payload'].get('evidence_step_ids', [])
+                    is_evidence and neighbour.split('/',1)[1] not in observed[('claims',cid)]['payload'].get('evidence_step_ids', [])
                     for cid in extension)):
-                raise ValueError('context reuse changed Evidence beyond reviewed additive owners')
+                raise ValueError('context reuse changed shared content beyond reviewed additive Claims')
         if ((not extension and neighbour not in selected['content_claim_keys']) or neighbour not in writes
                 or key not in selected['neighbour_claim_keys']):
             raise ValueError('peer did not review the changed neighbour and original reference role')
@@ -330,7 +339,7 @@ def verify_context_reviews(store, cursor, proof):
         needed = {cm.source.key(*k) for k in shared} | {key, neighbour} | {'claims/' + cid for cid in extension}
         if (not needed <= approved or key not in retained
                 or any((cm.source.key(*k) not in retained or original[k] != fresh[k])
-                       and not (k[0] == 'evidence_steps' and cm.source.key(*k) in changed) for k in shared)
+                       and not (k[0] in {'evidence_steps', 'questions'} and cm.source.key(*k) in changed) for k in shared)
                 or fresh.get(cm.source.split_key(neighbour)) != current[cm.source.split_key(neighbour)]):
             raise ValueError('peer omitted or changed the retained original basis')
         # Even a context finding cannot silently negate the preserved Claim.
