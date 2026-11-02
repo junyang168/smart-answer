@@ -76,6 +76,21 @@ def test_dense_lyrics_fit_without_changing_lines_or_inserting_a_slide():
     assert len(deck.slides)==1
 
 
+def test_lyric_leading_remains_spacious_and_is_accounted_for_when_fitting(tmp_path):
+    deck,shape=frame(width=9,height=3)
+    lines=['第一行完整詩歌']*7
+    _populate_lyrics_text_frame(shape.text_frame,lines)
+    size=body_size(shape.text_frame)
+    assert 18<=size<30
+    assert layout.fits(shape.text_frame,lines,'DengXian',size)
+    assert not layout.fits(shape.text_frame,lines,'DengXian',size+1)
+    path=tmp_path/'spacious-lyrics.pptx';deck.save(path)
+    reopened=Presentation(path).slides[0].shapes[0].text_frame
+    assert [p.text for p in reopened.paragraphs]==lines
+    assert all(p.line_spacing==Pt(size*1.5) for p in reopened.paragraphs)
+    assert reopened.word_wrap is False
+
+
 def test_impossible_content_reports_overflow_before_erasing_template():
     deck,shape=frame(width=1,height=.2)
     original=shape.text_frame.text
