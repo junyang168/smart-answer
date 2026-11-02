@@ -11,6 +11,8 @@ from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from pptx.oxml.xmlchemy import OxmlElement
 
+from backend.ppt_text_layout import prepare_frame, format_paragraph, format_run
+
 _PLACEHOLDER_PATTERN = re.compile(r"\{([^{}]+)\}")
 
 
@@ -88,8 +90,6 @@ def _replace_in_text_frame(text_frame, replacements: Mapping[str, str]) -> None:
 
         for run in paragraph.runs:
             original = run.text
-            if original == "{hymn}":
-                pass
             updated = _replace(original, replacements)
             if updated != original:
                 run.text = updated
@@ -364,17 +364,6 @@ def _get_section_reader(sections: list[dict[str, object]], index: int) -> str:
     return ""
 
 
-def _get_section_reader(sections: list[dict[str, object]], index: int) -> str:
-    if index >= len(sections):
-        return ""
-    candidate = sections[index]
-    if isinstance(candidate, dict):
-        reader = candidate.get("reader")
-        if reader:
-            return str(reader)
-    return ""
-
-
 def _move_slide(presentation: Presentation, old_index: int, new_index: int) -> None:
     slide_id_list = presentation.slides._sldIdLst
     slide_ids = list(slide_id_list)
@@ -484,14 +473,6 @@ def _render_section(
                         _replace_in_text_frame(text_frame, {index_token: index_value})
                         content = _text_frame_content(text_frame)
                 content = _text_frame_content(text_frame)
-        elif style == "lyrics":
-            if isinstance(section, dict):
-                index_value = section.get("index")
-                index_token = section.get("index_token")
-                if index_value and index_token:
-                    token_str = "{" + index_token + "}"
-                    if token_str in content:
-                        _replace_in_text_frame(text_frame, {index_token: index_value})
 
 
 def _text_frame_content(text_frame) -> str:
@@ -512,51 +493,38 @@ def _iter_text_frames(shapes) -> Iterable:
 
 
 def _populate_lyrics_text_frame(text_frame, lines: list[str]) -> None:
-    text_frame.clear()
+    family, size = prepare_frame(text_frame, lines)
     for index, line in enumerate(lines):
         paragraph = text_frame.add_paragraph() if index else text_frame.paragraphs[0]
-        paragraph.text = ""
         paragraph.alignment = PP_ALIGN.CENTER
         _disable_paragraph_bullets(paragraph)
+        format_paragraph(paragraph, family, size)
         run = paragraph.add_run()
         run.text = line
-        run.font.color.rgb = RGBColor(255, 255, 0) if (index + 1) % 2 == 0 else RGBColor(255, 255, 255)
-        run.font.name = "DengXian"
-        run.font.bold = True
+        color = RGBColor(255, 255, 0) if (index + 1) % 2 == 0 else RGBColor(255, 255, 255)
+        format_run(run, family, size, color)
 
 
 def _populate_scripture_text_frame(text_frame, lines: list[str]) -> None:
-    text_frame.clear()
+    family, size = prepare_frame(text_frame, lines, scripture=True)
     for index, line in enumerate(lines):
         paragraph = text_frame.add_paragraph() if index else text_frame.paragraphs[0]
-        paragraph.text = ""
         paragraph.alignment = PP_ALIGN.LEFT
         _disable_paragraph_bullets(paragraph)
+        format_paragraph(paragraph, family, size, scripture=True)
         color = RGBColor(255, 255, 255) if (index + 1) % 2 != 0 else RGBColor(255, 255, 0)
         match = re.match(r"^(?P<chapter>\d+):(?P<verse>\d+)\s+(?P<body>.*)$", line)
         if match:
-#            chapter_run = paragraph.add_run()
-#            chapter_run.text = f"{match.group('chapter')}:"
-#            chapter_run.font.color.rgb = color
-
             verse_run = paragraph.add_run()
             verse_run.text = match.group('verse')
-            verse_run.font.superscript = True
-            verse_run.font.color.rgb = color
-            verse_run.font.name = "DengXian"
-            verse_run.font.bold = True
-
+            format_run(verse_run, family, size, color, verse=True)
             body_run = paragraph.add_run()
             body_run.text = f" {match.group('body')}"
-            body_run.font.color.rgb = color
-            body_run.font.name = "DengXian"
-            body_run.font.bold = True
+            format_run(body_run, family, size, color)
         else:
             run = paragraph.add_run()
             run.text = line
-            run.font.color.rgb = color
-            run.font.name = "DengXian"
-            run.font.bold = True
+            format_run(run, family, size, color)
 
 
 def _apply_slide_template(slide, base_shapes: list, base_notes: str | None) -> None:
