@@ -1,8 +1,54 @@
-"""Explicit subscription-to-API continuation; no erased call or new budget."""
+"""Explicit Opus transport/quota continuations; no erased call or new budget."""
 import json
 from pathlib import Path
 
 from backend.pipeline.cvp_sql_commit import binding, check_binding
+
+
+def authorize_subscription_resumption(previous, request, policy, authority):
+    """Bind a new owner resumption after a proved, settled quota refusal."""
+    from backend.pipeline import claim_management as cm
+    proof = authority.get('opus_subscription_resumption')
+    if proof is None:
+        return None
+    old = cm.Request.model_validate(previous['request'])
+    original = cm.Policy.model_validate(previous['policy'])
+    expected = {'predecessor_action_id', 'prior_metadata_sha256',
+                'authorization_quote', 'capacity_resumption'}
+    if (not isinstance(proof, dict) or set(proof) != expected
+            or proof['predecessor_action_id'] != old.action_id
+            or proof['prior_metadata_sha256'] != cm.sha256_json(previous)
+            or not (proof['authorization_quote'] or '').strip()
+            or previous['result'].get('status') != 'paused'
+            or previous['result'].get('reason') != 'model_failed'
+            or authority.get('authorized_by') != 'owner'
+            or authority.get('human_content_approval') is not False
+            or policy.models != original.models or policy.api_spend != original.api_spend
+            or original.models['opus']['backend'] != 'claude_subscription'
+            or policy.initial_candidate != 'existing'
+            or request.permissions != old.permissions
+            or request.creation_permissions != old.creation_permissions):
+        raise ValueError('subscription resumption requires the exact owner-bound paused scope and backend')
+    check_binding(proof['capacity_resumption'])
+    resumed = json.loads(Path(proof['capacity_resumption']['path']).read_text())
+    if (resumed.get('previous_state', {}).get('blocked') != 'usage_limit_reached'
+            or resumed.get('model_calls') != 0 or resumed.get('budget_extension') is not False
+            or not resumed.get('owner_direction') or not resumed.get('recovery_id')
+            or type(resumed.get('resumed_at')) not in (int, float)):
+        raise ValueError('subscription resumption requires a verified common-capacity recovery')
+    refused = []
+    from datetime import datetime
+    for key, slot in previous['call_reservations'].items():
+        if slot['state'] != 'started':
+            continue
+        receipt = quota_refusal(previous, key, slot)
+        ended = json.loads(Path(receipt['exit']['path']).read_text()).get('finished_at')
+        if not ended or datetime.fromisoformat(ended).timestamp() >= resumed['resumed_at']:
+            raise ValueError('subscription resumption must be newer than its quota refusal')
+        refused.append(key)
+    if len(refused) != 1:
+        raise ValueError('subscription resumption requires exactly one proved quota refusal')
+    return proof
 
 
 def authorize(previous, request, policy, authority):

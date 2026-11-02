@@ -3327,6 +3327,7 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
+                opus_handoff = continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')
                 # Human answers bind the original review scope. The locked
                 # transaction readset also contains downstream consumers that
                 # were never source evidence; keep their current pins without
@@ -3389,7 +3390,7 @@ class PostgresKnowledgeStore:
                                 continuation['prior_findings'] = {**candidate_findings, **continuation['prior_findings']}
                             continuation.setdefault('previous_candidates', {})[child['unit_id']] = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         continue
-                    if (continuation.get('owner_call_extension') or continuation.get('opus_api_transition')) and child['materials']['round_id'] in prior['latest_rounds'].values():
+                    if (continuation.get('owner_call_extension') or opus_handoff) and child['materials']['round_id'] in prior['latest_rounds'].values():
                         if before != child['materials'].get('transaction_before',child['materials']['before']):
                             # Explicitly current-bound remaining-findings follow-ups,
                             # like API transitions, can refresh transaction-only
@@ -3401,7 +3402,7 @@ class PostgresKnowledgeStore:
                                      or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension
                                      or extension.get('basis') == 'permission_required' and (
                                          continuation.get('source_support_creation') or continuation.get('related_owner_target_extension'))))
-                            if (not (continuation.get('opus_api_transition') or current_bound_follow_up)
+                            if (not (opus_handoff or current_bound_follow_up)
                                     or (goal['original_objects'] != child['materials']['before']
                                         and not (continuation.get('related_owner_target_extension') and all(
                                             goal['original_objects'].get(k)==state for k,state in child['materials']['before'].items())))):
@@ -3430,7 +3431,7 @@ class PostgresKnowledgeStore:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
-                    elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not continuation.get('opus_api_transition')):
+                    elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not opus_handoff):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
                 if continuation.get('related_owner_target_extension'):
                     # Adding the explicitly authorized owner changes the joint
@@ -3609,7 +3610,7 @@ class PostgresKnowledgeStore:
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
                 continuation = parent.get('continuation', {})
-                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition')):
+                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')):
                     candidate = continuation.get('previous_candidates', {}).get(unit_id)
                     rejected_proposal = (continuation.get('owner_call_extension', {}).get('basis') == 'remaining_findings'
                         and bool(continuation.get('unaccepted_returned_proposals')) and candidate is None)

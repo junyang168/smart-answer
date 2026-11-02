@@ -1589,6 +1589,8 @@ def continuation_budget(previous, request, policy):
     authority = json.loads(source.verify_file(request.authorization).read_text())
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)
+    from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
+    subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
     extension = authority.get('owner_call_extension')
     target_extension = owner_target_extension(previous, old, request)
     support_creation = (request.creation_permissions != old.creation_permissions
@@ -1735,7 +1737,10 @@ def continuation_budget(previous, request, policy):
             historical_inputs[key] = entry
             spent[slot['role']] += 1
             continue
-        if consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot):
+        # An explicit bound proof must run its own validator and preserve its
+        # returned issues. Automatic accounting must not swallow that proof.
+        if key not in recovery and key not in proposal_recovery and (
+                consumed_invalid_review(previous, key, slot) or consumed_rejected_citations(previous,key,slot)):
             spent[slot['role']] += 1
             continue
         if key in recovery:
@@ -1768,7 +1773,7 @@ def continuation_budget(previous, request, policy):
             unknown[key] = {'reservation':binding(intent),'intent_sha256':slot['intent_sha256'],'state':'started'}
             spent[slot['role']] += 1
             continue
-        if api_transition:
+        if api_transition or subscription_resumption:
             from backend.pipeline.claim_opus_api_transition import quota_refusal
             failures[key] = quota_refusal(previous, key, slot)
             spent[slot['role']] += 1
@@ -1819,6 +1824,7 @@ def continuation_budget(previous, request, policy):
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
+        **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
         **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),
         **({'source_support_creation':True} if support_creation else {}),
