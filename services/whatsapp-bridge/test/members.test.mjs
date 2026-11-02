@@ -29,3 +29,9 @@ test("lookup failure preserves other evidence without inventing an ID", async ()
   assert.deepEqual(result.members[0].ids, ["111@lid"]);
   assert.equal(result.members[0].contact_name, "Saved Name");
 });
+
+test("unsupported participant IDs fail the audit instead of silently omitting people", async () => {
+  const c = client();
+  c.getChatById = async () => ({ isGroup: true, participants: [{ id: { _serialized: "unsupported@other" } }] });
+  await assert.rejects(readMembers(c, ["one@g.us"]), /Cannot safely identify/);
+});

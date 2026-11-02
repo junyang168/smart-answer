@@ -8,7 +8,7 @@ export async function readMembers(client, groups) {
     if (!chat.isGroup || !Array.isArray(chat.participants)) throw new Error("Cannot read selected group members");
     for (const participant of chat.participants) {
       const id = normalizeSenderId(participant.id?._serialized);
-      if (!id) continue;
+      if (!id) throw new Error("Cannot safely identify a selected group participant");
       if (!participants.has(id)) participants.set(id, { id, groups: [] });
       participants.get(id).groups.push(group);
     }
