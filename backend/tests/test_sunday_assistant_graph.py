@@ -625,15 +625,17 @@ def test_graph_can_finish_on_last_allowed_decision(agent):
 
 def test_graph_saves_video_song_without_catalog_and_preserves_other_fields(agent):
     url='https://youtu.be/5IIV-vdSq7c?t=30'
-    msg=incoming(agent,text='11/8 回應詩歌：合神心意 '+url)
+    msg=incoming(agent,text='11/8 回應詩歌：合神心意，最後一節重複一次 '+url)
     agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',hymn='奇異恩典',pianist='李芳')
     request={'service_changes':[service(field='responseHymn',value='合神心意',evidence=msg.text),
-                                 service(field='responseHymnYoutubeUrl',value=url,evidence=msg.text)]}
+                                 service(field='responseHymnYoutubeUrl',value=url,evidence=msg.text),
+                                 service(field='responseHymnNotes',value='最後一節重複一次',evidence=msg.text)]}
     model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request}))
     assert run_agent(agent,msg,model=model)['status']=='done'
     saved=agent.repository.services['2026-11-08']
     assert saved.response_hymn_youtube_url==url
     assert saved.response_hymn=='合神心意'
+    assert saved.response_hymn_notes=='最後一節重複一次'
     assert saved.hymn=='奇異恩典' and saved.pianist=='李芳'
     assert not agent.bridge.sent
 

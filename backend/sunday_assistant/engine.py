@@ -246,10 +246,15 @@ class Assistant:
                 proposed = next((c.value for c in result.service_changes if c.date == change.date and c.field == target_field), None)
                 existing = services.get(change.date.isoformat())
                 title = proposed or (existing.model_dump(by_alias=True).get(target_field) if existing else None)
+                video_field = VIDEO_FIELDS[target_field]
+                video_change = next((c for c in result.service_changes if c.date == change.date and c.field == video_field), None)
+                video = video_change.value if video_change else (saved.get(video_field) if saved.get(target_field) == title else None)
+                plan.setdefault('dependencies', []).append({'key': f'service:{change.date}:{video_field}',
+                    'date': str(change.date), 'field': video_field, 'before': saved.get(video_field)})
                 song = next((song for song in self.repository.list_sunday_songs() if song.title == title), None)
                 plan.setdefault("dependencies", []).append({"key": f"service:{change.date}:{target_field}", "date": str(change.date), "field": target_field, "before": existing.model_dump(by_alias=True).get(target_field) if existing else None})
                 try:
-                    if change.value is None:
+                    if change.value is None or video:
                         pass
                     elif not song or not song.lyrics_markdown:
                         raise ValueError("請先確認詩歌及完整歌詞，再處理當週演唱說明")
