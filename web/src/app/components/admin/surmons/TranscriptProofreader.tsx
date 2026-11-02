@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { betaEditorDestination } from "./review-entry";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "easymde";
 import type { Editor as CodeMirrorEditor } from "codemirror";
@@ -199,11 +201,14 @@ export function TranscriptReviewEntry({
   item,
   legacy,
   apiBase = "/api/sc_api",
+  preferBeta = false,
 }: {
   item: string;
   legacy: React.ReactNode;
   apiBase?: string;
+  preferBeta?: boolean;
 }) {
+  const router = useRouter();
   const [state, setState] = useState<{
     doc?: Document;
     error?: string;
@@ -212,10 +217,26 @@ export function TranscriptReviewEntry({
   }>({});
   useEffect(() => {
     let alive = true;
-    request<{ mode: string }>(
-      `${apiBase}/review_mode/${encodeURIComponent(item)}`,
-    )
-      .then(async ({ mode }) => {
+    setState({});
+    const resolveMode = async () => {
+      if (preferBeta) {
+        const destination = await betaEditorDestination(item, (url) =>
+          request(url),
+        );
+        if (!alive) return;
+        if (destination) {
+          router.replace(destination);
+          return;
+        }
+      }
+      return request<{ mode: string }>(
+        `${apiBase}/review_mode/${encodeURIComponent(item)}`,
+      );
+    };
+    resolveMode()
+      .then(async (result) => {
+        if (!alive || !result) return;
+        const { mode } = result;
         if (mode === "legacy") {
           if (alive) setState({ legacy: true });
           return;
@@ -238,7 +259,7 @@ export function TranscriptReviewEntry({
     return () => {
       alive = false;
     };
-  }, [item, apiBase]);
+  }, [item, apiBase, preferBeta, router]);
 
   if (state.candidate)
     return (
