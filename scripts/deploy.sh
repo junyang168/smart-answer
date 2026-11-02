@@ -250,7 +250,8 @@ activate_reference_inbox() {
 
 # Stop the old worker before switching API code; rollback starts the matching pair.
 activate_sunday_assistant() {
-  local release="$1"
+  local release="$1" started config health_script
+  started="$(date -u +%s)"
   if [[ ! -f "$release/$SUNDAY_ASSISTANT_JOB" ]]; then
     [[ ! -f "$SUNDAY_ASSISTANT_PLIST" ]] || launchctl unload "$SUNDAY_ASSISTANT_PLIST" 2>/dev/null || true
     return 0
@@ -260,6 +261,15 @@ activate_sunday_assistant() {
   restart_job "$SUNDAY_ASSISTANT_PLIST" || return 1
   assert_job_release "Sunday assistant" "Sunday assistant" \
     "$SUNDAY_ASSISTANT_PLIST" "$SUNDAY_ASSISTANT_JOB" "$release" || return 1
+  config="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:3' "$SUNDAY_ASSISTANT_PLIST")" || return 1
+  if [[ -n "${SMART_ANSWER_SUNDAY_HEALTH_CHECK:-}" ]]; then
+    "$SMART_ANSWER_SUNDAY_HEALTH_CHECK" "$config" "$started" || return 1
+  else
+    health_script="$release/scripts/check-sunday-assistant.py"
+    [[ -f "$health_script" ]] || health_script="$SOURCE_REPO/scripts/check-sunday-assistant.py"
+    "$release/backend/.venv/bin/python3" "$health_script" \
+      --config "$config" --since "$started" || return 1
+  fi
 }
 
 validate_job_plist() {

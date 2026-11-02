@@ -277,6 +277,7 @@ else:
         "SMART_ANSWER_BACKEND_PLIST": str(backend_plist),
         "SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST": str(reminder_plist),
         "SMART_ANSWER_REFERENCE_INBOX_PLIST": str(inbox_plist),
+        "SMART_ANSWER_SUNDAY_ASSISTANT_PLIST": str(tmp_path / "uninstalled-sunday.plist"),
         "SMART_ANSWER_PLIST_BUDDY": str(bin_dir / "plist-buddy"),
         "SMART_ANSWER_MIN_FREE_MB": "1",
         "SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE": str(google_token),
@@ -730,7 +731,7 @@ def _sunday_fixture(f):
         "ProgramArguments": ["/old/python", "/old/supervisor", "--config", "/protected/assistant.env"],
         "WorkingDirectory": "/old/release",
     }))
-    env = {**f["env"], "SMART_ANSWER_SUNDAY_ASSISTANT_PLIST": str(plist), "TEST_TARGET_SHA": sha}
+    env = {**f["env"], "SMART_ANSWER_SUNDAY_ASSISTANT_PLIST": str(plist), "TEST_TARGET_SHA": sha, "SMART_ANSWER_SUNDAY_HEALTH_CHECK": "/usr/bin/true"}
     return target, plist, env
 
 
@@ -767,3 +768,29 @@ def test_sunday_missing_agent_fails_before_service_switch(deploy_fixture):
     assert result.returncode == 1
     assert "Sunday assistant LaunchAgent missing" in result.stderr
     assert not f["launchctl_log"].exists()
+
+
+def test_sunday_health_failure_rolls_back(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    env["SMART_ANSWER_SUNDAY_HEALTH_CHECK"] = "/usr/bin/false"
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    assert f["launchctl_log"].read_text().splitlines()[-1] == f"unload {plist}"
+
+
+def test_sunday_rollback_rebinds_previous_supervisor(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    previous = f["previous_release"]
+    (previous / "scripts").mkdir()
+    (previous / "scripts/run-sunday-assistant.py").write_text("# old supervisor\n")
+    (previous / "services/whatsapp-bridge/node_modules/whatsapp-web.js").mkdir(parents=True)
+    env["TEST_FAIL_TARGET_FRONTEND"] = "1"
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    data = plistlib.loads(plist.read_bytes())
+    assert data["WorkingDirectory"] == str(previous)
+    assert data["ProgramArguments"][1] == str(previous / "scripts/run-sunday-assistant.py")

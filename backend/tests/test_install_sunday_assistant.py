@@ -19,6 +19,7 @@ def test_production_setup_keeps_one_secret_outside_release_and_does_not_start(tm
         path = config / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("EXISTING_SETTING=preserved\n")
+    (config / "sunday-assistant.env").write_text("SUNDAY_WHATSAPP_PORT=8769\n")
     backend = agents / "com.smart_answer.fullarticleservice.plist"
     backend.write_bytes(plistlib.dumps({"EnvironmentVariables": {"DATA_BASE_DIR": str(tmp_path / "data"), "OPENAI_API_KEY": "test-private-credential"}}))
     script = Path(__file__).resolve().parents[2] / "scripts/install-sunday-assistant-agent.py"
@@ -27,6 +28,9 @@ def test_production_setup_keeps_one_secret_outside_release_and_does_not_start(tm
     settings = dotenv_values(config / "sunday-assistant.env")
     secret = settings["SUNDAY_ASSISTANT_SECRET"]
     subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, check=True)
+    assert settings["SUNDAY_WHATSAPP_PORT"] == "8769"
+    assert settings["SUNDAY_WHATSAPP_BRIDGE_URL"] == "http://127.0.0.1:8769"
+    assert plistlib.loads(backend.read_bytes())["EnvironmentVariables"]["SUNDAY_WHATSAPP_BRIDGE_URL"] == settings["SUNDAY_WHATSAPP_BRIDGE_URL"]
     assert secret and len(secret) >= 24
     assert dotenv_values(config / "sunday-assistant.env")["SUNDAY_ASSISTANT_SECRET"] == secret
     for relative in (".env", "backend/.env", "web/.env.local"):

@@ -377,3 +377,12 @@ def test_real_form_and_agent_repository_writes_share_lock(tmp_path, monkeypatch)
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(create, range(20)))
     assert len(repo.list_sunday_workers()) == 20
+
+
+def test_live_messages_are_not_delayed_by_initial_history(agent, monkeypatch):
+    for message_id, stamp, history in [("old-history", "2026-10-01T10:00:00+00:00", True), ("live", "2026-11-01T10:00:00+00:00", False)]:
+        agent.store.receive(ChatMessage(message_id=message_id, group_id="111@g.us", sender_id="sender", sent_at=stamp, text="收到", initial_sync=history))
+    processed = []
+    monkeypatch.setattr(agent, "process_message", lambda row: processed.append(row["id"]))
+    agent.tick(datetime(2026, 11, 2, 17, tzinfo=timezone.utc))
+    assert processed == ["live"]

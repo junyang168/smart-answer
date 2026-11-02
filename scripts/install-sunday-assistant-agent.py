@@ -27,6 +27,10 @@ def main():
         raise SystemExit("Production configuration files must already exist")
     assistant_env = config / "sunday-assistant.env"
     existing = dotenv_values(assistant_env) if assistant_env.exists() else {}
+    port = int(existing.get("SUNDAY_WHATSAPP_PORT") or "8766")
+    if not 1024 <= port <= 65535:
+        raise SystemExit("Bridge port must be between 1024 and 65535")
+    bridge_url = f"http://127.0.0.1:{port}"
     secret = existing.get("SUNDAY_ASSISTANT_SECRET") or backend_env.get("SUNDAY_ASSISTANT_SECRET") or secrets.token_urlsafe(48)
     if len(secret) < 24:
         raise SystemExit("Existing secret is too short; reconcile it before installation")
@@ -38,8 +42,10 @@ def main():
             backup.chmod(0o600)
     for path in env_files:
         set_key(str(path), "SUNDAY_ASSISTANT_SECRET", secret)
+        set_key(str(path), "SUNDAY_WHATSAPP_BRIDGE_URL", bridge_url)
         path.chmod(0o600)
     backend_env["SUNDAY_ASSISTANT_SECRET"] = secret
+    backend_env["SUNDAY_WHATSAPP_BRIDGE_URL"] = bridge_url
     backend_plist.write_bytes(plistlib.dumps(backend))
     backend_plist.chmod(0o600)
     values = {
@@ -47,8 +53,8 @@ def main():
         "FULL_ARTICLE_SERVICE_URL": "http://127.0.0.1:8555",
         "SUNDAY_ASSISTANT_SECRET": secret,
         "SUNDAY_WHATSAPP_STATE_DIR": str(data / "sunday-assistant/whatsapp"),
-        "SUNDAY_WHATSAPP_PORT": "8766",
-        "SUNDAY_WHATSAPP_BRIDGE_URL": "http://127.0.0.1:8766",
+        "SUNDAY_WHATSAPP_PORT": str(port),
+        "SUNDAY_WHATSAPP_BRIDGE_URL": bridge_url,
         "SUNDAY_WHATSAPP_AUTOCONNECT": "1",
         "SUNDAY_WHATSAPP_CHROME": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     }
