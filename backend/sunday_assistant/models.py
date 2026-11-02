@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 ZONE = ZoneInfo("America/Chicago")
 SERVICE_FIELDS = {"sermonSpeaker": "講員", "sermonTitle": "講道題目", "hymn": "詩歌",
-                  "responseHymn": "回應詩歌", "scripture": "讀經經文", "donationAmount": "本週奉獻", "presider": "司會", "worshipLeader": "領詩", "hymnNotes": "詩歌演唱說明", "responseHymnNotes": "回應詩歌演唱說明"}
-FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field not in {"donationAmount", "hymnNotes", "responseHymnNotes"}}
+                  "responseHymn": "回應詩歌", "hymnYoutubeUrl": "詩歌 YouTube", "responseHymnYoutubeUrl": "回應詩歌 YouTube", "scripture": "讀經經文", "donationAmount": "本週奉獻", "presider": "司會", "worshipLeader": "領詩", "hymnNotes": "詩歌演唱說明", "responseHymnNotes": "回應詩歌演唱說明"}
+FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field not in {"donationAmount", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"}}
 
 
 class Settings(BaseModel):
@@ -86,6 +86,8 @@ class Settings(BaseModel):
             result = {field: self.service_group for field in ("sermonSpeaker", "sermonTitle", "scripture")}
             result["hymn"] = self.songs_group
             result["responseHymn"] = self.songs_group
+            result["hymnYoutubeUrl"] = self.songs_group
+            result["responseHymnYoutubeUrl"] = self.songs_group
             result["hymnNotes"] = self.songs_group
             result["responseHymnNotes"] = self.songs_group
             result["donationAmount"] = self.availability_group
@@ -94,6 +96,8 @@ class Settings(BaseModel):
         for field, group in (("responseHymn", self.response_hymn_group), ("donationAmount", self.offering_group)):
             if group:
                 result[field] = group
+                if field == "responseHymn":
+                    result["responseHymnYoutubeUrl"] = group
         return {field: group for field, group in result.items() if group}
 
     def fields_for_group(self, group_id):
@@ -130,7 +134,7 @@ class ChatMessage(BaseModel):
 
 class ServiceChange(BaseModel):
     date: date
-    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes"]
+    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"]
     value: str | list[str] | float | None
     evidence: str = Field(min_length=1)
 
@@ -154,6 +158,9 @@ class ServiceChange(BaseModel):
         elif self.field == "scripture":
             if not isinstance(self.value, list) or not self.value or any(not x.strip() for x in self.value):
                 raise ValueError("讀經需列出完整經文範圍")
+        elif self.field in {"hymnYoutubeUrl", "responseHymnYoutubeUrl"}:
+            from backend.sunday_video import youtube_url
+            self.value = youtube_url(self.value)
         elif self.field in {"hymnNotes", "responseHymnNotes"}:
             if self.value is not None and not isinstance(self.value, str):
                 raise ValueError("演唱說明需為文字或空值")

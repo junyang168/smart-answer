@@ -1848,7 +1848,7 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
             raise HTTPException(status_code=400, detail="當週詩歌演唱說明需核對：" + str(exc)) from exc
 
     section_configs: dict[str, dict[str, object]] = {}
-    if hymn and hymn.lyrics_markdown:
+    if not service.hymn_youtube_url and hymn and hymn.lyrics_markdown:
         sections = scheduled_lyrics(hymn.lyrics_markdown, service.hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.hymn_index)
@@ -1859,7 +1859,7 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
                 ],
                 "style": "lyrics",
             }
-    if response_hymn and response_hymn.lyrics_markdown:
+    if not service.response_hymn_youtube_url and response_hymn and response_hymn.lyrics_markdown:
         sections = scheduled_lyrics(response_hymn.lyrics_markdown, service.response_hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.response_hymn_index)
@@ -1870,6 +1870,10 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
                 ],
                 "style": "lyrics",
             }
+
+    for key, video in (("hymnLyrics", service.hymn_youtube_url), ("responseHymnLyrics", service.response_hymn_youtube_url)):
+        if video:
+            section_configs[key] = {"sections": [{"lines": ["播放 YouTube 影片"], "video_url": video}], "style": "lyrics"}
 
     scripture_sections = _fetch_scripture_sections(service.scripture)
     if require_complete and (len(scripture_sections) != len(service.scripture) or any(not section.get('verses') for section in scripture_sections)):
@@ -2152,6 +2156,11 @@ def _build_ppt_replacements(
 
     _apply_song_replacements(replacements, "hymn", service.hymn, hymn)
     _apply_song_replacements(replacements, "hymn2", service.response_hymn, response_hymn)
+
+    for prefix, video in (("hymn", service.hymn_youtube_url), ("hymn2", service.response_hymn_youtube_url)):
+        if video:
+            replacements[prefix + "Link"] = video
+            replacements[prefix + "Lyrics"] = ""
 
     _populate_fellowship_replacements(replacements, service_date)
 

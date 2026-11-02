@@ -188,10 +188,14 @@ def test_auto_readers_rotate_and_avoid_same_day_roles_and_absences(agent):
     assert agent.repository.services['2026-11-15'].scripture_readers==['讀經甲']
 
 
-def test_real_generator_runs_before_download_and_admin_notification(ready,monkeypatch,tmp_path):
+@pytest.mark.parametrize("video", [False, True])
+def test_real_generator_runs_before_download_and_admin_notification(ready,monkeypatch,tmp_path,video):
     from backend.api import service
     from pptx.util import Inches
     agent,ppt,day,now,calls=ready
+    if video:
+        agent.repository.services[day].response_hymn_youtube_url='https://youtu.be/5IIV-vdSq7c'
+        agent.repository.services[day].response_hymn='不在目錄的影片歌'
     deck=Presentation()
     for token in ['sermonTitle','hymnLyrics','responseHymnLyrics','scriptureVerses']:
         slide=deck.slides.add_slide(deck.slide_layouts[6])
@@ -210,7 +214,13 @@ def test_real_generator_runs_before_download_and_admin_notification(ready,monkey
     output=Presentation(ppt.downloadable(day,version))
     texts=[shape.text for slide in output.slides for shape in slide.shapes if shape.has_text_frame]
     assert '盼望' in texts and any('測試經文內容' in text for text in texts)
-    assert any('甲\n乙'==text for text in texts) and '丙' in texts
+    if video:
+        assert '播放 YouTube 影片' in texts
+        assert not any('甲' in text or '丙' in text for text in texts)
+        assert any(shape.click_action.hyperlink.address=='https://youtu.be/5IIV-vdSq7c'
+                   for slide in output.slides for shape in slide.shapes)
+    else:
+        assert any('甲\n乙'==text for text in texts) and '丙' in texts
     agent.deliver_outbox()
     assert len(agent.bridge.sent)==1 and agent.bridge.sent[0][1]=='999@g.us'
 
@@ -348,3 +358,20 @@ def test_interrupted_generation_recovers_without_duplicate_notice(ready):
     reopened=PptReady(agent,generator=ppt.generator,template=ppt.template)
     reopened.tick(now);agent.deliver_outbox()
     assert len(calls)==2 and len(agent.bridge.sent)==1 and len(notices(agent))==1
+
+
+def test_video_slots_ready_without_catalog_or_lyrics_and_url_changes_version(ready):
+    agent,ppt,day,now,calls=ready
+    entry=agent.repository.services[day]
+    entry.hymn_youtube_url='https://youtu.be/5IIV-vdSq7c?t=30'
+    entry.response_hymn_youtube_url='https://www.youtube.com/watch?v=abcdefghijk'
+    agent.repository.songs=[]
+    ppt.tick(now)
+    assert len(calls)==1 and notices(agent)
+    old=agent.store.get('ppt_readiness')['version']
+    entry.response_hymn_youtube_url='https://youtu.be/zyxwvutsrqp'
+    ppt.tick(now)
+    assert len(calls)==2 and agent.store.get('ppt_readiness')['version']!=old
+    entry.response_hymn_youtube_url=None
+    ppt.tick(now)
+    assert len(calls)==2 and agent.store.get('ppt_readiness')['missing']

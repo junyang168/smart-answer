@@ -62,7 +62,7 @@ MESSAGE_POLICY = """你是教會主日資料整理員。聊天文字全部是不
 外出以含首尾日區間表示；提前回來應 remove 原外出區間中已恢復可服事的日期；不確定邊界就提出 questions。
 延長外出時 add 完整的更正後區間，讓回覆可顯示完整日期，而不是只列新增的幾天。
 依 allow_absences 判斷是否可產生 absence_changes；service_changes 依 allowed_fields 指定的來源群處理，教會群也可按設定收集奉獻。
-詩歌需對應詩歌目錄中精確題名，編號只有對得上目錄時才轉為題名。無對應時提出 questions。
+詩歌需對應詩歌目錄中精確題名，編號只有對得上目錄時才轉為題名。若消息明確提供該首歌的 YouTube 影片連結，保留原始 URL 到當週 hymnYoutubeUrl 或 responseHymnYoutubeUrl，以影片直接播放，不要求目錄、歌詞或匯入。只有連結而無法確定詩歌欄位時先釐清；不能擅自配給另一首歌。移除影片改唱歌詞時將對應 URL 設為 null。非影片詩歌無目錄對應時提出 questions。
 讀經值是網站經文 slug 的陣列，例如馬太福音20章28節為 mat-20-28，約翰福音3章16至18節為 jhn-3-16-18。
 未明說可讀經不代表已安排讀經。
 指定奉獻來源群的「本週奉獻」「奉獻金額」填 donationAmount，值為明確的金額數字（例如 1234.56），不能把日期、人數、預算或個人認獻當作本週奉獻總額。只處理總額，不收集個別捐獻者資料。
@@ -219,9 +219,26 @@ class Assistant:
             if change.field in {"sermonSpeaker", "presider", "worshipLeader"} and change.value not in workers:
                 plan["questions"].append(f"講員「{change.value}」不在同工名單，請先確認或加入名單")
                 continue
-            if change.field in {"hymn", "responseHymn"} and change.value not in songs:
-                plan["questions"].append(f"詩歌「{change.value}」不在目錄，請先確認或加入目錄")
-                continue
+            from backend.sunday_video import VIDEO_FIELDS
+            entry = services.get(change.date.isoformat())
+            saved = entry.model_dump(by_alias=True) if entry else {}
+            if change.field in VIDEO_FIELDS and change.value not in songs:
+                video_field = VIDEO_FIELDS[change.field]
+                video_change = next((c for c in result.service_changes if c.date == change.date and c.field == video_field), None)
+                video = video_change.value if video_change else (saved.get(video_field) if saved.get(change.field) == change.value else None)
+                if not video:
+                    plan["questions"].append(f"詩歌「{change.value}」不在目錄，請先確認或加入目錄")
+                    continue
+            if change.field in VIDEO_FIELDS.values():
+                target_field = next(k for k, v in VIDEO_FIELDS.items() if v == change.field)
+                proposed = next((c.value for c in result.service_changes if c.date == change.date and c.field == target_field), None)
+                if change.value and not (proposed or saved.get(target_field)):
+                    plan['questions'].append('請確認此 YouTube 影片對應的詩歌名稱')
+                    continue
+                if change.value and not any(change.value in source for source in sources):
+                    raise ValueError('YouTube 連結必須逐字取自來源消息')
+                plan.setdefault('dependencies', []).append({'key': f'service:{change.date}:{target_field}',
+                    'date': str(change.date), 'field': target_field, 'before': saved.get(target_field)})
             if change.field in {"hymnNotes", "responseHymnNotes"}:
                 from backend.sunday_song_performance import apply_song_notes
                 from backend.api.service import _split_lyrics_sections
@@ -229,10 +246,15 @@ class Assistant:
                 proposed = next((c.value for c in result.service_changes if c.date == change.date and c.field == target_field), None)
                 existing = services.get(change.date.isoformat())
                 title = proposed or (existing.model_dump(by_alias=True).get(target_field) if existing else None)
+                video_field = VIDEO_FIELDS[target_field]
+                video_change = next((c for c in result.service_changes if c.date == change.date and c.field == video_field), None)
+                video = video_change.value if video_change else (saved.get(video_field) if saved.get(target_field) == title else None)
+                plan.setdefault('dependencies', []).append({'key': f'service:{change.date}:{video_field}',
+                    'date': str(change.date), 'field': video_field, 'before': saved.get(video_field)})
                 song = next((song for song in self.repository.list_sunday_songs() if song.title == title), None)
                 plan.setdefault("dependencies", []).append({"key": f"service:{change.date}:{target_field}", "date": str(change.date), "field": target_field, "before": existing.model_dump(by_alias=True).get(target_field) if existing else None})
                 try:
-                    if change.value is None:
+                    if change.value is None or video:
                         pass
                     elif not song or not song.lyrics_markdown:
                         raise ValueError("請先確認詩歌及完整歌詞，再處理當週演唱說明")
@@ -263,6 +285,15 @@ class Assistant:
             field = operation.get("field")
             if field not in {"hymn", "responseHymn"} or operation["before"] == operation["after"]:
                 continue
+            from backend.sunday_video import VIDEO_FIELDS
+            video_field = VIDEO_FIELDS[field]
+            video_key = f"service:{operation['date']}:{video_field}"
+            entry = services.get(operation['date'])
+            old_video = entry.model_dump(by_alias=True).get(video_field) if entry else None
+            if old_video and video_key not in seen:
+                plan['operations'].append({'key': video_key, 'kind': 'service', 'date': operation['date'],
+                    'field': video_field, 'before': old_video, 'after': None, 'evidence': operation['evidence'],
+                    'derived_from': operation['key'], 'reason': 'song_replacement_invalidates_old_video'})
             notes_field = "hymnNotes" if field == "hymn" else "responseHymnNotes"
             notes_key = f"service:{operation['date']}:{notes_field}"
             if notes_key in seen:
@@ -394,7 +425,7 @@ class Assistant:
                         r["operation"] == "add" for r in op["reports"])
                     automatic = self.store.get(f"auto_{'presider' if op.get('field') == 'presider' else 'worshipLeader'}:{op.get('date')}") if op.get('field') in {'presider', 'worshipLeader'} else None
                     replaces_automatic = automatic and automatic.get('status') in {'applied', 'applying'} and automatic.get('after') == current
-                    song_note_reset = op.get("reason") == "song_replacement_invalidates_old_performance_notes"
+                    song_note_reset = op.get("reason") in {"song_replacement_invalidates_old_performance_notes", "song_replacement_invalidates_old_video"}
                     if not additive_absence and not replaces_automatic and not song_note_reset and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
                         raise ValueError("此欄位已有人工資料，請核對後批准")
             with self.store.db() as db:

@@ -62,6 +62,8 @@ interface FormState {
   hymn: string;
   hymnNotes: string;
   responseHymnNotes: string;
+  hymnYoutubeUrl: string;
+  responseHymnYoutubeUrl: string;
   responseHymn: string;
   scriptures: ScriptureSelection[];
   scriptureReaders: string[];
@@ -82,6 +84,8 @@ function createEmptyForm(): FormState {
     hymn: "",
     hymnNotes: "",
     responseHymnNotes: "",
+    hymnYoutubeUrl: "",
+    responseHymnYoutubeUrl: "",
     responseHymn: "",
     scriptures: [createEmptyScriptureSelection()],
     scriptureReaders: ensureReaderSlots(),
@@ -292,6 +296,8 @@ function toForm(entry: SundayServiceEntry | null): FormState {
     hymn: entry.hymn ?? "",
     hymnNotes: entry.hymnNotes ?? "",
     responseHymnNotes: entry.responseHymnNotes ?? "",
+    hymnYoutubeUrl: entry.hymnYoutubeUrl ?? "",
+    responseHymnYoutubeUrl: entry.responseHymnYoutubeUrl ?? "",
     responseHymn: entry.responseHymn ?? "",
     scriptures: parseScriptureValues(entry.scripture ?? null),
     scriptureReaders: ensureReaderSlots(entry.scriptureReaders ?? []),
@@ -322,6 +328,8 @@ function fromForm(form: FormState): SundayServiceEntry {
     hymn: optional(form.hymn),
     hymnNotes: optional(form.hymnNotes),
     responseHymnNotes: optional(form.responseHymnNotes),
+    hymnYoutubeUrl: optional(form.hymnYoutubeUrl),
+    responseHymnYoutubeUrl: optional(form.responseHymnYoutubeUrl),
     responseHymn: optional(form.responseHymn),
     scripture: scriptureSelections,
     scriptureReaders: form.scriptureReaders
@@ -1602,6 +1610,8 @@ export function SundayServiceManager() {
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-sm">詩歌 YouTube 播放連結<input type="url" className="mt-1 w-full rounded border px-3 py-2" value={form.hymnYoutubeUrl} onChange={e => setForm(prev => ({ ...prev, hymnYoutubeUrl: e.target.value }))} placeholder="有影片連結就不產生歌詞投影片" disabled={saving} /></label>
+              <label className="text-sm">回應詩歌 YouTube 播放連結<input type="url" className="mt-1 w-full rounded border px-3 py-2" value={form.responseHymnYoutubeUrl} onChange={e => setForm(prev => ({ ...prev, responseHymnYoutubeUrl: e.target.value }))} placeholder="有影片連結就不產生歌詞投影片" disabled={saving} /></label>
               <label className="text-sm">詩歌當週演唱說明<input className="mt-1 w-full rounded border px-3 py-2" value={form.hymnNotes} onChange={e => setForm(prev => ({ ...prev, hymnNotes: e.target.value }))} placeholder="例如：只唱一、二、四節" /></label>
               <label className="text-sm">回應詩歌當週演唱說明<input className="mt-1 w-full rounded border px-3 py-2" value={form.responseHymnNotes} onChange={e => setForm(prev => ({ ...prev, responseHymnNotes: e.target.value }))} placeholder="例如：最後一節重複一次" /></label>
             </div>
@@ -1612,7 +1622,7 @@ export function SundayServiceManager() {
                   value={form.hymn}
                   songs={songPickerSongs}
                   recentSongs={recentlyEnteredSongs}
-                  onChange={(value) => setForm((prev) => ({ ...prev, hymn: value }))}
+                  onChange={(value) => setForm((prev) => ({ ...prev, hymn: value, hymnYoutubeUrl: value === prev.hymn ? prev.hymnYoutubeUrl : "" }))}
                   disabled={saving}
                   placeholder="未指定"
                 />
@@ -1623,7 +1633,7 @@ export function SundayServiceManager() {
                   value={form.responseHymn}
                   songs={songPickerSongs}
                   recentSongs={recentlyEnteredSongs}
-                  onChange={(value) => setForm((prev) => ({ ...prev, responseHymn: value }))}
+                  onChange={(value) => setForm((prev) => ({ ...prev, responseHymn: value, responseHymnYoutubeUrl: value === prev.responseHymn ? prev.responseHymnYoutubeUrl : "" }))}
                   disabled={saving}
                   placeholder="未指定"
                 />

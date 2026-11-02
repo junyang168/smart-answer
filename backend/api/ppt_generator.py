@@ -434,6 +434,14 @@ def _render_section(
                 _populate_scripture_text_frame(text_frame, lines)
             else:
                 _populate_scripture_text_frame(text_frame, lines)
+            if section.get("video_url"):
+                from backend.sunday_video import youtube_url
+                link = youtube_url(section["video_url"])
+                # Link the whole text box so Office does not replace the
+                # template's white text with its dark hyperlink theme color.
+                text_frame._parent.click_action.hyperlink.address = link
+                # Keep the full URL available to presenters without projecting it.
+                slide.notes_slide.notes_text_frame.text += "\nYouTube: " + link
             content = _text_frame_content(text_frame)
         if "{page}" in content:
             _replace_in_text_frame(text_frame, {"page": page_text})
