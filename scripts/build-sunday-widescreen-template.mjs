@@ -48,6 +48,7 @@ function planElement(element, slideNumber){
   if(slideNumber===1&&element.id==='22')fontCap=18;
   if(slideNumber===7&&element.type===9)fontCap=30;
   if(slideNumber===9&&element.id==='2')fontCap=60;
+  if(slideNumber===11&&element.id==='3')fontCap=66; // Match the Lord's Prayer title.
   if(slideNumber===14&&element.id==='4')fontCap=36;
   if(slideNumber===14&&element.id==='2')fontCap=48;
   if(slideNumber===5&&text.includes('主禱文'))fontCap=30;
