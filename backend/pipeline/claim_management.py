@@ -83,6 +83,7 @@ class Policy(source.Contract):
     review_unit_contract: Literal['claim_bounded_review_unit_v1'] | None = None
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
+    proposal_empty_arrays: Literal['program_validated_v1'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -94,7 +95,7 @@ class Policy(source.Contract):
             value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -130,6 +131,8 @@ class Policy(source.Contract):
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
             raise ValueError('compact model decisions require the joint content Update contract')
+        if self.proposal_empty_arrays and self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'}:
+            raise ValueError('empty-array interoperability requires a scoped proposal contract')
         if self.evidence_review_contract and (self.model_output_contract not in {'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'} or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
             raise ValueError('own Evidence review requires scoped compact Opus and program readback')
         if self.review_unit_contract and (self.claim_scope_contract != 'claim_direct_neighbours_v1'
@@ -1649,7 +1652,8 @@ def continuation_budget(previous, request, policy):
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
             or subscription_limit and previous['result'].get('reason') == 'model_failed'
-                and not previous.get('continuation',{}).get('subscription_output_limit_recovery')
+                and (not previous.get('continuation',{}).get('subscription_output_limit_recovery')
+                     or original.proposal_empty_arrays is None and policy.proposal_empty_arrays == 'program_validated_v1')
             or output_limit and previous['result'].get('reason') == 'model_failed'
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
@@ -1772,6 +1776,9 @@ def continuation_budget(previous, request, policy):
         raise ValueError('API output-limit recovery requires its one initial no-report failure, not another review loop')
     if subscription_limit and len(output_failures) != 1:
         raise ValueError('Codex output-limit recovery requires exactly one authenticated failed proposal')
+    if (subscription_limit and previous.get('continuation', {}).get('subscription_output_limit_recovery')
+            and not any(proof.get('blocked_empty_arrays') for proof in output_failures.values())):
+        raise ValueError('schema mitigation requires a proved whitespace loop at a forbidden array')
     if extension_basis == 'unknown_call' and not unknown:
         raise ValueError('owner unknown-call extension requires an actual unknown generation')
     if (policy.models != original.models and not api_transition or policy.independent_audit != original.independent_audit

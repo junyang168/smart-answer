@@ -74,7 +74,14 @@ def consumed_subscription_output_limit(previous, key, slot):
             or not any(e.get('type') == 'error' and e.get('message') == message for e in events)
             or any(e.get('type') == 'turn.completed' for e in events)):
         raise ValueError('not a proved finished Codex output-token exhaustion')
+    import re
+    texts = [e.get('item', {}).get('text', '') for e in events
+             if e.get('type') == 'item.completed' and e.get('item', {}).get('type') == 'agent_message']
+    blocked = [name for name, field in schema.get('properties', {}).items()
+               if field.get('maxItems') == 0 and texts
+               and re.search('"' + re.escape(name) + r'"\s*:\s*\[\s{64,}\Z', texts[-1])]
     return {'slot': key, 'spent_call_preserved': True, 'partial_output_accepted': False,
+            'blocked_empty_arrays': blocked,
             'failure': binding(stage/'gpt.failure.json'),
             **{name: binding(transport/name) for name in (*names, 'invocation.json', 'exit.json', 'response-schema.json')}}
 

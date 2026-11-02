@@ -15,6 +15,7 @@ from backend.tests.test_claim_model_output import material, empty, change
 from backend.tests.test_claim_joint_update import shared, action, postgres_store, _temporary_postgres
 from backend.tests.test_claim_management_execution_postgres import SyntheticPorts
 from backend.tests.test_claim_management_human_source_follow_up import authorize
+from backend.api.canonical_repository.postgres_store import ChangeSetConflict
 
 
 def scoped(material, *, review=False):
@@ -80,6 +81,30 @@ def test_legacy_output_schema_is_unchanged(material):
     assert adapter._response_model.model_json_schema() == schema and adapter.generation_config_sha256 == identity
 
 
+def test_empty_array_wire_hint_is_optional_but_program_still_forbids_items(material):
+    legacy, _ = scoped(material)
+    old_schema = legacy._response_model.model_json_schema()
+    assert old_schema['properties']['finding_resolutions']['maxItems'] == 0
+    material['policy']['proposal_empty_arrays'] = 'program_validated_v1'
+    policy = cm.Policy.model_validate(material['policy'])
+    adapter = wire.scoped_adapter(claim_management_model_adapter('gpt', policy), material)
+    schema = adapter._response_model.model_json_schema()
+    assert 'maxItems' not in schema['properties']['finding_resolutions']
+    assert adapter.generation_config_sha256 != legacy.generation_config_sha256
+    assert adapter._response_model.model_validate(empty()).finding_resolutions == []
+    invalid = {**empty(), 'finding_resolutions': [dict(finding_id='invented', disposition='resolved',
+        reason='not authorized', citations=change()['citations'], affected_target_keys=[],
+        affected_write_keys=[], impact_reason='not an actual finding')]}
+    with pytest.raises(ValueError): adapter._response_model.model_validate(invalid)
+    candidate, _ = wire.candidate(empty(), material)
+    # Opus and historical policies keep their schemas exactly unchanged.
+    review = deepcopy(material); review['candidate'] = candidate.model_dump(mode='json'); review['denominator'] = list(review['before'])
+    current = wire.scoped_adapter(claim_management_model_adapter('opus', policy), review)
+    review['policy'].pop('proposal_empty_arrays')
+    old = wire.scoped_adapter(claim_management_model_adapter('opus', cm.Policy.model_validate(review['policy'])), review)
+    assert current._response_model.model_json_schema() == old._response_model.model_json_schema()
+
+
 def test_v2_resolves_projected_request_and_does_not_grant_readonly_writes(material):
     material['request'] = deepcopy(material['unit_request'])
     material['request']['permissions'] = []
@@ -135,13 +160,27 @@ def test_returned_invalid_answer_is_spent_unapproved_and_never_recalled(shared, 
     child = store.get_cvp_group(rid)
     assert not child['change_set_ids'] and not child.get('opus_approved')
     assert ('candidate' if role == 'gpt' else 'opus') not in child.get('stage_results', {})
+    # Idempotence applies before this round is superseded by a correction.
+    assert store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail']) == slot['rejection']
     calls = list(ports.calls)
-    assert execute_claim_management(store, request, root=root, ports=ports) == result
-    assert ports.calls == calls == (['gpt'] if role == 'gpt' else ['gpt', 'opus'])
+    resumed = execute_claim_management(store, request, root=root, ports=ports)
+    if role == 'gpt':
+        # No source-bound decision exists in this malformed object.
+        assert resumed == result and ports.calls == calls == ['gpt']
+    else:
+        # The rejected Opus report can enter a bounded GPT correction using
+        # the original remaining budget. It is never replayed or approved.
+        assert resumed['status'] == 'paused' and resumed['returned_rejected_call'].endswith(':gpt')
+        assert ports.calls == calls + ['gpt'] and ports.calls.count('opus') == 1
+    parent = store.get_cvp_group(parent['run_id'])
+    assert parent['call_reservations'][rid+':'+role] == slot
     assert before == {key: store.get_record_state(*key.split('/', 1)) for key in before}
     # Recording is idempotent; tampered raw cannot be recorded or release a call.
-    assert store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail']) == slot['rejection']
+    if role == 'gpt':
+        assert store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail']) == slot['rejection']
+    else:
+        with pytest.raises(ChangeSetConflict): store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail'])
     raw_path = root/rid/(role+'.raw.json'); raw = read(raw_path)
     raw.pop('artifact_sha256'); raw['response'] = {'forged': True}; write(raw_path, raw, immutable=False)
-    with pytest.raises(ValueError): store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail'])
+    with pytest.raises((ValueError, ChangeSetConflict)): store.record_claim_management_returned_rejection(rid, role=role, detail=result['detail'])
     assert store.get_cvp_group(parent['run_id']) == parent

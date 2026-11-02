@@ -89,8 +89,18 @@ def scoped_adapter(adapter, packet):
     def key_type(keys):
         return Literal[tuple(sorted(keys))] if keys else str
 
+    def array_field(empty=False, **kwargs):
+        if empty:
+            kwargs['max_length'] = 0  # Still enforced by the response model.
+            if not reviewing and packet['policy'].get('proposal_empty_arrays') == 'program_validated_v1':
+                # Some structured decoders loop on maxItems:0. Remove only
+                # this wire hint; returned items remain forbidden by Pydantic.
+                kwargs['json_schema_extra'] = lambda schema: schema.pop('maxItems', None)
+                kwargs['description'] = kwargs.get('description', '') + ' Must be []; program validation forbids every item.'
+        return Field(**kwargs)
+
     def key_list(keys, description):
-        return (list[key_type(keys)], Field(description=description, **({'max_length': 0} if not keys else {})))
+        return (list[key_type(keys)], array_field(not keys, description=description))
 
     impact = {
         'affected_target_keys': key_list(targets, 'Only affected Claim keys from unit_request.target_keys. Never Evidence, Observation, relation, or readonly neighbour keys.'),
@@ -105,7 +115,7 @@ def scoped_adapter(adapter, packet):
         from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled
         base = BindingFindingsReview if binding_enabled(packet['policy']) else FindingsReview
         fields = dict(findings=(list[finding], ...),
-            prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+            prior_findings=(list[resolution], array_field(not pending)))
         if binding_enabled(packet['policy']) and packet.get('initial_review_references'):
             from backend.pipeline.claim_evidence_review import BindingAssessment
             fresh = set(packet['own_evidence_bindings'])
@@ -119,9 +129,9 @@ def scoped_adapter(adapter, packet):
         model = create_model('ScopedFindingsReview', __base__=base, **fields)
     else:
         change = create_model('ScopedChange', __base__=Change, record_key=(key_type(writable), ...))
-        fields = dict(changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
+        fields = dict(changes=(list[change], array_field(not writable)),
             findings=(list[finding], ...),
-            finding_resolutions=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+            finding_resolutions=(list[resolution], array_field(not pending)))
         if contract in {CREATING_CONTRACT, MANAGED_CONTRACT}:
             creatable = {p['collection'] for p in request.get('creation_permissions', [])}
             identity = {}
@@ -136,14 +146,13 @@ def scoped_adapter(adapter, packet):
                 support_creation = create_model('ScopedSupportCreation', __base__=Creation,
                     collection=(key_type(support), ...))
                 creation = Union[claim_creation, support_creation] if 'claims' in creatable else support_creation
-            fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else
-                {'max_length': len(slots)} if contract == MANAGED_CONTRACT and not support else {})))
+            fields['creations'] = (list[creation], array_field(not creatable, **({'max_length': len(slots)} if creatable and contract == MANAGED_CONTRACT and not support else {})))
         if contract == MANAGED_CONTRACT:
             allowed = {k for k in writable if k in targets or k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
             if 'Retire' not in request['allowed_operations']:
                 allowed = set()
             retirement = create_model('ScopedRetirement', __base__=Retirement, record_key=(key_type(allowed), ...))
-            fields['retirements'] = (list[retirement], Field(**({'max_length': 0} if not allowed else {})))
+            fields['retirements'] = (list[retirement], array_field(not allowed))
         base = ManagedChanges if contract == MANAGED_CONTRACT else CreatingChanges if contract == CREATING_CONTRACT else Changes
         model = create_model('ScopedChanges', __base__=base, **fields)
     schema_sha = cm.sha256_json(model.model_json_schema())

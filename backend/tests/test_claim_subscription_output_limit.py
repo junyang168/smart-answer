@@ -22,10 +22,11 @@ def truncated(action, monkeypatch):
     old, root = operation_request(action, 'Update', ['C'])
     policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v3.json').read_text())
     policy.initial_candidate = 'proposal'
+    policy.model_output_contract = 'claim_changes_v2'
     authorize(old, policy, root.with_suffix('.policy.json'))
     message = 'Incomplete response returned, reason: max_output_tokens'
     output = '\n'.join(json.dumps(e) for e in [
-        {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': '{"changes":[' + ' ' * 100}},
+        {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': '{"changes":[],"findings":[],"finding_resolutions":[' + ' ' * 100}},
         {'type': 'error', 'message': message}, {'type': 'turn.failed', 'error': {'message': message}}])
     class FailedClient(CodexSubscriptionClient):
         def _verify_chatgpt_login(self): pass
@@ -110,5 +111,21 @@ def test_truncated_followup_has_bounded_authority(truncated, defect):
         previous['continuation'] = {'subscription_output_limit_recovery': {'spent': True}}
         extension['prior_metadata_sha256'] = cm.sha256_json(previous)
     extension['budget'] = policy.budget.model_dump(mode='json')
+    authorize(new, policy, next_root.with_suffix('.policy.json'), extension)
+    with pytest.raises(ValueError): cm.continuation_budget(previous, new, policy)
+
+
+def test_a_second_truncation_needs_the_new_schema_mitigation_and_same_spend_bounds(truncated):
+    _, _, _, previous, new, next_root, policy, extension = truncated
+    previous['continuation'] = {'subscription_output_limit_recovery': {'spent': True}}
+    extension['prior_metadata_sha256'] = cm.sha256_json(previous)
+    authorize(new, policy, next_root.with_suffix('.policy.json'), extension)
+    with pytest.raises(ValueError): cm.continuation_budget(previous, new, policy)
+    policy.proposal_empty_arrays = 'program_validated_v1'
+    authorize(new, policy, next_root.with_suffix('.policy.json'), extension)
+    proof = cm.continuation_budget(previous, new, policy)
+    assert proof['spent_generations']['gpt'] == 1 and proof['subscription_output_limit_recovery']
+    previous['policy']['proposal_empty_arrays'] = 'program_validated_v1'
+    extension['prior_metadata_sha256'] = cm.sha256_json(previous)
     authorize(new, policy, next_root.with_suffix('.policy.json'), extension)
     with pytest.raises(ValueError): cm.continuation_budget(previous, new, policy)

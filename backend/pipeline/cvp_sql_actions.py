@@ -519,6 +519,11 @@ def execute_claim_management(store, request, *, root, ports):
                 resume_rejected_output(store,rejected_round,role=role,error=parent['result']['detail'])
                 parent = store.get_cvp_group(parent_id)
             except (ValueError,RuntimeError,OSError) as exc:
+                if str(exc) == 'rejected-input correction requires a bound own-source location':
+                    # Malformed output may contain no source-bound decision
+                    # to repair. Keep the original authenticated rejection;
+                    # reading it again must not erase or reclassify it.
+                    return parent['result']
                 return store.pause_claim_management_action(parent_id,
                     reason='budget_exhausted' if 'budget' in str(exc) else 'engineering_required',detail=str(exc))
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
