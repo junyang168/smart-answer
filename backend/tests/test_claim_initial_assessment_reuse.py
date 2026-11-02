@@ -196,6 +196,40 @@ def test_recovery_chain_keeps_original_passes_and_refuses_foreign_history(interr
         assert len(evidence.reused_assessments(materials, cm.Candidate.model_validate(old['candidate']))) == 8
 
 
+@pytest.mark.parametrize('interrupted_unit', ['owner_refs'], indirect=True)
+def test_created_claim_qualification_does_not_expand_hypothetical_shared_writes(interrupted_unit):
+    store, _, request, output, _, _, _, propose = interrupted_unit
+    created = None
+    def repair(packet):
+        nonlocal created
+        raw = propose(packet)
+        created = allocated_ids(packet['original_goal']['claim_creation_allocations'])[0]
+        fields = json.loads(raw['creations'][0]['fields_json'])
+        fields['evidence_step_ids'] = ['NEW-REFERENCE-EVIDENCE']
+        raw['creations'][0]['fields_json'] = json.dumps(fields)
+        changed = json.loads(raw['changes'][0]['fields_json'])
+        changed['produced_claim_ids'].remove(created)
+        raw['changes'][0]['fields_json'] = json.dumps(changed)
+        raw['creations'].append({'collection': 'evidence_steps', 'object_id': 'NEW-REFERENCE-EVIDENCE',
+            'fields_json': json.dumps({'statement': '甲是假设。', 'source_fragment_ids': ['FD'],
+                'produced_claim_ids': [created], 'speaker': 'professor', 'stance': 'asserted',
+                'support_eligibility': 'eligible_candidate'}),
+            'reason': 'new judgment reuses a readonly neighbour source fragment',
+            'citations': raw['creations'][0]['citations']})
+        return raw
+    def review(packet):
+        result = pass_review(packet)
+        result['prior_findings'] = [{'finding_id': fid, 'disposition': 'resolved',
+            'reason': 'both judgments have valid source-bound Claims', 'citations': [f['citations'][0]],
+            'affected_target_keys': ['claims/C0'], 'affected_write_keys': ['evidence_steps/EC0'],
+            'impact_reason': 'own evidence'} for fid, f in packet['unresolved'].items()]
+        return result
+    ports = SyntheticPorts(store, output, proposal=repair, opus=review)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert store.claim_management_qualification(created)['ready']
+
+
 def test_withdrawn_draft_blocker_reaches_the_same_unit_successor(interrupted_unit):
     from backend.pipeline.claim_review_recovery import resume_saved_pre_review
     store, original, successor, output, root, _, _, propose = interrupted_unit

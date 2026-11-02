@@ -67,7 +67,7 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     # Capabilities and other target identities from the old task do not seed
     # a new review. Both old and current direct scope are compared exactly.
     own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
-    left, right = scope(own, old), scope(own, current)
+    left, right = (scope(own, rows, include_write_context=False) for rows in (old, current))
     required = set(left['record_keys']) | set(right['record_keys'])
     neighbours = set(left['neighbour_claim_keys']) | set(right['neighbour_claim_keys'])
     changed_context = set()
@@ -172,7 +172,8 @@ def verify(store, cursor, claim_id, proof):
     # its original review used the legacy transitive scope. Dispatching by
     # that old policy would demand neighbours' private Evidence again.
     from backend.pipeline.claim_direct_scope import assert_current
-    assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states)
+    assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states,
+                   include_write_context=False)
     state = states[('claims', claim_id)]
     if state['retired_at'] is not None or state['payload'].get('review_status') in cm.HELD:
         raise ValueError('review reuse cannot release retired or held content')

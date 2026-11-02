@@ -68,7 +68,7 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
     return targets | maintenance | set(actual_write_keys)
 
 
-def scope(request, before, candidate=None):
+def scope(request, before, candidate=None, *, include_write_context=True):
     from backend.pipeline import claim_management as cm
     payloads = {k: v['payload'] for k, v in before.items()}
     old = dict(payloads)
@@ -190,7 +190,7 @@ def scope(request, before, candidate=None):
     neighbours = {k for k in endpoints if k.startswith('claims/')} - content_claims
     context = (endpoints | questions) - core
     writable = core | relations | questions
-    if bounded:
+    if bounded and include_write_context:
         # Potential shared consumers are reference material, not more review
         # roots or capabilities. Freeze their necessary evidence before a
         # proposal can change a shared fragment/step; do not wait until after
@@ -250,7 +250,7 @@ def scope(request, before, candidate=None):
     return result
 
 
-def assert_current(store, cursor, request, records, *, actual_write_keys=()):
+def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True):
     """Check adjacency at roots, not reverse closure at every read endpoint."""
     from backend.pipeline import claim_management as cm
     from backend.pipeline.claim_review_units import enabled as bounded_unit
@@ -274,6 +274,7 @@ def assert_current(store, cursor, request, records, *, actual_write_keys=()):
     if consumers - set(records):
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
-    selected = scope(request, {cm.source.key(*k): v for k, v in records.items()})
+    selected = scope(request, {cm.source.key(*k): v for k, v in records.items()},
+                     include_write_context=include_write_context)
     if not set(selected['record_keys']) <= {cm.source.key(*k) for k in records}:
         raise ValueError('direct Claim scope has incomplete current evidence')

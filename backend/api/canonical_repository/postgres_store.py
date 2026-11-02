@@ -4219,7 +4219,12 @@ class PostgresKnowledgeStore:
                         from backend.pipeline.claim_direct_scope import scope
                         own = Request.model_validate(value['materials']['unit_request']).model_copy(
                             update={'target_keys':['claims/'+claim_id], 'permissions':[]})
-                        protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()})['writable_record_keys']
+                        protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()},
+                                          include_write_context=False)['writable_record_keys']
+                except ValueError as exc:
+                    return {'ready': False, 'reason': 'current_own_evidence_scope_incomplete',
+                            'run_id': rid, 'detail': str(exc)}
+                try:
                     assert_no_newer_rejection(cursor, claim_id, rid, protected)
                 except ValueError:
                     return {'ready': False, 'reason': 'newer_formal_review_objection', 'run_id': rid}
