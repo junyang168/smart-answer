@@ -1,0 +1,19 @@
+{
+  "name": "sunday-presenter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mac proof of concept for two persistent PowerPoint web presentations",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "smoke": "electron . --smoke",
+    "package:mac": "electron-packager . 'Sunday Presenter' --platform=darwin --out=dist --overwrite --ignore='^/test($|/)' --ignore='^/output($|/)'"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.2.1"
+  },
+  "overrides": { "glob": "14.0.3", "minimatch": "11.0.4" },
+  "engines": { "node": ">=22.12.0" }
+}

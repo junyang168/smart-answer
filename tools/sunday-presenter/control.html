@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sunday Presenter — 控制台</title>
+  <link rel="stylesheet" href="control.css">
+  <script src="control.js" defer></script>
+</head>
+<body>
+  <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>專心帶領，輕鬆切換。</h1>
+    <p><strong>⌘P</strong> 顯示 / 隱藏控制台。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
+  </header>
+  <section class="onair"><span id="live" role="status">輸出：黑屏</span><div class="switches">
+    <button data-take="worship" class="take" disabled>主日崇拜</button>
+    <button data-take="sermon" class="take" disabled>講道</button>
+    <button data-action="black" class="black">黑屏 / 靜音</button></div></section>
+  <p id="error" role="alert"></p>
+  <main id="decks"></main>
+  <footer><div class="transport"><button data-key="Left">← 上一步</button><button data-key="Right">下一步 →</button><button data-action="show-output">顯示輸出視窗</button></div>
+    <p>準備：登入並開啟簡報 → 啟動投影片放映 → 在準備視窗檢查觀眾畫面 → 設為觀眾畫面 → 切換輸出。</p>
+    <p class="note">新彈出頁面保留在背景；需要時按該列「準備 / 檢查」。請確認觀眾頁面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。實際動畫及 Meet 收音須另行驗證。⌘P 切換控制台；⌘1 / ⌘2 切換；⌘0 黑屏。</p>
+  </footer>
+</body>
+</html>
