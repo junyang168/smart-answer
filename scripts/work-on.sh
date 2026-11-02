@@ -81,8 +81,8 @@ fi
 # interpreter and the packages are shared.
 #
 #   backend/.venv      the interpreter `.python-version` pins, and the one
-#                      production runs; the root `.venv` is an older 3.11 that
-#                      failed a test production passes
+#                      production runs; root `.venv` is a compatibility alias
+#                      to this same environment, not a separate Python version
 #   web/node_modules   491 MB
 #   node_modules        25 MB
 #

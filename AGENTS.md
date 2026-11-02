@@ -141,10 +141,9 @@ that fails there costs minutes and touches nothing, because the deploy builds
 before it switches.
 
 Run tests with `backend/.venv`, which is the version `.python-version` pins and
-the one production runs. The root `.venv` is an older 3.11 that survives for
-whatever still points at it, and it does not agree with production: a
-fellowship-documents test fails there and passes on 3.13, so a suite run
-against it can report a failure production does not have.
+the one production runs. The root `.venv` is only a compatibility symlink to
+`backend/.venv`; the old Python 3.11 development environment was removed in
+#591. Do not recreate a separate environment with an unpinned interpreter.
 
 Git enforces the part that matters — one branch cannot be checked out in two
 worktrees — so parallel sessions cannot take each other's floor away. Two
