@@ -124,8 +124,16 @@ def interrupted_unit(action, request, monkeypatch):
     return store, request, successor, output, root, initial, old_calls, propose
 
 
-def test_initial_passes_are_references_but_do_not_complete_the_pending_operation(interrupted_unit):
+@pytest.mark.parametrize('automatic', [False, True])
+def test_initial_passes_are_references_but_do_not_complete_the_pending_operation(interrupted_unit, automatic):
     store, original, request, output, root, initial, old_calls, propose = interrupted_unit
+    if automatic:
+        path = Path(request.authorization.path)
+        authority = json.loads(path.read_text())
+        authority.pop('reuse_initial_review_round')
+        authority['reuse_initial_claim_assessments'] = True
+        path.write_text(json.dumps(authority))
+        request.authorization = cm.source.FileBinding.model_validate(binding(path))
     assert store.claim_management_qualification('C1') is None
     raw = next(root.glob(initial + '/opus.raw.json')); saved = raw.read_bytes()
     def final(packet):

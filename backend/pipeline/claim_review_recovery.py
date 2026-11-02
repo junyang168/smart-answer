@@ -18,6 +18,67 @@ from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVIS
 VERSION='wang_claim_review_engineering_recovery_v1'
 
 
+def consumed_subscription_output_limit(previous, key, slot):
+    """Authenticate a finished Codex truncation, without accepting partial JSON."""
+    from types import SimpleNamespace
+    from backend.pipeline.source_reconciliation_runner import stage_adapter
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.subscription_process import digest_file
+    policy = cm.Policy.model_validate(previous['policy'])
+    if (slot['role'] != 'gpt' or slot['state'] != 'started'
+            or policy.models['gpt']['backend'] != 'codex_subscription'
+            or key != slot['round_id'] + ':gpt'):
+        raise ValueError('output-limit recovery requires the original started Codex proposal')
+    stage = Path(previous['execution_root']) / slot['round_id']
+    transport = stage / 'gpt.transport'
+    intent = body(read(stage/'gpt.reservation.json'))
+    materials = body(read(stage/'materials.json'))
+    packet = body(read(stage/'gpt.packet.json'))
+    if (intent != slot['intent'] or sha256_json(intent) != slot['intent_sha256']
+            or packet != cm.model_packet(materials)
+            or sha256_json(packet) != intent['request_payload_sha256']
+            or (stage/'gpt.raw.json').exists() or (transport/'response.json').exists()):
+        raise ValueError('truncated proposal cannot replace a complete answer or changed input')
+    adapter = stage_adapter(claim_management_model_adapter('gpt', policy), packet,
+                            stage/'gpt.raw.json', saved=intent)
+    for name in ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256'):
+        if intent[name] != getattr(adapter, name):
+            raise ValueError('truncated proposal model/prompt/schema drift')
+    if intent['request_encoding_proof'] != adapter.request_encoding_proof(packet):
+        raise ValueError('truncated proposal wire drift')
+    # Capture the existing encoder, never instantiate a live generation here.
+    adapter._client = SimpleNamespace(generate_json=lambda **kwargs: kwargs)
+    wire = adapter.generate(packet)
+    prompt = ("Perform this structured extraction without using tools or modifying files. "
+              "Return only the JSON object required by the supplied output schema."
+              "\n===== SYSTEM INSTRUCTIONS =====\n" + wire['system_prompt'] +
+              "\n===== USER INPUT =====\n" + (wire.get('cache_prefix') or '') + wire['user_prompt'])
+    invocation = json.loads((transport/'invocation.json').read_text())
+    receipt = json.loads((transport/'exit.json').read_text())
+    failure = body(read(stage/'gpt.failure.json'))
+    names = ('stdout.log', 'stderr.log')
+    if (invocation.get('cwd') != str(transport)
+            or invocation.get('input_sha256') != hashlib.sha256(prompt.encode()).hexdigest()
+            or receipt.get('returncode') != 1 or receipt.get('error_type')
+            or receipt.get('files') != {n: digest_file(transport/n) for n in names}
+            or failure.get('automatic_retry') is not False
+            or failure.get('transport_directory') != str(transport)
+            or any(failure.get('provider_raw', {}).get(n.removesuffix('.log')) != (transport/n).read_text() for n in names)):
+        raise ValueError('truncated proposal requires its exact finished transport receipt')
+    schema = json.loads((transport/'response-schema.json').read_text())
+    if schema != wire['json_schema'].get('schema', wire['json_schema']):
+        raise ValueError('truncated proposal response schema drift')
+    events = [json.loads(line) for line in (transport/'stdout.log').read_text().splitlines() if line.strip()]
+    message = 'Incomplete response returned, reason: max_output_tokens'
+    if (not events or events[-1] != {'type': 'turn.failed', 'error': {'message': message}}
+            or not any(e.get('type') == 'error' and e.get('message') == message for e in events)
+            or any(e.get('type') == 'turn.completed' for e in events)):
+        raise ValueError('not a proved finished Codex output-token exhaustion')
+    return {'slot': key, 'spent_call_preserved': True, 'partial_output_accepted': False,
+            'failure': binding(stage/'gpt.failure.json'),
+            **{name: binding(transport/name) for name in (*names, 'invocation.json', 'exit.json', 'response-schema.json')}}
+
+
 def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
     check_binding(authorization)
     direction=json.loads(Path(authorization['path']).read_text())
@@ -981,10 +1042,13 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             from backend.pipeline.cvp_sql_actions import claim_management_review_packet
             initial = [s['round_id'] for s in parent['call_reservations'].values()
                        if s['role'] == 'opus' and s['state'] == 'completed']
-            if len(initial) != 1:
+            if len(initial) > 1:
                 raise ValueError('saved capacity recovery requires exactly one accepted initial review')
             rebound['initial_assessment_reuse'] = freeze_initial_review_reuse(store,
-                cm.Request.model_validate(materials['unit_request']), initial_round_id=initial[0])
+                cm.Request.model_validate(materials['unit_request']),
+                **({'initial_round_id': initial[0]} if initial else {}))
+            if not rebound['initial_assessment_reuse']:
+                raise ValueError('saved capacity recovery requires an authenticated initial review')
             # Reuses only exact unaffected individual passes. If active work
             # still exceeds ten, this raises before changing any SQL stage.
             claim_management_review_packet(rebound, candidate)

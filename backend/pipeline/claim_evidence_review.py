@@ -26,16 +26,20 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
     if rid is None:
         if direction.get('reuse_initial_claim_assessments') is not True:
             return None
-        origin = request.action_id
-        parent = store.get_cvp_group('CMA-' + cm.sha256_json(origin))
         eligible = []
-        for slot in (parent or {}).get('call_reservations', {}).values():
-            if slot['role'] != 'opus' or slot['state'] != 'completed':
+        for origin in (request.action_id, request.predecessor_action_id):
+            if not origin:
                 continue
-            prior = store.get_cvp_group(slot['round_id'])
-            if (prior['materials']['round_number'] == 0 and prior['materials']['roles'] == ['opus']
-                    and prior.get('candidate') and not prior['candidate']['records']):
-                eligible.append(slot['round_id'])
+            parent = store.get_cvp_group('CMA-' + cm.sha256_json(origin))
+            for slot in (parent or {}).get('call_reservations', {}).values():
+                if slot['role'] != 'opus' or slot['state'] != 'completed':
+                    continue
+                prior = store.get_cvp_group(slot['round_id'])
+                if (prior['materials']['round_number'] == 0 and prior['materials']['roles'] == ['opus']
+                        and prior.get('candidate') and not prior['candidate']['records']):
+                    eligible.append(slot['round_id'])
+            if eligible:
+                break
         if not eligible:
             return None
         if len(eligible) != 1:

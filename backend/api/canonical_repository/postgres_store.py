@@ -3397,7 +3397,7 @@ class PostgresKnowledgeStore:
                             # must remain exactly unchanged. Legacy unknown-call
                             # extensions without a current binding stay strict.
                             current_bound_follow_up = (extension
-                                and (extension.get('basis') in {'remaining_findings','api_output_limit'}
+                                and (extension.get('basis') in {'remaining_findings','api_output_limit','subscription_output_limit'}
                                      or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension
                                      or extension.get('basis') == 'permission_required' and (
                                          continuation.get('source_support_creation') or continuation.get('related_owner_target_extension'))))
@@ -3407,6 +3407,12 @@ class PostgresKnowledgeStore:
                                             goal['original_objects'].get(k)==state for k,state in child['materials']['before'].items())))):
                                 raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
+                        if (not candidate and extension and extension.get('basis') == 'subscription_output_limit'
+                                and continuation.get('subscription_output_limit_recovery')):
+                            # A first proposal may fail before any candidate exists.
+                            # Keep current SQL as the baseline; the truncated text
+                            # never becomes an accepted candidate.
+                            candidate = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         if not candidate:
                             # A returned rejected GPT proposal deliberately has
                             # no accepted candidate. Preserve it as input, never

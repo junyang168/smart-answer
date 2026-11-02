@@ -1611,6 +1611,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     output_limit = extension_basis == 'api_output_limit'
+    subscription_limit = extension_basis == 'subscription_output_limit'
     permission_follow_up = (extension_basis == 'permission_required'
         and (previous['result'].get('reason') == 'permission_required'
              or support_creation and previous['result'].get('reason') == 'no_progress'
@@ -1647,6 +1648,8 @@ def continuation_budget(previous, request, policy):
         if extension_basis != 'unknown_call' or 'current_objects_sha256' in extension:
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
+            or subscription_limit and previous['result'].get('reason') == 'model_failed'
+                and not previous.get('continuation',{}).get('subscription_output_limit_recovery')
             or output_limit and previous['result'].get('reason') == 'model_failed'
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
@@ -1671,6 +1674,11 @@ def continuation_budget(previous, request, policy):
                 or policy.independent_audit_required or policy.api_spend != original.api_spend
                 or not original.budget.max_output_tokens < policy.budget.max_output_tokens <= min(64000,2*original.budget.max_output_tokens)):
             raise ValueError('API output-limit recovery permits one review and one correction/review, at most 64k total output')
+        if subscription_limit and (policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
+                or policy.budget.gemini_calls or policy.budget.max_revisions != 1
+                or policy.independent_audit_required or policy.api_spend != original.api_spend
+                or policy.budget.max_output_tokens != original.budget.max_output_tokens):
+            raise ValueError('Codex output-limit recovery permits one proposal/review pair without increasing output limits')
         if permission_follow_up and (policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
                 or policy.budget.gemini_calls != int(policy.independent_audit_required)
                 or policy.budget.max_revisions != 1):
@@ -1688,6 +1696,11 @@ def continuation_budget(previous, request, policy):
             continue
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
+            continue
+        if subscription_limit and slot['role'] == 'gpt' and (root/slot['round_id']/'gpt.failure.json').is_file():
+            from backend.pipeline.claim_review_recovery import consumed_subscription_output_limit
+            output_failures[key] = consumed_subscription_output_limit(previous,key,slot)
+            spent['gpt'] += 1
             continue
         if output_limit:
             from backend.pipeline.claim_anthropic_api import consumed_output_limit
@@ -1757,6 +1770,8 @@ def continuation_budget(previous, request, policy):
     if output_limit and (len(output_failures) != 1 or spent['gpt'] or spent['opus'] != 1
             or previous.get('findings') or any(previous['revision_rounds'].values())):
         raise ValueError('API output-limit recovery requires its one initial no-report failure, not another review loop')
+    if subscription_limit and len(output_failures) != 1:
+        raise ValueError('Codex output-limit recovery requires exactly one authenticated failed proposal')
     if extension_basis == 'unknown_call' and not unknown:
         raise ValueError('owner unknown-call extension requires an actual unknown generation')
     if (policy.models != original.models and not api_transition or policy.independent_audit != original.independent_audit
@@ -1776,6 +1791,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('original remaining budget cannot fund correction and review')
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
+        **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),
         **({'source_support_creation':True} if support_creation else {}),
         **({'related_owner_target_extension':True} if target_extension else {}),
         'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
