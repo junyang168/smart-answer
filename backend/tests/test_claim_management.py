@@ -543,3 +543,32 @@ def test_proposer_report_does_not_need_another_restating_call_before_permission_
         changed=deepcopy(pending);changed['original'][field]=value
         assert m.proposer_reported_finding_ids(changed,candidate)==set()
     assert m.proposer_reported_finding_ids(pending,candidate.model_copy(update={'findings':[]}))==set()
+
+
+@pytest.mark.parametrize('remaining', ['none','evidence','claim_fragment','other_owner','write','maintenance','impact','content'])
+def test_unused_audio_fragment_is_context_only_after_all_current_uses_removed(case,tmp_path,remaining):
+    from backend.pipeline.source_reconciliation_runner import binding
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    request,before,candidate,_=case
+    bounded=m.Policy.model_validate_json((m.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v4.json').read_text())
+    bounded.review_unit_contract='claim_bounded_review_unit_v1'
+    bound=tmp_path/'policy.json';bound.write_text(bounded.model_dump_json());request.policy=m.source.FileBinding.model_validate(binding(bound))
+    request.authorization=m.source.FileBinding(path=str(tmp_path/'authorization.json'),file_sha256='0'*64)
+    authorize(request,{'required_maintenance_keys':['source_fragments/F'] if remaining=='maintenance' else []})
+    before['source_documents/S']={'payload':{'source_id':'S'},'retired':False}
+    fragment=deepcopy(before['source_fragments/F']);fragment['payload']['fragment_id']='G';before['source_fragments/G']=fragment
+    evidence=deepcopy(before['evidence_steps/E']['payload']);evidence['source_fragment_ids']=['G']
+    if remaining=='evidence':evidence['source_fragment_ids'].append('F')
+    candidate=change(candidate,'evidence_steps/E','update',evidence)
+    if remaining=='claim_fragment':
+        claim=deepcopy(before['claims/C']['payload']);claim['source_fragment_ids']=['F']
+        candidate=change(candidate,'claims/C','update',claim)
+    if remaining=='other_owner':
+        before['evidence_steps/OTHER']={'payload':{'evidence_step_id':'OTHER','source_fragment_ids':['F']},'retired':False}
+    if remaining=='write':candidate=change(candidate,'source_fragments/F','update',deepcopy(before['source_fragments/F']['payload']))
+    finding={'target_key':'source_fragments/F','category':'content' if remaining=='content' else 'source_uncertain',
+        'affected_target_keys':['claims/C'] if remaining=='impact' else [],'affected_write_keys':[],
+        'impact_reason':'replacement evidence independently supports C; speaker of unused fragment still unknown'}
+    assert m.finding_blocks(finding,request,candidate,records=before)==(remaining!='none')
+    # The original preimage remains protected until a candidate removes use.
+    assert m.finding_blocks(finding,request,None,records=before)

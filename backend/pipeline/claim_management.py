@@ -803,6 +803,8 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
             # even when its Claim sentence is correct and no write exists.
             # Unused capability and reference-private data do not seed scope.
             blocks = finding['target_key'] in scope(request, records, candidate)['writable_record_keys']
+            if blocks and unused_source_fragment_context(finding, records, candidate):
+                blocks = False
         return blocks
     affected = finding.get('affected_target_keys')
     if request is None or is_source_impact(request) or affected is None:
@@ -820,6 +822,30 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
     # Explicitly authorized maintenance objects are part of this Update's
     # obligations even when the proposer keeps them unchanged.
     return bool(affected) or finding['target_key'] in written | {p.key for p in request.permissions}
+
+
+def unused_source_fragment_context(finding, before, candidate):
+    """Keep an audio-only question after its unsupported use was repaired.
+
+    Pre/post scope still protects every removed owner and every actual write.
+    This narrow exception concerns only an unchanged source fragment that no
+    current knowledge record uses, with explicit zero impact from both models.
+    It does not decide the unknown speaker or approve any replacement evidence.
+    """
+    key = finding['target_key']
+    if (candidate is None or finding.get('category') != 'source_uncertain'
+            or not key.startswith('source_fragments/') or key not in before
+            or before[key].get('retired')
+            or finding.get('affected_target_keys') != []
+            or finding.get('affected_write_keys') != []
+            or any(d.record_key == key and d.action != 'retain' for d in candidate.dispositions)):
+        return False
+    rows = {k: v['payload'] for k, v in before.items()}
+    rows.update(source.index(candidate.records))
+    if rows[key] != before[key]['payload']:
+        return False
+    return not any(key in domain_dependencies(k.split('/', 1)[0], payload, rows)
+                   for k, payload in rows.items())
 
 
 def resolution_finding(resolution, unresolved):

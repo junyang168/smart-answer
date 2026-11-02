@@ -416,3 +416,42 @@ def test_reference_lead_and_real_contradiction_have_distinct_qualification_effec
     q=store.claim_management_qualification('C')
     assert bool(q and q.get('ready')) is (not affects_target)
     assert ports.calls==['opus']
+
+
+def test_repaired_fragment_use_keeps_unanswered_audio_question_as_context(claims):
+    store,root=claims
+    original=store.get_record_state('source_fragments','FC')
+    evidence=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'alternative-bound-fragment',
+        'evidence_steps':[dict(evidence,source_fragment_ids=['FC','FD'])]}))
+    prepared=intake.prepare(['C'],root,instruction='Correct unsupported use without claiming speaker verification',
+        groups=[['C']],policy=policy_file(root.parent),store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    citation={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    finding={'target_key':'source_fragments/FC','component':'speaker','category':'source_uncertain',
+        'reason':'synthetic audio speaker is unknown','human_question':'Who spoke?',
+        'acceptance_condition':'Do not rely on an unconfirmed speaker','citations':[citation],
+        'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'C currently uses this fragment'}
+    def resolution(fid):
+        return {'finding_id':fid,'disposition':'persistent','reason':'speaker still unknown; unsupported use removed',
+            'citations':[citation],'affected_target_keys':[],'affected_write_keys':[],
+            'impact_reason':'No postimage record or Claim uses FC; the alternative evidence was fully reviewed'}
+    def review(packet):
+        result=pass_review(packet)
+        if not packet['unresolved']:result['findings']=[finding]
+        else:result['prior_findings']=[resolution(fid) for fid in packet['unresolved']]
+        return result
+    def propose(packet):
+        return {'changes':[{'record_key':'evidence_steps/EC','fields_json':json.dumps({'source_fragment_ids':['FD']}),
+            'reason':'use independently bound alternative','citations':[citation]}],
+            'creations':[],'retirements':[],'findings':[],
+            'finding_resolutions':[resolution(fid) for fid in packet['unresolved']]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus','gpt','opus']
+    assert store.get_record_state('source_fragments','FC')==original
+    assert store.claim_management_qualification('C')['ready']
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert not parent['findings'] and next(iter(parent['context_findings'].values()))['human_question']=='Who spoke?'
