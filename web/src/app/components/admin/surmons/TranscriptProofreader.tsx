@@ -9,7 +9,12 @@ import type { Editor as CodeMirrorEditor } from "codemirror";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { editOcrText, ocrText } from "./review-ocr-text";
-import { toggleParagraphPlayback } from "./review-playback";
+import {
+  toggleParagraphPlayback,
+  prepareParagraphPlayback,
+  seekParagraphPlayback,
+  stopAtParagraphEnd,
+} from "./review-playback";
 import {
   paragraphIsConfirmed,
   scrollToReviewParagraph,
@@ -327,9 +332,9 @@ function TranscriptProofreader({
   const running = useRef<Promise<void>>();
   const persistTail = useRef(Promise.resolve());
   const durable = useRef(true);
-  const segmentEnd = useRef<number>();
+  const boundaryTimer = useRef<ReturnType<typeof setTimeout>>();
+  const contextPlayback = useRef(false);
   const video = useRef<HTMLMediaElement | null>(null);
-  const [segmentPause, setSegmentPause] = useState(true);
   const [playing, setPlaying] = useState(false);
   const selectedParagraph = useRef(initial.script[0]?.index || "");
   const playbackParagraph = useRef<string>();
@@ -337,7 +342,8 @@ function TranscriptProofreader({
     if (selectedParagraph.current !== id) {
       video.current?.pause();
       setPlaying(false);
-      segmentEnd.current = undefined;
+      clearTimeout(boundaryTimer.current);
+      contextPlayback.current = false;
       playbackParagraph.current = undefined;
       selectedParagraph.current = id;
     }
@@ -345,6 +351,18 @@ function TranscriptProofreader({
     setActiveGroup(undefined);
     setPeekSlide(undefined);
   }, []);
+  const checkParagraphEnd = useCallback(function check() {
+    clearTimeout(boundaryTimer.current);
+    const media = video.current;
+    const binding =
+      current.current.context.paragraph_bindings[selectedParagraph.current];
+    if (!media || contextPlayback.current || !binding) return;
+    if (stopAtParagraphEnd(media, binding) || media.paused) return;
+    const remaining =
+      (binding.end_ms / 1000 - media.currentTime) / (media.playbackRate || 1);
+    boundaryTimer.current = setTimeout(check, Math.max(10, remaining * 1000));
+  }, []);
+  useEffect(() => () => clearTimeout(boundaryTimer.current), []);
   const composing = useRef(false);
   const [tabId] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -783,7 +801,7 @@ function TranscriptProofreader({
     const binding = current.current.context.paragraph_bindings[id];
     selectParagraph(id);
     playbackParagraph.current = id;
-    segmentEnd.current = binding.end_ms / 1000;
+    contextPlayback.current = false;
     if (video.current) {
       video.current.currentTime = binding.start_ms / 1000;
       void video.current.play();
@@ -792,32 +810,30 @@ function TranscriptProofreader({
   const seek = (seconds: number) => {
     const media = video.current;
     if (!media) return;
-    const selectedBinding =
-      current.current.context.paragraph_bindings[selected];
-    if (playbackParagraph.current !== selected && selectedBinding) {
-      media.currentTime = selectedBinding.start_ms / 1000;
-      playbackParagraph.current = selected;
-    }
-    const duration = Number.isFinite(media.duration)
-      ? media.duration
-      : Infinity;
-    media.currentTime = Math.max(
-      0,
-      Math.min(duration, media.currentTime + seconds),
+    seekParagraphPlayback(
+      media,
+      current.current.context.paragraph_bindings[selected],
+      seconds,
+      playbackParagraph.current !== selected || contextPlayback.current,
     );
-    const binding = current.current.context.paragraph_bindings[selected];
-    segmentEnd.current =
-      binding && media.currentTime < binding.end_ms / 1000
-        ? binding.end_ms / 1000
-        : undefined;
+    contextPlayback.current = false;
+    playbackParagraph.current = selected;
+    checkParagraphEnd();
   };
   const togglePlayback = () => {
     const media = video.current;
     if (!media) return;
-    segmentEnd.current = toggleParagraphPlayback(
+    if (contextPlayback.current && !media.paused) {
+      media.pause();
+      return;
+    }
+    const fresh =
+      playbackParagraph.current !== selected || contextPlayback.current;
+    contextPlayback.current = false;
+    toggleParagraphPlayback(
       media,
       current.current.context.paragraph_bindings[selected],
-      playbackParagraph.current !== selected,
+      fresh,
     );
     playbackParagraph.current = selected;
   };
@@ -1310,43 +1326,52 @@ function TranscriptProofreader({
                 audioOnly ? "block h-14 w-full" : "block w-full bg-black"
               }
               onPlay={() => {
+                const media = video.current;
                 const id = selectedParagraph.current;
                 const binding = current.current.context.paragraph_bindings[id];
+                if (!media) return;
                 if (
-                  playbackParagraph.current !== id &&
-                  video.current &&
-                  binding
-                ) {
-                  video.current.currentTime = binding.start_ms / 1000;
-                  segmentEnd.current = binding.end_ms / 1000;
-                  playbackParagraph.current = id;
-                }
+                  !contextPlayback.current &&
+                  !prepareParagraphPlayback(
+                    media,
+                    binding,
+                    playbackParagraph.current !== id,
+                  )
+                )
+                  return;
+                playbackParagraph.current = id;
                 setPlaying(true);
+                checkParagraphEnd();
               }}
-              onPause={() => setPlaying(false)}
-              onEnded={() => setPlaying(false)}
-              onTimeUpdate={() => {
-                if (
-                  segmentPause &&
-                  segmentEnd.current !== undefined &&
-                  video.current &&
-                  video.current.currentTime >= segmentEnd.current
-                ) {
-                  video.current.pause();
-                  segmentEnd.current = undefined;
+              onPlaying={checkParagraphEnd}
+              onRateChange={checkParagraphEnd}
+              onSeeking={() => {
+                if (video.current && !contextPlayback.current) {
+                  seekParagraphPlayback(
+                    video.current,
+                    current.current.context.paragraph_bindings[
+                      selectedParagraph.current
+                    ],
+                    0,
+                    false,
+                  );
                 }
+                checkParagraphEnd();
               }}
+              onSeeked={checkParagraphEnd}
+              onPause={() => {
+                setPlaying(false);
+                clearTimeout(boundaryTimer.current);
+              }}
+              onEnded={() => {
+                setPlaying(false);
+                clearTimeout(boundaryTimer.current);
+              }}
+              onTimeUpdate={checkParagraphEnd}
             />
             <div className="flex flex-wrap items-center gap-2 p-3">
               {playbackControls(audioOnly ? "音訊播放控制" : "影片播放控制")}
-              <label className="text-xs">
-                <input
-                  type="checkbox"
-                  checked={segmentPause}
-                  onChange={(e) => setSegmentPause(e.target.checked)}
-                />{" "}
-                段末暫停
-              </label>
+              <span className="text-xs text-slate-500">播放至本段結尾</span>
             </div>
           </section>
           <section className="rounded-xl border bg-white p-3">
@@ -1428,7 +1453,8 @@ function TranscriptProofreader({
                   className={button}
                   onClick={() => {
                     if (video.current) {
-                      segmentEnd.current = undefined;
+                      clearTimeout(boundaryTimer.current);
+                      contextPlayback.current = true;
                       playbackParagraph.current = selected;
                       video.current.currentTime =
                         (doc.context.occurrences[shownSlide!].time_ms || 0) /
