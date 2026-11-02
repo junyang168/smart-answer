@@ -2284,7 +2284,7 @@ def _split_lyrics_sections(raw: str) -> list[list[str]]:
     text = raw.strip()
     if not text:
         return []
-    sections = re.split(r"(?:\r?\n){2,}", text)
+    sections = re.split(r"\r?\n[ \t]*(?:\r?\n[ \t]*)+", text)
     result: list[list[str]] = []
     for section in sections:
         lines = [line.strip() for line in section.splitlines() if line.strip()]

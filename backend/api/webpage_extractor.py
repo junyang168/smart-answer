@@ -98,21 +98,29 @@ def _element_to_markdown(element: Tag | BeautifulSoup) -> str:
 
 
 def _flatten_tables(root: Tag | BeautifulSoup) -> None:
-    for table in list(root.find_all("table")):
-        rows: list[str] = []
-        for tr in table.find_all("tr"):
-            cells = [
-                cell.get_text(" ", strip=True)
-                for cell in tr.find_all(["th", "td"])
-            ]
-            row_text = " ".join(filter(None, cells)).strip()
-            if row_text:
-                rows.append(row_text)
-        replacement_text = "\n".join(rows).strip()
-        if replacement_text:
-            table.replace_with(replacement_text)
-        else:
-            table.decompose()
+    # These are layout tables: a verse number and its multi-line lyric cell.
+    # Keep the DOM until markdown conversion: get_text(" ") destroys <br>/<p>
+    # boundaries and inserts invented spaces between inline Word-export spans.
+    # Inner tables go first, so no nested row is emitted twice.
+    for table in reversed(list(root.find_all("table"))):
+        replacement = Tag(name="div")
+        for tr in list(table.find_all("tr")):
+            row = Tag(name="div")
+            cells = tr.find_all(["th", "td"], recursive=False)
+            # A number cell labels the following verse; it is not a slide.
+            if len(cells) == 2 and re.fullmatch(r"\d{1,2}", cells[0].get_text(strip=True)) and cells[1].get_text(strip=True):
+                number = cells[0].get_text(strip=True)
+                first = cells[1].find(["p", "div"])
+                (first or cells[1]).insert(0, number + " ")
+                cells = cells[1:]
+            for index, cell in enumerate(cells):
+                if index:
+                    row.append(" ")
+                for child in list(cell.contents):
+                    row.append(child.extract())
+            if row.get_text(strip=True):
+                replacement.append(row)
+        table.replace_with(replacement)
 
 
 def _ensure_response_encoding(response: requests.Response) -> None:
