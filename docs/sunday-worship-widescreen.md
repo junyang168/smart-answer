@@ -33,6 +33,8 @@ Lyrics use 1.5-times font-size leading, with the same leading used for fit
 measurement and serialized paragraphs. Scripture retains its own leading.
 The renderer keeps the 30pt cap, 18pt readability floor, intentional lyric
 lines and blank-line slide boundaries. It rejects content that cannot fit.
+The fixed Doxology page is an explicit exception requested after preview:
+its five short lines use 36pt type with 54pt leading and a separate 48pt title.
 
 ## Acceptance and installation
 

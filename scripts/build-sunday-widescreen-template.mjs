@@ -22,7 +22,7 @@ const specific={
   12:{6:box(.65,.35,12.03,.6),4:box(.65,1.1,12.03,5.6)},
   13:{11:box(.65,.35,12.03,.5),2:box(.65,1.2,12.03,1.6),5:box(.65,3,12.03,.4),
       3:box(.65,3.55,12.03,.8),7:box(.65,4.6,12.03,2.48)},
-  14:{2:box(.65,.35,12.03,.6),4:box(.65,1.55,12.03,5.1),3:box(.65,.4,1.5,.4)},
+  14:{2:box(.65,.35,12.03,.9),4:box(.65,1.75,12.03,4.9),3:box(.65,.4,1.5,.4)},
 };
 
 function planElement(element, slideNumber){
@@ -45,10 +45,14 @@ function planElement(element, slideNumber){
   if(slideNumber===1&&element.id==='22')fontCap=18;
   if(slideNumber===7&&element.type===9)fontCap=30;
   if(slideNumber===9&&element.id==='2')fontCap=60;
-  if(slideNumber===14&&element.id==='4')fontCap=30;
+  if(slideNumber===14&&element.id==='4')fontCap=36;
+  if(slideNumber===14&&element.id==='2')fontCap=48;
   if(slideNumber===5&&text.includes('主禱文'))fontCap=30;
   const alignment=slideNumber===1&&element.id==='3'?'ctr':null;
   if(alignment)for(const paragraph of element.paragraphs||[])paragraph.textStyle={...paragraph.textStyle,alignment:2};
+  const doxology=slideNumber===14&&element.id==='4';
+  if(doxology)for(const paragraph of element.paragraphs||[])paragraph.paragraphStyle={...paragraph.paragraphStyle,
+    lineSpacingPoints:5400,spaceBeforePoints:0,spaceAfterPoints:0};
   if(b)element.bbox=b;
   if(element.table&&old&&b){
     element.table.columnWidths=scaleWidths(element.table.columnWidths,b.widthEmu);
@@ -60,7 +64,7 @@ function planElement(element, slideNumber){
     cap(element);
   }
   return {id:element.id,bbox:b,oldBbox:old,fontCap,footer,alignment,table:element.type===9,
-    sermon:slideNumber===9&&element.id==='2'};
+    doxology,sermon:slideNumber===9&&element.id==='2'};
 }
 function attrs(tag,values){
   for(const[k,v]of Object.entries(values)){
@@ -125,6 +129,16 @@ function applyElement(block,plan){
     return cap?paragraph.replace(/<a:(?:rPr|defRPr|endParaRPr)\b[^>]*>/g,
       t=>attrs(t,{sz:Math.min(Number(t.match(/\bsz="(\d+)"/)?.[1]||cap*100),cap*100)})):paragraph;
   });
+  if(plan.doxology){
+    block=block.replace(/<a:bodyPr\b[^>]*>/,tag=>attrs(tag,{anchor:'ctr'}));
+    block=block.replace(/<a:p>[\s\S]*?<\/a:p>/g,paragraph=>{
+      const spacing='<a:lnSpc><a:spcPts val="5400"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft>';
+      const existing=paragraph.match(/<a:pPr\b[^>]*(?:\/>|>[\s\S]*?<\/a:pPr>)/)?.[0];
+      let properties=(existing||'<a:pPr algn="ctr"/>').replace(/<a:(?:lnSpc|spcBef|spcAft)>[\s\S]*?<\/a:(?:lnSpc|spcBef|spcAft)>/g,'');
+      properties=properties.endsWith('/>')?properties.slice(0,-2)+'>'+spacing+'</a:pPr>':properties.replace('</a:pPr>',spacing+'</a:pPr>');
+      return existing?paragraph.replace(existing,properties):paragraph.replace('<a:p>','<a:p>'+properties);
+    });
+  }
   return block;
 }
 
