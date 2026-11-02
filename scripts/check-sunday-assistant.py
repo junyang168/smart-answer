@@ -21,10 +21,20 @@ def check(config, since):
     path = Path(config["DATA_BASE_DIR"]) / "sunday-assistant/assistant.sqlite3"
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
         row = db.execute("SELECT value FROM kv WHERE key='worker'").fetchone()
+        settings_row = db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()
     worker = json.loads(row[0]) if row else {}
     timestamp = datetime.fromisoformat(worker["at"]).timestamp()
     if timestamp < since or time.time() - timestamp > 180 or worker.get("status") in {"error", "stale"}:
         raise ValueError("Sunday worker has no healthy heartbeat since service activation")
+    settings = json.loads(settings_row[0]) if settings_row else {}
+    if settings.get("admin_help_enabled"):
+        monitor = Path(config["DATA_BASE_DIR"]) / "sunday-assistant/admin-monitor.sqlite3"
+        with sqlite3.connect(f"file:{monitor}?mode=ro", uri=True) as db:
+            row = db.execute("SELECT value FROM monitor_kv WHERE key='last_check'").fetchone()
+        stamp = json.loads(row[0]) if row else 0
+        if stamp < since or time.time() - stamp > 60:
+            raise ValueError("Sunday administrator incident monitor is not updating")
+
 
 
 def main():

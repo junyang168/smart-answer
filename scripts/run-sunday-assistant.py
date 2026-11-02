@@ -42,6 +42,9 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             parser.error("Another bridge supervisor owns this WhatsApp session")
+        sys.path.insert(0, str(root))
+        from backend.sunday_assistant.admin_monitor import AdminMonitor
+        monitor = AdminMonitor(Path(env["DATA_BASE_DIR"]) / "sunday-assistant", env=env)
         processes = []
         def stop(*_):
             for p in processes:
@@ -58,8 +61,20 @@ def main():
             processes.append(subprocess.Popen([node, "index.mjs"], cwd=root / "services/whatsapp-bridge", env=env))
             processes.append(subprocess.Popen([sys.executable, "-m", "backend.sunday_assistant_job"], cwd=root, env=env))
             print("Sunday assistant bridge and worker started; monitor the admin page.", flush=True)
+            checked = 0
             while all(p.poll() is None for p in processes):
+                if time.time() - checked >= 10:
+                    try:
+                        monitor.tick()
+                    except Exception:
+                        print("Sunday admin monitor check failed; inspect private runtime logs.", flush=True)
+                    checked = time.time()
                 time.sleep(2)
+            monitor.record_exit()
+            try:
+                monitor.tick()
+            except Exception:
+                pass
         finally:
             stop()
     return 1

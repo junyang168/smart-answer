@@ -375,7 +375,11 @@ older release has no Sunday assistant. Group posting controls remain persistent
 settings; deployment never turns questions or reminders on.
 
 The admin page `/admin/sunday-assistant` shows account, synchronization and worker
-health. Log: `~/Library/Logs/smart-answer/sunday-assistant.log`. Check those after
+health. The supervisor also runs a model-independent administrator incident monitor;
+its separate `$DATA_BASE_DIR/sunday-assistant/admin-monitor.sqlite3` retains deduplicated
+alerts and delivery receipts across releases. It uses only the configured dedicated
+admin group, never a source group; see `docs/sunday-assistant.md` for thresholds.
+Log: `~/Library/Logs/smart-answer/sunday-assistant.log`. Check those after
 switching; a healthy website alone does not prove WhatsApp is connected.
 
 ### Reference commentary scan inbox

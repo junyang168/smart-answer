@@ -15,7 +15,7 @@ async function proxy(request: NextRequest, props: { params: Promise<{ path?: str
   const joined = path.join("/");
   // Ingestion/config endpoints are for the local bridge, never browser clients.
   const allowed = request.method === "GET" ? /^(state|groups)$/ :
-    request.method === "PUT" ? /^settings$/ : /^(connect|tick|identity-audit|proposals\/\d+|messages\/[^/]+\/retry)$/;
+    request.method === "PUT" ? /^settings$/ : /^(connect|tick|identity-audit|admin-help-test|proposals\/\d+|messages\/[^/]+\/retry)$/;
   if (!allowed.test(joined)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (request.method !== "GET") {
     const origin = request.headers.get("origin");

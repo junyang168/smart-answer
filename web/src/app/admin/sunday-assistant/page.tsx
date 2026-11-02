@@ -7,6 +7,7 @@ type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
   availability_group_name: string; service_group_name: string; songs_group_name: string;
   auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  admin_help_enabled: boolean; admin_group: string; admin_group_name: string;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
   households: string[][]; worker_aliases: Record<string, string>; worship_rotation: string[];
 };
@@ -19,6 +20,7 @@ type Proposal = { id: number; message_id: string; status: string; error?: string
 type IdentityAudit = { checked_at?: string; members: { id: string; ids: string[]; labels: string[]; groups: string[]; saved_contact: boolean; worker?: string; candidates: string[]; status: string; reason?: string; lookup_errors: string[] }[]; workers_without_account: string[]; unseen_mappings: { id: string; workers: string[] }[] };
 type Data = {
   identity_audit?: IdentityAudit;
+  admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number }[]; notices: { key: string; phase: string; status: string }[] };
   identities?: { sender_id: string; worker_name: string }[];
   settings: Settings; messages: Message[]; proposals: Proposal[];
   outbox: { key: string; text: string; status: string; error?: string; updated_at: string }[];
@@ -129,6 +131,15 @@ export default function SundayAssistantPage() {
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>
         <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時依設定保留後台，只有允許發問才送到原群。首次歷史同步只提供預覽。</p>
+        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+          <h3 className="font-semibold">Agent 內部故障求助</h3>
+          <p className="mt-2">執行失敗立即求助；工作程序超過五分鐘沒有更新、持續連線故障或反覆崩潰時通知管理員。缺資料、等待澄清及一般人工核對不通知。獨立監測，不依賴模型；事件去重，恢復後回報。</p>
+          <label className="mt-3 block"><input type="checkbox" checked={settings.admin_help_enabled ?? false} onChange={e => patch({ admin_help_enabled: e.target.checked })} /> 啟用內部故障通知網站管理員</label>
+          <label className="mt-3 block">網站管理員求助群<select aria-label="網站管理員求助群" className={`${input} mt-1`} value={settings.admin_group || ""} onChange={e => patch({ admin_group: e.target.value, admin_group_name: groups.find(g => g.id === e.target.value)?.name || "網站管理員" })}><option value="">請讀取群名單後選擇</option>{settings.admin_group && !groups.some(g => g.id === settings.admin_group) && <option value={settings.admin_group}>{settings.admin_group_name}</option>}{groups.filter(g => ![settings.availability_group, settings.service_group, settings.songs_group].includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
+          <p className="mt-2 text-xs">監測最近更新：{data.admin_monitor?.last_check ? new Date(data.admin_monitor.last_check * 1000).toLocaleString() : "尚未啟用"}。傳送失敗保留佇列；結果不明時不盲目重發。通知不含群原文、姓名、奉獻金額或密鑰。</p>
+          {!!data.admin_monitor?.incidents.length && <ul className="mt-2 space-y-1">{data.admin_monitor.incidents.map(i => <li key={i.id}>{i.id} · {i.label}（{i.count}項）· {i.active ? "需要管理員協助" : "故障條件已解除"}</li>)}</ul>}
+          <button className={`${button} mt-3`} disabled={busy || dirty || !settings.admin_help_enabled || !settings.admin_group} onClick={() => void action(() => call("admin-help-test", "POST", {}), "已排入管理群上線測試通知（明確標示測試、無需處理）")}>向管理群發送測試通知</button>
+        </div>
         <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>
           <p className="mt-3 text-sm">從下方原消息複製發送人 ID，對應到既有同工。每個帳號只對應本人；夫妻關係另存。首次自報姓名核對後會記住，下次「我」不再重問。</p>
           <input className={`${input} mt-3`} placeholder="WhatsApp 發送人 ID" value={sender} onChange={e => setSender(e.target.value)} />
