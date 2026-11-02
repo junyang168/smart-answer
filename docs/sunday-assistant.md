@@ -103,6 +103,24 @@ flowchart LR
 - 兩首分別寫入 `hymn`、`responseHymn`。群內明確標籤優先；只有兩首且只列順序時，按使用者確認的慣例第一首主日詩歌、第二首回應詩歌。
 - `hymnNotes`／`responseHymnNotes` 保存當週演唱說明，不改全站歌詞。可依明確「只唱一、二、四節」「最後一節重複一次」選取既有歌詞段落及重複末段；節次不存在、歌詞分段不符或重複次數未明則追問，不靜默忽略。網站可查看及修改說明，產生 PPT 時套用。
 
+### 換歌時的局部更新
+
+變更主日詩歌或回應詩歌時，只更新該歌曲及其依賴欄位。換成另一首且沒有明確提供新演唱說明，原歌的選節／重複說明會在同一筆受保護更新中清空；歌名未變則保留。若同時提供新說明，以新說明為準。衍生清空記錄原值、新值、來源消息及 `derived_from`，不改全站歌詞。
+
+只改演唱說明時也要核對目標歌名的讀取快照；換歌清空說明時核對說明快照。有人期間更換歌曲或修改說明，會拒絕覆蓋並重讀，不把舊說明套到新歌。明確取消說明可傳 `null`，其他主日欄位不能用 `null` 清除。
+
+### 隔離樣本重播
+
+`scripts/simulate-sunday-form.py` 使用真實 Agent、模型與網站儲存庫重播私有 scenario；輸出必須是新目錄，拒絕 production 路徑。程式不啟動 WhatsApp、worker supervisor 或寄信程序，所有群回覆僅記錄在本機。scenario 包含原消息時間、匿名帳號對應、起始排班與預期欄位；實際消息與個人資料不提交 Git。
+
+```sh
+backend/.venv/bin/python scripts/simulate-sunday-form.py \
+  --scenario /private/scenario.json --output /private/new-run \
+  --model-config /private/model.env
+```
+
+每則消息保存狀態及逐欄位前後差異，最後檢查目標表單、指定保留欄位、重播去重、歌曲目錄不變和沒有外部群傳送。`report.json` 與 `current-forms.json` 位於輸出目錄；資料在 `data/`，可用該 worktree 的獨立 dev server 檢視。補充壓力測試必須與使用者原始樣本分開標示。
+
 ## 未來兩週骨架
 
 - 以 America/Chicago 日期維持接下來兩個主日；週日當天的「未來兩週」是下週與下下週。未填的講道題目、經文、歌曲等留空，不補創世記1:1。網站表單允許先存骨架與未完成草稿，已輸入的部分經文仍須格式有效。

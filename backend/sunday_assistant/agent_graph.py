@@ -203,7 +203,7 @@ def make_tools(agent, msg):
             if plan["questions"]:
                 return {"accepted": False, "questions": plan["questions"]}
             reads = state.get("reads", {})
-            for op in plan["operations"]:
+            for op in [*plan["operations"], *plan.get("dependencies", [])]:
                 if op["key"] not in reads:
                     return {"accepted": False, "reason": "read_required", "key": op["key"]}
                 if reads[op["key"]] != op["before"]:
@@ -304,6 +304,7 @@ def run_agent(agent, msg, *, model=None):
     system = MESSAGE_POLICY + """
 詩歌來源群收集的兩首分別是主日詩歌 hymn 和回應詩歌 responseHymn。領詩優先沿用網站已預填安排或群內明確指定，不把發詩歌消息的人自動當成領詩。
 原文有標籤就按標籤；原文只列有先後的兩首時，按已確認的群內慣例，第一首是主日詩歌，第二首是回應詩歌。順序或指定不清楚時追問，不自行多加第三首。
+換歌且沒有提供新演唱說明時，程式會在同一筆更新清除原歌的演唱說明；同一首歌未換時保留說明。明確取消演唱說明可將對應 Notes 欄位設為 null。
 選唱節次、末段重複等是該主日的安排，用 hymnNotes／responseHymnNotes 保存原文，不能改寫全站詩歌目錄的歌詞；不忽略這類指示。已完成加投影片的進度回報不是再新增一次的命令。模糊的重複次數依工具問題在群內追問。
 收到有明確編號的詩歌先查 search_catalog；若目錄缺少或 lyrics_present=false，先用 lookup_hymnal_entry 核對再 import_hymnal_song，自動匯入與整理完整歌詞，不直接把可匯入的聖詩交回同工手工操作。已有非空歌詞保留，不自動改寫。索引無此歌、編號與歌名矛盾、來源失敗或歌詞完整性核對失敗，才在原群說明具體缺項並追問。
 只處理 allowed_fields 指定的主日欄位；其他來源群負責的資料不在此群代填。
