@@ -8,17 +8,24 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 ZONE = ZoneInfo("America/Chicago")
 SERVICE_FIELDS = {"sermonSpeaker": "講員", "sermonTitle": "講道題目", "hymn": "詩歌",
-                  "responseHymn": "回應詩歌", "scripture": "讀經經文", "donationAmount": "本週奉獻"}
-FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field != "donationAmount"}
+                  "responseHymn": "回應詩歌", "scripture": "讀經經文", "donationAmount": "本週奉獻", "presider": "司會", "worshipLeader": "領詩", "hymnNotes": "詩歌演唱說明", "responseHymnNotes": "回應詩歌演唱說明"}
+FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field not in {"donationAmount", "hymnNotes", "responseHymnNotes"}}
 
 
 class Settings(BaseModel):
     enabled: bool = False
     availability_group: str = ""
     service_group: str = ""
+    songs_group: str = ""
+    response_hymn_group: str = ""
+    offering_group: str = ""
     availability_group_name: str = "達拉斯聖道教會"
     service_group_name: str = "主日讲道联络群"
+    songs_group_name: str = "主日诗歌服侍交流群"
     auto_apply: bool = False
+    maintain_future_skeletons: bool = True
+    collect_cross_group: bool = True
+    offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
     reminders_enabled: bool = False
     friday_hour: int = Field(default=17, ge=0, le=23)
     friday_minute: int = Field(default=0, ge=0, le=59)
@@ -26,21 +33,27 @@ class Settings(BaseModel):
     sender_workers: dict[str, list[str]] = Field(default_factory=dict)
     households: list[list[str]] = Field(default_factory=list, max_length=200)
     worker_aliases: dict[str, str] = Field(default_factory=dict)
+    worship_rotation: list[str] = Field(default_factory=list)
     # Retained for old settings files; collection is authorized by selected group.
     trusted_senders: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def groups(self):
         import re
-        for group in (self.availability_group, self.service_group):
+        for group in (self.availability_group, self.service_group, self.songs_group):
             if group and not re.fullmatch(r"[0-9]+(?:-[0-9]+)?@g\.us", group):
                 raise ValueError("請選擇有效的 WhatsApp 群 ID")
-        if self.availability_group and self.availability_group == self.service_group:
-            raise ValueError("兩種資料需指定不同的群")
+        groups = [g for g in (self.availability_group, self.service_group, self.songs_group) if g]
+        if len(groups) != len(set(groups)):
+            raise ValueError("各資料來源需指定不同的群")
+        if any(g and g not in groups for g in (self.response_hymn_group, self.offering_group)):
+            raise ValueError("回應詩歌及奉獻需選擇已指定的資料來源群")
         if self.enabled and not (self.availability_group and self.service_group):
             raise ValueError("請先指定兩個群")
         if any(not alias.strip() or alias != alias.strip() or not target.strip() for alias, target in self.worker_aliases.items()):
             raise ValueError("姓名別名及對應同工不可空白，別名首尾不可有空格")
+        if self.worship_rotation and (len(self.worship_rotation) != 2 or len(set(self.worship_rotation)) != 2):
+            raise ValueError("領詩輪值需列出兩位不同同工")
         members = []
         for pair in self.households:
             if len(pair) != 2 or not all(name.strip() for name in pair) or pair[0] == pair[1]:
@@ -51,6 +64,35 @@ class Settings(BaseModel):
         return self
 
 
+    @property
+    def source_group_ids(self):
+        return {g for g in (self.availability_group, self.service_group, self.songs_group) if g}
+
+    def field_destinations(self):
+        # Preserve legacy two-group settings; selecting a songs group enables
+        # explicit field ownership instead of letting every group edit everything.
+        if not self.songs_group:
+            result = {field: self.service_group for field in SERVICE_FIELDS}
+        else:
+            result = {field: self.service_group for field in ("sermonSpeaker", "sermonTitle", "scripture")}
+            result["hymn"] = self.songs_group
+            result["responseHymn"] = self.songs_group
+            result["hymnNotes"] = self.songs_group
+            result["responseHymnNotes"] = self.songs_group
+            result["donationAmount"] = self.availability_group
+            result["presider"] = self.availability_group
+            result["worshipLeader"] = self.songs_group
+        for field, group in (("responseHymn", self.response_hymn_group), ("donationAmount", self.offering_group)):
+            if group:
+                result[field] = group
+        return {field: group for field, group in result.items() if group}
+
+    def fields_for_group(self, group_id):
+        if self.collect_cross_group and group_id in self.source_group_ids:
+            return set(SERVICE_FIELDS)
+        return {field for field, group in self.field_destinations().items() if group == group_id}
+
+
 class ChatMessage(BaseModel):
     message_id: str = Field(min_length=1, max_length=240)
     group_id: str = Field(min_length=1, max_length=160)
@@ -59,6 +101,9 @@ class ChatMessage(BaseModel):
     source_sent_at: datetime | None = None
     unverified_edit: bool = False
     text: str = Field(default="", max_length=20000)
+    origin: Literal["whatsapp", "schedule"] = "whatsapp"
+    schedule_date: date | None = None
+    schedule_field: Literal["sermonSpeaker", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes"] | None = None
     quoted_message_id: str | None = Field(default=None, max_length=240)
     source_id: str | None = Field(default=None, max_length=240)
     unsupported_media: bool = False
@@ -76,7 +121,7 @@ class ChatMessage(BaseModel):
 
 class ServiceChange(BaseModel):
     date: date
-    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount"]
+    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes"]
     value: str | list[str] | float
     evidence: str = Field(min_length=1)
 

@@ -52,6 +52,8 @@ export interface SundayServiceEntry {
   worshipLeader?: string | null;
   pianist?: string | null;
   hymn?: string | null;
+  hymnNotes?: string | null;
+  responseHymnNotes?: string | null;
   responseHymn?: string | null;
   scripture?: string[] | null;
   sermonSpeaker?: string | null;

@@ -94,7 +94,7 @@ class Store:
 
     def receive(self, message):
         settings = self.settings()
-        if message.group_id not in {settings.availability_group, settings.service_group}:
+        if message.group_id not in settings.source_group_ids:
             raise ValueError("此群未設定為資料來源")
         if message.text.startswith(("【主日資料提醒】", "【請假登記回覆】", "【主日助理提問】", "【主日資料回覆】")):
             return False

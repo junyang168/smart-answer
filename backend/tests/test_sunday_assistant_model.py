@@ -171,3 +171,96 @@ def test_model_single_character_operator_alias_with_chinese_date_connector(agent
     assert agent.repository.workers['王明'].is_available_on('2027-08-08')
     assert len(agent.bridge.sent) == 1
     assert agent.bridge.sent[0][2].startswith('【請假登記回覆】')
+
+
+def test_model_three_groups_collect_sermon_two_ordered_songs_and_offering(agent):
+    from backend.api.models import SundaySong
+    settings=agent.store.settings();settings.songs_group='333@g.us';agent.store.put('settings',settings.model_dump())
+    agent.repository.songs.append(SundaySong(id='2',title='這是天父世界',hymnalIndex=5,source='hymnal',lyricsMarkdown='測試用既有歌詞'))
+    event(agent,'11月8日主日诗歌：5、这是天父世界；123、奇异恩典。',group='333@g.us',sender='song-leader')
+    event(agent,'11月8日讲员陈牧师，题目「服事人的主」，读经马太福音20章28节。',sender='preacher')
+    event(agent,'11月8日本周奉献总额1234.56美元。',group='111@g.us',sender='treasurer')
+    entry=agent.repository.services['2026-11-08']
+    assert (entry.hymn,entry.response_hymn)==('這是天父世界','奇異恩典')
+    assert (entry.sermon_speaker,entry.sermon_title,entry.scripture)==('陳牧師','服事人的主',['mat-20-28'])
+    assert entry.donation_amount==1234.56
+    assert not any(text.startswith('【主日助理提問】') for _,_,text in agent.bridge.sent)
+
+
+def test_model_imports_missing_hymn_formats_complete_source_then_updates_form(agent,monkeypatch):
+    from backend.api.models import HymnMetadata,SundaySong
+    settings=agent.store.settings();settings.songs_group='333@g.us';agent.store.put('settings',settings.model_dump())
+    metadata=HymnMetadata(index=5,title='这是天父世界',lyricsUrl='https://fcccc.net/hymns/Hymns_HymnsForChurch/005.htm')
+    def get_metadata(number):
+        if number!=5:raise ValueError('not found')
+        return metadata
+    def create(payload):
+        song=SundaySong(id='model-import',**payload.model_dump());agent.repository.songs.append(song);return song
+    monkeypatch.setattr(agent.repository,'get_hymn_metadata',get_metadata,raising=False)
+    monkeypatch.setattr(agent.repository,'create_sunday_song',create,raising=False)
+    event(agent,'11月8日主日詩歌用第5首「这是天父世界」，回應詩歌第123首「奇異恩典」。',group='333@g.us')
+    entry=agent.repository.services['2026-11-08']
+    assert (entry.hymn,entry.response_hymn)==('这是天父世界','奇異恩典')
+    song=next(song for song in agent.repository.songs if song.id=='model-import')
+    assert song.lyrics_markdown and '\n\n' in song.lyrics_markdown
+    with agent.store.db() as db:
+        import json
+        receipt=json.loads(db.execute("SELECT value FROM kv WHERE key LIKE 'hymn_import:%'").fetchone()[0])
+    from backend.sunday_assistant.hymn_import import normalize_lyric_words
+    lines=receipt['raw_source'].splitlines();first,last=receipt['source_range']
+    assert normalize_lyric_words('\n'.join(lines[first:last+1]))==normalize_lyric_words(song.lyrics_markdown)
+    assert receipt['status']=='applied'
+    assert not any(text.startswith('【主日助理提問】') for _,_,text in agent.bridge.sent)
+
+
+def test_model_short_answer_by_different_person_uses_the_groups_question_date(agent):
+    event(agent,'11/15誰講啊？',sender='coordinator',at='2026-10-30T00:48:00+00:00')
+    event(agent,'陳牧師',sender='another-member',at='2026-10-30T00:49:00+00:00')
+    assert agent.repository.services['2026-11-15'].sermon_speaker=='陳牧師'
+    assert not agent.bridge.sent
+
+
+def test_model_sample_weekly_offering_uses_current_preparation_sunday_and_explicit_total(agent):
+    settings=agent.store.settings();settings.songs_group='333@g.us';settings.collect_cross_group=True;agent.store.put('settings',settings.model_dump())
+    event(agent,"本週（到10/23/2026）奉獻：1人經由Zelle奉獻$1200，二張支票共$2000，總共奉獻$3200。",group='111@g.us',at='2026-10-23T16:18:00+00:00')
+    assert agent.repository.services['2026-10-25'].donation_amount==3200
+    assert not agent.bridge.sent
+
+
+def test_model_sermon_scope_is_not_the_explicit_reading_passage(agent):
+    event(agent,'11/1 聖靈充滿與福音廣傳（徒1-2章）\n讀經：徒1:1-14',at='2026-10-27T01:00:00+00:00')
+    assert agent.repository.services['2026-11-01'].sermon_title=='聖靈充滿與福音廣傳'
+    assert agent.repository.services['2026-11-01'].scripture==['act-1-1-14']
+
+
+def test_model_travel_photo_and_dst_reminder_are_not_absence_registrations(agent):
+    settings=agent.store.settings();settings.songs_group='333@g.us';settings.collect_cross_group=True;agent.store.put('settings',settings.model_dump())
+    msg=ChatMessage(message_id='travel-photo',group_id='111@g.us',sender_id='traveler',sent_at='2026-10-23T19:37:00+00:00',text='New York 中央公園，非常美麗舒適及散步運動的地方',unsupported_media=True)
+    agent.store.receive(msg);assert run_agent(agent,msg)['status']=='irrelevant'
+    event(agent,'2026年11月1日換冬令時！時鐘撥慢一小時。',group='222@g.us',at='2026-10-28T17:08:00+00:00')
+    assert not agent.repository.services
+    assert not any(worker.unavailable_ranges for worker in agent.repository.workers.values())
+    assert not agent.bridge.sent
+
+
+def test_model_keeps_week_specific_verse_selection_out_of_catalog_lyrics(agent):
+    agent.repository.songs[0].lyrics_markdown='甲乙丙丁。\n\n戊己庚辛。\n\n壬癸天地。\n\n玄黃宇宙。'
+    event(agent,'11月8日主日詩歌：123 奇異恩典（只唱一、二、四節）。')
+    entry=agent.repository.services['2026-11-08']
+    assert entry.hymn=='奇異恩典'
+    assert entry.hymn_notes and '四' in entry.hymn_notes
+    assert agent.repository.songs[0].lyrics_markdown.count('\n\n')==3
+
+
+def test_model_any_group_member_answers_a_scheduled_required_role_question(agent):
+    from datetime import datetime,timezone
+    settings=agent.store.settings();settings.maintain_future_skeletons=True;settings.songs_group='333@g.us';agent.store.put('settings',settings.model_dump())
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',presider='王明',sermonSpeaker='陳牧師')
+    agent.repository.services['2026-11-15']=SundayServiceEntry(date='2026-11-15',presider='王明',sermonSpeaker='陳牧師')
+    agent.maintain_future_forms(datetime(2026,11,1,18,tzinfo=timezone.utc));agent.deliver_outbox()
+    assert len(agent.bridge.sent)==2
+    event(agent,'11月8日領詩由李芳負責。',group='333@g.us',sender='member-without-the-question')
+    assert agent.repository.services['2026-11-08'].worship_leader=='李芳'
+    agent.maintain_future_forms(datetime(2026,11,2,17,tzinfo=timezone.utc))
+    with agent.store.db() as db:
+        assert db.execute("SELECT count(*) FROM clarifications WHERE status='waiting'").fetchone()[0]==1

@@ -150,7 +150,7 @@ def test_different_group_members_fill_separate_fields_and_offering_incrementally
     saved = agent.repository.services["2026-11-08"].model_dump(by_alias=True)
     assert all(saved[field] == value for field, value in values)
     assert not agent.bridge.sent
-    assert not agent.missing("2026-11-08")
+    assert set(agent.missing("2026-11-08")) == {"司會", "領詩"}
     assert "本週奉獻" not in agent.missing("2026-11-15")
 
 

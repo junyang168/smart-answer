@@ -896,6 +896,7 @@ class ArticleRepository:
     def list_sunday_songs(self) -> list[SundaySong]:
         return self._load_sunday_songs()
 
+    @sunday_write
     def create_sunday_song(self, payload: SundaySongCreate) -> SundaySong:
         title = payload.title.strip()
         if not title:
@@ -920,6 +921,7 @@ class ArticleRepository:
         self._save_sunday_songs(songs)
         return new_song
 
+    @sunday_write
     def update_sunday_song(self, song_id: str, payload: SundaySongCreate) -> SundaySong:
         songs = self._load_sunday_songs()
         target = None
@@ -973,6 +975,7 @@ class ArticleRepository:
 
         return updated_song
 
+    @sunday_write
     def delete_sunday_song(self, song_id: str) -> None:
         songs = self._load_sunday_songs()
         target = None

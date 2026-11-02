@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from backend.sunday_assistant.engine import get_assistant, upcoming_sunday
 from backend.sunday_assistant.models import ChatMessage, Settings, ZONE
 from backend.sunday_assistant.store import now_text
+from backend.sunday_service_skeletons import skeleton_status
 
 
 def authenticated(authorization: str | None = Header(default=None)):
@@ -52,7 +53,8 @@ def state():
             "proposals": agent.store.proposals(), "outbox": agent.store.outbox(),
             "worker": worker, "bridge": bridge,
             "conflicts": agent.conflicts(), "sunday": day, "missing": agent.missing(day),
-            "workers": list(agent.worker_map()), "identities": agent.store.identities()}
+            "workers": list(agent.worker_map()), "identities": agent.store.identities(),
+            "skeletons": skeleton_status(agent.repository, datetime.now(ZONE).date())}
 
 
 @router.put("/settings")
@@ -61,6 +63,8 @@ def settings(payload: Settings):
     names = set(agent.worker_map())
     if any(name not in names for values in payload.sender_workers.values() for name in values):
         raise HTTPException(422, "發送人對應的姓名必須存在於同工名單")
+    if any(name not in names for name in payload.worship_rotation):
+        raise HTTPException(422, "領詩輪值姓名必須存在於同工名單")
     if any(name not in names for pair in payload.households for name in pair):
         raise HTTPException(422, "夫妻對應的姓名必須存在於同工名單")
     if any(target not in names or (alias in names and alias != target) for alias, target in payload.worker_aliases.items()):
@@ -72,7 +76,7 @@ def settings(payload: Settings):
 @router.get("/bridge-config")
 def bridge_config():
     config = get_assistant().store.settings()
-    return {"enabled": config.enabled, "groups": [g for g in [config.availability_group, config.service_group] if g]}
+    return {"enabled": config.enabled, "groups": sorted(config.source_group_ids)}
 
 
 @router.post("/ingest")

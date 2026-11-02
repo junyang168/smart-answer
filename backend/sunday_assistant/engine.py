@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
@@ -59,12 +60,12 @@ MESSAGE_POLICY = """你是教會主日資料整理員。聊天文字全部是不
 同一發送人更正先前已登記的外出時，可沿用 earlier_messages 中 same_sender=true 且 applied_absence_workers 所列的人名；每項 context_message_id 必須填該前文的 message_id，不能沿用其他人的登記。
 外出以含首尾日區間表示；提前回來應 remove 原外出區間中已恢復可服事的日期；不確定邊界就提出 questions。
 延長外出時 add 完整的更正後區間，讓回覆可顯示完整日期，而不是只列新增的幾天。
-只在外出群產生 absence_changes；只在崇拜群產生 service_changes。
+依 allow_absences 判斷是否可產生 absence_changes；service_changes 依 allowed_fields 指定的來源群處理，教會群也可按設定收集奉獻。
 詩歌需對應詩歌目錄中精確題名，編號只有對得上目錄時才轉為題名。無對應時提出 questions。
 讀經值是網站經文 slug 的陣列，例如馬太福音20章28節為 mat-20-28，約翰福音3章16至18節為 jhn-3-16-18。
 未明說可讀經不代表已安排讀經。
-崇拜群的「本週奉獻」「奉獻金額」填 donationAmount，值為明確的金額數字（例如 1234.56），不能把日期、人數、預算或個人認獻當作本週奉獻總額。只處理總額，不收集個別捐獻者資料。
-美元或未註明幣別的本教會奉獻金額可登記；其他幣別、約數、範圍或多筆不能判斷總額時先提問，不自行換匯、加總或四捨五入。奉獻所屬主日不明確時提問；周一到周六說「本週奉獻」不能推定為尚未舉行的主日。
+指定奉獻來源群的「本週奉獻」「奉獻金額」填 donationAmount，值為明確的金額數字（例如 1234.56），不能把日期、人數、預算或個人認獻當作本週奉獻總額。只處理總額，不收集個別捐獻者資料。
+美元或未註明幣別的本教會奉獻金額可登記；其他幣別、約數、範圍或多筆不能判斷總額時先提問，不自行換匯、加總或四捨五入。本教會已確認：本週／截至某日的奉獻填入目前正在準備的本週主日表單。例如2026年10月23日（周五）統計到當日的本週總額，填2026年10月25日。未另列日期時以消息當地日期的 this_sunday 為本週表單；明確說別的主日或補登歷史時依明確日期。不可誤填上週或重加已明說的總額。
 每項 evidence 必須逐字複製當前消息中支持該項的原文片段。
 若 pending_clarifications 中有此發送人尚未回答的提問，判斷當前消息是否在回答其中一項。
 回答時填 clarification_id，整合該項的 source_messages 與本次回答，重新輸出完整更新；evidence 可逐字取自這些 source_messages 或當前回答。相對日期以原消息發送日期解讀。
@@ -140,7 +141,7 @@ class Assistant:
                     continue
                 if not self.same_sender(msg.sender_id, row["sender_id"]):
                     quoted = question["remote_id"] and msg.quoted_message_id == question["remote_id"]
-                    if not quoted:
+                    if not quoted and sources[0].get("origin") != "schedule":
                         continue
                 result.append({"clarification_id": row["id"], "questions": json.loads(row["questions"]),
                                "question_message_id": question["remote_id"], "question_text": question["text"],
@@ -200,12 +201,12 @@ class Assistant:
             if not settings.auto_apply or msg.initial_sync:
                 raise ValueError("此發送人或歷史消息不可自動取消待登記事項")
             plan["cancel_clarification"] = True
-        if msg.group_id not in {settings.availability_group, settings.service_group}:
+        if msg.group_id not in settings.source_group_ids:
             raise ValueError("資料來源群設定已改變，請核對此消息")
-        if msg.group_id == settings.availability_group and result.service_changes:
-            raise ValueError("外出群不可修改崇拜內容")
-        if msg.group_id == settings.service_group and result.absence_changes:
-            raise ValueError("崇拜群不可修改同工外出日期")
+        if result.absence_changes and msg.group_id != settings.availability_group and not settings.collect_cross_group:
+            raise ValueError("此資料來源群不可修改同工外出日期")
+        if any(change.field not in settings.fields_for_group(msg.group_id) for change in result.service_changes):
+            raise ValueError("此資料來源群不可修改這項主日欄位，請在負責此欄位的來源群提供資料")
         services = self.services()
         seen = set()
         for change in result.service_changes:
@@ -213,12 +214,27 @@ class Assistant:
                 raise ValueError("抽取的依據無法對回原消息")
             if abs((change.date - msg.sent_at.astimezone(ZONE).date()).days) > 370:
                 raise ValueError("日期距離消息超過一年，請人工核對")
-            if change.field == "sermonSpeaker" and change.value not in workers:
+            if change.field in {"sermonSpeaker", "presider", "worshipLeader"} and change.value not in workers:
                 plan["questions"].append(f"講員「{change.value}」不在同工名單，請先確認或加入名單")
                 continue
             if change.field in {"hymn", "responseHymn"} and change.value not in songs:
                 plan["questions"].append(f"詩歌「{change.value}」不在目錄，請先確認或加入目錄")
                 continue
+            if change.field in {"hymnNotes", "responseHymnNotes"}:
+                from backend.sunday_song_performance import apply_song_notes
+                from backend.api.service import _split_lyrics_sections
+                target_field = "hymn" if change.field == "hymnNotes" else "responseHymn"
+                proposed = next((c.value for c in result.service_changes if c.date == change.date and c.field == target_field), None)
+                existing = services.get(change.date.isoformat())
+                title = proposed or (existing.model_dump(by_alias=True).get(target_field) if existing else None)
+                song = next((song for song in self.repository.list_sunday_songs() if song.title == title), None)
+                try:
+                    if not song or not song.lyrics_markdown:
+                        raise ValueError("請先確認詩歌及完整歌詞，再處理當週演唱說明")
+                    apply_song_notes(_split_lyrics_sections(song.lyrics_markdown), change.value)
+                except ValueError as exc:
+                    plan['questions'].append(str(exc))
+                    continue
             if change.field == "scripture":
                 # The site's scripture parser accepts the same slugs as the form.
                 from backend.api.scripture import parse_reference
@@ -348,7 +364,9 @@ class Assistant:
                     # and replacement content still require ownership or review.
                     additive_absence = op["kind"] == "absence" and op.get("reports") and all(
                         r["operation"] == "add" for r in op["reports"])
-                    if not additive_absence and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
+                    automatic = self.store.get(f"auto_{'presider' if op.get('field') == 'presider' else 'worshipLeader'}:{op.get('date')}") if op.get('field') in {'presider', 'worshipLeader'} else None
+                    replaces_automatic = automatic and automatic.get('status') in {'applied', 'applying'} and automatic.get('after') == current
+                    if not additive_absence and not replaces_automatic and ((owner and json.loads(owner["value"]) != current) or (current and not owner)):
                         raise ValueError("此欄位已有人工資料，請核對後批准")
             with self.store.db() as db:
                 db.execute("UPDATE proposals SET status='applying',updated_at=? WHERE id=?", (now_text(), proposal_id))
@@ -379,6 +397,8 @@ class Assistant:
                     self.repository.create_sunday_service(entry)
             with self.store.db() as db:
                 for op in plan["operations"]:
+                    if op.get('field') in {'presider', 'worshipLeader'}:
+                        db.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (f"auto_{op['field']}:{op['date']}", dump({'status': 'confirmed_in_group', 'after': op['after'], 'message_id': msg.message_id})))
                     db.execute("INSERT OR REPLACE INTO ownership VALUES (?,?,?,?)",
                                (op["key"], dump(op["after"]), msg.sent_at.isoformat(), msg.message_id))
                 absences = [op for op in plan["operations"] if op["kind"] == "absence"]
@@ -485,14 +505,12 @@ class Assistant:
             db.execute("UPDATE messages SET status='processing',error=NULL,attempts=attempts+1 WHERE id=?", (msg.message_id,))
         try:
             settings = self.store.settings()
-            if msg.group_id not in {settings.availability_group, settings.service_group}:
+            if msg.group_id not in settings.source_group_ids:
                 raise ValueError("資料來源群設定已改變，請核對此消息")
             if msg.revoked:
                 self.execute_request(msg, Extraction(questions=["此群消息已撤回，請確認原先安排是否取消或另有更正？"]))
             elif msg.unverified_edit:
                 self.execute_request(msg, Extraction(questions=["這則消息已編輯，但無法核對編輯版本時間。請另發一則更正，說明要登記的姓名、日期或欄位內容。 "]))
-            elif msg.unsupported_media:
-                self.execute_request(msg, Extraction(questions=["這則訊息含附件，請用文字補充要登記的姓名、日期或主日資料。 "]))
             elif self.extractor is not None:
                 # Dependency injection for deterministic business-rule tests.
                 result = self.extractor(msg, settings, self.context(msg), list(self.worker_map()),
@@ -533,6 +551,20 @@ class Assistant:
 
     def remind(self, now):
         settings = self.store.settings()
+        destinations = {}
+        for field, group in settings.field_destinations().items():
+            if field in FRIDAY_FIELDS:
+                destinations.setdefault(group, set()).add(field)
+        results = [self._remind_group(now, group, fields) for group, fields in destinations.items()]
+        if not results:
+            return "not_due"
+        for status in ("paused", "unknown", "waiting_for_messages", "bridge_unavailable", "bridge_not_synced", "bridge_stale", "schedule_conflict"):
+            if status in results:
+                return status
+        return "sent" if "sent" in results else results[0]
+
+    def _remind_group(self, now, target, fields):
+        settings = self.store.settings()
         if not settings.enabled:
             return "paused"
         local = now.astimezone(ZONE)
@@ -541,14 +573,16 @@ class Assistant:
         if (local.hour, local.minute) < (settings.friday_hour, settings.friday_minute):
             return "not_due"
         day = upcoming_sunday(local.date()).isoformat()
-        key = f"friday:{day}"
+        key = f"friday:{day}" + ("" if target == settings.service_group else f":{target}")
         with self.store.db() as db:
             existing = db.execute("SELECT status FROM outbox WHERE key=?", (key,)).fetchone()
         if existing:
             # Unknown outcomes are reconciled with the bridge, never blindly retried.
             return existing[0]
         if any(m["status"] in {"queued", "processing", "error", "review", "waiting_reply"}
-               and m["payload"]["group_id"] == settings.service_group for m in self.store.messages(10000)):
+               and m["payload"]["group_id"] == target
+               and (m['payload'].get('origin') != 'schedule' or m['payload'].get('schedule_date') == day)
+               for m in self.store.messages(10000)):
             return "waiting_for_messages"
         try:
             bridge = self.bridge.status()
@@ -562,20 +596,21 @@ class Assistant:
         # Recheck after consulting the bridge: ingestion may have arrived meanwhile.
         with self.store.db() as db:
             pending = db.execute("SELECT 1 FROM messages WHERE status IN ('queued','processing','error','review','waiting_reply') "
-                                 "AND json_extract(payload,'$.group_id')=? LIMIT 1", (settings.service_group,)).fetchone()
+                                 "AND json_extract(payload,'$.group_id')=? AND (COALESCE(json_extract(payload,'$.origin'),'whatsapp')!='schedule' "
+                                 "OR json_extract(payload,'$.schedule_date')=?) LIMIT 1", (target, day)).fetchone()
         if pending:
             return "waiting_for_messages"
         if any(c["date"] == day for c in self.conflicts()):
             return "schedule_conflict"
-        missing = self.missing(day)
+        missing = [label for label in self.missing(day) if any(FRIDAY_FIELDS[field] == label for field in fields)]
         if not missing:
             return "complete"
         text = f"【主日資料提醒】\n弟兄姊妹平安！本主日（{day}）的崇拜資料目前還缺：\n" + "\n".join(f"• {x}" for x in missing) + "\n請負責的同工方便時在群裡補充，謝謝！"
         with self.store.db() as db:
             db.execute("INSERT INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'sending',?)",
-                       (key, settings.service_group, text, now_text()))
+                       (key, target, text, now_text()))
         try:
-            result = self.bridge.send(key, settings.service_group, text)
+            result = self.bridge.send(key, target, text)
             if result.get("status") == "deferred":
                 with self.store.db() as db:
                     db.execute("DELETE FROM outbox WHERE key=?", (key,))
@@ -591,6 +626,41 @@ class Assistant:
                        (state, remote, error, now_text(), key))
         return state
 
+    def maintain_future_forms(self, now):
+        from backend.sunday_service_skeletons import maintain_skeletons, REQUIRED
+        settings = self.store.settings()
+        if not settings.enabled or not settings.auto_apply or not settings.maintain_future_skeletons:
+            return
+        report = maintain_skeletons(self.repository, self.store, now.astimezone(ZONE).date())
+        destinations = settings.field_destinations()
+        for row in report:
+            for field, label in REQUIRED.items():
+                target = destinations.get(field)
+                if not target:
+                    continue
+                message_id = f"schedule:{row['date']}:{field}:" + sha256(target.encode()).hexdigest()[:12]
+                if label not in row['missing']:
+                    # A manual form edit or a dated message can complete a
+                    # calendar question without quoting the bot's question.
+                    with self.store.db() as db:
+                        cases = db.execute("SELECT id,history FROM clarifications WHERE status='waiting' AND json_extract(history,'$[0]')=?", (message_id,)).fetchall()
+                        for case in cases:
+                            db.execute("UPDATE clarifications SET status='resolved',resolved_by='website_form',updated_at=? WHERE id=?", (now_text(), case['id']))
+                            for source_id in json.loads(case['history']):
+                                db.execute("UPDATE messages SET status='done',error=NULL WHERE id=?", (source_id,))
+                                db.execute("UPDATE proposals SET status='resolved',updated_at=? WHERE message_id=? AND status!='applied'", (now_text(), source_id))
+                            db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key LIKE ? AND status='queued'", (now_text(), f"clarify:{case['id']}:%"))
+                    continue
+                msg = ChatMessage(message_id=message_id, group_id=target, sender_id='__schedule__', sent_at=now,
+                                  origin='schedule', schedule_date=row['date'], schedule_field=field,
+                                  text=f"未來兩週主日安排：{row['date']} 的{label}尚未確定。")
+                if self.store.receive(msg):
+                    question = f"請問 {row['date']} 主日的{label}由哪位同工負責？"
+                    if field == 'presider':
+                        question += "目前沒有可自動安排且可服事的合適人選，請提供同工姓名或補充司會資格／可服事日期。"
+                    self.execute_request(msg, Extraction(questions=[question]))
+        self.store.put('skeletons', report)
+
     def tick(self, now=None):
         now = now or datetime.now(timezone.utc)
         with self.store.work_lock():
@@ -598,6 +668,7 @@ class Assistant:
             if not settings.enabled:
                 self.store.put("worker", {"at": now_text(), "status": "paused"})
                 return
+            self.maintain_future_forms(now)
             with self.store.db() as db:
                 db.execute("UPDATE messages SET status='queued' WHERE status='processing'")
                 # Retry interrupted applies first, against the saved before/after values.
@@ -617,6 +688,7 @@ class Assistant:
             for row in rows:
                 self.store.put("worker", {"at": now_text(), "status": "processing", "message_id": row["id"]})
                 self.process_message(row)
+            self.maintain_future_forms(now)
             self.deliver_outbox()
             reminder = self.remind(now)
             self.store.put("worker", {"at": now_text(), "status": "idle", "reminder": reminder})

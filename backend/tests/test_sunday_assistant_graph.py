@@ -464,3 +464,81 @@ def test_alias_settings_reject_empty_names(aliases):
     from backend.sunday_assistant.models import Settings
     with pytest.raises(ValueError, match="不可空白"):
         Settings(worker_aliases=aliases)
+
+
+def configure_three_groups(agent):
+    settings = agent.store.settings()
+    settings.songs_group = '333@g.us'
+    agent.store.put('settings', settings.model_dump())
+    return settings
+
+
+def test_three_groups_share_record_but_read_and_write_only_assigned_fields(agent):
+    configure_three_groups(agent)
+    for id, group, text, changes in [
+        ('songs', '333@g.us', '11月8日主日詩歌及回應詩歌都是奇異恩典', [service(field=f, value='奇異恩典', evidence='奇異恩典') for f in ['hymn', 'responseHymn']]),
+        ('sermon', '222@g.us', '本主日講員陳牧師', [service()]),
+        ('offering', '111@g.us', '11月8日主日奉獻總額123.45美元', [service(field='donationAmount', value=123.45, evidence='主日奉獻總額123.45美元')]),
+    ]:
+        msg = incoming(agent, text, group=group, id=id)
+        assert run_agent(agent, msg, model=ScriptModel(('read_sunday_record', {'day': '2026-11-08'}), ('update_records', {'request': {'service_changes': changes}})))['status']=='done'
+        fields = __import__('json').loads(trace(agent)[0].content)['fields']
+        assert set(fields) == agent.store.settings().fields_for_group(group)
+    entry=agent.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn, entry.sermon_speaker, entry.donation_amount)==('奇異恩典','奇異恩典','陳牧師',123.45)
+    from backend.sunday_assistant.models import Extraction
+    for group, field in [('333@g.us','donationAmount'),('333@g.us','sermonTitle'),('222@g.us','hymn'),('222@g.us','donationAmount'),('111@g.us','sermonTitle')]:
+        msg=incoming(agent,'明確來源',group=group,id=f'blocked-{group}-{field}')
+        with pytest.raises(ValueError, match='不可修改這項'):
+            agent.build_plan(msg,Extraction(service_changes=[service(field=field,value=1.0 if field=='donationAmount' else '奇異恩典',evidence=msg.text)]))
+
+
+def test_friday_reminders_split_sermon_and_song_fields_and_deduplicate(agent):
+    configure_three_groups(agent)
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',presider='王明')
+    now=datetime(2026,11,6,23,0,tzinfo=timezone.utc)
+    assert agent.remind(now)=='sent'
+    sent=agent.bridge.sent
+    assert len(sent)==2
+    messages={group:text for _,group,text in sent}
+    assert '講員' in messages['222@g.us'] and '讀經經文' in messages['222@g.us']
+    assert '詩歌' not in messages['222@g.us']
+    assert '詩歌' in messages['333@g.us'] and '回應詩歌' in messages['333@g.us']
+    assert '講員' not in messages['333@g.us'] and '奉獻' not in ''.join(messages.values())
+    assert agent.remind(now)=='sent'
+    assert len(sent)==2
+
+
+def test_song_clarifications_and_replies_stay_in_song_group(agent):
+    configure_three_groups(agent)
+    msg=incoming(agent,'11月8日回應詩歌用新歌',group='333@g.us',id='song-unknown')
+    result=run_agent(agent,msg,model=ScriptModel(('ask_group',{'request':{'questions':['請提供詩歌編號或目錄歌名？']}})))
+    assert result['status']=='waiting_reply'
+    agent.deliver_outbox()
+    assert agent.bridge.sent[-1][1]=='333@g.us'
+    other=incoming(agent,'123首',group='222@g.us',id='reply-in-wrong-group')
+    assert not agent.pending_dialogues(other)
+    reply=incoming(agent,'奇異恩典',group='333@g.us',id='song-reply',at='2026-11-02T16:01:00+00:00')
+    case=agent.pending_dialogues(reply)[0]['clarification_id']
+    result=run_agent(agent,reply,model=ScriptModel(('read_group_context',{}),('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':{'clarification_id':case,'service_changes':[service(field='responseHymn',value='奇異恩典',evidence='奇異恩典')]}})))
+    assert result['status']=='done'
+    agent.deliver_outbox()
+    assert agent.bridge.sent[-1][1]=='333@g.us'
+
+
+@pytest.mark.parametrize('kwargs',[{'songs_group':'111@g.us'},{'songs_group':'not-a-group'},{'offering_group':'444@g.us'}])
+def test_invalid_third_group_and_field_destinations_are_rejected(kwargs):
+    from backend.sunday_assistant.models import Settings
+    with pytest.raises(ValueError):
+        Settings(availability_group='111@g.us',service_group='222@g.us',**kwargs)
+
+
+def test_confirmed_cross_group_collection_accepts_offering_but_reminder_destination_stays_primary(agent):
+    settings=configure_three_groups(agent);settings.collect_cross_group=True;agent.store.put('settings',settings.model_dump())
+    msg=incoming(agent,'11月8日主日奉獻總額200美元',group='333@g.us',id='cross-offering')
+    result=run_agent(agent,msg,model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':{'service_changes':[service(field='donationAmount',value=200,evidence=msg.text)]}})))
+    assert result['status']=='done'
+    assert agent.repository.services['2026-11-08'].donation_amount==200
+    assert settings.field_destinations()['donationAmount']=='111@g.us'
+    assert settings.field_destinations()['sermonSpeaker']=='222@g.us'
+    assert settings.field_destinations()['worshipLeader']=='333@g.us'

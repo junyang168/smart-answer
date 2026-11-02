@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 type Settings = {
-  enabled: boolean; availability_group: string; service_group: string;
-  availability_group_name: string; service_group_name: string;
-  auto_apply: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
+  availability_group_name: string; service_group_name: string; songs_group_name: string;
+  auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
-  households: string[][]; worker_aliases: Record<string, string>;
+  households: string[][]; worker_aliases: Record<string, string>; worship_rotation: string[];
 };
 type Message = { id: string; status: string; error?: string;
   payload: { sender_id: string; group_id: string; sent_at: string; text: string; unsupported_media: boolean } };
@@ -24,6 +24,7 @@ type Data = {
   worker?: { status: string; at: string; reminder?: string; error?: string };
   conflicts: { date: string; role: string; worker: string }[];
   sunday: string; missing: string[]; workers: string[];
+  skeletons?: { date: string; missing: string[]; complete: boolean }[];
 };
 const labels: Record<string, string> = {
   queued: "等待處理", processing: "正在整理消息", review: "待核對", done: "已完成", applied: "已更新網站",
@@ -36,7 +37,7 @@ const labels: Record<string, string> = {
   bridge_unavailable: "WhatsApp 未連線，暫緩提醒", bridge_not_synced: "等待群消息同步",
   bridge_stale: "同步狀態過期，暫緩提醒", complete: "資料齊全", not_due: "尚未到提醒時間",
   schedule_conflict: "本主日同工安排有衝突，請先處理",
-  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻",
+  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻", presider: "司會", worshipLeader: "領詩", hymnNotes: "詩歌演唱說明", responseHymnNotes: "回應詩歌演唱說明",
 };
 const display = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value ?? "未填");
 const card = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
@@ -89,7 +90,7 @@ export default function SundayAssistantPage() {
     <header className="rounded-2xl bg-slate-900 p-6 text-white">
       <p className="text-sm text-indigo-200">主日服事 · WhatsApp</p>
       <h1 className="mt-1 text-2xl font-bold">主日資料助理</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時在原群追問，收到回答後繼續登記。請假資料成功更新後回覆原群；周五下午 5 點檢查崇拜準備資料的缺項並提醒。</p>
+      <p className="mt-3 text-sm leading-6 text-slate-200">整理外出日期、講員、講道題目、詩歌、讀經與本週奉獻；支援不同同工分次補充。不清楚時在原群追問，收到回答後繼續登記。請假資料成功更新後回覆原群；周五下午 5 點檢查崇拜準備資料的缺項，分別在講道與詩歌群提醒。</p>
       <div className="mt-4 flex flex-wrap gap-4 text-sm underline"><Link href="/admin/sunday-service">主日表單</Link><Link href="/admin/sunday-workers">同工及外出日期</Link></div>
     </header>
     {(error || loadError) && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || loadError}</div>}
@@ -100,20 +101,27 @@ export default function SundayAssistantPage() {
         <section className={card}><h2 className="font-semibold">整理進度</h2><p className="mt-2">{labels[data.worker?.status || ""] || "處理程序尚未啟動"}</p><p className="mt-2 text-sm">{pending.length} 項待核對</p>{data.worker && <p className="mt-1 text-xs text-slate-500">最近更新 {new Date(data.worker.at).toLocaleString()}</p>}{data.worker?.error && <p className="mt-2 text-sm text-amber-800">{data.worker.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">{data.sunday} 主日資料</h2><p className="mt-2 text-sm">{data.missing.length ? `尚缺：${data.missing.join("、")}` : "已齊全"}</p><p className="mt-2 text-xs text-slate-500">{labels[data.worker?.reminder || ""] || ""}</p></section>
       </div>
+      {!!data.skeletons?.length && <section className={card}><h2 className="text-lg font-bold">未來兩週主日骨架</h2><p className="mt-2 text-sm text-slate-600">先確定講員、司會、領詩；其餘資料可在主日前補齊。已有預填安排保留，司會缺項自動按資格、輪值及請假資料分配。</p>{!!settings.worship_rotation?.length && <p className="mt-2 text-sm">領詩輪值：{settings.worship_rotation.join(" ／ ")}；沿用已有預填安排，群內明確更正優先。</p>}{data.skeletons.map(row => <p className="mt-2 text-sm" key={row.date}>{row.date} · {row.complete ? "骨架齊全" : `待補：${row.missing.join("、")}`}</p>)}</section>}
       <section className={card}>
         <h2 className="text-lg font-bold">連接與設定</h2>
-        <p className="mt-2 text-sm text-slate-600">WhatsApp Web 接入使用非官方工具，可能因平台更新斷線或影響帳號。連接後先選定兩個資料來源群；首次同步最近 30 天可讀取的文字消息。</p>
+        <p className="mt-2 text-sm text-slate-600">WhatsApp Web 接入使用非官方工具，可能因平台更新斷線或影響帳號。連接後選定外出、講道及詩歌資料來源群；首次同步最近 30 天可讀取的文字消息。</p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button className={button} disabled={busy || data.bridge.state === "ready"} onClick={() => void action(() => call("connect", "POST", {}), "請使用手機 WhatsApp 的連結裝置掃碼")}>連接 WhatsApp</button>
           <button className={button} disabled={busy || data.bridge.state !== "ready"} onClick={() => void action(async () => { const result = await call<{ groups: typeof groups }>("groups"); setGroups(result.groups); }, "群名單已載入")}>讀取群名單</button>
         </div>
         {data.bridge.qr && <div className="mt-4"><img src={data.bridge.qr} width={240} height={240} alt="WhatsApp 連結裝置 QR 碼" /><p className="text-sm">手機 WhatsApp → 設定 → 連結裝置</p></div>}
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          {([ ["availability_group", "availability_group_name", "外出登記群"], ["service_group", "service_group_name", "主日內容群"] ] as const).map(([key, nameKey, label]) => <label key={key} className="space-y-2 text-sm"><span className="font-semibold">{label} · {settings[nameKey]}</span><select className={input} value={settings[key]} onChange={e => { const found = groups.find(g => g.id === e.target.value); patch({ [key]: e.target.value, ...(found ? { [nameKey]: found.name } : {}) }); }}><option value="">請連接後選擇群</option>{settings[key] && !groups.some(g => g.id === settings[key]) && <option value={settings[key]}>{settings[nameKey]}</option>}{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>)}
+          {([ ["availability_group", "availability_group_name", "外出及奉獻群"], ["service_group", "service_group_name", "講道資料群"], ["songs_group", "songs_group_name", "主日詩歌與回應詩歌群"] ] as const).map(([key, nameKey, label]) => <label key={key} className="space-y-2 text-sm"><span className="font-semibold">{label} · {settings[nameKey]}</span><select className={input} value={settings[key] || ""} onChange={e => { const found = groups.find(g => g.id === e.target.value); patch({ [key]: e.target.value, ...(found ? { [nameKey]: found.name } : {}) }); }}><option value="">請連接後選擇群</option>{settings[key] && !groups.some(g => g.id === settings[key]) && <option value={settings[key] || ""}>{settings[nameKey]}</option>}{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>)}
+        </div>
+        <p className="mt-3 text-sm text-slate-600">主要分工：教會群收集外出及奉獻；講道群收集講員、題目、讀經；詩歌群收集領詩、主日詩歌與回應詩歌。明確的跨群補充也可收集，提醒仍發到主要來源群。只有舊設定未指定詩歌群時，才沿用原講道群收集方式。</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {([["response_hymn_group", "回應詩歌來源", "預設：詩歌群（未設詩歌群時為講道群）"], ["offering_group", "本週奉獻來源", "預設：達拉斯聖道教會（未設詩歌群時沿用講道群）"]] as const).map(([key, label, fallback]) => <label className="text-sm" key={key}>{label}<select className={input} value={settings[key] || ""} onChange={e => patch({ [key]: e.target.value })}><option value="">{fallback}</option>{(["availability_group", "service_group", "songs_group"] as const).filter(role => settings[role]).map(role => <option value={settings[role]} key={role}>{settings[`${role}_name`]}</option>)}</select></label>)}
         </div>
         <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           <label><input type="checkbox" checked={settings.enabled} onChange={e => patch({ enabled: e.target.checked })} /> 啟用消息收集與整理</label>
           <label><input type="checkbox" checked={settings.auto_apply} onChange={e => patch({ auto_apply: e.target.checked })} /> 自動登記所選群內的明確資料</label>
+          <label><input type="checkbox" checked={settings.maintain_future_skeletons ?? true} onChange={e => patch({ maintain_future_skeletons: e.target.checked })} /> 維持未來兩個主日骨架，缺項在負責群提問</label>
+          <label><input type="checkbox" checked={settings.collect_cross_group ?? true} onChange={e => patch({ collect_cross_group: e.target.checked })} /> 收集三個來源群中的明確跨群資料</label>
           <label><input type="checkbox" checked={settings.reminders_enabled} onChange={e => patch({ reminders_enabled: e.target.checked })} /> 啟用周五缺項提醒</label>
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>

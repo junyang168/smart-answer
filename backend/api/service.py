@@ -1627,8 +1627,6 @@ def list_sunday_services() -> list[SundayServiceEntry]:
 
 
 def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
-    if not entry.scripture:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.create_sunday_service(entry)
     except ValueError as exc:
@@ -1636,8 +1634,6 @@ def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
 
 
 def update_sunday_service(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
-    if not entry.scripture:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.update_sunday_service(date, entry)
     except ValueError as exc:
@@ -1814,6 +1810,14 @@ def delete_micro_sermon(sermon_id: str) -> None:
 
 def generate_sunday_service_ppt(date: str) -> Path:
     service = get_sunday_service(date)
+    from backend.sunday_service_skeletons import maintain_skeletons
+    from backend.sunday_assistant.store import Store
+    report_date = _parse_service_date(service.date)
+    if report_date:
+        skeletons = maintain_skeletons(repository, Store(Path(os.environ['DATA_BASE_DIR']) / 'sunday-assistant'), report_date.date())
+        incomplete = [f"{row['date']}：{'、'.join(row['missing'])}" for row in skeletons if not row['complete']]
+        if incomplete:
+            raise HTTPException(status_code=400, detail="未來兩週骨架尚未齊全（講員、司會、領詩）：" + "；".join(incomplete))
     songs = {song.title: song for song in repository.list_sunday_songs()}
 
     hymn = songs.get(service.hymn or "") if service.hymn else None
@@ -1828,9 +1832,16 @@ def generate_sunday_service_ppt(date: str) -> Path:
         replacements["reader"] = ""
     summary_data: list[dict[str, str]] = []
 
+    from backend.sunday_song_performance import apply_song_notes
+    def scheduled_lyrics(raw, notes):
+        try:
+            return apply_song_notes(_split_lyrics_sections(raw), notes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="當週詩歌演唱說明需核對：" + str(exc)) from exc
+
     section_configs: dict[str, dict[str, object]] = {}
     if hymn and hymn.lyrics_markdown:
-        sections = _split_lyrics_sections(hymn.lyrics_markdown)
+        sections = scheduled_lyrics(hymn.lyrics_markdown, service.hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.hymn_index)
             section_configs["hymnLyrics"] = {
@@ -1841,7 +1852,7 @@ def generate_sunday_service_ppt(date: str) -> Path:
                 "style": "lyrics",
             }
     if response_hymn and response_hymn.lyrics_markdown:
-        sections = _split_lyrics_sections(response_hymn.lyrics_markdown)
+        sections = scheduled_lyrics(response_hymn.lyrics_markdown, service.response_hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.response_hymn_index)
             section_configs["responseHymnLyrics"] = {
@@ -2572,21 +2583,15 @@ def _populate_future_service_tokens(replacements: dict[str, str], current_servic
             _apply_future_service_defaults(replacements, idx)
         return
 
-    future_entries: list[tuple[datetime, SundayServiceEntry]] = []
-    for entry in repository.list_sunday_services():
-        entry_date = _parse_service_date(entry.date)
-        if entry_date is None or entry_date <= current_date:
-            continue
-        future_entries.append((entry_date, entry))
-
-    future_entries.sort(key=lambda item: item[0])
-
+    entries = {entry.date: entry for entry in repository.list_sunday_services()}
     for idx in (1, 2):
-        if idx <= len(future_entries):
-            _, entry = future_entries[idx - 1]
+        target = current_date + timedelta(days=7 * idx)
+        entry = entries.get(target.strftime("%Y-%m-%d"))
+        if entry:
             _apply_future_service_values(replacements, idx, entry)
         else:
             _apply_future_service_defaults(replacements, idx)
+            replacements[f"date{idx}"] = target.strftime("%m/%d")
 
 
 def _apply_future_service_defaults(replacements: dict[str, str], position: int) -> None:

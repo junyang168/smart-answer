@@ -59,6 +59,8 @@ interface FormState {
   worshipLeader: string;
   pianist: string;
   hymn: string;
+  hymnNotes: string;
+  responseHymnNotes: string;
   responseHymn: string;
   scriptures: ScriptureSelection[];
   scriptureReaders: string[];
@@ -77,6 +79,8 @@ function createEmptyForm(): FormState {
     worshipLeader: "",
     pianist: "",
     hymn: "",
+    hymnNotes: "",
+    responseHymnNotes: "",
     responseHymn: "",
     scriptures: [createEmptyScriptureSelection()],
     scriptureReaders: ensureReaderSlots(),
@@ -285,6 +289,8 @@ function toForm(entry: SundayServiceEntry | null): FormState {
     worshipLeader: entry.worshipLeader ?? "",
     pianist: entry.pianist ?? "",
     hymn: entry.hymn ?? "",
+    hymnNotes: entry.hymnNotes ?? "",
+    responseHymnNotes: entry.responseHymnNotes ?? "",
     responseHymn: entry.responseHymn ?? "",
     scriptures: parseScriptureValues(entry.scripture ?? null),
     scriptureReaders: ensureReaderSlots(entry.scriptureReaders ?? []),
@@ -313,6 +319,8 @@ function fromForm(form: FormState): SundayServiceEntry {
     worshipLeader: optional(form.worshipLeader),
     pianist: optional(form.pianist),
     hymn: optional(form.hymn),
+    hymnNotes: optional(form.hymnNotes),
+    responseHymnNotes: optional(form.responseHymnNotes),
     responseHymn: optional(form.responseHymn),
     scripture: scriptureSelections,
     scriptureReaders: form.scriptureReaders
@@ -356,7 +364,7 @@ function validateScripture(form: FormState): string | null {
   );
 
   if (filled.length === 0) {
-    return "請完整輸入讀經經文";
+    return null;
   }
 
   for (let index = 0; index < filled.length; index += 1) {
@@ -381,10 +389,6 @@ function validateScripture(form: FormState): string | null {
     if (end < start) {
       return `${prefix}：結束經文須大於或等於起始經文`;
     }
-  }
-  const readers = form.scriptureReaders.map((value) => value.trim()).filter((value) => value.length > 0);
-  if (readers.length < MIN_SCRIPTURE_READERS) {
-    return `請至少輸入 ${MIN_SCRIPTURE_READERS} 位讀經同工`;
   }
   return null;
 }
@@ -457,27 +461,7 @@ export function SundayServiceManager() {
     }
   }, []);
 
-  useEffect(() => {
-    if (scriptureBooks.length === 0) {
-      return;
-    }
-    setForm((prev) => {
-      const fallback = scriptureBooks[0]?.slug ?? "";
-      const base = prev.scriptures.length > 0 ? prev.scriptures : [createEmptyScriptureSelection()];
-      let changed = base.length !== prev.scriptures.length;
-      const updated = base.map((selection) => {
-        if (selection.book) {
-          return selection;
-        }
-        if (!fallback) {
-          return selection;
-        }
-        changed = true;
-        return { ...selection, book: fallback };
-      });
-      return changed ? { ...prev, scriptures: updated } : prev;
-    });
-  }, [scriptureBooks]);
+
 
   useEffect(() => {
     if (editingDate) {
@@ -835,11 +819,7 @@ export function SundayServiceManager() {
 
   const addScriptureSelection = () => {
     setForm((prev) => {
-      const fallback = scriptureBooks[0]?.slug ?? "";
       const next = createEmptyScriptureSelection();
-      if (fallback) {
-        next.book = fallback;
-      }
       return { ...prev, scriptures: [...prev.scriptures, next] };
     });
   };
@@ -863,10 +843,6 @@ export function SundayServiceManager() {
 
   const resetForm = () => {
     const base = createEmptyForm();
-    const fallbackBook = scriptureBooks[0]?.slug ?? "";
-    if (fallbackBook) {
-      base.scriptures[0] = { ...base.scriptures[0], book: fallbackBook };
-    }
     setForm(base);
     setEditingDate(null);
   };
@@ -880,23 +856,6 @@ export function SundayServiceManager() {
     setShowCreateForm(false);
     setEditingDate(entry.date);
     const next = toForm(entry);
-    if (scriptureBooks.length > 0) {
-      const fallback = scriptureBooks[0].slug;
-      let changed = false;
-      const normalized = next.scriptures.map((selection) => {
-        if (selection.book) {
-          return selection;
-        }
-        if (!fallback) {
-          return selection;
-        }
-        changed = true;
-        return { ...selection, book: fallback };
-      });
-      if (changed) {
-        next.scriptures = normalized;
-      }
-    }
     setForm(next);
     setFeedback(null);
     setError(null);
@@ -1359,6 +1318,7 @@ export function SundayServiceManager() {
                       <div className="flex flex-col">
                         <span>{entry.hymn ?? "-"}</span>
                         <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
+                        {(entry.hymnNotes || entry.responseHymnNotes) && <span className="text-xs text-amber-700">{[entry.hymnNotes, entry.responseHymnNotes].filter(Boolean).join("；")}</span>}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-gray-700">
@@ -1639,6 +1599,10 @@ export function SundayServiceManager() {
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
+              <label className="text-sm">詩歌當週演唱說明<input className="mt-1 w-full rounded border px-3 py-2" value={form.hymnNotes} onChange={e => setForm(prev => ({ ...prev, hymnNotes: e.target.value }))} placeholder="例如：只唱一、二、四節" /></label>
+              <label className="text-sm">回應詩歌當週演唱說明<input className="mt-1 w-full rounded border px-3 py-2" value={form.responseHymnNotes} onChange={e => setForm(prev => ({ ...prev, responseHymnNotes: e.target.value }))} placeholder="例如：最後一節重複一次" /></label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">詩歌</label>
                 <SundaySongPicker
@@ -1678,6 +1642,7 @@ export function SundayServiceManager() {
                         onChange={handleScriptureFieldChange(index, "book")}
                         disabled={saving || options.length === 0}
                       >
+                        <option value="">未指定</option>
                         {options.map((book) => (
                           <option key={`${index}-${book.slug}`} value={book.slug}>
                             {book.name}

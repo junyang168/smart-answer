@@ -426,6 +426,8 @@ class SundayServiceEntry(BaseModel):
     sermon_title: Optional[str] = Field(None, alias="sermonTitle")
     hymn: Optional[str] = None
     hymn_index: Optional[int] = Field(None, alias="hymnIndex")
+    hymn_notes: Optional[str] = Field(None, alias="hymnNotes")
+    response_hymn_notes: Optional[str] = Field(None, alias="responseHymnNotes")
     response_hymn: Optional[str] = Field(None, alias="responseHymn")
     response_hymn_index: Optional[int] = Field(None, alias="responseHymnIndex")
     announcements_markdown: Optional[str] = Field("", alias="announcementsMarkdown")

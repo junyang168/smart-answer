@@ -14,7 +14,7 @@ class Repo:
     def __init__(self):
         self.workers = {n: SundayWorker(name=n) for n in ["王明", "李芳", "陳牧師"]}
         self.services = {}
-        self.songs = [SundaySong(id="1", title="奇異恩典", hymnalIndex=123, source="hymnal")]
+        self.songs = [SundaySong(id="1", title="奇異恩典", hymnalIndex=123, source="hymnal", lyricsMarkdown="測試用既有歌詞")]
 
     def list_sunday_workers(self):
         return [x.model_copy(deep=True) for x in self.workers.values()]
@@ -58,7 +58,7 @@ def agent(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_BASE_DIR", str(tmp_path))
     store = Store(tmp_path / "assistant")
     store.put("settings", Settings(enabled=True, availability_group="111@g.us", service_group="222@g.us",
-                                   auto_apply=True, reminders_enabled=True, trusted_senders=["sender"],
+                                   auto_apply=True, collect_cross_group=False, maintain_future_skeletons=False, reminders_enabled=True, trusted_senders=["sender"],
                                    sender_workers={"sender": ["王明"]}, households=[["王明", "李芳"]]).model_dump())
     return Assistant(store, Repo(), bridge=Bridge())
 
@@ -260,7 +260,7 @@ def test_friday_does_not_remind_when_complete_unsynced_or_backlogged(agent):
     agent.store.receive(ChatMessage(message_id="q", group_id="222@g.us", sender_id="sender", sent_at=FRIDAY, text="還有資料"))
     assert agent.remind(FRIDAY) == "waiting_for_messages"
     with agent.store.db() as db: db.execute("UPDATE messages SET status='irrelevant'")
-    agent.repository.services["2026-11-08"] = SundayServiceEntry(date="2026-11-08", sermonSpeaker="王明", sermonTitle="題目", hymn="奇異恩典", responseHymn="奇異恩典", scripture=["mat-20-28"])
+    agent.repository.services["2026-11-08"] = SundayServiceEntry(date="2026-11-08", presider="陳牧師", worshipLeader="李芳", sermonSpeaker="王明", sermonTitle="題目", hymn="奇異恩典", responseHymn="奇異恩典", scripture=["mat-20-28"])
     assert agent.remind(FRIDAY) == "complete"
     assert not agent.bridge.sent
 

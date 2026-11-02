@@ -46,7 +46,7 @@ def verify_grounding(agent, msg, request):
 「12月要外出」「1月旅行」「下周要出去」沒有說明完整起訖，不能猜成整月或整周不在。只有明說「整個12月」「下周整周不在」才可按完整月份或星期登記。
 明確日期區間含首尾日；回程日預設仍在外出區間，除非已說當天可服事。只說去程日而未說回程日不能填回程；更正可沿用已連結的原日期，提前回來 remove 僅限明說恢復可安排的範圍。
 相對日期以各消息 source_sent_at（若有）或 sent_at 的 America/Chicago 當地日期解讀，不用今天日期或編輯日期。核對日、月、年與 add/remove 方向，不能在未說明時擴大或縮小日期。
-奉獻必須是明確主日的實際總額。近似數、範圍、其他幣別、個人認獻、預算不等於總額，不可自行加總、換匯或取整。美元、未註幣別的本教會總額及0可登記。
+奉獻是目前準備主日的本週總額：已確認週一至週六的「本週／截至某日」對應接下來主日，例如10/23統計填10/25，當天若為主日則填當天。明確其他主日或補報歷史則尊重明確日期。金額必須是實際總額。近似數、範圍、其他幣別、個人認獻、預算不等於總額，不可自行加總、換匯或取整。美元、未註幣別的本教會總額及0可登記。
 只核對，不產生新安排；若所有提議都得到支持，supported=true 且 questions=[]。"""
     response = get_openai_client().with_options(timeout=45, max_retries=0).chat.completions.create(
         model=os.getenv("SUNDAY_ASSISTANT_MODEL", DEFAULT_OPENAI_GENERATION_MODEL),
