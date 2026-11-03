@@ -573,6 +573,19 @@ def audit_frame_pts(video: Path, manifest: dict) -> dict:
             'time_base':str(base),'max_sample_rounding_delta_ms':maximum,'errors':errors}
 
 
+def leading_padding_match(resolved: dict, clip: dict, prior_start_ms: int, previous_end_ms: int) -> bool:
+    """Detect a start glued to padding and overlapping preceding speech.
+
+    This is a retry signal, never a fabricated/clamped acoustic timestamp.
+    The repeated opening words must be aligned again without the prior tail.
+    """
+    origin_ms = sample_ms(clip['source_origin_sample'])
+    return (resolved.get('start_ms') is not None
+            and 0 <= resolved['start_ms'] - origin_ms <= 80
+            and prior_start_ms - resolved['start_ms'] >= 2500
+            and previous_end_ms - resolved['start_ms'] > 500)
+
+
 def refine_backward_predictions(out: Path, python: Path) -> None:
     """One acoustic retry for backward/late partial timing, retaining originals."""
     master=read(out/'master.json');samples=read_audio(out/'master.wav');previous=None
@@ -590,7 +603,10 @@ def refine_backward_predictions(out: Path, python: Path) -> None:
                     prior_start = w.get('start_ms', 0) + p['start_ms']
                     begin = previous['end_ms'] * 16
                     partial = resolved['invalid_or_foreign_units'] > resolved['acoustic_anchor_count'] / 2
-                    if (partial and resolved['start_ms'] - prior_start > 3000
+                    if (leading_padding_match(resolved, c, prior_start, previous['end_ms'])
+                        and c['source_origin_sample'] < begin < c['source_origin_sample'] + c['sample_count']):
+                        bad.append((p['id'],begin,slides.object_sha(raw),'leading_clip_edge_alignment_in_previous_speech_padding'))
+                    elif (partial and resolved['start_ms'] - prior_start > 3000
                         and c['source_origin_sample'] < begin < c['source_origin_sample'] + c['sample_count']):
                         bad.append((p['id'],begin,slides.object_sha(raw),'late_partial_alignment_in_preceding_speech_padding'))
                         late_retry = True
