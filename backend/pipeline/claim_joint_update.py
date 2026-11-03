@@ -174,7 +174,7 @@ def admission_error(request, policy, before, goal):
                 or list(goal.get('units', {}).values()) != [request.target_keys]):
             raise ValueError('joint Update must bind every target and required maintenance item to one unit')
         from backend.pipeline import claim_management as cm
-        # Required keys must not seed their own reachability proof.
+        # Inspect declared roots, without treating unused grants as new roots.
         from types import SimpleNamespace
         natural = request.model_copy(deep=True, update={'permissions': []})
         reachable = set(cm.audit_keys(natural, before))

@@ -152,7 +152,7 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         transaction_refresh = direction.get('refresh_transaction_context') is True and not unrecorded and not applied
         if (value.get('kind')!='claim_management_round' or checkpoint not in ({'prepared'} if unrecorded else {'prepared','reviewed'}|({'applied'} if applied else set()))
                 or bool(value.get('change_set_ids')) != applied
-                or (value.get('opus_approved') and checkpoint not in {'reviewed','applied'} and not transaction_refresh)
+                or (unrecorded and value.get('opus_approved'))
                 or (checkpoint in {'reviewed','applied'} and not value.get('opus_approved'))
                 or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
                 or sha256_json(value)!=direction.get('prior_metadata_sha256')):

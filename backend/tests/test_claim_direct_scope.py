@@ -625,3 +625,44 @@ def test_question_only_update_never_invents_write_impacts_at_reference_private_e
     assert store.claim_management_qualification('A')['ready']
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['A']
     assert all(store.get_record_state(*cm.source.split_key(k))==v for k,v in before.items())
+
+
+@pytest.mark.parametrize('input_drift',[False,True])
+def test_accepted_review_before_package_plan_recovers_without_repeating_calls(chain,monkeypatch,input_drift):
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,execution,root=chain
+    bind(request,root,proposal=True)
+    def proposal(packet):
+        return {'changes':[{'record_key':'claims/A','fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),
+            'reason':'synthetic source correction','citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}],
+            'findings':[],'finding_resolutions':[]}
+    real_plan=store.plan_package
+    def stop_before_plan(package,**kwargs):
+        if kwargs.get('source_kind')==cm.VERSION:raise ValueError('synthetic package validator defect after accepted Opus')
+        return real_plan(package,**kwargs)
+    monkeypatch.setattr(store,'plan_package',stop_before_plan)
+    ports=SyntheticPorts(store,root,proposal=proposal,opus=yes)
+    first=execute_claim_management(store,request,root=execution,ports=ports)
+    assert first['status']=='paused',first
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
+    saved=store.get_cvp_group(rid);assert saved['checkpoint']=='prepared' and saved['opus_approved']
+    assert set(saved['stage_results'])=={'candidate','opus'} and not saved.get('change_set_ids')
+    slots=deepcopy(parent['call_reservations']);raw=(execution/rid/'opus.raw.json').read_bytes()
+    monkeypatch.setattr(store,'plan_package',real_plan)
+    if input_drift:
+        row=deepcopy(store.get_record_state('claims','A')['payload']);row['statement']='external semantic change'
+        store.apply_plan(store.plan_package({'package_id':'changed-before-accepted-review-recovery','claims':[row]}))
+    direction=root/'accepted-preplan-recovery.json';direction.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'repair exact package-validator checkpoint with original accepted answers',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}})}))
+    if input_drift:
+        with pytest.raises((ValueError,ChangeSetConflict)):recover_returned_review(store,rid,authorization=binding(direction))
+        assert store.get_cvp_group(rid)==saved
+        return
+    recover_returned_review(store,rid,authorization=binding(direction))
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus'] and (execution/rid/'opus.raw.json').read_bytes()==raw
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert store.claim_management_qualification('A')['ready']
