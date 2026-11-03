@@ -22,6 +22,7 @@ from backend.pipeline.source_reconciliation_runner import binding, body, read, w
 from backend.pipeline.cvp_sql_commit import check_binding
 
 MODULE = 'backend.pipeline.claim_management_batch'
+REFILL_POLL_SECONDS = 5
 
 
 def progress(path, value):
@@ -220,6 +221,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
             # footprints are re-read only when a job exits. Re-reading every
             # job on every one-second poll raced the worker's own commit.
             scopes, stale, refill_ready = {}, True, True
+            next_refill = 0.0
             while pending or active or refill:
                 if stale:
                     for key in pending:
@@ -236,6 +238,11 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                                                      opus_api=opus_api and role == 'opus')
                            for role in ('gpt', 'opus') if capacity and (capacity.root / role / 'state.json').exists()}
                 blocked = {role: reason for role, reason in blocked.items() if reason}
+                # The Agent can prepare an independent source after the last
+                # exit callback. Notice it while other workers are still live;
+                # an empty/finished batch retains its prompt return boundary.
+                if refill and active and time.monotonic() >= next_refill:
+                    refill_ready = True
                 if refill and refill_ready and not blocked:
                     room = model_capacity['action_window'] - len(active) - len(pending)
                     if room > 0:
@@ -243,6 +250,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                                             for sid in jobs[key][0].source_bindings}
                         supplied = refill(occupied_sources, room, jobs)
                         refill_ready = False
+                        next_refill = time.monotonic() + REFILL_POLL_SECONDS
                         for bound in supplied:
                             append_manifest(bound, remember=True)
                         if supplied:
