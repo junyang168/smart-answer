@@ -146,7 +146,7 @@ def bridge_config():
     except (ValueError, OSError):
         mail = None  # An email setup failure must not disconnect WhatsApp.
     return {"allow_speaker_followup": bool(config.enabled and mail and mail.get('enabled') and mail.get('saturday_followup', True)),
-            "enabled": config.enabled, "groups": sorted(config.source_group_ids),
+            "enabled": config.enabled, "groups": sorted(config.source_group_ids), "availability_group": config.availability_group,
             "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled,
             "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group,
             "allow_ppt_ready": config.enabled and config.auto_apply and config.auto_generate_ppt}

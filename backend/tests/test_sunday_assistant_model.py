@@ -431,3 +431,25 @@ def test_model_collects_future_pianist_while_preserving_known_absence_interval(a
     assert set(agent.repository.services)=={'2026-12-13'}
     with agent.store.db() as db:
         assert not db.execute("SELECT 1 FROM clarifications WHERE status='waiting'").fetchone()
+
+
+@pytest.mark.parametrize('text,expected,name',[
+    ('這週主日誰不能來？','2026-11-08','王明'),
+    ('下週主日哪些同工請假？','2026-11-15','李芳'),
+    ('11月8日誰不能來','2026-11-08','王明'),
+])
+def test_model_answers_absence_query_with_saved_records_and_no_mutation(agent,text,expected,name):
+    from backend.api.models import SundayWorker
+    agent.repository.workers['王明']=SundayWorker(name='王明',unavailableRanges=[{'startDate':'2026-11-08','endDate':'2026-11-08'}])
+    agent.repository.workers['李芳']=SundayWorker(name='李芳',unavailableRanges=[{'startDate':'2026-11-15','endDate':'2026-11-15'}])
+    settings=agent.store.settings();settings.group_questions_enabled=False;settings.reminders_enabled=False
+    agent.store.put('settings',settings.model_dump())
+    before={k:v.model_dump(mode='json') for k,v in agent.repository.workers.items()}
+    _,result=event(agent,text,group='111@g.us')
+    assert result['status']=='done'
+    assert len(agent.bridge.sent)==1
+    answer=agent.bridge.sent[0][2]
+    assert answer.startswith('【主日請假查詢】') and expected in answer and name in answer
+    assert '不代表已確認會出席' in answer
+    assert {k:v.model_dump(mode='json') for k,v in agent.repository.workers.items()}==before
+    assert not agent.repository.services and not agent.store.proposals()
