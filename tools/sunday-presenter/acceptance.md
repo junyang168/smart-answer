@@ -340,3 +340,12 @@ behind the actual fullscreen output, then verifies that exactly one toggle makes
 it visible and focused, and the next hides it. This passes alongside the complete
 20-switch/key/POST/fullscreen smoke. This is a 0.3.3 correction, not a claim that
 the already-running installed 0.3.2 has been patched in memory.
+
+
+The Mac was subsequently updated to the verified 0.3.3 bundle, preserving a
+0.3.2 backup and user data. Native UI verification reproduced the covered case
+by showing OUTPUT while the controller remained open, then sent one Command-P:
+the focused window became the controller. A second press hid it, and another
+single press restored it. This is installed-app shortcut verification, in
+addition to the isolated Electron regression. It used the locally built verified
+update, not another downloaded-package Gatekeeper first-launch test.
