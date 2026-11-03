@@ -47,6 +47,11 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
   const origin = `http://127.0.0.1:${server.address().port}`;
   setOrigin(origin);
   const savedOutputID = output.id;
+  const audienceFullscreen = () => {
+    if (process.platform !== 'darwin') return output.isFullScreen();
+    const b = output.getBounds(), d = screen.getDisplayMatching(b).bounds;
+    return b.x === d.x && b.y === d.y && b.width === d.width && b.height === d.height;
+  };
   const evidence = path.join(__dirname, '..', 'output', 'smoke');
   fs.mkdirSync(evidence, { recursive: true });
   const wc = page => page.view.webContents;
@@ -94,7 +99,8 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     for (let i = 0; i < 20; i++) {
       const page = i % 2 ? sermon : worship;
       await act('take', { deck: page.deck });
-      await until(() => output.isFullScreen(), 'fullscreen only after verified slide');
+      await until(audienceFullscreen, 'fullscreen only after verified slide');
+      if (process.platform === 'darwin') assert.equal(output.isFullScreen(), false);
       await act('key', { key: 'Right' });
       try {
         await until(async () => await wc(page).executeJavaScript('steps') === Math.floor(i / 2) + 1, 'key delivery');
@@ -216,7 +222,8 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await wc(popup).executeJavaScript('void document.documentElement.requestFullscreen()', true);
     await until(async () => await wc(popup).executeJavaScript('!!document.fullscreenElement'), 'fullscreen entry');
     assert.equal(await wc(popup).executeJavaScript('!!document.fullscreenElement'), true);
-    assert.equal(output.isFullScreen(), true);
+    assert.equal(audienceFullscreen(), true);
+    if (process.platform === 'darwin') assert.equal(output.isFullScreen(), false);
     assert.equal(output.id, savedOutputID);
     await wc(popup).executeJavaScript('document.exitFullscreen()');
     await until(() => !popup.ready, 'fullscreen exit disarms');

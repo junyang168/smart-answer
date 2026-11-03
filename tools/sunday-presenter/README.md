@@ -235,3 +235,16 @@ Dock activation or Command-P restores the full settings window. Closing settings
 leaves presentation and recording running. Return to playback hides settings and
 focuses the active slide. End/failure/navigation still mute and hide OUTPUT;
 ordinary deck switches keep the same capture window. The Dock policy is regular.
+
+
+## 0.3.6 macOS window-sharing compatibility
+
+Native macOS fullscreen moved OUTPUT to a separate Space. On the tested Mac,
+Chrome's Window picker omitted that output while Chrome was on the desktop.
+The app now uses a normal borderless window with exact display bounds instead;
+`enableLargerThanScreen` permits coverage of the menu-bar area. This preserves
+full-display slide sizing without creating a separate native-fullscreen Space.
+Office HTML fullscreen remains inside that same capture window. The smoke
+requires exact display position/size, no native fullscreen on macOS, retained
+keyboard focus and the existing switching/remote/privacy invariants. Real
+Chrome picker and physical receiving-client results are recorded separately.

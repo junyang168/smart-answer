@@ -423,3 +423,37 @@ window became OUTPUT without an extra hide action. The settings window did not
 appear in the saved playback screenshot (`035-playback-without-controls.png`,
 private evidence directory). Both source and installed ASAR matched; deep/strict
 signature, final DMG checksum and Remote ZIP integrity passed.
+
+
+## Window-sharing omission reproduced; compatibility candidate — 0.3.6
+
+The owner reproduced missing OUTPUT in the main laptop's Meet Window picker.
+The PPT itself displayed correctly; Chrome's Screen & System Audio Recording
+permission was enabled and a full Chrome restart did not resolve it. On this Mac,
+the actual Chrome getDisplayMedia Window picker likewise omitted the installed
+0.3.5 native-fullscreen OUTPUT while other app windows were listed. A private
+screenshot records the missing-source list. This observation motivates avoiding
+a separate fullscreen Space; it does not yet prove the cause on every Mac.
+
+A simple-fullscreen candidate again lost slide key delivery on the second deck
+and was rejected. The 0.3.6 candidate instead keeps OUTPUT as one normal borderless
+window, covering the exact display x/y/width/height, with larger-than-screen
+bounds enabled. No native-fullscreen Space is entered on macOS, including during
+Office HTML fullscreen. The same native OUTPUT ID remains across all deck
+changes. No second output, screen-wide capture fallback, cookie transfer or
+security-permission change was introduced.
+
+All 32 Node tests and the complete Electron smoke pass for this candidate,
+including exact display bounds, no native fullscreen, 20 retained-state switches,
+key focus, one capture-window identity, HTML fullscreen, hidden settings and the
+existing remote/audio/popup invariants. Installed source/ASAR, deep/strict
+signature, DMG checksum and Remote ZIP checks pass. The installed candidate opened
+the actual weekly worship slideshow and displayed it with settings hidden.
+
+A second Chrome chooser run could not be completed through computer automation:
+both the local diagnostic and WebRTC's official getDisplayMedia sample returned
+InvalidStateError before displaying the picker. This is not a missing-window
+result and not evidence of successful capture. Version 0.3.6 is a pilot candidate;
+the target laptop's Meet picker and continuous capture across worship/sermon
+switches still require owner verification. Physical two-Mac/audio acceptance is
+unchanged and the PR remains draft.

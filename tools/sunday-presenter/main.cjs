@@ -262,7 +262,7 @@ app.whenReady().then(async () => {
   officeSession.on('will-download', event => event.preventDefault());
   const hostOptions = { width: 1100, height: 660, backgroundColor: '#000000',
     fullscreenable: false, autoHideMenuBar: true };
-  output = new BrowserWindow({ ...hostOptions, frame: false, show: false, fullscreenable: true, title: 'Sunday Presenter — OUTPUT',
+  output = new BrowserWindow({ ...hostOptions, frame: false, show: false, enableLargerThanScreen: true, hasShadow: false, fullscreenable: process.platform !== 'darwin', title: 'Sunday Presenter — OUTPUT',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   await output.loadFile(path.join(__dirname, 'output.html'));
   // Allocate the stable capture surface without showing a blank startup window.
@@ -270,7 +270,12 @@ app.whenReady().then(async () => {
   const display = require('electron').screen.getPrimaryDisplay();
   output.setBounds(display.bounds);
   output.on('show', () => {
-    if (stage && stage.active !== null && !output.isFullScreen()) output.setFullScreen(true);
+    if (stage && stage.active !== null) {
+      // A normal borderless window remains enumerable from Chrome's desktop.
+      // macOS native fullscreen moves the surface to a separate Space.
+      if (process.platform === 'darwin') output.setBounds(require('electron').screen.getDisplayMatching(output.getBounds()).bounds);
+      else if (!output.isFullScreen()) output.setFullScreen(true);
+    }
   });
   preparation = new BaseWindow({ ...hostOptions, frame: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
