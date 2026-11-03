@@ -51,7 +51,21 @@ def sampling_marker(cursor,cid,state):
         FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s
         ORDER BY created_at DESC,review_event_id DESC""",(cid,)).fetchall()
     if not events or any(kind=='human' for _,kind,_,_ in events):return None
-    rev,kind,decision,artifact=events[0];r=(artifact or {}).get('resolution',{})
+    # A qualification handoff records no new content-review decision. It
+    # must not hide the underlying AI marker, but stays in the history seal.
+    def context_receipt(event):
+        rev, kind, decision, artifact = event
+        return (kind == 'system' and decision == 'review_context_revalidated'
+            and isinstance(artifact, dict) and artifact.get('schema_version') in {
+                'wang_claim_review_context_reuse_v1', 'wang_claim_review_context_reuse_v2',
+                'wang_claim_review_context_reuse_v3', 'wang_claim_review_context_reuse_v4'}
+            and all(artifact.get(k) for k in ('original_round_id','peer_round_id','original_approval','peer_approval'))
+            and any(p.get('collection') == 'claims' and p.get('object_id') == cid
+                and p.get('pin') == [state['revision'], state['content_sha256'], False]
+                for p in artifact.get('current_pins', [])))
+    decisions = [event for event in events if not context_receipt(event)]
+    if not decisions:return None
+    rev,kind,decision,artifact=decisions[0];r=(artifact or {}).get('resolution',{})
     if not (rev==state['revision'] and kind=='ai' and decision=='human_review_required'
         and r.get('schema_version')=='wang_legacy_ai_review_reconciliation_v1'
         and r.get('claim_id')==cid and r.get('approval_status')=='not_human_approved'

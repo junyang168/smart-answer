@@ -118,8 +118,13 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
         raise ValueError('Claim has an unresolved objection in the prior review')
     current_states = store.read_claim_context([('claims', claim_id)])
     current = {cm.source.key(*k): cm.model_state(v) for k, v in current_states.items()}
-    if key not in current or current[key]['retired'] or current[key]['payload'].get('review_status') in cm.HELD:
+    if key not in current or current[key]['retired']:
         raise ValueError('review reuse cannot release retired or held content')
+    if current[key]['payload'].get('review_status') in cm.HELD:
+        from backend.pipeline.claim_qualification_reuse import legacy_spot_check_replaced
+        with store.connect() as conn, conn.cursor() as cursor:
+            if not legacy_spot_check_replaced(cursor, claim_id, current[key], value):
+                raise ValueError('review reuse cannot release retired or held content')
     # Capabilities and other target identities from the old task do not seed
     # a new review. Both old and current direct scope are compared exactly.
     own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
@@ -274,8 +279,14 @@ def verify(store, cursor, claim_id, proof):
     assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states,
                    include_write_context=False)
     state = states[('claims', claim_id)]
-    if state['retired_at'] is not None or state['payload'].get('review_status') in cm.HELD:
+    if state['retired_at'] is not None:
         raise ValueError('review reuse cannot release retired or held content')
+    if state['payload'].get('review_status') in cm.HELD:
+        from backend.pipeline.claim_qualification_reuse import legacy_spot_check_replaced
+        reviewed = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                                  (proof['review_run_id'],)).fetchone()[0]
+        if not legacy_spot_check_replaced(cursor, claim_id, state, reviewed):
+            raise ValueError('review reuse cannot release retired or held content')
     return {'ready': True, 'run_id': proof['review_run_id'], 'revision': state['revision'],
             'content_sha256': state['content_sha256'], 'audit': proof['readback'],
             'validation_kind': 'reused_complete_review_and_current_program_check',

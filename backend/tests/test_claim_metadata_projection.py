@@ -303,3 +303,52 @@ def test_sampling_retirement_keeps_history_and_never_retires_a_human_hold(claims
     _,sources=cm.load_authority(request)
     _,writes=cm.validate_candidate(request,before,candidate,sources,metadata_projection=projection)
     assert writes['claims/C']['action']=='retire' and writes['claims/C']['payload']==before['claims/C']['payload']
+
+
+@pytest.mark.parametrize('later_human',[False,True])
+def test_full_review_reuse_recognizes_same_old_ai_spot_check_and_rechecks_human_history(claims,later_human):
+    from backend.pipeline import claim_review_reuse
+    store,root=claims
+    before=seed_marker(store,None)
+    prepared=intake.prepare(['C'],root,instruction='Full unchanged-source Claim review',store=store)
+    request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+    ports=SyntheticPorts(store,execution,opus=pass_review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert store.get_record_state('claims','C')==before
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    rid=next(iter(parent['latest_rounds'].values()))
+    proof=claim_review_reuse.admit(store,'C',rid)
+    assert store.claim_management_qualification('C')['ready']
+    assert ports.calls==['opus']
+    if later_human:
+        with store.connect() as conn:
+            conn.execute("INSERT INTO wang_knowledge.review_events (review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,decision,reason,artifact) VALUES ('HUMAN-LATER-REUSE','claims','C',%s,'human','owner','human_review_required','human source hold','{}'::jsonb)",(before['revision'],))
+        with pytest.raises(ValueError,match='held content'):
+            with store.connect() as conn,conn.cursor() as cursor:
+                claim_review_reuse.verify(store,cursor,'C',proof)
+        with pytest.raises(ValueError,match='held content'):
+            claim_review_reuse.build(store,'C',rid)
+    assert store.get_record_state('claims','C')==before
+
+
+@pytest.mark.parametrize('event_kind',['context','human','ai_rejection','other_system','wrong_pin','wrong_contract'])
+def test_only_mechanical_context_events_leave_ai_sampling_decision_in_effect(claims,event_kind):
+    from backend.pipeline.claim_metadata_projection import sampling_marker
+    store,_=claims;state=seed_marker(store,None)
+    with store.connect() as conn,conn.cursor() as cursor:
+        original=sampling_marker(cursor,'C',state)
+    artifact={'schema_version':'wang_claim_review_context_reuse_v4','original_round_id':'old','peer_round_id':'peer',
+        'original_approval':{'path':'old'},'peer_approval':{'path':'peer'},
+        'current_pins':[{'collection':'claims','object_id':'C','pin':[state['revision'],state['content_sha256'],False]}]}
+    if event_kind=='wrong_pin':artifact['current_pins'][0]['pin'][1]='0'*64
+    if event_kind=='wrong_contract':artifact['schema_version']='unrecognized'
+    kind='human' if event_kind=='human' else 'ai' if event_kind=='ai_rejection' else 'system'
+    decision='rejected' if event_kind=='ai_rejection' else 'human_review_required' if event_kind in {'human','other_system'} else 'review_context_revalidated'
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.review_events (review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,decision,reason,artifact) VALUES ('LATER-MARKER-EVENT','claims','C',%s,%s,'fixture',%s,'new history',%s::jsonb)",(state['revision'],kind,decision,json.dumps(artifact)))
+    with store.connect() as conn,conn.cursor() as cursor:
+        current=sampling_marker(cursor,'C',state)
+    assert bool(current)==(event_kind=='context')
+    if current:assert current['events_sha256']!=original['events_sha256']
+    assert store.get_record_state('claims','C')==state

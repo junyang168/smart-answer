@@ -237,8 +237,17 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
         # own support must not discover owners-of-owners or Claim neighbours.
         frontier = scope(request, before, include_write_context=include_write_context,
                          include_owner_context=False)['record_keys']
-        owners = {named('claims', cid) for k in frontier if k.startswith('evidence_steps/')
-            for cid in old[k].get('produced_claim_ids', [])} - set(frontier)
+        authority = json.loads(cm.source.verify_file(request.authorization).read_text())
+        fixed = authority.get('evidence_owner_context_keys')
+        if fixed is not None:
+            if not isinstance(fixed, list) or len(fixed) != len(set(fixed)) or any(
+                    not isinstance(k, str) or not k.startswith('claims/') for k in fixed):
+                raise ValueError('owner context requires exact frozen Claim keys')
+            owners = {named(*k.split('/', 1)) for k in fixed}
+        else:
+            # Compatibility for the first frozen packets of this opt-in.
+            owners = {named('claims', cid) for k in frontier if k.startswith('evidence_steps/')
+                for cid in old[k].get('produced_claim_ids', [])} - set(frontier)
         owners = {k for k in owners
             if (own := cm.own_source_ids(old[k], old)) and own <= set(request.source_bindings)}
         context.update(evidence_chain(owners, old))

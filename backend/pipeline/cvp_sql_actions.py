@@ -460,7 +460,12 @@ def validate_claim_stage_receipt(receipt):
                 or report['validation_kind'] != 'opus_and_program_readback'):
             raise ValueError('program readback identity drift')
         states = report['actual_records']
-        denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
+        unit = cm.Request.model_validate(materials['unit_request'])
+        from backend.pipeline.claim_direct_scope import owner_context_enabled
+        # Consume the exact approved frame, not another owner-discovery pass
+        # over postimages. SQL independently verifies its rows and adjacency.
+        basis = materials['before'] if owner_context_enabled(unit) else states
+        denominator = cm.audit_keys(unit, basis, candidate)
         if set(states) != set(denominator) or pin_rows(pins({content.split_key(k):v for k,v in states.items()})) != report['read_pins']:
             raise ValueError('program readback omitted or changed its current scope')
         if passed and not cm.is_source_impact(materials['request']):
@@ -760,8 +765,11 @@ def execute_claim_management(store, request, *, root, ports):
                         roots.update(content.split_key(r.key) for r in candidate.records)
                         actual = read_context(sorted(roots))
                         states = {content.key(*k): v for k, v in actual.items()}
-                        denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
-                        cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate,
+                        unit = cm.Request.model_validate(materials['unit_request'])
+                        from backend.pipeline.claim_direct_scope import owner_context_enabled
+                        basis = materials['before'] if owner_context_enabled(unit) else states
+                        denominator = cm.audit_keys(unit, basis, candidate)
+                        cm.require_full_sources(unit, states, candidate,
                                                 qualification=not cm.is_source_impact(request))
                         if not policy.independent_audit_required:
                             write(round_root / 'readback.json', {'round_id':rid, 'candidate_sha256':candidate.digest,

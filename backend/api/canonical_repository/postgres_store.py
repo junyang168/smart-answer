@@ -3819,6 +3819,11 @@ class PostgresKnowledgeStore:
                                 'content_sha256':op['after_sha256'], 'retired':op['operation']=='retire'}
                         if any(k not in expected or v != expected[k] for k,v in actual.items()):
                             raise ChangeSetConflict('program readback differs from approved SQL postimages')
+                        from backend.pipeline.claim_direct_scope import owner_context_enabled, assert_current
+                        unit = cm.Request.model_validate(materials['unit_request'])
+                        if owner_context_enabled(unit):
+                            assert_current(self, cursor, unit, observed, include_write_context=False,
+                                actual_write_keys=[d.record_key for d in candidate.dispositions if d.action != 'retain'])
                         value['program_readback_complete'] = bool(passed)
                         value['validation_kind'] = 'opus_and_program_readback'
                     value['audited_pins'] = report['read_pins']

@@ -481,7 +481,7 @@ def test_declared_owner_is_resolvable_readonly_context_without_a_claim_frontier(
         'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis','evidence_step_ids':['ED'],
             'occurrences':[{'source_id':'S','anchors':[]}]}], 'claim_relations':[relation('CD','C','D')]}))
     request.permissions=[p for p in request.permissions if p.key in {'claims/A','claim_relations/AB'}]
-    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':enabled})
+    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':enabled,'evidence_owner_context_keys':['claims/C']})
     before={cm.source.key(*k):cm.model_state(v) for k,v in store.read_claim_context([('claims','A')]).items()}
     selected=direct.scope(request,before)
     assert ('claims/C' in selected['record_keys'])==enabled
@@ -504,7 +504,8 @@ def test_declared_owner_is_resolvable_readonly_context_without_a_claim_frontier(
 
 
 @pytest.mark.parametrize('write_reference',[False,True])
-def test_provided_owner_can_receive_relation_without_write_or_new_qualification(chain,write_reference):
+@pytest.mark.parametrize('private_owner',[False,True])
+def test_provided_owner_can_receive_relation_without_write_or_new_qualification(chain,write_reference,private_owner):
     from backend.pipeline.claim_review_units import CONTRACT
     from backend.tests.test_claim_management_intake import pass_review
     store,request,execution,root=chain
@@ -514,11 +515,18 @@ def test_provided_owner_can_receive_relation_without_write_or_new_qualification(
         'evidence_steps':[dict(ea,produced_claim_ids=['A','C'],source_fragment_ids=['FA'],speaker='professor',
             stance='asserted',support_eligibility='eligible_candidate')],
         'claims':[dict(cl,evidence_step_ids=['EA','EC'])]}))
+    if private_owner:
+        ec=store.get_record_state('evidence_steps','EC')['payload']
+        store.apply_plan(store.plan_package({'package_id':'private-readonly-owner-is-not-a-second-frontier',
+            'evidence_steps':[dict(ec,produced_claim_ids=['C','D']),{'evidence_step_id':'ED',
+                'statement':'甲是假设。','source_fragment_ids':['FA'],'produced_claim_ids':['D']}],
+            'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis',
+                'evidence_step_ids':['ED'],'occurrences':[{'source_id':'S','anchors':[]}]}]}))
     p=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text());p.review_unit_contract=CONTRACT;p.joint_update_max_targets=10;p.initial_candidate='proposal'
     pf=root/'provided-carrier-policy.json';pf.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pf))
     request.permissions=[cm.source.Permission(collection='claims',object_id='A',fields=['statement']),
         cm.source.Permission(collection='claim_relations',object_id='AB',fields=['target_id','reason'])]
-    authorize(request,{'required_maintenance_keys':[],'include_existing_evidence_owners':True,'include_evidence_owner_context':True})
+    authorize(request,{'required_maintenance_keys':[],'include_existing_evidence_owners':True,'include_evidence_owner_context':True,'evidence_owner_context_keys':['claims/C']})
     initial=store.get_record_state('claims','C');ec=store.get_record_state('evidence_steps','EC')
     cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
     def propose(packet):

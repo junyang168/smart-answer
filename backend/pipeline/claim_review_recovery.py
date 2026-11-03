@@ -182,7 +182,7 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             if (sha256_json(reviewed)!=value['reviewed_sha256']
                     or value['materials']['request']['operation']!='Update'
                     or value['change_set_ids']!=[plan['change_set_id']]
-                    or any(op['operation']!='update' for op in plan['operations'])):
+                    or any(op['operation'] not in {'update','create'} for op in plan['operations'])):
                 raise ValueError('applied recovery requires the unchanged ordinary Update plan')
             committed=cursor.execute('SELECT status,fingerprint_sha256 FROM wang_knowledge.change_sets WHERE change_set_id=%s',
                 (plan['change_set_id'],)).fetchone()
@@ -191,14 +191,24 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             expected=deepcopy(value['materials']['before'])
             for op in plan['operations']:
                 key=cm.source.key(op['collection'],op['object_id'])
-                if key not in expected:raise ValueError('applied write was outside reviewed model scope')
+                if (key not in expected) != (op['operation'] == 'create'):
+                    raise ValueError('applied write was outside reviewed model scope')
+                if op['operation'] == 'create' and not any(
+                        d['record_key'] == key and d['action'] == 'create' for d in value['candidate']['dispositions']):
+                    raise ValueError('applied creation lacks its exact reviewed identity')
                 payload={**op['payload'],'revision':op['after_revision']}
                 expected[key]={'payload':payload,'revision':op['after_revision'],
                     'content_sha256':op['after_sha256'],'retired':False}
             unit=cm.Request.model_validate(value['materials']['unit_request'])
             candidate=cm.Candidate.model_validate(value['candidate'])
-            if not set(cm.audit_keys(unit,expected,candidate))<=set(expected):
+            from backend.pipeline.claim_direct_scope import owner_context_enabled, assert_current
+            basis = value['materials']['before'] if owner_context_enabled(unit) else expected
+            if not set(cm.audit_keys(unit,basis,candidate))<=set(expected):
                 raise ValueError('applied recovery would introduce unreviewed content')
+            if owner_context_enabled(unit):
+                assert_current(store,cursor,unit,{cm.source.split_key(k):v for k,v in expected.items()},
+                    include_write_context=False,
+                    actual_write_keys=[d.record_key for d in candidate.dispositions if d.action != 'retain'])
             store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in expected.items()}))
             if 'human_source_decisions' in value['materials']:
                 from backend.pipeline.claim_human_source import assert_current

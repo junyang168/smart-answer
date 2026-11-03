@@ -27,7 +27,8 @@ def policy_file(root):
     return path
 
 
-def test_unit_can_reserve_and_commit_two_claims_without_extra_model_rounds(claims):
+@pytest.mark.parametrize('recovery_fault',[None,'readback','created_drift','new_relation'])
+def test_unit_can_reserve_and_commit_two_claims_without_extra_model_rounds(claims,monkeypatch,recovery_fault):
     from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
     store,root=claims
     policy=policy_file(root.parent)
@@ -63,8 +64,57 @@ def test_unit_can_reserve_and_commit_two_claims_without_extra_model_rounds(claim
                 'reason':'both created','citations':[citation],'affected_target_keys':['claims/C'],
                 'affected_write_keys':['evidence_steps/EC'],'impact_reason':'both claims bind existing evidence'} for fid in packet['unresolved']]}
     ports=SyntheticPorts(store,execution,proposal=propose,opus=review)
+    if recovery_fault:
+        from copy import deepcopy
+        from pathlib import Path
+        from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+        from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+        record=store.record_claim_management_stage
+        def interrupted(rid,receipt):
+            if json.loads(Path(receipt['path']).read_text())['stage']=='readback':
+                if recovery_fault=='new_relation':
+                    store.apply_plan(store.plan_package({'package_id':'late-unreviewed-neighbour',
+                        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis',
+                            'occurrences':[{'source_id':'S','anchors':[]}]}],
+                        'claim_relations':[{'claim_relation_id':'LATE','from_id':'C','to_id':'D','relation_type':'supports'}]}))
+                    return record(rid,receipt)
+                raise ValueError('synthetic committed-creation readback stop')
+            return record(rid,receipt)
+        monkeypatch.setattr(store,'record_claim_management_stage',interrupted)
+        stopped=execute_claim_management(store,request,root=execution,ports=ports)
+        assert stopped['status']=='paused',stopped
+        parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+        rid=next(iter(parent['latest_rounds'].values()));saved=store.get_cvp_group(rid)
+        assert saved['checkpoint']=='applied'
+        if recovery_fault=='new_relation':
+            assert 'omitted a current neighbour' in stopped['detail'],stopped
+            assert ports.calls==['opus','gpt','opus']
+            return
+        ledger=deepcopy(parent['call_reservations']);changes=list(saved['change_set_ids'])
+        original_raw=(execution/rid/'opus.raw.json').read_bytes()
+        if recovery_fault=='created_drift':
+            row=deepcopy(store.get_record_state('claims',ids[0])['payload']);row['statement']='external changed teaching'
+            store.apply_plan(store.plan_package({'package_id':'created-postimage-drift','claims':[row]}))
+        direction=root/'creation-readback-recovery.json'
+        direction.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,'authorized_by':'owner',
+            'authorization_quote':'synthetic exact creation readback recovery','human_content_approval':False,
+            'prior_metadata_sha256':cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}}),
+            'resume_applied_readback':True}))
+        if recovery_fault=='created_drift':
+            with pytest.raises((ValueError,ChangeSetConflict)):
+                recover_returned_review(store,rid,authorization=binding(direction))
+            assert store.get_cvp_group(rid)==saved
+            return
+        recover_returned_review(store,rid,authorization=binding(direction))
+        monkeypatch.setattr(store,'record_claim_management_stage',record)
+        def no_apply(*args,**kwargs):raise AssertionError('committed creations must never be applied twice')
+        monkeypatch.setattr(store,'apply_plan',no_apply)
     assert execute_claim_management(store,request,root=execution,ports=ports)['status']=='completed'
     assert ports.calls==['opus','gpt','opus']
+    if recovery_fault:
+        assert store.get_cvp_group(parent['run_id'])['call_reservations']==ledger
+        assert store.get_cvp_group(rid)['change_set_ids']==changes
+        assert (execution/rid/'opus.raw.json').read_bytes()==original_raw
     assert store.get_record_state('evidence_steps','EC')['payload']['produced_claim_ids']==['C',*ids]
     assert all(store.claim_management_qualification(cid)['ready'] for cid in ids)
     assert claim_review_units.prepare(['C'],root,instruction='Review C and its two unrecorded source judgments',

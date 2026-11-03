@@ -169,10 +169,17 @@ def reused_assessments(materials, candidate):
         if key not in request.target_keys or key in retired or not assessment.sufficient:
             continue
         own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
-        original_own = cm.Request.model_validate(old['unit_request']).model_copy(
-            deep=True, update={'target_keys': [key], 'permissions': []})
-        left = set(scope(original_own, old['before'], include_write_context=False)['record_keys'])
-        right = set(scope(own, current, include_write_context=False)['record_keys'])
+        from backend.pipeline.claim_direct_scope import owner_context_enabled
+        if owner_context_enabled(request):
+            original_own = cm.Request.model_validate(old['unit_request']).model_copy(
+                deep=True, update={'target_keys': [key], 'permissions': []})
+            left = set(scope(original_own, old['before'], include_write_context=False)['record_keys'])
+            right = set(scope(own, current, include_write_context=False)['record_keys'])
+        else:
+            # Frozen older wires declared their fresh assessment set using
+            # this exact projection; never reinterpret a saved approval.
+            left = set(scope(own, old['before'])['record_keys'])
+            right = set(scope(own, current)['record_keys'])
         if left != right or not left <= approved:
             continue
         if any(f['target_key'] in left or key in (f.get('affected_target_keys') or []) for f in issues):
