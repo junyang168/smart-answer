@@ -45,6 +45,10 @@ export default (phase, { defaultConfig }) => {
           destination: '/api/admin/sunday-assistant/:path*',
         },
         {
+          source: '/api/admin/sunday-presenter/:path*',
+          destination: '/api/admin/sunday-presenter/:path*',
+        },
+        {
           source: '/api/fellowship-documents/:path*',
           destination: '/api/fellowship-documents/:path*',
         },
