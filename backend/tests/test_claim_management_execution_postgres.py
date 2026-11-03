@@ -842,6 +842,17 @@ def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(act
     assert after['engineering_review_recoveries'][0]['original_round']=={k:v for k,v in before.items() if k not in {'run_id','status','error'}}
     assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
     assert recover_returned_review(store,rid,authorization=binding(direction))==path
+    # A later transaction-only recovery sees relocated stage receipts, while
+    # the original completed call slots must retain their original bindings.
+    again=tmp_path/'returned-review-recovery-again.json'
+    again.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'recover the same saved review again without repeating calls',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json(
+            {k:v for k,v in after.items() if k not in {'run_id','status','error'}})}))
+    second=recover_returned_review(store,rid,authorization=binding(again))
+    assert second!=path
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert ports.calls==['opus']
     result=execute_claim_management(store,request,root=root,ports=ports)
     assert result['status']=='completed',result
     assert ports.calls==['opus']

@@ -285,6 +285,38 @@ def consumed_subscription_refusal(previous, key, slot):
             **{n: binding(transport / n) for n in (*names, 'invocation.json', 'exit.json')}}
 
 
+def _completed_stage_matches(slot, receipt_binding, round_id, stage):
+    """Recovery relocates receipts, never the original completed call ledger.
+
+    The uncommon relocated case authenticates both receipts and their exact
+    packet, candidate, raw and reservation. A path alone is not a new call.
+    """
+    if slot.get('state') != 'completed':
+        return False
+    recorded = slot.get('result')
+    if recorded == receipt_binding:
+        return True
+    if not recorded:
+        return False
+    for bound in (recorded, receipt_binding):
+        check_binding(bound)
+    old, current = (body(read(Path(bound['path']))) for bound in (recorded, receipt_binding))
+    if any(r.get('round_id') != round_id or r.get('stage') != stage for r in (old, current)):
+        return False
+    for r in (old, current):
+        check_binding(r['materials']); check_binding(r['candidate'])
+    if (old['candidate']['file_sha256'] != current['candidate']['file_sha256']
+            or cm.model_packet(body(read(Path(old['materials']['path'])))) != cm.model_packet(body(read(Path(current['materials']['path']))))):
+        return False
+    role = 'gpt' if stage == 'candidate' else 'opus'
+    old_root, current_root = (Path(r['candidate']['path']).parent for r in (old, current))
+    for suffix in ('.raw.json', '.reservation.json'):
+        if (old_root / (role+suffix)).read_bytes() != (current_root / (role+suffix)).read_bytes():
+            return False
+    intent = body(read(old_root / (role+'.reservation.json')))
+    return intent == slot.get('intent') and sha256_json(intent) == slot.get('intent_sha256')
+
+
 def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
     check_binding(authorization)
     direction=json.loads(Path(authorization['path']).read_text())
@@ -320,7 +352,8 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             if unrecorded and role=='opus':
                 if slot.get('state')!='started':raise ValueError('unrecorded recovery requires the original returned Opus call')
                 continue
-            if role not in {'gpt','opus'} or slot.get('state')!='completed' or slot.get('result')!=value['stage_results']['candidate' if role=='gpt' else 'opus']:
+            stage = 'candidate' if role == 'gpt' else 'opus'
+            if role not in {'gpt','opus'} or not _completed_stage_matches(slot, value['stage_results'][stage], round_id, stage):
                 raise ValueError('review recovery cannot repeat an unknown or unrecorded call')
         transaction_context = None
         if applied:
