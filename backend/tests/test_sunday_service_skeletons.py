@@ -104,9 +104,13 @@ def test_report_generation_stops_when_next_two_required_skeletons_are_incomplete
     from fastapi import HTTPException
     monkeypatch.setattr(service,'repository',agent.repository)
     monkeypatch.setattr(service,'get_sunday_service',lambda _:SundayServiceEntry(date='2026-11-01'))
-    with pytest.raises(HTTPException,match='未來兩週骨架') as error:
+    with pytest.raises(HTTPException,match='未來兩個主日') as error:
         service.generate_sunday_service_ppt('2026-11-01')
     assert error.value.status_code==400
+    assert '2026-11-01 的主日 PPT 尚未生成' in error.value.detail
+    assert '沒有下載檔案' in error.value.detail
+    assert '2026-11-08' in error.value.detail and '2026-11-15' in error.value.detail
+    assert '講員' in error.value.detail and '補齊後' in error.value.detail
     assert set(agent.repository.services)=={'2026-11-08','2026-11-15'}
 
 

@@ -1825,7 +1825,13 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
         skeletons = maintain_skeletons(repository, Store(Path(os.environ['DATA_BASE_DIR']) / 'sunday-assistant'), report_date.date())
         incomplete = [f"{row['date']}：{'、'.join(row['missing'])}" for row in skeletons if not row['complete']]
         if incomplete:
-            raise HTTPException(status_code=400, detail="未來兩週骨架尚未齊全（講員、司會、領詩）：" + "；".join(incomplete))
+            future_dates = "、".join(row["date"] for row in skeletons)
+            raise HTTPException(status_code=400, detail=(
+                f"{service.date} 的主日 PPT 尚未生成，因此沒有下載檔案。\n"
+                f"此 PPT 包含未來兩個主日（{future_dates}）的安排，目前尚缺：\n"
+                + "\n".join("• " + item for item in incomplete)
+                + "\n請補齊後重新按「生成 PPT」。"
+            ))
     songs = {song.title: song for song in repository.list_sunday_songs()}
 
     hymn = songs.get(service.hymn or "") if service.hymn else None
