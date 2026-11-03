@@ -9,6 +9,7 @@ import { BookOpenText, FileText, Inbox, Share2, Wrench } from "lucide-react";
 // older pages until their phase moves them.
 const sections = [
   { href: "/admin/wang", label: "待处理", icon: Inbox, match: [] as string[], exact: true },
+  { href: "/admin/wang/claim-refresh", label: "Claim 維護", icon: Wrench, match: ["/admin/wang/claim-refresh"] },
   { href: "/admin/wang/operations/articles", label: "文章", icon: FileText, match: ["/admin/wang/operations/articles", "/admin/wang/matthew-progress"] },
   { href: "/admin/wang/viewpoints", label: "观点图", icon: Share2, match: ["/admin/wang/viewpoints", "/admin/wang/viewpoint-structures", "/admin/wang/viewpoint-exceptions"] },
   { href: "/admin/wang/sermons", label: "讲道", icon: BookOpenText, match: ["/admin/wang/sermons"] },

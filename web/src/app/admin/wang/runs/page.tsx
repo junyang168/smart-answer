@@ -6,6 +6,7 @@ import { operationStageSummary } from "../operations-copy";
 // Engineering's pages, off the colleagues' menu (#453): the sermon pipeline
 // table that used to be the home page, and the pages it summarises.
 const areas = [
+  { href: "/admin/wang/claim-refresh", title: "Claim 維護進度", description: "整批進度、各篇狀態、人工待辦與 Agent 接續事項", icon: Cog },
   { href: "/admin/wang/runs/management", title: "管理运行", description: "Claim 与 CVP 管理、人工来源决定、审稿校准", icon: Cog },
   { href: "/admin/wang/health", title: "健康度", description: "整个语料的抽取质量分布，有没有该管的事", icon: HeartPulse },
   { href: "/admin/wang/library-audit", title: "独立审计", description: "文库各层的独立审计与要处理的后续", icon: ShieldCheck },
