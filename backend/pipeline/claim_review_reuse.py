@@ -359,9 +359,6 @@ def verify_context_reviews(store, cursor, proof):
             if any(saved_pins.get(k) != pin for k,pin in fresh.items()):
                 raise ValueError('context peer pins do not match its saved readback')
             writes = {d.record_key for d in candidate.dispositions if d.action != 'retain'}
-            if 'human_source_decisions' in peer['materials']:
-                from backend.pipeline.claim_human_source import assert_current as assert_human_current
-                assert_human_current(cursor, request.source_bindings, peer['materials']['human_source_decisions'])
             peers[rid] = (peer, readback, review, fresh, writes, outstanding,
                           scope(request, peer['materials']['before'], candidate), saved_records, request, row[1])
         peer, readback, review, fresh, writes, outstanding, selected, saved_records, request, started = peers[rid]
@@ -401,6 +398,14 @@ def verify_context_reviews(store, cursor, proof):
         if not {cm.source.split_key(k) for k in wanted} <= set(fresh):
             raise ValueError('context peer omitted the complete relevant Claim basis')
         relevant = {cm.source.split_key(k):fresh[cm.source.split_key(k)] for k in wanted}
+        if 'human_source_decisions' in peer['materials']:
+            # The outer proof already binds the complete current decision
+            # snapshot. Reconcile the peer against this delta's complete
+            # relevant Claim/evidence basis, just as for the original review;
+            # an unrelated paragraph is not a reason to repeat its audit.
+            human_evidence_snapshot(cursor, request.source_bindings,
+                peer['materials']['human_source_decisions'],
+                {cm.source.key(*k):saved_records[cm.source.key(*k)] for k in relevant})
         # Different records can be certified by different completed peers.
         # Consume only this delta's own basis, while retaining exact current
         # pins for another delta independently checked in this flat proof.

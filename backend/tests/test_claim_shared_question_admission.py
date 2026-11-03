@@ -112,3 +112,24 @@ def test_quoteless_borrowed_evidence_report_resumes_as_unaccepted_input(claims):
     assert (Path(job['root'])/rid/'opus.raw.json').read_bytes()==raw
     assert ports.calls==['opus']
     assert store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))['result']['reason']=='revision_required'
+
+
+@pytest.mark.parametrize('connected,fields,allowed',[(True,['produced_claim_ids'],True),(False,['produced_claim_ids'],False),(True,['statement'],False)])
+def test_only_direct_neighbour_evidence_owner_links_can_be_added(claims,connected,fields,allowed):
+    store,root=claims
+    if connected:
+        store.apply_plan(store.plan_package({'package_id':'neighbour','claim_relations':[
+            {'claim_relation_id':'CD','from_id':'C','to_id':'D','relation_type':'supports'}]}))
+    policy=cm.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v1.json'
+    p=intake.prepare(['C'],root,instruction='Review C',policy=policy,store=store,groups=[['C']])
+    job=json.loads(open(p['manifest']['path']).read())['jobs'][0]
+    request=cm.Request.model_validate_json(open(job['request']['path']).read())
+    request.permissions.append(cm.source.Permission(collection='evidence_steps',object_id='ED',fields=fields))
+    auth=json.loads(open(request.authorization.path).read())
+    extras={k:v for k,v in auth.items()if k not in {'schema_version','authorized_by','authorization_quote','human_content_approval','request','policy'}}
+    authorize(request,extras)
+    before={cm.source.key(*k):cm.model_state(v)for k,v in store.read_claim_context(joint.context_roots(request)).items()}
+    result=joint.admission_error(request,cm.Policy.model_validate_json(open(request.policy.path).read()),before,cm.original_goal(request,before))
+    assert (result is None)==allowed
+    from backend.pipeline.claim_direct_scope import scope
+    assert scope(request,before)['content_claim_keys']==['claims/C']

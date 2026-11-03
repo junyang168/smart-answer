@@ -40,8 +40,13 @@ def update_neighbour(store, root, *, objection=False, bounded=True, refs='馬太
     if shared or question:
         from backend.tests.test_claim_management_human_source_follow_up import authorize
         authority=json.loads(cm.source.verify_file(request.authorization).read_text())
-        request.permissions.append(cm.source.Permission(collection='questions' if question else 'evidence_steps',
-            object_id='Q' if question else 'ED',fields=['answer_claim_ids'] if question else ['produced_claim_ids']))
+        permission=cm.source.Permission(collection='questions' if question else 'evidence_steps',
+            object_id='Q' if question else 'ED',fields=['answer_claim_ids'] if question else ['produced_claim_ids'])
+        existing=next((p for p in request.permissions if p.key==permission.key),None)
+        if existing is None:
+            request.permissions.append(permission)
+        else:
+            assert set(permission.fields)<=set(existing.fields)
         authorize(request,{k:v for k,v in authority.items() if k not in {'request','policy'}})
     def propose(packet):
         changes=[{'record_key':'claims/C',
@@ -336,7 +341,12 @@ def run_scoped_peer(store, root, targets, proposal, *, review=pass_review, permi
     if permissions:
         from backend.tests.test_claim_management_human_source_follow_up import authorize
         authority=json.loads(cm.source.verify_file(request.authorization).read_text())
-        request.permissions.extend(permissions)
+        for permission in permissions:
+            existing=next((p for p in request.permissions if p.key==permission.key),None)
+            if existing is None:
+                request.permissions.append(permission)
+            else:
+                assert set(permission.fields)<=set(existing.fields)
         authorize(request,{k:v for k,v in authority.items() if k not in {'request','policy'}})
     ports=SyntheticPorts(store,execution,proposal=proposal,opus=review)
     result=execute_claim_management(store,request,root=execution,ports=ports)
@@ -460,3 +470,22 @@ def test_an_unreviewed_retirement_cannot_reuse_an_unrelated_peer_pass(claims):
         conn.execute("UPDATE wang_knowledge.objects SET retired_at=now(),revision=revision+1 WHERE collection='claim_relations' AND object_id='R'")
     with pytest.raises((ValueError,ChangeSetConflict)):
         reuse.admit(store,'D',old,peer_run_id=peer)
+
+
+@pytest.mark.parametrize('paragraph,allowed',[('S0002',True),('S0001',False)])
+def test_peer_handoff_scopes_later_human_confirmation_to_relevant_basis(claims,monkeypatch,paragraph,allowed):
+    from backend.pipeline import claim_human_source as human
+    store,root=claims
+    old=original_pass(store,root)
+    peer,ports=update_neighbour(store,root)
+    calls=list(ports.calls)
+    decision={'decision_id':'new','source_id':'S','paragraph_sha256':{paragraph:'a'*64}}
+    monkeypatch.setattr(human,'snapshot',lambda cursor,sources:[decision])
+    if allowed:
+        proof=reuse.admit(store,'D',old,peer_run_id=peer)
+        assert proof['human_source_decisions']==[decision]
+        assert proof['context_reviews']
+    else:
+        with pytest.raises(ValueError,match='human source evidence changed'):
+            reuse.admit(store,'D',old,peer_run_id=peer)
+    assert ports.calls==calls

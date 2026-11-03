@@ -188,12 +188,20 @@ def admission_error(request, policy, before, goal):
         # Creation must be able to attach its answer to a Question already
         # read as a shared-use consumer. This link-only grant does not make
         # the Question, its old answers or their neighbours review roots.
-        from backend.pipeline.claim_direct_scope import owner_context_enabled
-        if request.creation_permissions and creates(policy) and owner_context_enabled(request):
+        from backend.pipeline.claim_direct_scope import owner_context_enabled, scope as direct_scope
+        if owner_context_enabled(request):
             read = set(cm.audit_keys(request, before))
             payloads = {k: v['payload'] for k, v in before.items()}
-            reachable.update(p.key for p in request.permissions
-                if p.collection == 'questions' and set(p.fields) == {'answer_claim_ids'}
+            neighbours = set(direct_scope(natural, before)['neighbour_claim_keys'])
+            neighbour_ids = {k.split('/', 1)[1] for k in neighbours}
+            linkable = {p.key for p in request.permissions
+                if p.collection == 'questions' and set(p.fields) == {'answer_claim_ids'}}
+            linkable.update(p.key for p in request.permissions
+                if p.collection == 'evidence_steps' and set(p.fields) == {'produced_claim_ids'}
+                and p.key in payloads and (
+                    set(payloads[p.key].get('produced_claim_ids', [])) & neighbour_ids
+                    or any(p.object_id in payloads[k].get('evidence_step_ids', []) for k in neighbours)))
+            reachable.update(p.key for p in request.permissions if p.key in linkable
                 and p.key in read and p.key in before and not before[p.key]['retired']
                 and cm.own_source_ids(payloads[p.key], payloads) == set(request.source_bindings))
         permissions = {p.key for p in request.permissions}
