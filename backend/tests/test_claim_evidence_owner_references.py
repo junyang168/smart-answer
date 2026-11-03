@@ -34,6 +34,10 @@ def test_declared_owner_is_duplicate_context_only_and_has_no_new_review_or_write
                              store=store, policy=path)
     request, output = next(iter(batch.load(prepared['prepared_update']['manifest']['path'], root / 'batch', store=store)[1].values()))
     direction = json.loads(Path(request.authorization.path).read_text())
+    # This case freezes the earlier separate owner-reference table. New
+    # intakes opt into the resolvable owner context, covered in direct_scope.
+    direction.pop('include_evidence_owner_context', None)
+    direction.pop('evidence_owner_context_keys', None)
     if enabled:
         direction['include_existing_evidence_owners'] = True
     else:

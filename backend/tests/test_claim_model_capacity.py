@@ -252,7 +252,9 @@ with ClaimModelCapacity(json.loads(sys.argv[1])).call('opus',sys.argv[2]):
  run([sys.executable,'-c','import time;print("alive",flush=True);time.sleep(1.5)'],input='',env=dict(os.environ),timeout=5,directory=sys.argv[2])
 ''')
     artifacts=tmp_path/'transport'
-    parent=subprocess.Popen([sys.executable,str(script),json.dumps(config),str(artifacts)])
+    environment = dict(os.environ)
+    environment['PYTHONPATH'] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parents[2]), environment.get('PYTHONPATH')]))
+    parent=subprocess.Popen([sys.executable,str(script),json.dumps(config),str(artifacts)],env=environment)
     try:
         for _ in range(200):
             if (artifacts/'stdout.log').exists() and (artifacts/'stdout.log').read_text(): break
