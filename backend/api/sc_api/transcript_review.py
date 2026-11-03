@@ -582,6 +582,10 @@ class ReviewStore:
                 raise ReviewError(403, "沒有發佈權限")
             rows, c = self.load(item)
             self.version(rows, c, request.get("version"))
+            timing=c.get('timing_quality') or {}
+            if timing and timing.get('status')!='qualified':
+                count=sum(v.get('status')!='qualified' for v in timing.get('paragraph_states',{}).values())
+                raise ReviewError(409,f'還有 {count} 段時間邊界尚未通過原聲核對，不能發佈。')
             missing = []
             for p in rows:
                 target = {
@@ -784,6 +788,11 @@ class ReviewStore:
     def register_candidate(self, item, source, *, expected_script_sha256):
         source = Path(source).resolve()
         record = read(source / "full_transcript.json")
+        from backend.pipeline.contextual_transcript_timing import require_verified_timing
+        try:
+            require_verified_timing(source,record)
+        except (ValueError,OSError,KeyError) as error:
+            raise ReviewError(409,'段落時間尚未通過原聲邊界檢查，不能採用候選稿') from error
         layout = read(source / "reading-layout/layout.json")
         if (
             not record
@@ -915,6 +924,11 @@ class ReviewStore:
         from backend.pipeline.slide_change_pilot import read_json
 
         record = read_json(source / "full_transcript.json")
+        from backend.pipeline.contextual_transcript_timing import require_verified_timing
+        try:
+            require_verified_timing(source,record)
+        except (ValueError,OSError,KeyError) as error:
+            raise ReviewError(409,'段落時間尚未通過原聲邊界檢查，不能採用候選稿') from error
         layout = read_json(source / "reading-layout/layout.json")
         if layout["source_record_sha256"] != digest_compatible(record):
             raise ReviewError(409, "排版與來源版本不同")
@@ -1049,6 +1063,7 @@ class ReviewStore:
                 "source_input_file_sha256": file_hash(source / "full_transcript.json"),
                 "source_record_path": f"transcript_review/{item}/source-record.json",
                 "paragraph_bindings": bindings,
+                "timing_quality": record.get("timing_quality"),
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},
                     "core_bible_verse": meta.get("core_bible_verse") or [],

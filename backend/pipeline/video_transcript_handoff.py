@@ -15,6 +15,8 @@ from backend.pipeline.source_projection import project_script
 
 def export_handoff(out: Path) -> dict:
     record = read_json(out / 'full_transcript.json')
+    from backend.pipeline.contextual_transcript_timing import require_verified_timing
+    require_verified_timing(out,record)
     assets = {a['asset_id']: a for a in record['visual_assets']}
     folder = out / 'handoff'; folder.mkdir(exist_ok=True)
     rows, bindings = [], []
