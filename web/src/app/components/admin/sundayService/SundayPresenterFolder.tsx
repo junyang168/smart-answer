@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { SundayPresenterDownloads } from "./SundayPresenterDownloads";
 
 interface Folder { date: string; folderUrl: string; folderName: string; folderExists: boolean }
 
@@ -30,5 +31,6 @@ export function SundayPresenterFolder() {
       <p className="mt-1 text-sm text-gray-600">{folder.folderExists ? "資料夾已建立。" : "本週資料夾將於生成或上傳 PPT 時建立。"}雲端可用時間以 OneDrive 同步狀態為準。</p>
     </>}
     {error && <p role="status" className="mt-2 text-sm text-amber-800">{error}</p>}
+    <SundayPresenterDownloads />
   </section>;
 }

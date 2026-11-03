@@ -23,7 +23,7 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
   let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
@@ -104,6 +104,18 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     console.log('smoke: switching passed');
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token'))), tokens);
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('steps'))), [10, 10]);
+    await remoteControl.start({ host: '127.0.0.1' });
+    const controlURL = `http://127.0.0.1:${remoteControl.server.address().port}`;
+    const pair = await fetch(controlURL + '/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: remoteControl.snapshot().code }) }).then(r => r.json());
+    const remoteCommand = { key: 'Right', id: require('node:crypto').randomUUID(), binding: pair.binding };
+    const flip = () => fetch(controlURL + '/key', { method: 'POST', headers: {
+      'Content-Type': 'application/json', Authorization: 'Bearer ' + pair.token }, body: JSON.stringify(remoteCommand) });
+    assert.equal((await flip()).status, 200); assert.equal((await flip()).status, 200);
+    await until(async () => await wc(sermon).executeJavaScript('steps') === 11, 'one remote step despite retry');
+    await act('key', { key: 'Right' });
+    await until(async () => await wc(sermon).executeJavaScript('steps') === 12, 'operator still controls the same page');
+    await remoteControl.stop();
     const liveBeforeRefresh = stage.active;
     apiFailure = true;
     await assert.rejects(act('refresh-folder'), /503/);
@@ -179,6 +191,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       controlsHiddenByDefault: true, commandPRegistered: true, stableControlButtons: true,
       presentationCommandPIntercepted: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
+      remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
       microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));

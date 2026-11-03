@@ -99,4 +99,34 @@ From `tools/sunday-presenter`, `npm run icons` builds the native `.icns` from
 the tracked vector using the repository's existing sharp installation.
 `npm run package:mac` builds an arm64 `.app`, DMG and ZIP. The minimum macOS
 version is 13, as declared by the packaged Electron runtime. Installers contain
-no account sessions or host-specific config. They are unsigned test builds.
+no account sessions or host-specific config. Version 0.3.0 is ad-hoc signed,
+without Apple Developer ID or notarization, and also builds a universal native
+Sunday Remote for the speaker's Mac.
+
+## Authenticated installer downloads
+
+The Sunday-service admin page provides the Presenter arm64 DMG and Remote
+universal ZIP. Both metadata and file routes require an editor-capable session
+in production. Development uses the site's existing development-session helper.
+The installer route streams bytes in Next rather than buffering a large file in
+the generic backend proxy. Its explicit self-rewrite must precede that proxy's
+catch-all; otherwise dynamic download URLs reach the Python backend and 404.
+
+Build and inspect the packages before publishing their immutable version:
+
+```sh
+cd tools/sunday-presenter
+npm run package:mac
+cd ../..
+node scripts/publish-sunday-presenter.cjs \
+  --root "$DATA_BASE_DIR/sunday-presenter/releases"
+```
+
+The publisher copies only the two allowlisted installers, reads their SHA-256
+back, and atomically updates `latest.json` after both are complete. Existing
+version bytes cannot be replaced; changed builds need a new package version.
+Installers live outside Git and release-code directories. The website validates
+the manifest, filenames, lengths and regular-file boundaries before serving.
+No private Meet link, OneDrive configuration, paired identity or login session
+is included. The entry explicitly labels this a pilot; publication of a download
+does not establish two-computer audio or timed-service acceptance.

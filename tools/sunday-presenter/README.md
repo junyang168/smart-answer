@@ -13,16 +13,64 @@ Media/audio and broader animation acceptance remain separate checks.** See
 
 ## Install on another Mac
 
-Use `dist/Sunday-Presenter-0.2.0-mac-arm64.dmg` on an Apple Silicon Mac running
+Use `dist/Sunday-Presenter-0.3.0-mac-arm64.dmg` on an Apple Silicon Mac running
 macOS 13 or newer. Drag **Sunday Presenter** into **Applications**. A ZIP of the
 app is also produced. Node.js is not needed on the receiving laptop. The package
 contains an independent app icon, but no Microsoft account/session or private
 folder configuration. Sign in inside the app on each Mac.
 
-This test build is unsigned and not notarized; macOS may require **System
+This test build has an ad-hoc signature, without Developer ID or notarization; macOS may require **System
 Settings → Privacy & Security → Open Anyway** after the first blocked launch.
-The website integration must be deployed before automatic links work; manual
+The website integration is deployed; manual
 PowerPoint links remain usable while the website is unavailable.
+
+## Paired remote and Meet workflow prototype (#598)
+
+The DMG also contains **Sunday Remote**, a native universal Intel/Apple Silicon
+app for the speaker's Mac. AirPlay mirrors the audience app/window; the remote
+controls the same live slide through two buttons. It does not stream slides or
+relay microphone audio. Both computers join the configured Meet directly.
+
+On a trusted home network, pair once using the host's six-digit, single-use,
+five-minute code. Bonjour discovers the source. The remote remembers its exact
+TLS certificate fingerprint and bearer token in Keychain; the source persists
+only the token hash. Subsequent requests require the remembered certificate and
+token. Initial pairing is trust on first use, not protection against a hostile
+LAN. Duplicate command IDs cannot advance twice; a command bound to a previous
+live page is rejected. Only the host can start/end the worship workflow.
+
+The host remembers the private Meet URL in its local `service-settings.json`.
+It is absent from source, installers and the website's public folder API.
+**準備主日** checks the folder, starts pairing and asks a Swift helper to join
+Meet muted and share the exact OUTPUT window. **開始崇拜** requires prepared
+slides and both computers' verified status, confirms recording before asking
+the speaker to unmute. **結束** asks the speaker to mute, stops recording and
+leaves. The source microphone remains off and its headphone output is retained;
+the speaker app mutes its own output and restores it on normal cleanup.
+
+Every Sunday at **10:00 America/Chicago (Dallas)**, the host invokes the same
+guarded start workflow automatically. Open the app and finish preparation before
+ten. While running, it requests macOS to prevent idle display/system sleep; this
+does not launch a closed app, wake a powered-off Mac, or override manual locking.
+The local handled-date reservation is saved before starting, so restart, a
+failed recording attempt or a clock rollback cannot start twice. If preparation
+is incomplete at ten, or the app misses that minute, the controller reports the
+problem and requires a manual start. **取消本次定時開始** cancels the coming
+Sunday's trigger without disabling the operator's manual start button.
+
+The helper uses macOS Accessibility and semantic Chrome controls. Grant
+Accessibility to **Sunday Presenter** on the host, **Sunday Remote** on the
+speaker. Google sign-in and system permissions can still require manual action.
+The package binds the renamed Electron executable to its bundle identity;
+otherwise macOS can grant the bundle while rejecting its helper's requests.
+Prototype signature changes can require removing an obsolete permission entry
+and adding the installed app again; toggling that stale entry is insufficient.
+
+Real Meet testing has verified muted join, automatic OUTPUT selection/sharing,
+the app's short recording start/stop check and leaving only the host. Initial
+share confirmation was premature; polling replaces that fixed delay, with the
+updated polling build awaiting another real check. Two-computer audio/control
+and the full timed service transition remain under acceptance testing.
 
 ## Start from source
 

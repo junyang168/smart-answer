@@ -3,6 +3,37 @@
 This record distinguishes a working local harness from Sunday-service
 acceptance. No Agent integration or production deployment has been performed.
 
+## #598 remote, Meet automation and scheduled start — 2026-11-02
+
+The following is newer than the historical #590 notes below. Website integration
+was subsequently deployed under #590/#597. This feature does not redeploy it.
+
+| Check | Evidence / scope |
+| --- | --- |
+| Local protocol and workflow | Node tests cover TLS pairing/restart, token hashing, exact certificate pinning, command deduplication, stale-page rejection, host-only workflow authority, recording verification, cleanup and cancellation |
+| Fullscreen / shared source | Real Electron smoke passes 20 retained-state switches plus remote and operator commands applied to the same live page, duplicate IDs applied once |
+| Native builds | Swift helper and remote compile for arm64 and x86_64; universal bundle and installed host signature verification pass |
+| Website | Installed controller reads the actual production upcoming-Sunday folder |
+| Permission recovery | Initial Electron executable retained its upstream identity. TCC granted the bundle ID but checked the child against an executable path. Ad-hoc signing the complete host bundle fixes that mismatch. An obsolete permission must be removed and the installed app re-added; toggling retained a stale code hash. The owner performed authorization through macOS UI; no TCC database was modified or security protection disabled |
+| Real Meet join | App automatically joined the configured room with microphone and camera off, verified in Meet's actual controls |
+| Real Meet output share | App selected OUTPUT and pressed Share without manual picker selection. Meet displayed its presentation. A 0.5-second confirmation was too early and reported failure; operator confirmation then verified sharing. The source replaces that delay with bounded polling; that final adjustment still needs a real rerun |
+| Recording entitlement | One manual short recording started and stopped, with Gemini notes and transcription disabled |
+| Automated recording | The app's first-setup short recording check automatically started recording, verified it, and stopped it. Actual Meet returned to Start recording, with microphone/camera off and extra notes/transcription disabled |
+| Automated exit | App's End selected only the local host's leave action, handled the host's extra dialog, and Meet displayed the left-meeting page |
+| Evidence | Private account/room screenshots under `~/.local/state/sunday-presenter/ops-598/`; not packaged or committed |
+| Sunday 10:00 | Deterministic clock tests cover Dallas standard/daylight time, the DST transition Sunday, before-ten/no-weekday starts, cancellation, restart deduplication, unready state, missed time and durable-reservation failure. These are not an actual two-computer service or a real Sunday-clock acceptance run |
+
+Pending: two physical Macs, remembered discovery on the church LAN, AirPlay plus
+remote slide controls, speaker audio received independently through Meet,
+remote disconnection mute, and the complete scheduled recording/microphone
+transition. No speaker microphone was opened in this one-Mac test. Two short
+test recordings were created in the owner's Meet; cloud processing/file playback
+has not yet been verified. No invitations or church messages were sent.
+
+Prototype packages are ad-hoc signed, without Developer ID or notarization.
+Updating this prototype can change the TCC code hash and require reauthorization;
+the one-time home-setup goal across upgrades is not established by this build.
+
 ## Local technical checks — 2026-11-02
 
 Environment: macOS 26.5.2, Apple Silicon, Electron 45.2.1 / Chromium

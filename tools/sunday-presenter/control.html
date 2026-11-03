@@ -12,6 +12,24 @@
   <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>專心帶領，輕鬆切換。</h1>
     <p><strong>⌘P</strong> 顯示 / 隱藏控制台。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
   </header>
+  <section class="sunday-folder" aria-label="主日流程">
+    <h2>主日流程</h2>
+    <div class="transport"><button class="take" data-action="prepare-service">準備主日</button>
+      <button class="take" data-action="begin-service" disabled>開始崇拜</button>
+      <button data-action="end-service">結束</button></div>
+    <p id="workflow-status" role="status">準備時兩端關麥；開始後只開講員麥克風。主電腦保留耳機監聽。</p>
+    <p id="workflow-checks"></p>
+    <p id="schedule-status" role="status">每主日 10:00（Dallas）自動開始。</p>
+    <button data-action="cancel-auto-start">取消本次定時開始</button>
+    <button data-action="confirm-share" hidden>我已確認 Meet 分享的是 OUTPUT 視窗</button>
+    <details id="first-settings"><summary>首次設定（在家完成後記住）</summary>
+      <form id="meeting-settings"><input type="url" required aria-label="主日 Meet 連結" placeholder="https://meet.google.com/xxx-xxxx-xxx"><button>記住 Meet 連結</button></form>
+      <p>首次需允許主電腦 Sunday Presenter／講員 Sunday Remote 的輔助使用及本機網路；Chrome 需完成 Google 登入及麥克風／分享權限。</p>
+      <button data-action="test-recording">測試短錄影（保持靜音）</button>
+      <p>請在只有測試人員的會議使用。會真的錄製數秒並停止，不會開始崇拜或開啟講員麥克風。</p>
+      <button data-action="remote-forget">重設講員配對</button>
+    </details>
+  </section>
   <section class="sunday-folder" aria-label="本主日簡報">
     <strong id="sunday-date">正在取得本主日資料夾…</strong>
     <p id="sunday-status" role="status"></p>
@@ -24,6 +42,11 @@
     <button data-take="sermon" class="take" disabled>講道</button>
     <button data-action="black" class="black">黑屏 / 靜音</button></div></section>
   <p id="error" role="alert"></p>
+  <section class="sunday-folder" aria-label="講員翻頁">
+    <strong>講員翻頁</strong><p id="remote-status" role="status">關閉</p>
+    <div class="transport"><button data-action="remote-start" id="remote-start">開啟講員翻頁</button>
+      <button data-action="remote-stop" id="remote-stop" hidden>關閉講員翻頁</button></div>
+  </section>
   <main id="decks"></main>
   <footer><div class="transport"><button data-key="Left">← 上一步</button><button data-key="Right">下一步 →</button><button data-action="show-output">顯示輸出視窗</button></div>
     <p>準備：登入並開啟簡報 → 啟動投影片放映 → 在準備視窗檢查觀眾畫面 → 設為觀眾畫面 → 切換輸出。</p>

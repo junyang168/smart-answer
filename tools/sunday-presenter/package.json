@@ -1,6 +1,6 @@
 {
   "name": "sunday-presenter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Mac proof of concept for two persistent PowerPoint web presentations",
   "main": "main.cjs",

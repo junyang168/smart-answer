@@ -1,11 +1,23 @@
 Sunday Presenter — Apple Silicon Mac
 
-1. 打開 DMG，把 Sunday Presenter 拖進 Applications。
+1. 打開 DMG，主電腦把 Sunday Presenter 拖進 Applications；講員電腦安裝 Sunday Remote。
 2. 從 Applications 或 Spotlight 開啟 Sunday Presenter。
 3. 按 ⌘P 顯示控制台。App 會向教會網站取得本主日的 OneDrive 連結。
 4. 開啟主日崇拜／講道資料夾，在 app 內登入 Microsoft 並選取簡報。
 5. 啟動投影片放映，檢查後按「設為觀眾畫面」，然後切換輸出。
 6. Google Meet 只分享「Sunday Presenter — OUTPUT」視窗。
+
+新增講員遙控／開場流程（測試版）
+首次可在家完成：兩端登入 Chrome 的 Google 帳號；主電腦允許 Sunday Presenter、講員電腦允許 Sunday Remote 的輔助使用及本機網路權限。
+主控制台「首次設定」記住正式 Meet 連結。按「準備主日」，講員開啟 Sunday Remote，第一次輸入主電腦的六位數字。
+配對會記住，以後同一網路自動重連。AirPlay 選擇鏡像 OUTPUT；講員視窗只有上一頁／下一頁。
+主電腦的 Meet 麥克風保持關閉，耳機輸出保留；講員端準備時關麥，開始崇拜後開麥，揚聲器靜音。
+只有主電腦能按「開始崇拜」和「結束」。Google 登入驗證、螢幕分享選擇及錄影權限仍可能需要你確認。
+每主日 Dallas 當地時間 10:00，主電腦會自動執行「開始崇拜」。請提前開啟 app 並完成兩端準備；到時未就緒會顯示原因，完成後需手動開始。
+App 開啟時會防止閒置睡眠；不會自動開啟已退出的 app，也不會解除手動鎖屏。可按「取消本次定時開始」，取消該次主日的自動開始。
+首次設定內可測試數秒的實際錄影；整段保持靜音，測試不會進入崇拜模式。
+Meet 界面控制尚需在兩台電腦現場驗收；紅色／待確認項目不可視為已完成。主日正式使用前請完成開場、翻頁、失聯關麥及錄影驗收。
+Sunday Remote 為 Intel／Apple Silicon 通用原生 app；實際 Google Meet 自動操作依 Chrome／macOS 權限而定。
 
 ⌘P：顯示／隱藏控制台。⌘Q：離開 app。
 
@@ -13,6 +25,6 @@ Sunday Presenter — Apple Silicon Mac
 每台電腦須自行登入 Microsoft；安裝包不包含帳號、登入資料或簡報檔案。
 雲端新檔案以 OneDrive 完成同步為準。
 
-這是尚未簽章／公證的測試版本。若 macOS 阻擋開啟，請在確認來源後，
+這是使用本機臨時簽章、尚未取得 Apple Developer ID 簽章／公證的測試版本。若 macOS 阻擋開啟，請在確認來源後，
 到「系統設定 → 隱私權與安全性」按「仍要打開」。不要關閉系統安全保護。
-本主日 API 需要先部署網站整合版本；網站尚未更新時，控制台可手動貼上簡報連結。
+本主日 API 已部署；網站暫時無法連線時，控制台可手動貼上簡報連結。
