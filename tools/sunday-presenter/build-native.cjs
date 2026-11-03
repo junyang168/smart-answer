@@ -10,7 +10,7 @@ const bundle = path.join(output, 'Sunday Remote.app');
 const contents = path.join(bundle, 'Contents');
 fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
 fs.mkdirSync(path.join(contents, 'Resources'), { recursive: true });
-const source = ['NativeCore.swift', 'RemoteApp.swift', 'main.swift'].map(name =>
+const source = ['NativeCore.swift', 'RemoteVideoView.swift', 'RemoteApp.swift', 'main.swift'].map(name =>
   fs.readFileSync(path.join(__dirname, 'native', name), 'utf8')).join('\n').replaceAll('__SUNDAY_SERVICE_TYPE__', bonjourType);
 fs.writeFileSync(path.join(output, 'main.swift'), source);
 for (const arch of ['arm64', 'x86_64']) {
@@ -19,6 +19,7 @@ for (const arch of ['arm64', 'x86_64']) {
 }
 execFileSync('/usr/bin/lipo', ['-create', path.join(output, 'arm64'), path.join(output, 'x86_64'),
   '-output', path.join(contents, 'MacOS', 'Sunday Remote')]);
+fs.cpSync(path.join(__dirname, 'media'), path.join(contents, 'Resources', 'media'), { recursive: true, filter: source => !/\/(host\.(html|js)|preload\.cjs)$/.test(source) });
 fs.copyFileSync(path.join(__dirname, 'assets', 'SundayPresenter.icns'), path.join(contents, 'Resources', 'AppIcon.icns'));
 fs.writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -33,7 +34,7 @@ fs.writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encodin
 <key>LSMinimumSystemVersion</key><string>11.0</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSLocalNetworkUsageDescription</key><string>尋找同一個 Wi-Fi 的主電腦，控制主日簡報翻頁。</string>
+<key>NSLocalNetworkUsageDescription</key><string>尋找同一個 Wi-Fi 的主電腦，觀看主日 PPT 畫面並控制翻頁。</string>
 <key>NSBonjourServices</key><array><string>${bonjourType}</string></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>`);

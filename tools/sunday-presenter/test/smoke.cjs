@@ -23,7 +23,7 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
   let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
@@ -77,6 +77,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(controller.isFullScreen(), false);
     assert.equal(controller.isFullScreenable(), false);
     toggleControls(); assert.equal(controller.isVisible(), true);
+    require('electron').app.focus({ steal: true }); controller.focus();
     await until(() => controller.isFocused(), 'controller focused before hiding');
     toggleControls(); assert.equal(controller.isVisible(), true);
     controller.hide(); // With no slide, toggling never reveals a blank window.
@@ -156,6 +157,9 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await act('key', { key: 'Right' });
     await until(async () => await wc(sermon).executeJavaScript('steps') === 12, 'operator still controls the same page');
     await remoteControl.stop();
+    if (process.argv.includes('--video-smoke')) {
+      await require('./video-smoke.cjs').run({ hostVideo, stage, act, output, worship, sermon, evidence });
+    }
     const liveBeforeRefresh = stage.active;
     apiFailure = true;
     await assert.rejects(act('refresh-folder'), /503/);

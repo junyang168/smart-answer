@@ -27,10 +27,10 @@ function publish(port, id, failed) {
 }
 
 class RemoteControl {
-  constructor({ state, key, changed = () => {}, advertise = publish, now = Date.now, identity } = {}) {
+  constructor({ state, key, changed = () => {}, advertise = publish, now = Date.now, identity, video } = {}) {
     this.getState = state; this.key = key; this.changed = changed; this.advertise = advertise; this.now = now;
     this.server = null; this.error = ''; this.observe(null); this.queue = Promise.resolve();
-    this.identity = identity; this.peerHash = identity?.peerHash;
+    this.video = video; this.identity = identity; this.peerHash = identity?.peerHash;
   }
   observe(active) {
     if (this.active !== active) { this.active = active; this.binding = crypto.randomBytes(16).toString('hex'); }
@@ -39,7 +39,7 @@ class RemoteControl {
     const value = this.getState(); this.observe(value.active);
     const page = value.pages.find(p => p.id === value.active);
     return { live: !!page?.ready, deck: page?.deck === 'worship' ? '主日崇拜' : page ? '講道' : '尚未播放',
-      binding: this.binding };
+      binding: this.binding, ...(this.video ? { protocolVersion: 2, capabilities: ['ppt-video-v1'] } : {}) };
   }
   snapshot() {
     return { enabled: !!this.server, code: this.code || '', paired: !!this.lastSeen && this.now() - this.lastSeen < 10000,
@@ -62,6 +62,7 @@ class RemoteControl {
   }
   async stop() {
     this.stopAdvertising?.(); this.stopAdvertising = null;
+    this.video?.reset();
     this.generation = null; this.lastSeen = null; this.code = null;
     const server = this.server; this.server = null;
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
@@ -85,13 +86,13 @@ class RemoteControl {
       if (req.method === 'GET' && req.url === '/state') {
         send(paired ? 200 : 401, paired ? this.publicState() : { error: '請先連線。' }); return;
       }
-      if (req.method !== 'POST' || !['/pair', '/key'].includes(req.url) ||
+      if (req.method !== 'POST' || !['/pair', '/key', ...(this.video ? ['/video'] : [])].includes(req.url) ||
           req.headers['content-type']?.split(';')[0] !== 'application/json') { send(404, { error: 'Not found' }); return; }
       if (req.url !== '/pair' && !paired) { send(401, { error: '請重新連線。' }); return; }
       let body = '';
       for await (const chunk of req) {
         body += chunk;
-        if (Buffer.byteLength(body) > 4096) { send(413, { error: 'Request too large' }); return; }
+        if (Buffer.byteLength(body) > (req.url === '/video' ? 270000 : 4096)) { send(413, { error: 'Request too large' }); return; }
       }
       const data = JSON.parse(body);
       if (req.url === '/pair') {
@@ -106,6 +107,12 @@ class RemoteControl {
         this.identity?.remember(digest); this.peerHash = digest;
         this.lastSeen = this.now(); this.code = null; this.changed();
         send(200, { token, ...this.publicState() }); return;
+      }
+      if (req.url === '/video') {
+        if (generation !== this.generation || !equal(digest, this.peerHash)) { send(401, { error: '請重新連線。' }); return; }
+        try { send(200, this.video.request(data)); }
+        catch (error) { send(409, { error: error.message }); }
+        return;
       }
       if (!['Left', 'Right'].includes(data.key) || typeof data.id !== 'string' ||
           !/^[a-zA-Z0-9-]{16,80}$/.test(data.id) || typeof data.binding !== 'string') { send(400, { error: 'Invalid command' }); return; }

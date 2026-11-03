@@ -6,6 +6,7 @@ const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('.
 const { Website } = require('./website.cjs');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
+const { HostVideo } = require('./host-video.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -13,7 +14,7 @@ else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
 let controller, output, preparation, stage, officeSession, quitting = false, testOrigin;
-let website, remoteControl, awakeBlocker;
+let website, remoteControl, awakeBlocker, hostVideo;
 let keyQueue = Promise.resolve();
 let folderTimer;
 let filePlan = null;
@@ -38,6 +39,7 @@ function changed(reason) {
     stage.get(stage.active).view.webContents.focus();
   }
   if (stage) remoteControl?.observe(stage.active);
+  hostVideo?.observe();
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
@@ -276,6 +278,9 @@ app.whenReady().then(async () => {
   controller.setPosition(panelArea.x + Math.max(0, panelArea.width - 780), panelArea.y + 30);
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
+  hostVideo = new HostVideo({ output, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
+  output.on('minimize', () => hostVideo.observe());
+  output.on('hide', () => hostVideo.observe());
   let remoteIdentity, identityError;
   if (!smoke) {
     try { remoteIdentity = identity(path.join(app.getPath('userData'), 'remote')); }
@@ -283,7 +288,7 @@ app.whenReady().then(async () => {
   }
   remoteControl = new RemoteControl({ state: () => stage.snapshot(), changed,
     advertise: smoke ? () => () => {} : undefined,
-    identity: remoteIdentity,
+    identity: remoteIdentity, video: hostVideo,
     key: (key, active, valid) => {
       const task = keyQueue.then(() => sendSlideKey(key, active, valid));
       keyQueue = task.catch(() => {}); return task;
@@ -350,15 +355,15 @@ app.whenReady().then(async () => {
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        website, remoteControl, setOrigin: origin => { testOrigin = origin; } });
+        website, remoteControl, hostVideo, setOrigin: origin => { testOrigin = origin; } });
       console.log('SMOKE PASS');
       app.quit();
-    } catch (error) { console.error(error); app.exit(1); }
+    } catch (error) { console.error(error); await hostVideo?.close(); app.exit(1); }
   }
-}).catch(error => {
+}).catch(async error => {
   if (smoke) console.error(error);
   else dialog.showErrorBox('Sunday Presenter 未能啟動', error.message);
-  app.exit(1);
+  await hostVideo?.close(); app.exit(1);
 });
 app.on('activate', () => toggleControls());
 app.on('second-instance', () => {
@@ -368,7 +373,12 @@ app.on('second-instance', () => {
     controller.show(); controller.moveTop(); controller.focus();
   }
 });
-app.on('before-quit', () => {
+app.on('before-quit', event => {
+  if (!quitting && hostVideo) {
+    event.preventDefault(); quitting = true;
+    Promise.allSettled([hostVideo.close(), remoteControl?.stop()]).then(() => app.quit());
+    return;
+  }
   quitting = true;
   globalShortcut.unregisterAll();
   clearInterval(folderTimer);

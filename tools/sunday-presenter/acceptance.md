@@ -1,5 +1,63 @@
 # Sunday Presenter acceptance evidence
 
+## #643 local PPT video pilot — 0.5.0 (2026-11-03)
+
+Scope: video from the unique Presenter OUTPUT to native Sunday Remote, with the
+existing paired slide control. No microphone capture, recording, YouTube or
+schedule is implemented. The owner uses a wireless mic on the host; Remote mic
+relay is deferred, PPT audio is excluded, and later YouTube work uses a reusable
+stream key rather than OAuth/API lifecycle management.
+
+Local evidence on Apple Silicon macOS 26.5.2 / Electron 45.2.1:
+
+- 26 Node tests cover retained playback/pairing, authenticated video signaling,
+  rejection of audio/data/public ICE candidates, SDP bounds, setup deadline,
+  idempotent answers, stale session cancellation, bounded replacements and closed
+  services rejecting delayed restarts.
+- Native Remote compiles for arm64 and x86_64. Runtime validation below uses the
+  arm64 slice and system WebKit on this Mac, not a claimed minimum-OS matrix.
+- `npm run smoke:video` exercises actual native window capture and native
+  WKWebView receive on the same unlocked Mac with disposable TLS pairing.
+  Remote decodes 1280×720 video; pixel samples distinguish the two fixture decks
+  (sermon `[111,47,25,255]`, worship `[17,60,79,255]`). Selected ICE candidates are
+  host/host, and both sender and receiver have zero audio tracks.
+- Twenty deck switches retain one media session and OUTPUT. A native Remote
+  button advances the host's actual fixture slide. Moving the active page to
+  private preparation and minimizing OUTPUT stop capture; re-confirming the
+  source and viewer reconnection resume with fresh sessions and no new pairing.
+- An additional active-shutdown smoke stops a live capture before destroying its
+  renderer; the closed service rejects a delayed viewer restart and the app exits.
+- The full retained playback smoke also passes popup opener/POST, controller
+  focus, duplicate slide commands, navigation/fullscreen/crash invalidation and
+  source identity checks. It does not sign in to Microsoft or Meet.
+
+Reproduce with an unlocked desktop and no installed Presenter running:
+
+```sh
+cd tools/sunday-presenter
+npm ci
+npm test
+npm run smoke:video
+```
+
+Raw evidence and viewer image: ignored `output/smoke/video-result.json` and
+`output/smoke/remote-video.png`. Tests use synthetic slides in the real OUTPUT,
+not a camera, desktop fallback or mocked video track. The test probe's token is
+passed over stdin and is not saved in the user's Keychain or package.
+
+Local package verification also passes: universal Remote build, ad-hoc deep/strict
+signatures, DMG checksum and both ZIP integrity checks. The host ASAR's capture,
+signaling and renderer source bytes match this checkout; test/output/native build
+directories are excluded. Checksums are saved in ignored
+`dist/local-pilot-manifest.json`. These packages were not installed or published.
+
+Pending before field use: second physical Mac, iPhone hotspot/Bonjour, real Office
+slides/animations, all target OS/CPU versions, full-screen keyboard focus and
+long-duration behavior. 0.5.0 is a local pilot, not an installed production update.
+No YouTube stream or audio recording was started; the Phase 1 release below is
+unchanged. Frontend type-check remains blocked by inherited missing `cytoscape`
+and `react-quill-new`; no frontend sources or dependencies changed.
+
 ## Current release scope — Phase 1, 0.4.0 (2026-11-03)
 
 The owner explicitly split delivery: #598 is Phase 1 production playback and

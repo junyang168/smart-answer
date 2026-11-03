@@ -14,6 +14,12 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     var busy = false, polling = false
     var timer: Timer?
     var lastResolve = Date.distantPast
+    var videoView: RemoteVideoView?
+    var videoSession = "", videoClient = UUID().uuidString, videoBusy = false
+    var videoGeneration = 0, videoRetry = Date.distantPast
+    var videoStats: [String: Any] = [:]
+    var videoProbe = false
+
     lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5
@@ -42,12 +48,14 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         saved = value
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        loadPair()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 285),
-            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "Sunday Remote · 講員翻頁"; window.center()
+        if !videoProbe { loadPair() }
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "Sunday Remote · PPT 畫面與翻頁"; window.center()
         window.level = .floating; window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 520, height: 440)
+        computers.target = self; computers.action = #selector(selectComputer)
         let stack = NSStackView(); stack.orientation = .vertical; stack.spacing = 12; stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "講員翻頁"); title.font = .systemFont(ofSize: 22, weight: .semibold)
@@ -58,14 +66,20 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         for button in [previous, next] { button.font = .systemFont(ofSize: 20, weight: .medium); button.bezelStyle = .rounded; button.isEnabled = false; button.heightAnchor.constraint(equalToConstant: 56).isActive = true }
         computers.target = self; computers.action = #selector(selectComputer)
         let keys = NSStackView(views: [previous, next]); keys.distribution = .fillEqually; keys.spacing = 10
-        for view in [title, computers, code, connect, status, keys] { stack.addArrangedSubview(view) }
+        for view in [title, computers, code, connect, status] { stack.addArrangedSubview(view) }
+        let viewer = RemoteVideoView(resources: Bundle.main.resourceURL!)
+        videoView = viewer
+        viewer.onMessage = { [weak self] value in self?.videoMessage(value) }
+        stack.addArrangedSubview(viewer.webView)
+        viewer.webView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        stack.addArrangedSubview(keys)
         window.contentView!.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor), stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor), stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor)])
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor), stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor), stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor), stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor)])
         let menu = NSMenu(); let appMenu = NSMenu(); let item = NSMenuItem(); item.submenu = appMenu; menu.addItem(item)
         appMenu.addItem(withTitle: "顯示遙控器", action: #selector(show), keyEquivalent: "p").target = self
         appMenu.addItem(withTitle: "離開 Sunday Remote", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         NSApp.mainMenu = menu; show()
-        browser.delegate = self; browser.searchForServices(ofType: sundayServiceType, inDomain: "local.")
+        if !videoProbe { browser.delegate = self; browser.searchForServices(ofType: sundayServiceType, inDomain: "local.") }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.window.isKeyWindow, !(self.window.firstResponder is NSTextView) else { return event }
@@ -80,7 +94,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         service.delegate = self; service.resolve(withTimeout: 8)
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
-        if connectedService == service { endpoint = nil; connectedService = nil }
+        if connectedService == service { resetVideo("等待主電腦重新連線…"); endpoint = nil; connectedService = nil }
         if let index = services.firstIndex(where: { $0 == service }) { services.remove(at: index); computers.removeItem(at: index) }
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
@@ -90,6 +104,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             "找不到主電腦。請確認同一個 Wi-Fi，並允許本機網路。"
     }
     @objc func selectComputer() {
+        resetVideo("正在切換主電腦…")
         token = nil; endpoint = nil; binding = ""; previous.isEnabled = false; next.isEnabled = false
         let index = computers.indexOfSelectedItem
         if services.indices.contains(index) { resolved(services[index]) }
@@ -114,6 +129,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
                 return getnameinfo(address, socklen_t(data.count), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0
             }
             if found, let url = URL(string: "https://\(String(cString: host)):\(service.port)") {
+                if endpoint != url { resetVideo("正在連接主電腦…") }
                 endpoint = url; fingerprint = saved["fingerprint"] ?? id
                 connectedService = service
                 if let remembered = saved["token"] { token = remembered; poll() }
@@ -168,6 +184,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             switch result {
             case .success(let value): self.apply(value)
             case .failure(let error):
+                self.resetVideo("等待主電腦；畫面已停止。")
                 self.previous.isEnabled = false; self.next.isEnabled = false
                 self.status.stringValue = "等待主電腦；回到同一個 Wi-Fi 後自動重連。"
                 self.refreshEndpoint()
@@ -185,6 +202,55 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         previous.isEnabled = live && !busy; next.isEnabled = live && !busy
         code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = token != nil
         status.stringValue = "已連線 · \(state["deck"] as? String ?? "尚未播放")"
+        if live, (state["capabilities"] as? [String])?.contains("ppt-video-v1") == true { pollVideo() }
+        else { resetVideo(live ? "主電腦版本只支援翻頁，請更新 Presenter。" : "等待主電腦播放已確認的 PPT") }
+    }
+    func resetVideo(_ text: String) {
+        if !videoSession.isEmpty || videoBusy { videoGeneration += 1 }
+        videoSession = ""; videoBusy = false; videoClient = UUID().uuidString
+        videoView?.stop(text)
+    }
+    func pollVideo() {
+        guard videoView != nil, !videoBusy, Date() >= videoRetry else { return }
+        videoBusy = true
+        let generation = videoGeneration
+        let body: [String: Any] = videoSession.isEmpty ? ["op": "start", "clientId": videoClient] : ["op": "poll", "sessionId": videoSession]
+        request("video", body: body) { result in
+            guard generation == self.videoGeneration else { return }
+            self.videoBusy = false
+            switch result {
+            case .success(let value):
+                self.videoSession = value["sessionId"] as? String ?? ""
+                self.videoView?.apply(value)
+            case .failure:
+                self.resetVideo("畫面連線未完成，正在重試…")
+                self.videoRetry = Date().addingTimeInterval(3)
+            }
+        }
+    }
+    func videoMessage(_ value: [String: Any]) {
+        if videoProbe, value["op"] as? String != "stats" { emitJSON(["op": "diagnostic", "event": value["op"] ?? "", "error": value["error"] ?? ""]) }
+        switch value["op"] as? String {
+        case "failed":
+            if let failed = value["sessionId"] as? String, failed != videoSession { return }
+            resetVideo(value["error"] as? String ?? "畫面已斷線，正在重試…"); videoRetry = Date().addingTimeInterval(5)
+        case "stats":
+            guard value["sessionId"] as? String == videoSession else { return }
+            videoStats = value
+            if videoProbe { emitJSON(value) }
+        case "answer":
+            guard value["sessionId"] as? String == videoSession, let sdp = value["sdp"] as? String,
+                  sdp.utf8.count <= 262144 else { return }
+            let generation = videoGeneration
+            request("video", body: ["op": "answer", "sessionId": videoSession, "sdp": sdp]) { result in
+                guard generation == self.videoGeneration else { return }
+                if case .failure(let error) = result {
+                    if self.videoProbe { emitJSON(["op": "diagnostic", "answerError": error.localizedDescription]) }
+                    self.resetVideo("畫面連線失敗，正在重試…"); self.videoRetry = Date().addingTimeInterval(3)
+                }
+            }
+        default: break
+        }
     }
     @objc func back() { flip("Left") }
     @objc func forward() { flip("Right") }
@@ -200,6 +266,6 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         }
     }
     func applicationWillTerminate(_ notification: Notification) {
-        timer?.invalidate(); browser.stop()
+        timer?.invalidate(); browser.stop(); resetVideo("已結束")
     }
 }

@@ -1,4 +1,4 @@
-Sunday Presenter 0.4.0 — Phase 1
+Sunday Presenter 0.5.0 — PPT 點對點畫面測試版
 
 主電腦安裝 Sunday Presenter；講員電腦安裝 Sunday Remote。將 App 拖入 Applications。
 Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 Intel／Apple Silicon。
@@ -7,16 +7,19 @@ Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 In
 2. App 自動識別敬拜與講道。進入 PowerPoint 投影片放映，確認畫面後按「確認並播放」。
 3. 正式播放時設定窗口自動隱藏。⌘1 敬拜、⌘2 講道；方向鍵翻頁。點 Dock 圖示或 ⌘P 叫回設定。
 4. 按「開啟講員翻頁」。講員開啟 Sunday Remote，首次輸入主電腦的六位數字，以後記住配對並自動重連。
-   兩台 Mac 連同一個 Wi-Fi／手機熱點，首次允許本機網路。Remote 的上一頁／下一頁與主電腦控制同一份 PPT。
+   兩台 Mac 連同一個 Wi-Fi／手機熱點，首次允許本機網路。Remote 顯示同一個 OUTPUT，上一頁／下一頁與主電腦控制同一份 PPT。
+   Presenter 需允許螢幕錄製以分享 OUTPUT；Remote 不需要麥克風或攝影機。兩端更新到這個測試版本才有畫面。
 5. 手動在 Chrome 加入 Google Meet，分享唯一的「Sunday Presenter — OUTPUT」視窗。
    主電腦的 Meet 麥克風保持關閉，可用耳機監聽。講員電腦手動開啟 Meet 麥克風，並將揚聲器靜音，避免回音。
    開始前從另一台裝置確認觀眾能看到並聽到。錄影、關麥與離開 Meet 都由你手動操作。
-6. HDMI 接 TV；AirPlay 鏡像 OUTPUT。切換敬拜／講道時保持同一個分享視窗。
+6. HDMI 接 TV；Remote 直接看 OUTPUT，不需 AirPlay。切換敬拜／講道時保持同一個分享視窗。
+   回到準備畫面或最小化 OUTPUT 時 Remote 停止顯示；重新確認並播放才恢復。
 
-Phase 1 不會自動加入 Meet、開關麥克風、操作錄影或在 10 點自動開始。
+本測試版只新增 PPT 畫面傳輸，不會自動加入 Meet、開關麥克風、操作錄影或在 10 點自動開始。
 Presenter／Remote 不需要輔助使用或麥克風權限；Chrome 的分享及收音權限請依 Meet 提示設定。
 舊版升級請退出並更新兩台電腦的 App。舊的 Meet／定時設定不再執行。
-YouTube 直播及 Remote 收音屬於 Phase 2。
+後續錄影／YouTube 將使用接在主電腦的無線麥克風和固定 stream key，目前尚未實作；Remote 收音已延後。
+本機已通過單一 Mac 的真實視窗擷取與原生 Remote 接收測試。另一台實體 Mac、實際 PPT、熱點及完整一場時長仍待驗收。
 
 ⌘Q：離開 App。關閉設定窗口只隱藏設定，播放繼續。
 App 運行時防止閒置睡眠，不會解除手動鎖屏。

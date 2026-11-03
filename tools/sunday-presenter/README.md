@@ -13,7 +13,34 @@ link. PPT audio capture, Google OAuth and Remote microphone relay are outside th
 design; only the selected wireless microphone on the host supplies audio. It is
 a design draft, not an implemented capability of the Phase 1 release below.
 
-## Install and use
+## Local video pilot — 0.5.0 (#643)
+
+The worktree pilot adds a resizable PPT viewer to the native Remote. When paired
+with this Presenter, it receives only the current OUTPUT over local WebRTC and
+keeps the existing slide buttons and arrow keys. Remote requests no microphone
+or camera permission. The host allows capture of the exact OUTPUT window only;
+preparation, source loss and minimization stop the viewer instead of selecting
+another window. Pairing and slide control continue using certificate-pinned TLS.
+
+This is the first Phase 2 milestone, not a broadcast release. Wireless microphone
+input, recording, fixed-key YouTube streaming and scheduling remain unimplemented.
+The installed/released 0.4.0 apps and website downloads are unchanged.
+
+Run the pilot from this worktree with `npm ci` and `npm start` in this directory;
+quit the installed Presenter first. Build the Remote with `node build-native.cjs`,
+then open `output/native/Sunday Remote.app`. Use the existing six-digit pairing
+flow. Presenter may need macOS Screen Recording permission; Remote needs local
+network access. No Accessibility, microphone or camera permission is needed for
+this video milestone. Full screen is available through Remote's window controls.
+
+`npm run smoke:video` builds both Remote architectures and runs the real Electron
+OUTPUT → native WKWebView loop on one unlocked Mac. It uses disposable pairing
+and a separate host profile, never saved user accounts. Evidence is written to
+`output/smoke/video-result.json` and `output/smoke/remote-video.png`. This confirms
+local engine integration, not a second physical Mac, church hotspot, real Office
+files, minimum-OS support or a full service's duration. See [acceptance](acceptance.md).
+
+## Install and use — released Phase 1
 
 Download v0.4.0 from church administration → Sunday service → Download Sunday
 Apps. Install Sunday Presenter on an Apple Silicon Mac (macOS 13+) and Sunday
