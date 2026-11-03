@@ -242,8 +242,10 @@ Anonymous installer metadata/files redirect to sign-in, while the exact upcoming
 folder endpoint remains 200/no-store and adjacent administration stays protected.
 Published installer hashes match the staged bytes. Both installers previously
 passed development-browser download/readback. Actual production Chrome download
-attempts returned `ERR_BLOCKED_BY_CLIENT`; owner download confirmation remains
-pending, and this is not a successful production file-download check.
+attempts returned `ERR_BLOCKED_BY_CLIENT`. The owner subsequently clicked the
+production Sunday Remote download and confirmed twice that it downloads. Record
+this as owner-confirmed production Remote download success; production browser
+hash readback and the Presenter DMG download were not independently verified.
 
 The main Mac was updated from 0.3.0 to the published 0.3.1 bundle, retaining a
 backup and its user-data directory. Installed ASAR bytes match the staged bundle,
