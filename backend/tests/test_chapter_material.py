@@ -119,3 +119,57 @@ def test_points_are_the_claims_own_evidence_steps_with_his_words():
     assert [p["text"] for p in out["points"]] == ["第一步", "第二步", "第三步"]
     assert out["points"][0]["quote"] == "他的原話"
     assert out["application"] is True
+
+
+def timed(claim_id: str, refs: list[str], minute: float):
+    item = claim(claim_id, refs)
+    item["occurrences"][0]["anchors"] = [{"media_time": minute * 60}]
+    return item
+
+
+def test_one_hop_must_be_said_near_a_seed_in_the_same_lecture():
+    # （二）6：「解經必須運用理性」在讲太 6 试探时说，离结构那条起点 23.7 分。
+    chosen = run(
+        [timed("seed", ["馬太福音5:3"], 68), timed("far", [], 32), timed("near", [], 62)],
+        [relation("applies", "far", "seed"), relation("supports", "near", "seed")],
+    )
+    assert set(chosen) == {"seed", "near"}
+
+
+def test_nearness_is_to_any_seed_not_only_the_linked_one():
+    # 雅各书那条连着 12 分的起点，可 51–53 分他正讲着 5:28。
+    chosen = run(
+        [
+            timed("early", ["馬太福音5:28"], 12),
+            timed("late", ["馬太福音5:28"], 52),
+            timed("james", ["雅各書1:14-15"], 54.5),
+        ],
+        [relation("supports", "james", "early")],
+    )
+    assert "james" in chosen
+
+
+def test_a_verse_belongs_to_the_section_where_it_starts():
+    chapter = chapter_material.CHAPTERS["mat-5-1-48"]
+    assert chapter_material.section_of(chapter, "mat-5-28") == "mat-5-27-30"
+    assert chapter_material.section_of(chapter, "mat-5-39-44") == "mat-5-38-42"
+    assert chapter_material.section_of(chapter, "mat-5-17-48") == "mat-5-17-20"
+
+
+def test_the_same_minutes_belong_to_the_narrower_section_only():
+    from backend.pipeline.original_audio_index import exclusive_minutes
+
+    def row(stretches, marks):
+        return {
+            "transcript_id": "L1",
+            "stretches": [{"start": a, "end": b} for a, b in stretches],
+            "judgements": [{"at": at} for at in marks],
+            "seconds": sum(b - a for a, b in stretches),
+        }
+
+    wide = {"sermons": [row([(60, 1200)], [100, 200, 1000])]}
+    narrow = {"sermons": [row([(180, 270)], [190])]}
+    exclusive_minutes([wide, narrow])
+    assert wide["sermons"][0]["stretches"] == [{"start": 60, "end": 180}, {"start": 270, "end": 1200}]
+    assert [m["at"] for m in wide["sermons"][0]["judgements"]] == [100, 1000]
+    assert narrow["sermons"][0]["stretches"] == [{"start": 180, "end": 270}]

@@ -1146,7 +1146,6 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     # 而且主张是**某一篇讲道里的**一句话，正是幻灯上该写的：他这一分钟说的是
     # 什么。观点是把五篇里的同一件事归成一条，那是文章层要的东西，不是听原声的
     # 人要的。
-    by_sermon: dict[str, dict[str, Any]] = {}
     # 每个判断讲的是哪一节。主张自己的 `scripture_refs` 就写着，截到本段范围内。
     verses: dict[str, str] = {}
     # 按章的页面（`chapter_material.CHAPTERS`）从主张数据算出这一章的材料：起点
@@ -1166,73 +1165,158 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             for claim_id, claim in claims.items()
             if in_passage(claim, book, chapter, low, high)
         }
-    for claim_id, verse in chosen.items():
-        claim = claims[claim_id]
-        statement = str(claim.get("statement") or "").strip()
-        if not statement:
-            continue
-        verses.setdefault(statement, verse)
-        located, traces = spans_of(claim_id, statement)
-        for source_id, spans in located.items():
-            slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
-            slot["spans"].extend(spans)
-            target = slot["provenance"].setdefault(statement, {
-                "claim_ids": [],
-                "evidence_step_ids": [],
-                "source_fragment_ids": [],
+
+    def rows(items: Iterable[tuple[str, str]]) -> list[dict[str, Any]]:
+        """这些主张在各篇讲道里的录音，一篇讲道一行。"""
+
+        by_sermon: dict[str, dict[str, Any]] = {}
+        for claim_id, verse in items:
+            claim = claims[claim_id]
+            statement = str(claim.get("statement") or "").strip()
+            if not statement:
+                continue
+            verses.setdefault(statement, verse)
+            located, traces = spans_of(claim_id, statement)
+            for source_id, spans in located.items():
+                slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
+                slot["spans"].extend(spans)
+                target = slot["provenance"].setdefault(statement, {
+                    "claim_ids": [],
+                    "evidence_step_ids": [],
+                    "source_fragment_ids": [],
+                })
+                for key, values in traces.get(source_id, {}).items():
+                    for value in values:
+                        if value not in target[key]:
+                            target[key].append(value)
+
+        out: list[dict[str, Any]] = []
+        for source_id, slot in by_sermon.items():
+            sermon = sermons.load(source_id, documents.get(source_id) or {})
+            merged = stretch(slot["spans"], sermon.get("media_duration") if sermon else None)
+            if not merged or not sermon:
+                continue
+            out.append({
+                "source_id": source_id,
+                "transcript_id": sermon["transcript_id"],
+                "title": sermon["title"],
+                "media_kind": sermon["media_kind"],
+                "media_url": sermon["media_url"],
+                "media_duration": sermon["media_duration"],
+                "stretches": [{"start": a, "end": b} for a, b, _ in merged],
+                "judgements": [
+                    {**mark, **claim_points(mark, claims, steps, fragments)}
+                    for mark in judgement_during(
+                        slot["spans"], merged, verses, slot["provenance"]
+                    )
+                ],
+                "spoken": spoken_during(merged, sermon),
+                # 他什么时候念到哪一节。报节号是预告，念出来才算数。
+                "readings": [
+                    {"at": at, "scripture": slug}
+                    for at, slug in verse_readings(sermon, passage_verses)
+                    if any(begin <= at < finish for begin, finish, _ in merged)
+                ],
+                "original_language_events": original_language_during(merged, sermon),
+                "seconds": sum(b - a for a, b, _ in merged),
             })
-            for key, values in traces.get(source_id, {}).items():
-                for value in values:
-                    if value not in target[key]:
-                        target[key].append(value)
+        if whole_chapter is not None:
+            order = {lecture: index for index, lecture in enumerate(whole_chapter.lectures)}
+            out.sort(key=lambda row: order.get(row["transcript_id"], len(order)))
+        else:
+            out.sort(key=lambda row: -row["seconds"])
+        return out
 
-    sermons_out: list[dict[str, Any]] = []
-    for source_id, slot in by_sermon.items():
-        sermon = sermons.load(source_id, documents.get(source_id) or {})
-        merged = stretch(slot["spans"], sermon.get("media_duration") if sermon else None)
-        if not merged or not sermon:
-            continue
-        sermons_out.append({
-            "source_id": source_id,
-            "transcript_id": sermon["transcript_id"],
-            "title": sermon["title"],
-            "media_kind": sermon["media_kind"],
-            "media_url": sermon["media_url"],
-            "media_duration": sermon["media_duration"],
-            "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": [
-                {**mark, **claim_points(mark, claims, steps, fragments)}
-                for mark in judgement_during(
-                    slot["spans"], merged, verses, slot["provenance"]
-                )
-            ],
-            "spoken": spoken_during(merged, sermon),
-            # 他什么时候念到哪一节。报节号是预告，念出来才算数。
-            "readings": [
-                {"at": at, "scripture": slug}
-                for at, slug in verse_readings(sermon, passage_verses)
-                if any(begin <= at < finish for begin, finish, _ in merged)
-            ],
-            "original_language_events": original_language_during(merged, sermon),
-            "seconds": sum(b - a for a, b, _ in merged),
-        })
-    if whole_chapter is not None:
-        # 一章跨好几堂课，经文是按堂次往下讲的：（二）1 讲八福，（二）4 讲 5:32。
-        # 按堂次排，读者从上往下听就是从 5:1 讲到 5:48。
-        order = {lecture: index for index, lecture in enumerate(whole_chapter.lectures)}
-        sermons_out.sort(key=lambda row: order.get(row["transcript_id"], len(order)))
-    else:
-        sermons_out.sort(key=lambda row: -row["seconds"])
-
-    return {
+    index: dict[str, Any] = {
         "schema_version": "wang_original_audio_index_v4",
         # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
         # 页面地址，用的都是这一个 slug。
         "passage": passage,
         "label": format_chinese_reference(passage),
         "title": PASSAGE_TITLES.get(passage, ""),
-        "sermons": sermons_out,
+        "sermons": rows(chosen.items()),
     }
+    if whole_chapter is not None:
+        # 按经节次序分段，不按讲座次序（负责人 2026-11-03）。每条主张按它讲的
+        # 那一节的起点归段；一段里各篇讲道按堂次排。读者从上往下听，就是从
+        # 5:1 讲到 5:48——同一堂课会在几段里各出现一次，因为他在那一堂里讲了
+        # 好几处经文。
+        sections = [
+            {
+                "passage": section,
+                "label": format_chinese_reference(section),
+                "sermons": rows(
+                    (claim_id, verse)
+                    for claim_id, verse in chosen.items()
+                    if chapter_material.section_of(whole_chapter, verse) == section
+                ),
+            }
+            for section in whole_chapter.sections
+        ]
+        exclusive_minutes(sections)
+        # 没有材料的段不列：他在这一系列里没有单独讲这几节。
+        index["sections"] = [section for section in sections if section["sermons"]]
+    return index
+
+
+def exclusive_minutes(sections: list[dict[str, Any]]) -> None:
+    """同一堂课的同一分钟只归一段。
+
+    按经节次序从上往下听，同一段录音出现在两段里就会听两遍。太 5 量到两处，各一
+    分半：（二）1 开头讲登山寶訓结构时提到盐和光，既在 5:1-12 的 1–20 分里，又
+    是 5:13-16 的 3–4 分；（二）6 末尾讲结构，68–70 分同时落在 5:1-12 与 5:17-20。
+
+    较窄的那一段留下这几分钟，从较宽的那一段里剪掉——窄的是专讲那几节的，宽的
+    只是顺带经过。剪掉的时间里立的判断一并去掉，免得目录上点了跳不到。
+    """
+
+    owned: list[tuple[str, float, float]] = []
+    for section in sections:
+        for row in section["sermons"]:
+            for item in row["stretches"]:
+                owned.append((row["transcript_id"], item["start"], item["end"]))
+
+    for section in sections:
+        for row in section["sermons"]:
+            cuts = [
+                (start, end)
+                for transcript_id, start, end in owned
+                if transcript_id == row["transcript_id"]
+                and any(
+                    start < item["end"]
+                    and item["start"] < end
+                    and (end - start) < (item["end"] - item["start"])
+                    for item in row["stretches"]
+                )
+            ]
+            if not cuts:
+                continue
+            kept: list[dict[str, float]] = []
+            for item in row["stretches"]:
+                pieces = [(item["start"], item["end"])]
+                for cut_start, cut_end in cuts:
+                    next_pieces = []
+                    for a, b in pieces:
+                        if cut_end <= a or b <= cut_start or (cut_end - cut_start) >= (b - a):
+                            next_pieces.append((a, b))
+                            continue
+                        if a < cut_start:
+                            next_pieces.append((a, cut_start))
+                        if cut_end < b:
+                            next_pieces.append((cut_end, b))
+                    pieces = next_pieces
+                kept.extend({"start": a, "end": b} for a, b in pieces if b - a > 1)
+            removed = [
+                (a, b) for a, b in cuts
+                if any(item["start"] <= a and b <= item["end"] for item in row["stretches"])
+            ]
+            row["stretches"] = kept
+            row["judgements"] = [
+                mark for mark in row["judgements"]
+                if not any(a <= mark["at"] < b for a, b in removed)
+            ]
+            row["seconds"] = sum(item["end"] - item["start"] for item in kept)
+        section["sermons"] = [row for row in section["sermons"] if row["stretches"]]
 
 
 #: 有原声页面的经文段落。

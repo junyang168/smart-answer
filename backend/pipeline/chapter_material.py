@@ -52,6 +52,8 @@ class Chapter:
     #: (本章经文, 平行经文……)。平行经文落在本章之外，命中时这条主张讲的就是本
     #: 章的那一节。
     parallels: tuple[tuple[str, tuple[str, ...]], ...] = field(default_factory=tuple)
+    #: 页面按经节次序分段，用和合本的分段。
+    sections: tuple[str, ...] = field(default_factory=tuple)
 
 
 _NYSC_2 = "2011 NYSC 專題：馬太福音釋經（二）"
@@ -73,8 +75,30 @@ CHAPTERS: dict[str, Chapter] = {
             ("mat-5-38-42", ("luk-6-29-30",)),
             ("mat-5-43-48", ("luk-6-27-28", "luk-6-32-36")),
         ),
+        sections=(
+            "mat-5-1-12",
+            "mat-5-13-16",
+            "mat-5-17-20",
+            "mat-5-21-26",
+            "mat-5-27-30",
+            "mat-5-31-32",
+            "mat-5-33-37",
+            "mat-5-38-42",
+            "mat-5-43-48",
+        ),
     ),
 }
+
+
+def section_of(chapter: Chapter, verse: str) -> str | None:
+    """这一节归哪一段：看它的起点落在哪一段里。"""
+
+    _, _, start, _ = _range(verse)
+    for section in chapter.sections:
+        _, _, low, high = _range(section)
+        if low <= start <= high:
+            return section
+    return None
 
 
 def _occurs_in(claim: dict[str, Any], lectures: Iterable[str]) -> bool:
@@ -92,6 +116,48 @@ def _range(slug: str) -> tuple[str, int, int, int]:
         int(reference["chapter"]),
         int(reference["start"]),
         int(reference["end"]),
+    )
+
+
+#: 往外一步进来的主张，要在同一堂课里离某条起点主张多近才算「讲这节经文时
+#: 推出来的」。
+#:
+#: 量自太 5（2011（二），2026-11-03）：往外一步的 30 条里，有录音时间的都在
+#: 起点主张 9.3 分钟以内，只有一条在 23.7 分钟外——「解經必須運用理性……」，
+#: 他是在（二）6 讲太 6「不叫我們遇見試探」时说的，经 `applies` 连到第六堂末尾
+#: 讲登山寶訓结构的主张，于是太 6 的两分钟挂上了 5:3 的幻灯。这一页是要让听
+#: 的人专心在释经上（负责人），相隔半小时、在讲别处经文时说的话不算。
+NEAR_SECONDS = 600.0
+
+
+def _times(claim: dict[str, Any], lectures: Iterable[str]) -> dict[str, list[float]]:
+    """这条主张在各堂课里的录音时间（锚点所在段落的段首）。"""
+
+    wanted = set(lectures)
+    out: dict[str, list[float]] = {}
+    for occurrence in claim.get("occurrences") or []:
+        lecture = str(occurrence.get("transcript_id") or "")
+        if lecture not in wanted:
+            continue
+        for anchor in occurrence.get("anchors") or []:
+            if anchor.get("media_time") is not None:
+                out.setdefault(lecture, []).append(float(anchor["media_time"]))
+    return out
+
+
+def _near(one: dict[str, list[float]], other: dict[str, list[float]]) -> bool:
+    """这条主张是不是在同一堂课里、离某条起点主张 `NEAR_SECONDS` 以内讲的。
+
+    任一条没有录音时间就无从比较，也就不会上原声与幻灯，放行。
+    """
+
+    if not one or not other:
+        return True
+    return any(
+        abs(a - b) <= NEAR_SECONDS
+        for lecture, times in one.items()
+        for a in times
+        for b in other.get(lecture, ())
     )
 
 
@@ -129,11 +195,23 @@ def select(
                 break
 
     selected = dict(seeds)
+    times = {claim_id: _times(claim, chapter.lectures) for claim_id, claim in own.items()}
+    # 比的是离最近的那条起点主张，不只是关系连着的那条：雅各书那条（（二）3
+    # 54.5 分）连着的起点在 12 分，可 51–53 分他正讲着 5:28。
+    seed_times: dict[str, list[float]] = {}
+    for seed in seeds:
+        for lecture, values in times[seed].items():
+            seed_times.setdefault(lecture, []).extend(values)
     for relation in relations:
         if str(relation.get("relation_type") or "") not in RELATION_TYPES:
             continue
         ends = (str(relation.get("from_id") or ""), str(relation.get("to_id") or ""))
         for here, there in (ends, ends[::-1]):
-            if here in seeds and there in own and there not in selected:
+            if (
+                here in seeds
+                and there in own
+                and there not in selected
+                and _near(times[there], seed_times)
+            ):
                 selected[there] = seeds[here]
     return selected

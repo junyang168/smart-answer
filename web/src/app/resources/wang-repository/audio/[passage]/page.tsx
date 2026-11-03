@@ -215,6 +215,9 @@ function citedAt(sermon: Sermon, seconds: number, passage: string) {
   return cited && !inside(cited.scripture, passage) ? cited.label : "";
 }
 
+/** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
+type Section = { passage: string; label: string; sermons: Sermon[] };
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
@@ -222,13 +225,31 @@ export default function OriginalAudioPage() {
   const passage = String(useParams()?.passage ?? "");
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
-  const [sermons, setSermons] = useState<Sermon[] | null>(null);
+  const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
   const [paused, setPaused] = useState(false);
   // 幻灯的标题要跟着他讲到哪里换，所以得知道播到第几秒。
   const [at, setAt] = useState(0);
   const media = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
+  // 要跳到的那一刻，等新的播放器载入后再跳。
+  //
+  // 换一行就是换一个播放器元素。`setTimeout(0)` 时新元素常常还没挂上——自动接下
+  // 一段是在 timeupdate 里触发的，React 不急着提交——于是跳转落在旧元素上，新的
+  // 从 0:00 播起：5:13-16 放完，5:17-20 从（二）1 的开头放，而不是 36 分。
+  const pendingSeek = useRef<number | null>(null);
+
+  function applyPendingSeek() {
+    const element = media.current;
+    if (!element || pendingSeek.current === null) return;
+    // 离目标还远就跳，到了才算数。旧元素在卸下之前也可能收到这一跳，所以不能
+    // 跳一次就清掉——要等挂上的那个元素真的播到了那里。
+    if (Math.abs(element.currentTime - pendingSeek.current) > 1) {
+      element.currentTime = pendingSeek.current;
+    } else {
+      pendingSeek.current = null;
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -241,7 +262,9 @@ export default function OriginalAudioPage() {
         const data = await response.json();
         setLabel(data.label ?? "");
         setTitle(data.title ?? "");
-        setSermons(data.sermons ?? []);
+        setSections(
+          data.sections ?? [{ passage: data.passage, label: "", sermons: data.sermons ?? [] }],
+        );
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "讀不到");
       }
@@ -263,6 +286,7 @@ export default function OriginalAudioPage() {
     setPlaying({ sermon, index });
     setPaused(false);
     setAt(seconds);
+    pendingSeek.current = seconds;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
@@ -276,6 +300,7 @@ export default function OriginalAudioPage() {
     setPlaying({ sermon, index });
     setPaused(false);
     setAt(sermon.stretches[index].start);
+    pendingSeek.current = sermon.stretches[index].start;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
@@ -291,7 +316,7 @@ export default function OriginalAudioPage() {
    * 按的人以為自己暫停了，回來卻得從頭找。圖示承諾什麼，就要做什麼。
    */
   function toggle(sermon: Sermon) {
-    if (playing?.sermon.source_id !== sermon.source_id) {
+    if (playing?.sermon !== sermon) {
       play(sermon);
       return;
     }
@@ -307,6 +332,10 @@ export default function OriginalAudioPage() {
   function onTimeUpdate() {
     const element = media.current;
     if (!element || !playing) return;
+    if (pendingSeek.current !== null) {
+      applyPendingSeek();
+      return;
+    }
     setAt(element.currentTime);
     const stretch = playing.sermon.stretches[playing.index];
     if (element.currentTime < stretch.end) return;
@@ -314,6 +343,14 @@ export default function OriginalAudioPage() {
     if (next < playing.sermon.stretches.length) {
       element.currentTime = playing.sermon.stretches[next].start;
       setPlaying({ ...playing, index: next });
+      return;
+    }
+    // 这一行放完，接着放下一行。按章的页面是按经节次序排的，接着放就是接着往
+    // 下一节讲，哪怕下一行是另一堂课。
+    const rows = (sections ?? []).flatMap((section) => section.sermons);
+    const following = rows[rows.indexOf(playing.sermon) + 1];
+    if (following?.media_url) {
+      play(following);
     } else {
       element.pause();
     }
@@ -325,7 +362,7 @@ export default function OriginalAudioPage() {
         <p className="mx-auto max-w-4xl px-5 py-16 text-rose-800">{error}</p>
       </main>
     );
-  if (!sermons)
+  if (!sections)
     return (
       <main className="min-h-screen bg-stone-50">
         <p className="mx-auto max-w-4xl px-5 py-16 text-stone-600" role="status">
@@ -351,18 +388,30 @@ export default function OriginalAudioPage() {
             {title || label}
           </h1>
           <p className="max-w-3xl text-lg leading-8 text-stone-600">
-            他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
-            每一遍的理由都不一樣，所以不合併。
+            {sections.length > 1
+              ? `按經節次序，從 ${label} 一段段聽他講。每一段收他在各堂課裡講這幾節的原聲，放完自動接下一段；岔開去講別的、見證與無關的問答不收。`
+              : `他在 ${sections[0]?.sermons.length ?? 0} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。每一遍的理由都不一樣，所以不合併。`}
           </p>
         </header>
 
+        {sections.map((section) => (
+        <section key={section.passage} className="flex flex-col gap-3">
+        {section.label && (
+          <h2 className="font-serif text-xl font-bold text-stone-900">
+            {section.label}
+            <span className="ml-3 font-mono text-sm font-normal text-stone-400">
+              {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+            </span>
+          </h2>
+        )}
+
         <ul className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-        {sermons.map((sermon) => {
-          const open = playing?.sermon.source_id === sermon.source_id;
+        {section.sermons.map((sermon) => {
+          const open = playing?.sermon === sermon;
           const seconds = open ? at : (sermon.stretches[0]?.start ?? 0);
           const currentJudgement = judgementAt(sermon, seconds);
           return (
-            <li key={sermon.source_id}>
+            <li key={`${section.passage}-${sermon.source_id}`}>
               <button
                 type="button"
                 onClick={() => toggle(sermon)}
@@ -401,6 +450,7 @@ export default function OriginalAudioPage() {
                       controls
                       autoPlay
                       onTimeUpdate={onTimeUpdate}
+                      onLoadedMetadata={applyPendingSeek}
                       onPlay={() => setPaused(false)}
                       onPause={() => setPaused(true)}
                       className="w-full rounded-lg"
@@ -412,6 +462,7 @@ export default function OriginalAudioPage() {
                       controls
                       autoPlay
                       onTimeUpdate={onTimeUpdate}
+                      onLoadedMetadata={applyPendingSeek}
                       onPlay={() => setPaused(false)}
                       onPause={() => setPaused(true)}
                       className="w-full"
@@ -493,6 +544,8 @@ export default function OriginalAudioPage() {
           );
         })}
         </ul>
+        </section>
+        ))}
       </div>
     </main>
   );
