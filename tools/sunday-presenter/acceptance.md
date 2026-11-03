@@ -313,3 +313,14 @@ The owner was asked to perform the security exception and authentication
 personally. No quarantine removal, protection disablement or automated security
 exception was applied. New downloaded-install UI acceptance remains pending that
 manual confirmation. Developer ID signing/notarization is still absent.
+
+
+After the owner completed Open Anyway, the downloaded /Applications 0.3.2
+launched with the new playback controller. Process-path/version readback verified
+that exact installed copy. Its single weekly-folder action reused the retained
+Microsoft session and automatically opened/assigned both real 11/8 PPTs. Each
+was put into Office slideshow mode and confirmed/played through the new primary
+button. The installed app was left open with both decks ready and the controller
+visible for owner testing. Downloaded-install startup is therefore verified
+following an owner-granted Gatekeeper exception; this is not notarized first
+launch, and Meet/physical two-Mac acceptance remains pending.
