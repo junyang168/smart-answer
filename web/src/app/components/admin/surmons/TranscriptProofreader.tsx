@@ -1,6 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ReviewTextDiff } from "./ReviewTextDiff";
+import {
+  SubtitleSuggestions,
+  type SubtitleSuggestion,
+} from "./SubtitleSuggestions";
 import { useRouter } from "next/navigation";
 import { betaEditorDestination } from "./review-entry";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -309,7 +314,9 @@ function TranscriptProofreader({
   const current = useRef(initial);
   const reviewHeader = useRef<HTMLElement>(null);
   const [navigationTarget, setNavigationTarget] = useState<{ id: string }>();
-  const [selected, setSelected] = useState(initial.script[0]?.index || "");
+  const [selected, setSelected] = useState(
+    initial.script.find((p) => p.type !== "subtitle")?.index || "",
+  );
   const [activeGroup, setActiveGroup] = useState<SlideInspection>();
   const [peekSlide, setPeekSlide] = useState<string>();
   const [baseline, setBaseline] = useState<Row[] | null>(null);
@@ -329,6 +336,11 @@ function TranscriptProofreader({
     revision: number;
   }>();
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [generatingHeadings, setGeneratingHeadings] = useState(false);
+  const [headingSuggestions, setHeadingSuggestions] = useState<{
+    version: string;
+    insertions: SubtitleSuggestion[];
+  }>();
   const [recovered, setRecovered] = useState<Pending>();
   const queue = useRef<Operation[]>([]);
   const packet = useRef<Packet>();
@@ -342,7 +354,9 @@ function TranscriptProofreader({
   const contextPlayback = useRef(false);
   const video = useRef<HTMLMediaElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const selectedParagraph = useRef(initial.script[0]?.index || "");
+  const selectedParagraph = useRef(
+    initial.script.find((p) => p.type !== "subtitle")?.index || "",
+  );
   const playbackParagraph = useRef<string>();
   const selectParagraph = useCallback((id: string) => {
     if (selectedParagraph.current !== id) {
@@ -740,10 +754,13 @@ function TranscriptProofreader({
       });
       await flush();
       if (kind === "paragraph_review" && decision === "confirmed") {
-        const n = current.current.script.findIndex((p) => p.index === id);
-        if (n < current.current.script.length - 1) {
+        const spoken = current.current.script.filter(
+          (p) => p.type !== "subtitle",
+        );
+        const n = spoken.findIndex((p) => p.index === id);
+        if (n < spoken.length - 1) {
           focusNext.current = true;
-          selectParagraph(current.current.script[n + 1].index);
+          selectParagraph(spoken[n + 1].index);
         }
       }
     } catch (error) {
@@ -936,8 +953,9 @@ function TranscriptProofreader({
       doc.paragraph_shas,
       editedParagraphIds,
     );
-  const confirmed = doc.script.filter((p) => paragraphReviewed(p.index)).length;
-  const pendingParagraph = doc.script.find((p) => !paragraphReviewed(p.index));
+  const spokenRows = doc.script.filter((p) => p.type !== "subtitle");
+  const confirmed = spokenRows.filter((p) => paragraphReviewed(p.index)).length;
+  const pendingParagraph = spokenRows.find((p) => !paragraphReviewed(p.index));
   const timingBlocked = Boolean(
     doc.context.timing_quality &&
     doc.context.timing_quality.status !== "qualified",
@@ -963,7 +981,12 @@ function TranscriptProofreader({
       doc.context.reviews["g:" + g.id]?.decision === "confirmed" &&
       doc.context.reviews["g:" + g.id]?.sha256 === doc.group_shas[g.id],
   ).length;
-  const disabled = !doc.can_edit || busy || blocked.current || !ready;
+  const disabled =
+    !doc.can_edit ||
+    busy ||
+    blocked.current ||
+    !ready ||
+    Boolean(headingSuggestions);
   useEffect(() => {
     editor.current?.setOption("readOnly", disabled);
   }, [disabled]);
@@ -1100,6 +1123,72 @@ function TranscriptProofreader({
       setBusy(false);
     }
   };
+  const generateHeadings = async () => {
+    setGeneratingHeadings(true);
+    setBusy(true);
+    setFailure("");
+    try {
+      await flush();
+      const d = current.current;
+      const result = await request<{
+        version: string;
+        insertions: SubtitleSuggestion[];
+      }>(base + "/heading_suggestions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": `"${d.version}"`,
+        },
+        body: JSON.stringify({
+          operation_id: crypto.randomUUID(),
+          version: d.version,
+          epoch: d.epoch,
+        }),
+      });
+      const existing = new Set<string>();
+      let previous = "START";
+      d.script.forEach((p) => {
+        if (p.type === "subtitle")
+          existing.add(`${previous}:${p.text.startsWith("### ") ? 2 : 1}`);
+        else previous = p.index;
+      });
+      const insertions = result.insertions.filter(
+        (s) => !existing.has(`${s.after_index}:${s.level}`),
+      );
+      if (insertions.length) setHeadingSuggestions({ ...result, insertions });
+      else setFailure("已保留既有小標題；AI 本次沒有可加入的新建議。");
+    } catch (e) {
+      setFailure((e as Error).message);
+    } finally {
+      setGeneratingHeadings(false);
+      setBusy(false);
+    }
+  };
+  const saveHeadingChanges = async (operation: Operation) => {
+    setBusy(true);
+    setFailure("");
+    try {
+      await flush();
+      enqueue(operation);
+      await flush();
+      updateDoc(await loadDocument(base));
+      setHeadingSuggestions(undefined);
+    } catch (e) {
+      setFailure((e as Error).message);
+      setHeadingSuggestions(undefined);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const editHeading = (id: string, text: string) => {
+    updateDoc({
+      ...current.current,
+      script: current.current.script.map((p) =>
+        p.index === id ? { ...p, text } : p,
+      ),
+    });
+    enqueue({ kind: "text", id, text });
+  };
   const saveStatus = !ready
     ? "正在檢查本機草稿…"
     : recovered
@@ -1122,6 +1211,21 @@ function TranscriptProofreader({
       }}
       className="mx-auto max-w-[1700px] p-3 md:p-6 text-slate-800"
     >
+      {headingSuggestions && (
+        <SubtitleSuggestions
+          suggestions={headingSuggestions.insertions}
+          busy={busy}
+          onClose={() => setHeadingSuggestions(undefined)}
+          onApply={(insertions) =>
+            void saveHeadingChanges({
+              kind: "subtitles",
+              id: "editorial-subtitles",
+              source_version: headingSuggestions.version,
+              insertions,
+            })
+          }
+        />
+      )}
       <header
         ref={reviewHeader}
         className="sticky top-0 z-20 rounded-xl border bg-white/95 p-4 shadow-sm backdrop-blur"
@@ -1145,6 +1249,14 @@ function TranscriptProofreader({
           <div className="flex flex-wrap gap-2">
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
+            </button>
+            <button
+              hidden
+              className={button}
+              disabled={disabled}
+              onClick={() => void generateHeadings()}
+            >
+              {generatingHeadings ? "正在產生小標題…" : "加小標題"}
             </button>
             <button
               className={button}
@@ -1254,7 +1366,7 @@ function TranscriptProofreader({
         </div>
         <div className="mt-3 flex flex-wrap gap-4 text-sm">
           <span>
-            口述已核對 {confirmed}/{doc.script.length}
+            口述已核對 {confirmed}/{spokenRows.length}
           </span>
           <span>
             圖片已處理 {groupsConfirmed}/{doc.context.groups.length}
@@ -1617,7 +1729,7 @@ function TranscriptProofreader({
                     <option value="" disabled>
                       尚未指定
                     </option>
-                    {doc.script.map((p) => (
+                    {spokenRows.map((p) => (
                       <option key={p.index} value={p.index}>
                         {stamp(
                           doc.context.paragraph_bindings[p.index].start_ms,
@@ -1709,7 +1821,65 @@ function TranscriptProofreader({
           </section>
         </aside>
         <section className="min-w-0 space-y-3" aria-label="逐段校對">
-          {doc.script.map((p, i) => {
+          {doc.script.map((p) => {
+            if (p.type === "subtitle")
+              return (
+                <section
+                  key={p.index}
+                  className="rounded-lg border bg-blue-50 p-4"
+                  aria-label="編輯小標題"
+                >
+                  <p className="mb-2 text-xs text-slate-500">
+                    小標題（編輯整理，非口述）
+                  </p>
+                  {doc.can_edit ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        aria-label="小標題文字"
+                        className="min-w-0 flex-1 rounded border bg-white p-2 font-semibold"
+                        value={p.text.replace(/^#{1,6}\s*/, "")}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          editHeading(
+                            p.index,
+                            `${p.text.match(/^(#{1,6})\s/)?.[1] || "##"} ${e.target.value}`,
+                          )
+                        }
+                      />
+                      <button
+                        className={button}
+                        disabled={disabled}
+                        onClick={() =>
+                          void saveHeadingChanges({
+                            kind: "remove_subtitle",
+                            id: p.index,
+                          })
+                        }
+                      >
+                        移除
+                      </button>
+                    </div>
+                  ) : (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {p.text}
+                    </ReactMarkdown>
+                  )}
+                  {baseline &&
+                    baseline.find((v) => v.index === p.index)?.text !==
+                      p.text && (
+                      <details className="mt-2 text-sm">
+                        <summary>與原稿的差異</summary>
+                        <ReviewTextDiff
+                          before={
+                            baseline.find((v) => v.index === p.index)?.text
+                          }
+                          after={p.text}
+                        />
+                      </details>
+                    )}
+                </section>
+              );
+            const i = spokenRows.findIndex((row) => row.index === p.index);
             const active = p.index === selected;
             const binding = doc.context.paragraph_bindings[p.index];
             const review = doc.context.reviews["p:" + p.index];
@@ -1797,7 +1967,7 @@ function TranscriptProofreader({
                   <span
                     className={reviewed ? "text-green-700" : "text-slate-500"}
                   >
-                    {i + 1}/{doc.script.length} ·{" "}
+                    {i + 1}/{spokenRows.length} ·{" "}
                     {reviewed
                       ? "已核對"
                       : review?.decision === "question"
@@ -1810,12 +1980,10 @@ function TranscriptProofreader({
                     p.text && (
                     <details className="mb-3 rounded bg-amber-50 p-2 text-sm">
                       <summary>與原稿的差異</summary>
-                      <del className="block whitespace-pre-wrap text-red-800">
-                        {baseline.find((v) => v.index === p.index)?.text}
-                      </del>
-                      <ins className="block whitespace-pre-wrap text-green-800 no-underline">
-                        {p.text}
-                      </ins>
+                      <ReviewTextDiff
+                        before={baseline.find((v) => v.index === p.index)?.text}
+                        after={p.text}
+                      />
                     </details>
                   )}
                 {active && doc.can_edit ? (
@@ -1865,14 +2033,14 @@ function TranscriptProofreader({
                       <button
                         className={button}
                         disabled={i === 0 || busy}
-                        onClick={() => selectParagraph(doc.script[i - 1].index)}
+                        onClick={() => selectParagraph(spokenRows[i - 1].index)}
                       >
                         上一段
                       </button>
                       <button
                         className={button}
-                        disabled={i === doc.script.length - 1 || busy}
-                        onClick={() => selectParagraph(doc.script[i + 1].index)}
+                        disabled={i === spokenRows.length - 1 || busy}
+                        onClick={() => selectParagraph(spokenRows[i + 1].index)}
                       >
                         下一段
                       </button>
@@ -2058,15 +2226,20 @@ function HistoryDiff({
       {changes.map((p) => (
         <div key={p.index} className="rounded border p-3">
           <p className="text-sm text-slate-500">段落 {p.index}</p>
-          <del className="block whitespace-pre-wrap bg-red-50 p-2">
-            {previous.script.find((v) => v.index === p.index)?.text ||
-              "（新增）"}
-          </del>
-          <ins className="block whitespace-pre-wrap bg-green-50 p-2 no-underline">
-            {p.text}
-          </ins>
+          <ReviewTextDiff
+            before={previous.script.find((v) => v.index === p.index)?.text}
+            after={p.text}
+          />
         </div>
       ))}
+      {previous.script
+        .filter((p) => !snapshot.script.some((v) => v.index === p.index))
+        .map((p) => (
+          <div key={p.index} className="rounded border p-3">
+            <p className="text-sm text-slate-500">已移除小標題</p>
+            <ReviewTextDiff before={p.text} after="" />
+          </div>
+        ))}
       {groups.map((g) => {
         const before = previous.context.groups?.find((v) => v.id === g.id);
         return (

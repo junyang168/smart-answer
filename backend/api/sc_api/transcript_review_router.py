@@ -186,6 +186,34 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             raise HTTPException(412, "缺少正確版本條件")
         return call(lambda: prepare_recovery(store, actor, item, payload))
 
+    @router.post("/review_document/{item}/heading_suggestions")
+    async def heading_suggestions(item: str, request: Request):
+        from starlette.concurrency import run_in_threadpool
+        from backend.pipeline.subtitle_generation import generate_subtitles, SubtitleGenerationError
+        from backend.pipeline.source_projection import spoken_source_rows
+        raw = await request.body()
+        actor = authenticated_actor(request, raw)
+        payload = await payload_from(request)
+        if request.headers.get("if-match", "").strip('"') != payload.get("version"):
+            raise HTTPException(412, "缺少正確版本條件")
+        def capture():
+            with store.lock(item):
+                store.require(actor, item, write=True, epoch=payload.get("epoch"))
+                rows, context = store.load(item)
+                store.version(rows, context, payload["version"])
+                return spoken_source_rows(live_script(rows))
+        rows = call(capture)
+        try:
+            suggestions = await run_in_threadpool(generate_subtitles, rows, subject=item,
+                consumer="sermon_editor", trigger="beta_panel")
+        except SubtitleGenerationError as exc:
+            raise HTTPException(502, f"AI 產生小標題失敗：{exc}") from exc
+        except Exception as exc:
+            raise HTTPException(502, f"AI 產生小標題失敗：{type(exc).__name__}") from exc
+        # Recheck claim/version after the model returns; never offer stale suggestions.
+        call(capture)
+        return {"version": payload["version"], "insertions": suggestions}
+
     @router.post("/review_document/{item}/{action}")
     async def command(item: str, action: str, request: Request):
         raw = await request.body()
