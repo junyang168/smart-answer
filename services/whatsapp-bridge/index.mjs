@@ -192,7 +192,7 @@ const server = http.createServer(async (req, res) => {
         return reply(422, { error: "Only registered assistant messages may be sent" });
       }
       if (!allowedBySettings(sendConfig, key)) return reply(200, { status: "held", reason: "disabled_by_settings" });
-      if ((key.startsWith("friday:") || key.startsWith("ppt-ready:")) && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
+      if ((key.startsWith("friday:") || key.startsWith("ppt-ready:") || key.startsWith("absence-query:")) && (!synced || Object.keys(journal.data.pending).length || !lastSyncAt || Date.now() - Date.parse(lastSyncAt) > 60000)) {
         return reply(200, { status: "deferred" });
       }
       const result = await journal.send(key, group_id, text, async () => {

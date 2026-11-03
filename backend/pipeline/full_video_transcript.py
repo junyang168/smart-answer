@@ -573,6 +573,19 @@ def audit_frame_pts(video: Path, manifest: dict) -> dict:
             'time_base':str(base),'max_sample_rounding_delta_ms':maximum,'errors':errors}
 
 
+def leading_padding_match(resolved: dict, clip: dict, prior_start_ms: int, previous_end_ms: int) -> bool:
+    """Detect a start glued to padding and overlapping preceding speech.
+
+    This is a retry signal, never a fabricated/clamped acoustic timestamp.
+    The repeated opening words must be aligned again without the prior tail.
+    """
+    origin_ms = sample_ms(clip['source_origin_sample'])
+    return (resolved.get('start_ms') is not None
+            and 0 <= resolved['start_ms'] - origin_ms <= 80
+            and prior_start_ms - resolved['start_ms'] >= 2500
+            and previous_end_ms - resolved['start_ms'] > 500)
+
+
 def refine_backward_predictions(out: Path, python: Path) -> None:
     """One acoustic retry for backward/late partial timing, retaining originals."""
     master=read(out/'master.json');samples=read_audio(out/'master.wav');previous=None
@@ -590,7 +603,10 @@ def refine_backward_predictions(out: Path, python: Path) -> None:
                     prior_start = w.get('start_ms', 0) + p['start_ms']
                     begin = previous['end_ms'] * 16
                     partial = resolved['invalid_or_foreign_units'] > resolved['acoustic_anchor_count'] / 2
-                    if (partial and resolved['start_ms'] - prior_start > 3000
+                    if (leading_padding_match(resolved, c, prior_start, previous['end_ms'])
+                        and c['source_origin_sample'] < begin < c['source_origin_sample'] + c['sample_count']):
+                        bad.append((p['id'],begin,slides.object_sha(raw),'leading_clip_edge_alignment_in_previous_speech_padding'))
+                    elif (partial and resolved['start_ms'] - prior_start > 3000
                         and c['source_origin_sample'] < begin < c['source_origin_sample'] + c['sample_count']):
                         bad.append((p['id'],begin,slides.object_sha(raw),'late_partial_alignment_in_preceding_speech_padding'))
                         late_retry = True
@@ -614,7 +630,7 @@ def refine_backward_predictions(out: Path, python: Path) -> None:
         save(folder/'final_alignment_ref.json',{**ref,'folder':str(refined.relative_to(folder)),
             'timing_refinement':'one_acoustic_retry_with_neighbour_bound','parent_folder':ref['folder']})
 
-def finish(out: Path, video: Path) -> dict:
+def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     master, report, evidence = read(out/'master.json'), read(out/'slides/report.json'), read(out/'visual-evidence/slide_evidence.json')
     if sha(video) != master['source_sha256']:
         raise ValueError('Source video changed before final review')
@@ -710,6 +726,13 @@ def finish(out: Path, video: Path) -> dict:
     record['script_converter']={'config':'OpenCC s2t','version':version('opencc-python-reimplemented')}
     if vocabulary_from_manifest(master) is not None:
         record['vocabulary_hint'] = master['vocabulary_hint']
+    save(out/'full_transcript.json',record)
+    from backend.pipeline.contextual_transcript_timing import qualify_staged_record
+    record = qualify_staged_record(out,record,aligner_python)
+    paragraphs = record['paragraphs']
+    audit['contextual_timing_quality'] = record['timing_quality']
+    save(out/'timing_audit.json',audit)
+    record['timing_audit_sha256'] = sha(out/'timing_audit.json')
     save(out/'full_transcript.json',record)
     transcript_sha=sha(out/'full_transcript.json')
     visual_binding=lambda a:{'channel':'slide_visual','asset_id':a['asset_id'],
@@ -843,7 +866,7 @@ def main():
         refine_backward_predictions(out,args.aligner_python)
         if manifest is not None:
             save(out/'frame_pts_audit.json',audit_frame_pts(args.video,manifest))
-        print(finish(out,args.video),flush=True)
+        print(finish(out,args.video,args.aligner_python),flush=True)
     elif args.stage=='handoff':
         from backend.pipeline.video_transcript_handoff import export_handoff
         print(export_handoff(out),flush=True)
@@ -865,6 +888,6 @@ def main():
             if args.window and w['id'] not in args.window:continue
             folder=out/f'windows/{w["id"]}'
             align(folder/read(folder/'final_alignment_ref.json')['folder'],args.aligner_python)
-    else:print(finish(out,args.video),flush=True)
+    else:print(finish(out,args.video,args.aligner_python),flush=True)
 
 if __name__=='__main__':main()

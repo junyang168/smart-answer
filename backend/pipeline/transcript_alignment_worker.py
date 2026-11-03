@@ -32,6 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--device', choices=['cpu', 'mps'], default='mps')
+    parser.add_argument('--decode-profile',choices=['raw','monotonic'],default='raw')
     args = parser.parse_args()
     import numpy as np
     import torch
@@ -43,6 +44,8 @@ def main():
               'dtype': 'float16' if args.device == 'mps' else 'float32',
               'torch': torch.__version__, 'transformers': transformers.__version__,
               'decode': 'raw argmax timestamp classes; no interpolation', 'language': 'Chinese'}
+    if args.decode_profile=='monotonic':
+        config['decode_profile']='monotonic-logit-path.v1'
     processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
     model = AutoModelForTokenClassification.from_pretrained(MODEL, revision=REVISION,
         dtype=torch.float16 if args.device == 'mps' else torch.float32, attn_implementation='sdpa').to(args.device).eval()
@@ -78,7 +81,14 @@ def main():
         segment_ms = processor.timestamp_segment_time
         items = [{'text': token, 'start_ms': round(classes[2*i] * segment_ms),
                   'end_ms': round(classes[2*i+1] * segment_ms)} for i, token in enumerate(word_lists[0])]
-        save(target, {'schema_version': 'raw-forced-alignment.v1', 'identity': identity,
+        decoded={}
+        if args.decode_profile=='monotonic':
+            from backend.pipeline.monotonic_acoustic_decode import monotonic_path
+            matrix=outputs.logits[0][mask].detach().float().cpu().numpy()
+            path,diagnostics=monotonic_path(matrix,int(len(samples)/16000*1000//segment_ms))
+            decoded={'monotonic_items':[{'text':token,'start_ms':round(path[2*i]*segment_ms),'end_ms':round(path[2*i+1]*segment_ms)} for i,token in enumerate(word_lists[0])],
+                     'monotonic_diagnostics':diagnostics}
+        save(target, {**decoded,'schema_version': 'raw-forced-alignment.v1', 'identity': identity,
              'chunk_id': chunk['id'], 'items': items, 'timestamp_class_ids': classes,
              'timestamp_class_ms': segment_ms, 'wall_seconds': time.perf_counter() - started})
         del inputs, outputs
