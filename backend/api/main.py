@@ -47,6 +47,7 @@ from .wang_essay_runs import router as wang_essay_runs_router
 from .wang_inbox import router as wang_inbox_router
 from .wang_knowledge_graph import router as wang_knowledge_graph_router
 from .wang_runs import router as wang_runs_router
+from .claim_refresh_progress import router as claim_refresh_progress_router
 
 app = FastAPI()
 
@@ -98,6 +99,7 @@ app.include_router(wang_essay_runs_router)
 app.include_router(wang_inbox_router)
 app.include_router(wang_knowledge_graph_router)
 app.include_router(wang_runs_router)
+app.include_router(claim_refresh_progress_router)
 
 
 def _release_identity() -> dict[str, str]:

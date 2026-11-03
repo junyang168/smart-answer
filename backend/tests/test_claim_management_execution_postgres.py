@@ -842,6 +842,17 @@ def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(act
     assert after['engineering_review_recoveries'][0]['original_round']=={k:v for k,v in before.items() if k not in {'run_id','status','error'}}
     assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
     assert recover_returned_review(store,rid,authorization=binding(direction))==path
+    # A later transaction-only recovery sees relocated stage receipts, while
+    # the original completed call slots must retain their original bindings.
+    again=tmp_path/'returned-review-recovery-again.json'
+    again.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'recover the same saved review again without repeating calls',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json(
+            {k:v for k,v in after.items() if k not in {'run_id','status','error'}})}))
+    second=recover_returned_review(store,rid,authorization=binding(again))
+    assert second!=path
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert ports.calls==['opus']
     result=execute_claim_management(store,request,root=root,ports=ports)
     assert result['status']=='completed',result
     assert ports.calls==['opus']
@@ -1012,10 +1023,10 @@ def test_unrecorded_negative_review_recovery_records_human_outcome_without_calls
         result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='persistent',reason='source needs clarification',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
         return result.model_dump(mode='json')
     actual=cm.finding_blocks
-    def old(finding,request=None,candidate=None):
+    def old(finding,request=None,candidate=None,**kwargs):
         if candidate and not finding.get('affected_target_keys') and any(d.record_key==finding['target_key'] and d.action!='retain' for d in candidate.dispositions):
             raise ValueError('target or actual write finding cannot be dismissed as readonly context')
-        return actual(finding,request,candidate)
+        return actual(finding,request,candidate,**kwargs)
     monkeypatch.setattr(cm,'finding_blocks',old)
     before=store.get_record_state('observations','O');ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=propose)
     result=execute_claim_management(store,request,root=root,ports=ports)

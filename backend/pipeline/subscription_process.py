@@ -54,8 +54,13 @@ def run(command, *, input, env, timeout, directory, cwd=None, replay_only=False)
     save(request, intent)
     with out.open('x') as stdout, err.open('x') as stderr:
         try:
+            from backend.pipeline.claim_model_capacity import inherited_fds
+            protected = inherited_fds()
+            inherited = tuple(int(fd) for fd in env.get('WKP_CLAIM_BATCH_LOCK_FDS', '').split(',') if fd)
+            sources = tuple(int(fd) for fd in env.get('WKP_CLAIM_SOURCE_LOCK_FDS', '').split(',') if fd)
+            options = {'pass_fds': tuple(dict.fromkeys(protected + inherited + sources))} if protected else {}
             completed = subprocess.run(command, input=input, text=True, env=env, cwd=cwd,
-                                       stdout=stdout, stderr=stderr, timeout=timeout, check=False)
+                                       stdout=stdout, stderr=stderr, timeout=timeout, check=False, **options)
             exit_state = {'returncode': completed.returncode}
         except BaseException as exc:
             exit_state = {'error_type': type(exc).__name__, 'returncode': None}
