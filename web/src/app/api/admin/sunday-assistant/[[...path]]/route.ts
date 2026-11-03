@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionWithDevFallback } from "@/app/utils/auth";
+import { hasEditorAccess } from "@/app/utils/roles";
 
 async function proxy(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
   const session = await getSessionWithDevFallback();
-  if (!session?.user || !["admin", "editor"].includes(session.user.role || "")) {
+  if (!session?.user || !hasEditorAccess(session.user.role)) {
     return NextResponse.json({ error: "需要同工管理權限" }, { status: 403 });
   }
   const secret = process.env.SUNDAY_ASSISTANT_SECRET;
