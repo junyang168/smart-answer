@@ -13,7 +13,7 @@ const route = ts.transpileModule(
   readFileSync(new URL("../src/app/api/admin/sunday-assistant/[[...path]]/route.ts", import.meta.url), "utf8"),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
-function harness(session) {
+function harness(session, mailAccess = false) {
   const calls = [];
   const exports = {};
   vm.runInNewContext(route, {
@@ -22,6 +22,7 @@ function harness(session) {
       if (name === "next/server") return require(name);
       if (name === "@/app/utils/auth") return { getSessionWithDevFallback: async () => session };
       if (name === "@/app/utils/roles") return { hasEditorAccess };
+      if (name === "@/app/utils/sunday-gmail-access") return { canReviewSundayGmail: async () => mailAccess };
       throw new Error(`Unexpected module ${name}`);
     },
     process: { env: { SUNDAY_ASSISTANT_SECRET: "synthetic-test-only", FULL_ARTICLE_SERVICE_URL: "http://backend.invalid" } },
@@ -73,4 +74,16 @@ test("beta editor access retains origin checks and the browser endpoint allow-li
   assert.equal(app.calls.length, 0);
   assert.equal((await app.request("PUT", ["settings"], "https://church.test")).status, 200);
   assert.equal(app.calls.length, 1);
+});
+
+
+test("personal Gmail state and decisions require a designated reviewer as well as editor access", async () => {
+  const editor=harness({user:{role:"editor",email:"coworker@example.com"}});
+  assert.equal((await editor.request("GET",["gmail","state"])).status,403);
+  assert.equal((await editor.request("POST",["gmail","files","a".repeat(64)],"https://church.test")).status,403);
+  assert.equal(editor.calls.length,0);
+  const owner=harness({user:{role:"beta_tester",email:"owner@example.com"}},true);
+  assert.equal((await owner.request("GET",["gmail","state"])).status,200);
+  assert.equal((await owner.request("POST",["gmail","files","a".repeat(64)],"https://church.test")).status,200);
+  assert.equal((await owner.request("POST",["gmail","files","a".repeat(64)],"https://other.test")).status,403);
 });

@@ -542,3 +542,18 @@ Under `$DATA_BASE_DIR/wang-knowledge-platform/deployment-backups/`:
 Content and knowledge-platform work uses `WKP-` and carries no label. Keeping
 them apart matters: a mixed list is unreadable, and the two have different
 reviewers and different risk.
+
+### Sunday speaker Gmail intake
+
+Speaker attachment intake runs in its own bounded thread within the existing
+Sunday worker. Configure `$DATA_BASE_DIR/config/sunday_gmail.json` using
+`scripts/configure-sunday-gmail.py`, with private per-mailbox tokens outside
+website data; authorize each mailbox with `scripts/authorize-sunday-gmail.py`.
+This never expands or replaces the shared Drive/Docs token. See
+[Sunday assistant Gmail setup](sunday-assistant.md#gmail-私有設定與授權).
+Deploying code does not grant Gmail access. The account holder must consent to
+read-only access, and the profile must match the configured mailbox before the
+worker reads messages. Internal errors join existing admin incident monitoring;
+missing consent and ambiguous mail remain setup/review states. Saturday 22:00
+Dallas speaker-PPT follow-up has an independent admin-group-only switch and does
+not enable source-group questions or Friday reminders.

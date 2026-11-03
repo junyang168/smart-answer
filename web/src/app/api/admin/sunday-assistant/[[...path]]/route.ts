@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionWithDevFallback } from "@/app/utils/auth";
 import { hasEditorAccess } from "@/app/utils/roles";
+import { canReviewSundayGmail } from "@/app/utils/sunday-gmail-access";
 
 async function proxy(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
   const session = await getSessionWithDevFallback();
@@ -14,9 +15,12 @@ async function proxy(request: NextRequest, props: { params: Promise<{ path?: str
   }
   const { path = [] } = await props.params;
   const joined = path.join("/");
+  if (path[0] === "gmail" && !await canReviewSundayGmail(session.user.email, session.user.role)) {
+    return NextResponse.json({ error: "此 Gmail 接收紀錄僅供已指定的郵箱核對人查看" }, { status: 403 });
+  }
   // Ingestion/config endpoints are for the local bridge, never browser clients.
-  const allowed = request.method === "GET" ? /^(state|groups|ppt-ready\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{64})$/ :
-    request.method === "PUT" ? /^settings$/ : /^(connect|tick|identity-audit|admin-help-test|proposals\/\d+|messages\/[^/]+\/retry|ppt-retry\/\d{4}-\d{2}-\d{2})$/;
+  const allowed = request.method === "GET" ? /^(state|groups|gmail\/state|ppt-ready\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{64})$/ :
+    request.method === "PUT" ? /^settings$/ : /^(gmail\/files\/[a-f0-9]{64}|gmail\/messages\/[a-f0-9]{64}\/retry|connect|tick|identity-audit|admin-help-test|proposals\/\d+|messages\/[^/]+\/retry|ppt-retry\/\d{4}-\d{2}-\d{2})$/;
   if (!allowed.test(joined)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (request.method !== "GET") {
     const origin = request.headers.get("origin");
@@ -29,7 +33,7 @@ async function proxy(request: NextRequest, props: { params: Promise<{ path?: str
       method: request.method,
       headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       body: request.method === "GET" ? undefined : await request.text(),
-      cache: "no-store", signal: AbortSignal.timeout(20000),
+      cache: "no-store", signal: AbortSignal.timeout(joined.startsWith("gmail/files/") ? 60000 : 20000),
     });
     if (joined.startsWith("ppt-ready/") && response.ok) {
       return new NextResponse(await response.arrayBuffer(), { status: response.status, headers: {
