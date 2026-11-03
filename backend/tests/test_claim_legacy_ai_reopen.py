@@ -24,10 +24,28 @@ def seed(store, fault=None):
     state = store.get_record_state('claims', 'C')
     if fault == 'changed_revision':
         store.record_review('claims', 'C', decision='human_review_required', reviewer_kind='system', reason='later hold')
+    if fault in {'inherited_occurrences','changed_teaching','changed_note'}:
+        payload=deepcopy(state['payload'])
+        if fault=='inherited_occurrences':payload['occurrences'][0]['canonical_evidence_step_ids']=['EC']
+        elif fault=='changed_teaching':payload['statement']='a different later teaching'
+        else:payload['review_note']='different unresolved source decision'
+        # Disposable SQL fixture: an old edit inherited the AI flag but did
+        # not generate a new review. Do not forge a sealed content approval.
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        payload['revision']=state['revision']+1
+        digest=record_content_sha(payload)
+        with store.connect() as conn:
+            conn.execute("""INSERT INTO wang_knowledge.object_versions
+                (collection,object_id,revision,content_sha256,payload,change_set_id)
+                SELECT 'claims','C',%s,%s,%s::jsonb,change_set_id FROM wang_knowledge.object_versions
+                WHERE collection='claims' AND object_id='C' AND revision=%s""",
+                (payload['revision'],digest,json.dumps(payload),state['revision']))
+            conn.execute("UPDATE wang_knowledge.objects SET revision=%s,content_sha256=%s,payload=%s::jsonb WHERE collection='claims' AND object_id='C'",
+                (payload['revision'],digest,json.dumps(payload)))
     return state
 
 
-@pytest.mark.parametrize('fault', [None, 'human', 'earlier_human', 'source_uncertain', 'changed_revision'])
+@pytest.mark.parametrize('fault', [None, 'inherited_occurrences', 'changed_teaching', 'changed_note', 'human', 'earlier_human', 'source_uncertain', 'changed_revision'])
 def test_reopening_is_opt_in_and_does_not_promote_other_holds(claims, fault):
     store, root = claims
     seed(store, fault)
@@ -36,7 +54,7 @@ def test_reopening_is_opt_in_and_does_not_promote_other_holds(claims, fault):
     assert not default['manifest'] and default['excluded']['C']['reason'] == 'human_hold'
     prepared = intake.prepare(['C'], root/'explicit', instruction='Update C', store=store,
         legacy_ai_findings_direction='所有 human review required 都要 refresh')
-    if fault:
+    if fault not in {None,'inherited_occurrences'}:
         assert not prepared['manifest'] and prepared['excluded']['C']['reason'] == 'human_hold'
         assert store.get_record_state('claims', 'C') == before
         return

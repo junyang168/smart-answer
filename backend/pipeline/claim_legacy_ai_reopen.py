@@ -6,7 +6,7 @@ at proposal and commit through the existing metadata projection.
 """
 import re
 
-from backend.api.canonical_repository.postgres_store import sha256_json
+from backend.api.canonical_repository.postgres_store import sha256_json, record_content_sha
 
 
 def marker(cursor, claim_id, state):
@@ -18,21 +18,24 @@ def marker(cursor, claim_id, state):
     if not events or any(row[1] == 'human' for row in events):
         return None
     revision, kind, decision, artifact, reason = events[0]
-    if (revision != state['revision'] or kind != 'ai' or decision != 'human_review_required'
+    if (revision > state['revision'] or kind != 'ai' or decision != 'human_review_required'
             or not isinstance(artifact, dict) or set(artifact) != {'change_set_id'}
             or not isinstance(artifact['change_set_id'], str)
             or not re.fullmatch(r'KCS-REVIEW-[a-f0-9]{20}', artifact['change_set_id'])
             or not isinstance(reason, str) or not reason.startswith('独立 AI 复审：changes_suggested ')
             or not re.search(r'\[artifact [^\[\]\n]+\.independent-review\.json sha256:[a-f0-9]{12}\]$', reason)):
         return None
-    row = cursor.execute("""SELECT v.content_sha256,c.source_kind,c.status
+    row = cursor.execute("""SELECT v.content_sha256,c.source_kind,c.status,v.payload
         FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id)
         WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s AND v.change_set_id=%s""",
         (claim_id, revision, artifact['change_set_id'])).fetchone()
-    if not row or row != (state['content_sha256'], 'review_decision', 'applied'):
+    if (not row or row[1:3] != ('review_decision', 'applied')
+            or record_content_sha(row[3]) != row[0]
+            or {k:v for k,v in row[3].items() if k not in {'revision','occurrences'}}
+                != {k:v for k,v in state['payload'].items() if k not in {'revision','occurrences'}}):
         return None
-    return {'before_pin': [revision, state['content_sha256'], False],
-            'events_sha256': sha256_json(events)}
+    return {'before_pin': [state['revision'], state['content_sha256'], False],
+            'events_sha256': sha256_json({'events': events, 'reviewed_version_sha256': row[0]})}
 
 
 def authorized_markers(cursor, request, before, authority):
