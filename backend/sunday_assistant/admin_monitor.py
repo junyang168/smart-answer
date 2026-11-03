@@ -53,6 +53,29 @@ class AdminMonitor:
             ppt = db.execute("SELECT value FROM kv WHERE key='ppt_readiness'").fetchone()
             if ppt and json.loads(ppt[0]).get('status') == 'error':
                 errors += 1
+        # A mail ambiguity or pending OAuth connection is not an internal error.
+        config_file = Path(self.env.get('SUNDAY_GMAIL_CONFIG') or self.root.parent / 'config/sunday_gmail.json')
+        mail_db = self.root / 'gmail/mail.sqlite3'
+        mail_enabled = False
+        if settings.get('enabled') and config_file.exists():
+            try:
+                mail_enabled = bool(json.loads(config_file.read_text()).get('enabled'))
+            except (ValueError, OSError):
+                errors += 1
+        if mail_enabled and mail_db.exists():
+            with sqlite3.connect(f"file:{mail_db}?mode=ro", uri=True, timeout=2) as db:
+                errors += db.execute("SELECT COUNT(*) FROM mail_kv WHERE key LIKE 'status:%' AND json_extract(value,'$.status')='error'").fetchone()[0]
+                errors += db.execute("SELECT COUNT(*) FROM mail_messages m WHERE m.status='error' OR EXISTS (SELECT 1 FROM mail_files f WHERE f.message_key=m.key AND f.status='error')").fetchone()[0]
+            with sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2) as db:
+                row = db.execute("SELECT value FROM kv WHERE key='gmail_worker'").fetchone()
+                mail_worker = json.loads(row[0]) if row else {}
+            if mail_worker.get('status') == 'error':
+                errors += 1
+            elif mail_worker.get('status') == 'processing':
+                try:
+                    errors += int(time.time() - datetime.fromisoformat(mail_worker['at']).timestamp() > 300)
+                except (ValueError, KeyError):
+                    errors += 1
         return settings, worker, errors
 
     def record_exit(self, now=None):

@@ -486,6 +486,13 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('speaker-ppt-followup:'):
+                        from .gmail_inbox import GmailInbox
+                        day = row['key'].split(':')[1]
+                        if settings.admin_group != row['group_id'] or not GmailInbox(self).followup_needed(day):
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(), row['key']))
+                            continue
                     if row['key'].startswith('ppt-ready:'):
                         from .ppt_ready import PptReady
                         parts = row['key'].split(':')
@@ -519,7 +526,7 @@ class Assistant:
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
-                if row['key'].startswith('ppt-ready:'):
+                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:')):
                     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
                         state = 'queued'  # Not submitted; a later tick can retry.
                     elif isinstance(exc, httpx.HTTPStatusError):
@@ -802,6 +809,13 @@ class Assistant:
             from .ppt_ready import PptReady
             if settings.auto_apply and settings.auto_generate_ppt and settings.admin_group:
                 PptReady(self).tick(now)
+            from .gmail_source import configuration as gmail_configuration
+            try:
+                if gmail_configuration():
+                    from .gmail_inbox import GmailInbox
+                    GmailInbox(self).remind(now)
+            except Exception:
+                self.store.put('gmail_worker', {'at': now_text(), 'status': 'error', 'error': '講員郵件提醒檢查失敗'})
             self.deliver_outbox()
             reminder = self.remind(now)
             self.store.put("worker", {"at": now_text(), "status": "idle", "reminder": reminder})

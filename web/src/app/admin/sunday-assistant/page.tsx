@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { SundaySpeakerMail } from "@/app/components/admin/sundayService/SundaySpeakerMail";
 
 type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
@@ -108,6 +109,7 @@ export default function SundayAssistantPage() {
         <section className={card}><h2 className="font-semibold">整理進度</h2><p className="mt-2">{labels[data.worker?.status || ""] || "處理程序尚未啟動"}</p><p className="mt-2 text-sm">{pending.length} 項待核對</p>{data.worker && <p className="mt-1 text-xs text-slate-500">最近更新 {new Date(data.worker.at).toLocaleString()}</p>}{data.worker?.error && <p className="mt-2 text-sm text-amber-800">{data.worker.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">{data.sunday} 主日資料</h2><p className="mt-2 text-sm">{data.missing.length ? `尚缺：${data.missing.join("、")}` : "已齊全"}</p><p className="mt-2 text-xs text-slate-500">{labels[data.worker?.reminder || ""] || ""}</p></section>
       </div>
+      <SundaySpeakerMail workers={data.workers} />
       <section className={card}><h2 className="text-lg font-bold">主日 PPT</h2>
         <label className="mt-3 block"><input type="checkbox" checked={settings.auto_generate_ppt ?? true} onChange={e => patch({ auto_generate_ppt: e.target.checked })} /> 資料齊備後自動產生 PPT 並通知網站管理員群</label>
         <p className="mt-2 text-sm text-slate-600">司琴可留空。生成前檢查歌詞、讀經安排及未來兩週骨架；資料更正後產生新版。</p>

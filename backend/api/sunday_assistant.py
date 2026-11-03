@@ -140,7 +140,13 @@ def refresh_identity_audit():
 @router.get("/bridge-config")
 def bridge_config():
     config = get_assistant().store.settings()
-    return {"enabled": config.enabled, "groups": sorted(config.source_group_ids),
+    from backend.sunday_assistant.gmail_source import configuration
+    try:
+        mail = configuration()
+    except (ValueError, OSError):
+        mail = None  # An email setup failure must not disconnect WhatsApp.
+    return {"allow_speaker_followup": bool(config.enabled and mail and mail.get('enabled') and mail.get('saturday_followup', True)),
+            "enabled": config.enabled, "groups": sorted(config.source_group_ids),
             "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled,
             "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group,
             "allow_ppt_ready": config.enabled and config.auto_apply and config.auto_generate_ppt}
@@ -239,3 +245,37 @@ def connect():
         return get_assistant().bridge.request("POST", "/connect", {})
     except Exception as exc:
         raise HTTPException(503, "請先啟動 WhatsApp 橋接器") from exc
+
+
+@router.get("/gmail/state")
+def gmail_state():
+    from backend.sunday_assistant.gmail_inbox import GmailInbox
+    return GmailInbox(get_assistant()).state()
+
+
+class MailDecision(BaseModel):
+    action: str = Field(pattern="^(apply|dismiss)$")
+    date: str | None = None
+    speaker: str | None = None
+
+
+@router.post("/gmail/files/{job_id}")
+def gmail_decide(job_id: str, payload: MailDecision):
+    from backend.sunday_assistant.gmail_inbox import GmailInbox
+    try:
+        GmailInbox(get_assistant()).decide(job_id, payload.action, payload.date, payload.speaker)
+    except BlockingIOError as exc:
+        raise HTTPException(409, "Gmail 正在收存附件，請稍後重試") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"status": "saved"}
+
+
+@router.post("/gmail/messages/{key}/retry")
+def gmail_retry(key: str):
+    from backend.sunday_assistant.gmail_inbox import GmailInbox
+    try:
+        GmailInbox(get_assistant()).retry_message(key)
+    except (ValueError, BlockingIOError) as exc:
+        raise HTTPException(409, str(exc) or "Gmail 正在處理，請稍後重試") from exc
+    return {"status": "queued"}
