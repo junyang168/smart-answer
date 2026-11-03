@@ -10,7 +10,6 @@ import fcntl
 import hashlib
 import json
 import os
-import subprocess
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -60,25 +59,14 @@ def held(path: Path) -> bool:
     return False
 
 
-def live_workers(root: Path) -> set[str]:
-    batches = []
-    for path in root.glob("batch-*/status.json"):
-        state = read(path, {})
-        if state.get("active") and held(path.parent / "controller.lock"):
-            batches.append((path.parent, state["active"]))
-    pids = {str(pid) for _, active in batches for pid in active.values() if isinstance(pid, int) and pid > 0}
-    if not pids:
-        return set()
-    result = subprocess.run(["ps", "-p", ",".join(sorted(pids)), "-o", "pid=,command="],
-                            capture_output=True, text=True, timeout=3, check=False)
-    commands = {}
-    for line in result.stdout.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) == 2:
-            commands[parts[0]] = parts[1]
-    return {aid for batch, active in batches for aid, pid in active.items()
-            if "backend.pipeline.claim_management_batch" in commands.get(str(pid), "")
-            and commands[str(pid)].endswith(f" --root {batch} --job {aid}")}
+def live_actions(root: Path, actions) -> set[str]:
+    # execute_claim_management holds this exact per-action lock through
+    # cached-answer validation, models, commit and readback, including native
+    # recovery outside batch. Old PIDs and stale status files are irrelevant.
+    workers = {a["action_id"] for a in actions if a.get("execution_root")
+               and held(Path(a["execution_root"]) / "worker.lock")}
+    # A still-running inherited transport also matters after its parent dies.
+    return workers | active_model_actions(root, actions)
 
 
 def sessions(root: Path):
@@ -249,11 +237,11 @@ def progress(campaign: str | None = None):
             ids.add(read(queue)["action_id"])
         store = PostgresKnowledgeStore()
         actions = action_rows(store, ids)
-        result = project(entry, plan, actions, live_workers(root) | active_model_actions(root, actions),
+        result = project(entry, plan, actions, live_actions(root, actions),
                          decisions(store, [s["source_id"] for s in plan["sources"].values()]))
         return {"campaigns": [{"id": e["id"], "title": e["title"]} for e in entries], "selected": result,
                 "generated_at": datetime.now(timezone.utc).isoformat()}
     except HTTPException:
         raise
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(503, "進度資料無法核實，請稍後重試或交由 Agent 檢查") from exc

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -98,14 +97,13 @@ def test_multi_source_stop_is_agent_work_and_does_not_discard_three_claims(tmp_p
     assert result["agent_items"][0]["reason"] == "source_ownership"
 
 
-@pytest.mark.parametrize("matching,locked", [(False, True), (True, False), (True, True)])
-def test_stale_pid_needs_actual_batch_command_and_held_lock(tmp_path, monkeypatch, matching, locked):
-    batch = tmp_path / "batch-v1"
-    write(batch / "status.json", {"active": {"A": 1234}})
-    monkeypatch.setattr(ui, "held", lambda _: locked)
-    command = f"1234 python -m backend.pipeline.claim_management_batch --manifest M --root {batch} --job A" if matching else "1234 unrelated-process"
-    monkeypatch.setattr(ui.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=command))
-    assert ui.live_workers(tmp_path) == ({"A"} if matching and locked else set())
+@pytest.mark.parametrize("locked", [False, True])
+def test_live_action_needs_its_exact_execution_lock_not_a_saved_pid(tmp_path, monkeypatch, locked):
+    execution = tmp_path / "execution"
+    write(tmp_path / "batch-v1/status.json", {"active": {"B": 1234}})
+    rows = [action(execution_root=str(execution)), action("B", execution_root=str(tmp_path / "other"))]
+    monkeypatch.setattr(ui, "held", lambda path: locked and path == execution / "worker.lock")
+    assert ui.live_actions(tmp_path, rows) == ({"A"} if locked else set())
 
 
 def test_active_slot_journal_alone_or_finished_transport_is_not_a_session(tmp_path, monkeypatch):
