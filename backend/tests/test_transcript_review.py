@@ -859,3 +859,23 @@ def test_deleted_user_cannot_retain_beta_role():
     config = {"users": [], "user_roles": [{"user": "gone", "role": "beta_tester"}], "role_permissions": [{"role": "editor", "permission": "read_any_item"}]}
     assert user_roles(config, "gone") == set()
     assert role_permissions(config, "gone") == set()
+
+
+def test_unverified_machine_source_is_blocked_at_registration_and_direct_import(setup):
+    store,root,source=setup
+    record=read(source/'full_transcript.json');record['schema_version']='full-illustrated-corrected-transcript.v1';atomic(source/'full_transcript.json',record)
+    with pytest.raises(ReviewError,match='時間'):
+        store.register_candidate('講道 test',source,expected_script_sha256=None)
+    with pytest.raises(ReviewError,match='時間'):
+        store.import_candidate('講道 test',source,expected_script_sha256=None)
+    assert not store.enabled('講道 test')
+
+
+def test_publication_cannot_bypass_pending_time_quality_even_with_confirmed_text(setup):
+    store,root,source=setup;adopted(setup);confirmed(store)
+    folder=store.folder('講道 test');context=read(folder/'context.json')
+    context['timing_quality']={'status':'withheld','paragraph_states':{'1':{'status':'withheld'}}};atomic(folder/'context.json',context)
+    doc=store.document('a','講道 test')
+    with pytest.raises(ReviewError,match='時間邊界'):
+        store.publish('a','講道 test',op(doc))
+    assert not (root/'script_published/講道 test.json').exists()

@@ -1,0 +1,27 @@
+{
+  "source_sha256": "6b8fac4745bc7e0eccef48d2ea8882ab32f349e9ae11a07d855822c92bdf066b",
+  "target_text": "所以從神的國度來看，是什麼呢？就是亞當夏娃拒絕神做他們的王，所以魔鬼來篡位，魔鬼來管理我們這個世界，來管理我們人類。",
+  "candidates": [
+    {
+      "id": "c0",
+      "file": "prefix-control-0.wav",
+      "clip_start_ms": 197730,
+      "clip_end_ms": 201730,
+      "time_ms": 197730,
+      "sha256": "6279d48aa63ba275d3eb6466ab5bf1432492adf5c0f09e31a64d2ed66c04ac7a"
+    },
+    {
+      "id": "c1",
+      "file": "prefix-control-1.wav",
+      "clip_start_ms": 200500,
+      "clip_end_ms": 204500,
+      "time_ms": 200500,
+      "sha256": "fc730dc2a4c05222f2e54c5ef2138b80a8be6536140e34d2590894b4f87a5074"
+    }
+  ],
+  "expected_verdicts": {
+    "c0": "wrong_segment",
+    "c1": "clean_boundary"
+  },
+  "ground_truth": "Owner identified preceding sentence tail at old start; two acoustic contexts identify first target word at 200680/200720 ms."
+}

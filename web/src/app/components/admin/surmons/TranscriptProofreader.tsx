@@ -65,6 +65,10 @@ type Metadata = {
 };
 type Context = {
   media_mime_type?: string;
+  timing_quality?: {
+    status: string;
+    paragraph_states?: Record<string, { status: string }>;
+  } | null;
   revision: number;
   paragraph_bindings: Record<
     string,
@@ -921,6 +925,15 @@ function TranscriptProofreader({
     );
   const confirmed = doc.script.filter((p) => paragraphReviewed(p.index)).length;
   const pendingParagraph = doc.script.find((p) => !paragraphReviewed(p.index));
+  const timingBlocked = Boolean(
+    doc.context.timing_quality &&
+    doc.context.timing_quality.status !== "qualified",
+  );
+  const timingPending = doc.script.filter(
+    (p) =>
+      doc.context.timing_quality?.paragraph_states?.[p.index]?.status ===
+      "withheld",
+  );
   useEffect(() => {
     if (!navigationTarget) return;
     // Wait until React has opened the destination editor, including re-clicks.
@@ -1148,7 +1161,9 @@ function TranscriptProofreader({
                 {doc.can_publish && (
                   <button
                     className="rounded-md bg-blue-700 px-4 py-2 text-sm text-white disabled:opacity-40"
-                    disabled={busy || blocked.current || !ready}
+                    disabled={
+                      busy || blocked.current || !ready || timingBlocked
+                    }
                     onClick={() => void command("publish")}
                   >
                     發佈逐字稿
@@ -1186,6 +1201,19 @@ function TranscriptProofreader({
           >
             {pendingParagraph ? "前往待核對段落" : "所有段落已核對"}
           </button>
+          {timingPending.length > 0 && (
+            <button
+              className="text-amber-800"
+              disabled={busy}
+              onClick={() => {
+                const first = timingPending[0];
+                selectParagraph(first.index);
+                setNavigationTarget({ id: first.index });
+              }}
+            >
+              時間待核對 {timingPending.length} 段
+            </button>
+          )}
         </div>
         {failure && (
           <div
@@ -1682,6 +1710,15 @@ function TranscriptProofreader({
                   >
                     ▶ {stamp(binding.start_ms)}–{stamp(binding.end_ms)}
                   </button>
+                  {doc.context.timing_quality?.paragraph_states?.[p.index]
+                    ?.status === "withheld" && (
+                    <span
+                      className="rounded bg-amber-50 px-2 py-1 text-amber-800"
+                      title="本段的起點或結尾尚待確認；文字校對狀態保留。"
+                    >
+                      時間待核對
+                    </span>
+                  )}
                   {active && doc.can_edit && playbackControls("本段播放控制")}
                   <span
                     className={reviewed ? "text-green-700" : "text-slate-500"}
