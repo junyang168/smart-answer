@@ -130,6 +130,19 @@ def test_lock_probe_is_read_only(tmp_path):
     assert lock.read_text() == "unchanged"
 
 
+def test_native_recovery_liveness_requires_its_exact_held_transport(tmp_path, monkeypatch):
+    capacity = tmp_path / "capacity"
+    execution = tmp_path / "action"
+    write(tmp_path / "capacity.json", {"root": str(capacity)})
+    transport = execution / "round/gpt.transport"
+    write(capacity / "gpt/slot-0.json", {"active": True, "artifacts": str(transport)})
+    rows = [action(execution_root=str(execution)), action("B", execution_root=str(tmp_path / "other"))]
+    monkeypatch.setattr(ui, "held", lambda _: True)
+    assert ui.active_model_actions(tmp_path, rows) == {"A"}
+    write(transport / "exit.json", {"code": 0})
+    assert ui.active_model_actions(tmp_path, rows) == set()
+
+
 def test_frozen_plan_rejects_drift_and_duplicate_denominator(tmp_path):
     path = write(tmp_path / "plan.json", plan())
     stat = path.stat()

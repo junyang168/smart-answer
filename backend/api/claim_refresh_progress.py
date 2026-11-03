@@ -98,6 +98,27 @@ def sessions(root: Path):
     return result
 
 
+def active_model_actions(root: Path, actions):
+    """Native recovery can use the same slots without a batch subprocess."""
+    config = read(root / "capacity.json", {})
+    if not config.get("root"):
+        return set()
+    capacity = Path(config["root"])
+    active = set()
+    for role in ("gpt", "opus"):
+        for i in range(2):
+            journal = read(capacity / role / f"slot-{i}.json", {})
+            if not journal.get("active") or not journal.get("artifacts") or not held(capacity / role / f"slot-{i}.lock"):
+                continue
+            transport = Path(journal["artifacts"])
+            if (transport / "exit.json").exists():
+                continue
+            for action in actions:
+                if action.get("execution_root") and transport.is_relative_to(Path(action["execution_root"])):
+                    active.add(action["action_id"])
+    return active
+
+
 def action_rows(store, ids):
     if not ids:
         return []
@@ -107,7 +128,8 @@ def action_rows(store, ids):
               'targets',metadata->'request'->'target_keys',
               'sources',metadata->'request'->'source_bindings',
               'result',metadata->'result','continued_by',metadata->'continued_by',
-              'created_keys',metadata->'created_keys','findings',metadata->'findings')
+              'created_keys',metadata->'created_keys','findings',metadata->'findings',
+              'execution_root',metadata->>'execution_root')
             FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)
               AND metadata->>'kind'='claim_management_action'
             ORDER BY started_at""", (["CMA-" + sha256_json(aid) for aid in sorted(ids)],))
@@ -226,7 +248,8 @@ def progress(campaign: str | None = None):
         for queue in (root / "agent-prepared-refill").glob("*.json"):
             ids.add(read(queue)["action_id"])
         store = PostgresKnowledgeStore()
-        result = project(entry, plan, action_rows(store, ids), live_workers(root),
+        actions = action_rows(store, ids)
+        result = project(entry, plan, actions, live_workers(root) | active_model_actions(root, actions),
                          decisions(store, [s["source_id"] for s in plan["sources"].values()]))
         return {"campaigns": [{"id": e["id"], "title": e["title"]} for e in entries], "selected": result,
                 "generated_at": datetime.now(timezone.utc).isoformat()}
