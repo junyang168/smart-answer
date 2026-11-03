@@ -255,7 +255,7 @@ if __name__=='__main__':
     parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--snapshot',type=Path,required=True)
     parser.add_argument('--out',type=Path,required=True)
-    parser.add_argument('--core-seconds',type=int,choices=[150,300],default=300)
+    parser.add_argument('--core-seconds',type=int,choices=[75,150,300],default=300)
     parser.add_argument('--recovery-parent',type=Path)
     args=parser.parse_args()
     run(args.source,args.snapshot,args.out,core_seconds=args.core_seconds,recovery_parent=args.recovery_parent)
