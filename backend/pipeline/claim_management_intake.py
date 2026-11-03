@@ -69,7 +69,8 @@ def relation_endpoint_instruction():
             + json.dumps(rules, ensure_ascii=False, sort_keys=True))
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None,
+            legacy_ai_findings_direction=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -110,6 +111,10 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     if groups is not None:
         intent['groups'] = groups
     if creation_count!=1:intent['creation_count']=creation_count
+    if legacy_ai_findings_direction is not None:
+        if not isinstance(legacy_ai_findings_direction, str) or not legacy_ai_findings_direction.strip():
+            raise ValueError('legacy AI finding refresh requires explicit owner direction')
+        intent['legacy_ai_findings_direction'] = legacy_ai_findings_direction
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -125,6 +130,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     # Validate the complete denominator before preparing or dispatching any job.
     excluded = {}
     sampling_candidates = set()
+    legacy_markers = {}
     for cid in ids:
         state = store.get_record_state('claims', cid)
         if state is None or state['retired']:
@@ -133,6 +139,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             from backend.pipeline.claim_metadata_projection import sampling_marker
             with store.connect() as conn, conn.cursor() as cursor:
                 sampling = (selected.model_output_contract == 'claim_changes_v4' and sampling_marker(cursor, cid, state))
+                if not sampling and legacy_ai_findings_direction and selected.model_output_contract == 'claim_changes_v4':
+                    from backend.pipeline.claim_legacy_ai_reopen import marker
+                    if proof := marker(cursor, cid, state):
+                        legacy_markers['claims/' + cid] = proof
+                        sampling = True
             if sampling:sampling_candidates.add(cid)
             else:excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
     jobs, inputs = [], []
@@ -220,6 +231,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
             'policy': policy_binding, 'required_maintenance_keys': [],
             'review_questions': [instruction]}
+        reopened = {key: proof for key, proof in legacy_markers.items() if key in request.target_keys}
+        if reopened:
+            authorization['legacy_ai_findings_refresh'] = {
+                'authorization_quote': legacy_ai_findings_direction, 'claims': reopened}
+            authorization['review_questions'].extend(before[key]['payload']['review_note'] for key in reopened)
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:

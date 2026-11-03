@@ -408,7 +408,7 @@ def audit_contract(root, policy=None):
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
-        files += [pipeline/'prompts/claim_management_compact_v4.md',
+        files += [pipeline/'prompts/claim_management_compact_v4.md', pipeline/'claim_legacy_ai_reopen.py',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
     files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     if policy is not None and policy.review_unit_contract:
@@ -526,6 +526,7 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     from backend.pipeline.claim_metadata_projection import sampling_keys,stale_review_keys,RESET
     sampling = sampling_keys(request, before, metadata_projection)
     stale = stale_review_keys(request, before, metadata_projection)
+    stale |= set((metadata_projection or {}).get('legacy_ai_findings_markers', {}))
     dispositions = {d.record_key: d for d in candidate.dispositions}
     if len(dispositions) != len(candidate.dispositions):
         raise ValueError("candidate repeats an object disposition")
@@ -1760,11 +1761,18 @@ def continuation_budget(previous, request, policy):
     no_progress_returns = {}
     root = Path(previous['execution_root'])
     output_failures = {}
+    quota_refusals = {}
     for key, slot in previous['call_reservations'].items():
         if slot['state'] in {'planned','cancelled'}:
             continue
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
+            continue
+        from backend.pipeline.claim_review_recovery import closed_codex_quota_refusal
+        quota_refusal = closed_codex_quota_refusal(previous, key, slot, authority)
+        if quota_refusal is not None:
+            failures[key] = quota_refusal
+            quota_refusals[key] = quota_refusal
             continue
         from backend.pipeline.claim_review_recovery import pre_transport_login_refusal
         login_refusal = pre_transport_login_refusal(previous, key, slot)
@@ -1861,6 +1869,8 @@ def continuation_budget(previous, request, policy):
     if set(historical_stages) != set(historical_inputs):
         raise ValueError('historical rejected-stage proof names an unconsumed call')
     continued_goal = deepcopy(previous['original_goal'])
+    if authority.get('codex_quota_resumption') and len(quota_refusals) != 1:
+        raise ValueError('quota resumption must bind exactly one authenticated refused call')
     inherited_refusals = previous.get('continuation', {}).get('original_goal', {}).get('subscription_refusal_retries')
     if inherited_refusals:
         continued_goal['subscription_refusal_retries'] = list(inherited_refusals)
@@ -1903,6 +1913,7 @@ def continuation_budget(previous, request, policy):
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
+        **({'codex_quota_resumption': quota_refusals} if quota_refusals else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
         **({'engineering_repair_defects':used_engineering_repairs} if used_engineering_repairs else {}),
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),

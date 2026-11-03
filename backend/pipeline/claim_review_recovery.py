@@ -116,8 +116,8 @@ def pre_transport_login_refusal(previous, key, slot):
             'packet': binding(stage/'opus.packet.json'), 'model_calls': 0}
 
 
-def consumed_subscription_output_limit(previous, key, slot):
-    """Authenticate a finished Codex truncation, without accepting partial JSON."""
+def _closed_codex_failure(previous, key, slot):
+    """Authenticate the original wire and closed failure; classify it separately."""
     from types import SimpleNamespace
     from backend.pipeline.source_reconciliation_runner import stage_adapter
     from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
@@ -167,6 +167,14 @@ def consumed_subscription_output_limit(previous, key, slot):
     if schema != wire['json_schema'].get('schema', wire['json_schema']):
         raise ValueError('truncated proposal response schema drift')
     events = [json.loads(line) for line in (transport/'stdout.log').read_text().splitlines() if line.strip()]
+    evidence = {'failure': binding(stage/'gpt.failure.json'),
+        **{name: binding(transport/name) for name in (*names, 'invocation.json', 'exit.json', 'response-schema.json')}}
+    return events, schema, evidence
+
+
+def consumed_subscription_output_limit(previous, key, slot):
+    """Authenticate a finished Codex truncation, without accepting partial JSON."""
+    events, schema, evidence = _closed_codex_failure(previous, key, slot)
     message = 'Incomplete response returned, reason: max_output_tokens'
     if (not events or events[-1] != {'type': 'turn.failed', 'error': {'message': message}}
             or not any(e.get('type') == 'error' and e.get('message') == message for e in events)
@@ -180,8 +188,47 @@ def consumed_subscription_output_limit(previous, key, slot):
                and re.search('"' + re.escape(name) + r'"\s*:\s*\[\s{64,}\Z', texts[-1])]
     return {'slot': key, 'spent_call_preserved': True, 'partial_output_accepted': False,
             'blocked_empty_arrays': blocked,
-            'failure': binding(stage/'gpt.failure.json'),
-            **{name: binding(transport/name) for name in (*names, 'invocation.json', 'exit.json', 'response-schema.json')}}
+            **evidence}
+
+
+def closed_codex_quota_refusal(previous, key, slot, authority):
+    """One explicitly directed resumption; no generation or old answer discarded."""
+    grant = authority.get('codex_quota_resumption')
+    if grant is None:
+        return None
+    if not isinstance(grant, dict):
+        raise ValueError('quota resumption must be an exact direction object')
+    if grant.get('slot') != key:
+        return None
+    if (set(grant) != {'slot', 'predecessor_action_id', 'prior_metadata_sha256',
+                       'authorization_quote', 'current_rate_limits'}
+            or grant['predecessor_action_id'] != previous['action_id']
+            or grant['prior_metadata_sha256'] != sha256_json(previous)
+            or not grant['authorization_quote']
+            or previous['result'].get('reason') != 'model_failed'
+            or previous.get('continuation', {}).get('codex_quota_resumption')):
+        raise ValueError('quota resumption requires exact once-only owner direction')
+    check_binding(grant['current_rate_limits'])
+    status = json.loads(Path(grant['current_rate_limits']['path']).read_text())
+    if (status.get('model_calls') != 0
+            or status.get('response', {}).get('result', {}).get('ordinaryUsageAllowed') is not True):
+        raise ValueError('quota resumption requires a saved current allowance response')
+    events, _, evidence = _closed_codex_failure(previous, key, slot)
+    kinds = [e.get('type') for e in events]
+    if kinds != ['thread.started', 'turn.started', 'error', 'turn.failed']:
+        raise ValueError('quota refusal cannot conceal output, work or an unknown turn')
+    message = events[2].get('message', '')
+    if (not message.startswith('You’ve hit your usage limit.')
+            or events[3] != {'type': 'turn.failed', 'error': {'message': message}}):
+        raise ValueError('not an explicit finished Codex quota refusal')
+    stage = Path(previous['execution_root']) / slot['round_id']
+    failure = body(read(stage/'gpt.failure.json'))
+    raw = failure.get('provider_raw', {})
+    if (raw.get('last_message') not in (None, '')
+            or 'startup websocket prewarm setup failed: ' + message not in raw.get('stderr', '')):
+        raise ValueError('quota refusal requires its matching no-answer startup failure')
+    return {'kind': 'codex_quota_refused_before_generation', 'model_generations': 0,
+            'direction': grant, **evidence}
 
 
 def consumed_subscription_refusal(previous, key, slot):

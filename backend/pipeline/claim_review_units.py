@@ -36,7 +36,8 @@ def validate_members(groups):
     return groups
 
 
-def prepare(members, root, *, instruction, prior_reviews=None, policy=None, store=None, creation_count=1):
+def prepare(members, root, *, instruction, prior_reviews=None, policy=None, store=None, creation_count=1,
+            legacy_ai_findings_direction=None):
     """One frozen unit; previous passes are references, never model targets.
 
     Prior review IDs identify SQL history, not caller-provided approval JSON.
@@ -66,6 +67,10 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
     intent = {'members':members, 'prior_reviews':prior_reviews, 'instruction':instruction, 'policy':pb}
     if creation_count != 1:
         intent['creation_count'] = creation_count
+    if legacy_ai_findings_direction is not None:
+        if not isinstance(legacy_ai_findings_direction, str) or not legacy_ai_findings_direction.strip():
+            raise ValueError('legacy AI finding refresh requires explicit owner direction')
+        intent['legacy_ai_findings_direction'] = legacy_ai_findings_direction
     intake.immutable(root/'unit-intent.json', intent)
     saved_path = root/'unit-prepared.json'
     if saved_path.exists():
@@ -90,8 +95,15 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
     references, pending, proofs = {}, [], {}
     for cid in members:
         q = store.claim_management_qualification(cid)
+        reopen = None
+        if not (q and q.get('ready')) and legacy_ai_findings_direction:
+            from backend.pipeline.claim_legacy_ai_reopen import marker
+            with store.connect() as conn, conn.cursor() as cursor:
+                reopen = marker(cursor, cid, records[('claims', cid)])
         if q and q.get('ready'):
             references[cid] = q
+        elif reopen:
+            pending.append(cid)
         elif cid in prior_reviews:
             proofs[cid] = claim_review_reuse.build(store, cid, prior_reviews[cid])
         else:
@@ -145,7 +157,8 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
             raise ValueError('admitted review reuse is no longer current: ' + cid)
         references[cid] = q
     prepared = intake.prepare(pending, root/'update', instruction=instruction, groups=[pending],
-        policy=pb['path'], store=store, creation_count=creation_count) if pending else None
+        policy=pb['path'], store=store, creation_count=creation_count,
+        legacy_ai_findings_direction=legacy_ai_findings_direction) if pending else None
     result = {'members':members, 'reference_claim_ids':[cid for cid in members if cid in references],
               'target_claim_ids':pending, 'reference_qualifications':references,
               'prepared_update':prepared, 'model_calls':0}
