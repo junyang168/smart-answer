@@ -64,13 +64,24 @@ def prepare_recovery(store,actor,item,request):
         def paragraph(key):
             if key not in before or key not in now:conflict(key)
             a=old['paragraph_bindings'].get(key);b=new['paragraph_bindings'].get(key)
-            if not a or not b or a.get('source_paragraph_id')!=b.get('source_paragraph_id') or before[key]['type']!=now[key]['type']:conflict(key)
+            if before[key]['type']!=now[key]['type']:conflict(key)
+            if before[key]['type']=='subtitle' and a is None and b is None:return
+            if not a or not b or a.get('source_paragraph_id')!=b.get('source_paragraph_id'):conflict(key)
         for value in operations:
             if not isinstance(value,dict):raise ReviewError(400,'無效本機修改')
             op=copy.deepcopy(value);kind=op.get('kind');key=op.get('id')
             if not isinstance(kind,str) or (kind!='metadata' and not isinstance(key,str)):
                 raise ReviewError(400,'無效本機修改目標')
-            if kind in ('text','paragraph_review','bookmark'):
+            if kind=='subtitles':
+                from backend.pipeline.source_projection import spoken_source_rows
+                if op.get('source_version')!=effective_version or spoken_source_rows(list(before.values()))!=spoken_source_rows(list(now.values())):conflict('小標題來源')
+                op['source_version']=digest(store.document_value(rows,context))
+            elif kind=='remove_subtitle':
+                if key not in before or before[key].get('type')!='subtitle':conflict(key)
+                if key not in now:continue
+                if before[key]!=now[key]:conflict(key)
+                before.pop(key);now.pop(key)
+            elif kind in ('text','paragraph_review','bookmark'):
                 paragraph(key)
                 if kind=='text':
                     if not isinstance(op.get('text'),str):raise ReviewError(400,'無效文字修改')
@@ -79,6 +90,7 @@ def prepare_recovery(store,actor,item,request):
                         if target[key]['text']!=op['text']:ctx['reviews'].pop('p:'+key,None)
                         target[key]['text']=op['text']
                 elif kind=='paragraph_review':
+                    if before[key]['type']=='subtitle':conflict(key)
                     a={'text':before[key]['text'],**old['paragraph_bindings'][key]};b={'text':now[key]['text'],**new['paragraph_bindings'][key]}
                     if op.get('content_sha256')!=digest(a) or op.get('decision') not in ('confirmed','question','pending'):conflict(key)
                     if a!=b:

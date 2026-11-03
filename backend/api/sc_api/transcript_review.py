@@ -373,8 +373,35 @@ class ReviewStore:
                         by_id[key]["text"] = op["text"]
                         by_id[key]["user_id"] = actor
                         c["reviews"].pop("p:" + key, None)
+                elif kind == "subtitles":
+                    from backend.pipeline.sermon_subtitle_persistence import apply_insertions, SubtitlePersistenceError
+                    if op.get("source_version") != request.get("version"):
+                        raise ReviewError(412, "小標題建議的逐字稿已更新，請重新產生")
+                    if any(v.get("kind") == "text" and v.get("id") in c["paragraph_bindings"]
+                           for v in request.get("operations", [])):
+                        raise ReviewError(412, "請先儲存口述修改，再產生小標題")
+                    insertions = op.get("insertions")
+                    if (not isinstance(insertions, list) or not 1 <= len(insertions) <= 200
+                            or any(not isinstance(v, dict) or not isinstance(v.get("text"), str)
+                                   or not isinstance(v.get("after_index"), str) or type(v.get("level")) is not int
+                                   for v in insertions)):
+                        raise ReviewError(400, "沒有有效的小標題建議")
+                    # The shared helper preserves every existing physical row verbatim.
+                    try:
+                        updated = apply_insertions(rows, insertions,
+                            source_sha256=digest({"operation": request["operation_id"], "rows": rows}), user_id=actor)
+                    except (SubtitlePersistenceError, TypeError, ValueError) as exc:
+                        raise ReviewError(400, str(exc)) from exc
+                    rows[:] = updated
+                    by_id = {p["index"]: p for p in rows}
+                elif kind == "remove_subtitle":
+                    if key not in by_id or by_id[key].get("type") != "subtitle":
+                        raise ReviewError(400, "只能移除小標題，不能刪除口述段落")
+                    rows[:] = [p for p in rows if p["index"] != key]
+                    by_id.pop(key)
+                    c["reviews"].pop("p:" + key, None)
                 elif kind == "paragraph_review":
-                    if key not in by_id or op.get("decision") not in (
+                    if key not in c["paragraph_bindings"] or op.get("decision") not in (
                         "confirmed",
                         "question",
                         "pending",
@@ -426,7 +453,7 @@ class ReviewStore:
                             raise ReviewError(400, "代表圖必須來自本組原畫面")
                         group["slide_id"] = op["slide_id"]
                     elif kind == "placement":
-                        if op.get("paragraph_id") not in by_id:
+                        if op.get("paragraph_id") not in c["paragraph_bindings"]:
                             raise ReviewError(400, "無效段落位置")
                         group["before_paragraph_id"] = op["paragraph_id"]
                     elif kind == "hidden":
@@ -463,7 +490,7 @@ class ReviewStore:
                     if kind != "group_review":
                         c["reviews"].pop("g:" + key, None)
                 elif kind == "bookmark":
-                    if key not in by_id:
+                    if key not in c["paragraph_bindings"]:
                         raise ReviewError(400, "無效段落位置")
                     c.setdefault("bookmarks", {})[actor] = key
                 elif kind == "metadata":
@@ -588,6 +615,10 @@ class ReviewStore:
                 raise ReviewError(409,f'還有 {count} 段時間邊界尚未通過原聲核對，不能發佈。')
             missing = []
             for p in rows:
+                if p.get("type") == "subtitle":
+                    if not p["text"].lstrip("#").strip():
+                        raise ReviewError(409, "小標題不能留空，請填寫或移除")
+                    continue
                 target = {
                     "text": p["text"],
                     **c["paragraph_bindings"].get(p["index"], {}),
@@ -612,6 +643,8 @@ class ReviewStore:
 
             script = copy.deepcopy(rows)
             for row in script:
+                if row.get("type") == "subtitle":
+                    continue
                 binding = c["paragraph_bindings"][row["index"]]
                 row.update(
                     start_time=binding["start_ms"] / 1000
