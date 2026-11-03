@@ -802,7 +802,9 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
             # Complete Update includes its own evidence/relations/questions,
             # even when its Claim sentence is correct and no write exists.
             # Unused capability and reference-private data do not seed scope.
-            blocks = finding['target_key'] in scope(request, records, candidate)['writable_record_keys']
+            blocks = finding['target_key'] in scope(request, records, candidate,
+                include_write_context=False, include_owner_context=False,
+                include_impact_evidence=False)['writable_record_keys']
             if blocks and unused_source_fragment_context(finding, records, candidate):
                 blocks = False
         return blocks

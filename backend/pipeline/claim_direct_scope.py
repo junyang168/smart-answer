@@ -80,7 +80,8 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
     return targets | maintenance | set(actual_write_keys)
 
 
-def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True):
+def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
+          include_impact_evidence=True):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -179,7 +180,11 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
             pending.extend(incoming.get(key, set()))
         return found
     for rows in [old, payloads]:
-        seeds = (roots | impact_claims | impact_context) & set(rows)
+        # Shared owners' evidence must remain available for reviewing the
+        # actual delta, but their private defects do not become a full Update
+        # obligation. Finding classification can ask for roots' own complete
+        # support only; normal packets/transactions keep the full impact scope.
+        seeds = (roots | impact_claims | impact_context if include_impact_evidence else roots) & set(rows)
         # Evidence whose explicit owner is the target is also its evidence,
         # even if an older Claim omitted its forward evidence_step_ids.
         seeds.update(k for k, p in rows.items() if k.startswith('evidence_steps/')
