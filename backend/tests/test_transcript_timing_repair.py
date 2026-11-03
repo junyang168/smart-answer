@@ -93,3 +93,16 @@ def test_batch_validation_is_atomic_and_quality_binds_postimage(repair):
     atomic(path,batch);request['evidence_sha256']=file_hash(path)
     apply_timing_repair(store,'owner','lecture',request,path)
     assert store.document('owner','lecture')['context']['timing_quality']['status']=='withheld'
+
+
+def test_quality_only_audit_can_hold_unchanged_ranges_without_new_confirmation(repair):
+    store,before,evidence,path,request=repair
+    evidence.update(schema_version='paragraph-timing-corrections.v1',entries=[],quality_audit={
+        'status':'withheld','paragraph_states':{'1':{'status':'withheld','binding_sha256':digest(evidence['before_binding'])}}})
+    request['operations']=[];atomic(path,evidence);request['evidence_sha256']=file_hash(path)
+    apply_timing_repair(store,'owner','lecture',request,path)
+    after=store.document('owner','lecture')
+    assert after['script']==before['script']
+    assert after['context']['reviews']==before['context']['reviews']
+    assert after['context']['paragraph_bindings']==before['context']['paragraph_bindings']
+    assert after['context']['timing_quality']['status']=='withheld'

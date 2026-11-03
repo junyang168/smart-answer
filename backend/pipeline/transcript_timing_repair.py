@@ -32,7 +32,7 @@ def apply_timing_repair(store, actor: str, item: str, request: dict, evidence_pa
                 or file_hash(folder/'source-record.json')!=context['source_record_sha256']):
             raise ReviewError(412,'原始音訊或來源版本不一致')
         entries=evidence.get('entries') if evidence.get('schema_version')=='paragraph-timing-corrections.v1' else [evidence]
-        if not isinstance(entries,list) or not entries:
+        if not isinstance(entries,list) or (not entries and evidence.get('quality_audit') is None):
             raise ReviewError(400,'沒有時間修正項目')
         ids=[entry.get('paragraph_id') for entry in entries]
         if len(set(ids))!=len(ids) or request.get('operations')!=[{'kind':'paragraph_timing','id':key} for key in ids]:
