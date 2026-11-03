@@ -4021,7 +4021,7 @@ class PostgresKnowledgeStore:
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'],
-                        actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'])
+                        actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
                 if not report_only:
@@ -4089,17 +4089,18 @@ class PostgresKnowledgeStore:
                          (canonical_json(value), action_run_id))
         return value['result']
 
-    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None, actual_write_keys=()):
+    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None, actual_write_keys=(), postimage=False):
         """New shared owners/relations must not hide behind unchanged row pins."""
         from backend.pipeline.claim_management import CLAIM_COLLECTIONS
         if records is None:
             records = self._assert_transaction_read_pins(cursor, read_pins)
         if request is not None:
-            from backend.pipeline.claim_direct_scope import enabled, assert_current
+            from backend.pipeline.claim_direct_scope import enabled, assert_current, owner_context_enabled
             from backend.pipeline.claim_management import Request
             request = Request.model_validate(request)
             if enabled(request):
-                return assert_current(self, cursor, request, records, actual_write_keys=actual_write_keys)
+                return assert_current(self, cursor, request, records, actual_write_keys=actual_write_keys,
+                    include_write_context=not (postimage and owner_context_enabled(request)))
         payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
         keys = {key for key in read_pins if key[0] in CLAIM_COLLECTIONS}
         for col, oid in self._claim_reference_consumers(cursor, keys):
@@ -4201,7 +4202,7 @@ class PostgresKnowledgeStore:
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'],
-                        actual_write_keys=[d['record_key'] for d in value['candidate']['dispositions'] if d['action'] != 'retain'])
+                        actual_write_keys=[d['record_key'] for d in value['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                 except (ValueError, OSError, KeyError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))

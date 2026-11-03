@@ -554,3 +554,38 @@ def test_provided_owner_can_receive_relation_without_write_or_new_qualification(
         assert store.claim_management_qualification('A')['ready']
     assert store.get_record_state('claims','C')==initial and store.get_record_state('evidence_steps','EC')==ec
     assert store.claim_management_qualification('C') is None
+
+
+@pytest.mark.parametrize('late_relation',[False,True])
+def test_postimage_check_does_not_reopen_private_reference_owners_but_detects_new_root_edges(chain,late_relation):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.pipeline.cvp_sql_commit import pins
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,_,root=chain
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract=CONTRACT;policy.joint_update_max_targets=10
+    pp=root/'postimage-policy.json';pp.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp))
+    ea=store.get_record_state('evidence_steps','EA')['payload'];ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'postimage-readonly-private-owner',
+        'evidence_steps':[dict(ea,produced_claim_ids=['A','C']),dict(ec,produced_claim_ids=['C','D'])],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis',
+            'occurrences':[{'source_id':'S','anchors':[]}]}],
+        'claim_relations':[dict(store.get_record_state('claim_relations','AB')['payload'],target_id='C')]}))
+    request.permissions=[p for p in request.permissions if p.key in {'claims/A','claim_relations/AB'}]
+    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':True})
+    records=store.read_claim_context([('claims','A')])
+    states={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    # The approved frame includes C's private EC as reference material but
+    # never assigns a further review to its other owner D.
+    own=set(direct.scope(request,states,include_write_context=False)['record_keys']) | {'claims/C','evidence_steps/EC'}
+    protected={k:v for k,v in records.items() if cm.source.key(*k) in own}
+    assert ('claims','D') not in protected
+    if late_relation:
+        store.apply_plan(store.plan_package({'package_id':'unreviewed-root-edge',
+            'claim_relations':[relation('LATE','A','D')]}))
+    with store.connect() as conn,conn.cursor() as cursor:
+        if late_relation:
+            with pytest.raises(ChangeSetConflict,match='omitted a current neighbour'):
+                store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
+        else:
+            store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
