@@ -858,9 +858,41 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
                 for child in item.values():visit(child)
     visit(raw['response'])
     if error!=CITATION_ERROR:
+        # A passing-looking evidence assessment need not contain quotations.
+        # Locate this reproduced ownership rejection in the *program-bound*
+        # own evidence, never invent a citation on behalf of the reviewer.
+        location_basis = None
+        if (not located and role == 'opus'
+                and error == 'own Evidence assessment borrowed non-owned Evidence or a whole paragraph'):
+            rows = {**materials['before'], **{k: {'payload':v}
+                for k,v in cm.source.index(candidate.records).items()}}
+            from backend.pipeline.claim_evidence_review import BindingAssessment
+            for item in raw['response'].get('binding_assessments', []):
+                assessment = BindingAssessment.model_validate(item)
+                owned = packet.get('own_evidence_bindings', {}).get(assessment.claim_key, {})
+                borrowed = set(assessment.evidence_keys) - set(owned)
+                if not borrowed or not borrowed <= set(rows):
+                    continue
+                for key in sorted(owned):
+                    evidence = rows.get(key, {}).get('payload', {})
+                    fragments = evidence.get('source_fragment_ids', []) + ([evidence['source_fragment_id']] if evidence.get('source_fragment_id') else [])
+                    for fid in fragments:
+                        fragment = rows.get('source_fragments/' + fid, {}).get('payload', {})
+                        citation = {k:fragment.get(v) for k,v in [('source_id','source_id'), ('paragraph_key','paragraph_key'), ('exact_quote','verbatim_excerpt')]}
+                        if not all(citation.values()):
+                            continue
+                        cm.validate_citations([cm.Citation.model_validate(citation)], materials['sources'])
+                        located.append(citation)
+                        location_basis = {'kind':'program_bound_own_evidence', 'claim_key':assessment.claim_key,
+                            'evidence_key':key, 'fragment_key':'source_fragments/' + fid,
+                            'borrowed_keys':sorted(borrowed)}
+                        break
+                    if located:break
+                if located:break
         if not located:raise ValueError('rejected-input correction requires a bound own-source location')
         return {'role':role,'round_id':materials['round_id'],'raw':binding(root/(role+'.raw.json')),
             'response':raw['response'],'rejection_detail':error,'correction_citation':located[0],
+            **({'correction_location_basis':location_basis} if location_basis else {}),
             'review_not_accepted':True,
             'instruction':'This unchanged answer failed deterministic validation and is unaccepted input, never approval. Correct the exact recorded error against the frozen source and authorized objects. Reassess all decisions; preserve original scope and budget, and pass ordinary full validation and independent Opus review.'}
     if not bad:raise ValueError('no authenticated non-exact citation to correct')

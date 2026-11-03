@@ -1,5 +1,6 @@
 """A shared read Question can receive a new answer without widening review roots."""
 from copy import deepcopy
+from pathlib import Path
 import json
 import pytest
 from backend.pipeline import claim_management as cm,claim_joint_update as joint,claim_management_intake as intake
@@ -80,3 +81,34 @@ def test_zero_call_refusal_recovery_preserves_input_and_budget(claims,monkeypatc
         history=json.loads(open(receipt['path']).read())
         assert history['original_parent']['admission_refusal'] and history['model_calls']==0
     assert ports.calls==[]
+
+
+def test_quoteless_borrowed_evidence_report_resumes_as_unaccepted_input(claims):
+    from backend.tests.test_claim_management_intake import pass_review
+    from backend.pipeline.claim_review_recovery import resume_rejected_output
+    from backend.pipeline.source_reconciliation_runner import read,body
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'direct-neighbour',
+        'claim_relations':[{'claim_relation_id':'CD','from_id':'C','to_id':'D','relation_type':'supports','reason':'source reason'}]}))
+    policy=cm.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v1.json'
+    prepared=intake.prepare(['C'],root,instruction='Refresh C',policy=policy,store=store,groups=[['C']])
+    job=json.loads(open(prepared['manifest']['path']).read())['jobs'][0]
+    request=cm.Request.model_validate_json(open(job['request']['path']).read())
+    def borrowed(packet):
+        result=pass_review(packet)
+        result['binding_assessments'][0]['evidence_keys'].append('evidence_steps/ED')
+        return result
+    ports=SyntheticPorts(store,root,opus=borrowed)
+    result=execute_claim_management(store,request,root=job['root'],ports=ports)
+    error='own Evidence assessment borrowed non-owned Evidence or a whole paragraph'
+    assert result['detail']==error
+    rid=result['returned_rejected_call'].rsplit(':',1)[0]
+    raw=(Path(job['root'])/rid/'opus.raw.json').read_bytes()
+    receipt=resume_rejected_output(store,rid,role='opus',error=error)
+    record=body(read(Path(receipt['path'])))
+    assert record['input']['correction_location_basis']['claim_key']=='claims/C'
+    assert record['input']['correction_location_basis']['borrowed_keys']==['evidence_steps/ED']
+    assert record['input']['review_not_accepted'] and record['model_calls']==0 and not record['new_budget']
+    assert (Path(job['root'])/rid/'opus.raw.json').read_bytes()==raw
+    assert ports.calls==['opus']
+    assert store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))['result']['reason']=='revision_required'
