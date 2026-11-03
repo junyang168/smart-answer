@@ -503,6 +503,47 @@ def test_declared_owner_is_resolvable_readonly_context_without_a_claim_frontier(
         assert not {'claims/D','claim_relations/CD'} & set(post['record_keys'])
 
 
+def test_readback_keeps_reviewed_owner_after_evidence_disconnects_it(chain):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store, request, execution, root = chain
+    ea = store.get_record_state('evidence_steps', 'EA')['payload']
+    store.apply_plan(store.plan_package({'package_id': 'owner-detaches-after-review',
+        'source_fragments': [{'fragment_id': 'FA', 'source_id': 'S', 'paragraph_key': 'S0001',
+                              'verbatim_excerpt': '甲是假设，不是断言。'}],
+        'evidence_steps': [dict(ea, produced_claim_ids=['A', 'C'], source_fragment_ids=['FA'],
+                               speaker='professor', stance='asserted', support_eligibility='eligible_candidate')]}))
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent / 'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract = CONTRACT
+    policy.joint_update_max_targets = 10
+    policy.initial_candidate = 'proposal'
+    path = root / 'detach-owner-policy.json'
+    path.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    request.permissions = [cm.source.Permission(collection='evidence_steps', object_id='EA', fields=['produced_claim_ids'])]
+    authorize(request, {'required_maintenance_keys': ['evidence_steps/EA'],
+        'include_evidence_owner_context': True, 'evidence_owner_context_keys': ['claims/C']})
+    original = store.get_record_state('claims', 'C')
+    def propose(packet):
+        return {'changes': [{'record_key': 'evidence_steps/EA',
+            'fields_json': json.dumps({'produced_claim_ids': ['A']}),
+            'reason': 'Remove redundant ownership; C has separate EC evidence.',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}]}],
+            'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': []}
+    ports = SyntheticPorts(store, root, proposal=propose, opus=pass_review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    round_id = next(iter(parent['latest_rounds'].values()))
+    readback = json.loads((execution / round_id / 'readback.json').read_text())
+    keys = set(readback.get('actual_records', readback.get('denominator', [])))
+    assert {'claims/C', 'evidence_steps/EC'} <= keys
+    assert not {'claim_relations/BC', 'claims/D'} & keys
+    assert store.get_record_state('claims', 'C') == original
+    assert store.claim_management_qualification('C') is None
+    assert ports.calls == ['gpt', 'opus']
+
+
 @pytest.mark.parametrize('write_reference',[False,True])
 @pytest.mark.parametrize('private_owner',[False,True])
 def test_provided_owner_can_receive_relation_without_write_or_new_qualification(chain,write_reference,private_owner):

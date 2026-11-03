@@ -763,11 +763,19 @@ def execute_claim_management(store, request, *, root, ports):
                             roots.update((p.collection,p.object_id) for p in unit.permissions)
                             roots.update(content.split_key(k) for k in parent['created_keys'])
                         roots.update(content.split_key(r.key) for r in candidate.records)
-                        actual = read_context(sorted(roots))
-                        states = {content.key(*k): v for k, v in actual.items()}
                         unit = cm.Request.model_validate(materials['unit_request'])
                         from backend.pipeline.claim_direct_scope import owner_context_enabled
-                        basis = materials['before'] if owner_context_enabled(unit) else states
+                        frozen_owner_context = owner_context_enabled(unit)
+                        if frozen_owner_context:
+                            # A reviewed owner can cease to be reachable after
+                            # an Evidence edit. Read every frozen review key
+                            # explicitly rather than silently dropping it or
+                            # substituting its old payload in the readback.
+                            roots.update(content.split_key(k) for k in
+                                         cm.audit_keys(unit, materials['before'], candidate))
+                        actual = read_context(sorted(roots))
+                        states = {content.key(*k): v for k, v in actual.items()}
+                        basis = materials['before'] if frozen_owner_context else states
                         denominator = cm.audit_keys(unit, basis, candidate)
                         cm.require_full_sources(unit, states, candidate,
                                                 qualification=not cm.is_source_impact(request))
