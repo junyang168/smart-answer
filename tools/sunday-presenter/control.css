@@ -13,7 +13,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid #91d8cf; outline-
 button:disabled { opacity: .4; cursor: default; }
 .take { background: #aadbd0; color: #122a28; border: 0; font-weight: 650; }
 .take:hover { background: #c3f0e8; }
-.black { background: #0b1017; }
 .deck { padding: 20px; border: 1px solid #354153; border-radius: 12px; margin: 14px 0; }
 .sunday-folder { padding: 18px; background: #172b32; border-radius: 12px; margin-top: 20px; }
 .deck.live { border-color: #aadbd0; }
@@ -47,3 +46,17 @@ p { margin: 8px 0; }
 .deck { margin: 12px 0; padding: 16px; }
 .workflow-settings { margin: 12px 0; }
 #sunday-status { font-size: 12px; }
+
+header { position: relative; }
+header h1 { font-size: 20px; }
+#panel-settings, #hide-panel { padding: 6px 9px; font-size: 12px; margin-right: 6px; }
+body.compact { padding: 10px; overflow: hidden; }
+.compact header .eyebrow, .compact header p, .compact header h1,
+.compact > .sunday-folder, .compact #decks, .compact .workflow-settings,
+.compact footer p, .compact [data-action="show-output"] { display: none; }
+.compact .onair { margin: 8px 0; padding: 8px; gap: 6px; }
+.compact .onair #live { font-size: 12px; width: 100%; }
+.compact .switches { width: 100%; }
+.compact .switches button { flex: 1; }
+.compact footer .transport { display: flex; flex-wrap: nowrap; }
+.compact footer .transport button { flex: 1; font-size: 18px; }

@@ -54,24 +54,27 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await act('open', { deck, url: `${origin}/${deck}` });
     const page = stage.get(stage.selected[deck]);
     await until(() => page.loaded && !wc(page).isLoading(), 'fixture loaded');
-    assert.equal(controller.isVisible(), false);
+    assert.equal(controller.isVisible(), true);
     assert.equal(preparation.isVisible(), true);
     toggleControls();
     assert.equal(controller.isVisible(), true);
     assert.equal(preparation.isVisible(), true);
-    toggleControls();
-    assert.equal(preparation.isVisible(), false);
+    await act('hide-panel');
+    assert.equal(preparation.isVisible(), true);
     await act('arm', { id: page.id });
     return page;
   };
   try {
     assert.equal(controller.isVisible(), false);
     assert.equal(globalShortcut.isRegistered('CommandOrControl+P'), true);
-    assert.equal(output.isFullScreen(), true);
-    assert.deepEqual(output.getBounds(), screen.getDisplayMatching(output.getBounds()).bounds);
+    assert.equal(output.isVisible(), false);
+    assert.equal(output.isFullScreen(), false);
+    assert.equal(controller.isFullScreen(), false);
+    assert.equal(controller.isFullScreenable(), false);
     toggleControls(); assert.equal(controller.isVisible(), true);
     await until(() => controller.isFocused(), 'controller focused before hiding');
-    toggleControls(); assert.equal(controller.isVisible(), false);
+    toggleControls(); assert.equal(controller.isVisible(), true);
+    controller.hide(); // With no slide, toggling never reveals a blank window.
     website.apiURL = origin + '/api/upcoming';
     await act('refresh-folder');
     assert.equal(apiCalls, 1);
@@ -91,6 +94,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     for (let i = 0; i < 20; i++) {
       const page = i % 2 ? sermon : worship;
       await act('take', { deck: page.deck });
+      await until(() => output.isFullScreen(), 'fullscreen only after verified slide');
       await act('key', { key: 'Right' });
       try {
         await until(async () => await wc(page).executeJavaScript('steps') === Math.floor(i / 2) + 1, 'key delivery');
@@ -111,7 +115,15 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     toggleControls();
     await until(() => controller.isVisible() && controller.isFocused(), 'one toggle raises covered controls');
     toggleControls();
+    assert.equal(controller.isVisible(), true); // Recovery never accidentally hides the panel.
+    const liveBeforeClose = stage.active;
+    controller.close();
     assert.equal(controller.isVisible(), false);
+    assert.equal(stage.active, liveBeforeClose);
+    assert.equal(output.isVisible(), true);
+    require('electron').app.emit('activate', {}, true);
+    await until(() => controller.isVisible(), 'Dock activation restores the panel');
+    await act('hide-panel');
     console.log('smoke: switching passed');
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token'))), tokens);
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('steps'))), [10, 10]);
@@ -140,7 +152,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await until(async () => await controller.webContents.executeJavaScript(`document.querySelector('[data-page="${worship.id}"] .title').textContent.includes('Fixture title update')`), 'control update');
     assert.equal(await controller.webContents.executeJavaScript(`savedArm === document.querySelector('[data-page="${worship.id}"] [data-action="arm"]')`), true);
     fs.writeFileSync(path.join(evidence, 'control.png'), (await controller.webContents.capturePage()).toPNG());
-    toggleControls();
+    await act('hide-panel');
     fs.writeFileSync(path.join(evidence, 'slide.png'), (await wc(sermon).capturePage()).toPNG());
     output.focus(); wc(sermon).focus();
     wc(sermon).sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
@@ -155,7 +167,19 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     toggleControls();
     await until(async () => await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').textContent.includes('確認並播放')"), 'single confirmation button');
     await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').click()", true);
-    await until(() => stage.active === worship.id && !controller.isVisible(), 'confirm and play from the actual UI');
+    await until(() => stage.active === worship.id && controller.isVisible(), 'floating panel stays available during playback');
+    assert.ok(controller.getBounds().width <= 420);
+    assert.ok(controller.getBounds().height <= 240);
+    assert.equal(controller.isFullScreen(), false);
+    await act('hide-panel');
+    // Deck changes must not reopen a panel the operator explicitly dismissed.
+    for (const [key, deck] of [['2','sermon'],['1','worship']]) {
+      const shown = stage.get(stage.active); output.focus(); wc(shown).focus();
+      wc(shown).sendInputEvent({type:'keyDown',keyCode:key,modifiers:[process.platform==='darwin'?'meta':'control']});
+      wc(shown).sendInputEvent({type:'keyUp',keyCode:key,modifiers:[process.platform==='darwin'?'meta':'control']});
+      await until(() => stage.active === stage.selected[deck], 'formal presentation deck shortcut');
+      assert.equal(controller.isVisible(), false);
+    }
     await act('take', { deck: 'sermon' });
     // Real window.open path: returned WC retains an opener and is private/muted.
     await wc(sermon).executeJavaScript("void window.open('/show', 'show')");
@@ -210,7 +234,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
       navigationAndCrashBlackout: true, popupPostPreserved: true, fullscreenOutput: true,
       controlsHiddenByDefault: true, commandPRegistered: true, stableControlButtons: true,
-      presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true,
+      presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true, noBlankStartupWindow: true, controllerCannotFullscreen: true, floatingPanel: true, closePreservesPresentation: true, dockActivationRestoresPanel: true, formalDeckShortcuts: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
       microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };

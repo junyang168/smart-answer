@@ -79,7 +79,7 @@ class Stage {
     const page = this.get(this.selected[deck]);
     if (!page.ready || !page.loaded || page.error) throw Error('請先檢查投影片，並按「設為觀眾畫面」。');
     // Mute every page, including editors and auth/presentation popups, first.
-    this.black(false);
+    this.black(false, false);
     this.move(page, this.output);
     this.active = page.id;
     page.view.setVisible(true);
@@ -89,12 +89,13 @@ class Stage {
     this.changed();
   }
 
-  black(emit = true) {
+  black(emit = true, hideOutput = true) {
     for (const page of this.pages.values()) {
       if (!page.view.webContents.isDestroyed()) page.view.webContents.setAudioMuted(true);
       if (page.host === this.output) page.view.setVisible(false);
     }
     this.active = null;
+    if (hideOutput) this.output.hide();
     if (emit) this.changed();
   }
 

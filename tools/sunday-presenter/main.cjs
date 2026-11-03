@@ -28,25 +28,32 @@ const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
 const controlShortcut = 'CommandOrControl+P';
 
+let panelExpanded = true, panelHasPlayed = false;
+function resizePanel(expanded) {
+  panelExpanded = expanded;
+  if (!controller || controller.isDestroyed()) return;
+  const bounds = controller.getBounds();
+  const area = require('electron').screen.getDisplayMatching(bounds).workArea;
+  const width = Math.min(expanded ? 760 : 420, area.width);
+  const height = Math.min(expanded ? 650 : 240, area.height);
+  controller.setBounds({ x: Math.min(Math.max(bounds.x, area.x), area.x + area.width - width),
+    y: Math.min(Math.max(bounds.y, area.y), area.y + area.height - height), width, height });
+}
 function toggleControls() {
-  if (controller.isVisible() && controller.isFocused()) {
-    controller.hide(); preparation.hide();
-    output.show(); output.focus();
-    if (stage.active !== null) stage.get(stage.active).view.webContents.focus();
-  } else {
-    app.focus({ steal: true });
-    if (controller.isMinimized()) controller.restore();
-    controller.show(); controller.moveTop(); controller.focus();
-  }
+  // Recovery action is idempotent. Close/hide is an explicit panel action.
+  if (!controller || controller.isDestroyed()) return;
+  if (controller.isMinimized()) controller.restore();
+  controller.show(); controller.moveTop(); controller.focus();
 }
 
 function changed() {
+  if (stage?.active != null && !panelHasPlayed) { panelHasPlayed = true; resizePanel(false); }
   if (stage) remoteControl?.observe(stage.active);
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  workflow: workflow?.snapshot(), folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
+  workflow: workflow?.snapshot(), panelExpanded, folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
 
 function saveSettings() {
   const target = path.join(app.getPath('userData'), 'service-settings.json');
@@ -82,7 +89,7 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
       const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === url);
       if (existing) {
         if (stage.preview === page.id && !existing.ready) {
-          stage.prepare(existing.id); controller.hide();
+          stage.prepare(existing.id); controller.moveTop();
         } else if (existing.ready) { stage.selected[existing.deck] = existing.id; changed(); }
         return { action: 'deny' };
       }
@@ -114,7 +121,7 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
       page.deck = assigned;
     }
     if (followFrom && isDocumentURL(wc.getURL()) && stage.preview === followFrom.id) {
-      stage.prepare(page.id); controller.hide();
+      stage.prepare(page.id); controller.moveTop();
     }
     changed();
   });
@@ -132,24 +139,32 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
         (process.platform === 'darwin' ? input.meta : input.control) && !input.alt && !input.shift) {
       event.preventDefault(); toggleControls(); return;
     }
+    if (input.type === 'keyDown' && (process.platform === 'darwin' ? input.meta : input.control) &&
+        !input.alt && !input.shift && ['1', '2'].includes(input.key)) {
+      event.preventDefault();
+      act('take', { deck: input.key === '1' ? 'worship' : 'sermon' }).catch(() => {});
+      return;
+    }
     if (stage.active === page.id && input.type === 'keyDown' && input.key === 'Escape') stage.invalidate(page.id);
   });
   wc.on('destroyed', () => stage.remove(page.id));
   // Office can open unrelated background authentication popups repeatedly.
   // Keep popups hidden/muted without stealing preview, focus, or deck selection.
   // The operator opens the appropriate new row with Prepare when needed.
-  if (!popup) { stage.prepare(page.id); controller.hide(); }
+  if (!popup) { stage.prepare(page.id); controller.moveTop(); }
   return page;
 }
 
 async function act(action, args = {}) {
   switch (action) {
     case 'state': return snapshot();
+    case 'panel-settings': resizePanel(!panelExpanded); changed(); toggleControls(); break;
+    case 'hide-panel': controller.hide(); break;
     case 'choose-week': {
       filePlan = null; folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
       const folder = await website.refresh();
       const existing = [...stage.pages.values()].find(p => sameFolderURL(p.view.webContents.getURL(), folder.folderUrl));
-      if (existing) { stage.prepare(existing.id); controller.hide(); }
+      if (existing) { stage.prepare(existing.id); controller.moveTop(); }
       else await act('open', { deck: 'worship', url: folder.folderUrl });
       folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
       break;
@@ -186,13 +201,12 @@ async function act(action, args = {}) {
       page.view.webContents.loadURL(args.url).catch(() => {});
       break;
     }
-    case 'prepare': stage.prepare(args.id); controller.hide(); break;
-    case 'confirm-play': { const page = stage.get(args.id); stage.arm(page.id); stage.take(page.deck); controller.hide(); break; }
+    case 'prepare': stage.prepare(args.id); controller.moveTop(); break;
+    case 'confirm-play': { const page = stage.get(args.id); stage.arm(page.id); stage.take(page.deck); break; }
     case 'arm': stage.arm(args.id); break;
     case 'take':
       if (!Object.hasOwn(labels, args.deck)) throw Error('Unknown deck');
       stage.take(args.deck); break;
-    case 'black': stage.black(); break;
     case 'close': {
       const page = stage.get(args.id);
       stage.remove(page.id);
@@ -207,7 +221,7 @@ async function act(action, args = {}) {
       await task;
       break;
     }
-    case 'show-output': output.show(); break;
+    case 'show-output': if (stage.active !== null) { output.show(); output.focus(); } break;
     default: throw Error('Unknown action');
   }
   return snapshot();
@@ -215,7 +229,7 @@ async function act(action, args = {}) {
 
 async function sendSlideKey(key, expectedActive, valid = () => true) {
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
-      if (stage.active === null) throw Error('目前是黑屏。');
+      if (stage.active === null) throw Error('尚未播放簡報。');
       const wc = stage.get(stage.active).view.webContents;
       app.focus({ steal: true });
       output.show();
@@ -242,10 +256,9 @@ app.whenReady().then(async () => {
     { label: 'Sunday Presenter', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
     { role: 'editMenu' },
     { label: 'Presentation', submenu: [
-      { label: '顯示 / 隱藏控制台', accelerator: controlShortcut, click: toggleControls },
+      { label: '顯示控制條', accelerator: controlShortcut, click: toggleControls },
       { label: '主日崇拜', accelerator: 'CmdOrCtrl+1', click: () => act('take', { deck: 'worship' }).catch(() => {}) },
-      { label: '講道', accelerator: 'CmdOrCtrl+2', click: () => act('take', { deck: 'sermon' }).catch(() => {}) },
-      { label: '黑屏 / 靜音', accelerator: 'CmdOrCtrl+0', click: () => stage.black() }
+      { label: '講道', accelerator: 'CmdOrCtrl+2', click: () => act('take', { deck: 'sermon' }).catch(() => {}) }
     ] }, { role: 'windowMenu' }
   ]));
   officeSession = session.fromPartition(smoke ? 'smoke-office' : 'persist:office');
@@ -256,18 +269,21 @@ app.whenReady().then(async () => {
   officeSession.on('will-download', event => event.preventDefault());
   const hostOptions = { width: 1100, height: 660, backgroundColor: '#000000',
     fullscreenable: false, autoHideMenuBar: true };
-  output = new BrowserWindow({ ...hostOptions, frame: false, fullscreenable: true, title: 'Sunday Presenter — OUTPUT',
+  output = new BrowserWindow({ ...hostOptions, frame: false, show: false, fullscreenable: true, title: 'Sunday Presenter — OUTPUT',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   await output.loadFile(path.join(__dirname, 'output.html'));
-  app.focus({ steal: true }); output.show(); output.focus();
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(Error('Output could not enter fullscreen')), 8000);
-    output.once('enter-full-screen', () => { clearTimeout(timeout); resolve(); });
-    output.setFullScreen(true);
+  // Allocate the stable capture surface without showing a blank startup window.
+  // Only a verified Stage.take reveals it; subsequent deck switches keep its ID.
+  const display = require('electron').screen.getPrimaryDisplay();
+  output.setBounds(display.bounds);
+  output.on('show', () => {
+    if (stage && stage.active !== null && !output.isFullScreen()) output.setFullScreen(true);
   });
   preparation = new BaseWindow({ ...hostOptions, frame: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
-  controller = new BrowserWindow({ width: 1040, height: 760, show: false, alwaysOnTop: true,
+  controller = new BrowserWindow({ width: 760, height: 650, show: false, alwaysOnTop: true,
+    type: process.platform === 'darwin' ? 'panel' : 'normal',
+    fullscreenable: false, maximizable: false,
     title: 'Sunday Presenter — 控制台',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
       contextIsolation: true, nodeIntegration: false } });
@@ -276,6 +292,13 @@ app.whenReady().then(async () => {
     preparation.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
   preparation.setAlwaysOnTop(true);
+  controller.setAlwaysOnTop(true, 'modal-panel');
+  if (process.platform === 'darwin') {
+    app.setActivationPolicy('regular');
+    app.dock.show();
+  }
+  const panelArea = require('electron').screen.getPrimaryDisplay().workArea;
+  controller.setPosition(panelArea.x + Math.max(0, panelArea.width - 780), panelArea.y + 30);
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
   const settingsFile = path.join(app.getPath('userData'), 'service-settings.json');
@@ -320,7 +343,7 @@ app.whenReady().then(async () => {
     if (!quitting) { event.preventDefault(); preparation.hide(); }
   });
   controller.on('close', event => {
-    if (!quitting) { event.preventDefault(); controller.hide(); preparation.hide(); output.focus(); }
+    if (!quitting) { event.preventDefault(); controller.hide(); }
   });
   controller.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   controller.webContents.on('will-navigate', event => event.preventDefault());
@@ -381,7 +404,14 @@ app.whenReady().then(async () => {
   else dialog.showErrorBox('Sunday Presenter 未能啟動', error.message);
   app.exit(1);
 });
-app.on('second-instance', () => { output?.show(); });
+app.on('activate', () => toggleControls());
+app.on('second-instance', () => {
+  if (controller && !controller.isDestroyed()) {
+    app.focus({ steal: true });
+    if (controller.isMinimized()) controller.restore();
+    controller.show(); controller.moveTop(); controller.focus();
+  }
+});
 let finishingBeforeQuit = false;
 app.on('before-quit', event => {
   if (!quitting && workflow?.recordAttempted) {

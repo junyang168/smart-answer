@@ -40,7 +40,7 @@ class RemoteControl {
   publicState() {
     const value = this.getState(); this.observe(value.active);
     const page = value.pages.find(p => p.id === value.active);
-    return { ...this.workflow(), live: !!page?.ready, deck: page?.deck === 'worship' ? '主日崇拜' : page ? '講道' : '黑屏',
+    return { ...this.workflow(), live: !!page?.ready, deck: page?.deck === 'worship' ? '主日崇拜' : page ? '講道' : '尚未播放',
       binding: this.binding };
   }
   snapshot() {

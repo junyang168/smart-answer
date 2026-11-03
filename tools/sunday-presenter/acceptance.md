@@ -349,3 +349,46 @@ the focused window became the controller. A second press hid it, and another
 single press restored it. This is installed-app shortcut verification, in
 addition to the isolated Electron regression. It used the locally built verified
 update, not another downloaded-package Gatekeeper first-launch test.
+
+
+## Floating controls and no blank startup — 0.3.4
+
+The owner superseded the hidden-shortcut controller design: no blank startup
+window, no manual blackout UI, no fullscreen controller. Startup now allocates
+OUTPUT hidden, opens a non-fullscreen settings panel, and enters fullscreen only
+when a verified slide is taken. Internal end/navigation/failure gates mute views
+and hide OUTPUT instead of presenting an empty user window; normal deck changes
+retain its visible identity. The black/mute button, menu and Command-0 action are
+removed. A second launch brings forward the panel rather than opening blank OUTPUT.
+
+On macOS the controller uses the native floating panel window type, with explicit
+regular Dock activation policy. Playback reduces it to 420×240. Settings expands
+it without fullscreen. Close/Hide affects only the panel; Dock activation restores
+it. Command-P only restores the panel. Command-1/2 are intercepted in Office views
+before the web editor can consume them, and work while the panel remains closed.
+
+The full Electron smoke passes: startup OUTPUT is hidden/non-fullscreen;
+controller fullscreen is disabled; first verified slide enters fullscreen;
+20 deck changes retain the capture window; popup POST/opener, audio isolation,
+remote keys and invalidation safety pass. Closing the actual panel preserves the
+live slide; app activation restores it; actual view key events for Command-1/2
+switch decks without reopening the dismissed panel. Physical Dock clicking,
+real installed-Office floating behavior and Meet capture for this new window
+lifecycle require their specific checks; the emitted app activation is not a
+physical Dock click.
+
+The installed /Applications 0.3.4 bundle was subsequently compared with the
+source ASAR and passed deep/strict signature verification. Native UI opened the
+actual two weekly PPTs using the saved Microsoft session, started both Office
+slideshows and confirmed playback. The controller reduced to the small floating
+panel. Closing its native close button left the actual slideshow visible;
+Command-2 selected the sermon and Command-1 returned to worship without opening
+the panel. Command-P restored the compact panel and its status confirmed worship.
+Private screenshots record the compact panel and full-screen real slides.
+
+Read-only Dock preferences show the running /Applications app in recent apps.
+Finder's Add to Dock was attempted, but a persistent pin and physical Dock click
+were not verified: the computer interface could not inspect the Dock. Do not
+treat that attempt as completed pinning. The emitted activation regression above
+continues to cover the app's restore callback. Meet capture after this lifecycle
+change and physical two-computer/audio acceptance remain pending.

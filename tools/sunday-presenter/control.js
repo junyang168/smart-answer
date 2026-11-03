@@ -31,6 +31,8 @@ async function act(action, args) {
 }
 function render(state) {
   const flow = state.workflow;
+  document.body.classList.toggle('compact', state.panelExpanded === false);
+  document.querySelector('#panel-settings').textContent = state.panelExpanded === false ? '設定' : '收起設定';
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
   document.querySelector('#schedule-status').textContent = state.schedule?.message || '每主日 10:00（Dallas）自動開始。';
   document.querySelector('[data-action="cancel-auto-start"]').disabled = ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
@@ -58,7 +60,8 @@ function render(state) {
   for (const button of document.querySelectorAll('[data-folder]')) button.disabled = !folder;
   document.querySelector('[data-action="refresh-folder"]').disabled = website?.status === 'loading';
   const active = state.pages.find(page => page.id === state.active);
-  document.querySelector('#live').textContent = active ? `輸出：${labels[active.deck]}` : '輸出：黑屏（全部靜音）';
+  document.querySelector('#live').textContent = active ? `輸出：${labels[active.deck]}` : '尚未播放 · 請先準備 PPT';
+  document.querySelector('[data-action="show-output"]').disabled = !active;
   for (const deck of Object.keys(labels)) {
     const label = labels[deck];
     const section = document.getElementById(deck);
@@ -72,7 +75,7 @@ function render(state) {
     if (candidate) {
       args = { id: candidate.id };
       if (candidate.id === state.active) {
-        action = 'show-output'; buttonLabel = '正在播放 · 顯示畫面'; hint = '觀眾正在看這份簡報。⌘P 隱藏控制台。';
+        action = 'show-output'; buttonLabel = '正在播放 · 顯示畫面'; hint = '觀眾正在看這份簡報。按 × 可隱藏控制條，PPT 繼續播放。';
       } else if (candidate.ready) {
         action = 'take'; args = { deck }; buttonLabel = `播放${label}`; hint = '畫面已確認，可以播放。';
       } else if (state.preview === candidate.id && candidate.loaded && !candidate.error && /\.pptx?\b/i.test(candidate.title)) {
@@ -80,7 +83,7 @@ function render(state) {
         hint = '請先在 PowerPoint 啟動投影片放映。確認畫面只有投影片，再按下方按鈕。';
       } else {
         action = 'prepare'; buttonLabel = candidate.error ? '查看問題／重試' : '繼續準備 PPT';
-        hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，再按 ⌘P 回來確認。';
+        hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，在浮動控制條確認畫面。';
       }
     }
     primary.textContent = buttonLabel; primary.disabled = disabled;

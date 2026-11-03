@@ -10,8 +10,8 @@
   <script src="control.js" defer></script>
 </head>
 <body>
-  <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>本主日播放台</h1>
-    <p><strong>⌘P</strong> 顯示 / 隱藏控制台。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
+  <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>Sunday Presenter</h1><button data-action="panel-settings" id="panel-settings">收起設定</button><button data-action="hide-panel" id="hide-panel">隱藏控制條</button>
+    <p><strong>⌘P</strong> 叫出控制條。也可點 Dock 圖示。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
   </header>
   <section class="sunday-folder" aria-label="本主日簡報">
     <strong id="sunday-date">正在取得本主日資料夾…</strong>
@@ -20,10 +20,10 @@
       <button data-action="refresh-folder">更新連結</button></div>
     <p id="auto-status" role="status">登入 OneDrive 後，自動識別「主日崇拜」和另一份講道 PPT。多份候選時，請在資料夾選擇要用的檔案。</p>
   </section>
-  <section class="onair"><span id="live" role="status">輸出：黑屏</span><div class="switches">
+  <section class="onair"><span id="live" role="status">尚未播放</span><div class="switches">
     <button data-take="worship" class="take" disabled>主日崇拜</button>
     <button data-take="sermon" class="take" disabled>講道</button>
-    <button data-action="black" class="black">黑屏 / 靜音</button></div></section>
+</div></section>
   <p id="error" role="alert"></p>
   <main id="decks"></main>
   <details class="workflow-settings"><summary>Meet、講員連線與自動開場</summary>
@@ -53,8 +53,8 @@
       <button data-action="remote-stop" id="remote-stop" hidden>關閉講員翻頁</button></div>
   </section>
   <footer><div class="transport"><button data-key="Left">← 上一步</button><button data-key="Right">下一步 →</button><button data-action="show-output">顯示輸出視窗</button></div>
-    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → ⌘P 回來確認畫面 → 播放。</p>
-    <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。實際動畫及 Meet 收音須另行驗證。⌘P 切換控制台；⌘1 / ⌘2 切換；⌘0 黑屏。</p>
+    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → 在控制條確認畫面 → 播放。</p>
+    <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。實際動畫及 Meet 收音須另行驗證。⌘P 叫出控制條；⌘1 / ⌘2 切換。</p>
   </footer>
 </body>
 </html>

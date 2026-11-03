@@ -196,7 +196,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         previous.isEnabled = live && !busy; next.isEnabled = live && !busy
         code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = token != nil
         phase = state["phase"] as? String ?? "idle"
-        status.stringValue = lastMeetingError.isEmpty ? "已連線 · \(state["deck"] as? String ?? "黑屏")" : lastMeetingError
+        status.stringValue = lastMeetingError.isEmpty ? "已連線 · \(state["deck"] as? String ?? "尚未播放")" : lastMeetingError
         if let raw = state["meetingUrl"] as? String, let url = URL(string: raw) {
             meetingURL = url
             let run = state["runId"] as? String ?? ""
