@@ -1251,7 +1251,6 @@ function TranscriptProofreader({
               編輯歷史
             </button>
             <button
-              hidden
               className={button}
               disabled={disabled}
               onClick={() => void generateHeadings()}
