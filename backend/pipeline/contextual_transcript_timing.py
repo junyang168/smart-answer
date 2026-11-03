@@ -125,6 +125,14 @@ def edge_anchor(items,duration,*,end=False,quiet_interval=None,voice_near=None):
     return point
 
 
+def verified_overlap(previous,current):
+    left=previous.get('end_audio_witness',{});right=current.get('start_audio_witness',{})
+    return bool(left.get('genuine_overlap') and right.get('genuine_overlap')
+                and left.get('pair_id') and left.get('pair_id')==right.get('pair_id')
+                and left.get('left_id')==previous['id'] and left.get('right_id')==current['id']
+                and left.get('raw_response_sha256')==right.get('raw_response_sha256'))
+
+
 def analyse(out:Path,tolerance_ms=240,*,partial=False,write=True,detail=False):
     plan=read_json(out/'plan.json');observations={};errors=[]
     for chunk in plan['chunks']:
@@ -186,10 +194,21 @@ def analyse(out:Path,tolerance_ms=240,*,partial=False,write=True,detail=False):
             if row['start_status']==row['end_status']=='qualified' and row['start_ms']<row['end_ms']:
                 row['status']='qualified'
             results.append(row)
+        from backend.pipeline.paired_boundary_review import saved_pairs
+        positions={p['id']:p for p in results}
+        for pair in saved_pairs(out):
+            if pair['lecture']!=lecture:continue
+            left,right=positions[pair['left_id']],positions[pair['right_id']]
+            if ((left.get('start_ms') is not None and pair['left_end_ms']<=left['start_ms'])
+                or (right.get('end_ms') is not None and pair['right_start_ms']>=right['end_ms'])):continue
+            left.update(end_ms=pair['left_end_ms'],end_status='qualified',end_audio_witness={**pair,'genuine_overlap':pair['genuine_overlap']})
+            right.update(start_ms=pair['right_start_ms'],start_status='qualified',start_audio_witness={**pair,'genuine_overlap':pair['genuine_overlap']})
+            for row in [left,right]:
+                if row['start_status']==row['end_status']=='qualified' and row['start_ms']<row['end_ms']:row['status']='qualified'
         # Large overlaps require additional acoustic work, not mechanical cutting.
         conflicts=set()
         for previous,current in zip(results,results[1:]):
-            if previous['status']=='qualified' and current['status']=='qualified' and previous['end_ms']-current['start_ms']>320 and not (previous.get('end_audio_witness',{}).get('genuine_overlap') or current.get('start_audio_witness',{}).get('genuine_overlap')):
+            if previous['status']=='qualified' and current['status']=='qualified' and previous['end_ms']-current['start_ms']>320 and not verified_overlap(previous,current):
                 conflicts.update([previous['id'],current['id']])
         for row in results:
             if row['id'] in conflicts:
@@ -302,6 +321,13 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
     """Required producer step. Uncertain results stay staged and cannot hand off."""
     import shutil
     import subprocess
+    # Invalidate the old export before inference/network work can fail. The
+    # immutable old bytes remain available for inspection, never as current.
+    if (out/'handoff').exists():
+        import uuid
+        archive=out/'withheld-handoffs'/uuid.uuid4().hex
+        archive.parent.mkdir(exist_ok=True)
+        shutil.move(str(out/'handoff'),str(archive))
     signature=timing_fingerprint(record)[:20];base=out/'contextual-timing'/signature
     input_root=base/'input';evidence=base/'evidence';input_root.mkdir(parents=True,exist_ok=True)
     source_copy=input_root/'full_transcript.json'
@@ -327,6 +353,13 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
         from backend.pipeline.boundary_audio_review import run as review_boundaries
         review_boundaries(evidence)
         detail=analyse(evidence,detail=True)
+        if not detail['all_qualified']:
+            review_boundaries(evidence,phase='extended')
+            detail=analyse(evidence,detail=True)
+        if not detail['all_qualified']:
+            from backend.pipeline.paired_boundary_review import run as review_pairs
+            review_pairs(evidence)
+            detail=analyse(evidence,detail=True)
     if not detail['all_qualified']:
         record['timing_quality']={'policy':POLICY,'status':'withheld',
             'assessment_path':str((evidence/'assessment.json').relative_to(out))}
@@ -344,6 +377,7 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
         if 'alignment_sha256' in p:p['prior_alignment_sha256']=p.pop('alignment_sha256')
         p['timing_precision']='contextual_acoustic_phrase'
         p['contextual_alignment_sha256']=object_sha(qualified[p['id']]['observations'])
+        p['timing_boundary_evidence_sha256']=object_sha(qualified[p['id']])
         p['word_timing_valid']=False
     certificate={'policy':POLICY,'fingerprint':timing_fingerprint(record),
                  'evidence_root':str(evidence.relative_to(out)),'plan_sha256':file_sha(evidence/'plan.json'),

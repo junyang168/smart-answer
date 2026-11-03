@@ -71,3 +71,25 @@ def test_saved_p10_padding_counterexample_requires_acoustic_retry():
     assert not leading_padding_match({'start_ms':200680},clip,200730,199640)
     assert not leading_padding_match({'start_ms':197730},clip,197730,197000)
     assert not leading_padding_match({'start_ms':197730},clip,200730,197000)
+
+
+def test_batch_validation_is_atomic_and_quality_binds_postimage(repair):
+    store,before,evidence,path,request=repair
+    second={**evidence,'paragraph_id':'missing'}
+    batch={'schema_version':'paragraph-timing-corrections.v1',
+           'source_video_sha256':evidence['source_video_sha256'],
+           'source_record_sha256':evidence['source_record_sha256'],
+           'entries':[evidence,second]}
+    request['operations']=[{'kind':'paragraph_timing','id':key} for key in ['1','missing']]
+    atomic(path,batch);request['evidence_sha256']=file_hash(path)
+    with pytest.raises(ReviewError):apply_timing_repair(store,'owner','lecture',request,path)
+    assert store.document('owner','lecture')['context']==before['context']
+    batch['entries']=[evidence];request['operations']=[{'kind':'paragraph_timing','id':'1'}]
+    batch['quality_audit']={'status':'withheld','paragraph_states':{'1':{'status':'withheld','binding_sha256':digest(evidence['before_binding'])}}}
+    atomic(path,batch);request['evidence_sha256']=file_hash(path)
+    with pytest.raises(ReviewError):apply_timing_repair(store,'owner','lecture',request,path)
+    assert store.document('owner','lecture')['context']==before['context']
+    batch['quality_audit']['paragraph_states']['1']['binding_sha256']=digest(evidence['after_binding'])
+    atomic(path,batch);request['evidence_sha256']=file_hash(path)
+    apply_timing_repair(store,'owner','lecture',request,path)
+    assert store.document('owner','lecture')['context']['timing_quality']['status']=='withheld'

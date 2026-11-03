@@ -8,7 +8,9 @@
       "clip_start_ms": 197730,
       "clip_end_ms": 201730,
       "time_ms": 197730,
-      "sha256": "6279d48aa63ba275d3eb6466ab5bf1432492adf5c0f09e31a64d2ed66c04ac7a"
+      "sha256": "6279d48aa63ba275d3eb6466ab5bf1432492adf5c0f09e31a64d2ed66c04ac7a",
+      "left_file": "prefix-left-c0.wav",
+      "left_sha256": "8fa85f53276c0e8184bdfc56f440e2502cd14fff4a3b85da675c471650edb2e6"
     },
     {
       "id": "c1",
@@ -16,12 +18,17 @@
       "clip_start_ms": 200500,
       "clip_end_ms": 204500,
       "time_ms": 200500,
-      "sha256": "fc730dc2a4c05222f2e54c5ef2138b80a8be6536140e34d2590894b4f87a5074"
+      "sha256": "fc730dc2a4c05222f2e54c5ef2138b80a8be6536140e34d2590894b4f87a5074",
+      "left_file": "prefix-left-c1.wav",
+      "left_sha256": "4ae23f5a8f36950a0a53bc6cd419e41bde184ab21f231face8fca32055612300"
     }
   ],
   "expected_verdicts": {
     "c0": "wrong_segment",
     "c1": "clean_boundary"
   },
-  "ground_truth": "Owner identified preceding sentence tail at old start; two acoustic contexts identify first target word at 200680/200720 ms."
+  "ground_truth": "Owner identified preceding sentence tail at old start; two acoustic contexts identify first target word at 200680/200720 ms.",
+  "left_target_text": "可是呢，後來亞當夏娃犯了罪，魔鬼，亞當夏娃聽魔鬼的話，\n所以亞當夏娃說：「我何必讓神做我的王？我自己做王來管我自己不是很好嗎？」所以啊，亞當夏娃被魔鬼騙了，所以他們不要神做王。那神不做王，魔鬼就篡位，魔鬼來做王。",
+  "pair_context_file": "prefix-pair-context.wav",
+  "pair_context_sha256": "867fe8e91a4927c1da100f40223c61f979d6684a22fe6bc8253955ca85af7fde"
 }

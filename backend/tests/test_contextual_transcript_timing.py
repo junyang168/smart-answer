@@ -82,3 +82,14 @@ def test_producer_requires_context_verification_before_handoff(tmp_path,monkeypa
     assert [p['text'] for p in qualified['paragraphs']]==[p['text'] for p in record['paragraphs']]
     assert qualified['timing_quality']['status']=='qualified'
     require_verified_timing(tmp_path,qualified)
+
+
+def test_failed_verification_cannot_leave_old_handoff_current(tmp_path):
+    from backend.pipeline.contextual_transcript_timing import qualify_staged_record
+    record={'schema_version':'full-illustrated-corrected-transcript.v1','source_sha256':'a'*64,'paragraphs':[{'id':'p','text':'甲乙','start_ms':3000,'end_ms':3600}]}
+    save_json(tmp_path/'master.json',{'source_sha256':'a'*64,'duration_ms':8000})
+    write_audio(tmp_path/'master.wav',np.ones(8000*16,dtype=np.int16))
+    old=tmp_path/'handoff';old.mkdir();(old/'old.json').write_text('retained')
+    with pytest.raises(ValueError,match='aligner-python'):qualify_staged_record(tmp_path,record,None)
+    assert not old.exists()
+    assert [p.read_text() for p in (tmp_path/'withheld-handoffs').glob('*/old.json')]==['retained']
