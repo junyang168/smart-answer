@@ -10,8 +10,8 @@
   <script src="control.js" defer></script>
 </head>
 <body>
-  <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>Sunday Presenter</h1><button data-action="panel-settings" id="panel-settings">收起設定</button><button data-action="hide-panel" id="hide-panel">隱藏控制條</button>
-    <p><strong>⌘P</strong> 叫出控制條。也可點 Dock 圖示。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
+  <header><span class="eyebrow">SUNDAY PRESENTER · MAC 原型</span><h1>Sunday Presenter</h1><button data-action="hide-panel" id="hide-panel">返回播放</button>
+    <p><strong>⌘P</strong> 叫出設定，也可點 Dock 圖示。播放後設定窗口自動隱藏。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
   </header>
   <section class="sunday-folder" aria-label="本主日簡報">
     <strong id="sunday-date">正在取得本主日資料夾…</strong>
@@ -52,9 +52,9 @@
     <div class="transport"><button data-action="remote-start" id="remote-start">開啟講員翻頁</button>
       <button data-action="remote-stop" id="remote-stop" hidden>關閉講員翻頁</button></div>
   </section>
-  <footer><div class="transport"><button data-key="Left">← 上一步</button><button data-key="Right">下一步 →</button><button data-action="show-output">顯示輸出視窗</button></div>
-    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → 在控制條確認畫面 → 播放。</p>
-    <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。實際動畫及 Meet 收音須另行驗證。⌘P 叫出控制條；⌘1 / ⌘2 切換。</p>
+  <footer><div class="transport"><button data-action="show-output">顯示輸出視窗</button></div>
+    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → 在設定窗口確認畫面 → 播放。</p>
+    <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。實際動畫及 Meet 收音須另行驗證。⌘1 敬拜／⌘2 講道；方向鍵翻頁。點 Dock 圖示叫回設定。</p>
   </footer>
 </body>
 </html>

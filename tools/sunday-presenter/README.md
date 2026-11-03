@@ -223,14 +223,15 @@ Electron references: [WebContentsView](https://www.electronjs.org/docs/latest/ap
 
 The controller opens at launch. One “開啟本週 PPT” action reads the dated OneDrive folder in the operator's existing Office session, assigns a unique worship-named PPT and its sole remaining PPT to two fixed cards, and opens them. Extra candidates require operator selection. The folder poll expires after two minutes. Repeated document GET opens reuse a private view; POST bodies/opener and authentication popups remain isolated. The main confirmation action arms and takes the inspected page together. Internal page records and manual URLs are collapsed. Recording and remote acceptance remain separate.
 
-## 0.3.4 window behavior
+## 0.3.5 window behavior
 
-Startup shows only a 900×650 controller, which cannot enter native fullscreen or maximize. The fixed OUTPUT surface is created hidden and becomes fullscreen only after a verified slide is taken. Command-P without content leaves the controller available; while preparing it returns to the private document instead of revealing an empty output. The manual blackout button, menu and Command-0 shortcut are removed. End/failure/navigation still mute content and hide the output, while ordinary deck switches retain the same shown capture surface.
+Startup shows only a 760×650 settings window, which cannot fullscreen or maximize.
+OUTPUT remains hidden until a verified slide is played. Every successful playback
+or scheduled take automatically hides settings. There is no compact flip panel,
+manual blackout button or Command-0 action. Command-1 selects worship, Command-2
+selects sermon and arrow keys stay with the active PowerPoint slideshow.
 
-
-The 0.3.4 controller is a macOS floating panel, reduced to 420×240 when playback
-starts, with expandable settings. Its ×/Hide action hides only the panel; the
-presentation and recording workflow continue. Dock activation reopens it, and
-Command-P is an idempotent recovery action rather than a toggle. During formal
-presentation Command-1/2 switches the prepared decks without reopening the panel.
-The Dock activation policy remains regular with an explicit visible app icon.
+Dock activation or Command-P restores the full settings window. Closing settings
+leaves presentation and recording running. Return to playback hides settings and
+focuses the active slide. End/failure/navigation still mute and hide OUTPUT;
+ordinary deck switches keep the same capture window. The Dock policy is regular.

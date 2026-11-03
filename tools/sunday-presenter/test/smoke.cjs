@@ -167,9 +167,14 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     toggleControls();
     await until(async () => await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').textContent.includes('確認並播放')"), 'single confirmation button');
     await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').click()", true);
-    await until(() => stage.active === worship.id && controller.isVisible(), 'floating panel stays available during playback');
-    assert.ok(controller.getBounds().width <= 420);
-    assert.ok(controller.getBounds().height <= 240);
+    await until(() => stage.active === worship.id && !controller.isVisible(), 'playback automatically hides settings');
+    assert.equal(controller.getBounds().width, 760);
+    toggleControls();
+    assert.equal(await controller.webContents.executeJavaScript("document.querySelectorAll('[data-key], #panel-settings').length"), 0);
+    assert.equal(controller.isVisible(), true);
+    // A workflow/scheduled take also hides settings, even for the same deck.
+    stage.take('worship');
+    assert.equal(controller.isVisible(), false);
     assert.equal(controller.isFullScreen(), false);
     await act('hide-panel');
     // Deck changes must not reopen a panel the operator explicitly dismissed.
@@ -234,7 +239,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
       navigationAndCrashBlackout: true, popupPostPreserved: true, fullscreenOutput: true,
       controlsHiddenByDefault: true, commandPRegistered: true, stableControlButtons: true,
-      presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true, noBlankStartupWindow: true, controllerCannotFullscreen: true, floatingPanel: true, closePreservesPresentation: true, dockActivationRestoresPanel: true, formalDeckShortcuts: true,
+      presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true, noBlankStartupWindow: true, controllerCannotFullscreen: true, playbackHidesSettings: true, noFlipPanel: true, closePreservesPresentation: true, dockActivationRestoresPanel: true, formalDeckShortcuts: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
       microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };

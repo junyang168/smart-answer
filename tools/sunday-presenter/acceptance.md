@@ -392,3 +392,34 @@ were not verified: the computer interface could not inspect the Dock. Do not
 treat that attempt as completed pinning. The emitted activation regression above
 continues to cover the app's restore callback. Meet capture after this lifecycle
 change and physical two-computer/audio acceptance remain pending.
+
+
+## Settings only; automatic hide on playback — 0.3.5
+
+The owner rejected the daily flip panel because it would be hidden during a
+presentation anyway. The compact mode, settings/compact toggle and local
+previous/next buttons are removed. There is one settings window. Every successful
+Stage.take, including a workflow/scheduled take of the already-active deck,
+hides settings and returns keyboard focus to the active Office view. State-only
+updates do not hide a settings window that the operator intentionally reopened.
+Dock activation and Command-P reopen full settings; close leaves playback running.
+Return to playback is unavailable before any presentation exists.
+
+All 32 Node tests pass. The updated Electron smoke checks automatic hiding from
+the actual confirmation button, the direct scheduled-workflow take path, absence
+of the flip controls, full settings restoration, Command-1/2 with settings hidden,
+20 retained-state changes and the existing popup/session/audio/remote invariants.
+An intermediate installed build also opened the actual weekly files and confirmed
+that playing the real sermon automatically hid settings. Native preparation
+focus required retaining the macOS panel type for the full settings window; this
+is a window behavior detail, not a compact playback panel. Final source/installed
+ASAR and package integrity are verified separately before publishing. Physical
+Dock clicking, Meet lifecycle and two-Mac/audio acceptance remain pending.
+
+
+Final installed 0.3.5 native UI then opened the actual upcoming-week folder,
+entered the real worship slideshow and confirmed playback. The focused native
+window became OUTPUT without an extra hide action. The settings window did not
+appear in the saved playback screenshot (`035-playback-without-controls.png`,
+private evidence directory). Both source and installed ASAR matched; deep/strict
+signature, final DMG checksum and Remote ZIP integrity passed.

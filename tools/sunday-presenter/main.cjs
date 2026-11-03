@@ -28,17 +28,6 @@ const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
 const controlShortcut = 'CommandOrControl+P';
 
-let panelExpanded = true, panelHasPlayed = false;
-function resizePanel(expanded) {
-  panelExpanded = expanded;
-  if (!controller || controller.isDestroyed()) return;
-  const bounds = controller.getBounds();
-  const area = require('electron').screen.getDisplayMatching(bounds).workArea;
-  const width = Math.min(expanded ? 760 : 420, area.width);
-  const height = Math.min(expanded ? 650 : 240, area.height);
-  controller.setBounds({ x: Math.min(Math.max(bounds.x, area.x), area.x + area.width - width),
-    y: Math.min(Math.max(bounds.y, area.y), area.y + area.height - height), width, height });
-}
 function toggleControls() {
   // Recovery action is idempotent. Close/hide is an explicit panel action.
   if (!controller || controller.isDestroyed()) return;
@@ -46,14 +35,19 @@ function toggleControls() {
   controller.show(); controller.moveTop(); controller.focus();
 }
 
-function changed() {
-  if (stage?.active != null && !panelHasPlayed) { panelHasPlayed = true; resizePanel(false); }
+function changed(reason) {
+  // Every successful presentation, including scheduled starts, leaves only slides.
+  if (reason === 'present' && controller && !controller.isDestroyed()) {
+    controller.hide();
+    output.focus();
+    stage.get(stage.active).view.webContents.focus();
+  }
   if (stage) remoteControl?.observe(stage.active);
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  workflow: workflow?.snapshot(), panelExpanded, folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
+  workflow: workflow?.snapshot(), folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
 
 function saveSettings() {
   const target = path.join(app.getPath('userData'), 'service-settings.json');
@@ -158,8 +152,7 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
 async function act(action, args = {}) {
   switch (action) {
     case 'state': return snapshot();
-    case 'panel-settings': resizePanel(!panelExpanded); changed(); toggleControls(); break;
-    case 'hide-panel': controller.hide(); break;
+    case 'hide-panel': controller.hide(); if (stage.active !== null) { output.focus(); stage.get(stage.active).view.webContents.focus(); } break;
     case 'choose-week': {
       filePlan = null; folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
       const folder = await website.refresh();
@@ -221,7 +214,7 @@ async function act(action, args = {}) {
       await task;
       break;
     }
-    case 'show-output': if (stage.active !== null) { output.show(); output.focus(); } break;
+    case 'show-output': if (stage.active !== null) { controller.hide(); output.show(); output.focus(); stage.get(stage.active).view.webContents.focus(); } break;
     default: throw Error('Unknown action');
   }
   return snapshot();
@@ -256,7 +249,7 @@ app.whenReady().then(async () => {
     { label: 'Sunday Presenter', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
     { role: 'editMenu' },
     { label: 'Presentation', submenu: [
-      { label: '顯示控制條', accelerator: controlShortcut, click: toggleControls },
+      { label: '顯示設定', accelerator: controlShortcut, click: toggleControls },
       { label: '主日崇拜', accelerator: 'CmdOrCtrl+1', click: () => act('take', { deck: 'worship' }).catch(() => {}) },
       { label: '講道', accelerator: 'CmdOrCtrl+2', click: () => act('take', { deck: 'sermon' }).catch(() => {}) }
     ] }, { role: 'windowMenu' }

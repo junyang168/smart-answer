@@ -86,7 +86,7 @@ class Stage {
     page.view.webContents.setAudioMuted(false);
     page.view.webContents.focus();
     this.output.show();
-    this.changed();
+    this.changed('present');
   }
 
   black(emit = true, hideOutput = true) {
