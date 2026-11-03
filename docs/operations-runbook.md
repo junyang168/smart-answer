@@ -331,6 +331,55 @@ date staging held 7.1 GB on an internal disk at 98% and blocked a deploy.
   mode and link targets. Database dumps that #423 had already moved to the SSD
   stay reachable through their absolute links.
 
+### Website video migration to the Jun SSD
+
+The website media root is `/opt/homebrew/var/www/church/web/video`, alongside
+`DATA_BASE_DIR`, rather than inside it. nginx serves it at `/web/video/`;
+the canonical repository and original-audio index also read this directory.
+`/Volumes/Jun SSD/data/video` is a separate, pre-existing 110 GiB collection
+used by slide extraction. Do not overwrite it or assume matching filenames
+contain the same bytes.
+
+On 2026-11-02, #593 copied the website directory to
+`/Volumes/Jun SSD/church-website-video`: 477 files, 32,475,018,212 bytes,
+including 476 audio/video files and `.DS_Store`. Every file's SHA-256, size,
+mode, owner and modification time matched. The SSD has ownership disabled,
+so its displayed group is `staff` rather than the source's `admin` group.
+Extended attributes matched apart from macOS-managed quarantine/provenance
+changes introduced by copying; these protections were not removed.
+
+**The website now serves the SSD directory.** The original `video` path is a
+symlink to `/Volumes/Jun SSD/church-website-video`, so existing URLs and backend
+paths remain the same. The verified internal duplicate has been removed.
+The SSD must stay mounted while serving or processing website media.
+
+The first symlink probe returned HTTP 500: nginx logged `Operation not
+permitted` while reading the SSD. The owner explicitly authorized enabling
+nginx's Full Disk Access and completed the macOS administrator verification.
+The same running nginx process then served the SSD successfully, without a
+configuration reload, service restart or code deployment. This broad macOS
+privacy permission does not add any nginx URL mappings. If the permission is
+revoked, or a future nginx update changes the authorized executable, verify
+SSD access again before removing any internal fallback copy.
+
+Verification records live outside the public web tree at
+`/Volumes/Jun SSD/codex-output/ssd-migration-593/`. They include both file
+manifests, metadata differences and the successful pre-migration HTTP HEAD
+checks for all 476 media URLs before and after the switch. MP3, MP4 and
+Chinese-filename checks verified exact bytes at the beginning, middle and end
+of each sampled file (nine HTTP 206 responses). Three additional checks passed
+through the public `https://dallas-hlc.org/web/video/` URLs. The cleanup record
+confirms the verified internal duplicate was removed after the local checks.
+
+For a future relocation, stage a symlink to the verified destination, retain
+the current directory under a temporary name, then switch the original `video`
+path to the symlink. Recheck all media URLs and byte-range responses before
+removing the duplicate. On failure, restore the retained directory at the
+original path. The #593 internal copy has already been removed; reverting this
+move requires copying the SSD directory back and verifying it before replacing
+the symlink, with sufficient internal free space for the copy. Never unlink
+the working media path before the replacement is ready.
+
 ### Google OAuth token
 
 Exporting a sermon to a Google Doc uses the owner's own Google sign-in, stored
