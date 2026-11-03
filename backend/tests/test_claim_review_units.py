@@ -455,3 +455,43 @@ def test_repaired_fragment_use_keeps_unanswered_audio_question_as_context(claims
     assert store.claim_management_qualification('C')['ready']
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
     assert not parent['findings'] and next(iter(parent['context_findings'].values()))['human_question']=='Who spoke?'
+
+
+def test_explicit_orphan_question_maintenance_is_read_without_unused_permission_roots(claims):
+    from pathlib import Path
+    from backend.pipeline.claim_joint_update import context_roots
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    store,root=claims
+    # Synthetic old Question payloads exercise the read/authority boundary.
+    store.apply_plan(store.plan_package({'package_id':'unlinked-question-maintenance',
+        'source_fragments':[{'fragment_id':'FQ','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'},
+            {'fragment_id':'FU','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设'}],
+        'questions':[{'question_id':'Q','text':'甲是否是斷言？','source_fragment_ids':['FQ'],
+            'answer_state':'unanswered','answer_claim_ids':[]},
+            {'question_id':'UNUSED','text':'另一個問題？','source_fragment_ids':['FU'],
+                'answer_state':'unanswered','answer_claim_ids':[]}]}))
+    prepared=intake.prepare(['C'],root,instruction='Update the explicit Question answer; keep the Claim',
+        policy=policy_file(root.parent),groups=[['C']],store=store)
+    request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+    p=cm.Policy.model_validate_json(Path(request.policy.path).read_text());p.initial_candidate='proposal'
+    pp=root/'q-policy.json';pp.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp))
+    a=json.loads(cm.source.verify_file(request.authorization).read_text());a['required_maintenance_keys']=['questions/Q']
+    request.permissions=[cm.source.Permission(collection='questions',object_id='Q',fields=['answer_state','answer_claim_ids'])]
+    authorize(request,{k:v for k,v in a.items() if k not in {'request','policy'}})
+    with_unused_grant=request.model_copy(deep=True,update={'permissions':request.permissions+[
+        cm.source.Permission(collection='questions',object_id='UNUSED',fields=['answer_claim_ids'])]})
+    assert ('questions','Q') in context_roots(with_unused_grant) and ('questions','UNUSED') not in context_roots(with_unused_grant)
+    original=store.get_record_state('claims','C')
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def propose(packet):
+        assert 'questions/Q' in packet['before'] and 'questions/UNUSED' not in packet['before']
+        return {'changes':[{'record_key':'questions/Q','fields_json':json.dumps({'answer_state':'answered','answer_claim_ids':['C']}),
+            'reason':'synthetic direct answer link','citations':[cite]}], 'creations':[],'retirements':[],
+            'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=pass_review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus'] and store.get_record_state('claims','C')==original
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C']
+    assert store.get_record_state('questions','UNUSED')['payload']['answer_claim_ids']==[]
+    assert store.claim_management_qualification('C')['ready']

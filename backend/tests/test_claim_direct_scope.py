@@ -466,3 +466,83 @@ def test_applied_readback_recovery_never_repeats_models_or_apply(chain, monkeypa
     assert (output/rid/'readback.json').read_bytes() == old_readback
     assert Path(recovered, 'readback.json').is_file()
     assert store.claim_management_qualification('A')['ready']
+
+
+@pytest.mark.parametrize('enabled',[False,True])
+def test_declared_owner_is_resolvable_readonly_context_without_a_claim_frontier(chain,enabled):
+    store,request,_,root=chain
+    from backend.pipeline.claim_review_units import CONTRACT
+    p=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text());p.review_unit_contract=CONTRACT;p.joint_update_max_targets=10
+    pf=root/'owner-context-policy.json';pf.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pf))
+    a=store.get_record_state('evidence_steps','EA')['payload']
+    ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'explicit-readonly-evidence-owner',
+        'evidence_steps':[dict(a,produced_claim_ids=['A','C']),dict(ec,produced_claim_ids=['C','D']),{'evidence_step_id':'ED','statement':'甲是假设。','produced_claim_ids':['D']}],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis','evidence_step_ids':['ED'],
+            'occurrences':[{'source_id':'S','anchors':[]}]}], 'claim_relations':[relation('CD','C','D')]}))
+    request.permissions=[p for p in request.permissions if p.key in {'claims/A','claim_relations/AB'}]
+    authorize(request,{'required_maintenance_keys':[],'include_evidence_owner_context':enabled})
+    before={cm.source.key(*k):cm.model_state(v) for k,v in store.read_claim_context([('claims','A')]).items()}
+    selected=direct.scope(request,before)
+    assert ('claims/C' in selected['record_keys'])==enabled
+    assert ('evidence_steps/EC' in selected['record_keys'])==enabled
+    assert selected['content_claim_keys']==['claims/A']
+    assert not {'claims/D','claim_relations/BC','claim_relations/CD'} & set(selected['record_keys'])
+    if enabled:
+        assert 'claims/C' not in selected['writable_record_keys']
+        assert 'evidence_steps/EC' not in selected['writable_record_keys']
+        assert 'claims/C' not in direct.scope(request,before,include_write_context=False)['record_keys']
+        projected={k:before[k] for k in selected['record_keys']}
+        assert direct.scope(request,projected)['record_keys']==selected['record_keys']
+        candidate=cm.existing_candidate(projected)
+        row=dict(before['claim_relations/AB']['payload'],target_id='C')
+        candidate.records=[cm.source.Row(collection='claim_relations',object_id='AB',payload=row)]
+        next(d for d in candidate.dispositions if d.record_key=='claim_relations/AB').action='update'
+        post=direct.scope(request,projected,candidate)
+        assert 'claims/C' in post['neighbour_claim_keys'] and post['content_claim_keys']==['claims/A']
+        assert not {'claims/D','claim_relations/CD'} & set(post['record_keys'])
+
+
+@pytest.mark.parametrize('write_reference',[False,True])
+def test_provided_owner_can_receive_relation_without_write_or_new_qualification(chain,write_reference):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store,request,execution,root=chain
+    ea=store.get_record_state('evidence_steps','EA')['payload'];cl=store.get_record_state('claims','C')['payload']
+    store.apply_plan(store.plan_package({'package_id':'same-source-provided-carrier',
+        'source_fragments':[{'fragment_id':'FA','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'}],
+        'evidence_steps':[dict(ea,produced_claim_ids=['A','C'],source_fragment_ids=['FA'],speaker='professor',
+            stance='asserted',support_eligibility='eligible_candidate')],
+        'claims':[dict(cl,evidence_step_ids=['EA','EC'])]}))
+    p=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text());p.review_unit_contract=CONTRACT;p.joint_update_max_targets=10;p.initial_candidate='proposal'
+    pf=root/'provided-carrier-policy.json';pf.write_text(p.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pf))
+    request.permissions=[cm.source.Permission(collection='claims',object_id='A',fields=['statement']),
+        cm.source.Permission(collection='claim_relations',object_id='AB',fields=['target_id','reason'])]
+    authorize(request,{'required_maintenance_keys':[],'include_existing_evidence_owners':True,'include_evidence_owner_context':True})
+    initial=store.get_record_state('claims','C');ec=store.get_record_state('evidence_steps','EC')
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def propose(packet):
+        assert 'claims/C' in packet['before'] and 'evidence_steps/EC' in packet['before']
+        assert 'claims/C' not in packet['claim_scope']['content_claim_keys']
+        changes=[{'record_key':'claim_relations/AB','fields_json':json.dumps({'target_id':'C','reason':'synthetic support to the active carrier'}),
+            'reason':'use the explicit provided carrier','citations':[cite]}]
+        if write_reference:changes.append({'record_key':'claims/C','fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),
+            'reason':'not authorised by reference presence','citations':[cite]})
+        return {'changes':changes,'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    def review(packet):
+        assert set(packet['own_evidence_bindings'])=={'claims/A'}
+        assert 'claims/C' in packet['claim_scope']['neighbour_claim_keys']
+        assert 'claim_relations/BC' not in packet['before']
+        return pass_review(packet)
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    if write_reference:
+        assert result['status']=='paused' and any(text in result['detail'] for text in ['read-only','hidden Claim']),result
+        assert ports.calls==['gpt']
+    else:
+        assert result['status']=='completed',result
+        assert ports.calls==['gpt','opus']
+        assert store.get_record_state('claim_relations','AB')['payload']['target_id']=='C'
+        assert store.claim_management_qualification('A')['ready']
+    assert store.get_record_state('claims','C')==initial and store.get_record_state('evidence_steps','EC')==ec
+    assert store.claim_management_qualification('C') is None

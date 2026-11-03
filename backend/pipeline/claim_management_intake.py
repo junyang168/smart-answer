@@ -223,7 +223,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:
-            authorization.update(reuse_initial_claim_assessments=True, include_existing_evidence_owners=True)
+            authorization.update(reuse_initial_claim_assessments=True, include_existing_evidence_owners=True,
+                                 include_evidence_owner_context=True)
         if selected.model_output_contract == 'claim_changes_v4':
             authorization['claim_creation_allocations'] = allocations
         request.authorization = cm.source.FileBinding.model_validate(immutable(auth_path, authorization))

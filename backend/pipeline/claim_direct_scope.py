@@ -17,10 +17,22 @@ EVIDENCE_OWNER_NOTE = (
     'already stated by a listed active Claim.')
 
 
+def owner_context_enabled(request):
+    """New authorizations opt in; frozen packets retain their exact table."""
+    from backend.pipeline import claim_management as cm
+    bound = request.authorization
+    return (bound.file_sha256 != '0' * 64 and Path(bound.path).is_file()
+        and json.loads(cm.source.verify_file(bound).read_text()).get('include_evidence_owner_context') is True)
+
+
 def evidence_owner_references(request, before, transaction_before):
     """Resolve declared owners for duplicate checks, without traversing Claims."""
     from copy import deepcopy
     from backend.pipeline import claim_management as cm
+    if owner_context_enabled(request):
+        # Provided Evidence owners are already in the resolvable table.
+        # Do not discover further Claims from their private reference Evidence.
+        return {}
     rows = {k:v['payload'] for k,v in transaction_before.items()}
     ids = {cid for key,state in before.items() if key.startswith('evidence_steps/')
            for cid in state['payload'].get('produced_claim_ids', [])}
@@ -68,7 +80,7 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
     return targets | maintenance | set(actual_write_keys)
 
 
-def scope(request, before, candidate=None, *, include_write_context=True):
+def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -219,6 +231,18 @@ def scope(request, before, candidate=None, *, include_write_context=True):
                     owners.add(owner)
             context.update(evidence_chain(owners, rows))
         neighbours.update(k for k in context if k.startswith('claims/') and k not in content_claims)
+    if bounded and include_write_context and include_owner_context and owner_context_enabled(request):
+        # Resolve the exact owner facts supplied by the original reference
+        # table. Freeze discovery at the pre-proposal frontier: adding their
+        # own support must not discover owners-of-owners or Claim neighbours.
+        frontier = scope(request, before, include_write_context=include_write_context,
+                         include_owner_context=False)['record_keys']
+        owners = {named('claims', cid) for k in frontier if k.startswith('evidence_steps/')
+            for cid in old[k].get('produced_claim_ids', [])} - set(frontier)
+        owners = {k for k in owners
+            if (own := cm.own_source_ids(old[k], old)) and own <= set(request.source_bindings)}
+        context.update(evidence_chain(owners, old))
+        neighbours.update(owners)
     for rows in [old, payloads]:
         context.update(evidence_chain(context & set(rows), rows, leaf_claims=True))
     keys = core | relations | context

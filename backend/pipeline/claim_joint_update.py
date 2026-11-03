@@ -39,6 +39,15 @@ def required_keys(request, *, strict=True):
     return list(keys)
 
 
+def context_roots(request):
+    """Read explicit maintenance roots; unused grants do not widen joint reads."""
+    from backend.pipeline import claim_management as cm
+    keys = set(request.target_keys)
+    keys.update(required_keys(request) if enabled(request) else (p.key for p in request.permissions))
+    keys.update(cm.source.key('source_documents', sid) for sid in request.source_bindings)
+    return sorted(cm.source.split_key(key) for key in keys)
+
+
 def finding_permission_extension(previous, old, request):
     """A linked action may authorize a known readonly finding, not widen reads."""
     if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted', 'no_progress'}:

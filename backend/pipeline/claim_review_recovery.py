@@ -816,13 +816,9 @@ def resume_rejected_citations(store, round_id, *, role):
 
 def _current_rejected_input_context(store, cursor, request, materials, *, include_records=False):
     """Keep the model input exact while refreshing transaction-only consumers."""
-    from backend.pipeline.claim_joint_update import enabled
-    keys = {cm.source.split_key(k) for k in request.target_keys}
-    keys.update(('source_documents', sid) for sid in request.source_bindings)
-    if not enabled(request):
-        keys.update((p.collection, p.object_id) for p in request.permissions)
+    from backend.pipeline.claim_joint_update import context_roots
     reader = store.read_affected_context if cm.is_source_impact(request) else store.read_claim_context
-    records = reader(sorted(keys))
+    records = reader(context_roots(request))
     locked = store._assert_transaction_read_pins(cursor, pins(records))
     current = {cm.source.key(*k): cm.model_state(v) for k, v in locked.items()}
     if cm.original_goal(request, current)['original_objects'] != materials['before']:

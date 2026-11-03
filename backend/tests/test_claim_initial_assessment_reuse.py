@@ -53,6 +53,7 @@ def interrupted_unit(action, request, monkeypatch):
     legacy_auth = json.loads(Path(request.authorization.path).read_text())
     legacy_auth.pop('reuse_initial_claim_assessments', None)
     legacy_auth.pop('include_existing_evidence_owners', None)
+    legacy_auth.pop('include_evidence_owner_context', None)
     legacy_file = tmp / 'legacy-authority.json'; legacy_file.write_text(json.dumps(legacy_auth))
     request.authorization = cm.source.FileBinding.model_validate(binding(legacy_file))
     citation = {'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}

@@ -493,11 +493,8 @@ def execute_claim_management(store, request, *, root, ports):
             if parent['request'] != request.model_dump(mode='json') or parent['execution_root'] != str(root):
                 raise ValueError('Claim recovery cannot reset original input/root/budget')
         else:
-            keys = {content.split_key(k) for k in request.target_keys}
-            if not enabled(request):
-                keys.update((p.collection, p.object_id) for p in request.permissions)
-            keys.update(('source_documents', sid) for sid in request.source_bindings)
-            records = read_context(sorted(keys))
+            from backend.pipeline.claim_joint_update import context_roots
+            records = read_context(context_roots(request))
             before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
             goal = cm.original_goal(request, before)
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
@@ -552,7 +549,10 @@ def execute_claim_management(store, request, *, root, ports):
                         keys.update(content.split_key(k) for k in parent['created_keys'])
                         if request.operation == 'Create':
                             keys.update(('source_documents', sid) for sid in request.source_bindings)
-                        if len(parent['original_goal']['units']) == 1:
+                        if enabled(request):
+                            from backend.pipeline.claim_joint_update import context_roots
+                            keys = set(context_roots(request)) | {content.split_key(k) for k in parent['created_keys']}
+                        elif len(parent['original_goal']['units']) == 1:
                             keys.update((p.collection,p.object_id) for p in request.permissions)
                         # Root authority is fixed; only permissions reachable
                         # from this unit are presented as writable.
@@ -564,11 +564,11 @@ def execute_claim_management(store, request, *, root, ports):
                         before = transaction_before
                         if enabled(request):
                             frozen = set(parent['original_goal']['original_objects'])
-                            natural = request.model_copy(deep=True, update={'permissions': []})
-                            current_scope = set(cm.audit_keys(natural, before))
+                            current_scope = set(cm.audit_keys(request, before))
                             if current_scope - frozen:
                                 raise ValueError('joint Update dependency scope expanded outside frozen original objects')
-                        unit_request = request.model_copy(deep=True, update={'target_keys': targets, 'permissions': []})
+                        unit_request = request.model_copy(deep=True, update={'target_keys': targets,
+                            'permissions': list(request.permissions) if len(parent['original_goal']['units']) == 1 else []})
                         unit_keys = set(cm.audit_keys(unit_request, before))
                         unit_request.permissions = [p for p in request.permissions if p.key in unit_keys]
                         if len(parent['original_goal']['units']) == 1:
