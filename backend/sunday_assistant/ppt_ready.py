@@ -50,7 +50,9 @@ class PptReady:
             missing.append('自動安排讀經同工')
         songs = []
         catalog = self.agent.repository.list_sunday_songs()
-        for title in [entry.hymn, entry.response_hymn]:
+        for title, video in [(entry.hymn, entry.hymn_youtube_url), (entry.response_hymn, entry.response_hymn_youtube_url)]:
+            if video:
+                continue
             matches = [song for song in catalog if song.title == title]
             if len(matches) != 1 or not (matches[0].lyrics_markdown or '').strip():
                 missing.append('詩歌目錄／完整歌詞：' + (title or '未指定'))

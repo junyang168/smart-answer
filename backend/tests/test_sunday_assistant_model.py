@@ -75,6 +75,7 @@ def test_model_oct4_existing_different_reading_boundaries_are_held_without_group
     entry = agent.repository.services[case["date"]]
     entry.sermon_title = case["expected"]["sermonTitle"]
     entry.response_hymn = case["expected"]["responseHymn"]
+    entry.response_hymn_youtube_url = case["expected"]["responseHymnYoutubeUrl"]
     entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
     before = entry.model_dump(by_alias=True)
     event(agent, case["text"], sender="unverified-author", at=case["sent_at"])
@@ -90,6 +91,7 @@ def test_model_oct4_explicit_reading_correction_can_replace_manual_boundaries(ag
     entry = agent.repository.services[case["date"]]
     entry.sermon_title = case["expected"]["sermonTitle"]
     entry.response_hymn = case["expected"]["responseHymn"]
+    entry.response_hymn_youtube_url = case["expected"]["responseHymnYoutubeUrl"]
     entry.scripture = ["gen-5-21-25", "gen-5-26-29", "gen-7-11-13", "heb-11-5-7"]
     before = entry.model_dump(by_alias=True)
     text = "更正10/4已存的讀經分段，請把原來5:21-25、5:26-29改成以下消息的四段，以這次更正為準：\n" + case["text"]
@@ -374,3 +376,58 @@ def test_model_two_missing_songs_finish_within_eight_decisions(agent, monkeypatc
     entry = agent.repository.services['2026-11-08']
     assert (entry.hymn, entry.response_hymn) == (titles[17], titles[18])
     assert len([song for song in agent.repository.songs if song.id.startswith('import-')]) == 2
+
+
+def test_model_oct4_video_does_not_require_catalog_or_lyrics(agent):
+    case=oct4_case(agent)
+    agent.repository.songs=[song for song in agent.repository.songs if song.title!='合神心意']
+    before_songs=[song.model_dump() for song in agent.repository.songs]
+    event(agent,case['text'],sender='unverified-author',at=case['sent_at'])
+    saved=agent.repository.services[case['date']].model_dump(by_alias=True)
+    for field,value in case['expected'].items():
+        assert saved[field]==value
+    assert [song.model_dump() for song in agent.repository.songs]==before_songs
+    assert not agent.bridge.sent
+    with agent.store.db() as db:
+        assert not db.execute("SELECT 1 FROM clarifications WHERE status='waiting'").fetchone()
+
+
+def test_model_adds_only_response_video_to_existing_form(agent):
+    case=oct4_case(agent)
+    agent.repository.services[case['date']].response_hymn='合神心意'
+    before=agent.repository.services[case['date']].model_dump(by_alias=True)
+    url='https://youtu.be/5IIV-vdSq7c?t=30'
+    event(agent,'10/4 回應詩歌影片連結：'+url,sender='unverified-author',at=case['sent_at'])
+    after=agent.repository.services[case['date']].model_dump(by_alias=True)
+    assert after['responseHymnYoutubeUrl']==url
+    assert {key for key in before if before[key]!=after[key]}=={'responseHymnYoutubeUrl'}
+    assert not agent.bridge.sent
+
+
+def test_model_collects_explicit_pianist_without_confusing_unavailable_namesake(agent):
+    from backend.api.models import SundayWorker
+    agent.repository.workers['林樂意']=SundayWorker(name='林樂意',preferredRoles=['司琴'])
+    agent.repository.workers['林怡婷']=SundayWorker(name='林怡婷',preferredRoles=['司琴'],unavailableRanges=[{'startDate':'2026-11-02','endDate':'2026-12-12'}])
+    settings=agent.store.settings();settings.collect_cross_group=True;settings.group_questions_enabled=False
+    agent.store.put('settings',settings.model_dump())
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',sermonTitle='喜樂的感恩——住棚節',scripture=['neh-8-1-18'],worshipLeader='王明')
+    before=agent.repository.services['2026-11-08'].model_dump(by_alias=True)
+    event(agent,'林樂意這個主日司琴',group='111@g.us',at='2026-11-03T00:30:23Z')
+    after=agent.repository.services['2026-11-08'].model_dump(by_alias=True)
+    assert after['pianist']=='林樂意'
+    assert {key for key in before if before[key]!=after[key]}=={'pianist'}
+    assert not agent.bridge.sent
+
+
+def test_model_collects_future_pianist_while_preserving_known_absence_interval(agent):
+    from backend.api.models import SundayWorker
+    agent.repository.workers['林怡婷']=SundayWorker(name='林怡婷',preferredRoles=['司琴'],unavailableRanges=[{'startDate':'2026-11-02','endDate':'2026-12-12'}])
+    settings=agent.store.settings();settings.collect_cross_group=True;settings.group_questions_enabled=False
+    agent.store.put('settings',settings.model_dump())
+    before=agent.repository.workers['林怡婷'].model_dump()
+    event(agent,'林怡婷姐妹和我说了,她只有12/13来司琴,这之前她都不在.这之后得等她回来再定',group='111@g.us',at='2026-11-03T00:04:28Z')
+    assert agent.repository.services['2026-12-13'].pianist=='林怡婷'
+    assert agent.repository.workers['林怡婷'].model_dump()==before
+    assert set(agent.repository.services)=={'2026-12-13'}
+    with agent.store.db() as db:
+        assert not db.execute("SELECT 1 FROM clarifications WHERE status='waiting'").fetchone()

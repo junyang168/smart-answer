@@ -12,12 +12,13 @@ async function main() {
   const args = process.argv.slice(2), options = {};
   while (args.length) {
     const flag = args.shift();
-    if (!['--root', '--dist'].includes(flag) || !args.length) throw Error('Usage: publish-sunday-presenter.cjs --root <data>/sunday-presenter/releases [--dist <build-dir>]');
+    if (!['--root', '--dist', '--version'].includes(flag) || !args.length) throw Error('Usage: publish-sunday-presenter.cjs --version <version> --root <data>/sunday-presenter/releases [--dist <build-dir>]');
     options[flag] = args.shift();
   }
   if (!options['--root']) throw Error('--root is required');
+  if (!options['--version']) throw Error('--version is required');
   const source = path.resolve(__dirname, '../tools/sunday-presenter');
-  const { version } = require(path.join(source, 'package.json'));
+  const version = options['--version'];
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid version');
   const dist = path.resolve(options['--dist'] || path.join(source, 'dist'));
   const definitions = [['presenter-mac-arm64', `Sunday-Presenter-${version}-mac-arm64.dmg`],

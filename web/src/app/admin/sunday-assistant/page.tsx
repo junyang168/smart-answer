@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { SundaySpeakerMail } from "@/app/components/admin/sundayService/SundaySpeakerMail";
 
 type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
@@ -43,7 +44,8 @@ const labels: Record<string, string> = {
   bridge_unavailable: "WhatsApp 未連線，暫緩提醒", bridge_not_synced: "等待群消息同步",
   bridge_stale: "同步狀態過期，暫緩提醒", complete: "資料齊全", not_due: "尚未到提醒時間",
   schedule_conflict: "本主日同工安排有衝突，請先處理",
-  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻", presider: "司會", worshipLeader: "領詩", hymnNotes: "詩歌演唱說明", responseHymnNotes: "回應詩歌演唱說明",
+  hymnYoutubeUrl: "詩歌 YouTube", responseHymnYoutubeUrl: "回應詩歌 YouTube",
+  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻", presider: "司會", worshipLeader: "領詩", pianist: "司琴", hymnNotes: "詩歌演唱說明", responseHymnNotes: "回應詩歌演唱說明",
 };
 const display = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value ?? "未填");
 const card = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";
@@ -101,12 +103,13 @@ export default function SundayAssistantPage() {
     </header>
     {(error || loadError) && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || loadError}</div>}
     {feedback && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-800">{feedback}</p>}
-    {!data || !settings ? <p>正在載入助理狀態…</p> : <>
+    {!data || !settings ? (loadError ? <button className={button} onClick={() => void load()}>重新載入助理狀態</button> : <p>正在載入助理狀態…</p>) : <>
       <div className="grid gap-4 sm:grid-cols-3">
         <section className={card}><h2 className="font-semibold">WhatsApp</h2><p className="mt-2">{labels[data.bridge.state] || data.bridge.state}</p><p className="mt-1 break-all text-xs text-slate-500">{data.bridge.account}</p><p className="mt-2 text-xs">{data.bridge.synced ? "群消息已同步" : "尚未完成同步"} · 等待傳送 {data.bridge.pending ?? 0} 則</p>{data.bridge.error && <p className="mt-2 text-sm text-amber-800">{data.bridge.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">整理進度</h2><p className="mt-2">{labels[data.worker?.status || ""] || "處理程序尚未啟動"}</p><p className="mt-2 text-sm">{pending.length} 項待核對</p>{data.worker && <p className="mt-1 text-xs text-slate-500">最近更新 {new Date(data.worker.at).toLocaleString()}</p>}{data.worker?.error && <p className="mt-2 text-sm text-amber-800">{data.worker.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">{data.sunday} 主日資料</h2><p className="mt-2 text-sm">{data.missing.length ? `尚缺：${data.missing.join("、")}` : "已齊全"}</p><p className="mt-2 text-xs text-slate-500">{labels[data.worker?.reminder || ""] || ""}</p></section>
       </div>
+      <SundaySpeakerMail workers={data.workers} />
       <section className={card}><h2 className="text-lg font-bold">主日 PPT</h2>
         <label className="mt-3 block"><input type="checkbox" checked={settings.auto_generate_ppt ?? true} onChange={e => patch({ auto_generate_ppt: e.target.checked })} /> 資料齊備後自動產生 PPT 並通知網站管理員群</label>
         <p className="mt-2 text-sm text-slate-600">司琴可留空。生成前檢查歌詞、讀經安排及未來兩週骨架；資料更正後產生新版。</p>

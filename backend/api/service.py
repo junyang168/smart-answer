@@ -1825,7 +1825,13 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
         skeletons = maintain_skeletons(repository, Store(Path(os.environ['DATA_BASE_DIR']) / 'sunday-assistant'), report_date.date())
         incomplete = [f"{row['date']}：{'、'.join(row['missing'])}" for row in skeletons if not row['complete']]
         if incomplete:
-            raise HTTPException(status_code=400, detail="未來兩週骨架尚未齊全（講員、司會、領詩）：" + "；".join(incomplete))
+            future_dates = "、".join(row["date"] for row in skeletons)
+            raise HTTPException(status_code=400, detail=(
+                f"{service.date} 的主日 PPT 尚未生成，因此沒有下載檔案。\n"
+                f"此 PPT 包含未來兩個主日（{future_dates}）的安排，目前尚缺：\n"
+                + "\n".join("• " + item for item in incomplete)
+                + "\n請補齊後重新按「生成 PPT」。"
+            ))
     songs = {song.title: song for song in repository.list_sunday_songs()}
 
     hymn = songs.get(service.hymn or "") if service.hymn else None
@@ -1848,7 +1854,7 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
             raise HTTPException(status_code=400, detail="當週詩歌演唱說明需核對：" + str(exc)) from exc
 
     section_configs: dict[str, dict[str, object]] = {}
-    if hymn and hymn.lyrics_markdown:
+    if not service.hymn_youtube_url and hymn and hymn.lyrics_markdown:
         sections = scheduled_lyrics(hymn.lyrics_markdown, service.hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.hymn_index)
@@ -1859,7 +1865,7 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
                 ],
                 "style": "lyrics",
             }
-    if response_hymn and response_hymn.lyrics_markdown:
+    if not service.response_hymn_youtube_url and response_hymn and response_hymn.lyrics_markdown:
         sections = scheduled_lyrics(response_hymn.lyrics_markdown, service.response_hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.response_hymn_index)
@@ -1870,6 +1876,10 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
                 ],
                 "style": "lyrics",
             }
+
+    for key, video in (("hymnLyrics", service.hymn_youtube_url), ("responseHymnLyrics", service.response_hymn_youtube_url)):
+        if video:
+            section_configs[key] = {"sections": [{"lines": ["播放 YouTube 影片"], "video_url": video}], "style": "lyrics"}
 
     scripture_sections = _fetch_scripture_sections(service.scripture)
     if require_complete and (len(scripture_sections) != len(service.scripture) or any(not section.get('verses') for section in scripture_sections)):
@@ -2152,6 +2162,11 @@ def _build_ppt_replacements(
 
     _apply_song_replacements(replacements, "hymn", service.hymn, hymn)
     _apply_song_replacements(replacements, "hymn2", service.response_hymn, response_hymn)
+
+    for prefix, video in (("hymn", service.hymn_youtube_url), ("hymn2", service.response_hymn_youtube_url)):
+        if video:
+            replacements[prefix + "Link"] = video
+            replacements[prefix + "Lyrics"] = ""
 
     _populate_fellowship_replacements(replacements, service_date)
 

@@ -112,13 +112,16 @@ The installer route streams bytes in Next rather than buffering a large file in
 the generic backend proxy. Its explicit self-rewrite must precede that proxy's
 catch-all; otherwise dynamic download URLs reach the Python backend and 404.
 
-Build and inspect the packages before publishing their immutable version:
+Build and inspect the packages before publishing their immutable version. The
+0.3.1 pilot artifacts come from the reviewed Presenter checkout in #598 / PR #611;
+this website-distribution change does not assert two-computer service acceptance.
 
 ```sh
 cd tools/sunday-presenter
 npm run package:mac
 cd ../..
-node scripts/publish-sunday-presenter.cjs \
+node scripts/publish-sunday-presenter.cjs --version 0.3.1 \
+  --dist /path/to/reviewed/presenter/dist \
   --root "$DATA_BASE_DIR/sunday-presenter/releases"
 ```
 

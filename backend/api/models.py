@@ -426,6 +426,8 @@ class SundayServiceEntry(BaseModel):
     sermon_title: Optional[str] = Field(None, alias="sermonTitle")
     hymn: Optional[str] = None
     hymn_index: Optional[int] = Field(None, alias="hymnIndex")
+    hymn_youtube_url: Optional[str] = Field(None, alias="hymnYoutubeUrl")
+    response_hymn_youtube_url: Optional[str] = Field(None, alias="responseHymnYoutubeUrl")
     hymn_notes: Optional[str] = Field(None, alias="hymnNotes")
     response_hymn_notes: Optional[str] = Field(None, alias="responseHymnNotes")
     response_hymn: Optional[str] = Field(None, alias="responseHymn")
@@ -439,6 +441,12 @@ class SundayServiceEntry(BaseModel):
     email_body_html: Optional[str] = Field(None, alias="emailBodyHtml")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("hymn_youtube_url", "response_hymn_youtube_url", mode="before")
+    @classmethod
+    def _youtube_url(cls, value):
+        from backend.sunday_video import youtube_url
+        return youtube_url(value)
 
     @field_validator("scripture", mode="before")
     @classmethod

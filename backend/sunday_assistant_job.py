@@ -18,6 +18,9 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     agent = get_assistant()
+    if not args.once:
+        from backend.sunday_assistant.gmail_job import start_mail_worker
+        start_mail_worker(agent)
     while True:
         try:
             agent.tick()

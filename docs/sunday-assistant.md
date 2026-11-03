@@ -99,11 +99,18 @@ flowchart LR
 ## 聖詩匯入與當週演唱安排
 
 - Agent 可查完整網站聖詩索引，不只查已匯入歌曲。明確編號的歌缺少目錄項或歌詞時，使用 `lookup_hymnal_entry`／`import_hymnal_song` 接續；不能要求人手工匯入其實已可核對的索引項。
-- 匯入只使用網站索引與已支援的 fcccc.net 聖詩來源。索引未附歌詞 URL 時，可按該站固定編號路徑查找，但仍須獨立核對歌名、編號及完整歌詞，不能只因 URL 可下載就接受。任意網址、YouTube-only 自訂歌曲、無索引或來源失敗需人工補來源或歌詞，不能從記憶創作。
+- 匯入只使用網站索引與已支援的 fcccc.net 聖詩來源。索引未附歌詞 URL 時，可按該站固定編號路徑查找，但仍須獨立核對歌名、編號及完整歌詞，不能只因 URL 可下載就接受。任意歌詞網址、無索引或來源失敗需人工補來源或歌詞，不能從記憶創作。明確提供 YouTube 影片的詩歌另走影片播放流程，不需歌詞。
 - 歌詞先按既有流程轉繁體，再由模型定位完整歌詞範圍及換行分段。程式比較來源與排版後的全部歌詞文字及順序（容許空白、標點及段首詩節序號的排版差異）；另一個核對步驟檢查是否漏掉整節／副歌、來源錯誤或混入網頁導覽。
 - 匯入原文、範圍、來源 URL、來源及排版 SHA、依據消息與儲存狀態保存在私有 SQLite。準備完成後中斷可重用；寫入前重新核對目錄快照。已存在的非空歌詞一律保留，準備期間有人填好歌詞也不覆蓋；空白歌詞可補齊。目錄寫入與網站編輯共用資料鎖，網路與模型呼叫不持有寫入鎖。
 - 兩首分別寫入 `hymn`、`responseHymn`。群內明確標籤優先；只有兩首且只列順序時，按使用者確認的慣例第一首主日詩歌、第二首回應詩歌。
 - `hymnNotes`／`responseHymnNotes` 保存當週演唱說明，不改全站歌詞。可依明確「只唱一、二、四節」「最後一節重複一次」選取既有歌詞段落及重複末段；節次不存在、歌詞分段不符或重複次數未明則追問，不靜默忽略。網站可查看及修改說明，產生 PPT 時套用。
+
+### YouTube 影片播放
+
+- 明確對應某首歌的 YouTube URL 按當週、按歌曲欄位保存：`hymnYoutubeUrl`／`responseHymnYoutubeUrl`，不改全站詩歌目錄。保留原 URL 及時間參數，不以影片預覽的樂譜編號推斷網站聖詩編號。
+- 影片歌曲可不在目錄，也不需要歌詞；Agent 不應匯入或索取歌詞。PPT 完整性檢查只對沒有影片連結的歌曲要求目錄及完整歌詞。
+- PPT 使用原來的歌名與歌詞頁位置，將該首歌改成一頁「播放 YouTube 影片」的可點擊連結；完整 URL 同時放入講者備註。點擊開啟瀏覽器播放，不是嵌入影片或自動播放。其他歌曲仍照常產生歌詞。
+- 網站表單可查看、修改或清除兩個播放連結。換歌時在同一筆受保護 Patch 清除舊歌的影片連結（若同時給新連結，以新連結為準）；只補同一首歌的 URL 不動其他欄位。無法判定歌曲、日期或連結歸屬時保留待釐清，群內發問仍遵守現有開關。
 
 ### 換歌時的局部更新
 
@@ -224,3 +231,41 @@ cd web && ./node_modules/.bin/tsc --noEmit
 歌詞中的單個換行表示同一張 slide 的下一行；空行表示下一張 slide。HTML 擷取保留 `<br>`、段落與詩節表格列，不用空格壓平儲存格，也不在相鄰行內標籤間插入空格。獨立編號欄併入詩節首行，避免產生只有編號的投影片。
 
 來源已有連續編號、多行且分段的詩節時，Agent 由程式保留原行與空行，僅移除詩節編號及 Markdown 行尾空白；模型只選擇歌詞範圍，不能重新合併或拆開這些 slide。完整性核對仍需通過；不自動改寫既有已保存歌詞。PPT 依相同空行規則分頁。
+
+
+### 司琴安排
+
+明確的司琴安排寫入當週 `pianist`，按完整同工名單、相對日期、現有表單與請假資料核對；三群跨群收集開啟時均可提供，主要負責群為詩歌群。司琴仍非周五／PPT 必填項，沒有指定可留空；「可留空」不代表忽略已公布的安排。明確取消可清空該欄，普通詢問不產生安排。不同同姓同工不可互換，改動只 Patch 司琴欄，既有人工安排仍須明確更正或操作者核對。
+
+## 講員郵件 PPT 收存
+
+獨立的 Gmail 唯讀接收執行緒掃描已指定的個人郵箱，不能寄信、改標籤或標記已讀；慢郵箱及模型失敗不阻塞 WhatsApp。每次只掃描一頁、處理一封新郵件，逐頁先保存完整 message ID 再前進游標。範圍為最近 45 天帶 `.ppt`／`.pptx` 附件的收件（不含垃圾桶、垃圾郵件、草稿與寄件）。不開啟郵件內的網址，不把附件內容送給模型。
+
+先以實際 From email 對照網站同工 email 或操作者已核對的寄件地址，再核對姓名；顯示名稱不是身分證據。模型以郵件時間、主旨、正文、附件名與網站日期／講員／題目判讀，另一次來源核對通過後才自動收存。主日崇拜流程、團契查經、舊版參考附件不作講道檔。未知寄件人、日期不明、多份版本或資料衝突留在後台；缺少的姓名對應／網站安排補上後可繼續，原判讀與核對結果按原始輸入保存。內部失敗走既有管理員求助監測，不冒充缺資料。
+
+原始 PowerPoint 位元組直接複製到與主日 PPT 相同的 OneDrive 日期資料夾，檔名 `講道-YYYY-MM-DD-講員.pptx`（原生 `.ppt` 同樣保留）。`講員PPT版本/` 保存各 SHA 原檔。兩個郵箱收到相同附件只保存一份；晚到舊版不退回目前版本；人工改過的檔案先保留並要求核對。模型和檔案下載在表單鎖之外，正式寫入前重讀寄件人與網站安排。收存不中斷／重寫主日表單或既有主日 PPT；本機寫入成功不表示 OneDrive 雲端已同步。
+
+每週六 **22:00 America/Chicago** 尚未確認收到並收存當次講道 PPT，向**網站管理員群**發一次跟進通知；重啟不重複，附件到達後取消尚未送出的提醒。這是獨立開關 `saturday_followup`，不啟用已關閉的群內追問或周五缺項提醒。
+
+### Gmail 私有設定與授權
+
+`config/sunday_gmail.json`（或 `SUNDAY_GMAIL_CONFIG`）只列郵箱、核對人及私有 token 目錄；OAuth token 存在網站資料目錄之外，每郵箱一份，檔案權限 600。**既有 Drive／Docs 的 token.json 不變。** 即使是網站同工，也只有設定指定且本身有 editor 權限的核對人能讀取郵件附件紀錄／確認寄件身分；不授予新網站角色。
+
+```sh
+backend/.venv/bin/python scripts/configure-sunday-gmail.py \
+  --config /absolute/data/config/sunday_gmail.json \
+  --mailbox junyang168@gmail.com --mailbox jianwens@gmail.com \
+  --reviewer junyang168@gmail.com --reviewer jianwens@gmail.com \
+  --token-directory /absolute/private/sunday-gmail-tokens
+backend/.venv/bin/python scripts/authorize-sunday-gmail.py \
+  --config /absolute/data/config/sunday_gmail.json \
+  --email junyang168@gmail.com --client-secret /absolute/private/client_secret.json
+```
+
+第二個郵箱需由其帳號另行 Google 同意。Google Cloud 須啟用 Gmail API，desktop OAuth client 使用 loopback callback。授權範圍僅 `gmail.readonly`，核對 profile email 完全相符後才啟用 token；若 Gmail API 尚未啟用，已取得的同意先存私有 pending token，啟用 API 後以同一命令加 `--verify-pending` 核對，不重複要求同意。授權頁安全提示由帳號持有人處理。可移除指定 reviewer 立即撤回後台存取；`enabled=false` 停止收件／提醒，`saturday_followup=false` 單獨停提醒。
+
+持久化資料為 `$DATA_BASE_DIR/sunday-assistant/gmail/` 下的 SQLite、原檔 cache 和鎖；不進 Git，不在一般助理狀態 API 暴露私人郵件。網站 `/admin/sunday-assistant` 的 Gmail 區塊顯示連線、收存／版本、待核對及重試入口。
+
+### SQLite 連線釋放
+
+所有助理佇列、Gmail inbox 及管理員監測的 SQLite context 在提交／回滾後立即 close；Python 的 `with connection` 只處理交易，不能代替 close。LangGraph 自己的 SqliteSaver 另有 closing context。否則連線等待 cyclic GC 時可耗盡 macOS 背景程序的檔案描述符，連 checkpoint 都會報 `unable to open database file`。回歸測試在獨立子程序關閉 GC、限制 128 個描述符，連續跑 300 次佇列／監測／郵件讀寫，並驗證例外回滾及連線已關閉；不以提高系統上限掩蓋洩漏。發生內部錯誤的原消息仍保存來源、checkpoint 及已有寫入回執，恢復時重用既有請求，不能偽造成功或重發已成功回執。
