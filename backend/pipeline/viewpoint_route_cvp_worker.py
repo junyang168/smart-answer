@@ -362,11 +362,14 @@ def process_cvp_route(
     ownership_guard: Callable[[], None] | None = None,
     repair_evidence_input: bool = False,
     repair_connection_context: bool = False,
+    clarify_review_scope: bool = False,
     include_connection_judgments: bool = False,
     policy_path: Path = DEFAULT_POLICY,
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
 
+    if clarify_review_scope and not repair_connection_context:
+        raise ValueError('review scope clarification requires the original connection continuation')
     output_dir = output_dir.resolve()
 
     def guard() -> None:
@@ -432,7 +435,8 @@ def process_cvp_route(
     if repair_connection_context:
         connection_seed = prepare_connection_continuation(output_dir, packet, materials,
             proposer=proposer, reviewer=reviewer, reconsiderer=reconsiderer,
-            max_correction_rounds=max_correction_rounds)
+            max_correction_rounds=max_correction_rounds,
+            **({'clarify_review_scope':True} if clarify_review_scope else {}))
     output_dir = execution_dir
     write_immutable(output_dir / "cvp-route-materials.json", materials)
     result = run_cvp_route_scope(
@@ -526,9 +530,15 @@ def main() -> int:
                         help="Continue the saved initial review after the Claim-evidence boundary fix")
     parser.add_argument('--repair-connection-context', action='store_true',
                         help='Continue the exact saved CVP exception with approved connection context')
+    parser.add_argument('--clarify-review-scope', action='store_true',
+                        help='Recheck passing partial-instance exceptions on identical saved material')
     parser.add_argument('--round-extension', type=Path,
                         help='Owner authorization for one extra correction/review in this exact saved job')
     args = parser.parse_args()
+    if args.clarify_review_scope:
+        if args.repair_connection_context or args.repair_evidence_input or not args.job_id or not args.retry_exceptions:
+            parser.error('scope clarification requires an exact saved job, --retry-exceptions and no other repair')
+        args.repair_connection_context=True
     if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
         parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
     if args.repair_connection_context and (args.action != 'run' or not args.job_id
@@ -661,6 +671,7 @@ def main() -> int:
             apply=args.apply, ownership_guard=guard,
             repair_evidence_input=args.repair_evidence_input, policy_path=args.route_policy,
             repair_connection_context=args.repair_connection_context,
+            clarify_review_scope=args.clarify_review_scope,
             include_connection_judgments=use_judgments,
         )
         guard()

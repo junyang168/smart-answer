@@ -24,7 +24,8 @@ def _fixed_implementation(require_committed):
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=project,text=True).strip()
     paths=['backend/pipeline/'+name for name in (
         'viewpoint_route_connection_recovery.py','viewpoint_route_cvp_worker.py',
-        'viewpoint_route_cvp_resolution.py','viewpoint_route_materials.py','viewpoint_route_resolution.py')]
+        'viewpoint_route_cvp_resolution.py','viewpoint_route_materials.py','viewpoint_route_resolution.py',
+        'viewpoint_route_review_scope.py')]
     paths+=['backend/api/canonical_repository/'+name for name in ('postgres_store.py','cvp_link_judgment.py')]
     bindings={}
     for name in paths:
@@ -52,7 +53,8 @@ def verify_connection_reservation(parent, *, original_material_sha256=None, exec
 
 
 def prepare_connection_continuation(parent, packet, materials, *, proposer, reviewer,
-                                    reconsiderer, max_correction_rounds, reserve=True):
+                                    reconsiderer, max_correction_rounds, reserve=True,
+                                    clarify_review_scope=False):
     from backend.pipeline.viewpoint_route_cvp_resolution import bind_attestation_source_ids
     parent = Path(parent).resolve()
     def read(name):return json.loads((parent / name).read_text())
@@ -75,7 +77,9 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
     before={l['viewpoint_claim_link_id']:l for l in old_material['links']}
     after={l['viewpoint_claim_link_id']:l for l in materials['links']}
     added=set(after)-set(before)
-    if old.get('approved_connection_judgments') is not None and not added:
+    if clarify_review_scope and (old != packet or old_material != materials):
+        raise ValueError('review scope clarification cannot change materials or membership')
+    if old.get('approved_connection_judgments') is not None and not added and not clarify_review_scope:
         raise ValueError('connection continuation with existing rationale needs the exact repaired member')
     if (not set(before) <= set(after) or any(after[k] != v for k,v in before.items())
             or any(after[k]['claim_id'] not in allowed_claims for k in added)):
@@ -202,6 +206,11 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         raise ValueError('connection continuation has unknown calls or changed final verdicts')
     if added and n == max_correction_rounds:
         raise ValueError('new membership requires a remaining original correction')
+    if clarify_review_scope:
+        from backend.pipeline.viewpoint_route_review_scope import validate_scope_continuation, MARKER as SCOPE
+        if SCOPE in review_packet:
+            raise ValueError('review scope contract was already offered; no repeated clarification')
+        validate_scope_continuation(current,last_review)
     path=parent/'connection-continuation-reservation.json'
     saved=json.loads(path.read_text()) if path.exists() else None
     names=saved['original_files'] if saved else sorted(p.name for p in parent.glob('*.json'))
@@ -217,6 +226,10 @@ def prepare_connection_continuation(parent, packet, materials, *, proposer, revi
         'original_exceptions':run['cvp_re_review_exceptions'],'new_initial_proposal_calls':0,
         'human_content_approval':False,'automatic_retry_unknown_calls':False,
         'fixed_code_commit':commit, 'implementation_sha256s':implementation}
+    if clarify_review_scope:
+        from backend.pipeline.viewpoint_route_review_scope import CONTRACT
+        receipt['defect']='upstream_enrichment_conflated_with_current_invalidity'
+        receipt['review_scope_contract']=CONTRACT
     if 'program_validation_repairs' in run:
         receipt['previous_program_validation'] = {
             'used': run['program_validation_repairs'],
