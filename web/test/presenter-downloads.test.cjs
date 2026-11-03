@@ -52,6 +52,15 @@ test('editors receive only public release metadata and exact streamed attachment
   }
   assert.equal((await download.GET(null, { params: Promise.resolve({ asset: '../latest.json' }) })).status, 404);
 });
+test('released Phase 1 metadata is served while unknown release statuses fail closed', async () => {
+  save({...manifest, status:'released'});
+  const result = await downloads.loadPresenterRelease();
+  assert.equal(result.status, 'released');
+  assert.equal((await (await metadata.GET()).json()).status, 'released');
+  save({...manifest, status:'unchecked'});
+  await assert.rejects(downloads.loadPresenterRelease());
+  save();
+});
 test('invalid manifests, missing bytes and symlink escape fail closed', async () => {
   for (const change of [m => { m.version = '../outside'; }, m => { m.artifacts[0].filename = '../outside'; },
     m => { m.artifacts[0].bytes++; }, m => { m.artifacts[0].sha256 = 'bad'; }]) {

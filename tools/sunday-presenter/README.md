@@ -1,165 +1,96 @@
-# Sunday Presenter — Mac prototype (#590)
+# Sunday Presenter — Phase 1 (#598)
 
-Two original PowerPoint presentations, one persistent audience window. This is
-a packaged Electron app. At startup it calls the church website's upcoming-Sunday
-API for the dated OneDrive folder. The website saves newly generated and uploaded
-PPTs into that same OneDrive sync tree. It does not send church group messages.
+Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
+window and a paired local speaker remote. Google Meet is operated manually.
+YouTube streaming, speaker microphone relay and automated broadcasting belong to
+Phase 2 (#643).
 
-**Status: technical prototype. The owner's Microsoft sign-in and two real slide
-shows work; a second signed-in Meet client received switching in the windowed
-baseline, and the owner subsequently reported successful full-screen sharing.
-Media/audio and broader animation acceptance remain separate checks.** See
-[acceptance.md](acceptance.md) for observations and the remaining checks.
+## Install and use
 
-## Install on another Mac
+Download v0.4.0 from church administration → Sunday service → Download Sunday
+Apps. Install Sunday Presenter on an Apple Silicon Mac (macOS 13+) and Sunday
+Remote on the speaker Mac (universal Intel/Apple Silicon). No Node.js installation
+is needed. The package is ad-hoc signed, without Developer ID/notarization; use
+macOS Privacy & Security → Open Anyway after verifying the downloaded source.
 
-Use `dist/Sunday-Presenter-0.2.0-mac-arm64.dmg` on an Apple Silicon Mac running
-macOS 13 or newer. Drag **Sunday Presenter** into **Applications**. A ZIP of the
-app is also produced. Node.js is not needed on the receiving laptop. The package
-contains an independent app icon, but no Microsoft account/session or private
-folder configuration. Sign in inside the app on each Mac.
+1. Open Presenter. A movable settings window appears; no blank OUTPUT appears at
+   startup. Open this week's PPT and sign into Microsoft inside Presenter.
+2. The church API supplies the upcoming Sunday folder in America/Chicago time.
+   The unique worship-named file and sole remaining sermon PPT are assigned to
+   two fixed cards. Ambiguous choices require selection. In each PowerPoint file,
+   start the slideshow, inspect it and press Confirm and Play.
+3. Playback hides settings. Command-1 selects worship, Command-2 selects sermon;
+   arrow keys flip the current slideshow. Switching retains the same views and
+   slide state. Dock activation or Command-P restores settings; closing settings
+   leaves playback running. Command-Q exits.
+4. Enable speaker slide control. On the same trusted local network, open Sunday
+   Remote, enter the six-digit code once and allow local-network access. Pairing
+   is remembered; discovery and reconnection are automatic. Either operator or
+   speaker controls the same live slideshow. AirPlay mirrors OUTPUT; HDMI feeds TV.
+5. Manually open and join Meet in Chrome. Share **Sunday Presenter — OUTPUT** once
+   and keep that window open and unminimized. The host microphone remains manually
+   muted; use earphones to monitor. On the speaker laptop, manually configure Meet
+   microphone and mute speaker output to avoid echo. Manually start/stop recording
+   when available and leave Meet at the end. Confirm actual audio/video from an
+   independent receiving device before the service.
 
-This test build is unsigned and not notarized; macOS may require **System
-Settings → Privacy & Security → Open Anyway** after the first blocked launch.
-The website integration must be deployed before automatic links work; manual
-PowerPoint links remain usable while the website is unavailable.
+Presenter and Remote do not request Accessibility or microphone access, launch
+Chrome, join/leave Meet, change system sound, control recording or schedule a
+10:00 start. Old service-settings.json files are ignored. Exit/update both apps
+when moving from the earlier automation prototype. Remote is slide-only in Phase 1.
+The running Presenter prevents idle display sleep; it does not override manual
+locking or start itself after being quit.
 
-## Start from source
+## Architecture and boundaries
 
-Requires Node 22.12 or newer and internet access.
+Each deck is a sandboxed persistent WebContentsView. Private sign-in/preparation
+and the single OUTPUT share a viewport; only an explicitly confirmed audience page
+can play. Popup adoption preserves opener and POST navigation. Switching does not
+reload the page. Full-document navigation, fullscreen exit and renderer failure
+revoke readiness, mute and hide the invalid audience page. There is no manual
+blackout window/button. On macOS OUTPUT covers display bounds without entering a
+separate fullscreen Space, so it stays available to the Meet window picker.
+
+Both decks use persist:office. Microsoft sessions remain local under Application
+Support/Sunday Presenter/Partitions/office. No cookies, credentials, private Meet
+URLs or pairing identities are packaged. Office views cannot access controller
+IPC, Node.js or OS capture/microphone permissions. Controller IPC accepts only its
+own local top-level frame.
+
+Remote uses Bonjour, certificate-pinned TLS and a remembered bearer token in
+Keychain. The host stores its hash. Initial pairing assumes a trusted LAN; codes
+are single-use, expire after five minutes and are rate-limited. Only paired arrow
+commands for the current audience binding are accepted; duplicates are applied
+once and stale commands are rejected. No Meet state, workflow or microphone
+commands are exposed by the Phase 1 protocol. Audio does not share this channel.
+
+The church's iPhone hotspot must allow peer connectivity between both Macs.
+Flip commands stay local; Office and manually operated Meet use the internet.
+Keeping a page loaded preserves state, not paused timers: background video,
+animations and automatic slide advances may continue. Readiness is the operator's
+visual confirmation. Office account policies, unsupported web animations and
+actual Meet audio require testing with the intended files and receiving device.
+
+## Development and packaging
+
+Requires Node 22.12+:
 
 ```sh
 cd tools/sunday-presenter
 npm ci
-npm start
-```
-
-The app opens a black, borderless **full-screen OUTPUT** window. Press
-**⌘P (Command+P)** to show the controls. Press it again to hide both the controls
-and any private preparation view, returning focus to the slides. This shortcut
-works while another application has focus, and is registered only while Sunday
-Presenter is running (so it replaces the usual Print shortcut during that time).
-
-The app uses three separate windows:
-
-- **控制台**: operator controls, deck links, and all open pages.
-- **PRIVATE PREPARATION**: sign-in, file selection, editor, and new popups.
-- **OUTPUT**: black until an explicitly designated audience page is selected.
-  Share only this window in Google Meet, and keep it open and unminimized.
-
-Click **Microsoft 登入 / 選檔** to open PowerPoint web privately. Sign in **inside
-this app**; Chrome's Microsoft session is separate. Alternatively paste an existing
-OneDrive, SharePoint, or PowerPoint HTTPS link in a deck's input. A OneDrive
-folder is useful for finding a file; it is not itself a slideshow.
-
-The **本主日簡報** card displays the date returned by the website, calculated in
-America/Chicago (Sunday itself is included). Open the dated folder for either
-deck. Startup and each explicit folder-open fetch a fresh link; an offline or
-stale-date reply clears the link and shows a retry message. Refreshing never
-reloads or switches an existing presentation. The app reads the API only; missing
-date directories are created when the website generates or uploads a PPT.
-
-1. Open the worship file under **主日崇拜**. Enter PowerPoint's slide show mode.
-2. A popup, if any, appears as a new row in the corresponding deck. It stays
-   hidden and muted without stealing focus or changing the chosen deck. Click
-   **準備 / 檢查** on the desired new row to inspect it privately. All pages stay open.
-3. Check that this page contains the audience slides, without notes, editor
-   chrome, or presenter controls. On that row click **設為觀眾畫面**. The private
-   view returns to the output host but remains hidden until taken live.
-4. Prepare **講道** the same way. Confirm its audience page as well.
-5. Click **切換到主日崇拜** or **切換到講道**. Each click shows the already loaded
-   page and mutes all other pages. **黑屏 / 靜音** hides the audience view and mutes
-   everything. Both switch buttons stay pinned at the top while scrolling.
-   ⌘1 / ⌘2 switch and ⌘0 blacks while the app is focused. **⌘P** toggles the
-   controls globally. Previous/next sends Left/Right to the active page and focuses the
-   output window; keyboard interpretation belongs to PowerPoint.
-
-Reopening **準備 / 檢查** revokes that page's audience designation. Inspecting the
-currently live page first blacks the output. Full document navigation, renderer
-failure, Escape in a live page, or leaving HTML fullscreen also revokes readiness
-and blacks the output when that page is live. Close unused rows when approaching
-the limit of eight pages per deck.
-
-The output window cannot be closed accidentally; use **⌘Q** while the app is
-focused to quit. Closing the controller hides it. The audience window enters
-native full-screen once at startup and keeps that window throughout switching;
-webpage HTML fullscreen cannot resize it. Output and preparation use the same viewport
-size to avoid layout changes during transfer. PowerPoint controls the original
-slide's layout and aspect ratio; the app performs no cropping or conversion.
-
-## What is retained
-
-Each page is a sandboxed WebContentsView. Switching changes its visibility and
-audio mute state; it does not navigate, reload, recreate, or send slide keys.
-Preparation moves the same view between native hosts. Popup handling adopts
-Electron's supplied WebContents, preserving opener relationships and POST-based
-navigation rather than replaying a popup URL in an editor.
-
-Both decks use `persist:office`. Account cookies and web storage live locally in
-`~/Library/Application Support/Sunday Presenter/Partitions/office`. The app does
-not export them, inspect credentials, or write deck URLs to a configuration or
-log. Sign out through Microsoft's UI when needed. User accounts and remembered
-sessions are not part of the source tree or packaged application.
-
-Remote pages have no Node integration, preload, or controller IPC bridge. The
-controller accepts IPC only from its own local top-level frame. Navigation is
-HTTPS (plus blank popup pages); external application protocols and downloads
-are blocked. Only HTML fullscreen for the previewed/live page is permitted;
-camera, microphone, screen capture, location, notifications, and other requested
-permissions are denied. Meet runs separately in the user's browser. Native
-fullscreen/resizing caused by a webpage is disabled to retain the shared window.
-
-## Limits to validate
-
-- Keeping a page alive preserves its in-memory state, **not a paused clock**.
-  Background videos, timed animations, and slide auto-advance may keep running,
-  even though audio is muted. The prototype does not inject pause/resume code
-  into Office. If resuming a timed sequence at the exact instant of switching is
-  essential, the architecture has not met that requirement.
-- Readiness is the operator's visual designation, not Office UI recognition.
-  Same-document UI changes can show editor controls or a sign-in overlay without
-  a navigation event. Use black immediately if this happens. Full-document
-  navigation and fullscreen exit are guarded, but that is not a guarantee against
-  every possible Office UI change.
-- Account policies may reject embedded browsers; successful display of the
-  sign-in form does not prove authentication. No user-agent spoofing, cookie
-  transfer from Chrome, or security bypass is implemented.
-- Microsoft lists [animation triggers as unsupported in PowerPoint web](https://support.microsoft.com/en-us/powerpoint/compare-powerpoint-features-on-different-platforms).
-  The same comparison lists other web limitations; test the speaker's actual
-  file. This prototype cannot promise desktop PowerPoint compatibility.
-- Google documents [window/desktop audio sharing requirements](https://support.google.com/meet/answer/16581830),
-  including macOS 14.2 or newer. Muting WebContents is not evidence that Meet
-  transmits the intended audio; verify with a separate receiving device.
-- OneDrive upload uses the host Mac's existing sync client. Filesystem success
-  is not proof of cloud availability; the API reports cloud status unverified.
-  Agent file intake, code signing, notarization, and an updater remain outside
-  this prototype.
-
-## Verification and packaging
-
-```sh
 npm test
 npm run smoke
-npm run icons
 npm run package:mac
 ```
 
-Quit the regular prototype before the smoke run so two copies do not compete
-for native keyboard focus. The smoke run opens an isolated temporary profile and loopback fixture server;
-it does not use the Microsoft session. It exercises default hidden controls,
-native fullscreen, shortcut registration, stable buttons, real Electron views,
-popups/opener/POST, shared cookies, keys and slide-step state, HTML fullscreen, mute
-flags, resize, redirect, and a renderer crash. Results and synthetic screenshots
-are written to ignored `output/smoke/`. It does not test Microsoft or Meet.
+Quit the installed Presenter before smoke testing to avoid competing shortcuts.
+Smoke uses an isolated temporary profile and loopback fixture. It checks one
+OUTPUT, retained switching/keys, popup POST/opener, focus, hidden settings, capture
+window bounds, remote commands, and rejection of removed Meet actions. It does not
+sign into Microsoft or operate Meet. Native Remote builds for arm64 and x86_64;
+DMG and ZIP outputs live in ignored dist/. Test/account data is excluded.
 
-Packaging writes an unsigned `Sunday Presenter.app` under ignored `dist/` for
-Apple Silicon, plus a drag-to-Applications DMG and ZIP. It omits tests, screenshots, node_modules used
-only for development, and account data. Do not distribute it as an accepted
-Sunday production app before completing the account/deck/Meet checks.
-
-Website/storage configuration, migration and API contract:
-[integration runbook](../../docs/sunday-presenter.md).
-
-Electron references: [WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view),
-[popup creation](https://www.electronjs.org/docs/latest/api/web-contents#contentssetwindowopenhandlerhandler),
-[web preferences](https://www.electronjs.org/docs/latest/api/structures/web-preferences).
+Published installers are immutable files outside Git. scripts/publish-sunday-presenter.cjs
+uses --status released for Phase 1; the website accepts released and older pilot
+manifests. Build verification and real user observations are in acceptance.md.
+Website/storage API: ../../docs/sunday-presenter.md.

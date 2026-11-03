@@ -75,3 +75,16 @@ test('background popups cannot steal the chosen audience page or preparation vie
   assert.equal(stage.get(2).view.webContents.muted, true);
   stage.take('worship'); // still available with one click
 });
+
+
+test('stopping or invalidating hides output; deck switching keeps the window', () => {
+  const output = host(); let shown = false, hides = 0;
+  output.show = () => { shown = true; }; output.hide = () => { shown = false; hides++; };
+  const stage = new Stage(output, host());
+  const first = stage.add('worship', view(1)), second = stage.add('sermon', view(2));
+  ready(stage, first); ready(stage, second);
+  stage.take('worship'); assert.equal(shown, true); assert.equal(hides, 0);
+  stage.take('sermon'); assert.equal(shown, true); assert.equal(hides, 0);
+  stage.invalidate(second.id, 'navigation'); assert.equal(shown, false);
+  assert.equal(stage.active, null); assert.ok([...stage.pages.values()].every(p => p.view.webContents.muted));
+});

@@ -1,7 +1,106 @@
-# #590 acceptance evidence
+# Sunday Presenter acceptance evidence
 
-This record distinguishes a working local harness from Sunday-service
-acceptance. No Agent integration or production deployment has been performed.
+## Current release scope — Phase 1, 0.4.0 (2026-11-03)
+
+The owner explicitly split delivery: #598 is Phase 1 production playback and
+local paired slide control, with Google Meet operated manually. #643 is Phase 2
+YouTube broadcasting, speaker audio in Sunday Remote and automated opening.
+Earlier Meet automation/scheduled-service notes below are historical, superseded
+scope; their pending automation checks do not describe shipped Phase 1 features.
+
+The Phase 1 source removes host workflow/helper/scheduler, all Meet actions and
+settings loading, native Meet/Accessibility and system-output mutation, Remote
+microphone/recording handling and its report route. No timer reads old service
+settings. The Remote protocol returns only deck/live/binding; it carries no room
+URL or broadcast command. Presenter no longer embeds the obsolete native helper.
+Meet joining, sharing, audio and recording are explicitly manual in App guidance,
+installer instructions and website download copy.
+
+Verification completed before release:
+
+- All 19 retained Node tests pass (presentation, folder/API, TLS pairing,
+  restart, deduplication, stale commands and removed report/workflow routes).
+- Real Electron smoke passes 20 retained-view switches, keyboard focus,
+  operator/remote controls on the same page, popup opener/POST, cookies,
+  mute/privacy/navigation/crash guards and single-window/display invariants.
+  Former Meet IPC actions fail with Unknown action; no workflow, scheduler or
+  meeting state/controls are present. No Microsoft or Meet sign-in was performed
+  by that synthetic smoke.
+- Nine website download/publication/authentication tests pass, including
+  released metadata, unknown-status rejection and immutable publication.
+  Frontend tsc --noEmit passes.
+- Both native Remote architectures compile. Installed Remote's real network
+  probe reads paired TLS state; a deliberately wrong certificate pin is rejected.
+  That probe is protocol verification, not a new two-physical-Mac field test.
+- Installed 0.4.0 Presenter opens with the existing user profile/settings and
+  shows Phase 1 without Meet controls or permission prompts. Installed Remote
+  displays discovery/pairing and two slide buttons only. Private startup proof:
+  040-phase1-startup.png. Both installed bundles pass deep/strict signature checks;
+  final DMG checksum and Remote ZIP integrity pass.
+- The owner's earlier real Main Laptop OUTPUT-sharing and deck-switching report
+  remains applicable to the retained presentation path. Actual Office files,
+  hotspot/AirPlay conditions and manually operated Meet audio should be checked
+  before a service; no new broad physical/network acceptance is claimed.
+
+Installers remain ad-hoc signed without Developer ID/notarization. Phase 1 no
+longer uses Accessibility, so its previous grant persistence no longer gates
+playback or remote control. Local-network access and Chrome's own manual capture/
+microphone permissions remain ordinary setup. This does not claim notarization.
+
+## Historical evidence (earlier prototype scope)
+
+## #598 remote, Meet automation and scheduled start — 2026-11-02
+
+The following is newer than the historical #590 notes below. Website integration
+was subsequently deployed under #590/#597. This feature does not redeploy it.
+
+| Check | Evidence / scope |
+| --- | --- |
+| Local protocol and workflow | Node tests cover TLS pairing/restart, token hashing, exact certificate pinning, command deduplication, stale-page rejection, host-only workflow authority, recording verification, cleanup and cancellation |
+| Fullscreen / shared source | Real Electron smoke passes 20 retained-state switches plus remote and operator commands applied to the same live page, duplicate IDs applied once |
+| Native builds | Swift helper and remote compile for arm64 and x86_64; universal bundle and installed host signature verification pass |
+| Website | Installed controller reads the actual production upcoming-Sunday folder |
+| Permission recovery | Initial Electron executable retained its upstream identity. TCC granted the bundle ID but checked the child against an executable path. Ad-hoc signing the complete host bundle fixes that mismatch. An obsolete permission must be removed and the installed app re-added; toggling retained a stale code hash. The owner performed authorization through macOS UI; no TCC database was modified or security protection disabled |
+| Real Meet join | App automatically joined the configured room with microphone and camera off, verified in Meet's actual controls |
+| Real Meet output share | App selected OUTPUT and pressed Share without manual picker selection. Meet displayed its presentation. A 0.5-second confirmation was too early and reported failure; operator confirmation then verified sharing. The source replaces that delay with bounded polling; that final adjustment still needs a real rerun |
+| Recording entitlement | One manual short recording started and stopped, with Gemini notes and transcription disabled |
+| Automated recording | The app's first-setup short recording check automatically started recording, verified it, and stopped it. Actual Meet returned to Start recording, with microphone/camera off and extra notes/transcription disabled |
+| Automated exit | App's End selected only the local host's leave action, handled the host's extra dialog, and Meet displayed the left-meeting page |
+| Evidence | Private account/room screenshots under `~/.local/state/sunday-presenter/ops-598/`; not packaged or committed |
+| Sunday 10:00 | Deterministic clock tests cover Dallas standard/daylight time, the DST transition Sunday, before-ten/no-weekday starts, cancellation, restart deduplication, unready state, missed time and durable-reservation failure. These are not an actual two-computer service or a real Sunday-clock acceptance run |
+
+Pending: two physical Macs, remembered discovery on the church LAN, AirPlay plus
+remote slide controls, speaker audio received independently through Meet,
+remote disconnection mute, and the complete scheduled recording/microphone
+transition. No speaker microphone was opened in this one-Mac test. Two short
+test recordings were created in the owner's Meet; cloud processing/file playback
+has not yet been verified. No invitations or church messages were sent.
+
+Prototype packages are ad-hoc signed, without Developer ID or notarization.
+Updating this prototype can change the TCC code hash and require reauthorization;
+the one-time home-setup goal across upgrades is not established by this build.
+
+Additional real-file/native-client checks:
+
+- The owner's newly supplied test PPT opened from the actual 11-8-2026 cloud
+  folder inside the installed Presenter, with 29 slides and animated steps. The
+  generated worship PPT also opened there, with 28 slides. Fullscreen output
+  showed the slides without editor/controller UI. Keyboard and controller Next
+  were exercised. Switching away and back retained sermon slide 3 and worship
+  slide 2; this is a sample, not blanket acceptance of every Office animation.
+- Native Remote testing found the original Bonjour protocol label exceeded
+  Apple's 15-character limit. Version 0.3.1 centralizes a shorter service type
+  for host, client and bundle declarations. In-place build-directory launch also
+  retained stale Info.plist registration; the installed app discovered correctly.
+- An installed native Remote paired over actual TLS with an isolated synthetic
+  source and delivered both button directions. Client restart reused its
+  Keychain pairing. Source restart on a new port reconnected automatically and
+  accepted another command. Host revocation disabled both controls and cleared
+  the remembered synthetic pairing. The fixture and remote GUI were stopped;
+  no microphone, output-volume or Meet action was part of this fixture test.
+- The owner identified iPhone 5G Personal Hotspot as the actual church network.
+  The two-Mac, hotspot, AirPlay and Meet-audio checks remain pending. Home Wi-Fi
+  or same-Mac fixture checks do not establish that acceptance.
 
 ## Local technical checks — 2026-11-02
 
@@ -177,3 +276,368 @@ has **not** been deployed; production activation remains required before another
 laptop can obtain automatic links. The package is unsigned and not notarized.
 The second laptop itself, audible Meet delivery and broader real animation
 coverage have not been tested.
+
+
+## Paired remote and website pilot distribution — 2026-11-02
+
+The 0.3.1 pilot is available from authenticated Sunday-service administration
+through the separately merged/deployed #613 / PR #617. Production release
+`e8d1561c` passed the canonical deployment and health checks. The real signed-in
+production page displays both installer links and the upcoming 11/8 folder.
+Anonymous installer metadata/files redirect to sign-in, while the exact upcoming
+folder endpoint remains 200/no-store and adjacent administration stays protected.
+Published installer hashes match the staged bytes. Both installers previously
+passed development-browser download/readback. Actual production Chrome download
+attempts returned `ERR_BLOCKED_BY_CLIENT`. The owner subsequently clicked the
+production Sunday Remote download and confirmed twice that it downloads. Record
+this as owner-confirmed production Remote download success; production browser
+hash readback and the Presenter DMG download were not independently verified.
+
+The main Mac was updated from 0.3.0 to the published 0.3.1 bundle, retaining a
+backup and its user-data directory. Installed ASAR bytes match the staged bundle,
+the deep strict signature verifies, and the app starts with the actual upcoming
+folder and Sunday 10:00 Dallas schedule visible. Installed Sunday Remote
+successfully discovered this actual host via Bonjour. No same-Mac speaker Meet
+or microphone run was started. The discovery test service was stopped and
+Remote exited; Presenter remains idle with black/muted output.
+
+The short Bonjour service type and client endpoint re-resolution fixes are
+covered by 27 passing app tests. Eight website authorization/download/publisher
+checks and TypeScript pass. Previous actual PPT advance/switch-retention checks
+and same-Mac native TLS fixture checks remain partial evidence only. Physical
+two-Mac control over the owner's iPhone hotspot, AirPlay with HDMI, speaker audio,
+disconnection mute and the complete timed service transition still require
+acceptance. Keep #598 / PR #611 in draft. Ad-hoc updates may invalidate macOS
+Accessibility grants; no renewed grant was assumed or changed during this update.
+
+
+## Playback UX correction — 0.3.2, 2026-11-02
+
+Owner use exposed the hidden popup/page inventory as an unacceptable primary
+workflow. Startup now shows the playback controller, with two fixed deck cards;
+internal page records and manual links are collapsed. The current inspected
+slide has one confirm-and-play action, exercised through the actual controller
+in the Electron smoke. Confirmed deck cards remain stable despite stale popup
+records. The existing manual inspection requirement is retained; this does not
+automatically validate editor content as an audience slide.
+
+A single weekly-folder action reads visible file names inside the owner's
+existing OneDrive session. A unique worship-named PPT plus exactly one other PPT
+are assigned to worship/sermon and opened through that folder. Ambiguous file
+sets require selection. Folder identity survives OneDrive's date URL encoding;
+polling is bounded to two minutes and ends after opening both files. Repeated
+document GET opens reuse their private views; POST popups retain their original
+body and opener. Only a document opened from the current private preview may
+automatically follow into it; authentication popups do not steal the audience.
+
+Actual signed-in OneDrive test: one button opened the 11/8 generated worship PPT
+and the owner's test sermon, and the real controller showed each file in the
+correct card. These were real Office editors, not fixture page titles. Both real PPTs were then put into Office slideshow mode, confirmed and played
+through the new primary buttons. Switching back to worship and a controller
+Next action produced the actual second slide. The PowerPoint slideshow command
+still needs operator action and visual confirmation.
+Thirty-one Node tests pass, and the full Electron smoke passes, including UI
+confirm-and-play, 20 switches, key delivery, POST preservation and blackout gates.
+No new Meet, two-Mac audio, or hotspot acceptance is implied by this UX change.
+
+
+## Downloaded-install first launch — 2026-11-02
+
+Owner installation on this Mac revealed two application locations: system
+Applications contained verified 0.3.2, while the running process was the older
+0.3.1 in the user's Applications directory. The old process was quit normally,
+and its bundle moved to a disabled backup outside Applications. User-data and
+Office sessions were retained. The downloaded 0.3.2 was copied from its mounted
+DMG into system Applications using Finder.
+
+Its initial launch did not reach application code: the process remained at
+`_dyld_start` with a 96 KB footprint, and CoreServicesUIAgent displayed the
+Apple-cannot-verify alert. Privacy & Security showed the matching Open Anyway
+entry. This reproduces the owner's downloaded-package Gatekeeper friction;
+local source/bundle functional checks do not complete that first-launch test.
+The owner was asked to perform the security exception and authentication
+personally. No quarantine removal, protection disablement or automated security
+exception was applied. New downloaded-install UI acceptance remains pending that
+manual confirmation. Developer ID signing/notarization is still absent.
+
+
+After the owner completed Open Anyway, the downloaded /Applications 0.3.2
+launched with the new playback controller. Process-path/version readback verified
+that exact installed copy. Its single weekly-folder action reused the retained
+Microsoft session and automatically opened/assigned both real 11/8 PPTs. Each
+was put into Office slideshow mode and confirmed/played through the new primary
+button. The installed app was left open with both decks ready and the controller
+visible for owner testing. Downloaded-install startup is therefore verified
+following an owner-granted Gatekeeper exception; this is not notarized first
+launch, and Meet/physical two-Mac acceptance remains pending.
+
+
+## Covered controller shortcut — 0.3.3
+
+The owner reported that Command-P required two presses. A visible controller
+could remain behind the native fullscreen output after switching or key delivery;
+the old toggle treated it as foreground and hid it on the first press. The toggle
+now hides only a visible, focused controller. Otherwise it restores a minimized
+controller, shows it, raises its z-order and focuses it. Existing macOS fullscreen
+workspace visibility remains enabled.
+
+The Electron regression deliberately leaves the controller visible but unfocused
+behind the actual fullscreen output, then verifies that exactly one toggle makes
+it visible and focused, and the next hides it. This passes alongside the complete
+20-switch/key/POST/fullscreen smoke. This is a 0.3.3 correction, not a claim that
+the already-running installed 0.3.2 has been patched in memory.
+
+
+The Mac was subsequently updated to the verified 0.3.3 bundle, preserving a
+0.3.2 backup and user data. Native UI verification reproduced the covered case
+by showing OUTPUT while the controller remained open, then sent one Command-P:
+the focused window became the controller. A second press hid it, and another
+single press restored it. This is installed-app shortcut verification, in
+addition to the isolated Electron regression. It used the locally built verified
+update, not another downloaded-package Gatekeeper first-launch test.
+
+
+## Floating controls and no blank startup — 0.3.4
+
+The owner superseded the hidden-shortcut controller design: no blank startup
+window, no manual blackout UI, no fullscreen controller. Startup now allocates
+OUTPUT hidden, opens a non-fullscreen settings panel, and enters fullscreen only
+when a verified slide is taken. Internal end/navigation/failure gates mute views
+and hide OUTPUT instead of presenting an empty user window; normal deck changes
+retain its visible identity. The black/mute button, menu and Command-0 action are
+removed. A second launch brings forward the panel rather than opening blank OUTPUT.
+
+On macOS the controller uses the native floating panel window type, with explicit
+regular Dock activation policy. Playback reduces it to 420×240. Settings expands
+it without fullscreen. Close/Hide affects only the panel; Dock activation restores
+it. Command-P only restores the panel. Command-1/2 are intercepted in Office views
+before the web editor can consume them, and work while the panel remains closed.
+
+The full Electron smoke passes: startup OUTPUT is hidden/non-fullscreen;
+controller fullscreen is disabled; first verified slide enters fullscreen;
+20 deck changes retain the capture window; popup POST/opener, audio isolation,
+remote keys and invalidation safety pass. Closing the actual panel preserves the
+live slide; app activation restores it; actual view key events for Command-1/2
+switch decks without reopening the dismissed panel. Physical Dock clicking,
+real installed-Office floating behavior and Meet capture for this new window
+lifecycle require their specific checks; the emitted app activation is not a
+physical Dock click.
+
+The installed /Applications 0.3.4 bundle was subsequently compared with the
+source ASAR and passed deep/strict signature verification. Native UI opened the
+actual two weekly PPTs using the saved Microsoft session, started both Office
+slideshows and confirmed playback. The controller reduced to the small floating
+panel. Closing its native close button left the actual slideshow visible;
+Command-2 selected the sermon and Command-1 returned to worship without opening
+the panel. Command-P restored the compact panel and its status confirmed worship.
+Private screenshots record the compact panel and full-screen real slides.
+
+Read-only Dock preferences show the running /Applications app in recent apps.
+Finder's Add to Dock was attempted, but a persistent pin and physical Dock click
+were not verified: the computer interface could not inspect the Dock. Do not
+treat that attempt as completed pinning. The emitted activation regression above
+continues to cover the app's restore callback. Meet capture after this lifecycle
+change and physical two-computer/audio acceptance remain pending.
+
+
+## Settings only; automatic hide on playback — 0.3.5
+
+The owner rejected the daily flip panel because it would be hidden during a
+presentation anyway. The compact mode, settings/compact toggle and local
+previous/next buttons are removed. There is one settings window. Every successful
+Stage.take, including a workflow/scheduled take of the already-active deck,
+hides settings and returns keyboard focus to the active Office view. State-only
+updates do not hide a settings window that the operator intentionally reopened.
+Dock activation and Command-P reopen full settings; close leaves playback running.
+Return to playback is unavailable before any presentation exists.
+
+All 32 Node tests pass. The updated Electron smoke checks automatic hiding from
+the actual confirmation button, the direct scheduled-workflow take path, absence
+of the flip controls, full settings restoration, Command-1/2 with settings hidden,
+20 retained-state changes and the existing popup/session/audio/remote invariants.
+An intermediate installed build also opened the actual weekly files and confirmed
+that playing the real sermon automatically hid settings. Native preparation
+focus required retaining the macOS panel type for the full settings window; this
+is a window behavior detail, not a compact playback panel. Final source/installed
+ASAR and package integrity are verified separately before publishing. Physical
+Dock clicking, Meet lifecycle and two-Mac/audio acceptance remain pending.
+
+
+Final installed 0.3.5 native UI then opened the actual upcoming-week folder,
+entered the real worship slideshow and confirmed playback. The focused native
+window became OUTPUT without an extra hide action. The settings window did not
+appear in the saved playback screenshot (`035-playback-without-controls.png`,
+private evidence directory). Both source and installed ASAR matched; deep/strict
+signature, final DMG checksum and Remote ZIP integrity passed.
+
+
+## Window-sharing omission reproduced; compatibility candidate — 0.3.6
+
+The owner reproduced missing OUTPUT in the main laptop's Meet Window picker.
+The PPT itself displayed correctly; Chrome's Screen & System Audio Recording
+permission was enabled and a full Chrome restart did not resolve it. On this Mac,
+the actual Chrome getDisplayMedia Window picker likewise omitted the installed
+0.3.5 native-fullscreen OUTPUT while other app windows were listed. A private
+screenshot records the missing-source list. This observation motivates avoiding
+a separate fullscreen Space; it does not yet prove the cause on every Mac.
+
+A simple-fullscreen candidate again lost slide key delivery on the second deck
+and was rejected. The 0.3.6 candidate instead keeps OUTPUT as one normal borderless
+window, covering the exact display x/y/width/height, with larger-than-screen
+bounds enabled. No native-fullscreen Space is entered on macOS, including during
+Office HTML fullscreen. The same native OUTPUT ID remains across all deck
+changes. No second output, screen-wide capture fallback, cookie transfer or
+security-permission change was introduced.
+
+All 32 Node tests and the complete Electron smoke pass for this candidate,
+including exact display bounds, no native fullscreen, 20 retained-state switches,
+key focus, one capture-window identity, HTML fullscreen, hidden settings and the
+existing remote/audio/popup invariants. Installed source/ASAR, deep/strict
+signature, DMG checksum and Remote ZIP checks pass. The installed candidate opened
+the actual weekly worship slideshow and displayed it with settings hidden.
+
+A second Chrome chooser run could not be completed through computer automation:
+both the local diagnostic and WebRTC's official getDisplayMedia sample returned
+InvalidStateError before displaying the picker. This is not a missing-window
+result and not evidence of successful capture. Version 0.3.6 is a pilot candidate;
+the target laptop's Meet picker and continuous capture across worship/sermon
+switches still require owner verification. Physical two-Mac/audio acceptance is
+unchanged and the PR remains draft.
+
+
+## Automatic join reproduced and verified — 0.3.7
+
+The owner reported preparation opening Meet without joining. After removing and
+re-adding the exact installed app through macOS UI, permission was restored.
+The baseline then stopped on prejoin with the microphone on; the app reported
+that the microphone state could not be confirmed. A controlled run with Chrome
+explicitly foreground joined automatically, muted, and reached the share picker.
+That run used an owner-authorized AppleScript solely to activate Chrome and is
+not evidence that the app itself handled the foreground transition.
+
+The native prepare action now activates Chrome itself even for an existing room.
+A join-only action lets the app accurately report joined/muted while no PPT is
+playing, rather than attempting to share hidden OUTPUT. The Prepare button stays
+available in that verified waiting state. A regression blocks readiness and
+recording until sharing is confirmed; host mute guarding remains active while
+joined/preparing. All 33 Node tests and the complete Electron smoke pass, including
+the actual UI's enabled retry button and the existing single-OUTPUT invariants.
+
+Installed final 0.3.7 passed two real-Meet checks: the first opened/joined muted;
+the second started with the actual room already on its prejoin screen, microphone
+on, and Chrome out of the foreground. Only the app's Prepare action was pressed.
+The app activated Chrome, muted, joined and reported joined/waiting-for-PPT. No
+manual Join, external foreground script, recording or speaker unmute was used in
+these final runs. Actual native Meet controls displayed Turn on microphone and
+Leave call, and the Prepare retry button remained enabled. Private final screenshots
+are 037-final-autojoin-meet.png and 037-final-autojoin-status.png. App End was used
+to leave the test runs. Source/installed-ASAR/helper matching, deep/strict signature,
+final DMG checksum and Remote ZIP integrity checks pass.
+
+The owner separately reported window sharing working on this Mac, explicitly
+not yet the main laptop. This is owner-reported acceptance, not an independent
+receiving-client check. Main-laptop sharing, continuous new-lifecycle capture on
+an independent receiver, physical two-Mac/hotspot/audio and scheduled live-service
+acceptance remain pending. Ad-hoc update permission persistence is still a known
+packaging limitation, not fixed by the join change.
+
+
+Cleanup qualification: the second End attempt reported "Meet did not accept the
+operation" even though the actual Chrome UI subsequently showed the Meet home
+page, with no active call. The first End attempt had returned ended. Therefore
+this run establishes automatic join/mute, not reliable End completion reporting.
+The inconsistent End acknowledgement remains an explicit follow-up. The app was
+returned to a clean idle state after preserving the join screenshots. The final
+installer instructions were repacked without changing the tested app executable,
+ASAR or native helper.
+
+## Main-laptop locator investigation — unpublished 0.3.8
+
+The owner confirmed the main laptop runs 0.3.7, can share the single OUTPUT and
+switch decks, but preparation stops at prejoin. Its exact reported error was
+"請在 Chrome 登入 Google 並開啟主日 Meet。" despite the visible signed-in room.
+This identifies a failed native window lookup, not evidence of missing login.
+
+The lookup previously traversed up to 2,500 nodes per unrelated browser window
+before checking the next window, consuming the shared operation deadline. The
+candidate searches browser structure breadth-first, reads each web area's URL
+without descending into page contents, rejects unrelated/other-room URLs, checks
+all Chrome application processes, and raises the matched window. It requests
+native accessibility once per Chrome PID after a successful request, retaining
+retry eligibility after a failed request. Diagnostics distinguish no web tree,
+missing room and lookup timeout; they contain counts, not private page URLs.
+
+The exact Swift locator passes synthetic counterexamples with a 5,000-node
+unrelated page, a later matching window, wrong rooms and embedded impersonating
+nodes. All 34 Node tests and the complete Electron smoke pass. Both native
+architectures compile; the local installed runtime and helper matched that warm
+0.3.8 candidate and its deep/strict signature verified.
+
+Importantly, installed 0.3.7 ALSO joined successfully with the large unrelated
+window open on this development Mac. Therefore that defect is not a proven
+explanation for the main-laptop failure. Installed 0.3.8 opened the real room,
+muted microphone/camera and joined using only App Prepare; actual Meet controls
+showed "開啟麥克風", "開啟攝像頭" and "退出通話". Private evidence is
+038-warm-autojoin-meet.png. This was a warm-Chrome check, not cold-start proof or
+main-laptop acceptance. Updating the local test app again invalidated its ad-hoc
+Accessibility grant; the same exact app was re-added via normal System Settings
+UI, without broadening permission or weakening the signature requirement.
+
+End again actually left this client (Meet showed "你已退出会议") but the App
+reported "Meet 未接受操作". Reliable End acknowledgement remains unresolved.
+The test app was quit, the owned large-page window closed and its local server
+stopped. No recording or speaker unmute was attempted. A full Chrome quit/reopen
+test remains pending owner consent because it would close all development-Mac
+browser windows. At that checkpoint 0.3.8 was not published.
+
+## Cold-start reproduction and recovery — final 0.3.8
+
+The owner authorized quitting the development Mac's Chrome. At test start the
+ordinary GUI Chrome was already gone; the remaining Chrome PID belonged to a
+headless website worker with a separate profile. It was left running. The first
+candidate failed with window count 0 and web-area count 0: NSWorkspace reused
+the running headless instance instead of opening a GUI. Preparation now requests
+a new application instance when the requested Meet page is absent, and activates
+only the PID belonging to the verified meeting window. This uses
+NSWorkspace.OpenConfiguration.createsNewApplicationInstance; Apple's documented
+default otherwise reuses an existing instance:
+https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/createsnewapplicationinstance
+
+That launch correction alone created a GUI but still failed cold: two windows,
+zero web areas. Chromium defers enhanced accessibility until two seconds after
+the last request. Its setter handles the request before delegating to AppKit,
+so the AX return code cannot be treated as a success acknowledgement. The
+success-only cache in the earlier candidate and unconditional polling in 0.3.7
+could keep requesting every 500ms and resetting that delay. The final helper
+reads the application role and sends the enhanced request once per PID,
+independent of the AX setter return code. Chromium source authority:
+https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/browser/chrome_browser_application_mac.mm
+(enableScreenReaderCompleteModeAfterDelay and accessibilitySetValue).
+
+The failed GUI Chrome was normally quit through Activity Monitor's Quit action,
+selected by its verified PID; Force Quit was not used. Activity Monitor's original
+GPU Processes view and empty search were restored. The headless worker was not
+quit or changed. After installing the final candidate and restoring the same App
+grant through normal UI, only Presenter Prepare was pressed. Chrome was not
+inspected through native/browser tools before the App reported joined/muted.
+The App itself started a fresh GUI Chrome, found the room, joined, muted its
+microphone and camera, and stayed waiting for PPT sharing. Subsequent actual Meet
+inspection showed "開啟麥克風", "開啟攝像頭", "退出通話" and the explicit
+camera/microphone-off message. Private proof: 038-cold-autojoin-meet.png and
+038-cold-autojoin-status.png. The independent-receiver, main-laptop and full
+service/audio checks remain pending; this establishes development-Mac cold start.
+
+All 34 Node tests pass after the final native changes, the installed runtime/helper
+match the final build, and its deep/strict signature verifies. The earlier complete
+Electron smoke remains applicable to unchanged JavaScript. Both native targets
+compile. App End visibly left this test client and returned ended (with an
+"操作已取消" suffix); previous inconsistent End acknowledgements remain recorded
+and are not cleared by one successful attempt. No recording or speaker unmute was
+performed. The update still has the known ad-hoc signing/TCC persistence limitation.
+
+Final DMG checksum and Remote ZIP integrity checks pass. The verified final 0.3.8
+pilot artifacts were published through scripts/publish-sunday-presenter.cjs;
+latest.json now selects 0.3.8. Presenter DMG: 131544108 bytes,
+SHA256 aa14483f181134a5d0db0c1f993fd7e4abc9df2dc6e0bd2ce8c17754bebbeaed.
+Remote ZIP: 464105 bytes,
+SHA256 8b4251f4f167da558af83fa3ac5bc775e305ce5197db57470600807ffc7622b1.

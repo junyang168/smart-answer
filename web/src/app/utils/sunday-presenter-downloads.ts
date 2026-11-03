@@ -13,7 +13,7 @@ export async function loadPresenterRelease() {
   const stat = await fs.lstat(manifestPath);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32768) throw new Error("Invalid release manifest");
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  if (manifest.schemaVersion !== 1 || manifest.status !== "pilot" ||
+  if (manifest.schemaVersion !== 1 || !["pilot", "released"].includes(manifest.status) ||
       typeof manifest.version !== "string" || !/^\d+\.\d+\.\d+$/.test(manifest.version) ||
       !Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 2) throw new Error("Invalid release manifest");
   const versionRoot = path.join(root, manifest.version);
@@ -28,5 +28,5 @@ export async function loadPresenterRelease() {
     if (fileStat.isSymbolicLink() || !fileStat.isFile() || fileStat.size !== entry.bytes) throw new Error("Release artifact unavailable");
     return { id, filename, bytes: entry.bytes as number, sha256: entry.sha256 as string, file, type: spec.type };
   }));
-  return { version: manifest.version as string, status: "pilot" as const, artifacts };
+  return { version: manifest.version as string, status: manifest.status as "pilot" | "released", artifacts };
 }

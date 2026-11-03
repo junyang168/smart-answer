@@ -12,11 +12,13 @@ async function main() {
   const args = process.argv.slice(2), options = {};
   while (args.length) {
     const flag = args.shift();
-    if (!['--root', '--dist', '--version'].includes(flag) || !args.length) throw Error('Usage: publish-sunday-presenter.cjs --version <version> --root <data>/sunday-presenter/releases [--dist <build-dir>]');
+    if (!['--root', '--dist', '--version', '--status'].includes(flag) || !args.length) throw Error('Usage: publish-sunday-presenter.cjs --version <version> --root <data>/sunday-presenter/releases [--dist <build-dir>] [--status pilot|released]');
     options[flag] = args.shift();
   }
   if (!options['--root']) throw Error('--root is required');
   if (!options['--version']) throw Error('--version is required');
+  const status = options['--status'] || 'pilot';
+  if (!['pilot', 'released'].includes(status)) throw Error('Invalid release status');
   const source = path.resolve(__dirname, '../tools/sunday-presenter');
   const version = options['--version'];
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('Invalid version');
@@ -47,7 +49,7 @@ async function main() {
         if (fs.lstatSync(file).isSymbolicLink() || await hash(file) !== artifact.sha256) throw Error('Version already exists with different bytes; use a new version');
       }
     } else fs.renameSync(temporary, target);
-    const manifest = { schemaVersion: 1, version, status: 'pilot', artifacts };
+    const manifest = { schemaVersion: 1, version, status, artifacts };
     const next = path.join(root, '.latest-' + crypto.randomUUID());
     fs.writeFileSync(next, JSON.stringify(manifest, null, 2) + '\n', { flag: 'wx' });
     fs.renameSync(next, path.join(root, 'latest.json'));

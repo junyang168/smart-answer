@@ -1,18 +1,27 @@
-Sunday Presenter — Apple Silicon Mac
+Sunday Presenter 0.4.0 — Phase 1
 
-1. 打開 DMG，把 Sunday Presenter 拖進 Applications。
-2. 從 Applications 或 Spotlight 開啟 Sunday Presenter。
-3. 按 ⌘P 顯示控制台。App 會向教會網站取得本主日的 OneDrive 連結。
-4. 開啟主日崇拜／講道資料夾，在 app 內登入 Microsoft 並選取簡報。
-5. 啟動投影片放映，檢查後按「設為觀眾畫面」，然後切換輸出。
-6. Google Meet 只分享「Sunday Presenter — OUTPUT」視窗。
+主電腦安裝 Sunday Presenter；講員電腦安裝 Sunday Remote。將 App 拖入 Applications。
+Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 Intel／Apple Silicon。
 
-⌘P：顯示／隱藏控制台。⌘Q：離開 app。
+1. 開啟 Presenter，按「開啟本週 PPT」，首次在 App 內登入 Microsoft。
+2. App 自動識別敬拜與講道。進入 PowerPoint 投影片放映，確認畫面後按「確認並播放」。
+3. 正式播放時設定窗口自動隱藏。⌘1 敬拜、⌘2 講道；方向鍵翻頁。點 Dock 圖示或 ⌘P 叫回設定。
+4. 按「開啟講員翻頁」。講員開啟 Sunday Remote，首次輸入主電腦的六位數字，以後記住配對並自動重連。
+   兩台 Mac 連同一個 Wi-Fi／手機熱點，首次允許本機網路。Remote 的上一頁／下一頁與主電腦控制同一份 PPT。
+5. 手動在 Chrome 加入 Google Meet，分享唯一的「Sunday Presenter — OUTPUT」視窗。
+   主電腦的 Meet 麥克風保持關閉，可用耳機監聽。講員電腦手動開啟 Meet 麥克風，並將揚聲器靜音，避免回音。
+   開始前從另一台裝置確認觀眾能看到並聽到。錄影、關麥與離開 Meet 都由你手動操作。
+6. HDMI 接 TV；AirPlay 鏡像 OUTPUT。切換敬拜／講道時保持同一個分享視窗。
 
-需要網路、Apple Silicon Mac 及 macOS 13 或以上。App 不需要安裝 Node.js。
-每台電腦須自行登入 Microsoft；安裝包不包含帳號、登入資料或簡報檔案。
-雲端新檔案以 OneDrive 完成同步為準。
+Phase 1 不會自動加入 Meet、開關麥克風、操作錄影或在 10 點自動開始。
+Presenter／Remote 不需要輔助使用或麥克風權限；Chrome 的分享及收音權限請依 Meet 提示設定。
+舊版升級請退出並更新兩台電腦的 App。舊的 Meet／定時設定不再執行。
+YouTube 直播及 Remote 收音屬於 Phase 2。
 
-這是尚未簽章／公證的測試版本。若 macOS 阻擋開啟，請在確認來源後，
-到「系統設定 → 隱私權與安全性」按「仍要打開」。不要關閉系統安全保護。
-本主日 API 需要先部署網站整合版本；網站尚未更新時，控制台可手動貼上簡報連結。
+⌘Q：離開 App。關閉設定窗口只隱藏設定，播放繼續。
+App 運行時防止閒置睡眠，不會解除手動鎖屏。
+切換保留已載入頁面；背景影片、計時動畫可能繼續執行，請預先測試實際檔案。
+
+安裝包不包含帳號、登入資料、簡報或配對身份。每台電腦自行登入 Microsoft。
+這個版本尚未取得 Apple Developer ID 簽章／公證。若 macOS 阻擋開啟，確認來源後到
+「系統設定 → 隱私權與安全性」按「仍要打開」；不要關閉系統安全保護。
