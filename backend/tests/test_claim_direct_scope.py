@@ -589,3 +589,39 @@ def test_postimage_check_does_not_reopen_private_reference_owners_but_detects_ne
                 store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
         else:
             store._assert_claim_management_scope(cursor,pins(protected),records=protected,request=request,postimage=True)
+
+
+def test_question_only_update_never_invents_write_impacts_at_reference_private_evidence(chain):
+    from backend.pipeline.claim_review_units import CONTRACT
+    from backend.tests.test_claim_management_intake import pass_review
+    store,request,execution,root=chain
+    ea=store.get_record_state('evidence_steps','EA')['payload'];ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'question-only-private-reference',
+        'source_fragments':[{'fragment_id':'FA','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'甲是假设，不是断言。'}],
+        'evidence_steps':[dict(ea,source_fragment_ids=['FA'],produced_claim_ids=['A','C'],
+            speaker='professor',stance='asserted',support_eligibility='eligible_candidate'),
+            dict(ec,source_fragment_ids=['FA'],produced_claim_ids=['C','D'])],
+        'claims':[{'claim_id':'D','statement':'甲是假设。','claim_type':'exegesis','occurrences':[{'source_id':'S','anchors':[]}]}],
+        'questions':[{'question_id':'Q','text':'甲是否是斷言？','source_fragment_ids':['FA'],
+            'answer_state':'unanswered','answer_claim_ids':[]}]}))
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json').read_text())
+    policy.review_unit_contract=CONTRACT;policy.joint_update_max_targets=10;policy.initial_candidate='proposal'
+    pp=root/'question-private-policy.json';pp.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp))
+    request.permissions=[cm.source.Permission(collection='questions',object_id='Q',fields=['answer_state','answer_claim_ids'])]
+    authorize(request,{'required_maintenance_keys':['questions/Q'],'include_evidence_owner_context':True,
+        'evidence_owner_context_keys':['claims/C']})
+    before={k:store.get_record_state(*cm.source.split_key(k)) for k in ['claims/A','claims/C','claims/D','evidence_steps/EA','evidence_steps/EC']}
+    cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
+    def proposal(packet):
+        assert 'evidence_steps/EC' in packet['before'] and 'claims/D' not in packet['before']
+        assert packet['claim_scope']['content_claim_keys']==['claims/A']
+        return {'changes':[{'record_key':'questions/Q','fields_json':json.dumps({'answer_state':'answered','answer_claim_ids':['A']}),
+            'reason':'link the existing direct answer','citations':[cite]}],'creations':[],'retirements':[],
+            'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=proposal,opus=pass_review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.claim_management_qualification('A')['ready']
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['A']
+    assert all(store.get_record_state(*cm.source.split_key(k))==v for k,v in before.items())

@@ -73,8 +73,8 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
     targets = set(request.target_keys)
     if bounded:
         from backend.pipeline.claim_joint_update import required_keys
-        maintenance = (set() if request.authorization.file_sha256 == '0' * 64
-                       else set(required_keys(request)))
+        maintenance = (set() if request.authorization.file_sha256 == '0' * 64 else {
+            k for k in required_keys(request, strict=False) if not k.startswith('claims/')})
     else:
         maintenance = {p.key for p in request.permissions} - targets
     return targets | maintenance | set(actual_write_keys)
@@ -211,7 +211,12 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
         # roots or capabilities. Freeze their necessary evidence before a
         # proposal can change a shared fragment/step; do not wait until after
         # GPT to discover that its old owners were missing from the packet.
-        possible = {p.key for p in request.permissions} or writable
+        possible = {p.key for p in request.permissions}
+        if not possible and not owner_context_enabled(request):
+            # Historical packets used a hypothetical full write frontier.
+            # New bound empty grants mean read-only, including admission's
+            # natural-closure probe; do not invent fragment write impacts.
+            possible = writable
         for rows in [old, payloads]:
             owners = set()
             for owner, value in rows.items():

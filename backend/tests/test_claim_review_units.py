@@ -545,3 +545,24 @@ def test_explicit_orphan_question_maintenance_is_read_without_unused_permission_
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C']
     assert store.get_record_state('questions','UNUSED')['payload']['answer_claim_ids']==[]
     assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('bad',['missing_question','missing_evidence','hidden_claim','missing_list'])
+def test_invalid_explicit_maintenance_is_durably_refused_without_calls_or_content(claims,bad):
+    store,root=claims
+    prepared=intake.prepare(['C'],root,instruction='Validate mandatory maintenance before any review',
+        policy=policy_file(root.parent),groups=[['C']],store=store)
+    request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+    extra=json.loads(cm.source.verify_file(request.authorization).read_text())
+    extra={k:v for k,v in extra.items() if k not in {'request','policy'}}
+    if bad=='missing_list':extra.pop('required_maintenance_keys')
+    else:extra['required_maintenance_keys']=[{'missing_question':'questions/ABSENT','missing_evidence':'evidence_steps/ABSENT',
+                                            'hidden_claim':'claims/ABSENT'}[bad]]
+    authorize(request,extra)
+    before=store.get_record_state('claims','C');ports=SyntheticPorts(store,execution)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='paused' and result['reason']=='engineering_required',result
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert parent['admission_refusal'] and not parent['call_reservations'] and not parent['latest_rounds']
+    assert ports.calls==[] and store.get_record_state('claims','C')==before
+    assert execute_claim_management(store,request,root=execution,ports=ports)==result

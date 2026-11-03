@@ -499,7 +499,7 @@ def execute_claim_management(store, request, *, root, ports):
                 raise ValueError('Claim recovery cannot reset original input/root/budget')
         else:
             from backend.pipeline.claim_joint_update import context_roots
-            records = read_context(context_roots(request))
+            records = read_context(context_roots(request, exists=lambda col, oid: store.get_record_state(col, oid) is not None))
             before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
             goal = cm.original_goal(request, before)
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)

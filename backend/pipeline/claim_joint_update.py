@@ -39,11 +39,18 @@ def required_keys(request, *, strict=True):
     return list(keys)
 
 
-def context_roots(request):
-    """Read explicit maintenance roots; unused grants do not widen joint reads."""
+def context_roots(request, *, exists=None):
+    """Read explicit maintenance; let admission persist invalid-list refusals."""
     from backend.pipeline import claim_management as cm
     keys = set(request.target_keys)
-    keys.update(required_keys(request) if enabled(request) else (p.key for p in request.permissions))
+    if enabled(request):
+        # Claims must be explicit targets, never hidden maintenance roots.
+        # Initial admission can omit a missing maintenance row only so its
+        # unchanged required list is durably refused before any model call.
+        keys.update(k for k in required_keys(request, strict=False) if not k.startswith('claims/')
+            and (exists is None or exists(*cm.source.split_key(k))))
+    else:
+        keys.update(p.key for p in request.permissions)
     keys.update(cm.source.key('source_documents', sid) for sid in request.source_bindings)
     return sorted(cm.source.split_key(key) for key in keys)
 
