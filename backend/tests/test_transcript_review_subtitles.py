@@ -58,7 +58,7 @@ def test_heading_suggestions_cannot_be_rebased_after_body_changes(setup):
     with pytest.raises(ReviewError):prepare_recovery(store,'a',ITEM,op(current,base_version=base['version'],pending_operations=[operation]))
 
 
-@pytest.mark.parametrize('mode',['success','stale','failure'])
+@pytest.mark.parametrize('mode',['success','stale','failure','integrated'])
 def test_suggestion_endpoint_uses_live_saved_body_and_never_writes_suggestions(setup,monkeypatch,mode):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -76,15 +76,29 @@ def test_suggestion_endpoint_uses_live_saved_body_and_never_writes_suggestions(s
         if mode=='failure':raise generator.SubtitleGenerationError('fixture model unavailable')
         if mode=='stale':store.mutate('a',ITEM,op(doc,operations=[{'kind':'text','id':'2','text':'另一處修改'}]))
         return [{'after_index':'START','text':'## 建議','level':1}]
-    monkeypatch.setattr(generator,'generate_subtitles',generate);monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET','test-secret')
+    if mode=='integrated':
+        from types import SimpleNamespace
+        import backend.pipeline.run_ledger as ledger
+        calls=[]
+        def generate_json(*args,**kwargs):
+            calls.append(kwargs)
+            return {'insertions':[{'after_index':'START','text':'## 建議','level':1}]}
+        # Keep the actual generator and ledger contract. Only external I/O is fake.
+        monkeypatch.setattr(generator,'build_client',lambda:SimpleNamespace(
+            model='gpt-6.1-sol',last_usage=None,generate_json=generate_json))
+        monkeypatch.setattr(ledger,'_connect',lambda:None)
+    else:
+        monkeypatch.setattr(generator,'generate_subtitles',generate)
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET','test-secret')
     app=FastAPI();app.include_router(create_review_router(root),prefix='/sc_api');client=TestClient(app)
     path='/sc_api/review_document/'+quote(ITEM,safe='')+'/heading_suggestions'
     body=json.dumps(op(doc)).encode();headers={**signed('POST',path,body),'content-type':'application/json','if-match':'"'+doc['version']+'"'}
     assert client.post(path,content=body).status_code==401
     response=client.post(path,content=body,headers=headers)
-    assert response.status_code=={'success':200,'stale':412,'failure':502}[mode]
+    assert response.status_code=={'success':200,'stale':412,'failure':502,'integrated':200}[mode]
     if mode!='stale':assert store.document('a',ITEM)==doc
     if mode=='success':assert response.json()['insertions'][0]['text']=='## 建議'
+    if mode=='integrated':assert len(calls)==1 and response.json()['insertions'][0]['text']=='## 建議'
 
 
 def test_heading_source_version_cannot_bless_body_changes_in_the_same_packet(setup):

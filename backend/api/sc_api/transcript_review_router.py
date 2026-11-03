@@ -205,7 +205,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
         rows = call(capture)
         try:
             suggestions = await run_in_threadpool(generate_subtitles, rows, subject=item,
-                consumer="sermon_editor", trigger="beta_panel")
+                consumer="sermon_editor", trigger="panel")
         except SubtitleGenerationError as exc:
             raise HTTPException(502, f"AI 產生小標題失敗：{exc}") from exc
         except Exception as exc:
