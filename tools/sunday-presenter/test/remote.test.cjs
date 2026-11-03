@@ -47,6 +47,7 @@ test('encrypted pairing remembers a hash; reconnect survives a source restart an
   assert.ok(!saved.includes(f.token)); assert.match(saved, /peerHash/);
   const publicState = await request(f.remote, '/state', undefined, f.token);
   assert.equal(publicState.status, 200);
+  assert.deepEqual(Object.keys(publicState.data).sort(), ['binding','deck','live']);
   await f.remote.stop();
   const again = new RemoteControl({ identity: identity(f.directory), state: () => f.state, key: async () => {}, advertise: () => () => {} });
   await again.start({ host: '127.0.0.1' }); t.after(() => again.stop());
@@ -74,10 +75,10 @@ test('stale deck changes and lost authorization are checked again before key del
   await f.remote.stop(); assert.equal(valid(), false);
 });
 
-test('only paired slide keys and reports are accepted, never remote workflow commands', async t => {
+test('only paired slide keys are accepted, never Meet reports or workflow commands', async t => {
   const f = await fixture(t);
   assert.equal((await request(f.remote, '/state')).status, 401);
-  for (const route of ['/begin', '/end', '/record', '/open']) {
+  for (const route of ['/begin', '/end', '/record', '/open', '/report']) {
     assert.equal((await request(f.remote, route, {}, f.token)).status, 404);
   }
   assert.equal((await request(f.remote, '/key', { key: 'Escape', id: crypto.randomUUID(), binding: f.binding }, f.token)).status, 400);

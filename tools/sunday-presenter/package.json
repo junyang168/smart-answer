@@ -1,8 +1,8 @@
 {
   "name": "sunday-presenter",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "private": true,
-  "description": "Mac proof of concept for two persistent PowerPoint web presentations",
+  "description": "Sunday Presenter Phase 1: persistent presentations and paired local slide control",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",

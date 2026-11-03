@@ -7,17 +7,11 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     let code = NSTextField()
     let connect = NSButton(title: "第一次連線", target: nil, action: nil)
     let status = NSTextField(wrappingLabelWithString: "正在找主電腦…")
-    let retry = NSButton(title: "完成登入／權限後重試", target: nil, action: nil)
     let previous = NSButton(title: "← 上一頁", target: nil, action: nil)
     let next = NSButton(title: "下一頁 →", target: nil, action: nil)
     var endpoint: URL?, fingerprint = "", token: String?, binding = ""
     var saved: [String: String] = [:]
-    var busy = false, polling = false, audioBusy = false
-    var preparedRun = "", pendingRun = "", phase = "idle", currentRun = "", microphoneKnown = false
-    var failedRun = "", lastMeetingError = "", endedRun = ""
-    var meetingURL: URL?, meeting: MeetControl?
-    let speakerMute = OutputMute()
-    let audioQueue = DispatchQueue(label: "sunday.remote.meet")
+    var busy = false, polling = false
     var timer: Timer?
     var lastResolve = Date.distantPast
     lazy var session: URLSession = {
@@ -61,11 +55,10 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         connect.target = self; connect.action = #selector(pair)
         previous.target = self; previous.action = #selector(back)
         next.target = self; next.action = #selector(forward)
-        retry.target = self; retry.action = #selector(retryPreparation); retry.isHidden = true
         for button in [previous, next] { button.font = .systemFont(ofSize: 20, weight: .medium); button.bezelStyle = .rounded; button.isEnabled = false; button.heightAnchor.constraint(equalToConstant: 56).isActive = true }
         computers.target = self; computers.action = #selector(selectComputer)
         let keys = NSStackView(views: [previous, next]); keys.distribution = .fillEqually; keys.spacing = 10
-        for view in [title, computers, code, connect, status, retry, keys] { stack.addArrangedSubview(view) }
+        for view in [title, computers, code, connect, status, keys] { stack.addArrangedSubview(view) }
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor), stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor), stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor)])
         let menu = NSMenu(); let appMenu = NSMenu(); let item = NSMenuItem(); item.submenu = appMenu; menu.addItem(item)
@@ -82,7 +75,6 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         }
     }
     @objc func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    @objc func retryPreparation() { failedRun = ""; lastMeetingError = ""; retry.isHidden = true; poll() }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         services.append(service); computers.addItem(withTitle: service.name)
         service.delegate = self; service.resolve(withTimeout: 8)
@@ -143,7 +135,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
     func request(_ path: String, body: [String: Any]? = nil, completion: @escaping (Result<[String: Any], Error>) -> Void) {
-        guard let endpoint = endpoint else { completion(.failure(ControlError("請先在主電腦按準備主日。"))); return }
+        guard let endpoint = endpoint else { completion(.failure(ControlError("請先在主電腦開啟講員翻頁。"))); return }
         var request = URLRequest(url: endpoint.appendingPathComponent(path)); request.cachePolicy = .reloadIgnoringLocalCacheData
         if let token = token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         if let body = body { request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try? JSONSerialization.data(withJSONObject: body) }
@@ -184,9 +176,6 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
                     self.code.isHidden = false; self.connect.isHidden = false; self.computers.isHidden = false
                     self.status.stringValue = "主電腦已重設配對，請重新輸入六位數字。"
                 }
-                if self.phase == "live", let url = self.meetingURL {
-                    self.audioQueue.async { try? MeetControl(url: url, speaker: true).microphone(muted: true) }
-                }
             }
         }
     }
@@ -195,51 +184,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         let live = state["live"] as? Bool == true
         previous.isEnabled = live && !busy; next.isEnabled = live && !busy
         code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = token != nil
-        phase = state["phase"] as? String ?? "idle"
-        status.stringValue = lastMeetingError.isEmpty ? "已連線 · \(state["deck"] as? String ?? "尚未播放")" : lastMeetingError
-        if let raw = state["meetingUrl"] as? String, let url = URL(string: raw) {
-            meetingURL = url
-            let run = state["runId"] as? String ?? ""
-            currentRun = run
-            updateMeeting(run: run)
-        }
-    }
-    func updateMeeting(run: String) {
-        guard !audioBusy, let url = meetingURL else { return }
-        if failedRun == run && !["ending", "ended"].contains(phase) { return }
-        audioBusy = true
-        let currentPhase = phase
-        audioQueue.async {
-            var joined = false, muted = false, outputMuted = false, verified = false, detail = ""
-            do {
-                self.meeting = try MeetControl(url: url, speaker: true)
-                if currentPhase == "ended" {
-                    if self.endedRun != run { try self.meeting?.leave(); self.endedRun = run }
-                    self.speakerMute.restore(); muted = true; verified = true
-                } else if currentPhase != "idle" {
-                    outputMuted = self.speakerMute.mute()
-                    guard outputMuted else { throw ControlError("請把講員電腦的揚聲器靜音，避免回音。") }
-                    if self.preparedRun != run && ["preparing", "ready", "live"].contains(currentPhase) {
-                        try self.meeting?.prepare(); self.preparedRun = run
-                    }
-                    let shouldOpen = currentPhase == "live" && DispatchQueue.main.sync { self.phase == "live" && self.currentRun == run }
-                    try self.meeting?.microphone(muted: !shouldOpen, canOpen: {
-                        DispatchQueue.main.sync { self.phase == "live" && self.currentRun == run }
-                    })
-                    joined = (try self.meeting?.joined()) == true
-                    muted = (try self.meeting?.microphoneMuted()) == true; verified = true
-                }
-            } catch { detail = error.localizedDescription }
-            let report: [String: Any] = ["runId": run, "joined": joined, "microphoneMuted": muted,
-                                          "microphoneVerified": verified, "speakerMuted": outputMuted, "error": detail]
-            DispatchQueue.main.async {
-                self.audioBusy = false; self.microphoneKnown = detail.isEmpty
-                self.lastMeetingError = detail
-                if !detail.isEmpty { self.status.stringValue = detail; self.failedRun = run; self.retry.isHidden = false }
-                else { self.failedRun = ""; self.retry.isHidden = true }
-                self.request("report", body: report) { _ in }
-            }
-        }
+        status.stringValue = "已連線 · \(state["deck"] as? String ?? "尚未播放")"
     }
     @objc func back() { flip("Left") }
     @objc func forward() { flip("Right") }
@@ -256,7 +201,5 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     }
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate(); browser.stop()
-        if let url = meetingURL { try? MeetControl(url: url, speaker: true).microphone(muted: true) }
-        speakerMute.restore()
     }
 }

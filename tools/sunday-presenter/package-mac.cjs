@@ -24,7 +24,6 @@ function verifyBundleLinks(root, folder = root) {
     out: path.join(__dirname, 'dist'), overwrite: true, asar: true,
     appBundleId: 'org.dallas-hlc.sunday-presenter', appCategoryType: 'public.app-category.productivity',
     icon: path.join(__dirname, 'assets', 'SundayPresenter.icns'),
-    extraResource: [remote],
     extendInfo: { NSLocalNetworkUsageDescription: '與已配對的講員電腦連線，接收主日簡報翻頁指令。',
       NSBonjourServices: [bonjourType] },
     ignore: [/^\/test($|\/)/, /^\/output($|\/)/, /^\/native($|\/)/,

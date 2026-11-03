@@ -27,12 +27,10 @@ function publish(port, id, failed) {
 }
 
 class RemoteControl {
-  constructor({ state, key, changed = () => {}, advertise = publish, now = Date.now, identity,
-    workflow = () => ({}), report = () => {} } = {}) {
+  constructor({ state, key, changed = () => {}, advertise = publish, now = Date.now, identity } = {}) {
     this.getState = state; this.key = key; this.changed = changed; this.advertise = advertise; this.now = now;
     this.server = null; this.error = ''; this.observe(null); this.queue = Promise.resolve();
     this.identity = identity; this.peerHash = identity?.peerHash;
-    this.workflow = workflow; this.report = report;
   }
   observe(active) {
     if (this.active !== active) { this.active = active; this.binding = crypto.randomBytes(16).toString('hex'); }
@@ -40,7 +38,7 @@ class RemoteControl {
   publicState() {
     const value = this.getState(); this.observe(value.active);
     const page = value.pages.find(p => p.id === value.active);
-    return { ...this.workflow(), live: !!page?.ready, deck: page?.deck === 'worship' ? '主日崇拜' : page ? '講道' : '尚未播放',
+    return { live: !!page?.ready, deck: page?.deck === 'worship' ? '主日崇拜' : page ? '講道' : '尚未播放',
       binding: this.binding };
   }
   snapshot() {
@@ -87,7 +85,7 @@ class RemoteControl {
       if (req.method === 'GET' && req.url === '/state') {
         send(paired ? 200 : 401, paired ? this.publicState() : { error: '請先連線。' }); return;
       }
-      if (req.method !== 'POST' || !['/pair', '/key', '/report'].includes(req.url) ||
+      if (req.method !== 'POST' || !['/pair', '/key'].includes(req.url) ||
           req.headers['content-type']?.split(';')[0] !== 'application/json') { send(404, { error: 'Not found' }); return; }
       if (req.url !== '/pair' && !paired) { send(401, { error: '請重新連線。' }); return; }
       let body = '';
@@ -96,15 +94,6 @@ class RemoteControl {
         if (Buffer.byteLength(body) > 4096) { send(413, { error: 'Request too large' }); return; }
       }
       const data = JSON.parse(body);
-      if (req.url === '/report') {
-        if (typeof data.runId !== 'string' || !['joined', 'speakerMuted', 'microphoneMuted', 'microphoneVerified'].every(k => typeof data[k] === 'boolean')) {
-          send(400, { error: 'Invalid report' }); return;
-        }
-        this.report({ runId: data.runId, joined: data.joined, speakerMuted: data.speakerMuted,
-          microphoneMuted: data.microphoneMuted, microphoneVerified: data.microphoneVerified,
-          error: typeof data.error === 'string' ? data.error.slice(0, 200) : '' });
-        send(200, { ok: true }); return;
-      }
       if (req.url === '/pair') {
         this.attempts = this.attempts.filter(at => this.now() - at < 60000);
         if (this.attempts.length >= 5) { send(429, { error: '請等一分鐘再試。' }); return; }

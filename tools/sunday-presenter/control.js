@@ -30,23 +30,10 @@ async function act(action, args) {
   } catch { error.textContent = '操作未完成，請重試。'; return false; }
 }
 function render(state) {
-  const flow = state.workflow;
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
-  document.querySelector('#schedule-status').textContent = state.schedule?.message || '每主日 10:00（Dallas）自動開始。';
-  document.querySelector('[data-action="cancel-auto-start"]').disabled = ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
-  const phases = { idle: '待機', preparing: '準備中', ready: '已就緒，可以開始崇拜', starting: '正在確認錄影', testing: '正在測試短錄影（保持靜音）', live: '崇拜中', ending: '正在結束', ended: '已結束', error: '需要處理' };
-  document.querySelector('#workflow-status').textContent = flow ? `${phases[flow.phase]}${flow.error ? '：' + flow.error : ''}` : '待機';
-  document.querySelector('#workflow-checks').textContent = flow ?
-    `主電腦 Meet ${flow.hostReady ? '已加入並分享 ✓' : flow.hostJoined ? '已加入、等待分享 PPT' : '待確認'} · 講員準備 ${flow.peerReady ? '✓' : (flow.peerError || '等待連線')} · 兩份簡報 ${flow.slidesReady ? '✓' : '待確認投影片'} · 錄影 ${flow.recording ? '已確認開始' : '未確認開始'}${flow.phase === 'live' ? ' · 講員收音 ' + (flow.speakerLive ? '已確認開啟' : '等待確認') : ''}` : '';
-  document.querySelector('[data-action="begin-service"]').disabled = flow?.phase !== 'ready';
-  document.querySelector('[data-action="prepare-service"]').disabled = (flow?.phase === 'preparing' && !flow.hostJoined) || ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
-  document.querySelector('[data-action="test-recording"]').disabled = !flow?.hostReady || ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
-  document.querySelector('[data-action="end-service"]').disabled = ['idle', 'ending', 'ended'].includes(flow?.phase);
-  document.querySelector('[data-action="confirm-share"]').hidden = !flow?.error?.includes('OUTPUT');
-  if (!state.meetingConfigured) document.querySelector('#first-settings').open = true;
   const remote = state.remote;
   document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired ? '講員已連線，可以翻頁。' :
-    remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按準備主日後，講員可用 Sunday Remote 控制上一頁／下一頁。');
+    remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
   document.querySelector('#remote-start').hidden = !!remote?.enabled;
   document.querySelector('#remote-stop').hidden = !remote?.enabled;
   const website = state.website;
@@ -117,9 +104,5 @@ function render(state) {
 for (const button of document.querySelectorAll('[data-action]')) button.onclick = () => act(button.dataset.action);
 for (const button of document.querySelectorAll('[data-take]')) button.onclick = () => act('take', { deck: button.dataset.take });
 for (const button of document.querySelectorAll('[data-folder]')) button.onclick = () => act('sunday-folder', { deck: button.dataset.folder });
-document.querySelector('#meeting-settings').onsubmit = async event => {
-  event.preventDefault(); const input = event.target.querySelector('input');
-  if (await act('save-meeting', { url: input.value.trim() })) { input.value = ''; document.querySelector('#first-settings').open = false; }
-};
 window.presenter.onState(render);
 act('state');

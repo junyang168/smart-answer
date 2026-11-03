@@ -1,5 +1,11 @@
 # Sunday Presenter and OneDrive (#590)
 
+Current delivery: #598 is Phase 1 (0.4.0), with PPT playback and local speaker
+slide control. Google Meet joining, sharing, microphone and recording are manual.
+Phase 2 #643 adds YouTube broadcasting and microphone relay inside Sunday Remote.
+Phase 1 removes the old Meet Accessibility integration and automatic 10:00 start;
+old service settings do not execute. See tools/sunday-presenter/README.md.
+
 The website owns the date and OneDrive folder mapping. The desktop app calls
 `GET /api/admin/sunday-services/presenter/upcoming` on launch, retry and folder
 open. The existing Next.js Sunday-services proxy forwards to the backend's
@@ -113,14 +119,14 @@ the generic backend proxy. Its explicit self-rewrite must precede that proxy's
 catch-all; otherwise dynamic download URLs reach the Python backend and 404.
 
 Build and inspect the packages before publishing their immutable version. The
-0.3.1 pilot artifacts come from the reviewed Presenter checkout in #598 / PR #611;
-this website-distribution change does not assert two-computer service acceptance.
+0.4.0 Phase 1 artifacts come from the reviewed Presenter checkout in #598 / PR #611.
+Production publication is scoped to playback and slide control, not automated audio.
 
 ```sh
 cd tools/sunday-presenter
 npm run package:mac
 cd ../..
-node scripts/publish-sunday-presenter.cjs --version 0.3.1 \
+node scripts/publish-sunday-presenter.cjs --version 0.4.0 --status released \
   --dist /path/to/reviewed/presenter/dist \
   --root "$DATA_BASE_DIR/sunday-presenter/releases"
 ```
@@ -131,5 +137,7 @@ version bytes cannot be replaced; changed builds need a new package version.
 Installers live outside Git and release-code directories. The website validates
 the manifest, filenames, lengths and regular-file boundaries before serving.
 No private Meet link, OneDrive configuration, paired identity or login session
-is included. The entry explicitly labels this a pilot; publication of a download
-does not establish two-computer audio or timed-service acceptance.
+is included. The entry labels released builds as Phase 1 and older pilot builds as testing.
+Only pilot/released statuses are accepted. Publish released metadata after deploying
+the matching website reader; earlier deployed readers accept only pilot. Neither
+status claims Phase 2 broadcast or automated-service acceptance.

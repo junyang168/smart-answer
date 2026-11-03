@@ -87,15 +87,17 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await until(async () => (await controller.webContents.executeJavaScript("document.querySelector('#sunday-date').textContent")).includes(website.state.folder.date), 'website date shown');
     assert.equal(stage.pages.size, 0);
     assert.equal(controller.isVisible(), false);
-    const retry = await controller.webContents.executeJavaScript(`(async () => {
+    // Old persisted Meet settings must not restore any Phase 1 automation.
+    const phase1 = await controller.webContents.executeJavaScript(`(async () => {
       const state = (await window.presenter.act('state')).state;
-      state.workflow = {...state.workflow, phase:'preparing', hostJoined:false}; render(state);
-      const busy = document.querySelector('[data-action="prepare-service"]').disabled;
-      state.workflow.hostJoined = true; render(state);
-      return {busy, canRetry:!document.querySelector('[data-action="prepare-service"]').disabled};
+      const removed = ['prepare-service','begin-service','end-service','test-recording','save-meeting','cancel-auto-start','confirm-share'];
+      const replies = await Promise.all(removed.map(action => window.presenter.act(action)));
+      return { noWorkflow: !('workflow' in state) && !('schedule' in state) && !('meetingConfigured' in state),
+        noControls: !document.querySelector('#meeting-settings, #workflow-status, #schedule-status'),
+        rejected: replies.every(reply => reply.error === 'Unknown action'),
+        remoteAvailable: !!document.querySelector('#remote-start') };
     })()`);
-    assert.deepEqual(retry, {busy:true, canRetry:true});
-    await act('state');
+    assert.deepEqual(phase1, {noWorkflow:true, noControls:true, rejected:true, remoteAvailable:true});
     console.log('smoke: loading');
     const worship = await load('worship'), sermon = await load('sermon');
     const tokens = await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token')));
@@ -187,7 +189,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     toggleControls();
     assert.equal(await controller.webContents.executeJavaScript("document.querySelectorAll('[data-key], #panel-settings').length"), 0);
     assert.equal(controller.isVisible(), true);
-    // A workflow/scheduled take also hides settings, even for the same deck.
+    // Taking a deck again also hides settings, even for the same deck.
     stage.take('worship');
     assert.equal(controller.isVisible(), false);
     assert.equal(controller.isFullScreen(), false);
@@ -258,7 +260,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true, noBlankStartupWindow: true, controllerCannotFullscreen: true, playbackHidesSettings: true, noFlipPanel: true, closePreservesPresentation: true, dockActivationRestoresPanel: true, formalDeckShortcuts: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
-      microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };
+      phase1ManualMeet: true, removedMeetActionsRejected: true, microsoftAuthentication: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));
   } finally { server.close(); }

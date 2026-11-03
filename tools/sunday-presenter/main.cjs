@@ -6,10 +6,6 @@ const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('.
 const { Website } = require('./website.cjs');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
-const { HostHelper, helperPath } = require('./host-helper.cjs');
-const { WorshipFlow } = require('./workflow.cjs');
-const { SundaySchedule } = require('./schedule.cjs');
-const fs = require('node:fs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -17,8 +13,7 @@ else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
 let controller, output, preparation, stage, officeSession, quitting = false, testOrigin;
-let website, remoteControl, workflow, helper, hostGuard, schedule, scheduleTimer, awakeBlocker;
-let settings = {};
+let website, remoteControl, awakeBlocker;
 let keyQueue = Promise.resolve();
 let folderTimer;
 let filePlan = null;
@@ -36,7 +31,7 @@ function toggleControls() {
 }
 
 function changed(reason) {
-  // Every successful presentation, including scheduled starts, leaves only slides.
+  // Every successful presentation, leaves only slides.
   if (reason === 'present' && controller && !controller.isDestroyed()) {
     controller.hide();
     output.focus();
@@ -47,13 +42,8 @@ function changed(reason) {
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  workflow: workflow?.snapshot(), folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
+  folderMessage }; }
 
-function saveSettings() {
-  const target = path.join(app.getPath('userData'), 'service-settings.json');
-  fs.writeFileSync(target + '.tmp', JSON.stringify(settings), { mode: 0o600 });
-  fs.renameSync(target + '.tmp', target);
-}
 
 function remotePreferences() {
   return { session: officeSession, nodeIntegration: false, nodeIntegrationInSubFrames: false,
@@ -162,19 +152,6 @@ async function act(action, args = {}) {
       folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
       break;
     }
-    case 'save-meeting': {
-      if (typeof args.url !== 'string' || !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(args.url)) throw Error('請填入完整的主日 Meet 連結。');
-      if (workflow.recordAttempted || ['live', 'starting', 'testing', 'ending'].includes(workflow.phase)) throw Error('請先結束目前的崇拜。');
-      settings.meetingUrl = args.url;
-      saveSettings();
-      changed(); break;
-    }
-    case 'prepare-service': await workflow.prepare(); break;
-    case 'test-recording': await workflow.testRecording(); break;
-    case 'confirm-share': await workflow.confirmShare(); break;
-    case 'begin-service': await workflow.begin(); break;
-    case 'end-service': await workflow.end(); break;
-    case 'cancel-auto-start': schedule.cancel(); break;
     case 'remote-forget': await remoteControl.forget(); break;
     case 'remote-start': await remoteControl.start(); break;
     case 'remote-stop': await remoteControl.stop(); break;
@@ -299,11 +276,6 @@ app.whenReady().then(async () => {
   controller.setPosition(panelArea.x + Math.max(0, panelArea.width - 780), panelArea.y + 30);
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
-  const settingsFile = path.join(app.getPath('userData'), 'service-settings.json');
-  if (!smoke && fs.existsSync(settingsFile)) {
-    try { settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8')); } catch { settings = {}; }
-  }
-  helper = new HostHelper(helperPath(app, __dirname));
   let remoteIdentity, identityError;
   if (!smoke) {
     try { remoteIdentity = identity(path.join(app.getPath('userData'), 'remote')); }
@@ -312,22 +284,11 @@ app.whenReady().then(async () => {
   remoteControl = new RemoteControl({ state: () => stage.snapshot(), changed,
     advertise: smoke ? () => () => {} : undefined,
     identity: remoteIdentity,
-    workflow: () => workflow?.info() || {}, report: value => workflow?.peerReport(value),
     key: (key, active, valid) => {
       const task = keyQueue.then(() => sendSlideKey(key, active, valid));
       keyQueue = task.catch(() => {}); return task;
     } });
   if (identityError) remoteControl.error = identityError;
-  workflow = new WorshipFlow({ website, helper, remote: remoteControl, stage, meeting: () => settings.meetingUrl || '', changed });
-  schedule = new SundaySchedule({ flow: workflow, handledDate: settings.autoStartHandledDate,
-    save: date => { settings.autoStartHandledDate = date; saveSettings(); }, changed });
-  if (!smoke) hostGuard = setInterval(() => {
-    if (!workflow.meetingUrl || !workflow.hostJoined || !['preparing', 'ready', 'live'].includes(workflow.phase) || helper.pending.size) return;
-    helper.run('status', workflow.meetingUrl).then(state => {
-      if (!state.microphoneMuted || !state.joined) workflow.error = '主電腦 Meet 靜音／連線狀態需要檢查。';
-      changed();
-    }).catch(error => { workflow.error = error.message; changed(); });
-  }, 3000);
   stage.layout();
   preparation.setPosition(...output.getPosition());
   if (!globalShortcut.register(controlShortcut, toggleControls)) {
@@ -355,9 +316,6 @@ app.whenReady().then(async () => {
   await controller.loadFile(path.join(__dirname, 'control.html'));
   if (!smoke) {
     awakeBlocker = powerSaveBlocker.start('prevent-display-sleep');
-    scheduleTimer = setInterval(() => schedule.tick().catch(error => {
-      schedule.message = `定時啟動設定未能保存：${error.message}`; changed();
-    }), 500);
   }
   if (!smoke) { controller.show(); controller.focus(); website.refresh().catch(() => {}); }
   folderTimer = setInterval(async () => {
@@ -410,28 +368,12 @@ app.on('second-instance', () => {
     controller.show(); controller.moveTop(); controller.focus();
   }
 });
-let finishingBeforeQuit = false;
-app.on('before-quit', event => {
-  if (!quitting && workflow?.recordAttempted) {
-    event.preventDefault();
-    if (!finishingBeforeQuit) {
-      finishingBeforeQuit = true;
-      workflow.end().then(() => { quitting = true; app.quit(); }).catch(error => {
-        finishingBeforeQuit = false;
-        controller?.show();
-        dialog.showErrorBox('請先確認 Meet 已停止錄影', error.message);
-      });
-    }
-    return;
-  }
+app.on('before-quit', () => {
   quitting = true;
   globalShortcut.unregisterAll();
-  clearInterval(hostGuard);
   clearInterval(folderTimer);
-  clearInterval(scheduleTimer);
   if (awakeBlocker !== undefined && powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker);
   remoteControl?.stop();
-  helper?.close();
   if (stage) {
     stage.black();
     // BaseWindow does not own/destroy the WebContents of child views.

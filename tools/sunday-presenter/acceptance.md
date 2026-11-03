@@ -1,7 +1,53 @@
-# #590 acceptance evidence
+# Sunday Presenter acceptance evidence
 
-This record distinguishes a working local harness from Sunday-service
-acceptance. No Agent integration or production deployment has been performed.
+## Current release scope — Phase 1, 0.4.0 (2026-11-03)
+
+The owner explicitly split delivery: #598 is Phase 1 production playback and
+local paired slide control, with Google Meet operated manually. #643 is Phase 2
+YouTube broadcasting, speaker audio in Sunday Remote and automated opening.
+Earlier Meet automation/scheduled-service notes below are historical, superseded
+scope; their pending automation checks do not describe shipped Phase 1 features.
+
+The Phase 1 source removes host workflow/helper/scheduler, all Meet actions and
+settings loading, native Meet/Accessibility and system-output mutation, Remote
+microphone/recording handling and its report route. No timer reads old service
+settings. The Remote protocol returns only deck/live/binding; it carries no room
+URL or broadcast command. Presenter no longer embeds the obsolete native helper.
+Meet joining, sharing, audio and recording are explicitly manual in App guidance,
+installer instructions and website download copy.
+
+Verification completed before release:
+
+- All 19 retained Node tests pass (presentation, folder/API, TLS pairing,
+  restart, deduplication, stale commands and removed report/workflow routes).
+- Real Electron smoke passes 20 retained-view switches, keyboard focus,
+  operator/remote controls on the same page, popup opener/POST, cookies,
+  mute/privacy/navigation/crash guards and single-window/display invariants.
+  Former Meet IPC actions fail with Unknown action; no workflow, scheduler or
+  meeting state/controls are present. No Microsoft or Meet sign-in was performed
+  by that synthetic smoke.
+- Nine website download/publication/authentication tests pass, including
+  released metadata, unknown-status rejection and immutable publication.
+  Frontend tsc --noEmit passes.
+- Both native Remote architectures compile. Installed Remote's real network
+  probe reads paired TLS state; a deliberately wrong certificate pin is rejected.
+  That probe is protocol verification, not a new two-physical-Mac field test.
+- Installed 0.4.0 Presenter opens with the existing user profile/settings and
+  shows Phase 1 without Meet controls or permission prompts. Installed Remote
+  displays discovery/pairing and two slide buttons only. Private startup proof:
+  040-phase1-startup.png. Both installed bundles pass deep/strict signature checks;
+  final DMG checksum and Remote ZIP integrity pass.
+- The owner's earlier real Main Laptop OUTPUT-sharing and deck-switching report
+  remains applicable to the retained presentation path. Actual Office files,
+  hotspot/AirPlay conditions and manually operated Meet audio should be checked
+  before a service; no new broad physical/network acceptance is claimed.
+
+Installers remain ad-hoc signed without Developer ID/notarization. Phase 1 no
+longer uses Accessibility, so its previous grant persistence no longer gates
+playback or remote control. Local-network access and Chrome's own manual capture/
+microphone permissions remain ordinary setup. This does not claim notarization.
+
+## Historical evidence (earlier prototype scope)
 
 ## #598 remote, Meet automation and scheduled start — 2026-11-02
 
