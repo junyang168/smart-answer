@@ -293,3 +293,23 @@ still needs operator action and visual confirmation.
 Thirty-one Node tests pass, and the full Electron smoke passes, including UI
 confirm-and-play, 20 switches, key delivery, POST preservation and blackout gates.
 No new Meet, two-Mac audio, or hotspot acceptance is implied by this UX change.
+
+
+## Downloaded-install first launch — 2026-11-02
+
+Owner installation on this Mac revealed two application locations: system
+Applications contained verified 0.3.2, while the running process was the older
+0.3.1 in the user's Applications directory. The old process was quit normally,
+and its bundle moved to a disabled backup outside Applications. User-data and
+Office sessions were retained. The downloaded 0.3.2 was copied from its mounted
+DMG into system Applications using Finder.
+
+Its initial launch did not reach application code: the process remained at
+`_dyld_start` with a 96 KB footprint, and CoreServicesUIAgent displayed the
+Apple-cannot-verify alert. Privacy & Security showed the matching Open Anyway
+entry. This reproduces the owner's downloaded-package Gatekeeper friction;
+local source/bundle functional checks do not complete that first-launch test.
+The owner was asked to perform the security exception and authentication
+personally. No quarantine removal, protection disablement or automated security
+exception was applied. New downloaded-install UI acceptance remains pending that
+manual confirmation. Developer ID signing/notarization is still absent.
