@@ -248,3 +248,21 @@ Office HTML fullscreen remains inside that same capture window. The smoke
 requires exact display position/size, no native fullscreen on macOS, retained
 keyboard focus and the existing switching/remote/privacy invariants. Real
 Chrome picker and physical receiving-client results are recorded separately.
+
+
+## 0.3.7 automatic Meet join
+
+Preparation now brings Chrome to the foreground even when the room is already
+open. This fixes a reproduced case where the native press returned success but
+the microphone stayed on and joining never proceeded. When there is no playing
+PPT, preparation joins muted without trying to share a hidden OUTPUT, reports
+joined/waiting-for-PPT, and permits another Prepare once playback is available.
+No recording or speaker microphone starts in that waiting state. The host mute
+guard also runs while the verified joined host waits for preparation to finish.
+
+The installed build was exercised against the real configured Meet: cold/opened
+room and existing prejoin with Chrome background. The app joined and muted
+without manual Join or an external foreground activation in those runs. The
+existing-room run started with the mic enabled. Screenshots/readback and test
+scope are in acceptance.md; main-laptop and physical speaker/audio checks remain
+separate. Prototype updates can still invalidate ad-hoc Accessibility grants.

@@ -172,6 +172,11 @@ final class MeetControl {
                 NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: "/Applications/Google Chrome.app"), configuration: options)
             }
         }
+        // AXPress on Meet can return success while Chrome is background without
+        // changing the microphone. Always activate, even when the tab exists.
+        DispatchQueue.main.sync {
+            NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.activate(options: [.activateIgnoringOtherApps])
+        }
         let deadline = Date().addingTimeInterval(35)
         var last = "等待 Meet 載入。"
         while Date() < deadline {

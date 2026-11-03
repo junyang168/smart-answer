@@ -30,6 +30,7 @@ if CommandLine.arguments.contains("--probe") {
                     response["id"] = id
                     let meeting = try MeetControl(url: url, speaker: false)
                     switch action {
+                    case "join": try meeting.prepare()
                     case "prepare": try meeting.prepare(); try meeting.shareOutput()
                     case "confirm-share": try meeting.microphone(muted: true); try meeting.confirmSharedOutput()
                     case "begin":

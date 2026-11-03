@@ -37,9 +37,9 @@ function render(state) {
   const phases = { idle: '待機', preparing: '準備中', ready: '已就緒，可以開始崇拜', starting: '正在確認錄影', testing: '正在測試短錄影（保持靜音）', live: '崇拜中', ending: '正在結束', ended: '已結束', error: '需要處理' };
   document.querySelector('#workflow-status').textContent = flow ? `${phases[flow.phase]}${flow.error ? '：' + flow.error : ''}` : '待機';
   document.querySelector('#workflow-checks').textContent = flow ?
-    `主電腦 Meet ${flow.hostReady ? '✓' : '待確認'} · 講員準備 ${flow.peerReady ? '✓' : (flow.peerError || '等待連線')} · 兩份簡報 ${flow.slidesReady ? '✓' : '待確認投影片'} · 錄影 ${flow.recording ? '已確認開始' : '未確認開始'}${flow.phase === 'live' ? ' · 講員收音 ' + (flow.speakerLive ? '已確認開啟' : '等待確認') : ''}` : '';
+    `主電腦 Meet ${flow.hostReady ? '已加入並分享 ✓' : flow.hostJoined ? '已加入、等待分享 PPT' : '待確認'} · 講員準備 ${flow.peerReady ? '✓' : (flow.peerError || '等待連線')} · 兩份簡報 ${flow.slidesReady ? '✓' : '待確認投影片'} · 錄影 ${flow.recording ? '已確認開始' : '未確認開始'}${flow.phase === 'live' ? ' · 講員收音 ' + (flow.speakerLive ? '已確認開啟' : '等待確認') : ''}` : '';
   document.querySelector('[data-action="begin-service"]').disabled = flow?.phase !== 'ready';
-  document.querySelector('[data-action="prepare-service"]').disabled = ['preparing', 'starting', 'testing', 'live', 'ending'].includes(flow?.phase);
+  document.querySelector('[data-action="prepare-service"]').disabled = (flow?.phase === 'preparing' && !flow.hostJoined) || ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
   document.querySelector('[data-action="test-recording"]').disabled = !flow?.hostReady || ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
   document.querySelector('[data-action="end-service"]').disabled = ['idle', 'ending', 'ended'].includes(flow?.phase);
   document.querySelector('[data-action="confirm-share"]').hidden = !flow?.error?.includes('OUTPUT');

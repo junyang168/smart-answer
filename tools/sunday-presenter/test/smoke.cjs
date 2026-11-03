@@ -87,6 +87,15 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await until(async () => (await controller.webContents.executeJavaScript("document.querySelector('#sunday-date').textContent")).includes(website.state.folder.date), 'website date shown');
     assert.equal(stage.pages.size, 0);
     assert.equal(controller.isVisible(), false);
+    const retry = await controller.webContents.executeJavaScript(`(async () => {
+      const state = (await window.presenter.act('state')).state;
+      state.workflow = {...state.workflow, phase:'preparing', hostJoined:false}; render(state);
+      const busy = document.querySelector('[data-action="prepare-service"]').disabled;
+      state.workflow.hostJoined = true; render(state);
+      return {busy, canRetry:!document.querySelector('[data-action="prepare-service"]').disabled};
+    })()`);
+    assert.deepEqual(retry, {busy:true, canRetry:true});
+    await act('state');
     console.log('smoke: loading');
     const worship = await load('worship'), sermon = await load('sermon');
     const tokens = await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token')));

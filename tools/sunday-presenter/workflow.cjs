@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 class WorshipFlow {
   constructor({ website, helper, remote, stage, meeting, changed = () => {} }) {
     Object.assign(this, { website, helper, remote, stage, meeting, changed });
-    this.phase = 'idle'; this.runId = ''; this.meetingUrl = ''; this.error = ''; this.hostReady = false;
+    this.phase = 'idle'; this.runId = ''; this.meetingUrl = ''; this.error = ''; this.hostReady = false; this.hostJoined = false;
     this.recording = false; this.peer = null;
     this.epoch = 0; this.recordAttempted = false;
   }
@@ -25,13 +25,13 @@ class WorshipFlow {
   snapshot() {
     this.reconcile();
     return { ...this.info(), error: this.error, recording: this.recording,
-      hostReady: this.hostReady, peerReady: this.peerReady(), slidesReady: this.slidesReady(),
+      hostReady: this.hostReady, hostJoined: this.hostJoined, peerReady: this.peerReady(), slidesReady: this.slidesReady(),
       speakerLive: this.remote.snapshot().paired && this.peer?.microphoneVerified === true && this.peer?.microphoneMuted === false && this.peer?.speakerMuted === true,
       peerError: this.peer?.error || '' };
   }
   async prepare() {
     if (this.recordAttempted || ['live', 'starting', 'ending', 'testing'].includes(this.phase)) throw Error('請先結束目前的崇拜。');
-    this.phase = 'preparing'; this.runId = crypto.randomUUID(); this.error = ''; this.hostReady = false; this.peer = null;
+    this.phase = 'preparing'; this.runId = crypto.randomUUID(); this.error = ''; this.hostReady = false; this.hostJoined = false; this.peer = null;
     const epoch = ++this.epoch;
     this.changed();
     try {
@@ -42,9 +42,14 @@ class WorshipFlow {
       this.meetingUrl = meeting;
       await this.remote.start(); this.changed();
       if (epoch !== this.epoch) return;
-      const state = await this.helper.run('prepare', this.meetingUrl);
+      const state = await this.helper.run(this.stage.active == null ? 'join' : 'prepare', this.meetingUrl);
       if (epoch !== this.epoch) return;
       if (!state.joined || !state.microphoneMuted) throw Error('主電腦尚未確認加入 Meet 並關閉麥克風。');
+      this.hostJoined = true;
+      if (!state.sharing && this.stage.active == null) {
+        this.error = 'Meet 已加入並關麥；請先播放 PPT，再按準備主日分享畫面。';
+        this.changed(); return;
+      }
       if (!state.sharing) throw Error('請在 Meet 選擇分享 Sunday Presenter — OUTPUT 視窗，再按準備主日確認。');
       this.hostReady = true; this.reconcile(); this.changed();
     } catch (error) { if (epoch !== this.epoch) return; this.error = error.message; this.phase = 'error'; this.changed(); throw error; }
@@ -82,7 +87,7 @@ class WorshipFlow {
     if (!this.meetingUrl || this.recordAttempted || ['live', 'starting', 'ending', 'testing'].includes(this.phase)) throw Error('請先結束目前的錄影，再準備主日。');
     const state = await this.helper.run('confirm-share', this.meetingUrl);
     if (!state.joined || !state.microphoneMuted || !state.sharing) throw Error('Meet 尚未確認分享及靜音。');
-    this.hostReady = true; this.error = ''; this.phase = 'preparing'; this.reconcile(); this.changed();
+    this.hostJoined = true; this.hostReady = true; this.error = ''; this.phase = 'preparing'; this.reconcile(); this.changed();
   }
   async end() {
     ++this.epoch;
@@ -97,7 +102,7 @@ class WorshipFlow {
     try {
       const state = await this.helper.run(this.recordAttempted ? 'end' : 'leave', this.meetingUrl);
       if ((this.recordAttempted && state.recording !== false) || state.microphoneMuted !== true) throw Error('尚未確認停止錄影及靜音，請查看 Meet。');
-      this.recording = false; this.phase = 'ended'; this.stage.black();
+      this.recording = false; this.hostJoined = false; this.hostReady = false; this.phase = 'ended'; this.stage.black();
       if (this.peer && (!this.remote.snapshot().paired || !this.peer.microphoneVerified || this.peer.microphoneMuted !== true)) {
         this.error = '主電腦已結束；講員靜音尚未收到確認，請查看講員電腦。';
       }

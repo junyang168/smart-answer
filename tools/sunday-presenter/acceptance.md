@@ -457,3 +457,50 @@ result and not evidence of successful capture. Version 0.3.6 is a pilot candidat
 the target laptop's Meet picker and continuous capture across worship/sermon
 switches still require owner verification. Physical two-Mac/audio acceptance is
 unchanged and the PR remains draft.
+
+
+## Automatic join reproduced and verified — 0.3.7
+
+The owner reported preparation opening Meet without joining. After removing and
+re-adding the exact installed app through macOS UI, permission was restored.
+The baseline then stopped on prejoin with the microphone on; the app reported
+that the microphone state could not be confirmed. A controlled run with Chrome
+explicitly foreground joined automatically, muted, and reached the share picker.
+That run used an owner-authorized AppleScript solely to activate Chrome and is
+not evidence that the app itself handled the foreground transition.
+
+The native prepare action now activates Chrome itself even for an existing room.
+A join-only action lets the app accurately report joined/muted while no PPT is
+playing, rather than attempting to share hidden OUTPUT. The Prepare button stays
+available in that verified waiting state. A regression blocks readiness and
+recording until sharing is confirmed; host mute guarding remains active while
+joined/preparing. All 33 Node tests and the complete Electron smoke pass, including
+the actual UI's enabled retry button and the existing single-OUTPUT invariants.
+
+Installed final 0.3.7 passed two real-Meet checks: the first opened/joined muted;
+the second started with the actual room already on its prejoin screen, microphone
+on, and Chrome out of the foreground. Only the app's Prepare action was pressed.
+The app activated Chrome, muted, joined and reported joined/waiting-for-PPT. No
+manual Join, external foreground script, recording or speaker unmute was used in
+these final runs. Actual native Meet controls displayed Turn on microphone and
+Leave call, and the Prepare retry button remained enabled. Private final screenshots
+are 037-final-autojoin-meet.png and 037-final-autojoin-status.png. App End was used
+to leave the test runs. Source/installed-ASAR/helper matching, deep/strict signature,
+final DMG checksum and Remote ZIP integrity checks pass.
+
+The owner separately reported window sharing working on this Mac, explicitly
+not yet the main laptop. This is owner-reported acceptance, not an independent
+receiving-client check. Main-laptop sharing, continuous new-lifecycle capture on
+an independent receiver, physical two-Mac/hotspot/audio and scheduled live-service
+acceptance remain pending. Ad-hoc update permission persistence is still a known
+packaging limitation, not fixed by the join change.
+
+
+Cleanup qualification: the second End attempt reported "Meet did not accept the
+operation" even though the actual Chrome UI subsequently showed the Meet home
+page, with no active call. The first End attempt had returned ended. Therefore
+this run establishes automatic join/mute, not reliable End completion reporting.
+The inconsistent End acknowledgement remains an explicit follow-up. The app was
+returned to a clean idle state after preserving the join screenshots. The final
+installer instructions were repacked without changing the tested app executable,
+ASAR or native helper.

@@ -20,7 +20,7 @@ test('only verified preparation can begin; recorder is confirmed before speaker 
   await flow.prepare(); assert.equal(flow.phase, 'preparing');
   report(flow); assert.equal(flow.phase, 'ready');
   await flow.begin(); assert.equal(flow.phase, 'live'); assert.equal(stage.active, 1);
-  assert.deepEqual(calls, ['prepare', 'begin']);
+  assert.deepEqual(calls, ['join', 'begin']);
   assert.equal(flow.snapshot().speakerLive, false);
   report(flow, false); assert.equal(flow.snapshot().speakerLive, true);
   await assert.rejects(flow.prepare(), /結束/);
@@ -55,7 +55,7 @@ test('stale reports, unprepared slides and open host mic block readiness', async
 });
 test('ending before recording never stops somebody else’s recording', async () => {
   const { flow, calls } = fixture(); await flow.prepare(); report(flow); await flow.end();
-  assert.deepEqual(calls, ['prepare', 'leave']); assert.equal(flow.phase, 'ended');
+  assert.deepEqual(calls, ['join', 'leave']); assert.equal(flow.phase, 'ended');
 });
 test('a recording check refused before start never owns an existing recording', async () => {
   const { flow, helper, calls } = fixture(); await flow.prepare(); report(flow);
@@ -65,12 +65,30 @@ test('a recording check refused before start never owns an existing recording', 
     return original(action);
   };
   await assert.rejects(flow.testRecording(), /already recording/);
-  await flow.end(); assert.deepEqual(calls, ['prepare', 'leave']);
+  await flow.end(); assert.deepEqual(calls, ['join', 'leave']);
 });
 test('ending invalidates an in-flight preparation so late success cannot reopen a run', async () => {
   const { flow, helper } = fixture(); let release;
-  helper.run = async action => action === 'prepare' ? new Promise(resolve => { release = resolve; }) : { microphoneMuted: true };
+  helper.run = async action => action === 'join' ? new Promise(resolve => { release = resolve; }) : { microphoneMuted: true };
   const pending = flow.prepare(); while (!release) await new Promise(resolve => setTimeout(resolve, 1));
   await flow.end(); release({ joined: true, microphoneMuted: true, sharing: true }); await pending;
   assert.equal(flow.phase, 'ended');
+});
+
+
+test('joining without a live output stays muted and cannot claim sharing readiness', async () => {
+  const { flow, stage, calls, helper } = fixture();
+  helper.run = async action => { calls.push(action); return { joined: true, microphoneMuted: true, sharing: action === 'prepare' }; };
+  await flow.prepare(); report(flow);
+  assert.deepEqual(calls, ['join']);
+  assert.equal(flow.hostJoined, true);
+  assert.equal(flow.hostReady, false);
+  assert.equal(flow.phase, 'preparing');
+  assert.match(flow.error, /Meet 已加入並關麥/);
+  await assert.rejects(flow.begin());
+  stage.active = 1;
+  await flow.prepare(); report(flow);
+  assert.deepEqual(calls, ['join', 'prepare']);
+  assert.equal(flow.phase, 'ready');
+  assert.equal(flow.error, '');
 });

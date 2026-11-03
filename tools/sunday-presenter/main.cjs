@@ -322,7 +322,7 @@ app.whenReady().then(async () => {
   schedule = new SundaySchedule({ flow: workflow, handledDate: settings.autoStartHandledDate,
     save: date => { settings.autoStartHandledDate = date; saveSettings(); }, changed });
   if (!smoke) hostGuard = setInterval(() => {
-    if (!workflow.meetingUrl || !['ready', 'live'].includes(workflow.phase) || helper.pending.size) return;
+    if (!workflow.meetingUrl || !workflow.hostJoined || !['preparing', 'ready', 'live'].includes(workflow.phase) || helper.pending.size) return;
     helper.run('status', workflow.meetingUrl).then(state => {
       if (!state.microphoneMuted || !state.joined) workflow.error = '主電腦 Meet 靜音／連線狀態需要檢查。';
       changed();
