@@ -121,6 +121,7 @@ type Packet = {
 };
 type Pending = {
   baseVersion: string;
+  epoch?: string;
   operations: Operation[];
   packet?: Packet;
 };
@@ -314,6 +315,7 @@ function TranscriptProofreader({
   const [baseline, setBaseline] = useState<Row[] | null>(null);
   const [status, setStatus] = useState("已自動儲存");
   const [failure, setFailure] = useState("");
+  const [recoveryNotice, setRecoveryNotice] = useState("");
   const [ready, setReady] = useState(false);
   const editor = useRef<CodeMirrorEditor>();
   const focusNext = useRef(false);
@@ -451,6 +453,7 @@ function TranscriptProofreader({
   const persist = useCallback(() => {
     const value: Pending = structuredClone({
       baseVersion: current.current.version,
+      epoch: current.current.epoch,
       operations: queue.current,
       packet: packet.current,
     });
@@ -542,6 +545,16 @@ function TranscriptProofreader({
       await task;
     } catch (error) {
       blocked.current = true;
+      if (error instanceof RequestError && error.status === 412) {
+        setRecovered(
+          structuredClone({
+            baseVersion: current.current.version,
+            epoch: current.current.epoch,
+            operations: queue.current,
+            packet: packet.current,
+          }),
+        );
+      }
       setFailure((error as Error).message);
       setStatus(
         durable.current ? "同步暫停，修改保留在本機" : "尚未同步；請下載備份",
@@ -989,42 +1002,98 @@ function TranscriptProofreader({
     URL.revokeObjectURL(url);
   };
   const restore = async () => {
-    if (!recovered || recovered.baseVersion !== current.current.version) {
-      setFailure(
-        "來源版本已變更，請下載本機修改並與目前版本比較；不會自動覆蓋。",
-      );
-      return;
-    }
+    if (!recovered) return;
     setBusy(true);
     editor.current?.setOption("readOnly", true);
     try {
+      // Archive the exact durable queue before replacing any request identity.
+      await draftStorage(
+        identity + ":recovery-backup:" + crypto.randomUUID(),
+        recovered,
+      );
+      const latest = await loadDocument(base);
+      if (
+        (recovered.epoch && recovered.epoch !== latest.epoch) ||
+        (recovered.packet && recovered.packet.epoch !== latest.epoch)
+      )
+        throw new Error("認領已變更；本機修改仍保留，不能自動覆蓋。");
       const pending = [
         ...(recovered.packet?.operations || []),
         ...recovered.operations,
       ];
-      // Text and OCR restore visibly; all saved operations remain exact for server validation.
-      const d = structuredClone(current.current);
-      for (const op of pending) {
+      const plan = await request<{
+        version: string;
+        epoch: string;
+        operations: Operation[];
+        recheck_paragraph_ids: string[];
+      }>(base + "/recover_pending", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": `"${latest.version}"`,
+        },
+        body: JSON.stringify({
+          operation_id: crypto.randomUUID(),
+          version: latest.version,
+          epoch: latest.epoch,
+          base_version: recovered.baseVersion,
+          pending_operations: pending,
+          pending_packet: recovered.packet,
+        }),
+      });
+      // The plan writes nothing. A fresh CAS-protected packet is persisted before send.
+      const next = structuredClone(latest);
+      for (const op of plan.operations) {
         if (op.kind === "text") {
-          const p = d.script.find((p) => p.index === op.id);
+          const p = next.script.find((p) => p.index === op.id);
           if (p) p.text = op.text as string;
         }
         if (op.kind === "ocr") {
-          const r = d.context.visual_assets[op.id!]?.content.text_regions.find(
-            (r) => r.id === op.region_id,
-          );
-          if (r) r.text = op.text as string;
+          const region = next.context.visual_assets[
+            op.id!
+          ]?.content.text_regions.find((r) => r.id === op.region_id);
+          if (region) region.text = op.text as string;
         }
       }
-      updateDoc(d);
-      queue.current = recovered.operations;
-      packet.current = recovered.packet;
+      const replacement: Pending = {
+        baseVersion: plan.version,
+        epoch: plan.epoch,
+        operations: [],
+        ...(plan.operations.length
+          ? {
+              packet: {
+                operation_id: crypto.randomUUID(),
+                version: plan.version,
+                epoch: plan.epoch,
+                operations: plan.operations,
+              },
+            }
+          : {}),
+      };
+      await draftStorage(identity, replacement); // Preserve this exact packet on any failure.
+      updateDoc(next);
+      queue.current = [];
+      packet.current = replacement.packet;
       blocked.current = false;
       setRecovered(undefined);
       setFailure("");
-      setDirty(true);
+      setDirty(Boolean(replacement.packet));
       await flush();
       updateDoc(await loadDocument(base));
+      const target =
+        plan.recheck_paragraph_ids[0] ||
+        [...pending]
+          .reverse()
+          .find((op) => op.kind === "text" || op.kind === "paragraph_review")
+          ?.id;
+      if (target && next.script.some((p) => p.index === target)) {
+        selectParagraph(target);
+        setNavigationTarget({ id: target });
+      }
+      if (plan.recheck_paragraph_ids.length)
+        setRecoveryNotice(
+          `本機文字已恢復。第 ${plan.recheck_paragraph_ids.join("、")} 段播放時間已更新，待存的「已核對」未套用，請重聽確認。`,
+        );
     } catch (error) {
       setFailure((error as Error).message);
     } finally {
@@ -1215,6 +1284,11 @@ function TranscriptProofreader({
             </button>
           )}
         </div>
+        {recoveryNotice && (
+          <p role="status" className="mt-3 text-amber-800">
+            {recoveryNotice}
+          </p>
+        )}
         {failure && (
           <div
             role="alert"
