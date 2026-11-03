@@ -70,6 +70,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(output.isFullScreen(), true);
     assert.deepEqual(output.getBounds(), screen.getDisplayMatching(output.getBounds()).bounds);
     toggleControls(); assert.equal(controller.isVisible(), true);
+    await until(() => controller.isFocused(), 'controller focused before hiding');
     toggleControls(); assert.equal(controller.isVisible(), false);
     website.apiURL = origin + '/api/upcoming';
     await act('refresh-folder');
@@ -101,6 +102,16 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       assert.equal(output.id, savedOutputID);
       for (const other of stage.pages.values()) assert.equal(wc(other).isAudioMuted(), other !== page);
     }
+    // Reproduce the owner's two-press failure: visibility remains true after
+    // the fullscreen output takes focus. One toggle must raise, not hide it.
+    controller.show();
+    output.focus(); wc(sermon).focus();
+    await until(() => !controller.isFocused(), 'visible controller behind output');
+    assert.equal(controller.isVisible(), true);
+    toggleControls();
+    await until(() => controller.isVisible() && controller.isFocused(), 'one toggle raises covered controls');
+    toggleControls();
+    assert.equal(controller.isVisible(), false);
     console.log('smoke: switching passed');
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token'))), tokens);
     assert.deepEqual(await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('steps'))), [10, 10]);
@@ -199,7 +210,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
       navigationAndCrashBlackout: true, popupPostPreserved: true, fullscreenOutput: true,
       controlsHiddenByDefault: true, commandPRegistered: true, stableControlButtons: true,
-      presentationCommandPIntercepted: true,
+      presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
       microsoftAuthentication: 'NOT TESTED', meet: 'NOT TESTED' };

@@ -29,12 +29,14 @@ const labels = { worship: '主日崇拜', sermon: '講道' };
 const controlShortcut = 'CommandOrControl+P';
 
 function toggleControls() {
-  if (controller.isVisible()) {
+  if (controller.isVisible() && controller.isFocused()) {
     controller.hide(); preparation.hide();
     output.show(); output.focus();
     if (stage.active !== null) stage.get(stage.active).view.webContents.focus();
   } else {
-    app.focus({ steal: true }); controller.show(); controller.focus();
+    app.focus({ steal: true });
+    if (controller.isMinimized()) controller.restore();
+    controller.show(); controller.moveTop(); controller.focus();
   }
 }
 

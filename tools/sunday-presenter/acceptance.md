@@ -324,3 +324,19 @@ button. The installed app was left open with both decks ready and the controller
 visible for owner testing. Downloaded-install startup is therefore verified
 following an owner-granted Gatekeeper exception; this is not notarized first
 launch, and Meet/physical two-Mac acceptance remains pending.
+
+
+## Covered controller shortcut — 0.3.3
+
+The owner reported that Command-P required two presses. A visible controller
+could remain behind the native fullscreen output after switching or key delivery;
+the old toggle treated it as foreground and hid it on the first press. The toggle
+now hides only a visible, focused controller. Otherwise it restores a minimized
+controller, shows it, raises its z-order and focuses it. Existing macOS fullscreen
+workspace visibility remains enabled.
+
+The Electron regression deliberately leaves the controller visible but unfocused
+behind the actual fullscreen output, then verifies that exactly one toggle makes
+it visible and focused, and the next hides it. This passes alongside the complete
+20-switch/key/POST/fullscreen smoke. This is a 0.3.3 correction, not a claim that
+the already-running installed 0.3.2 has been patched in memory.
