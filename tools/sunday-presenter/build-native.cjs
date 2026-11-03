@@ -10,7 +10,7 @@ const bundle = path.join(output, 'Sunday Remote.app');
 const contents = path.join(bundle, 'Contents');
 fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
 fs.mkdirSync(path.join(contents, 'Resources'), { recursive: true });
-const source = ['NativeCore.swift', 'RemoteApp.swift', 'main.swift'].map(name =>
+const source = ['MeetWindowLocator.swift', 'NativeCore.swift', 'RemoteApp.swift', 'main.swift'].map(name =>
   fs.readFileSync(path.join(__dirname, 'native', name), 'utf8')).join('\n').replaceAll('__SUNDAY_SERVICE_TYPE__', bonjourType);
 fs.writeFileSync(path.join(output, 'main.swift'), source);
 for (const arch of ['arm64', 'x86_64']) {

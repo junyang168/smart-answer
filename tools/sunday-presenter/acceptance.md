@@ -504,3 +504,42 @@ The inconsistent End acknowledgement remains an explicit follow-up. The app was
 returned to a clean idle state after preserving the join screenshots. The final
 installer instructions were repacked without changing the tested app executable,
 ASAR or native helper.
+
+## Main-laptop locator investigation — unpublished 0.3.8
+
+The owner confirmed the main laptop runs 0.3.7, can share the single OUTPUT and
+switch decks, but preparation stops at prejoin. Its exact reported error was
+"請在 Chrome 登入 Google 並開啟主日 Meet。" despite the visible signed-in room.
+This identifies a failed native window lookup, not evidence of missing login.
+
+The lookup previously traversed up to 2,500 nodes per unrelated browser window
+before checking the next window, consuming the shared operation deadline. The
+candidate searches browser structure breadth-first, reads each web area's URL
+without descending into page contents, rejects unrelated/other-room URLs, checks
+all Chrome application processes, and raises the matched window. It requests
+native accessibility once per Chrome PID after a successful request, retaining
+retry eligibility after a failed request. Diagnostics distinguish no web tree,
+missing room and lookup timeout; they contain counts, not private page URLs.
+
+The exact Swift locator passes synthetic counterexamples with a 5,000-node
+unrelated page, a later matching window, wrong rooms and embedded impersonating
+nodes. All 34 Node tests and the complete Electron smoke pass. Both native
+architectures compile; the local installed runtime and helper match the final
+0.3.8 build and its deep/strict signature verifies.
+
+Importantly, installed 0.3.7 ALSO joined successfully with the large unrelated
+window open on this development Mac. Therefore that defect is not a proven
+explanation for the main-laptop failure. Installed 0.3.8 opened the real room,
+muted microphone/camera and joined using only App Prepare; actual Meet controls
+showed "開啟麥克風", "開啟攝像頭" and "退出通話". Private evidence is
+038-warm-autojoin-meet.png. This was a warm-Chrome check, not cold-start proof or
+main-laptop acceptance. Updating the local test app again invalidated its ad-hoc
+Accessibility grant; the same exact app was re-added via normal System Settings
+UI, without broadening permission or weakening the signature requirement.
+
+End again actually left this client (Meet showed "你已退出会议") but the App
+reported "Meet 未接受操作". Reliable End acknowledgement remains unresolved.
+The test app was quit, the owned large-page window closed and its local server
+stopped. No recording or speaker unmute was attempted. A full Chrome quit/reopen
+test remains pending owner consent because it would close all development-Mac
+browser windows. The 0.3.8 candidate is not published; the download remains 0.3.7.

@@ -74,11 +74,14 @@ struct MeetingNode {
 }
 
 var verifiedShares: Set<String> = []
+var chromeAccessibilityRequested: Set<pid_t> = []
 
 final class MeetControl {
     let url: URL
     let speaker: Bool
     let deadline = Date().addingTimeInterval(45)
+    private var chromePID: pid_t?
+    private var chromeMeetingWindow: AXUIElement?
     init(url: URL, speaker: Bool) throws {
         guard url.scheme == "https", url.host == "meet.google.com",
               url.path.range(of: "^/[a-z]{3}-[a-z]{4}-[a-z]{3}$", options: .regularExpression) != nil else {
@@ -113,22 +116,59 @@ final class MeetControl {
     }
     func meetingWindow() throws -> AXUIElement {
         guard trusted() else { throw ControlError("首次使用：請在系統設定的輔助使用中允許 Sunday Remote 控制 Meet。") }
-        guard let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first else {
+        let browsers = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome")
+        guard !browsers.isEmpty else {
             throw ControlError("等待 Chrome 開啟 Meet。")
         }
-        let app = AXUIElementCreateApplication(chrome.processIdentifier)
-        AXUIElementSetMessagingTimeout(app, 1)
-        // Chrome exposes its web controls only after an assistive client requests
-        // accessibility mode. A DOM/CDP snapshot does not enable this native tree.
-        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        for window in attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
-            for node in nodes(window) where node.role == "AXWebArea" {
-                let raw = attribute(node.element, kAXURLAttribute)
-                let page = (raw as? URL) ?? (raw as? String).flatMap(URL.init(string:))
-                if page?.host == "meet.google.com", page?.path.hasSuffix(url.path) == true { return window }
+        var windowCount = 0, webAreaCount = 0, meetPageCount = 0
+        for chrome in browsers {
+            let app = AXUIElementCreateApplication(chrome.processIdentifier)
+            AXUIElementSetMessagingTimeout(app, 1)
+            // Request the native web tree once per Chrome process after Chrome
+            // accepts it. A transient failure must remain eligible for retry.
+            if !chromeAccessibilityRequested.contains(chrome.processIdentifier) {
+                if AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success {
+                    chromeAccessibilityRequested.insert(chrome.processIdentifier)
+                }
+            }
+            for window in attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
+                windowCount += 1
+                // Window-level AXDocument may lag behind tab navigation. Inspect
+                // the actual web area's URL before accepting the target window.
+                if hasRequestedMeetPage(in: window, meeting: url,
+                    role: { self.attribute($0, kAXRoleAttribute) as? String ?? "" },
+                    pageURL: {
+                        webAreaCount += 1
+                        let value = self.attribute($0, kAXURLAttribute)
+                        let page = (value as? URL) ?? (value as? String).flatMap(URL.init(string:))
+                        if page?.host == "meet.google.com" { meetPageCount += 1 }
+                        return page
+                    }, children: { self.attribute($0, kAXChildrenAttribute) as? [AXUIElement] ?? [] },
+                    canContinue: { Date() < self.deadline }) {
+                    chromePID = chrome.processIdentifier
+                    chromeMeetingWindow = window
+                    return window
+                }
             }
         }
-        throw ControlError("請在 Chrome 登入 Google 並開啟主日 Meet。")
+        if Date() >= deadline { throw ControlError("尋找 Meet 視窗逾時；尚未確認加入。") }
+        if webAreaCount == 0 {
+            throw ControlError("尚未讀到 Chrome 的網頁控制項（視窗 \(windowCount)、網頁 0）；尚未加入 Meet。")
+        }
+        if meetPageCount > 0 {
+            throw ControlError("已讀到 Meet 網頁，但未找到設定的會議；請將該會議分頁顯示在 Chrome 前景。")
+        }
+        throw ControlError("尚未找到設定的 Meet 分頁（視窗 \(windowCount)、網頁 \(webAreaCount)）；請將該會議分頁顯示在 Chrome 前景。")
+    }
+    func activateChrome() {
+        let browsers = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome")
+        let chrome = browsers.first(where: { $0.processIdentifier == chromePID }) ?? browsers.first
+        DispatchQueue.main.sync {
+            _ = chrome?.activate(options: [.activateIgnoringOtherApps])
+            if let window = self.chromeMeetingWindow {
+                _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            }
+        }
     }
     func matches(_ node: MeetingNode, _ labels: [String]) -> Bool {
         ["AXButton", "AXMenuButton", "AXMenuItem", "AXRadioButton", "AXPopUpButton", "AXTab"].contains(node.role) &&
@@ -174,9 +214,7 @@ final class MeetControl {
         }
         // AXPress on Meet can return success while Chrome is background without
         // changing the microphone. Always activate, even when the tab exists.
-        DispatchQueue.main.sync {
-            NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.activate(options: [.activateIgnoringOtherApps])
-        }
+        activateChrome()
         let deadline = Date().addingTimeInterval(35)
         var last = "等待 Meet 載入。"
         while Date() < deadline {
@@ -281,7 +319,7 @@ final class MeetControl {
             guard verifiedShares.contains(url.path) else { throw ControlError("Meet 正在分享；請在控制台確認分享的是 OUTPUT 視窗。") }
             return
         }
-        NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").first?.activate(options: [])
+        activateChrome()
         guard try press(["Present now", "Share screen", "立即演示", "分享螢幕", "共享屏幕", "分享畫面"]) else {
             throw ControlError("請在 Meet 選擇分享 Sunday Presenter — OUTPUT 視窗。")
         }
