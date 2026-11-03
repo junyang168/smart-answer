@@ -130,10 +130,12 @@ def verified_overlap(previous,current):
     return bool(left.get('genuine_overlap') and right.get('genuine_overlap')
                 and left.get('pair_id') and left.get('pair_id')==right.get('pair_id')
                 and left.get('left_id')==previous['id'] and left.get('right_id')==current['id']
-                and left.get('raw_response_sha256')==right.get('raw_response_sha256'))
+                and left.get('raw_response_sha256')==right.get('raw_response_sha256')
+                and left.get('left_end_ms')==previous.get('end_ms')
+                and right.get('right_start_ms')==current.get('start_ms'))
 
 
-def analyse(out:Path,tolerance_ms=240,*,partial=False,write=True,detail=False):
+def analyse(out:Path,tolerance_ms=240,*,partial=False,write=True,detail=False,apply_coherence=True):
     plan=read_json(out/'plan.json');observations={};errors=[]
     for chunk in plan['chunks']:
         path=out/'alignment'/f'{chunk["id"]}.json'
@@ -205,6 +207,18 @@ def analyse(out:Path,tolerance_ms=240,*,partial=False,write=True,detail=False):
             right.update(start_ms=pair['right_start_ms'],start_status='qualified',start_audio_witness={**pair,'genuine_overlap':pair['genuine_overlap']})
             for row in [left,right]:
                 if row['start_status']==row['end_status']=='qualified' and row['start_ms']<row['end_ms']:row['status']='qualified'
+        if apply_coherence:
+            from backend.pipeline.paragraph_audio_coherence import needs_coherence,saved_ranges
+            whole=saved_ranges(out)
+            for row in results:
+                verified=whole.get((lecture,row['id']))
+                if verified:
+                    row.update(start_ms=verified['start_ms'],end_ms=verified['end_ms'],
+                               start_status='qualified',end_status='qualified',status='qualified',
+                               continuous_audio_witness=verified)
+                    row.pop('issue',None)
+                elif needs_coherence(row):
+                    row['status']='withheld';row['issue']='discordant_boundary_occurrences_need_continuous_audio'
         # Large overlaps require additional acoustic work, not mechanical cutting.
         conflicts=set()
         for previous,current in zip(results,results[1:]):
@@ -360,6 +374,10 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
             from backend.pipeline.paired_boundary_review import run as review_pairs
             review_pairs(evidence)
             detail=analyse(evidence,detail=True)
+    if not detail['all_qualified']:
+        from backend.pipeline.paragraph_audio_coherence import run as review_whole
+        review_whole(evidence)
+        detail=analyse(evidence,detail=True)
     if not detail['all_qualified']:
         record['timing_quality']={'policy':POLICY,'status':'withheld',
             'assessment_path':str((evidence/'assessment.json').relative_to(out))}

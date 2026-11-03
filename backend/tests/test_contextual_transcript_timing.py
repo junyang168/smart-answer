@@ -93,3 +93,17 @@ def test_failed_verification_cannot_leave_old_handoff_current(tmp_path):
     with pytest.raises(ValueError,match='aligner-python'):qualify_staged_record(tmp_path,record,None)
     assert not old.exists()
     assert [p.read_text() for p in (tmp_path/'withheld-handoffs').glob('*/old.json')]==['retained']
+
+
+def test_mixed_occurrences_cannot_qualify_from_two_separate_edge_approvals(tmp_path,monkeypatch):
+    import backend.pipeline.boundary_audio_review as audio
+    record=certified(tmp_path)
+    # Original neighbouring contexts agree near 500–900 ms. An isolated clip
+    # identifies a later occurrence of the ending, with no complete-span proof.
+    monkeypatch.setattr(audio,'saved_verdicts',lambda root:{('source','p1','end'):{'time_ms':3900,'raw_response_sha256':'later-occurrence'}})
+    result=analyse(tmp_path/'evidence',write=False,detail=True)
+    row=result['lectures']['source']['paragraphs'][0]
+    assert row['status']=='withheld'
+    assert row['issue']=='discordant_boundary_occurrences_need_continuous_audio'
+    assert not playback_bindings(result['lectures']['source'])
+    with pytest.raises(ValueError,match='unresolved'):require_verified_timing(tmp_path,record)

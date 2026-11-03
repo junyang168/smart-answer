@@ -39,9 +39,10 @@ def test_simultaneous_voice_requires_actual_overlapping_tested_edges_and_pair_bi
     answer['right_start_id']='c0';answer['candidates'][0]['right_complete']='yes'
     assert validate(answer,pair)
     witness={'pair_id':'ab','left_id':'a','right_id':'b','raw_response_sha256':'saved',
-             'genuine_overlap':True}
-    left={'id':'a','end_audio_witness':witness};right={'id':'b','start_audio_witness':witness}
+             'genuine_overlap':True,'left_end_ms':2000,'right_start_ms':1500}
+    left={'id':'a','end_ms':2000,'end_audio_witness':witness};right={'id':'b','start_ms':1500,'start_audio_witness':witness}
     assert verified_overlap(left,right)
+    assert not verified_overlap({**left,'end_ms':2200},right)
     assert not verified_overlap(left,{'id':'c','start_audio_witness':witness})
     assert not verified_overlap(left,{'id':'b'})
 
