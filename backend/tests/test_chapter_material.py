@@ -173,3 +173,15 @@ def test_the_same_minutes_belong_to_the_narrower_section_only():
     assert wide["sermons"][0]["stretches"] == [{"start": 60, "end": 180}, {"start": 270, "end": 1200}]
     assert [m["at"] for m in wide["sermons"][0]["judgements"]] == [100, 1000]
     assert narrow["sermons"][0]["stretches"] == [{"start": 180, "end": 270}]
+
+
+def test_superseded_claims_are_left_out_whatever_else_their_status():
+    chosen = run(
+        [
+            claim("old", ["馬太福音5:28"], review_status="superseded", superseded_by="new"),
+            claim("new", ["馬太福音5:28"], review_status="candidate"),
+            claim("flagged", ["馬太福音5:28"], review_status="human_review_required"),
+        ],
+        [],
+    )
+    assert set(chosen) == {"new", "flagged"}

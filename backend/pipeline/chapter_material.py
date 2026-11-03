@@ -178,10 +178,14 @@ def select(
     """
 
     book, number, low, high = _range(chapter.passage)
+    # 审核状态不决定上不上页面（负责人 2026-11-03：不看 ai_consensus_reviewed）。
+    # 只去掉 superseded：它已被另一条同义的主张取代，取代它的那条也在，两条都
+    # 留着同一个判断会出现两次——「希臘文 πρὸς τὸ + infinitive 表達目的」就是。
     own = {
         claim_id: claim
         for claim_id, claim in claims.items()
         if _occurs_in(claim, chapter.lectures)
+        and str(claim.get("review_status") or "") != "superseded"
     }
 
     seeds: dict[str, str] = {}
