@@ -176,6 +176,16 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             raise HTTPException(412, "缺少正確版本條件")
         return call(lambda: store.mutate(actor, item, payload))
 
+    @router.post("/review_document/{item}/recover_pending")
+    async def recover_pending(item: str, request: Request):
+        from .transcript_recovery import prepare_recovery
+        raw = await request.body()
+        actor = authenticated_actor(request, raw)
+        payload = await payload_from(request)
+        if request.headers.get("if-match", "").strip('"') != payload.get("version"):
+            raise HTTPException(412, "缺少正確版本條件")
+        return call(lambda: prepare_recovery(store, actor, item, payload))
+
     @router.post("/review_document/{item}/{action}")
     async def command(item: str, action: str, request: Request):
         raw = await request.body()
