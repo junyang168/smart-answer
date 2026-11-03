@@ -102,7 +102,7 @@ export default function SundayAssistantPage() {
     </header>
     {(error || loadError) && <div role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || loadError}</div>}
     {feedback && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-emerald-800">{feedback}</p>}
-    {!data || !settings ? <p>正在載入助理狀態…</p> : <>
+    {!data || !settings ? (loadError ? <button className={button} onClick={() => void load()}>重新載入助理狀態</button> : <p>正在載入助理狀態…</p>) : <>
       <div className="grid gap-4 sm:grid-cols-3">
         <section className={card}><h2 className="font-semibold">WhatsApp</h2><p className="mt-2">{labels[data.bridge.state] || data.bridge.state}</p><p className="mt-1 break-all text-xs text-slate-500">{data.bridge.account}</p><p className="mt-2 text-xs">{data.bridge.synced ? "群消息已同步" : "尚未完成同步"} · 等待傳送 {data.bridge.pending ?? 0} 則</p>{data.bridge.error && <p className="mt-2 text-sm text-amber-800">{data.bridge.error}</p>}</section>
         <section className={card}><h2 className="font-semibold">整理進度</h2><p className="mt-2">{labels[data.worker?.status || ""] || "處理程序尚未啟動"}</p><p className="mt-2 text-sm">{pending.length} 項待核對</p>{data.worker && <p className="mt-1 text-xs text-slate-500">最近更新 {new Date(data.worker.at).toLocaleString()}</p>}{data.worker?.error && <p className="mt-2 text-sm text-amber-800">{data.worker.error}</p>}</section>
