@@ -185,6 +185,17 @@ def admission_error(request, policy, before, goal):
         hop = [p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS and p.key in reachable]
         if hop:
             reachable |= set(cm.audit_keys(request.model_copy(deep=True, update={'permissions': hop}), before))
+        # Creation must be able to attach its answer to a Question already
+        # read as a shared-use consumer. This link-only grant does not make
+        # the Question, its old answers or their neighbours review roots.
+        from backend.pipeline.claim_direct_scope import owner_context_enabled
+        if request.creation_permissions and creates(policy) and owner_context_enabled(request):
+            read = set(cm.audit_keys(request, before))
+            payloads = {k: v['payload'] for k, v in before.items()}
+            reachable.update(p.key for p in request.permissions
+                if p.collection == 'questions' and set(p.fields) == {'answer_claim_ids'}
+                and p.key in read and p.key in before and not before[p.key]['retired']
+                and cm.own_source_ids(payloads[p.key], payloads) == set(request.source_bindings))
         permissions = {p.key for p in request.permissions}
         if (permissions | set(required)) - reachable:
             raise ValueError('joint Update permission/required maintenance item is unreachable from its target closure')

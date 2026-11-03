@@ -18,6 +18,56 @@ from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVIS
 VERSION='wang_claim_review_engineering_recovery_v1'
 
 
+def recover_refused_admission(store, action_id, *, authorization):
+    """Revalidate unchanged zero-call intake after a bound admission-code fix."""
+    check_binding(authorization)
+    direction = json.loads(Path(authorization['path']).read_text())
+    if (direction.get('schema_version') != VERSION or direction.get('action_id') != action_id
+            or direction.get('authorized_by') != 'owner' or not direction.get('authorization_quote')
+            or direction.get('human_content_approval') is not False):
+        raise ValueError('exact zero-call admission recovery direction required')
+    parent_id = 'CMA-' + sha256_json(action_id)
+    snapshot = store.get_cvp_group(parent_id)
+    if not snapshot:
+        raise ValueError('original refused action is required')
+    request = cm.Request.model_validate(snapshot['request'])
+    from backend.pipeline.claim_joint_update import context_roots, admission_error
+    records = store.read_claim_context(context_roots(request))
+    before = {cm.source.key(*k): cm.model_state(v) for k, v in records.items()}
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (parent_id,)).fetchone()[0]
+        if (not value.get('admission_refusal') or value.get('continued_by')
+                or value.get('call_reservations') or value.get('latest_rounds')
+                or value.get('created_keys') or value.get('revision_rounds')
+                or sha256_json(value) != direction.get('prior_metadata_sha256')
+                or value['request'] != request.model_dump(mode='json')):
+            raise ValueError('admission recovery requires exact refused input with zero calls and rounds')
+        policy, _ = cm.load_authority(request, source_documents=cm.source_documents(before))
+        goal = cm.original_goal(request, before)
+        if policy.model_dump(mode='json') != value['policy'] or goal != value['original_goal']:
+            raise ValueError('admission recovery cannot change its original facts, authority or goal')
+        refusal = admission_error(request, policy, before, goal)
+        if refusal:
+            raise ValueError('original admission remains refused: ' + refusal)
+        store._assert_transaction_read_pins(cursor, pins(records))
+        if 'human_source_decisions' in value:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor, request.source_bindings, value['human_source_decisions'])
+        destination = Path(value['execution_root']) / 'zero-call-admission-recovery'
+        contract = cm.audit_contract(destination, policy)
+        record = {'original_parent': deepcopy(value), 'authorization': authorization,
+                  'current_contract': contract, 'new_budget': False, 'model_calls': 0,
+                  'content_approved': False}
+        write(destination / 'engineering-recovery.json', record)
+        value.setdefault('admission_recoveries', []).append(binding(destination / 'engineering-recovery.json'))
+        value.pop('admission_refusal')
+        value.update(audit_contract=contract, result={'status': 'prepared'})
+        cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
+                       (canonical_json(value), parent_id))
+        return value['admission_recoveries'][-1]
+
+
 def pre_transport_login_refusal(previous, key, slot):
     """Recognize the Claude login check that precedes any generation process.
 
