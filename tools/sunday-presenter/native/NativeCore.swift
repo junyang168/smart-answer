@@ -5,6 +5,7 @@ import CoreAudio
 import Security
 import CryptoKit
 import Darwin
+let sundayServiceType = "__SUNDAY_SERVICE_TYPE__"
 
 struct ControlError: LocalizedError {
     let message: String

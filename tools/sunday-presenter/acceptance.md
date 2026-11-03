@@ -34,6 +34,28 @@ Prototype packages are ad-hoc signed, without Developer ID or notarization.
 Updating this prototype can change the TCC code hash and require reauthorization;
 the one-time home-setup goal across upgrades is not established by this build.
 
+Additional real-file/native-client checks:
+
+- The owner's newly supplied test PPT opened from the actual 11-8-2026 cloud
+  folder inside the installed Presenter, with 29 slides and animated steps. The
+  generated worship PPT also opened there, with 28 slides. Fullscreen output
+  showed the slides without editor/controller UI. Keyboard and controller Next
+  were exercised. Switching away and back retained sermon slide 3 and worship
+  slide 2; this is a sample, not blanket acceptance of every Office animation.
+- Native Remote testing found the original Bonjour protocol label exceeded
+  Apple's 15-character limit. Version 0.3.1 centralizes a shorter service type
+  for host, client and bundle declarations. In-place build-directory launch also
+  retained stale Info.plist registration; the installed app discovered correctly.
+- An installed native Remote paired over actual TLS with an isolated synthetic
+  source and delivered both button directions. Client restart reused its
+  Keychain pairing. Source restart on a new port reconnected automatically and
+  accepted another command. Host revocation disabled both controls and cleared
+  the remembered synthetic pairing. The fixture and remote GUI were stopped;
+  no microphone, output-volume or Meet action was part of this fixture test.
+- The owner identified iPhone 5G Personal Hotspot as the actual church network.
+  The two-Mac, hotspot, AirPlay and Meet-audio checks remain pending. Home Wi-Fi
+  or same-Mac fixture checks do not establish that acceptance.
+
 ## Local technical checks — 2026-11-02
 
 Environment: macOS 26.5.2, Apple Silicon, Electron 45.2.1 / Chromium

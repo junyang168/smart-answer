@@ -3,6 +3,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { packager } = require('@electron/packager');
 const { version } = require('./package.json');
+const { bonjourType } = require('./protocol.json');
 
 function verifyBundleLinks(root, folder = root) {
   for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
@@ -25,7 +26,7 @@ function verifyBundleLinks(root, folder = root) {
     icon: path.join(__dirname, 'assets', 'SundayPresenter.icns'),
     extraResource: [remote],
     extendInfo: { NSLocalNetworkUsageDescription: '與已配對的講員電腦連線，接收主日簡報翻頁指令。',
-      NSBonjourServices: ['_sunday-presenter._tcp'] },
+      NSBonjourServices: [bonjourType] },
     ignore: [/^\/test($|\/)/, /^\/output($|\/)/, /^\/native($|\/)/,
       /^\/build-(icons|native)\.cjs$/, /^\/package-mac\.cjs$/] });
   const app = path.join(build, 'Sunday Presenter.app');

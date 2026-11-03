@@ -19,6 +19,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     let speakerMute = OutputMute()
     let audioQueue = DispatchQueue(label: "sunday.remote.meet")
     var timer: Timer?
+    var lastResolve = Date.distantPast
     lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5
@@ -71,7 +72,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         appMenu.addItem(withTitle: "顯示遙控器", action: #selector(show), keyEquivalent: "p").target = self
         appMenu.addItem(withTitle: "離開 Sunday Remote", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         NSApp.mainMenu = menu; show()
-        browser.delegate = self; browser.searchForServices(ofType: "_sunday-presenter._tcp.", inDomain: "local.")
+        browser.delegate = self; browser.searchForServices(ofType: sundayServiceType, inDomain: "local.")
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.window.isKeyWindow, !(self.window.firstResponder is NSTextView) else { return event }
@@ -91,7 +92,10 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         if let index = services.firstIndex(where: { $0 == service }) { services.remove(at: index); computers.removeItem(at: index) }
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
-        status.stringValue = "找不到主電腦。請確認同一個 Wi-Fi，並允許本機網路。"
+        NSLog("Sunday Remote Bonjour search failed: %@", errorDict)
+        status.stringValue = errorDict["NSNetServicesErrorCode"]?.intValue == -72008 ?
+            "請把 Sunday Remote 安裝到 Applications，再重新開啟。" :
+            "找不到主電腦。請確認同一個 Wi-Fi，並允許本機網路。"
     }
     @objc func selectComputer() {
         token = nil; endpoint = nil; binding = ""; previous.isEnabled = false; next.isEnabled = false
@@ -99,6 +103,13 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         if services.indices.contains(index) { resolved(services[index]) }
     }
     func netServiceDidResolveAddress(_ sender: NetService) { resolved(sender) }
+    func refreshEndpoint() {
+        guard let service = connectedService, Date().timeIntervalSince(lastResolve) >= 5 else { return }
+        lastResolve = Date()
+        // A restarted source can keep its Bonjour name/certificate but change
+        // its port without a remove/add notification. Re-resolve after failure.
+        service.stop(); service.resolve(withTimeout: 4)
+    }
     func resolved(_ service: NetService) {
         let text = service.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         guard let raw = text["id"], let id = String(data: raw, encoding: .utf8), id.count == 64 else { return }
@@ -154,7 +165,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             do {
                 let state = try result.get(); self.token = state["token"] as? String
                 try self.savePair(); self.code.stringValue = ""; self.apply(state)
-            } catch { self.status.stringValue = error.localizedDescription }
+            } catch { self.status.stringValue = error.localizedDescription; self.refreshEndpoint() }
         }
     }
     func poll() {
@@ -167,6 +178,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             case .failure(let error):
                 self.previous.isEnabled = false; self.next.isEnabled = false
                 self.status.stringValue = "等待主電腦；回到同一個 Wi-Fi 後自動重連。"
+                self.refreshEndpoint()
                 if error.localizedDescription.hasPrefix("PAIRING_REQUIRED:") {
                     self.token = nil; self.saved = [:]; SecItemDelete(self.keychainQuery() as CFDictionary)
                     self.code.isHidden = false; self.connect.isHidden = false; self.computers.isHidden = false

@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 
-const TYPE = '_sunday-presenter._tcp';
+const { bonjourType: TYPE } = require('./protocol.json');
 function localPeer(ip = '') {
   ip = ip.replace(/^::ffff:/, '');
   if (ip === '::1' || /^f[cd][0-9a-f]:/i.test(ip) || /^fe80:/i.test(ip)) return true;

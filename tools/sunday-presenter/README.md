@@ -13,7 +13,7 @@ Media/audio and broader animation acceptance remain separate checks.** See
 
 ## Install on another Mac
 
-Use `dist/Sunday-Presenter-0.3.0-mac-arm64.dmg` on an Apple Silicon Mac running
+Use `dist/Sunday-Presenter-0.3.1-mac-arm64.dmg` on an Apple Silicon Mac running
 macOS 13 or newer. Drag **Sunday Presenter** into **Applications**. A ZIP of the
 app is also produced. Node.js is not needed on the receiving laptop. The package
 contains an independent app icon, but no Microsoft account/session or private
@@ -38,6 +38,13 @@ only the token hash. Subsequent requests require the remembered certificate and
 token. Initial pairing is trust on first use, not protection against a hostile
 LAN. Duplicate command IDs cannot advance twice; a command bound to a previous
 live page is rejected. Only the host can start/end the worship workflow.
+
+The church uses an iPhone 5G Personal Hotspot. Both Macs should join that same
+local network. The slide commands travel locally; Meet and Office use the
+phone's internet connection. Validate actual peer connectivity and AirPlay on
+the hotspot before service; a home-network check does not establish it.
+Apple describes the [Personal Hotspot network](https://support.apple.com/en-au/111785)
+and [AirPlay same-network requirement](https://support.apple.com/en-ie/guide/mac-help/mchld7e543a0/mac).
 
 The host remembers the private Meet URL in its local `service-settings.json`.
 It is absent from source, installers and the website's public folder API.

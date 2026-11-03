@@ -1,4 +1,10 @@
 const test = require('node:test');
+test('Bonjour service uses a valid short protocol label shared by both app bundles', () => {
+  const { TYPE } = require('../remote.cjs');
+  const assert = require('node:assert/strict');
+  assert.match(TYPE, /^_[a-z][a-z0-9-]{0,14}\._tcp$/);
+  assert.equal(TYPE, require('../protocol.json').bonjourType);
+});
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
