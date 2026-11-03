@@ -44,7 +44,7 @@ const labels: Record<string, string> = {
   bridge_stale: "同步狀態過期，暫緩提醒", complete: "資料齊全", not_due: "尚未到提醒時間",
   schedule_conflict: "本主日同工安排有衝突，請先處理",
   hymnYoutubeUrl: "詩歌 YouTube", responseHymnYoutubeUrl: "回應詩歌 YouTube",
-  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻", presider: "司會", worshipLeader: "領詩", hymnNotes: "詩歌演唱說明", responseHymnNotes: "回應詩歌演唱說明",
+  sermonSpeaker: "講員", sermonTitle: "講道題目", hymn: "詩歌", responseHymn: "回應詩歌", scripture: "讀經經文", donationAmount: "本週奉獻", presider: "司會", worshipLeader: "領詩", pianist: "司琴", hymnNotes: "詩歌演唱說明", responseHymnNotes: "回應詩歌演唱說明",
 };
 const display = (value: unknown) => typeof value === "string" ? value : JSON.stringify(value ?? "未填");
 const card = "rounded-xl border border-slate-200 bg-white p-5 shadow-sm";

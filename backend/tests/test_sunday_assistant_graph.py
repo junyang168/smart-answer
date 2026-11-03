@@ -660,3 +660,50 @@ def test_graph_rejects_video_link_not_in_source(agent):
         ('ask_group',{'request':{'questions':['請提供影片連結']}}))
     assert run_agent(agent,msg,model=model)['status']=='waiting_reply'
     assert not agent.repository.services
+
+
+def test_graph_collects_pianist_from_church_group_and_preserves_form(agent):
+    from backend.api.models import SundayWorker
+    agent.repository.workers['林樂意']=SundayWorker(name='林樂意',preferredRoles=['司琴'])
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',hymn='奇異恩典',sermonTitle='既有題目',scripture=['neh-8-1-18'])
+    before=agent.repository.services['2026-11-08'].model_dump(by_alias=True)
+    settings=agent.store.settings();settings.collect_cross_group=True;settings.group_questions_enabled=False
+    agent.store.put('settings',settings.model_dump())
+    msg=incoming(agent,text='林樂意這個主日司琴',group='111@g.us',at='2026-11-03T00:30:23+00:00')
+    request={'service_changes':[service(field='pianist',value='林樂意',evidence=msg.text)]}
+    assert run_agent(agent,msg,model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request})))['status']=='done'
+    after=agent.repository.services['2026-11-08'].model_dump(by_alias=True)
+    assert after['pianist']=='林樂意'
+    assert {key for key in before if before[key]!=after[key]}=={'pianist'}
+    assert not agent.bridge.sent
+
+
+def test_unknown_pianist_is_not_saved(agent):
+    from backend.sunday_assistant.models import Extraction
+    msg=incoming(agent,text='11/8 司琴林某某')
+    plan=agent.build_plan(msg,Extraction(service_changes=[service(field='pianist',value='林某某',evidence=msg.text)]))
+    assert not plan['operations'] and '司琴' in plan['questions'][0]
+
+
+def test_unavailable_pianist_is_not_applied(agent):
+    from backend.api.models import SundayWorker
+    from backend.sunday_assistant.models import Extraction
+    agent.repository.workers['林怡婷']=SundayWorker(name='林怡婷',unavailableRanges=[{'startDate':'2026-11-02','endDate':'2026-12-12'}])
+    msg=incoming(agent,text='11/8 司琴林怡婷')
+    plan=agent.build_plan(msg,Extraction(service_changes=[service(field='pianist',value='林怡婷',evidence=msg.text)]))
+    from backend.sunday_assistant.store import dump,now_text
+    with agent.store.db() as db:
+        pid=db.execute("INSERT INTO proposals(message_id,payload,status,updated_at) VALUES (?,?,'review',?) RETURNING id",(msg.message_id,dump(plan),now_text())).fetchone()[0]
+    with pytest.raises(ValueError,match='不能服事'):
+        agent.apply(pid,approved=True)
+    assert not agent.repository.services
+
+
+def test_graph_explicitly_clears_optional_pianist_without_clearing_other_roles(agent):
+    agent.repository.services['2026-11-08']=SundayServiceEntry(date='2026-11-08',pianist='李芳',worshipLeader='王明')
+    msg=incoming(agent,text='更正11/8，取消原來李芳的司琴安排，司琴先留空')
+    request={'service_changes':[service(field='pianist',value=None,evidence=msg.text)]}
+    model=ScriptModel(('read_sunday_record',{'day':'2026-11-08'}),('update_records',{'request':request,'replace_existing':True}))
+    assert run_agent(agent,msg,model=model)['status']=='done'
+    assert agent.repository.services['2026-11-08'].pianist is None
+    assert agent.repository.services['2026-11-08'].worship_leader=='王明'

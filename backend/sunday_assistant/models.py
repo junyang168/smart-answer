@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 ZONE = ZoneInfo("America/Chicago")
 SERVICE_FIELDS = {"sermonSpeaker": "講員", "sermonTitle": "講道題目", "hymn": "詩歌",
-                  "responseHymn": "回應詩歌", "hymnYoutubeUrl": "詩歌 YouTube", "responseHymnYoutubeUrl": "回應詩歌 YouTube", "scripture": "讀經經文", "donationAmount": "本週奉獻", "presider": "司會", "worshipLeader": "領詩", "hymnNotes": "詩歌演唱說明", "responseHymnNotes": "回應詩歌演唱說明"}
-FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field not in {"donationAmount", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"}}
+                  "responseHymn": "回應詩歌", "hymnYoutubeUrl": "詩歌 YouTube", "responseHymnYoutubeUrl": "回應詩歌 YouTube", "scripture": "讀經經文", "donationAmount": "本週奉獻", "presider": "司會", "worshipLeader": "領詩", "pianist": "司琴", "hymnNotes": "詩歌演唱說明", "responseHymnNotes": "回應詩歌演唱說明"}
+FRIDAY_FIELDS = {field: label for field, label in SERVICE_FIELDS.items() if field not in {"pianist", "donationAmount", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"}}
 
 
 class Settings(BaseModel):
@@ -93,6 +93,7 @@ class Settings(BaseModel):
             result["donationAmount"] = self.availability_group
             result["presider"] = self.availability_group
             result["worshipLeader"] = self.songs_group
+            result["pianist"] = self.songs_group
         for field, group in (("responseHymn", self.response_hymn_group), ("donationAmount", self.offering_group)):
             if group:
                 result[field] = group
@@ -134,7 +135,7 @@ class ChatMessage(BaseModel):
 
 class ServiceChange(BaseModel):
     date: date
-    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"]
+    field: Literal["sermonSpeaker", "sermonTitle", "hymn", "responseHymn", "scripture", "donationAmount", "presider", "worshipLeader", "pianist", "hymnNotes", "responseHymnNotes", "hymnYoutubeUrl", "responseHymnYoutubeUrl"]
     value: str | list[str] | float | None
     evidence: str = Field(min_length=1)
 
@@ -165,6 +166,8 @@ class ServiceChange(BaseModel):
             if self.value is not None and not isinstance(self.value, str):
                 raise ValueError("演唱說明需為文字或空值")
             self.value = self.value.strip() or None if isinstance(self.value, str) else None
+        elif self.field == "pianist" and self.value is None:
+            pass  # Optional assignment may be explicitly cancelled.
         elif not isinstance(self.value, str) or not self.value.strip():
             raise ValueError("欄位不可為空")
         return self
