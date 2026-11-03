@@ -2,13 +2,16 @@
 
 Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
 window and a paired local speaker remote. Google Meet is operated manually.
-YouTube streaming, speaker microphone relay and automated broadcasting belong to
-Phase 2 (#643).
+Phase 2 (#643) proposes PPT video to Remote and automated YouTube broadcasting
+with the existing wireless microphone on the host. Remote microphone relay is
+deferred.
 
 The [Phase 2 design](../../docs/sunday-presenter-phase2-design.md) covers local
-point-to-point PPT video and speaker audio, replacing the AirPlay dependency,
-plus YouTube streaming and recording. It is a design draft, not an implemented
-capability of the Phase 1 release below.
+point-to-point PPT video, replacing the AirPlay dependency,
+plus recording and YouTube streaming with a reusable stream key and fixed viewing
+link. PPT audio capture, Google OAuth and Remote microphone relay are outside this
+design; only the selected wireless microphone on the host supplies audio. It is
+a design draft, not an implemented capability of the Phase 1 release below.
 
 ## Install and use
 
