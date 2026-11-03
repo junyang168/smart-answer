@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide, { type OriginalLanguageEvent } from "../ScriptureSlide";
+import ScriptureSlide, { type OriginalLanguageEvent, type SlidePoint } from "../ScriptureSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -41,6 +41,10 @@ type Judgement = {
   at: number;
   judgement: string;
   seconds: number;
+  /** 这条主张自己的证据步骤：他怎样推到这个判断。 */
+  points?: SlidePoint[];
+  /** 主张类型是应用。 */
+  application?: boolean;
   scripture: string;
   provenance?: Provenance;
 };
@@ -384,6 +388,8 @@ export default function OriginalAudioPage() {
                     <ScriptureSlide
                       slug={verseAt(sermon, seconds, passage)}
                       title={currentJudgement?.judgement ?? ""}
+                      points={currentJudgement?.points ?? []}
+                      application={currentJudgement?.application ?? false}
                       originalLanguage={originalLanguageAt(sermon, seconds)}
                       cited={citedAt(sermon, seconds, passage)}
                     />

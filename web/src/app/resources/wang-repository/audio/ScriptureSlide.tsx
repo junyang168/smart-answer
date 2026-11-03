@@ -25,6 +25,19 @@ export type OriginalLanguageEvent = {
   source_kind: "transcript_explicit";
 };
 
+/** 幻灯上的一条要点：这条主张的一个证据步骤，附教授原话。
+ *
+ * `text` 是证据步骤的规范化表述（编辑整理），`quote` 是来源片段的逐字摘录（原
+ * 话）。两种文字在视觉上分开：要点常显，原话收在「教授原話」里展开核对。
+ */
+export type SlidePoint = {
+  text: string;
+  kind: string;
+  quote: string;
+  evidence_step_id: string;
+  source_fragment_id: string;
+};
+
 /** 取过的经节不再取第二次。
  *
  * 整页只有一段经文，所以实际上只取一次。缓存活在模块作用域，翻到别的讲道再翻
@@ -104,6 +117,8 @@ export default function ScriptureSlide({
   title,
   originalLanguage,
   cited,
+  points = [],
+  application = false,
 }: {
   slug: string;
   /** 由来源绑定 Claim 规范化出的讲论要点，不是逐字引语。 */
@@ -112,6 +127,10 @@ export default function ScriptureSlide({
   originalLanguage: OriginalLanguageEvent[];
   /** 他此刻翻到的别处经文，中文写法（「弗 4:11」）。 */
   cited?: string;
+  /** 他怎样推到这个判断：这条主张的证据步骤，最多三条。 */
+  points?: SlidePoint[];
+  /** 这条判断是生活应用。负责人要求应用在幻灯上看得出是应用。 */
+  application?: boolean;
 }) {
   const [shown, setShown] = useState<{ reference: string; passages: Passages } | null>(null);
 
@@ -155,10 +174,33 @@ export default function ScriptureSlide({
       <header className="border-b border-slate-800 pb-4">
         <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-amber-400">
           講論要點 · 根據來源 Claim 整理
+          {application && (
+            <span className="ml-2 rounded bg-emerald-400/15 px-1.5 py-0.5 text-emerald-300">應用</span>
+          )}
         </p>
         <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">
           {title}
         </h2>
+        {points.length > 0 && (
+          <ol className="mt-3 space-y-2 text-[0.95rem] leading-relaxed text-slate-300">
+            {points.map((point) => (
+              <li key={point.evidence_step_id} className="flex gap-2">
+                <span aria-hidden className="mt-[0.6rem] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/70" />
+                <div>
+                  <p>{point.text}</p>
+                  {point.quote && (
+                    <details className="mt-1 text-xs text-slate-500">
+                      <summary className="cursor-pointer select-none hover:text-slate-300">教授原話</summary>
+                      <blockquote className="mt-1 border-l border-amber-300/30 pl-3 text-slate-400">
+                        {point.quote}
+                      </blockquote>
+                    </details>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
       </header>
 
       {/* 他讲到经文里的哪个字，就把那个字标出来。原来铺整节的希腊原文——读者不看

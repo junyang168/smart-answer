@@ -40,6 +40,7 @@ from backend.api.scripture import (
     reference_slugs,
     spoken_references,
 )
+from backend.pipeline import chapter_material
 from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
 
 
@@ -1003,6 +1004,66 @@ def build_sermon_slides(
     }
 
 
+#: 幻灯要点放哪几种证据步骤。问题本身和对话语境不是他推论的一步。
+POINT_STEP_TYPES = frozenset({
+    "reasoning",
+    "scripture_evidence",
+    "original_language",
+    "literary_context",
+    "historical_background",
+    "qualification",
+    "answer",
+    "application",
+})
+
+#: 一张幻灯最多几条要点。
+MOST_POINTS = 3
+
+
+def claim_points(
+    mark: dict[str, Any],
+    claims: dict[str, dict[str, Any]],
+    steps: dict[str, dict[str, Any]],
+    fragments: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """幻灯上的两三条要点：他怎样推到这个判断。
+
+    取这条判断的主张自己的证据步骤，按主张记下的次序，每条附他的原话。一个字都
+    不新写：要点是证据步骤的规范化表述（标为编辑整理），原话是来源片段的逐字摘
+    录。主张类型是应用的，标出来——负责人要求应用在幻灯上看得出是应用。
+    """
+
+    claim_ids = (mark.get("provenance") or {}).get("claim_ids") or []
+    claim = claims.get(str(claim_ids[0])) if claim_ids else None
+    if not claim:
+        return {"points": [], "application": False}
+    statement = str(claim.get("statement") or "").strip()
+    points: list[dict[str, Any]] = []
+    seen: set[str] = {statement}
+    for step_id in claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []:
+        step = steps.get(str(step_id)) or {}
+        text = str(step.get("statement") or "").strip()
+        if not text or text in seen or str(step.get("step_type") or "") not in POINT_STEP_TYPES:
+            continue
+        seen.add(text)
+        fragment_ids = [step["source_fragment_id"]] if step.get("source_fragment_id") else []
+        fragment_ids += list(step.get("source_fragment_ids") or [])
+        fragment = next((fragments[f] for f in map(str, fragment_ids) if f in fragments), {})
+        points.append({
+            "text": text,
+            "kind": str(step.get("step_type") or ""),
+            "quote": str(fragment.get("verbatim_excerpt") or "").strip(),
+            "evidence_step_id": str(step_id),
+            "source_fragment_id": str(fragment.get("fragment_id") or ""),
+        })
+        if len(points) == MOST_POINTS:
+            break
+    return {
+        "points": points,
+        "application": str(claim.get("claim_type") or "") in {"application", "應用"},
+    }
+
+
 def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
 
@@ -1088,13 +1149,29 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     by_sermon: dict[str, dict[str, Any]] = {}
     # 每个判断讲的是哪一节。主张自己的 `scripture_refs` 就写着，截到本段范围内。
     verses: dict[str, str] = {}
-    for claim_id, claim in claims.items():
-        if not in_passage(claim, book, chapter, low, high):
-            continue
+    # 按章的页面（`chapter_material.CHAPTERS`）从主张数据算出这一章的材料：起点
+    # 主张加往外一步有关系的主张，只取该章系列的讲道。其余页面照旧只看引用。
+    whole_chapter = chapter_material.CHAPTERS.get(passage)
+    if whole_chapter is not None:
+        chosen = chapter_material.select(
+            whole_chapter,
+            claims,
+            store.list_records("claim_relations"),
+            in_passage,
+            claim_verse,
+        )
+    else:
+        chosen = {
+            claim_id: claim_verse(claim, book, chapter, low, high)
+            for claim_id, claim in claims.items()
+            if in_passage(claim, book, chapter, low, high)
+        }
+    for claim_id, verse in chosen.items():
+        claim = claims[claim_id]
         statement = str(claim.get("statement") or "").strip()
         if not statement:
             continue
-        verses.setdefault(statement, claim_verse(claim, book, chapter, low, high))
+        verses.setdefault(statement, verse)
         located, traces = spans_of(claim_id, statement)
         for source_id, spans in located.items():
             slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
@@ -1123,9 +1200,12 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             "media_url": sermon["media_url"],
             "media_duration": sermon["media_duration"],
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": judgement_during(
-                slot["spans"], merged, verses, slot["provenance"]
-            ),
+            "judgements": [
+                {**mark, **claim_points(mark, claims, steps, fragments)}
+                for mark in judgement_during(
+                    slot["spans"], merged, verses, slot["provenance"]
+                )
+            ],
             "spoken": spoken_during(merged, sermon),
             # 他什么时候念到哪一节。报节号是预告，念出来才算数。
             "readings": [
@@ -1136,7 +1216,13 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             "original_language_events": original_language_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
         })
-    sermons_out.sort(key=lambda row: -row["seconds"])
+    if whole_chapter is not None:
+        # 一章跨好几堂课，经文是按堂次往下讲的：（二）1 讲八福，（二）4 讲 5:32。
+        # 按堂次排，读者从上往下听就是从 5:1 讲到 5:48。
+        order = {lecture: index for index, lecture in enumerate(whole_chapter.lectures)}
+        sermons_out.sort(key=lambda row: order.get(row["transcript_id"], len(order)))
+    else:
+        sermons_out.sort(key=lambda row: -row["seconds"])
 
     return {
         "schema_version": "wang_original_audio_index_v4",
@@ -1201,13 +1287,18 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
 #:   16:13-23  教會的磐石根基 · 權柄的對象：不只彼得，更是教會
 #:             彌賽亞的真諦：從身份認同到使命認知
 #:   16:24-27  何謂「捨己」？ · 何謂「背起十字架」？
+#:   5:1-48    八福與彌賽亞的身份 · 耶穌與律法——廢掉還是成全？
+#:             超越法利賽人的義（2011（二）1、2 的小标题）
 PASSAGE_TITLES: dict[str, str] = {
+    "mat-5-1-48": "八福與彌賽亞的身份，成全律法，與超越法利賽人的義",
     "mat-16-1-12": "求神蹟的試探，與防備法利賽人的酵",
     "mat-16-13-23": "認信、磐石與天國的鑰匙，到第一次預言受難",
     "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
 }
 
 PASSAGES: tuple[tuple[str, str], ...] = (
+    # 按章：材料由 `chapter_material` 从主张数据算出，不只看引用。
+    ("mat-5-1-48", "太5:1–48"),
     ("mat-16-1-12", "太16:1–12"),
     ("mat-16-13-23", "太16:13–23"),
     ("mat-16-24-27", "太16:24–27"),
