@@ -1,7 +1,7 @@
 """Durable speaker attachment intake; originals are never converted or merged."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 from email.utils import parseaddr
 from hashlib import sha256
@@ -104,7 +104,7 @@ class GmailInbox:
 
     @contextmanager
     def db(self):
-        with sqlite3.connect(self.path, timeout=5) as db:
+        with closing(sqlite3.connect(self.path, timeout=5)) as db, db:
             db.row_factory = sqlite3.Row
             db.execute('PRAGMA journal_mode=WAL')
             yield db

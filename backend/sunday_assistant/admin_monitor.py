@@ -1,7 +1,7 @@
 """Independent, non-LLM incident monitor with a private durable admin outbox."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 import json
 import os
@@ -36,13 +36,13 @@ class AdminMonitor:
 
     @contextmanager
     def db(self):
-        with sqlite3.connect(self.path, timeout=2) as db:
+        with closing(sqlite3.connect(self.path, timeout=2)) as db, db:
             db.row_factory = sqlite3.Row
             db.execute("PRAGMA journal_mode=WAL")
             yield db
 
     def settings_snapshot(self):
-        with sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2) as db:
+        with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db, db:
             row = db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()
             settings = json.loads(row[0]) if row else {}
             row = db.execute("SELECT value FROM kv WHERE key='worker'").fetchone()
@@ -63,10 +63,10 @@ class AdminMonitor:
             except (ValueError, OSError):
                 errors += 1
         if mail_enabled and mail_db.exists():
-            with sqlite3.connect(f"file:{mail_db}?mode=ro", uri=True, timeout=2) as db:
+            with closing(sqlite3.connect(f"file:{mail_db}?mode=ro", uri=True, timeout=2)) as db, db:
                 errors += db.execute("SELECT COUNT(*) FROM mail_kv WHERE key LIKE 'status:%' AND json_extract(value,'$.status')='error'").fetchone()[0]
                 errors += db.execute("SELECT COUNT(*) FROM mail_messages m WHERE m.status='error' OR EXISTS (SELECT 1 FROM mail_files f WHERE f.message_key=m.key AND f.status='error')").fetchone()[0]
-            with sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2) as db:
+            with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db, db:
                 row = db.execute("SELECT value FROM kv WHERE key='gmail_worker'").fetchone()
                 mail_worker = json.loads(row[0]) if row else {}
             if mail_worker.get('status') == 'error':
@@ -230,7 +230,7 @@ def monitor_state(root):
     if not path.exists():
         return {"incidents": [], "notices": [], "last_check": None}
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1) as db:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db, db:
             db.row_factory = sqlite3.Row
             row = db.execute("SELECT value FROM monitor_kv WHERE key='last_check'").fetchone()
             return {"incidents": [dict(r) for r in db.execute("SELECT * FROM incidents ORDER BY first_seen DESC LIMIT 30")],

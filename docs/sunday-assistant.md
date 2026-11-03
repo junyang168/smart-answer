@@ -265,3 +265,7 @@ backend/.venv/bin/python scripts/authorize-sunday-gmail.py \
 第二個郵箱需由其帳號另行 Google 同意。Google Cloud 須啟用 Gmail API，desktop OAuth client 使用 loopback callback。授權範圍僅 `gmail.readonly`，核對 profile email 完全相符後才啟用 token；若 Gmail API 尚未啟用，已取得的同意先存私有 pending token，啟用 API 後以同一命令加 `--verify-pending` 核對，不重複要求同意。授權頁安全提示由帳號持有人處理。可移除指定 reviewer 立即撤回後台存取；`enabled=false` 停止收件／提醒，`saturday_followup=false` 單獨停提醒。
 
 持久化資料為 `$DATA_BASE_DIR/sunday-assistant/gmail/` 下的 SQLite、原檔 cache 和鎖；不進 Git，不在一般助理狀態 API 暴露私人郵件。網站 `/admin/sunday-assistant` 的 Gmail 區塊顯示連線、收存／版本、待核對及重試入口。
+
+### SQLite 連線釋放
+
+所有助理佇列、Gmail inbox 及管理員監測的 SQLite context 在提交／回滾後立即 close；Python 的 `with connection` 只處理交易，不能代替 close。LangGraph 自己的 SqliteSaver 另有 closing context。否則連線等待 cyclic GC 時可耗盡 macOS 背景程序的檔案描述符，連 checkpoint 都會報 `unable to open database file`。回歸測試在獨立子程序關閉 GC、限制 128 個描述符，連續跑 300 次佇列／監測／郵件讀寫，並驗證例外回滾及連線已關閉；不以提高系統上限掩蓋洩漏。發生內部錯誤的原消息仍保存來源、checkpoint 及已有寫入回執，恢復時重用既有請求，不能偽造成功或重發已成功回執。
