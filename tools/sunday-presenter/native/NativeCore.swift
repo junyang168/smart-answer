@@ -124,12 +124,16 @@ final class MeetControl {
         for chrome in browsers {
             let app = AXUIElementCreateApplication(chrome.processIdentifier)
             AXUIElementSetMessagingTimeout(app, 1)
-            // Request the native web tree once per Chrome process after Chrome
-            // accepts it. A transient failure must remain eligible for retry.
+            // Chromium defers enhanced accessibility until two seconds after
+            // the LAST request. Its setter delegates to AppKit after handling
+            // the request, so the AX return code is not an acknowledgement.
+            // Retrying on every 500ms poll prevents a cold tree from enabling.
+            // chrome/browser/chrome_browser_application_mac.mm:
+            // enableScreenReaderCompleteModeAfterDelay / accessibilitySetValue.
             if !chromeAccessibilityRequested.contains(chrome.processIdentifier) {
-                if AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success {
-                    chromeAccessibilityRequested.insert(chrome.processIdentifier)
-                }
+                _ = attribute(app, kAXRoleAttribute)
+                AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                chromeAccessibilityRequested.insert(chrome.processIdentifier)
             }
             for window in attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? [] {
                 windowCount += 1
@@ -162,7 +166,9 @@ final class MeetControl {
     }
     func activateChrome() {
         let browsers = NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome")
-        let chrome = browsers.first(where: { $0.processIdentifier == chromePID }) ?? browsers.first
+        // A website worker may run headless Chrome with the same bundle ID.
+        // Activate only the process whose actual Meet window was verified.
+        let chrome = browsers.first(where: { $0.processIdentifier == chromePID })
         DispatchQueue.main.sync {
             _ = chrome?.activate(options: [.activateIgnoringOtherApps])
             if let window = self.chromeMeetingWindow {
@@ -209,6 +215,10 @@ final class MeetControl {
         if (try? meetingWindow()) == nil {
             DispatchQueue.main.sync {
                 let options = NSWorkspace.OpenConfiguration()
+                // Do not route this URL to a headless website-worker instance.
+                // Chrome's normal-profile singleton still reuses its GUI when
+                // one is already running; no profile or login data is copied.
+                options.createsNewApplicationInstance = true
                 NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: "/Applications/Google Chrome.app"), configuration: options)
             }
         }
@@ -219,6 +229,10 @@ final class MeetControl {
         var last = "等待 Meet 載入。"
         while Date() < deadline {
             do {
+                // The GUI process may appear asynchronously after open(). Wait
+                // for the requested page before choosing which Chrome to raise.
+                _ = try meetingWindow()
+                activateChrome()
                 _ = try press(["Rejoin", "重新加入", "再次加入"])
                 try microphone(muted: true)
                 _ = try press(["Turn off camera", "关闭摄像头", "關閉攝影機"])

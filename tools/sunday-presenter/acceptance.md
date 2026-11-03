@@ -524,8 +524,8 @@ missing room and lookup timeout; they contain counts, not private page URLs.
 The exact Swift locator passes synthetic counterexamples with a 5,000-node
 unrelated page, a later matching window, wrong rooms and embedded impersonating
 nodes. All 34 Node tests and the complete Electron smoke pass. Both native
-architectures compile; the local installed runtime and helper match the final
-0.3.8 build and its deep/strict signature verifies.
+architectures compile; the local installed runtime and helper matched that warm
+0.3.8 candidate and its deep/strict signature verified.
 
 Importantly, installed 0.3.7 ALSO joined successfully with the large unrelated
 window open on this development Mac. Therefore that defect is not a proven
@@ -542,4 +542,56 @@ reported "Meet 未接受操作". Reliable End acknowledgement remains unresolved
 The test app was quit, the owned large-page window closed and its local server
 stopped. No recording or speaker unmute was attempted. A full Chrome quit/reopen
 test remains pending owner consent because it would close all development-Mac
-browser windows. The 0.3.8 candidate is not published; the download remains 0.3.7.
+browser windows. At that checkpoint 0.3.8 was not published.
+
+## Cold-start reproduction and recovery — final 0.3.8
+
+The owner authorized quitting the development Mac's Chrome. At test start the
+ordinary GUI Chrome was already gone; the remaining Chrome PID belonged to a
+headless website worker with a separate profile. It was left running. The first
+candidate failed with window count 0 and web-area count 0: NSWorkspace reused
+the running headless instance instead of opening a GUI. Preparation now requests
+a new application instance when the requested Meet page is absent, and activates
+only the PID belonging to the verified meeting window. This uses
+NSWorkspace.OpenConfiguration.createsNewApplicationInstance; Apple's documented
+default otherwise reuses an existing instance:
+https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/createsnewapplicationinstance
+
+That launch correction alone created a GUI but still failed cold: two windows,
+zero web areas. Chromium defers enhanced accessibility until two seconds after
+the last request. Its setter handles the request before delegating to AppKit,
+so the AX return code cannot be treated as a success acknowledgement. The
+success-only cache in the earlier candidate and unconditional polling in 0.3.7
+could keep requesting every 500ms and resetting that delay. The final helper
+reads the application role and sends the enhanced request once per PID,
+independent of the AX setter return code. Chromium source authority:
+https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/browser/chrome_browser_application_mac.mm
+(enableScreenReaderCompleteModeAfterDelay and accessibilitySetValue).
+
+The failed GUI Chrome was normally quit through Activity Monitor's Quit action,
+selected by its verified PID; Force Quit was not used. Activity Monitor's original
+GPU Processes view and empty search were restored. The headless worker was not
+quit or changed. After installing the final candidate and restoring the same App
+grant through normal UI, only Presenter Prepare was pressed. Chrome was not
+inspected through native/browser tools before the App reported joined/muted.
+The App itself started a fresh GUI Chrome, found the room, joined, muted its
+microphone and camera, and stayed waiting for PPT sharing. Subsequent actual Meet
+inspection showed "開啟麥克風", "開啟攝像頭", "退出通話" and the explicit
+camera/microphone-off message. Private proof: 038-cold-autojoin-meet.png and
+038-cold-autojoin-status.png. The independent-receiver, main-laptop and full
+service/audio checks remain pending; this establishes development-Mac cold start.
+
+All 34 Node tests pass after the final native changes, the installed runtime/helper
+match the final build, and its deep/strict signature verifies. The earlier complete
+Electron smoke remains applicable to unchanged JavaScript. Both native targets
+compile. App End visibly left this test client and returned ended (with an
+"操作已取消" suffix); previous inconsistent End acknowledgements remain recorded
+and are not cleared by one successful attempt. No recording or speaker unmute was
+performed. The update still has the known ad-hoc signing/TCC persistence limitation.
+
+Final DMG checksum and Remote ZIP integrity checks pass. The verified final 0.3.8
+pilot artifacts were published through scripts/publish-sunday-presenter.cjs;
+latest.json now selects 0.3.8. Presenter DMG: 131544108 bytes,
+SHA256 aa14483f181134a5d0db0c1f993fd7e4abc9df2dc6e0bd2ce8c17754bebbeaed.
+Remote ZIP: 464105 bytes,
+SHA256 8b4251f4f167da558af83fa3ac5bc775e305ce5197db57470600807ffc7622b1.
