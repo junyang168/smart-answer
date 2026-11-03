@@ -486,6 +486,14 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('absence-query:'):
+                        from .absence_query import prepare_delivery
+                        text = prepare_delivery(self, row)
+                        if text is None:
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(),row['key']))
+                            continue
+                        row = dict(row);row['text'] = text
                     if row['key'].startswith('speaker-ppt-followup:'):
                         from .gmail_inbox import GmailInbox
                         day = row['key'].split(':')[1]
@@ -520,13 +528,13 @@ class Assistant:
                     from urllib.parse import quote
                     result = self.bridge.request("GET", "/outbox/" + quote(row["key"], safe=""))
                 state = result.get('status') if result.get('status') in {'sent', 'held'} else 'unknown'
-                if row['key'].startswith('ppt-ready:') and result.get('status') == 'deferred':
+                if row['key'].startswith(('ppt-ready:', 'absence-query:')) and result.get('status') == 'deferred':
                     state = 'queued'
                 error = None if state in {'sent', 'held'} else "發送結果待確認，未重複發送"
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
-                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:')):
+                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:', 'absence-query:')):
                     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
                         state = 'queued'  # Not submitted; a later tick can retry.
                     elif isinstance(exc, httpx.HTTPStatusError):
