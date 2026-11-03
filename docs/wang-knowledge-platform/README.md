@@ -102,7 +102,7 @@
 | [馬太福音十六章來源地圖 v1](./30-authoring/matthew_16_source_map_v1.md) | 十六章有哪些来源、哪些算独立证据 |
 | [马太福音第 17 章释经篇章蓝图](./30-authoring/matthew_17_exposition_blueprint.md) | 太17 释经文章的结构（候选，应迁移为 CompositionPlan） |
 | [马太福音文章进度页设计 v1](./30-authoring/matthew_exposition_progress_design_v1.md) | `/admin/wang/matthew-progress` 只读进度页的设计 |
-| [马太福音按章释经页：方案](./30-authoring/matthew_chapter_exposition_page_solution.md) | 一章的原声、同步幻灯与完整释经从哪里取材、怎样组成一页（待评审） |
+| [马太福音按章释经页：方案](./30-authoring/matthew_chapter_exposition_page_solution.md) | NYSC 马太系列：一章的原声与同步幻灯从哪些主张取材、怎样组成一页 |
 
 ## 40-qa-search —— 智能问答与搜索
 
