@@ -5,6 +5,11 @@ window and a paired local speaker remote. Google Meet is operated manually.
 YouTube streaming, speaker microphone relay and automated broadcasting belong to
 Phase 2 (#643).
 
+The [Phase 2 design](../../docs/sunday-presenter-phase2-design.md) covers local
+point-to-point PPT video and speaker audio, replacing the AirPlay dependency,
+plus YouTube streaming and recording. It is a design draft, not an implemented
+capability of the Phase 1 release below.
+
 ## Install and use
 
 Download v0.4.0 from church administration → Sunday service → Download Sunday

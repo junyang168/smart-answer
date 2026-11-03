@@ -6,6 +6,11 @@ Phase 2 #643 adds YouTube broadcasting and microphone relay inside Sunday Remote
 Phase 1 removes the old Meet Accessibility integration and automatic 10:00 start;
 old service settings do not execute. See tools/sunday-presenter/README.md.
 
+The [Phase 2 design](./sunday-presenter-phase2-design.md) proposes direct local
+PPT video and speaker audio between Presenter and Sunday Remote, followed by
+YouTube broadcasting. It records reuse choices, media isolation, failure handling
+and the physical-device acceptance gates; it does not describe released features.
+
 The website owns the date and OneDrive folder mapping. The desktop app calls
 `GET /api/admin/sunday-services/presenter/upcoming` on launch, retry and folder
 open. The existing Next.js Sunday-services proxy forwards to the backend's
