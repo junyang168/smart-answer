@@ -263,3 +263,33 @@ two-Mac control over the owner's iPhone hotspot, AirPlay with HDMI, speaker audi
 disconnection mute and the complete timed service transition still require
 acceptance. Keep #598 / PR #611 in draft. Ad-hoc updates may invalidate macOS
 Accessibility grants; no renewed grant was assumed or changed during this update.
+
+
+## Playback UX correction — 0.3.2, 2026-11-02
+
+Owner use exposed the hidden popup/page inventory as an unacceptable primary
+workflow. Startup now shows the playback controller, with two fixed deck cards;
+internal page records and manual links are collapsed. The current inspected
+slide has one confirm-and-play action, exercised through the actual controller
+in the Electron smoke. Confirmed deck cards remain stable despite stale popup
+records. The existing manual inspection requirement is retained; this does not
+automatically validate editor content as an audience slide.
+
+A single weekly-folder action reads visible file names inside the owner's
+existing OneDrive session. A unique worship-named PPT plus exactly one other PPT
+are assigned to worship/sermon and opened through that folder. Ambiguous file
+sets require selection. Folder identity survives OneDrive's date URL encoding;
+polling is bounded to two minutes and ends after opening both files. Repeated
+document GET opens reuse their private views; POST popups retain their original
+body and opener. Only a document opened from the current private preview may
+automatically follow into it; authentication popups do not steal the audience.
+
+Actual signed-in OneDrive test: one button opened the 11/8 generated worship PPT
+and the owner's test sermon, and the real controller showed each file in the
+correct card. These were real Office editors, not fixture page titles. Both real PPTs were then put into Office slideshow mode, confirmed and played
+through the new primary buttons. Switching back to worship and a controller
+Next action produced the actual second slide. The PowerPoint slideshow command
+still needs operator action and visual confirmation.
+Thirty-one Node tests pass, and the full Electron smoke passes, including UI
+confirm-and-play, 20 switches, key delivery, POST preservation and blackout gates.
+No new Meet, two-Mac audio, or hotspot acceptance is implied by this UX change.

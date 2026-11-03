@@ -3,7 +3,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const fixture = `<!doctype html><html><head><title>Fixture</title></head>
+const fixture = `<!doctype html><html><head><title>Fixture.pptx</title></head>
 <body style="margin:0;background:#103c50;color:white;height:100vh;font:48px sans-serif">
 <p id="slide">Audience slide</p><button onclick="window.open('/show','show')">Present</button>
 <button onclick="document.documentElement.requestFullscreen()">Fullscreen</button>
@@ -125,7 +125,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(stage.active, liveBeforeRefresh);
     toggleControls();
     await controller.webContents.executeJavaScript(`void (window.savedArm = document.querySelector('[data-page="${worship.id}"] [data-action="arm"]'))`);
-    worship.title = 'Fixture title update'; stage.changed();
+    worship.title = 'Fixture title update.pptx'; stage.changed();
     await until(async () => await controller.webContents.executeJavaScript(`document.querySelector('[data-page="${worship.id}"] .title').textContent.includes('Fixture title update')`), 'control update');
     assert.equal(await controller.webContents.executeJavaScript(`savedArm === document.querySelector('[data-page="${worship.id}"] [data-action="arm"]')`), true);
     fs.writeFileSync(path.join(evidence, 'control.png'), (await controller.webContents.capturePage()).toPNG());
@@ -136,6 +136,16 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     wc(sermon).sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
     await until(() => controller.isVisible(), 'Command-P intercepted before the presentation page');
     toggleControls();
+    // The main cards keep duplicate/internal pages collapsed and offer one
+    // confirmation action instead of exposing arm/take as separate steps.
+    assert.equal(await controller.webContents.executeJavaScript("document.querySelectorAll('#decks > .deck').length"), 2);
+    assert.equal(await controller.webContents.executeJavaScript("[...document.querySelectorAll('.advanced')].every(el => !el.open)"), true);
+    await act('prepare', { id: worship.id });
+    toggleControls();
+    await until(async () => await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').textContent.includes('確認並播放')"), 'single confirmation button');
+    await controller.webContents.executeJavaScript("document.querySelector('#worship .primary').click()", true);
+    await until(() => stage.active === worship.id && !controller.isVisible(), 'confirm and play from the actual UI');
+    await act('take', { deck: 'sermon' });
     // Real window.open path: returned WC retains an opener and is private/muted.
     await wc(sermon).executeJavaScript("void window.open('/show', 'show')");
     await until(() => stage.pages.size === 3 && [...stage.pages.values()].at(-1).loaded &&

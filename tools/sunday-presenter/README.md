@@ -218,3 +218,7 @@ Website/storage configuration, migration and API contract:
 Electron references: [WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view),
 [popup creation](https://www.electronjs.org/docs/latest/api/web-contents#contentssetwindowopenhandlerhandler),
 [web preferences](https://www.electronjs.org/docs/latest/api/structures/web-preferences).
+
+## 0.3.2 playback flow
+
+The controller opens at launch. One “開啟本週 PPT” action reads the dated OneDrive folder in the operator's existing Office session, assigns a unique worship-named PPT and its sole remaining PPT to two fixed cards, and opens them. Extra candidates require operator selection. The folder poll expires after two minutes. Repeated document GET opens reuse a private view; POST bodies/opener and authentication popups remain isolated. The main confirmation action arms and takes the inspected page together. Internal page records and manual URLs are collapsed. Recording and remote acceptance remain separate.

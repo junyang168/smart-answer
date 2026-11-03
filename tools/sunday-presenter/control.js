@@ -6,16 +6,18 @@ for (const [deck, label] of Object.entries(labels)) {
   section.className = 'deck';
   section.id = deck;
   // Only fixed application strings enter this template. Remote titles use textContent.
-  section.innerHTML = `<h2>${label}<button class="take" data-deck="${deck}">切換到${label}</button></h2>
-    <form><input type="url" required placeholder="貼上 PowerPoint / OneDrive 連結" aria-label="${label}連結"><button>開啟</button></form>
-    <button class="office">Microsoft 登入 / 選檔</button><div class="pages"></div>`;
+  section.innerHTML = `<h2>${label} PPT</h2><div class="current-title">尚未選擇檔案</div>
+    <p class="next-step"></p><div class="transport"><button class="take primary">選擇 PPT</button><button class="change">更換 PPT</button></div>
+    <details class="advanced"><summary>其他頁面與手動連結</summary>
+    <form><input type="url" required placeholder="貼上 PowerPoint / OneDrive 連結" aria-label="${label}連結"><button>開啟連結</button></form>
+    <button class="office">Microsoft 登入 / 選檔</button><div class="pages"></div></details>`;
   section.querySelector('.office').onclick = () => act('office', { deck });
+  section.querySelector('.change').onclick = () => act('sunday-folder', { deck });
   section.querySelector('form').onsubmit = async event => {
     event.preventDefault();
     const input = section.querySelector('input');
     if (await act('open', { deck, url: input.value.trim() })) input.value = '';
   };
-  section.querySelector('.take').onclick = () => act('take', { deck });
   root.append(section);
 }
 async function act(action, args) {
@@ -29,12 +31,13 @@ async function act(action, args) {
 }
 function render(state) {
   const flow = state.workflow;
+  if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
   document.querySelector('#schedule-status').textContent = state.schedule?.message || '每主日 10:00（Dallas）自動開始。';
   document.querySelector('[data-action="cancel-auto-start"]').disabled = ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
   const phases = { idle: '待機', preparing: '準備中', ready: '已就緒，可以開始崇拜', starting: '正在確認錄影', testing: '正在測試短錄影（保持靜音）', live: '崇拜中', ending: '正在結束', ended: '已結束', error: '需要處理' };
   document.querySelector('#workflow-status').textContent = flow ? `${phases[flow.phase]}${flow.error ? '：' + flow.error : ''}` : '待機';
   document.querySelector('#workflow-checks').textContent = flow ?
-    `主電腦 Meet ${flow.hostReady ? '✓' : '待確認'} · 講員準備 ${flow.peerReady ? '✓' : (flow.peerError || '等待連線')} · 兩份簡報 ${flow.slidesReady ? '✓' : '待設為觀眾畫面'} · 錄影 ${flow.recording ? '已確認開始' : '未確認開始'}${flow.phase === 'live' ? ' · 講員收音 ' + (flow.speakerLive ? '已確認開啟' : '等待確認') : ''}` : '';
+    `主電腦 Meet ${flow.hostReady ? '✓' : '待確認'} · 講員準備 ${flow.peerReady ? '✓' : (flow.peerError || '等待連線')} · 兩份簡報 ${flow.slidesReady ? '✓' : '待確認投影片'} · 錄影 ${flow.recording ? '已確認開始' : '未確認開始'}${flow.phase === 'live' ? ' · 講員收音 ' + (flow.speakerLive ? '已確認開啟' : '等待確認') : ''}` : '';
   document.querySelector('[data-action="begin-service"]').disabled = flow?.phase !== 'ready';
   document.querySelector('[data-action="prepare-service"]').disabled = ['preparing', 'starting', 'testing', 'live', 'ending'].includes(flow?.phase);
   document.querySelector('[data-action="test-recording"]').disabled = !flow?.hostReady || ['starting', 'testing', 'live', 'ending'].includes(flow?.phase);
@@ -57,14 +60,38 @@ function render(state) {
   const active = state.pages.find(page => page.id === state.active);
   document.querySelector('#live').textContent = active ? `輸出：${labels[active.deck]}` : '輸出：黑屏（全部靜音）';
   for (const deck of Object.keys(labels)) {
+    const label = labels[deck];
     const section = document.getElementById(deck);
     section.classList.toggle('live', active?.deck === deck);
     const chosen = state.pages.find(page => page.id === state.selected[deck]);
-    section.querySelector('.take').disabled = !chosen?.ready;
+    const candidate = window.presenterCards.cardPage(state, deck);
+    const primary = section.querySelector('.primary');
+    section.querySelector('.current-title').textContent = candidate?.title || '尚未選擇檔案';
+    let action = 'sunday-folder', args = { deck }, hint = '點「開啟本週 PPT」，登入後自動識別敬拜與講道。';
+    let buttonLabel = '選擇 PPT', disabled = false;
+    if (candidate) {
+      args = { id: candidate.id };
+      if (candidate.id === state.active) {
+        action = 'show-output'; buttonLabel = '正在播放 · 顯示畫面'; hint = '觀眾正在看這份簡報。⌘P 隱藏控制台。';
+      } else if (candidate.ready) {
+        action = 'take'; args = { deck }; buttonLabel = `播放${label}`; hint = '畫面已確認，可以播放。';
+      } else if (state.preview === candidate.id && candidate.loaded && !candidate.error && /\.pptx?\b/i.test(candidate.title)) {
+        action = 'confirm-play'; buttonLabel = `確認並播放${label}`;
+        hint = '請先在 PowerPoint 啟動投影片放映。確認畫面只有投影片，再按下方按鈕。';
+      } else {
+        action = 'prepare'; buttonLabel = candidate.error ? '查看問題／重試' : '繼續準備 PPT';
+        hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，再按 ⌘P 回來確認。';
+      }
+    }
+    primary.textContent = buttonLabel; primary.disabled = disabled;
+    primary.onclick = () => act(action, args);
+    section.querySelector('.next-step').textContent = hint;
+    section.querySelector('.change').textContent = candidate ? '查看 PPT' : '選擇其他檔案';
+    section.querySelector('.change').onclick = () => candidate ? act('prepare', { id: candidate.id }) : act('sunday-folder', { deck });
     document.querySelector(`[data-take="${deck}"]`).disabled = !chosen?.ready;
     const pages = section.querySelector('.pages');
     const deckPages = state.pages.filter(page => page.deck === deck);
-    for (const row of pages.children) {
+    for (const row of [...pages.children]) {
       if (!deckPages.some(page => String(page.id) === row.dataset.page)) row.remove();
     }
     for (const page of deckPages) {

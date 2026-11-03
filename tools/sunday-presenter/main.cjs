@@ -2,6 +2,7 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu,
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
+const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('./folder-wizard.js');
 const { Website } = require('./website.cjs');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
@@ -19,6 +20,10 @@ let controller, output, preparation, stage, officeSession, quitting = false, tes
 let website, remoteControl, workflow, helper, hostGuard, schedule, scheduleTimer, awakeBlocker;
 let settings = {};
 let keyQueue = Promise.resolve();
+let folderTimer;
+let filePlan = null;
+let folderMessage = '';
+const folderRuns = new Map();
 const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
 const controlShortcut = 'CommandOrControl+P';
@@ -39,7 +44,7 @@ function changed() {
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  workflow: workflow?.snapshot(), schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
+  workflow: workflow?.snapshot(), folderMessage, schedule: schedule?.snapshot(), meetingConfigured: !!settings.meetingUrl }; }
 
 function saveSettings() {
   const target = path.join(app.getPath('userData'), 'service-settings.json');
@@ -54,7 +59,7 @@ function remotePreferences() {
     navigateOnDragDrop: false, autoplayPolicy: 'document-user-activation-required' };
 }
 
-function createPage(deck, popupOptions = {}) {
+function createPage(deck, popupOptions = {}, followFrom = null) {
   if ([...stage.pages.values()].filter(p => p.deck === deck).length >= 8) {
     throw Error('此簡報已開啟八個頁面；請先關閉不需要的頁面。');
   }
@@ -68,12 +73,23 @@ function createPage(deck, popupOptions = {}) {
   const popup = !!popupOptions.webContents;
   const page = stage.add(deck, view, { select: !popup });
   const wc = view.webContents;
-  wc.setWindowOpenHandler(({ url }) => {
+  wc.setWindowOpenHandler(({ url, postBody }) => {
+    // Repeated GET clicks reuse the existing private document; never replace a
+    // POST popup or destroy its opener/body. Authentication popups stay parked.
+    if (!postBody && isDocumentURL(url)) {
+      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === url);
+      if (existing) {
+        if (stage.preview === page.id && !existing.ready) {
+          stage.prepare(existing.id); controller.hide();
+        } else if (existing.ready) { stage.selected[existing.deck] = existing.id; changed(); }
+        return { action: 'deny' };
+      }
+    }
     if (!allowedURL(url, testOrigin) || [...stage.pages.values()].filter(p => p.deck === deck).length >= 8) {
       return { action: 'deny' };
     }
     return { action: 'allow', overrideBrowserWindowOptions: { webPreferences: remotePreferences() },
-      createWindow: options => createPage(deck, options).view.webContents };
+      createWindow: options => createPage(deck, options, { id: page.id, url }).view.webContents };
   });
   const navigate = event => {
     if (!allowedURL(event.url, testOrigin)) event.preventDefault();
@@ -87,7 +103,19 @@ function createPage(deck, popupOptions = {}) {
   wc.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
     if (mainFrame && !inPlace) { page.loaded = false; stage.invalidate(page.id); }
   });
-  wc.on('did-finish-load', () => { page.loaded = true; page.error = ''; changed(); });
+  wc.on('did-finish-load', () => {
+    page.loaded = true; page.error = '';
+    const name = (() => { try { return new URL(wc.getURL()).searchParams.get('file') || ''; } catch { return ''; } })();
+    const assigned = filePlan && Object.keys(filePlan).find(key => name === filePlan[key]);
+    if (assigned && assigned !== page.deck) {
+      if (stage.selected[page.deck] === page.id) stage.selected[page.deck] = null;
+      page.deck = assigned;
+    }
+    if (followFrom && isDocumentURL(wc.getURL()) && stage.preview === followFrom.id) {
+      stage.prepare(page.id); controller.hide();
+    }
+    changed();
+  });
   wc.on('did-stop-loading', changed);
   wc.on('page-title-updated', (_event, title) => { page.title = title.slice(0, 180); changed(); });
   wc.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
@@ -115,6 +143,15 @@ function createPage(deck, popupOptions = {}) {
 async function act(action, args = {}) {
   switch (action) {
     case 'state': return snapshot();
+    case 'choose-week': {
+      filePlan = null; folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
+      const folder = await website.refresh();
+      const existing = [...stage.pages.values()].find(p => sameFolderURL(p.view.webContents.getURL(), folder.folderUrl));
+      if (existing) { stage.prepare(existing.id); controller.hide(); }
+      else await act('open', { deck: 'worship', url: folder.folderUrl });
+      folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
+      break;
+    }
     case 'save-meeting': {
       if (typeof args.url !== 'string' || !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(args.url)) throw Error('請填入完整的主日 Meet 連結。');
       if (workflow.recordAttempted || ['live', 'starting', 'testing', 'ending'].includes(workflow.phase)) throw Error('請先結束目前的崇拜。');
@@ -148,6 +185,7 @@ async function act(action, args = {}) {
       break;
     }
     case 'prepare': stage.prepare(args.id); controller.hide(); break;
+    case 'confirm-play': { const page = stage.get(args.id); stage.arm(page.id); stage.take(page.deck); controller.hide(); break; }
     case 'arm': stage.arm(args.id); break;
     case 'take':
       if (!Object.hasOwn(labels, args.deck)) throw Error('Unknown deck');
@@ -227,7 +265,7 @@ app.whenReady().then(async () => {
   });
   preparation = new BaseWindow({ ...hostOptions, frame: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
-  controller = new BrowserWindow({ width: 740, height: 850, show: false, alwaysOnTop: true,
+  controller = new BrowserWindow({ width: 1040, height: 760, show: false, alwaysOnTop: true,
     title: 'Sunday Presenter — 控制台',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
       contextIsolation: true, nodeIntegration: false } });
@@ -290,6 +328,7 @@ app.whenReady().then(async () => {
     try { return { state: await act(action, args) }; }
     catch (error) { return { error: error.message }; }
   });
+  if (smoke) controller.webContents.on('console-message', (_event, ...args) => console.log('controller:', ...args));
   await controller.loadFile(path.join(__dirname, 'control.html'));
   if (!smoke) {
     awakeBlocker = powerSaveBlocker.start('prevent-display-sleep');
@@ -297,7 +336,36 @@ app.whenReady().then(async () => {
       schedule.message = `定時啟動設定未能保存：${error.message}`; changed();
     }), 500);
   }
-  if (!smoke) website.refresh().catch(() => {});
+  if (!smoke) { controller.show(); controller.focus(); website.refresh().catch(() => {}); }
+  folderTimer = setInterval(async () => {
+    for (const [id, run] of folderRuns) {
+      const page = stage.pages.get(id);
+      if (!page || page.view.webContents.isDestroyed()) { folderRuns.delete(id); continue; }
+      const wc = page.view.webContents;
+      if (Date.now() > run.deadline) { folderRuns.delete(id); folderMessage = '自動選檔已停止；可重新按「開啟本週 PPT」，或在 OneDrive 選擇檔案。'; changed(); continue; }
+      if (run.busy || !page.loaded || !sameFolderURL(wc.getURL(), run.url) || run.opened.size === 2) continue;
+      run.busy = true;
+      try {
+        const names = await wc.executeJavaScript(`(${fileElements.toString()})().map(item => item.name)`);
+        const plan = identifyFiles(names);
+        if (!plan) { if (names.length) { folderMessage = '找到多份候選或缺少檔案，請在 OneDrive 選擇本週要用的 PPT。'; changed(); } continue; }
+        filePlan = plan; folderMessage = '已找到本週敬拜與講道，檔名顯示在下方。'; changed();
+        for (const name of Object.values(plan)) {
+          if (run.opened.has(name)) continue;
+          // Only click the exact file name observed above, in the same dated folder.
+          if (!sameFolderURL(wc.getURL(), run.url)) break;
+          const point = await wc.executeJavaScript(`(() => { const item = (${fileElements.toString()})().find(item => item.name === ${JSON.stringify(name)}); if (!item) return null; const r = item.element.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+          if (point) {
+            wc.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+            wc.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+            run.opened.add(name);
+          }
+        }
+        if (run.opened.size === 2) folderRuns.delete(id);
+      } catch { /* Login/navigation is allowed to finish before the next bounded poll. */ }
+      finally { run.busy = false; }
+    }
+  }, 1500);
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
@@ -329,6 +397,7 @@ app.on('before-quit', event => {
   quitting = true;
   globalShortcut.unregisterAll();
   clearInterval(hostGuard);
+  clearInterval(folderTimer);
   clearInterval(scheduleTimer);
   if (awakeBlocker !== undefined && powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker);
   remoteControl?.stop();

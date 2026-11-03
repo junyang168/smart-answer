@@ -29,3 +29,21 @@ input { width: 100%; min-width: 0; color: #e9edf5; background: #172231; font-siz
 .transport { display: flex; gap: 8px; flex-wrap: wrap; }
 .note { font-size: 12px; color: #8e9eb1; }
 #error { color: #ffbaa8; min-height: 0; }
+
+.current-title { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.next-step { min-height: 38px; }
+.advanced { margin-top: 20px; color: #aab9c9; font-size: 12px; }
+.advanced summary { cursor: pointer; margin-bottom: 12px; }
+.onair { position: static; box-shadow: none; flex-wrap: wrap; }
+#decks { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.deck { min-width: 0; }
+.deck .transport { align-items: flex-start; }
+@media (max-width: 620px) { #decks { grid-template-columns: 1fr; } }
+
+body { padding: 20px; }
+h1 { font-size: 24px; margin: 8px 0; }
+p { margin: 8px 0; }
+.sunday-folder { margin-top: 12px; padding: 14px; }
+.deck { margin: 12px 0; padding: 16px; }
+.workflow-settings { margin: 12px 0; }
+#sunday-status { font-size: 12px; }

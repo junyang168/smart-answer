@@ -1,11 +1,12 @@
 Sunday Presenter — Apple Silicon Mac
 
 1. 打開 DMG，主電腦把 Sunday Presenter 拖進 Applications；講員電腦安裝 Sunday Remote。
-2. 從 Applications 或 Spotlight 開啟 Sunday Presenter。
-3. 按 ⌘P 顯示控制台。App 會向教會網站取得本主日的 OneDrive 連結。
-4. 開啟主日崇拜／講道資料夾，在 app 內登入 Microsoft 並選取簡報。
-5. 啟動投影片放映，檢查後按「設為觀眾畫面」，然後切換輸出。
-6. Google Meet 只分享「Sunday Presenter — OUTPUT」視窗。
+2. 開啟 Sunday Presenter，播放台會直接出現。按「開啟本週 PPT」，首次登入 Microsoft。
+3. App 會把檔名包含「主日崇拜／主日敬拜」的唯一 PPT 歸到敬拜，另一份唯一 PPT 歸到講道，並自動開啟兩份。
+   若有多份候選，不會猜；請在 OneDrive 選擇本週檔案。
+4. 在 PowerPoint 啟動投影片放映，按 ⌘P 回播放台，按卡片上的「確認並播放」。
+5. 要回到該份 PPT 可按「查看 PPT」。其他頁面及手動連結收在卡片下方的進階選項。
+6. Google Meet 只分享「Sunday Presenter — OUTPUT」視窗。播放時按 ⌘P 顯示／隱藏播放台。
 
 新增講員遙控／開場流程（測試版）
 首次可在家完成：兩端登入 Chrome 的 Google 帳號；主電腦允許 Sunday Presenter、講員電腦允許 Sunday Remote 的輔助使用及本機網路權限。
