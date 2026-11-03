@@ -230,3 +230,34 @@ has **not** been deployed; production activation remains required before another
 laptop can obtain automatic links. The package is unsigned and not notarized.
 The second laptop itself, audible Meet delivery and broader real animation
 coverage have not been tested.
+
+
+## Paired remote and website pilot distribution — 2026-11-02
+
+The 0.3.1 pilot is available from authenticated Sunday-service administration
+through the separately merged/deployed #613 / PR #617. Production release
+`e8d1561c` passed the canonical deployment and health checks. The real signed-in
+production page displays both installer links and the upcoming 11/8 folder.
+Anonymous installer metadata/files redirect to sign-in, while the exact upcoming
+folder endpoint remains 200/no-store and adjacent administration stays protected.
+Published installer hashes match the staged bytes. Both installers previously
+passed development-browser download/readback. Actual production Chrome download
+attempts returned `ERR_BLOCKED_BY_CLIENT`; owner download confirmation remains
+pending, and this is not a successful production file-download check.
+
+The main Mac was updated from 0.3.0 to the published 0.3.1 bundle, retaining a
+backup and its user-data directory. Installed ASAR bytes match the staged bundle,
+the deep strict signature verifies, and the app starts with the actual upcoming
+folder and Sunday 10:00 Dallas schedule visible. Installed Sunday Remote
+successfully discovered this actual host via Bonjour. No same-Mac speaker Meet
+or microphone run was started. The discovery test service was stopped and
+Remote exited; Presenter remains idle with black/muted output.
+
+The short Bonjour service type and client endpoint re-resolution fixes are
+covered by 27 passing app tests. Eight website authorization/download/publisher
+checks and TypeScript pass. Previous actual PPT advance/switch-retention checks
+and same-Mac native TLS fixture checks remain partial evidence only. Physical
+two-Mac control over the owner's iPhone hotspot, AirPlay with HDMI, speaker audio,
+disconnection mute and the complete timed service transition still require
+acceptance. Keep #598 / PR #611 in draft. Ad-hoc updates may invalidate macOS
+Accessibility grants; no renewed grant was assumed or changed during this update.
