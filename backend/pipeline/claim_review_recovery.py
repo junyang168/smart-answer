@@ -184,6 +184,60 @@ def consumed_subscription_output_limit(previous, key, slot):
             **{name: binding(transport/name) for name in (*names, 'invocation.json', 'exit.json', 'response-schema.json')}}
 
 
+def consumed_subscription_refusal(previous, key, slot):
+    """Account for a finished initial Claude refusal; this permits no retry itself."""
+    from types import SimpleNamespace
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet
+    from backend.pipeline.source_reconciliation_runner import stage_adapter
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.subscription_process import digest_file
+    policy = cm.Policy.model_validate(previous['policy'])
+    if (slot.get('role') != 'opus' or slot.get('state') != 'started'
+            or key != slot['round_id'] + ':opus'
+            or policy.models['opus']['backend'] != 'claude_subscription'):
+        raise ValueError('finished refusal requires its original Claude subscription slot')
+    stage = Path(previous['execution_root']) / slot['round_id']
+    transport = stage / 'opus.transport'
+    materials = body(read(stage / 'materials.json'))
+    intent = body(read(stage / 'opus.reservation.json'))
+    packet = body(read(stage / 'opus.packet.json'))
+    failure = body(read(stage / 'opus.failure.json'))
+    candidate = cm.Candidate.model_validate(body(read(stage / 'candidate.json')))
+    if (materials['roles'] != ['opus'] or materials['round_number'] != 0
+            or intent != slot['intent'] or sha256_json(intent) != slot['intent_sha256']
+            or packet != claim_management_review_packet(materials, candidate)
+            or sha256_json(packet) != intent['request_payload_sha256']
+            or (stage / 'opus.raw.json').exists() or (transport / 'response.json').exists()):
+        raise ValueError('finished refusal cannot replace a report, revision or changed input')
+    adapter = stage_adapter(claim_management_model_adapter('opus', policy), packet,
+                            stage / 'opus.raw.json', saved=intent)
+    if (any(intent[n] != getattr(adapter, n) for n in
+            ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256'))
+            or intent['request_encoding_proof'] != adapter.request_encoding_proof(packet)):
+        raise ValueError('finished refusal model/prompt/schema/wire drift')
+    adapter._client = SimpleNamespace(generate_json=lambda **kwargs: kwargs)
+    wire = adapter.generate(packet)
+    invocation = json.loads((transport / 'invocation.json').read_text())
+    receipt = json.loads((transport / 'exit.json').read_text())
+    names = ('stdout.log', 'stderr.log')
+    if (invocation.get('input_sha256') != hashlib.sha256(((wire.get('cache_prefix') or '') + wire['user_prompt']).encode()).hexdigest()
+            or receipt.get('returncode') != 1 or receipt.get('error_type')
+            or receipt.get('files') != {n: digest_file(transport / n) for n in names}
+            or failure.get('automatic_retry') is not False
+            or failure.get('transport_directory') != str(transport)
+            or any(failure.get('provider_raw', {}).get(n.removesuffix('.log')) != (transport / n).read_text() for n in names)):
+        raise ValueError('finished refusal requires its exact closed transport and failure receipt')
+    result = json.loads((transport / 'stdout.log').read_text())
+    if (result.get('stop_reason') != 'refusal' or result.get('is_error') is not True
+            or result.get('terminal_reason') != 'api_error' or 'structured_output' in result
+            or not result.get('result') or not isinstance(result.get('usage'), dict)):
+        raise ValueError('not an explicit finished provider refusal without a report')
+    return {'slot': key, 'spent_call_preserved': True, 'review_accepted': False,
+            'provider_stop_reason': 'refusal', 'usage': result['usage'],
+            'failure': binding(stage / 'opus.failure.json'),
+            **{n: binding(transport / n) for n in (*names, 'invocation.json', 'exit.json')}}
+
+
 def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
     check_binding(authorization)
     direction=json.loads(Path(authorization['path']).read_text())

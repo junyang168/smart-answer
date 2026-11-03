@@ -3327,6 +3327,11 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
+                if continuation.get('subscription_refusal_retry'):
+                    if goal['original_objects'] != prior['original_goal']['original_objects']:
+                        raise ChangeSetConflict('same-task refusal retry input changed')
+                    from backend.pipeline.claim_human_source import assert_current as assert_human_current
+                    assert_human_current(cursor, request.source_bindings, prior.get('human_source_decisions', []))
                 opus_handoff = continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')
                 # Human answers bind the original review scope. The locked
                 # transaction readset also contains downstream consumers that

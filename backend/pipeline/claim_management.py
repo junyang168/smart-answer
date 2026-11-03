@@ -1622,6 +1622,28 @@ def continuation_budget(previous, request, policy):
     api_transition = api_authorize(previous, request, policy, authority)
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
     subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
+    refusal_retry = authority.get('subscription_refusal_retry')
+    refusal_proofs = {}
+    if refusal_retry is not None:
+        same_policy = lambda p: p.model_dump(mode='json', exclude={'policy_id', 'budget'})
+        current_contract = audit_contract(Path(previous['execution_root']) / 'refusal-retry-contract', original)
+        if (not isinstance(refusal_retry, dict)
+                or set(refusal_retry) != {'predecessor_action_id', 'prior_metadata_sha256', 'slot', 'failure', 'authorization_quote'}
+                or refusal_retry['predecessor_action_id'] != old.action_id
+                or refusal_retry['prior_metadata_sha256'] != sha256_json(previous)
+                or not refusal_retry['authorization_quote']
+                or previous['result'].get('reason') != 'model_failed'
+                or previous.get('findings') or previous.get('created_keys')
+                or authority.get('owner_call_extension') or authority.get('human_source_verification')
+                or previous['original_goal'].get('subscription_refusal_retries')
+                or previous.get('continuation', {}).get('original_goal', {}).get('subscription_refusal_retries')
+                or previous.get('continuation', {}).get('subscription_refusal_retry')
+                or same_policy(policy) != same_policy(original)
+                or policy.budget.max_output_tokens != original.budget.max_output_tokens
+                or policy.budget.max_request_bytes != original.budget.max_request_bytes
+                or any(current_contract['implementation'].get(k) != v
+                       for k, v in previous['audit_contract']['implementation'].items() if '/prompts/' in k)):
+            raise ValueError('refusal retry requires one explicit same-task/model direction and unchanged instructions')
     extension = authority.get('owner_call_extension')
     from backend.pipeline.claim_metadata_projection import repair_extension,repair_defects
     engineering_repair = repair_extension(previous,request,policy,authority)
@@ -1747,6 +1769,14 @@ def continuation_budget(previous, request, policy):
         if login_refusal is not None:
             failures[key] = login_refusal
             continue
+        if refusal_retry is not None and key == refusal_retry['slot']:
+            from backend.pipeline.claim_review_recovery import consumed_subscription_refusal
+            proof = consumed_subscription_refusal(previous, key, slot)
+            if proof['failure'] != refusal_retry['failure']:
+                raise ValueError('refusal retry failure binding drift')
+            refusal_proofs[key] = proof
+            spent[slot['role']] += 1
+            continue
         if subscription_limit and slot['role'] == 'gpt' and (root/slot['round_id']/'gpt.failure.json').is_file():
             from backend.pipeline.claim_review_recovery import consumed_subscription_output_limit
             output_failures[key] = consumed_subscription_output_limit(previous,key,slot)
@@ -1829,6 +1859,13 @@ def continuation_budget(previous, request, policy):
     if set(historical_stages) != set(historical_inputs):
         raise ValueError('historical rejected-stage proof names an unconsumed call')
     continued_goal = deepcopy(previous['original_goal'])
+    inherited_refusals = previous.get('continuation', {}).get('original_goal', {}).get('subscription_refusal_retries')
+    if inherited_refusals:
+        continued_goal['subscription_refusal_retries'] = list(inherited_refusals)
+    if refusal_retry is not None:
+        if len(refusal_proofs) != 1:
+            raise ValueError('refusal retry must preserve exactly one spent closed refusal')
+        continued_goal['subscription_refusal_retries'] = list(refusal_proofs)
     if engineering_repair:
         if extension_basis!='remaining_findings':raise ValueError('stale AI repair requires the existing bounded findings continuation')
         used_engineering_repairs.append(engineering_repair['defect'])
@@ -1869,6 +1906,7 @@ def continuation_budget(previous, request, policy):
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
         **({'subscription_output_limit_recovery':output_failures} if subscription_limit else {}),
+        **({'subscription_refusal_retry': {'direction': refusal_retry, 'failures': refusal_proofs}} if refusal_retry is not None else {}),
         **({'source_support_creation':True} if support_creation else {}),
         **({'related_owner_target_extension':True} if target_extension else {}),
         'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':continued_goal,
