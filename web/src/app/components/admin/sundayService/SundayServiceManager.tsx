@@ -431,6 +431,7 @@ export function SundayServiceManager() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pptGenerating, setPptGenerating] = useState<string | null>(null);
+  const [pptResult, setPptResult] = useState<{ date: string; message: string; failed: boolean } | null>(null);
   const [finalPptUploading, setFinalPptUploading] = useState(false);
   const [finalPptDownloading, setFinalPptDownloading] = useState<string | null>(null);
   const [emailSending, setEmailSending] = useState<string | null>(null);
@@ -862,6 +863,7 @@ export function SundayServiceManager() {
   };
 
   const handleEdit = (entry: SundayServiceEntry) => {
+    setPptResult(null);
     setShowCreateForm(false);
     setEditingDate(entry.date);
     const next = toForm(entry);
@@ -950,6 +952,7 @@ export function SundayServiceManager() {
   };
 
   const handleGeneratePpt = async (date: string) => {
+    setPptResult(null);
     setPptGenerating(date);
     setFeedback(null);
     setError(null);
@@ -968,10 +971,10 @@ export function SundayServiceManager() {
       anchor.click();
       document.body.removeChild(anchor);
       window.URL.revokeObjectURL(url);
-      setFeedback(`已生成並下載 ${fileName}`);
+      setPptResult({ date, message: `已生成 ${fileName}，已要求瀏覽器下載。`, failed: false });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "生成 PPT 失敗";
-      setError(message);
+      const message = err instanceof Error ? err.message : "生成 PPT 失敗，沒有下載檔案，請稍後重試。";
+      setPptResult({ date, message, failed: true });
     } finally {
       setPptGenerating(null);
     }
@@ -1439,6 +1442,12 @@ export function SundayServiceManager() {
                   {emailSending === editingDate ? "發送中…" : "發送 email"}
                 </button>
               </div>
+              {pptGenerating === editingDate && <p role="status" className="text-sm text-blue-800">正在生成 {editingDate} 的 PPT，完成後會開始下載…</p>}
+              {pptResult?.date === editingDate && (
+                <div role={pptResult.failed ? "alert" : "status"} className={`whitespace-pre-line rounded border p-3 text-sm ${pptResult.failed ? "border-red-200 bg-red-50 text-red-800" : "border-green-200 bg-green-50 text-green-800"}`}>
+                  {pptResult.message}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="font-semibold text-gray-700">上傳最終 PPT</span>
                 <input
