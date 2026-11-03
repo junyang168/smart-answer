@@ -6,8 +6,9 @@ Historical policies keep their original schemas and interpretation.
 """
 from copy import copy, deepcopy
 import json
-from typing import Literal
+from typing import Literal, Union
 
+from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
 from pydantic import Field, create_model
 from backend.pipeline import claim_management as cm
 
@@ -115,11 +116,18 @@ def scoped_adapter(adapter, packet):
             creatable = {p['collection'] for p in request.get('creation_permissions', [])}
             identity = {}
             if contract == MANAGED_CONTRACT:
-                slots = set(packet['original_goal']['claim_creation_allocations'].values())
+                slots = set(allocated_ids(packet['original_goal']['claim_creation_allocations']))
                 identity['object_id'] = (key_type(slots), ...)
             creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...), **identity)
+            support = creatable - {'claims'}
+            if contract == MANAGED_CONTRACT and support:
+                claim_creation = create_model('ScopedClaimCreation', __base__=Creation,
+                    collection=(Literal['claims'], ...), **identity)
+                support_creation = create_model('ScopedSupportCreation', __base__=Creation,
+                    collection=(key_type(support), ...))
+                creation = Union[claim_creation, support_creation] if 'claims' in creatable else support_creation
             fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else
-                                                          {'max_length': 1} if contract == MANAGED_CONTRACT else {})))
+                {'max_length': len(slots)} if contract == MANAGED_CONTRACT and not support else {})))
         if contract == MANAGED_CONTRACT:
             allowed = {k for k in writable if k in targets or k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
             if 'Retire' not in request['allowed_operations']:
@@ -175,7 +183,11 @@ def candidate(raw, materials):
         raise ValueError('legacy identity recovery cannot upgrade the model output contract')
     managed = materials['policy']['model_output_contract'] == MANAGED_CONTRACT
     creating = materials['policy']['model_output_contract'] in {CREATING_CONTRACT, MANAGED_CONTRACT}
-    wire = (ManagedChanges if managed else CreatingChanges if creating else Changes).model_validate(raw)
+    from backend.pipeline.claim_metadata_projection import project_support_aliases, project_candidate
+    wire_type = ManagedChanges if managed else CreatingChanges if creating else Changes
+    wire = wire_type.model_validate(raw)
+    projected_raw, support_ids = project_support_aliases(raw, materials)
+    if support_ids:wire = wire_type.model_validate(projected_raw)
     request = cm.Request.model_validate(materials['unit_request'])
     if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
@@ -204,7 +216,7 @@ def candidate(raw, materials):
         key = cm.source.key(creation.collection, creation.object_id)
         if key in seen or key in before or creation.collection not in cm.KNOWLEDGE_COLLECTIONS:
             raise ValueError('created record repeated, already present or of an unknown collection')
-        if managed and creation.object_id not in materials['original_goal']['claim_creation_allocations'].values():
+        if managed and creation.collection == 'claims' and creation.object_id not in allocated_ids(materials['original_goal']['claim_creation_allocations']):
             raise ValueError('created identity is not a program-reserved Claim slot')
         seen.add(key)
         fields = object_json(creation.fields_json)
@@ -228,7 +240,8 @@ def candidate(raw, materials):
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
-    return result, receipt
+    if support_ids:receipt['support_creation_identities']=support_ids
+    return project_candidate(result, receipt, materials)
 
 
 def review(raw, materials, proposal):

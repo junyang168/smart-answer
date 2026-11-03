@@ -19,7 +19,7 @@ FIELDS = {
                        'source_fragment_ids', 'speaker', 'stance', 'discourse_role',
                        'support_eligibility', 'produced_claim_ids', 'citation_ids'},
     'source_fragments': {'verbatim_excerpt', 'paragraph_key', 'source_segment_index',
-                         'media_time', 'anchor_state'},
+                         'media_time', 'media_end_time', 'anchor_state'},
     'observations': {'statement', 'observation_type', 'argument_role', 'scripture_refs',
                      'source_fragment_id', 'source_fragment_ids'},
     'questions': {'text', 'question_type', 'questioner', 'source_fragment_id',
@@ -30,6 +30,13 @@ FIELDS = {
     'knowledge_relations': {'from_id', 'to_id', 'relation_type', 'reason'},
     'claim_relation_constraints': {'source_id', 'target_id', 'forbidden_relation_types',
                                   'bidirectional', 'composition_role', 'reason'},
+}
+
+# A new Claim may need a new piece of its own professor source as evidence.
+# These remain content-only grants; source documents and approval stay protected.
+SUPPORT_CREATION_FIELDS = {
+    'evidence_steps': FIELDS['evidence_steps'],
+    'source_fragments': FIELDS['source_fragments'] | {'source_id'},
 }
 
 
@@ -50,7 +57,7 @@ def immutable(path, value):
     return binding(path)
 
 
-def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -64,6 +71,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         raise ValueError('the Claim Update direction is required')
     if type(max_workers) is not int or max_workers not in (1, 2):
         raise ValueError('max_workers must be 1 or 2')
+    if type(creation_count) is not int or creation_count<1:raise ValueError('creation_count must be a positive integer')
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if policy is None:
@@ -76,6 +84,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}
+    if creation_count!=1:intent['creation_count']=creation_count
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -90,12 +99,17 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
 
     # Validate the complete denominator before preparing or dispatching any job.
     excluded = {}
+    sampling_candidates = set()
     for cid in ids:
         state = store.get_record_state('claims', cid)
         if state is None or state['retired']:
             excluded[cid] = {'status': 'paused', 'reason': 'missing_claim' if state is None else 'retired_claim'}
         elif state['payload'].get('review_status') in cm.HELD:
-            excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
+            from backend.pipeline.claim_metadata_projection import sampling_marker
+            with store.connect() as conn, conn.cursor() as cursor:
+                sampling = (selected.model_output_contract == 'claim_changes_v4' and sampling_marker(cursor, cid, state))
+            if sampling:sampling_candidates.add(cid)
+            else:excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
     jobs, inputs = [], []
     for cid in ids:
         if cid in excluded:
@@ -125,8 +139,10 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             request.allowed_operations = ['Update', 'Create', 'Retire']
             request.creation_permissions = [cm.CreationPermission(collection='claims', source_id=sid,
                                                                   fields=sorted(FIELDS['claims']))]
+            request.creation_permissions += [cm.CreationPermission(collection=col, source_id=sid,
+                fields=sorted(fields)) for col,fields in SUPPORT_CREATION_FIELDS.items()]
             allocations[sid] = reserve(store, action_id=request.action_id, source_id=sid, target_id=cid,
-                                       root=action_dir / 'execution')
+                                       root=action_dir / 'execution',count=creation_count)
         # A writable relation makes its other Claim reviewed content, so one
         # more pass grants the Evidence and relations that review then shows
         # (#459: CR001 brought CL004's E016/ER011 into review but not into the
@@ -145,7 +161,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 if key in granted or col not in FIELDS or (col == 'claims' and oid != cid):
                     continue
                 state = before[key]
-                if state['retired'] or state['payload'].get('review_status') in cm.HELD:
+                if state['retired'] or (state['payload'].get('review_status') in cm.HELD and not (col=='claims' and oid==cid and cid in sampling_candidates)):
                     continue
                 if col not in cm.RELATION_COLLECTIONS and not cm.own_source_ids(state['payload'], payloads) <= own:
                     continue
@@ -175,7 +191,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     return result
 
 
-def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
+def run(values, root, *, instruction, max_workers=1, store=None, policy=None, model_capacity=None, creation_count=1):
     from backend.pipeline import claim_management_batch as batch
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = store if store is not None else PostgresKnowledgeStore()
@@ -186,14 +202,15 @@ def run(values, root, *, instruction, max_workers=1, store=None, policy=None):
     with (root / 'intake.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
-            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy)
+            prepared = prepare(values, root, instruction=instruction, max_workers=max_workers, store=store, policy=policy, creation_count=creation_count)
             manifest = prepared['manifest']['path'] if prepared['manifest'] else None
             jobs = batch.load(manifest, root / 'batch', store=store)[1] if manifest else {}
             original = batch._paragraph_results(store, jobs)
             if not all(v.get('status') == 'completed' for v in original['results'].values()):
-                batch.run(manifest, root / 'batch')
+                batch.run(manifest, root / 'batch', **({'model_capacity': model_capacity} if model_capacity else {}))
             from backend.pipeline.claim_qualification_refresh import run as refresh_currentness
-            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction)
+            result = refresh_currentness(store, jobs, root / 'completion-currentness', instruction=instruction,
+                **({'model_capacity': model_capacity} if model_capacity else {}))
             by_claim = {cid: {'action_id': None, 'result': reason, 'qualification': None}
                         for cid, reason in prepared['excluded'].items()}
             for action_id, (request, _) in jobs.items():

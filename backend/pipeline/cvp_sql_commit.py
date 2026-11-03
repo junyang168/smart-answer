@@ -203,6 +203,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
         evidence['claim_management_scope'] = {'consumer_roots': [list(k) for k in sorted({
             (key.split('/',1)[0], key.split('/',1)[1]) for key in material['unit_request']['target_keys']} |
             {(p['collection'],p['object_id']) for p in material['unit_request']['permissions']})]}
+        if 'program_metadata_projection' in material:
+            evidence['claim_management_scope']['metadata_projection'] = {
+                'projection':material['program_metadata_projection'], 'policy':material['policy'],
+                'request':material['unit_request']}
         if 'human_source_decisions' in material:
             evidence['claim_management_scope'].update(source_ids=sorted(material['unit_request']['source_bindings']),
                 human_source_decisions=material['human_source_decisions'])

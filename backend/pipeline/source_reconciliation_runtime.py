@@ -94,11 +94,23 @@ def claim_management_model_adapter(role, policy, *, live=False):
     from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, JointJsonCandidate, JointReview, MODELS
     if role not in {"gpt", "opus"}:
         raise ValueError("independent Gemini audit uses audit-library's own transport")
-    model, _ = MODELS[role]
-    client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
-        model=model, backend=MODELS[role][1], reasoning_effort="high",
+    model = policy.models[role]['model_id']
+    backend = policy.models[role]['backend']
+    if live and backend == 'anthropic_api':
+        from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
+        client = ClaimAnthropicAPI(model=model, reasoning_effort='high',
+            max_output_tokens=policy.budget.max_output_tokens,
+            spend_root=policy.api_spend['root'],
+            cache_enabled=policy.request_encoding_contract is not None)
+    else:
+        client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
+        model=model, backend=backend, reasoning_effort="high",
         max_output_tokens=policy.budget.max_output_tokens)
     client.max_output_tokens = policy.budget.max_output_tokens
+    if policy.request_encoding_contract and role == 'gpt':
+        client.cache_usage_events = True
+        if policy.api_spend:
+            client.cache_working_directory = str(Path(policy.api_spend['root']).parent / 'codex-cache-context')
     prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
                                           else "claim_management_review_v2.md")).read_text())
     if role == 'gpt':
@@ -131,7 +143,7 @@ def claim_management_model_adapter(role, policy, *, live=False):
         response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = policy.budget.max_request_bytes
-    return adapter
+    return adapter.shared_shapes_v6_copy() if policy.request_encoding_contract else adapter
 
 
 def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict:
@@ -186,6 +198,10 @@ def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict
 class ProductionPorts:
     def __init__(self, store=None):
         self.store = store or PostgresKnowledgeStore()
+        configuration = os.environ.get('WKP_CLAIM_CAPACITY_CONFIG')
+        if configuration:
+            from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+            self.model_call_capacity = ClaimModelCapacity(json.loads(Path(configuration).read_text())).call
 
     def current_snapshot(self, keys):
         """Fresh exact row identities, including storage metadata; no SELECT-all."""
