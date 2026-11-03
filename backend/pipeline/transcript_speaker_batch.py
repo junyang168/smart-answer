@@ -90,7 +90,8 @@ def plan_windows(paragraphs: list[dict], duration_ms: int, core_seconds=300) -> 
 
 
 def run(source: Path, snapshot: Path, out: Path, workers=2, *,
-        core_seconds=300, recovery_parent: Path | None = None) -> dict:
+        core_seconds=300, recovery_parent: Path | None = None,
+        thinking_level: str | None = None, only_window_ids: list[str] | None = None) -> dict:
     if workers not in (1, 2):
         raise ValueError('Bounded pilot supports one or two workers')
     if (out.resolve().is_relative_to(source.resolve())
@@ -131,6 +132,11 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
                             'parent_window':parent['id'], 'reason':'explicit_HTTP_504_split_no_original_replay',
                             'max_additional_calls':2, 'maximum_additional_reserved_usd':2}
 
+    if only_window_ids:
+        selected = [w for w in windows if w['id'] in only_window_ids]
+        if len(selected) != len(only_window_ids) or len(set(only_window_ids)) != len(only_window_ids):
+            raise ValueError('Unknown/duplicate selected window')
+        windows = selected
     plan = {'schema_version': 'speaker-full-audio-plan.v1', 'source_hashes': hashes,
             'snapshot_sha256': snapshot_sha, 'snapshot_revision': document['context']['revision'],
             'window_count': len(windows), 'max_calls': len(windows),
@@ -138,6 +144,12 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
             'workers': workers, 'windows': windows, 'protections': protections}
     if recovery_binding:
         plan['bounded_recovery'] = recovery_binding
+    if thinking_level is not None:
+        if thinking_level != 'LOW':
+            raise ValueError('Only existing audio correction LOW thinking policy is supported')
+        plan['thinking_level'] = thinking_level
+    if only_window_ids:
+        plan['selected_window_ids'] = only_window_ids
     out.mkdir(parents=True, exist_ok=True)
     if (out/'plan.json').exists() and read_json(out/'plan.json') != plan:
         raise ValueError('Saved plan differs; do not replace')
@@ -157,6 +169,8 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
             write_audio(clip, audio)
         reviewer = VisionReviewer('gemini', BATCH_PROMPT, BATCH_SCHEMA)
         reviewer.config['max_output_tokens'] = 16384
+        if thinking_level is not None:
+            reviewer.config['thinking_config'] = {'thinking_level':thinking_level}
         material = {'core_clip_range_s': [(window['core_start_ms']-lo)/1000,
                                           (window['core_end_ms']-lo)/1000],
                     'paragraphs': [{'paragraph_id':p['id'], 'text':p['text'],
@@ -255,7 +269,10 @@ if __name__=='__main__':
     parser.add_argument('--source',type=Path,required=True)
     parser.add_argument('--snapshot',type=Path,required=True)
     parser.add_argument('--out',type=Path,required=True)
-    parser.add_argument('--core-seconds',type=int,choices=[150,300],default=300)
+    parser.add_argument('--core-seconds',type=int,choices=[75,150,300],default=300)
     parser.add_argument('--recovery-parent',type=Path)
+    parser.add_argument('--thinking-level',choices=['LOW'])
+    parser.add_argument('--only-window',action='append')
     args=parser.parse_args()
-    run(args.source,args.snapshot,args.out,core_seconds=args.core_seconds,recovery_parent=args.recovery_parent)
+    run(args.source,args.snapshot,args.out,core_seconds=args.core_seconds,recovery_parent=args.recovery_parent,
+        thinking_level=args.thinking_level,only_window_ids=args.only_window)

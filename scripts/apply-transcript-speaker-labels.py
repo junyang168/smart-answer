@@ -82,7 +82,7 @@ def main(args):
     if not args.apply or not result['operations']: return
     if (root/'apply-request.json').exists():
         raise ValueError('A saved operation already exists; reconcile its receipt before another write')
-    request={'operation_id':'speaker623_model_'+uuid.uuid4().hex,
+    request={'operation_id':args.operation_prefix+'_'+uuid.uuid4().hex,
              'version':current['version'],'epoch':access['epoch'],'operations':result['operations'],
              'assisted_edit':{'kind':'speaker_attribution_candidate','review_status':'unreviewed_model_candidate',
                               'source_hashes':plan['source_hashes'],'snapshot_sha256':plan['snapshot_sha256']}}
@@ -122,5 +122,6 @@ if __name__=='__main__':
     p.add_argument('--item',required=True)
     p.add_argument('--actor',required=True)
     p.add_argument('--base',default='http://127.0.0.1:8555')
+    p.add_argument('--operation-prefix',default='speaker_model')
     p.add_argument('--apply',action='store_true')
     main(p.parse_args())

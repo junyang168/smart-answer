@@ -68,7 +68,8 @@ def validate(answer: dict, text: str, duration_s: float) -> None:
         previous_start = start
 
 
-def run(source: Path, paragraph_id: str, out: Path, start_s: int, end_s: int) -> dict:
+def run(source: Path, paragraph_id: str, out: Path, start_s: int, end_s: int, *,
+        thinking_level: str | None = None) -> dict:
     if not 0 <= start_s < end_s or end_s - start_s > 120:
         raise ValueError('Pilot accepts at most 120 seconds')
     if out.resolve().is_relative_to(source.resolve()) or source.resolve().is_relative_to(out.resolve()):
@@ -97,6 +98,10 @@ def run(source: Path, paragraph_id: str, out: Path, start_s: int, end_s: int) ->
                 'target_approximate_clip_range_s': [target['start_ms'] / 1000 - start_s,
                                                   target['end_ms'] / 1000 - start_s]}
     reviewer = VisionReviewer('gemini', PROMPT, SCHEMA)
+    if thinking_level is not None:
+        if thinking_level != 'LOW':
+            raise ValueError('Only the existing audio-correction LOW thinking policy is supported')
+        reviewer.config['thinking_config'] = {'thinking_level':thinking_level}
     request = {'stage': 'speaker-attribution-pilot.v1', 'model': reviewer.model,
                'prompt': PROMPT, 'schema': SCHEMA, 'config': reviewer.config,
                'transcript_sha256': transcript_sha,
@@ -138,6 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--start', type=int, required=True)
     parser.add_argument('--end', type=int, required=True)
+    parser.add_argument('--thinking-level', choices=['LOW'])
     args = parser.parse_args()
-    result = run(args.source, args.paragraph, args.out, args.start, args.end)
+    result = run(args.source, args.paragraph, args.out, args.start, args.end, thinking_level=args.thinking_level)
     print(json.dumps(result, ensure_ascii=False, indent=2))
