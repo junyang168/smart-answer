@@ -63,7 +63,7 @@ fi
 
 git push --quiet -u origin "$BRANCH"
 
-if url="$(gh pr view "$BRANCH" --json url -q .url 2>/dev/null)" && [[ -n "$url" ]]; then
+if url="$(gh pr view "$BRANCH" --json url,state -q 'select(.state == "OPEN") | .url' 2>/dev/null)" && [[ -n "$url" ]]; then
   printf '%s\n' "$url"
   printf 'already open · pushed %s\n' "$BRANCH" >&2
   exit 0
