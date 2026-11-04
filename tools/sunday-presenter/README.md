@@ -1,14 +1,18 @@
-# Sunday Presenter — local recording pilot (#643)
+# Sunday Presenter — Meet-first PPT and Remote pilot (#643)
 
 Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
 window and a paired local speaker remote. Google Meet is operated manually.
-Phase 2 (#643) proposes PPT video to Remote and automated YouTube broadcasting
-with the existing wireless microphone on the host. Remote microphone relay is
-deferred.
+Phase 2 (#643) first stabilizes PPT video, Remote and the Google Meet workflow.
+In Meet, manually share OUTPUT and select the host's wireless microphone.
+Local recording is optional and starts only on explicit Start Recording; it is
+not required to use PPT, Remote or Meet. Presenter microphone permission and a
+recording destination are unnecessary for that Meet-only workflow. Meet still
+needs its own permission and input selection. YouTube broadcasting is deferred
+until the app/Meet path is stable. Remote microphone relay remains deferred.
 
 The [Phase 2 design](../../docs/sunday-presenter-phase2-design.md) covers local
 point-to-point PPT video, replacing the AirPlay dependency,
-plus recording and YouTube streaming with a reusable stream key and fixed viewing
+plus optional recording and later YouTube streaming with a reusable stream key and fixed viewing
 link. PPT audio capture, Google OAuth and Remote microphone relay are outside this
 design; only the selected wireless microphone on the host supplies audio. It is
 a design draft, not an implemented capability of the Phase 1 release below.

@@ -1,5 +1,22 @@
 # Sunday Presenter acceptance evidence
 
+## #643 owner rollout decision — Meet first, recording optional (2026-11-04)
+
+The owner directed continued Google Meet use while Presenter/Remote stabilizes,
+with YouTube Live deferred. Current runtime already starts recording only from
+an explicit `record-start` action: app startup, PPT playback and Remote connection
+do not start it. Meet-only use does not require Presenter microphone access or
+an MP4 save location; Meet has its own input/permission controls. Controller copy
+now states that recording is optional and initially inactive. This is wording
+and rollout-order clarification, not a newly implemented automatic-recording
+switch. No package reinstall, permission reset or new live call was needed.
+
+The v3 design requires an independent, default-off setting if future automatic
+recording is added; recording disabled/failed must not block Meet, PPT, Remote
+or later YouTube. Meet/target-Mac/hotspot/full-service acceptance is the current
+priority. The two short digital-silence findings below remain unresolved;
+recording is neither accepted as clean audio nor a prerequisite for Meet.
+
 ## #643 completed 90-minute installed-app run — qualified result (2026-11-04)
 
 Installed 0.6.1 (runtime commit `0697a29b`) recorded the owner's actual Office

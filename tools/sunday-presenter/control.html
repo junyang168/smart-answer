@@ -27,10 +27,11 @@
   <p id="error" role="alert"></p>
   <main id="decks"></main>
   <section class="sunday-folder" aria-label="本機錄影">
-    <strong>PPT＋麥克風錄影</strong>
+    <strong>PPT＋麥克風錄影（選用）</strong>
+    <p class="note">預設不錄影，只有按「開始錄影」才會啟動。使用 Google Meet 不需要開啟本機錄影；請在 Meet 選擇無線麥克風並分享 OUTPUT。</p>
     <div class="transport"><button data-action="record-devices" id="record-devices">選擇／更新麥克風</button>
       <select id="record-mic" aria-label="錄影麥克風"><option value="">請先更新麥克風</option></select></div>
-    <p id="record-status" role="status">錄下觀眾 PPT 畫面和選定麥克風，儲存為 MP4。</p>
+    <p id="record-status" role="status">本機錄影未啟動；需要 MP4 副本時才手動開始。</p>
     <label>收音 <meter id="record-level" min="0" max="1" value="0" aria-label="麥克風音量"></meter></label>
     <div class="transport"><button id="record-start">開始錄影並選擇儲存位置</button>
       <button data-action="record-stop" id="record-stop" hidden>停止並儲存</button>

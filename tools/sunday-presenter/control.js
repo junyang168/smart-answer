@@ -57,7 +57,7 @@ function render(state) {
     recording.status === 'stopping' ? '正在停止收音並儲存錄影，請稍候…' :
     recording.status === 'saved' ? `已儲存：${recording.path}${recording.stopReason ? ' · ' + recording.stopReason : ''}` :
     recording.status === 'error' ? `${recording.error}${recording.partialPath ? ' · 未完成檔案：' + recording.partialPath : ''}` :
-    '錄下觀眾 PPT 畫面和選定麥克風，儲存為 MP4。';
+    '本機錄影未啟動；需要 MP4 副本時才手動開始。';
   const remote = state.remote;
   document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired ? '講員已連線，可以翻頁。' :
     remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
