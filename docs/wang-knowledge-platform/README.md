@@ -98,6 +98,7 @@
 | [釋經文章寫作品質評分表 v1](./30-authoring/matthew_exposition_writing_quality_rubric_v1.md) | 正文的评分维度与 hard gates |
 | [釋經初稿的程序化審計流程 v1](./30-authoring/editorial_draft_audit_workflow_v1.md) | 编排计划与初稿之间的程序化审计 |
 | [篇章编排双模型审核 v1](./30-authoring/composition_ai_review_v1.md) | 编排计划怎样被双模型复核 |
+| [文库入口：先选书卷和来源，再选章](./30-authoring/repository_book_source_navigation_solution.md) | 文库入口页怎样按书卷、来源、章导航到按章页面（待评审） |
 | [馬太福音釋經：來源進入論證層與跨來源整合 v1](./30-authoring/matthew_source_to_argument_workflow_v1.md) | 笔记与讲稿两种来源怎样进入论证层 |
 | [馬太福音十六章來源地圖 v1](./30-authoring/matthew_16_source_map_v1.md) | 十六章有哪些来源、哪些算独立证据 |
 | [马太福音第 17 章释经篇章蓝图](./30-authoring/matthew_17_exposition_blueprint.md) | 太17 释经文章的结构（候选，应迁移为 CompositionPlan） |
