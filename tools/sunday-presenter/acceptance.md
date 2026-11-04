@@ -1,3 +1,23 @@
+## #652 physical iPad installation; first launch awaits device trust (2026-11-04)
+
+The owner connected an iPad Air (5th generation), iPadOS 27.2 (24B119), enabled
+Developer Mode, paired it over USB, signed in to Xcode and authorized Keychain.
+Xcode lists the real device and developer disk image services are available.
+The signed Debug device build succeeds and strict/deep codesign verification
+passes. Official devicectl installation confirms Sunday Remote 0.1.0 build 1.
+First launch was denied with an iPadOS signature/entitlement/profile-trust
+security error; the owner has been asked to explicitly trust their development
+profile on iPad. No real-device launch/video/control pass is claimed yet.
+The Personal Team profile expires 2026-11-11 19:47 UTC (13:47 Chicago).
+
+DeviceSupport processing exhausted internal space during this setup. Its
+finalized data was copied and checksum-verified on SSD before replacing the
+internal directory with a symlink. Closing the owned test simulator and Xcode
+also released space. Internal free space recovered to roughly 27 GiB. Measured
+sizes and limits of the disk accounting are recorded in [iPad setup](ipad/README.md#physical-device-setup-and-disk-usage-2026-11-04).
+No unrelated user data was deleted. Source project generation remains free of
+personal team/signing settings; the installed app is a development build.
+
 ## #652 iPad simulator runtime verified (2026-11-04)
 
 The owner completed Mac system authorization. Xcode 26.6 first-launch status now

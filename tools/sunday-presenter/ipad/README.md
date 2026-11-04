@@ -138,9 +138,13 @@ Keep the SSD mounted for these development operations. DerivedData remains on
 the SSD too; Xcode, the runtime asset and simulator caches remain internal.
 Internal free space recovered from about 100 MiB to approximately 25 GiB.
 
-Apple account/Personal Team setup generated a development provisioning profile
-for this target; the signed build was waiting at codesign for Keychain access
-at this checkpoint. The profile expires on 2026-11-11 at 19:47 UTC. This is a
+After owner Keychain authorization, the signed physical-device build succeeded
+and `codesign --verify --deep --strict` passed. `devicectl` installed Sunday
+Remote 0.1.0 (build 1) on the real iPad. First launch was denied by iPadOS with
+a signature/entitlement/profile-trust security message; explicit developer
+profile trust on the device has been requested. Launch, pairing, PPT and real
+network acceptance remain pending, not inferred from successful installation.
+The profile expires on 2026-11-11 at 19:47 UTC (13:47 America/Chicago). This is a
 time-limited development install, not a permanent distribution package.
 No team identifier or personal signing settings are checked into the generated
-project. Actual installation, launch and PPT checks remain pending.
+project. Internal free space subsequently measured approximately 27 GiB.
