@@ -286,9 +286,14 @@ def prepare_unit(store, root, index):
     direction = (m['instruction'] + '\n' + RULES + '\nNew committed source ChangeSet: '
         + register_receipt['change_set_id'] + '\nOld file SHA: ' + m['before']['file_sha256']
         + '\nNew file SHA: ' + m['after']['file_sha256'])
+    # Existing units keep their exact intent. New units explicitly maintain
+    # linked Questions and their evidence in the same ordinary transaction.
+    question_evidence=(read(unit/'intake.json').get('include_question_evidence',False)
+                       if (unit/'intake.json').exists() else True)
     return intake(group, unit, instruction=direction, groups=[group], store=store,
                   policy=m['policy']['path'], creation_count=3,
-                  legacy_ai_findings_direction=m['instruction'],source_epoch_reassessment=epoch)
+                  legacy_ai_findings_direction=m['instruction'],source_epoch_reassessment=epoch,
+                  include_question_evidence=question_evidence)
 
 
 def run_unit(store, root, index, *, capacity):

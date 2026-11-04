@@ -70,7 +70,7 @@ def relation_endpoint_instruction():
 
 
 def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None,
-            legacy_ai_findings_direction=None, source_epoch_reassessment=None):
+            legacy_ai_findings_direction=None, source_epoch_reassessment=None, include_question_evidence=False):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -118,6 +118,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     if source_epoch_reassessment is not None:
         check_binding(source_epoch_reassessment)
         intent['source_epoch_reassessment'] = source_epoch_reassessment
+    if include_question_evidence:
+        intent['include_question_evidence'] = True
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -235,10 +237,31 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 raise ValueError('Claim creation Question must belong to the target own source: ' + key)
             request.permissions.append(cm.source.Permission(collection='questions',
                 object_id=key.split('/', 1)[1], fields=['answer_claim_ids']))
+        required=[]
+        if include_question_evidence:
+            # Question text and its literal source are one maintenance unit.
+            # Neither promotes another answer Claim to a write/review target.
+            linked={key for key,state in before.items() if key.startswith('questions/')
+                and not state['retired'] and set(state['payload'].get('answer_claim_ids',[])) & set(members)}
+            for key in sorted(linked):
+                question=before[key]['payload']
+                fragments=set(question.get('source_fragment_ids') or [])
+                if question.get('source_fragment_id'):fragments.add(question['source_fragment_id'])
+                required.extend([key,*[cm.source.key('source_fragments',fid) for fid in sorted(fragments)]])
+            required=sorted(set(required))
+            granted_by_key={p.key:p for p in request.permissions}
+            for key in required:
+                state=before.get(key)
+                if (not state or state['retired'] or state['payload'].get('review_status') in cm.HELD
+                        or cm.own_source_ids(state['payload'],payloads)!=own):
+                    raise ValueError('required Question evidence is missing, held or belongs to another source: '+key)
+                col,oid=cm.source.split_key(key)
+                granted_by_key[key]=cm.source.Permission(collection=col,object_id=oid,fields=sorted(FIELDS[col]))
+            request.permissions=list(granted_by_key.values())
         authorization = {'schema_version': cm.VERSION, 'authorized_by': 'owner',
             'authorization_quote': instruction, 'human_content_approval': False,
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
-            'policy': policy_binding, 'required_maintenance_keys': [],
+            'policy': policy_binding, 'required_maintenance_keys': required,
             'review_questions': [instruction]}
         reopened = {key: proof for key, proof in legacy_markers.items() if key in request.target_keys}
         if reopened:

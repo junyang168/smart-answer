@@ -232,6 +232,42 @@ def test_verify_uses_own_proof_and_never_treats_unrun_units_as_complete(case):
     assert migration.verify(store,root)['results']['C']['status']=='retired_or_missing'
 
 
+@pytest.mark.parametrize('held',[False,True])
+def test_new_migration_unit_includes_question_and_quote_without_extra_claim_targets(case,postgres_store,held,monkeypatch):
+    fake,beta,root,_,_=case
+    fake.rows['questions','Q']=state({'question_id':'Q','text':'是什麼？','source_fragment_ids':['FQ'],
+        'answer_claim_ids':['D'],'review_status':'candidate'})
+    fake.rows['source_fragments','FQ']=state({'fragment_id':'FQ','source_id':'S',
+        'paragraph_key':'S0001','verbatim_excerpt':'舊話。'})
+    package={'package_id':'question-source-migration-fixture'}
+    for (col,_),row in fake.rows.items():
+        payload=deepcopy(row['payload'])
+        if col=='claims':payload['review_status']='candidate'
+        package.setdefault(col,[]).append(payload)
+    store=postgres_store;store.apply_plan(store.plan_package(package))
+    migration.prepare(store,beta_root=beta,item='lecture',source_id='S',root=root,
+        instruction='移植 Claim 和相關問題與來源；軟刪除不能作證據',group_size=1)
+    migration.register(store,root)
+    if held:
+        original=store.read_claim_context
+        def with_hold(keys):
+            records=original(keys)
+            records['questions','Q']['payload']['review_status']='human_review_required'
+            return records
+        monkeypatch.setattr(store,'read_claim_context',with_hold)
+        with pytest.raises(ValueError,match='protected Question|required Question evidence.*held'):
+            migration.prepare_unit(store,root,0)
+        return
+    prepared=migration.prepare_unit(store,root,0)
+    job=migration.read(prepared['manifest']['path'])['jobs'][0]
+    request=migration.read(job['request']['path']);auth=migration.read(request['authorization']['path'])
+    assert request['target_keys']==['claims/D']
+    assert auth['required_maintenance_keys']==['questions/Q','source_fragments/FQ']
+    grants={p['collection']+'/'+p['object_id']:set(p['fields']) for p in request['permissions']}
+    assert 'verbatim_excerpt' in grants['source_fragments/FQ'] and 'text' in grants['questions/Q']
+    assert 'claims/C' not in grants
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}
