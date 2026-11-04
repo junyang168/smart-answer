@@ -38,6 +38,13 @@ flow. Presenter may need macOS Screen Recording permission; Remote needs local
 network access. No Accessibility, microphone or camera permission is needed for
 this video milestone. Full screen is available through Remote's window controls.
 
+After an ad-hoc pilot update, macOS can retain the old signing requirement even
+when Screen Recording shows On. If capture remains denied, remove only the old
+Presenter entry in System Settings, add `/Applications/Sunday Presenter.app`
+again, and restart Presenter. Complete any Keychain prompt yourself to retain the
+existing Remote pair. The 0.5.1 installed-app check passed actual Office animation,
+next/previous controls and live video after that renewal; no PPT content changed.
+
 `npm run smoke:video` builds both Remote architectures and runs the real Electron
 OUTPUT → native WKWebView loop on one unlocked Mac. It uses disposable pairing
 and a separate host profile, never saved user accounts. Evidence is written to

@@ -31,13 +31,25 @@ updated with originals preserved in the private `ops-643` local-state backup.
 The existing Microsoft session and host pairing identity were retained, and the
 owner's current PPT was reopened at slide 6 without editing its contents.
 
-Actual Office Remote-key acceptance is still pending: normal Remote startup is
-waiting in macOS Keychain `SecItemCopyMatching` for the existing saved pair.
-This is separate from the passing disposable-pair video/keyboard smoke. No keychain
-ACL, credential, system security setting or website release was changed. The
-owner was asked to complete any macOS authorization prompt directly. Second
-physical Mac/hotspot validation and the existing full-docs/frontend dependency
-failures also remain outside this change.
+After the owner completed macOS Keychain authorization, actual installed Remote
+control passed on the owner's real Office slideshow: its Next button advanced
+slide 6 to animation 1/3, then an arrow with the Remote viewer focused advanced it
+to animation 2/3. The PowerPoint accessibility state independently confirmed both
+steps. After screen capture was renewed, the same tests passed again with live
+video: all three animations, slide 6 → 7, and the Previous button back to 6.
+No manuscript or slide contents were edited.
+
+The installed host's screen-recording grant needed renewal after the ad-hoc
+update. macOS logged `Failed to match existing code requirement` for this bundle
+and ScreenCapture; toggling/restarting alone retained that stale requirement.
+Removing the old entry and re-adding the installed /Applications Presenter through
+System Settings, then restarting it, restored actual Remote video. Only this
+existing grant was renewed. Pairing and Microsoft credentials were retained; no
+keychain ACL or website release changed. A SHA-bound local record of installed
+versions and the actual Office actions is kept outside Git at
+`~/.local/state/sunday-presenter/ops-643/actual-office-0.5.1.json`.
+Second physical Mac/hotspot validation and the existing full-docs/frontend
+dependency failures remain outside this change.
 
 ## #643 local PPT video pilot — 0.5.0 (2026-11-03)
 
