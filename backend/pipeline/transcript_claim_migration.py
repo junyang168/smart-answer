@@ -407,6 +407,7 @@ def resume_rejected_unit(store, root, index):
     if (unit/'preflight-repair.json').exists():unit=unit/'source-epoch-preflight-repair'
     prepared=current_unit_prepared(store,root,index,read(unit/'prepared.json'))
     batch_root=Path(prepared['manifest']['path']).parent/'batch';result={}
+    batch_root.mkdir(parents=True,exist_ok=True)
     with ExitStack() as stack:
         controller=stack.enter_context((batch_root/'controller.lock').open('a'))
         fcntl.flock(controller,fcntl.LOCK_EX|fcntl.LOCK_NB)

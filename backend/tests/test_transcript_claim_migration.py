@@ -178,6 +178,21 @@ def test_explicit_rejected_recovery_cannot_touch_an_active_controller(case):
         with pytest.raises(BlockingIOError):migration.resume_rejected_unit(store,root,0)
 
 
+def test_rejected_recovery_creates_derived_head_controller_directory(case,monkeypatch):
+    from backend.pipeline import source_reconciliation_runtime as runtime
+    _,_,root,_,_=case;prepare(case)
+    unit=root/'units/000'
+    migration.immutable(unit/'prepared.json',{'manifest':{'path':'unused'}})
+    directory=unit/'admitted-action-heads'/'exact-head'
+    monkeypatch.setattr(migration,'current_unit_prepared',lambda *a:{'manifest':{'path':str(directory/'manifest.json')}})
+    class StopAtMaintenance(Exception):pass
+    def stopped():raise StopAtMaintenance()
+    monkeypatch.setattr(runtime,'maintenance_lock',stopped)
+    with pytest.raises(StopAtMaintenance):migration.resume_rejected_unit(None,root,0)
+    # A SQL-admitted head has not necessarily run its derived batch yet.
+    assert (directory/'batch/controller.lock').is_file()
+
+
 @pytest.mark.parametrize('defect',[None,'source','membership','outside','missing','unadmitted'])
 def test_resume_follows_only_the_exact_sql_admitted_action_head(case,defect):
     from backend.pipeline import claim_management as cm
