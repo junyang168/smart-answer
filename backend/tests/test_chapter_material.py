@@ -1,95 +1,17 @@
-"""一章的材料从主张数据算出来：起点主张、平行经文、往外一步。"""
+"""按章页面：逐字稿切片、模型决定的核对、页面上的行。"""
 
-from backend.pipeline import chapter_material
-from backend.pipeline.chapter_material import Chapter, select
-from backend.pipeline.original_audio_index import claim_points, claim_verse, in_passage
+import json
 
-
-LECTURE = "2011 NYSC 專題：馬太福音釋經（二）3"
-OTHER = "2017 NYSC 專題：馬太福音釋經（六）1"
+from backend.pipeline import chapter_exposition, chapter_material
+from backend.pipeline.chapter_exposition import check, cut, lecture_rows, parse_verses
+from backend.pipeline.chapter_material import Chapter
 
 CHAPTER = Chapter(
     passage="mat-5-1-48",
     series="2011 NYSC 專題：馬太福音釋經（二）",
-    lectures=(LECTURE,),
-    parallels=(("mat-5-31-32", ("mat-19-3-9", "luk-16-18")),),
+    lectures=("L",),
+    sections=("mat-5-1-12", "mat-5-27-30", "mat-5-31-32"),
 )
-
-
-def claim(claim_id: str, refs: list[str], lecture: str = LECTURE, **extra):
-    return {
-        "claim_id": claim_id,
-        "statement": f"主張 {claim_id}",
-        "scripture_refs": refs,
-        "occurrences": [{"transcript_id": lecture}],
-        **extra,
-    }
-
-
-def relation(kind: str, source: str, target: str):
-    return {"relation_type": kind, "from_id": source, "to_id": target}
-
-
-def run(claims, relations):
-    return select(
-        CHAPTER,
-        {c["claim_id"]: c for c in claims},
-        relations,
-        in_passage,
-        claim_verse,
-    )
-
-
-def test_seed_is_a_claim_whose_reference_lands_in_the_chapter():
-    chosen = run([claim("seed", ["馬太福音5:28"]), claim("james", ["雅各書1:14-15"])], [])
-    assert chosen == {"seed": "mat-5-28"}
-
-
-def test_theology_derived_from_the_verse_comes_in_one_hop_with_the_seeds_verse():
-    # 他讲 5:28 时带进的雅各书：引用落不进太 5，关系里记着它支持 5:28 的判断。
-    chosen = run(
-        [claim("seed", ["馬太福音5:28"]), claim("james", ["雅各書1:14-15"])],
-        [relation("supports", "james", "seed")],
-    )
-    assert chosen == {"seed": "mat-5-28", "james": "mat-5-28"}
-
-
-def test_claims_without_a_relation_stay_out():
-    # （二）3 的三段见证与任何太 5 的主张都没有关系。
-    chosen = run(
-        [claim("seed", ["馬太福音5:28"]), claim("testimony", [])],
-        [],
-    )
-    assert "testimony" not in chosen
-
-
-def test_only_one_hop():
-    # 两步会把（二）6 讲太 6 试探的一段间接拉进来。
-    chosen = run(
-        [claim("seed", ["馬太福音5:3"]), claim("method", []), claim("temptation", ["哥林多前書10:13"])],
-        [relation("applies", "method", "seed"), relation("supports", "temptation", "method")],
-    )
-    assert set(chosen) == {"seed", "method"}
-
-
-def test_refutes_is_not_followed():
-    chosen = run(
-        [claim("seed", ["馬太福音5:28"]), claim("opposed", [])],
-        [relation("refutes", "seed", "opposed")],
-    )
-    assert "opposed" not in chosen
-
-
-def test_parallel_passage_counts_as_the_chapter_verse():
-    # （二）4 的问答从路加福音 16:18 讲 5:32。
-    chosen = run([claim("luke", ["路加福音16:18"]), claim("matt19", ["馬太福音 19:3-9"])], [])
-    assert chosen == {"luke": "mat-5-31-32", "matt19": "mat-5-31-32"}
-
-
-def test_only_the_chapters_own_series_counts():
-    # 2017（六）讲太 19 时也讲 5:32，不属于太 5 这一章的系列。
-    chosen = run([claim("later", ["馬太福音5:32"], lecture=OTHER)], [])
-    assert chosen == {}
 
 
 def test_matthew_5_is_configured_for_all_six_lectures_of_its_series():
@@ -98,15 +20,134 @@ def test_matthew_5_is_configured_for_all_six_lectures_of_its_series():
     assert all(lecture.startswith(chapter.series) for lecture in chapter.lectures)
 
 
-def test_points_are_the_claims_own_evidence_steps_with_his_words():
-    claims = {
-        "c": claim(
-            "c",
-            ["馬太福音5:3"],
-            claim_type="application",
-            evidence_step_ids=["q", "s1", "s2", "s3", "s4"],
-        )
-    }
+def test_a_verse_belongs_to_the_section_where_it_starts():
+    chapter = chapter_material.CHAPTERS["mat-5-1-48"]
+    assert chapter_material.section_of(chapter, "mat-5-28") == "mat-5-27-30"
+    assert chapter_material.section_of(chapter, "mat-5-39-44") == "mat-5-38-42"
+    assert chapter_material.section_of(chapter, "mat-5-17-48") == "mat-5-17-20"
+
+
+def test_long_paragraphs_are_cut_at_sentence_ends_with_times_by_position():
+    # （二）1 一个段落 13.7 分钟，前半释经、后半见证；要能分开决定。
+    sentence = "這是一句話。" * 10  # 60 字
+    sermon = {"segments": [
+        {"text": sentence * 6, "start_time": 0},  # 360 字
+        {"text": "短。", "start_time": 360},
+    ]}
+    pieces = cut(sermon)
+    assert [p["id"] for p in pieces] == ["U001", "U002"]
+    assert all(p["text"].endswith("。") for p in pieces)
+    assert len(pieces[0]["text"]) <= chapter_exposition.PIECE_CHARS
+    # 360 字 360 秒：时间按字的位置推算，模型不给时间。
+    assert pieces[0]["start"] == 0 and pieces[1]["end"] == 360
+    assert pieces[0]["end"] == pieces[1]["start"]
+
+
+def test_empty_transcript_rows_give_no_piece():
+    # （二）6 逐字稿有空洞，没有文字就没有片段可判断。
+    sermon = {"segments": [{"text": "", "start_time": 0}, {"text": "有內容的一句話。", "start_time": 60}]}
+    assert len(cut(sermon)) == 1
+
+
+def test_verses_parse_within_the_chapter_only():
+    assert parse_verses("5:27-28", CHAPTER) == ["mat-5-27-28"]
+    assert parse_verses("5:3, 5:10", CHAPTER) == ["mat-5-3", "mat-5-10"]
+    # （二）2 的模型用了分号；格式的分隔符不该让整堂作废。
+    assert parse_verses("5:21-22; 5:27-28", CHAPTER) == ["mat-5-21-22", "mat-5-27-28"]
+    assert parse_verses("6:13", CHAPTER) is None
+    assert parse_verses("5:47-49", CHAPTER) is None
+    assert parse_verses("無", CHAPTER) is None
+
+
+PIECES = [{"id": f"U00{n}", "start": n * 60.0, "end": n * 60.0 + 60, "text": f"第{n}段。"} for n in range(1, 6)]
+
+
+def keep(piece_id, verses="5:28", kind="釋經"):
+    return {"id": piece_id, "keep": True, "verses": verses, "kind": kind}
+
+
+def drop(piece_id, reason="見證，與第五章無關"):
+    return {"id": piece_id, "keep": False, "reason": reason}
+
+
+def test_every_piece_must_be_decided_or_the_whole_output_is_void():
+    problems, _ = check([keep("U001"), drop("U002"), keep("U003"), keep("U004")], PIECES, CHAPTER)
+    assert any("漏了 1 個片段" in p for p in problems)
+
+
+def test_duplicates_unknown_pieces_and_bad_verses_are_rejected():
+    decisions = [keep("U001"), keep("U001"), keep("U002", verses="6:13"), drop("U003", reason=""),
+                 keep("U004", kind="其他"), drop("U005"), drop("U009")]
+    problems, _ = check(decisions, PIECES, CHAPTER)
+    joined = "\n".join(problems)
+    assert "U001: 決定了兩次" in joined
+    assert "U002: 經節讀不出來或不在這一章" in joined
+    assert "U003: 不保留卻沒有理由" in joined
+    assert "U004: 保留的片段沒有標釋經、神學或應用" in joined
+    assert "U009: 不是這一堂的片段" in joined
+
+
+def test_a_complete_answer_passes_and_is_normalised():
+    decisions = [keep("U001"), drop("U002"), keep("U003", verses="5:28"), keep("U004", "5:32", "應用"), drop("U005")]
+    problems, normalised = check(decisions, PIECES, CHAPTER)
+    assert problems == []
+    assert normalised[0] == {"id": "U001", "keep": True, "verses": ["mat-5-28"], "kind": "釋經"}
+    assert normalised[1] == {"id": "U002", "keep": False, "reason": "見證，與第五章無關"}
+
+
+def test_left_out_pieces_stay_inline_after_the_kept_piece_they_follow():
+    # （二）3：5:28 的释经、中间三段见证、再回到 5:28；见证留在原处、标灰。
+    record = {"pieces": PIECES, "decisions": check(
+        [keep("U001"), drop("U002"), drop("U003", "另一個理由"), keep("U004"), keep("U005", "5:32")],
+        PIECES, CHAPTER,
+    )[1]}
+    rows = lecture_rows(CHAPTER, record)
+    assert set(rows) == {"mat-5-27-30", "mat-5-31-32"}
+    stretches = rows["mat-5-27-30"]["stretches"]
+    assert [(s["start"], s["end"], bool(s.get("left_out"))) for s in stretches] == [
+        (60, 120, False), (120, 240, True), (240, 300, False),
+    ]
+    assert stretches[1]["reasons"] == ["見證，與第五章無關", "另一個理由"]
+    assert stretches[1]["text"] == "第2段。\n\n第3段。"
+    # 同一段里接连的保留片段并成一段录音。
+    assert rows["mat-5-31-32"]["stretches"] == [{"start": 300, "end": 360}]
+
+
+def test_left_out_pieces_before_any_kept_piece_join_the_first_kept_section():
+    # （二）6：前一个多小时讲第六、七章，末尾才回到太 5。
+    record = {"pieces": PIECES, "decisions": check(
+        [drop("U001"), drop("U002"), drop("U003"), keep("U004", "5:3"), drop("U005")],
+        PIECES, CHAPTER,
+    )[1]}
+    rows = lecture_rows(CHAPTER, record)
+    assert list(rows) == ["mat-5-1-12"]
+    assert [bool(s.get("left_out")) for s in rows["mat-5-1-12"]["stretches"]] == [True, False, True]
+
+
+def test_a_lecture_with_nothing_kept_has_no_row():
+    record = {"pieces": PIECES[:2], "decisions": check([drop("U001"), drop("U002")], PIECES[:2], CHAPTER)[1]}
+    assert lecture_rows(CHAPTER, record) == {}
+
+
+def test_saved_decisions_are_ignored_once_the_transcript_changes(tmp_path):
+    target = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({
+        "schema_version": chapter_exposition.SCHEMA_VERSION,
+        "transcript_sha256": "aaa",
+        "pieces": [],
+        "decisions": [],
+    }))
+    assert chapter_exposition.load_record(tmp_path, "mat-5-1-48", "L", "aaa") is not None
+    assert chapter_exposition.load_record(tmp_path, "mat-5-1-48", "L", "bbb") is None
+    assert chapter_exposition.load_record(tmp_path, "mat-5-1-48", "M", "aaa") is None
+
+
+def test_slide_points_are_the_claims_own_evidence_steps_with_his_words():
+    from backend.pipeline.original_audio_index import claim_points
+
+    claims = {"c": {"claim_id": "c", "statement": "主張 c", "claim_type": "application",
+                    "evidence_step_ids": ["q", "s1", "s2", "s3", "s4"]}}
     steps = {
         "q": {"statement": "問題本身", "step_type": "question"},
         "s1": {"statement": "第一步", "step_type": "literary_context", "source_fragment_ids": ["f1"]},
@@ -118,70 +159,3 @@ def test_points_are_the_claims_own_evidence_steps_with_his_words():
     out = claim_points({"provenance": {"claim_ids": ["c"]}}, claims, steps, fragments)
     assert [p["text"] for p in out["points"]] == ["第一步", "第二步", "第三步"]
     assert out["points"][0]["quote"] == "他的原話"
-    assert out["application"] is True
-
-
-def timed(claim_id: str, refs: list[str], minute: float):
-    item = claim(claim_id, refs)
-    item["occurrences"][0]["anchors"] = [{"media_time": minute * 60}]
-    return item
-
-
-def test_one_hop_must_be_said_near_a_seed_in_the_same_lecture():
-    # （二）6：「解經必須運用理性」在讲太 6 试探时说，离结构那条起点 23.7 分。
-    chosen = run(
-        [timed("seed", ["馬太福音5:3"], 68), timed("far", [], 32), timed("near", [], 62)],
-        [relation("applies", "far", "seed"), relation("supports", "near", "seed")],
-    )
-    assert set(chosen) == {"seed", "near"}
-
-
-def test_nearness_is_to_any_seed_not_only_the_linked_one():
-    # 雅各书那条连着 12 分的起点，可 51–53 分他正讲着 5:28。
-    chosen = run(
-        [
-            timed("early", ["馬太福音5:28"], 12),
-            timed("late", ["馬太福音5:28"], 52),
-            timed("james", ["雅各書1:14-15"], 54.5),
-        ],
-        [relation("supports", "james", "early")],
-    )
-    assert "james" in chosen
-
-
-def test_a_verse_belongs_to_the_section_where_it_starts():
-    chapter = chapter_material.CHAPTERS["mat-5-1-48"]
-    assert chapter_material.section_of(chapter, "mat-5-28") == "mat-5-27-30"
-    assert chapter_material.section_of(chapter, "mat-5-39-44") == "mat-5-38-42"
-    assert chapter_material.section_of(chapter, "mat-5-17-48") == "mat-5-17-20"
-
-
-def test_the_same_minutes_belong_to_the_narrower_section_only():
-    from backend.pipeline.original_audio_index import exclusive_minutes
-
-    def row(stretches, marks):
-        return {
-            "transcript_id": "L1",
-            "stretches": [{"start": a, "end": b} for a, b in stretches],
-            "judgements": [{"at": at} for at in marks],
-            "seconds": sum(b - a for a, b in stretches),
-        }
-
-    wide = {"sermons": [row([(60, 1200)], [100, 200, 1000])]}
-    narrow = {"sermons": [row([(180, 270)], [190])]}
-    exclusive_minutes([wide, narrow])
-    assert wide["sermons"][0]["stretches"] == [{"start": 60, "end": 180}, {"start": 270, "end": 1200}]
-    assert [m["at"] for m in wide["sermons"][0]["judgements"]] == [100, 1000]
-    assert narrow["sermons"][0]["stretches"] == [{"start": 180, "end": 270}]
-
-
-def test_superseded_claims_are_left_out_whatever_else_their_status():
-    chosen = run(
-        [
-            claim("old", ["馬太福音5:28"], review_status="superseded", superseded_by="new"),
-            claim("new", ["馬太福音5:28"], review_status="candidate"),
-            claim("flagged", ["馬太福音5:28"], review_status="human_review_required"),
-        ],
-        [],
-    )
-    assert set(chosen) == {"new", "flagged"}
