@@ -113,3 +113,34 @@ Wi-Fi/hotspot interruption, minimum-iPadOS, external keyboard or full-service
 iPad acceptance is claimed. No installable IPA or App Store/TestFlight release
 has been produced. The owner's iPad model/OS and normal Xcode signing/device setup
 remain the next hardware steps. Retain both laptops in Meet this Sunday.
+
+### Physical-device setup and disk usage (2026-11-04)
+
+The connected iPad Air (5th generation) reports iPadOS 27.2 (24B119).
+Developer Mode, USB pairing and developer disk image services are enabled;
+Xcode lists it as a real run destination. This confirms the development
+connection, not app installation or hardware acceptance.
+
+First connection created roughly 12 GiB of device-support data during processing;
+the finalized source occupied about 6.5 GiB. Together with Xcode (~3.7 GiB), the
+simulator runtime asset (~7.9 GiB), simulator caches (~3 GiB) and test-device data
+(~2.4 GiB), this exhausted internal space at the observed peak. These are measured
+directory sizes, not a complete before/after accounting of the owner's disk.
+Closing Xcode and shutting down the owned test simulator recovered additional
+space. No unrelated user files, recordings or photo libraries were removed.
+
+DeviceSupport was copied to
+`/Volumes/Jun SSD/SundayPresenterTests/iOS DeviceSupport`, checksum-verified,
+resynchronized after Xcode finalized its symbols, and verified again before
+removing the internal copy. The original
+`~/Library/Developer/Xcode/iOS DeviceSupport` now links to that SSD directory.
+Keep the SSD mounted for these development operations. DerivedData remains on
+the SSD too; Xcode, the runtime asset and simulator caches remain internal.
+Internal free space recovered from about 100 MiB to approximately 25 GiB.
+
+Apple account/Personal Team setup generated a development provisioning profile
+for this target; the signed build was waiting at codesign for Keychain access
+at this checkpoint. The profile expires on 2026-11-11 at 19:47 UTC. This is a
+time-limited development install, not a permanent distribution package.
+No team identifier or personal signing settings are checked into the generated
+project. Actual installation, launch and PPT checks remain pending.
