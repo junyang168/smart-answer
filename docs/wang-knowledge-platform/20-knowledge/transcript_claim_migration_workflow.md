@@ -3,8 +3,16 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
+
+## 目錄
+
+- [1. 純程式證據搬遷 dry-run](#1-純程式證據搬遷-dry-run)
+- [2. 來源與範圍](#2-來源與範圍)
+- [3. 來源版本登記](#3-來源版本登記)
+- [4. 另行啟動的內容審查與修訂](#4-另行啟動的內容審查與修訂)
+- [5. 回讀與下游交接](#5-回讀與下游交接)
 
 ## 1. 純程式證據搬遷 dry-run
 
@@ -15,7 +23,7 @@
 既有 worker 須先查實際 process、保存答覆及 transaction，不能以停止檔代替中止中的 worker。
 
 ```bash
-backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --root RUN --output PREVIEW
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --root RUN --output PREVIEW --align-sequence
 ```
 
 輸入沿用已凍結新舊原件、同源片段及目前正式記錄，包括此 run 已提交的新建物件；
@@ -23,6 +31,12 @@ backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --roo
 可篩選的 `comparison.html` 及 `comparison.csv`，保留執行程式 SHA、來源 SHA 與每條當前版本。
 相同輸入重跑產生相同結果；來源或目前記錄漂移時不覆寫舊 preview。
 這是 dry-run 輸出版本，不另建模型 action、預算或重試 root。
+
+`--align-sequence` 啟用第二版：先做原有的逐字／排版比對，再對例外建立一次整篇順序對齊。
+候選須有前後唯一的相同上下文、受限的距離、字元重合及段落範圍；程式保留規則、
+具體上下文位置、對齊範圍和差異，不以相似比例冒充意思等價。
+另外不重跑對齊的字面核查會檢查上下文唯一性、新引文逐字切片、時間和明確刪除線位置。
+程式 SHA 與核查結果一起保存。省略該選項則沿用第一版，舊輸出不覆寫。
 
 分類規則：
 
@@ -36,8 +50,14 @@ backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --roo
   保留歷史引文及原始定位，不將其冒充新來源的有效證據；不能因別處同一句被刪就標記本條。
 - 一個 Evidence 的所有引用均如此失效，擬標為「已經刪除」；仍有其他引用則擬標為
   「部分證據已刪除」。不因一個片段失效就自動退休整條 Claim。
-- 引文找不到、重複位置不能消歧、來源版本不明、講者標記改變、跨新段落或視覺內容：
-  列為例外，附原引文、原因、相關 Claim 與下游連接。找不到不等於已刪除。
+- 位置已由順序與唯一上下文定位，但引文用字、邊界或分段改變：列為「已定位／待 refresh」。
+  列出新版逐字切片、各段時間、文字差異及否定／數字／原文詞變動，沒有自動寫入提案。
+  跨段引文保留每個實際來源切片，不自行合成一個新的段落或來源錨點。
+- 新版明確標為聽眾說的：只標記「聽眾」，不因講者不同而阻擋位置搬遷。
+  Evidence 所連片段全部可確定歸屬時才提出整條講者標記；只有部分能確定時保留片段標記，
+  不替其餘推定講者。這不改寫 Claim，也不判定聽眾的話可作教授主張的依據。
+- 引文找不到、重複位置不能消歧、來源版本不明、對齊依據不足或視覺內容：
+  列為「尚未可靠定位」，保留未確認候選供後續處理。找不到不等於已刪除。
 
 時間直接取已凍結 Beta 的段落起訖，不宣稱逐字對齊。若日後實作 apply，須使用此精確
 preview 的來源、記錄版本與實際寫集，走既有 transaction／ChangeSet／歷史及回讀；

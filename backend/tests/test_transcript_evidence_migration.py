@@ -1,4 +1,5 @@
 from copy import deepcopy
+import pytest
 from backend.tests.test_transcript_claim_migration import case
 from backend.pipeline.transcript_evidence_migration import classify, expanded_source, preview
 from backend.pipeline.source_projection import project_script
@@ -142,7 +143,8 @@ def test_english_token_boundaries_and_numeric_lists_remain_distinct():
     assert literal_layout('καρδία')[0]=='καρδία'
 
 
-def test_dry_run_repeats_exact_output_and_fails_on_source_drift(case,tmp_path):
+@pytest.mark.parametrize('align_sequence',[False,True])
+def test_dry_run_repeats_exact_output_and_fails_on_source_drift(case,tmp_path,align_sequence):
     from backend.pipeline import transcript_claim_migration as m
     from backend.pipeline.transcript_evidence_migration import dry_run
     from backend.tests.test_transcript_claim_migration import prepare
@@ -152,8 +154,8 @@ def test_dry_run_repeats_exact_output_and_fails_on_source_drift(case,tmp_path):
     store.read_current_records=lambda keys:{key:deepcopy(store.rows[key]) for key in keys if key in store.rows}
     output=tmp_path/'preview'
     before=deepcopy(store.rows);writes=store.writes
-    result=dry_run(store,root,output)
-    assert dry_run(store,root,output)==result
+    result=dry_run(store,root,output,align_sequence=align_sequence)
+    assert dry_run(store,root,output,align_sequence=align_sequence)==result
     assert store.rows==before and store.writes==writes
     assert result['production_writes']==0
     store.rows['source_documents',manifest['source_id']]['payload']['source_path']='another-source'
