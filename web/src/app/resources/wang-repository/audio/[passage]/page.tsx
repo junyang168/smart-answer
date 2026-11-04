@@ -516,7 +516,7 @@ export default function OriginalAudioPage() {
                           leftOutHere.reasons?.[0]}
                       </p>
                     </div>
-                  ) : sermon.slides ? (
+                  ) : sermon.slides && sermon.slides.length > 0 ? (
                     (() => {
                       const slide = [...sermon.slides].reverse().find((item) => item.at <= seconds) ?? sermon.slides[0];
                       return slide ? <ChapterSlide slide={slide} seconds={seconds} /> : null;

@@ -1249,31 +1249,37 @@ def _chapter_slides(
     lecture_rows: dict[str, dict[str, Any]],
     timed_slides: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """投影片排进各段：跟着它第一句所在的片段归段。"""
+    """投影片排进各段：它的时间跨到哪一段的保留片段，就出现在哪一段。
+
+    一张投影片可能在 5:17-20 的片段里开始、讲到下一个片段时归了 5:1-12（片段
+    按它第一句所在投影片的经节归段）；只按开头归段，（二）6 在 5:1-12 的那一
+    行就没有投影片。在别的段里，它从那一段第一个片段开始的时刻算起。
+    """
 
     from backend.api.scripture import format_chinese_reference
 
-    section_of_piece = {
-        piece["id"]: section
-        for section, value in lecture_rows.items()
-        for piece in value["pieces"]
-    }
     out: dict[str, list[dict[str, Any]]] = {}
     for slide in timed_slides:
-        section = section_of_piece.get(slide["piece"])
-        if section is None:
-            continue
-        out.setdefault(section, []).append({
-            "at": slide["at"],
-            "seconds": slide["seconds"],
-            "title": slide["title"],
-            "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
-            "verses": slide["verses"],
-            "scriptures": [
-                {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
-                for item in slide["scriptures"]
-            ],
-        })
+        until = slide["at"] + slide["seconds"]
+        for section, value in lecture_rows.items():
+            overlap = [
+                piece for piece in value["pieces"]
+                if piece["start"] < until and slide["at"] < piece["end"]
+            ]
+            if not overlap:
+                continue
+            at = max(slide["at"], min(piece["start"] for piece in overlap))
+            out.setdefault(section, []).append({
+                "at": at,
+                "seconds": until - at,
+                "title": slide["title"],
+                "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
+                "verses": slide["verses"],
+                "scriptures": [
+                    {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
+                    for item in slide["scriptures"]
+                ],
+            })
     return out
 
 

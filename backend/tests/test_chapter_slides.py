@@ -164,3 +164,17 @@ def test_a_revision_replaces_the_slides_only_after_review_and_the_same_checks(tm
     assert record["revision"] == 1 and record["slides"][0]["points"][1]["text"] == "他的結論"
     # 修正后的稿子还没审过，不能再按旧审阅修。
     assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([]))["status"] == "not_reviewed"
+
+
+def test_a_slide_shows_in_every_section_its_time_reaches():
+    # （二）6：投影片在 5:17-20 的片段裡開始，講到下一個片段歸了 5:1-12；那一行原來沒有投影片。
+    from backend.pipeline.original_audio_index import _chapter_slides
+
+    rows = {
+        "mat-5-17-20": {"pieces": [{"id": "U001", "start": 0.0, "end": 100.0}]},
+        "mat-5-1-12": {"pieces": [{"id": "U002", "start": 100.0, "end": 180.0}]},
+    }
+    timed = [{"at": 50.0, "seconds": 120.0, "title": "t", "points": [], "verses": ["mat-5-3"], "scriptures": []}]
+    out = _chapter_slides(rows, timed)
+    assert out["mat-5-17-20"][0]["at"] == 50.0
+    assert out["mat-5-1-12"][0]["at"] == 100.0 and out["mat-5-1-12"][0]["seconds"] == 70.0
