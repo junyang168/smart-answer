@@ -16,6 +16,51 @@ EVIDENCE_OWNER_NOTE = (
     'Do not infer absence from this unit or from a missing owner payload; do not recreate a judgment '
     'already stated by a listed active Claim.')
 
+RETIREMENT_REFERENCE_NOTE = (
+    'Explicit current Claim snapshots for comparing preservation of the retired teaching. '
+    'They are read-only transaction pins, not additional review targets, write permissions '
+    'or new approvals. Compare the full judgments, attribution and limitations against the '
+    'complete professor sources. Existence or topical similarity alone is insufficient.')
+
+
+def retirement_reference_keys(request):
+    """An opt-in Retire comparison never expands write or review authority."""
+    from backend.pipeline import claim_management as cm
+    bound = request.authorization
+    if request.operation != 'Retire' or bound.file_sha256 == '0' * 64 or not Path(bound.path).is_file():
+        return []
+    keys = json.loads(cm.source.verify_file(bound).read_text()).get('retirement_reference_keys', [])
+    if (not isinstance(keys, list) or any(not isinstance(k, str) or k.count('/') != 1
+            or not k.startswith('claims/') or not k.split('/', 1)[1].strip()
+            or k.split('/', 1)[1] != k.split('/', 1)[1].strip() for k in keys)
+            or len(keys) != len(set(keys))):
+        raise ValueError('retirement references require distinct explicit Claim keys')
+    if set(keys) & (set(request.target_keys) | {p.key for p in request.permissions}):
+        raise ValueError('retirement references must remain outside targets and write permissions')
+    return keys
+
+
+def retirement_references(request, transaction_before):
+    """Use actual frozen SQL rows, including their exact versions; never prose snapshots."""
+    from backend.pipeline import claim_management as cm
+    keys = retirement_reference_keys(request)
+    if not keys:
+        return {}
+    rows = {k:v['payload'] for k,v in transaction_before.items()}
+    result = {}
+    for key in keys:
+        state = transaction_before.get(key)
+        if state:
+            state = cm.model_state(state)
+        if (not state or state['retired'] or state['payload'].get('superseded_by')
+                or state['payload'].get('review_status') in cm.HELD):
+            raise ValueError('retirement reference must be an active unheld frozen Claim: ' + key)
+        own = cm.own_source_ids(state['payload'], rows)
+        if len(own) != 1 or not own <= set(request.source_bindings):
+            raise ValueError('retirement reference requires its complete authorized own source: ' + key)
+        result[key] = state
+    return result
+
 
 def owner_context_enabled(request):
     """New authorizations opt in; frozen packets retain their exact table."""

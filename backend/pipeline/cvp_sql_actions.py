@@ -559,6 +559,8 @@ def execute_claim_management(store, request, *, root, ports):
                             keys = set(context_roots(request)) | {content.split_key(k) for k in parent['created_keys']}
                         elif len(parent['original_goal']['units']) == 1:
                             keys.update((p.collection,p.object_id) for p in request.permissions)
+                        from backend.pipeline.claim_direct_scope import retirement_reference_keys, retirement_references
+                        keys.update(content.split_key(k) for k in retirement_reference_keys(request))
                         # Root authority is fixed; only permissions reachable
                         # from this unit are presented as writable.
                         records = read_context(sorted(keys))
@@ -566,6 +568,7 @@ def execute_claim_management(store, request, *, root, ports):
                             if ('source_documents',sid) not in records:
                                 records['source_documents',sid] = store.get_record_state('source_documents',sid)
                         transaction_before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
+                        comparison_claims = retirement_references(request, transaction_before)
                         before = transaction_before
                         if enabled(request):
                             frozen = set(parent['original_goal']['original_objects'])
@@ -591,6 +594,10 @@ def execute_claim_management(store, request, *, root, ports):
                         if direct_scope_enabled(request):
                             source_ids = set(direct_scope(unit_request, before)['source_ids'])
                         source_ids.update(p.source_id for p in request.creation_permissions)
+                        if comparison_claims:
+                            payloads = {k:v['payload'] for k,v in transaction_before.items()}
+                            for state in comparison_claims.values():
+                                source_ids.update(cm.own_source_ids(state['payload'], payloads))
                         unit_keys.update(content.key('source_documents',sid) for sid in source_ids)
                         unit_keys = {k for k in unit_keys if not k.startswith('source_documents/') or content.split_key(k)[1] in source_ids}
                         before = {k: v for k, v in before.items() if k in unit_keys}
@@ -629,6 +636,10 @@ def execute_claim_management(store, request, *, root, ports):
                                 for col in sorted({p.collection for p in unit_request.permissions} | {p.collection for p in request.creation_permissions})}}
                         if 'human_source_decisions' in parent:
                             materials['human_source_decisions'] = unit_decisions
+                        if comparison_claims:
+                            from backend.pipeline.claim_direct_scope import RETIREMENT_REFERENCE_NOTE
+                            materials['retirement_reference_claims'] = comparison_claims
+                            materials['program_owned_fields']['retirement_reference_claims'] = RETIREMENT_REFERENCE_NOTE
                         if parent.get('continuation'):
                             materials['continuation'] = parent['continuation']
                         if policy.legacy_ai_supersession_restore:
@@ -764,6 +775,8 @@ def execute_claim_management(store, request, *, root, ports):
                             roots.update(content.split_key(k) for k in parent['created_keys'])
                         roots.update(content.split_key(r.key) for r in candidate.records)
                         unit = cm.Request.model_validate(materials['unit_request'])
+                        from backend.pipeline.claim_direct_scope import retirement_reference_keys, retirement_references
+                        roots.update(content.split_key(k) for k in retirement_reference_keys(unit))
                         from backend.pipeline.claim_direct_scope import owner_context_enabled
                         frozen_owner_context = owner_context_enabled(unit)
                         if frozen_owner_context:
@@ -775,6 +788,8 @@ def execute_claim_management(store, request, *, root, ports):
                                          cm.audit_keys(unit, materials['before'], candidate))
                         actual = read_context(sorted(roots))
                         states = {content.key(*k): v for k, v in actual.items()}
+                        if retirement_references(unit, states) != materials.get('retirement_reference_claims', {}):
+                            raise ValueError('retirement comparison changed before program readback')
                         basis = materials['before'] if frozen_owner_context else states
                         denominator = cm.audit_keys(unit, basis, candidate)
                         cm.require_full_sources(unit, states, candidate,
