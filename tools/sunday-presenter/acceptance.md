@@ -1,5 +1,36 @@
 # Sunday Presenter acceptance evidence
 
+## #643 switching Presenter hosts — Remote 0.5.2 (2026-11-03)
+
+The owner confirmed two physical Macs connected on the same home network. When
+moving Remote to a MacBook Pro Presenter on iPhone Personal Hotspot, the screenshot
+showed the Pro in the service selector but no endpoint. Native resolution returned
+early whenever the advertised certificate identity differed from the remembered
+Mac, including after explicit host selection. This is a proven client defect;
+its repair does not yet establish two-Mac hotspot acceptance.
+
+Remote now resolves only the selected host and uses its advertised identity for
+certificate pinning. It reuses the saved token only for that exact identity;
+another host requires its own pairing code. The prior saved pair remains intact
+until a new pairing succeeds. Host switching clears command/video state and
+invalidates late responses; the host selector stays visible when connected.
+
+A compiled native regression exercises the actual RemoteApp with two synthetic
+Bonjour services: old saved pairing → new host, old-token isolation, ignored
+background resolution, return to the saved host, cleared controls/busy state,
+and a delayed old-host response after switching. Both native architectures build.
+The complete 27-test suite passes; the extended delayed-response check also
+passes. Remote 0.5.2 is compatible with Presenter 0.5.1 and packaged separately;
+no website installer update or Presenter permission change is needed.
+
+The full Electron → native WebKit video smoke also passes: 1280×720 video only,
+20 switches preserving the session, native buttons and viewer-focused arrows,
+privacy stop, source recovery and reconnect. ZIP integrity and deep/strict bundle
+signature verification pass. The Remote-only universal ZIP SHA256 is
+`6e9dd499b66837f6b6595a2369178ea913b4229d5c3f17ec0838d8d68b40b273`.
+Actual Pro/Air hotspot pairing, video and controls still need owner verification.
+
+
 ## #643 embedded slide-control fix — 0.5.1 (2026-11-03)
 
 The owner reported working video but no Remote slide response in a real Office

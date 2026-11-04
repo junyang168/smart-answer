@@ -11,6 +11,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     let next = NSButton(title: "下一頁 →", target: nil, action: nil)
     var endpoint: URL?, fingerprint = "", token: String?, binding = ""
     var saved: [String: String] = [:]
+    var connectionGeneration = 0
     var busy = false, polling = false
     var commandError = "", commandErrorUntil = Date.distantPast
     var timer: Timer?
@@ -99,7 +100,11 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         service.delegate = self; service.resolve(withTimeout: 8)
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
-        if connectedService == service { resetVideo("等待主電腦重新連線…"); endpoint = nil; connectedService = nil }
+        if connectedService == service {
+            resetVideo("等待主電腦重新連線…"); connectionGeneration += 1
+            endpoint = nil; connectedService = nil; token = nil; busy = false; polling = false
+            previous.isEnabled = false; next.isEnabled = false
+        }
         if let index = services.firstIndex(where: { $0 == service }) { services.remove(at: index); computers.removeItem(at: index) }
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
@@ -110,9 +115,18 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     }
     @objc func selectComputer() {
         resetVideo("正在切換主電腦…")
-        token = nil; endpoint = nil; binding = ""; previous.isEnabled = false; next.isEnabled = false
+        connectionGeneration += 1; busy = false; polling = false
+        token = nil; endpoint = nil; connectedService = nil; fingerprint = ""; binding = ""
+        commandError = ""; commandErrorUntil = .distantPast
+        previous.isEnabled = false; next.isEnabled = false
+        code.isHidden = false; connect.isHidden = false
+        status.stringValue = "正在尋找所選主電腦…"
         let index = computers.indexOfSelectedItem
-        if services.indices.contains(index) { resolved(services[index]) }
+        if services.indices.contains(index) {
+            let service = services[index]
+            resolved(service)
+            if endpoint == nil { service.stop(); service.resolve(withTimeout: 8) }
+        }
     }
     func netServiceDidResolveAddress(_ sender: NetService) { resolved(sender) }
     func refreshEndpoint() {
@@ -123,10 +137,10 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         service.stop(); service.resolve(withTimeout: 4)
     }
     func resolved(_ service: NetService) {
+        let index = computers.indexOfSelectedItem
+        guard services.indices.contains(index), services[index] == service else { return }
         let text = service.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
         guard let raw = text["id"], let id = String(data: raw, encoding: .utf8), id.count == 64 else { return }
-        if let remembered = saved["fingerprint"], remembered != id { return }
-        guard saved.isEmpty || saved["fingerprint"] == id else { return }
         for data in service.addresses ?? [] {
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             let found = data.withUnsafeBytes { bytes -> Bool in
@@ -135,10 +149,13 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             }
             if found, let url = URL(string: "https://\(String(cString: host)):\(service.port)") {
                 if endpoint != url { resetVideo("正在連接主電腦…") }
-                endpoint = url; fingerprint = saved["fingerprint"] ?? id
+                endpoint = url; fingerprint = id
                 connectedService = service
-                if let remembered = saved["token"] { token = remembered; poll() }
-                else { status.stringValue = "找到主電腦，第一次請輸入六位數字。" }
+                // A remembered token belongs only to its exact pinned host.
+                token = saved["fingerprint"] == id ? saved["token"] : nil
+                code.isHidden = token != nil; connect.isHidden = token != nil
+                if token != nil { poll() }
+                else { status.stringValue = "找到主電腦，請輸入這台主電腦的六位數字。" }
                 return
             }
         }
@@ -160,6 +177,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         var request = URLRequest(url: endpoint.appendingPathComponent(path)); request.cachePolicy = .reloadIgnoringLocalCacheData
         if let token = token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         if let body = body { request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try? JSONSerialization.data(withJSONObject: body) }
+        let generation = connectionGeneration
         session.dataTask(with: request) { data, response, error in
             let result: Result<[String: Any], Error>
             if let error = error { result = .failure(error) }
@@ -167,7 +185,10 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
                 if (response as? HTTPURLResponse)?.statusCode == 200 { result = .success(value) }
                 else { result = .failure(ControlError(((response as? HTTPURLResponse)?.statusCode == 401 ? "PAIRING_REQUIRED: " : "") + (value["error"] as? String ?? "主電腦暫時無法翻頁。"))) }
             } else { result = .failure(ControlError("連線未完成。")) }
-            DispatchQueue.main.async { completion(result) }
+            DispatchQueue.main.async {
+                guard generation == self.connectionGeneration else { return }
+                completion(result)
+            }
         }.resume()
     }
     @objc func pair() {
@@ -205,7 +226,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         binding = state["binding"] as? String ?? ""
         let live = state["live"] as? Bool == true
         previous.isEnabled = live && !busy; next.isEnabled = live && !busy
-        code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = token != nil
+        code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = false
         status.stringValue = Date() < commandErrorUntil ? commandError : "已連線 · \(state["deck"] as? String ?? "尚未播放")"
         if live, (state["capabilities"] as? [String])?.contains("ppt-video-v1") == true { pollVideo() }
         else { resetVideo(live ? "主電腦版本只支援翻頁，請更新 Presenter。" : "等待主電腦播放已確認的 PPT") }

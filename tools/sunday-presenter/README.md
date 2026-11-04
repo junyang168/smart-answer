@@ -27,6 +27,13 @@ Remote video viewer has focus, and keeps command errors visible across state
 polls. The host restores the confirmed player frame and uses Chromium's input
 path for embedded frames; it does not click the slide or send global OS keys.
 
+Remote 0.5.2 fixes switching from a remembered Presenter to another Mac. Only
+the selected host is resolved; remembered credentials are reused only for their
+exact certificate identity. Selecting another host requests that host's six-digit
+code, and late replies from the previous connection cannot change the new one.
+The host selector remains available after connecting. This Remote-only update
+works with Presenter 0.5.1; only the most recently paired host is remembered.
+
 This is the first Phase 2 milestone, not a broadcast release. Wireless microphone
 input, recording, fixed-key YouTube streaming and scheduling remain unimplemented.
 The installed/released 0.4.0 apps and website downloads are unchanged.
