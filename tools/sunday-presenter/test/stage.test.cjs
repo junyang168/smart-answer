@@ -14,6 +14,29 @@ function view(id) {
 }
 function ready(stage, page) { page.loaded = true; stage.prepare(page.id); stage.arm(page.id); }
 
+test('destroyed views may lose webContents before removal callbacks snapshot the stage', () => {
+  const output=host(), prep=host(); let stage, snapshots=[];
+  stage=new Stage(output,prep,()=>snapshots.push(stage.snapshot()));
+  const page=stage.add('sermon',view(80)); ready(stage,page); stage.take('sermon');
+  delete page.view.webContents;
+  assert.equal(stage.snapshot().pages[0].muted,true);
+  assert.throws(()=>stage.get(page.id),/頁面已關閉/);
+  assert.doesNotThrow(()=>stage.remove(page.id));
+  assert.equal(stage.active,null); assert.equal(stage.selected.sermon,null);
+  assert.equal(stage.pages.size,0); assert.equal(snapshots.at(-1).pages.length,0);
+  assert.doesNotThrow(()=>stage.remove(page.id));
+});
+
+test('closing a destroyed private preview preserves the other deck and revokes preview',()=>{
+  const stage=new Stage(host(),host());
+  const worship=stage.add('worship',view(81));ready(stage,worship);stage.take('worship');
+  const sermon=stage.add('sermon',view(82));sermon.loaded=true;stage.prepare(sermon.id);
+  delete sermon.view.webContents;
+  stage.remove(sermon.id);
+  assert.equal(stage.preview,null);assert.equal(stage.active,worship.id);
+  assert.equal(stage.get(worship.id).ready,true);assert.equal(stage.selected.sermon,null);
+});
+
 test('switches retain views and mute every inactive editor and popup', () => {
   const output = host(), prep = host(), stage = new Stage(output, prep);
   const worship = stage.add('worship', view(1));

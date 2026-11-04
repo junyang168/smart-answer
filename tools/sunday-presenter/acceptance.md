@@ -1,3 +1,33 @@
+## #652 iPad simulator runtime verified (2026-11-04)
+
+The owner completed Mac system authorization. Xcode 26.6 first-launch status now
+passes; iOS 26.5 (23F77) boots an iPad (A16) simulator. Simulator and unsigned
+physical-device architecture builds succeed. DerivedData is on the SSD; Xcode
+remains in `/Applications`, with no global toolchain or OS change.
+
+Real simulator UI verification against a development Presenter and actual Office
+PPT passed pairing, video, observer-default disabled navigation, explicit touch
+Next/Previous, expanded viewer, portrait/landscape, Home/app return and process
+termination/relaunch with remembered pairing and recovered image. Saved host
+identity also reconnected after host restart. The simulator initially failed
+Keychain saves with signing disabled; normal Xcode ad-hoc simulator signing fixed
+that failure. UIKit compilation also caught a stored `next` property conflicting
+with UIResponder; it is now `nextButton`.
+
+The old installed 0.6.1 host's Office source was black after overnight idle; a
+fresh Office presentation restored real video. Close/quit also reproduced missing
+`webContents` during destroyed-view callbacks. Stage now handles that lifecycle,
+removes closed pages before notifying observers, and preserves another live deck.
+Two regression counterexamples pass, and all 53 regression tests pass. No claim
+is made that the idle black source is resolved. Installed app bytes were not
+replaced; the currently running demonstration host uses this worktree source.
+
+No physical iPad, minimum-iPadOS, hardware keyboard, real hotspot/network change
+or full-service iPad acceptance is claimed. No microphone, recording, Meet or
+YouTube session was started. Keep the existing two-laptop Meet service workflow.
+See [iPad build and acceptance](ipad/README.md). Earlier entries below retain the
+failed/intermediate evidence and are not the current setup status.
+
 # Sunday Presenter acceptance evidence
 
 ## #652 agreement confirmed; administrator authorization required (2026-11-04)

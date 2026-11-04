@@ -2,6 +2,7 @@ const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 const fs = require('node:fs');
 const root=__dirname;
+const derivedData=process.env.SUNDAY_IPAD_DERIVED_DATA ? path.resolve(process.env.SUNDAY_IPAD_DERIVED_DATA) : path.join(root,'../output/ipad');
 function run(command,args){return execFileSync(command,args,{encoding:'utf8',stdio:['ignore','pipe','pipe']});}
 try {
   require('./generate-project.cjs');
@@ -18,11 +19,11 @@ try {
     run('xcrun',['--sdk',simulator?'iphonesimulator':'iphoneos','--show-sdk-path']);
     execFileSync('xcodebuild',['-project',path.join(root,'SundayRemote.xcodeproj'),'-scheme','SundayRemote',
       '-configuration','Debug','-destination',simulator?'generic/platform=iOS Simulator':'generic/platform=iOS',
-      '-derivedDataPath',path.join(root,'../output/ipad'), 'CODE_SIGNING_ALLOWED=NO','build'],{stdio:'inherit'});
+      '-derivedDataPath',derivedData, ...(simulator ? ['CODE_SIGNING_ALLOWED=YES','CODE_SIGN_IDENTITY=-'] : ['CODE_SIGNING_ALLOWED=NO']),'build'],{stdio:'inherit'});
     console.log(simulator?'Simulator build complete; not yet launched/tested.':'Unsigned iPad build complete; use Xcode and your team/device for installation.');
   }
 }catch(error){
   console.error(error.stderr?.toString()||error.message);
-  console.error('Full Xcode with the iOS SDK is required for build/run. See ipad/README.md. No installable iPad build has been produced by this failed command.');
+  console.error('Build/check failed; inspect the diagnostics above. Full Xcode and an installed iOS platform are required. See ipad/README.md. This command does not establish a successful iPad build.');
   process.exitCode=1;
 }

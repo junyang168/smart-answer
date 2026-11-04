@@ -9,7 +9,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
     private let code = UITextField()
     private let pair = UIButton(type: .system)
     private let previous = UIButton(type: .system)
-    private let next = UIButton(type: .system)
+    private let nextButton = UIButton(type: .system)
     private let fullscreen = UIButton(type: .system)
     private let forget = UIButton(type: .system)
     private let observing = UISwitch()
@@ -44,7 +44,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         code.addTarget(self, action: #selector(codeChanged), for: .editingChanged)
         configure(pair, "第一次連線", #selector(connect))
         configure(previous, "← 上一頁", #selector(back))
-        configure(next, "下一頁 →", #selector(forward))
+        configure(nextButton, "下一頁 →", #selector(forward))
         configure(fullscreen, "全螢幕", #selector(toggleFullscreen))
         configure(forget, "重新配對", #selector(resetPair))
         observing.isOn = true; observing.accessibilityLabel = "只看畫面，停用翻頁"
@@ -57,7 +57,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         connection.addArrangedSubview(options)
         pairing.axis = .horizontal; pairing.spacing = 8
         pairing.addArrangedSubview(code); pairing.addArrangedSubview(pair)
-        let buttons = row([previous, next, fullscreen]); buttons.distribution = .fillEqually
+        let buttons = row([previous, nextButton, fullscreen]); buttons.distribution = .fillEqually
         let footer = UIStackView(arrangedSubviews: [connection, pairing, buttons])
         footer.axis = .vertical; footer.spacing = 6; footer.isLayoutMarginsRelativeArrangement = true
         footer.layoutMargins = UIEdgeInsets(top: 6, left: 12, bottom: 8, right: 12)
@@ -118,7 +118,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         // Unpairing/loss must expose connection and pairing recovery even in fullscreen.
         if expanded && !client.paired { expanded = false; connection.isHidden = false; pairing.isHidden = false; setNeedsStatusBarAppearanceUpdate() }
         pair.isEnabled = client.canPair && RemoteScope.validCode(code.text ?? "")
-        code.isEnabled = !client.pairingBusy; previous.isEnabled = client.canFlip; next.isEnabled = client.canFlip
+        code.isEnabled = !client.pairingBusy; previous.isEnabled = client.canFlip; nextButton.isEnabled = client.canFlip
         observing.isOn = client.scope.observing
         var fullscreenConfig = fullscreen.configuration
         fullscreenConfig?.title = expanded ? "顯示連線" : "全螢幕"

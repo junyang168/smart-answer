@@ -35,7 +35,7 @@ Owner 明確指定 iPad 才是 Sunday Remote 的主要目標；講員使用 Mac 
 
 現有 WebRTC `remote.html/js/css` 與 `RemoteVideoView.swift` 共用；iPad 以 UIKit 實作版面與生命週期，重用既有 TLS／Bonjour／配對及翻頁協議。只接收 video，不移動 PPT／Office 登入到 iPad。App 進入非作用狀態即停止本機 viewer、取消請求並禁用按鍵；回到前景重新探索與協商，不承諾背景串流。詳細建置／安裝及證據界線見 [iPad 說明](../tools/sunday-presenter/ipad/README.md)。
 
-目前僅完成原型源碼、Mac SDK 的實際 client／憑證／scope 檢查與 UIKit 語法解析；開發 Mac 缺少完整 Xcode／iOS SDK，尚無 iPad 建置、安裝或整場驗收。iPadOS 版本與簽章／真機接入仍待確認，不能以 Mac 測試當作 iPad 已通過。
+2026-11-04 已安裝 Xcode，iOS 模擬器與未簽章真機架構建置通過；iPad 模擬器已驗證真實 PPT video、觸控雙向翻頁、只看模式、橫向全螢幕，以及重開 App／返回前景後保留配對並恢復影像。真機簽章、目標 iPadOS、實際 Wi-Fi／熱點與整場驗收仍待完成；模擬器成功不代表真機已通過。
 
 ## 2. 架構決定
 

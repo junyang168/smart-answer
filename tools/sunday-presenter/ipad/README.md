@@ -42,9 +42,11 @@ The first command compiles/tests the actual Foundation/Security client and scope
 on the Mac SDK, validates plist/project/resources, and parses UIKit source.
 It does **not** compile UIKit against the iOS SDK, launch an app or verify WebRTC
 on iPad. The last two commands require full Xcode and the appropriate iOS SDK.
-Both build without signing; an unsigned device app is **not installable**.
-Generated projects are deterministic (`generate-project.cjs`); generated build
-products stay under the ignored `output/` directory.
+Simulator builds use Xcode ad-hoc signing, including its simulated application
+identifier; disabling signing breaks Keychain pairing on the tested runtime.
+Device builds remain unsigned and **not installable**. Generated projects are
+deterministic (`generate-project.cjs`). Products default to the ignored `output/`
+directory; set `SUNDAY_IPAD_DERIVED_DATA` to place DerivedData on an SSD.
 
 ## Install and actual acceptance
 
@@ -76,20 +78,38 @@ Apple references: [local network privacy](https://developer.apple.com/documentat
 
 ## Current evidence and limits
 
-Initial checks found only Command Line Tools; `xcrun --sdk iphoneos
---show-sdk-path` failed. With owner installation authorization, the Mac App Store
-then installed its last compatible release, Xcode 26.6, in `/Applications`. macOS
-remains 26.5.2. The owner then explicitly confirmed the displayed Xcode and Apple SDKs
-Agreement (EA1990, 2026-01-21), and Agree was pressed through the normal UI.
-First launch is still incomplete: recording the agreement requires administrator
-authorization. The official unprivileged command reports that requirement, and
-a noninteractive sudo attempt returns "a password is required". The computer-use
-tool refuses SecurityAgent access, so the owner must complete system authorization
-locally or through their own remote connection. Do not send a password in chat.
-SSD relocation and simulator setup are pending; no successful global license
-registration or simulator run is claimed. The portable check command passes 38 production-scope/TLS/redirect assertions;
-all 51 Presenter/Remote regression tests pass. Both Mac Remote architectures
-build with the shared viewer changes. Project/plist resources validate and UIKit
-source parses. No iOS simulator/device build, installable IPA or physical
-iPad acceptance is claimed. Signing, actual iPadOS compatibility and WebRTC/local
-network behavior remain required work. Do not use a Mac compile as an iPad pass.
+On 2026-11-04, after the owner completed the authorized Xcode agreement and Mac
+administrator prompt, `xcodebuild -checkFirstLaunchStatus` passed. Xcode 26.6
+(17F113) is installed in `/Applications/Xcode.app`; macOS remains 26.5.2. The
+machine-wide CLT selection is unchanged: builds use
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Xcode itself has not
+been moved to SSD. DerivedData is on `/Volumes/Jun SSD/SundayPresenterTests/iPadBuild`.
+
+iOS 26.5 (23F77) runs on the iPad (A16) simulator. Both the simulator build and
+unsigned physical-device architecture build succeed. Actual simulator UI checks
+with a real Office PPT and a development Presenter passed:
+
+- Six-digit pairing saves to Keychain; terminating/relaunching the app restores
+  the pair without re-entering a code, and video returns.
+- Observer mode starts on and disables navigation. Explicitly disabling it lets
+  touch Next advance to the second slide and Previous return to the title slide.
+- Expanded viewing hides connection details but retains navigation and settings;
+  portrait and landscape render correctly after the rotation transition.
+- Home/app return reconnects and restores the PPT image. Restarting the host and
+  enabling Remote also re-discovers the saved host identity at its new endpoint.
+
+The initial unsigned simulator run could not save pairing; this failed attempt
+is superseded by the correctly signed simulator build, not counted as a pass.
+The old installed host had a black PPT source after overnight idle; reopening
+Office restored the source. Its destroyed-view close/quit error was reproduced
+and fixed with regression tests in this branch. This does not establish an
+idle-black-screen fix or full-service stability. The installed Mac app bundle
+was not replaced: the current demo host runs development source.
+
+All 53 Presenter/Remote regression tests pass, including 38 portable production
+client/scope/TLS/redirect assertions and two destroyed-view counterexamples.
+Earlier Mac Remote builds passed on both architectures. No physical iPad, real
+Wi-Fi/hotspot interruption, minimum-iPadOS, external keyboard or full-service
+iPad acceptance is claimed. No installable IPA or App Store/TestFlight release
+has been produced. The owner's iPad model/OS and normal Xcode signing/device setup
+remain the next hardware steps. Retain both laptops in Meet this Sunday.

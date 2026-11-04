@@ -31,9 +31,11 @@ constraint of the current service workflow. [The iPad target](ipad/README.md)
 adds a UIKit viewer/controller using the same bundled WebRTC receiver and pinned
 Presenter protocol. It defaults to observe-only mode. Pairing, host isolation,
 touch navigation, expanded viewing and foreground reconnect are implemented as
-pilot source. The development Mac has no full Xcode/iOS SDK: there is no
-installable iPad artifact or physical-device acceptance yet. Keep the first
-Sunday's two-laptop Meet workflow until the actual iPad has been built and tested.
+a pilot. Xcode simulator and unsigned device builds now pass. An iPad simulator
+has received real PPT video, controlled both slide directions, displayed the
+expanded landscape viewer, and restored video/pairing after app restart and
+foreground return. Physical-device signing and hardware/full-service acceptance
+remain outstanding. Keep the first Sunday's two-laptop Meet workflow.
 
 ## Local video pilot — 0.5.1 (#643)
 

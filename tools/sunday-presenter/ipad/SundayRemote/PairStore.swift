@@ -21,8 +21,15 @@ struct PairStore {
         if status == errSecItemNotFound {
             var q = query(fingerprint); q[kSecValueData as String] = data
             q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw RemoteError("無法儲存配對，請重新連線。") }
-        } else if status != errSecSuccess { throw RemoteError("無法更新配對，請重新連線。") }
+            let added = SecItemAdd(q as CFDictionary, nil)
+            guard added == errSecSuccess else {
+                NSLog("SundayRemote Keychain add failed: %d", added)
+                throw RemoteError("無法儲存配對，請重新連線。")
+            }
+        } else if status != errSecSuccess {
+            NSLog("SundayRemote Keychain update failed: %d", status)
+            throw RemoteError("無法更新配對，請重新連線。")
+        }
     }
     func remove(_ fingerprint: String) { SecItemDelete(query(fingerprint) as CFDictionary) }
 }
