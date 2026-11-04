@@ -1267,7 +1267,7 @@ def _chapter_slides(
             "at": slide["at"],
             "seconds": slide["seconds"],
             "title": slide["title"],
-            "points": slide["points"],
+            "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
             "verses": slide["verses"],
             "scriptures": [
                 {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}

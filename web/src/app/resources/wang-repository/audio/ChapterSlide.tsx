@@ -15,51 +15,83 @@ export type ChapterSlideData = {
   at: number;
   seconds: number;
   title: string;
-  points: string[];
+  /** 每条要点在他讲到的那一句才出现（at）。 */
+  points: { at: number; text: string }[];
   verses: string[];
   scriptures: { at: number; scripture: string; label: string }[];
 };
 
+/** `mat-5-4-9` → 逐节的出处 `mat-5-4` … `mat-5-9`；读不出的整段当一节。 */
+function eachVerse(slug: string): { number: string; slug: string }[] {
+  const match = slug.match(/^([a-z0-9]+)-(\d+)-(\d+)(?:-(\d+))?$/);
+  if (!match) return [{ number: "", slug }];
+  const [, book, chapter, from, to] = match;
+  const first = Number(from);
+  const last = to ? Number(to) : first;
+  if (last < first || last - first > 30) return [{ number: "", slug }];
+  return Array.from({ length: last - first + 1 }, (_, index) => ({
+    number: String(first + index),
+    slug: `${book}-${chapter}-${first + index}`,
+  }));
+}
+
+/** 一节一行、带节号——他一节一节读，听众要找得到他读到哪里。 */
 function Verse({ slug, label, latest }: { slug: string; label: string; latest: boolean }) {
-  const [text, setText] = useState<string | null>(null);
+  const verses = eachVerse(slug);
+  const [texts, setTexts] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
-    load(slug).then((data) => {
-      if (alive) setText(plain(data.passages.zh));
+    Promise.all(verses.map((verse) => load(verse.slug).then((data) => plain(data.passages.zh)))).then((loaded) => {
+      if (alive) setTexts(loaded);
     });
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
   return (
-    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/40" : "bg-slate-900/50"}`}>
-      <p className="mb-1 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
-      <p className={`font-serif leading-8 ${latest ? "text-[1.05rem] text-slate-100 sm:text-lg" : "text-[0.95rem] text-slate-400"}`}>
-        {text ?? "……"}
-      </p>
+    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
+      <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
+      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200" : "text-[0.9rem] leading-6 text-slate-500"}`}>
+        {verses.map((verse, index) => (
+          <li key={verse.slug} className="flex gap-2.5">
+            {verse.number && (
+              <span className="w-5 shrink-0 pt-[0.15rem] text-right font-mono text-[0.7rem] text-amber-300/60">
+                {verse.number}
+              </span>
+            )}
+            <span>{texts ? texts[index] : "……"}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
 
 export default function ChapterSlide({ slide, seconds }: { slide: ChapterSlideData; seconds: number }) {
-  // 他读到了才出现；同一张里先读的留着，新读的放在最上面、亮着。
+  // 要点和经文都是他讲到、读到了才出现。新读的经文放在最上面、亮着。
+  const points = slide.points.filter((item) => item.at <= seconds + 1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
   const shown = [...read].reverse();
   return (
     <section className="flex min-h-[20rem] flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
-      <header className={shown.length > 0 ? "border-b border-slate-800 pb-4" : ""}>
-        <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-amber-400">
-          要點 · 編輯整理
-        </p>
+      <header>
         <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
-        <ul className="mt-3 space-y-2 text-[1rem] leading-relaxed text-slate-200">
-          {slide.points.map((point) => (
-            <li key={point} className="flex gap-2">
-              <span aria-hidden className="mt-[0.65rem] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/70" />
-              <span>{point}</span>
-            </li>
-          ))}
-        </ul>
+        {points.length > 0 && (
+          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed">
+            {points.map((point, index) => (
+              <li
+                key={point.text}
+                className={`flex gap-3 ${index === points.length - 1 ? "text-white" : "text-slate-400"}`}
+              >
+                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
+                  {index + 1}
+                </span>
+                <span>{point.text}</span>
+              </li>
+            ))}
+          </ol>
+        )}
       </header>
       {shown.length > 0 && (
         <div className="flex flex-col gap-3">
@@ -68,6 +100,7 @@ export default function ChapterSlide({ slide, seconds }: { slide: ChapterSlideDa
           ))}
         </div>
       )}
+      <p className="mt-auto text-right text-[0.65rem] tracking-[0.15em] text-slate-600">要點為編輯整理，非原話</p>
     </section>
   );
 }

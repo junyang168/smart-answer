@@ -11,6 +11,10 @@
 投影片在句子上换，不在片段上换：第一版按约 300 字的片段换，评审发现一个话题的
 尾巴、下一个话题的开头常落在别的投影片上（问题在这一张、答案在下一张）。
 
+要点也标句子（v3）：负责人 2026-11-03 指出「八福都是天國的祝福」那张四条一起
+出来，他还在读经文，听众已经读到两分钟后的结论；两条又说同一件事。现在每条要
+点在他讲到时才出现，次序就是他讲的次序。
+
 用法::
 
     backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-5-1-48 --lecture （二）1
@@ -29,7 +33,7 @@ from typing import Any
 from backend.pipeline import chapter_exposition, chapter_material
 from backend.pipeline.chapter_material import Chapter
 
-SCHEMA_VERSION = "chapter_slides_v2"
+SCHEMA_VERSION = "chapter_slides_v3"
 
 DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 
@@ -46,6 +50,8 @@ SYSTEM_PROMPT = """你在為王教授馬太福音講座的錄音配投影片。�
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
 
 要點（points，2 到 4 條，每條不超過 28 字）：
+- 每條寫 sentence：教授講到這一點的那一句（他說出這個問題、理由或結論的那一句）。要點在那一句才出現在螢幕上，所以按他講的次序排，sentence 遞增。
+- 每條一個意思；同一張裡兩條不可說同一件事（例如「全與天國有關」和「都與天國有關係」只留一條）。
 - 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
 - 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
 - 不重複前面投影片已經有的要點。
@@ -76,7 +82,14 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "first": {"type": "string"},
                     "title": {"type": "string"},
-                    "points": {"type": "array", "items": {"type": "string"}},
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"sentence": {"type": "string"}, "text": {"type": "string"}},
+                            "required": ["sentence", "text"],
+                        },
+                    },
                     "verses": {"type": "string"},
                     "scriptures": {
                         "type": "array",
@@ -205,7 +218,17 @@ def check(
         own = lines[a:b]
         own_ids = [s["id"] for s in own]
         title = _title(str(slide.get("title") or ""))
-        points = [str(p).strip() for p in slide.get("points") or [] if str(p).strip()]
+        points = []
+        for item in slide.get("points") or []:
+            text = str(item.get("text") or "").strip() if isinstance(item, dict) else ""
+            if not text:
+                continue
+            if item.get("sentence") not in own_ids:
+                problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
+                continue
+            points.append({"sentence": item["sentence"], "text": text})
+        if any(own_ids.index(b["sentence"]) < own_ids.index(a["sentence"]) for a, b in zip(points, points[1:])):
+            problems.append(f"{title}: 要點沒有按他講的次序")
         if not title:
             problems.append(f"{own_ids[0]}: 沒有標題")
         if not FEWEST_POINTS <= len(points) <= MOST_POINTS:
@@ -284,6 +307,10 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
             "piece": own[0]["piece"],
             "at": own[0]["start"],
             "seconds": own[-1]["end"] - own[0]["start"],
+            "points": [
+                {**item, "at": lines[index[item["sentence"]]]["start"]}
+                for item in slide["points"]
+            ],
             "scriptures": [
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
                 for item in slide["scriptures"]

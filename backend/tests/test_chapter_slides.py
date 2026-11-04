@@ -20,7 +20,8 @@ KEPT = [
 
 
 def slide(first, verses="5:3-5", scriptures=(), points=("一", "二"), title=None):
-    return {"first": first, "title": title or first, "points": list(points),
+    points = [p if isinstance(p, dict) else {"sentence": first, "text": p} for p in points]
+    return {"first": first, "title": title or first, "points": points,
             "verses": verses, "scriptures": list(scriptures)}
 
 
@@ -61,6 +62,21 @@ def test_points_verses_and_scripture_references_are_checked():
     assert "經節讀不出來或不在這一章" in joined
     assert "句子 S0001 不在這一張" in joined
     assert "經文出處讀不出來" in joined
+
+
+def test_points_appear_when_he_reaches_them_in_his_order():
+    # 「八福都是天國的祝福」：四條一起出來，他還在讀經文，聽眾已讀到兩分鐘後的結論。
+    problems, _, _ = chapter_slides.check([slide("S0001", points=(
+        {"sentence": "S0002", "text": "後"}, {"sentence": "S0001", "text": "先"}))], KEPT, CHAPTER)
+    assert any("沒有按他講的次序" in p for p in problems)
+    problems, _, _ = chapter_slides.check([slide("S0001"), slide("S0003", points=(
+        {"sentence": "S0001", "text": "別張的句子"}, {"sentence": "S0004", "text": "二"}))], KEPT, CHAPTER)
+    assert any("別張的句子" in p and "不在這一張" in p for p in problems)
+    decisions = {"pieces": KEPT, "decisions": [{"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    _, _, slides = chapter_slides.check([slide("S0001", points=(
+        {"sentence": "S0001", "text": "一"}, {"sentence": "S0004", "text": "二"}))], KEPT, CHAPTER)
+    _, timed = chapter_slides.placed(decisions, {"slides": slides})
+    assert [p["at"] for p in timed[0]["points"]][0] == 0 and timed[0]["points"][1]["at"] > 300
 
 
 def test_a_verse_read_but_missing_from_the_slide_is_listed_not_rejected():
