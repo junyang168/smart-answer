@@ -223,6 +223,52 @@ def seed_claims(store, ids):
          'occurrences': [{'source_id': 'S', 'anchors': []}]} for cid in ids]}))
 
 
+def test_legacy_retirement_with_shared_position_is_one_atomic_two_source_unit(action):
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    store, _, _, _, tmp_path, _ = action
+    other = tmp_path / 'other-source.json'
+    other.write_text(json.dumps({'script': [{'text': '甲是假设，不是断言。'}]}))
+    store.apply_plan(store.plan_package({'package_id': 'legacy-shared-opposition',
+        'source_documents': [{'source_id': 'T', 'title': 'synthetic notes', 'source_type': 'notes_manuscript',
+            'source_path': str(other), 'source_file_sha256': binding(other)['file_sha256']}],
+        'claims': [{'claim_id': cid, 'statement': '甲是假设。', 'claim_type': 'exegesis',
+            'occurrences': [{'source_id': sid, 'anchors': []} for sid in ['S', 'T']],
+            'opposed_position_ids': ['P'] if cid in 'AB' else [], 'evidence_step_ids': ['E'+cid]} for cid in 'ABC'],
+        'evidence_steps': [{'evidence_step_id': 'E'+cid, 'statement': '甲是假设。', 'produced_claim_ids': [cid]} for cid in 'ABC'],
+        'position_nodes': [{'position_id': 'P', 'title': 'synthetic old opposition'}],
+        'claim_relations': [{'claim_relation_id': 'AC', 'from_id': 'A', 'to_id': 'C', 'relation_type': 'supports'}]}))
+    request, output = operation_request(action, 'Retire', list('ABC'))
+    request.source_bindings['T'] = cm.source.FileBinding.model_validate(binding(other))
+    request.policy = cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY.parent / 'wang_claim_management_opus_only_v1.json'))
+    request.permissions += [cm.source.Permission(collection='evidence_steps', object_id='E'+cid, fields=['produced_claim_ids']) for cid in 'ABC']
+    request.permissions += [cm.source.Permission(collection='position_nodes', object_id='P', fields=['title']),
+                            cm.source.Permission(collection='claim_relations', object_id='AC', fields=['reason'])]
+    authorize(request, {})
+    def propose(packet):
+        unit = packet['unit_request']
+        if '__claim_request_ref__' in unit:
+            unit = packet[unit['__claim_request_ref__']]
+        assert set(unit['target_keys']) == {'claims/'+cid for cid in 'ABC'}
+        assert set(packet['sources']) == {'S', 'T'}
+        candidate = cm.existing_candidate(packet['before'])
+        for disposition in candidate.dispositions:
+            if disposition.record_key.startswith('source_documents/'):
+                continue
+            disposition.action = 'retire'
+            disposition.reason = 'synthetic reviewed duplicate and its obsolete support'
+            disposition.citations = [cm.Citation(source_id='S', paragraph_key='S0001', exact_quote='甲是假设，不是断言。')]
+        return candidate.model_dump(mode='json')
+    ports = SyntheticPorts(store, tmp_path, proposal=propose)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus']
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    assert len(parent['original_goal']['units']) == 1
+    assert all(store.get_record_state('claims', cid)['retired'] for cid in 'ABC')
+    with store.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM wang_knowledge.change_sets WHERE source_kind=%s', (cm.VERSION,)).fetchone() == (1,)
+
+
 @pytest.mark.parametrize('operation',['Create','Update','Retire','Restore','Split','Merge'])
 def test_opus_only_completes_with_real_program_readback_and_no_gemini(action,operation):
     store,original,_,_,tmp_path,_=action
