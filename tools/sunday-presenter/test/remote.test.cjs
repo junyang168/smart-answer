@@ -101,3 +101,17 @@ test('pairing code is single use, expires, and is rate limited', async t => {
 });
 
 module.exports = { request };
+
+test('video signaling requires the existing pair, rejects browser origins and stays isolated from slide commands', async t => {
+  const calls = [];
+  const video = { reset() {}, request(data) { calls.push(data); return { sessionId: 'fixture', status: 'starting' }; } };
+  const f = await fixture(t, { video });
+  assert.equal((await request(f.remote, '/video', { op: 'start' })).status, 401);
+  assert.equal((await request(f.remote, '/video', { op: 'start' }, f.token, { Origin: 'https://example.com' })).status, 403);
+  assert.equal(calls.length, 0);
+  assert.equal((await request(f.remote, '/video', { op: 'start' }, f.token)).status, 200);
+  assert.equal((await request(f.remote, '/state', undefined, f.token)).data.capabilities[0], 'ppt-video-v1');
+  assert.equal((await request(f.remote, '/video', { op: 'answer', sdp: 'x'.repeat(280000) }, f.token)).status, 413);
+  assert.equal((await request(f.remote, '/key', { key: 'Right', id: crypto.randomUUID(), binding: f.binding }, f.token)).status, 200);
+  assert.equal(f.calls.length, 1);
+});

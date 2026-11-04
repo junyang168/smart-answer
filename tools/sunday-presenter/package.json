@@ -1,13 +1,15 @@
 {
   "name": "sunday-presenter",
-  "version": "0.4.0",
+  "version": "0.6.1",
   "private": true,
-  "description": "Sunday Presenter Phase 1: persistent presentations and paired local slide control",
+  "description": "Sunday Presenter pilot: local PPT video and paired slide control",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
-    "smoke": "electron . --smoke",
+    "smoke": "electron . --smoke --focus-smoke",
+    "smoke:recording": "electron . --smoke --focus-smoke --recording-smoke",
+    "smoke:video": "node build-native.cjs && electron . --smoke --focus-smoke --video-smoke",
     "icons": "node build-icons.cjs",
     "package:mac": "node package-mac.cjs"
   },

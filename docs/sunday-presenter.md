@@ -2,9 +2,19 @@
 
 Current delivery: #598 is Phase 1 (0.4.0), with PPT playback and local speaker
 slide control. Google Meet joining, sharing, microphone and recording are manual.
-Phase 2 #643 adds YouTube broadcasting and microphone relay inside Sunday Remote.
+Phase 2 #643 adds local PPT video to Sunday Remote and YouTube broadcasting,
+using the existing wireless microphone connected to the host. Remote microphone
+relay is deferred.
 Phase 1 removes the old Meet Accessibility integration and automatic 10:00 start;
 old service settings do not execute. See tools/sunday-presenter/README.md.
+
+The [Phase 2 design](./sunday-presenter-phase2-design.md) proposes direct local
+PPT video from Presenter to Sunday Remote, followed by YouTube broadcasting with a reusable stream key and fixed channel viewing link.
+Only the selected wireless microphone on the host supplies broadcast audio.
+The design records reuse choices, media isolation, failure handling and the
+physical-device acceptance gates. The 0.5.1 local video pilot has passed a
+single-Mac Electron-to-native-Remote fixture test; other Phase 2 features remain
+unimplemented. See the [pilot evidence](../tools/sunday-presenter/acceptance.md).
 
 The website owns the date and OneDrive folder mapping. The desktop app calls
 `GET /api/admin/sunday-services/presenter/upcoming` on launch, retry and folder

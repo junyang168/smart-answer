@@ -1,5 +1,402 @@
 # Sunday Presenter acceptance evidence
 
+## #643 refined three-step rollout (2026-11-04)
+
+The owner clarified that this Sunday is an observational first step: Presenter
+switches PPT/OUTPUT; both host and speaker laptops stay in Meet, keeping the
+existing service/audio workflow. A separate device observes Remote video without
+issuing live slide commands. Step 2 introduces speaker-operated Remote and the
+existing wireless microphone feeding the host's Meet; only the host joins Meet.
+Step 3 adds YouTube after those paths stabilize. The v4 design and instructions
+supersede the earlier wording that put speaker Remote/wireless mic into the first
+step. This is a rollout plan, not evidence those service steps already passed.
+Recording stays optional/inactive throughout. No runtime logic or installed app
+was changed, and no meeting, microphone test or streaming session was started.
+
+## #643 owner rollout decision — Meet first, recording optional (2026-11-04)
+
+The owner directed continued Google Meet use while Presenter/Remote stabilizes,
+with YouTube Live deferred. Current runtime already starts recording only from
+an explicit `record-start` action: app startup, PPT playback and Remote connection
+do not start it. Meet-only use does not require Presenter microphone access or
+an MP4 save location; Meet has its own input/permission controls. Controller copy
+now states that recording is optional and initially inactive. This is wording
+and rollout-order clarification, not a newly implemented automatic-recording
+switch. No package reinstall, permission reset or new live call was needed.
+
+The v3 design requires an independent, default-off setting if future automatic
+recording is added; recording disabled/failed must not block Meet, PPT, Remote
+or later YouTube. Meet/target-Mac/hotspot/full-service acceptance is the current
+priority. The two short digital-silence findings below remain unresolved;
+recording is neither accepted as clean audio nor a prerequisite for Meet.
+
+## #643 completed 90-minute installed-app run — qualified result (2026-11-04)
+
+Installed 0.6.1 (runtime commit `0697a29b`) recorded the owner's actual Office
+slideshow and explicitly selected AudioPro X5 into an external SSD, from
+2026-11-03 22:47 to 2026-11-04 00:17 America/Chicago. Normal Stop/Save displayed
+saved; the final file exists and no partial remains. The independent monitor
+reached its 90-minute deadline without a process loss or file-growth alarm.
+Its 91 minute checkpoints show a peak combined app/helper RSS of 1,277 MiB
+and an ending RSS of 940 MiB; these are sampled observations, not a leak proof.
+
+Final recording: `PPT-AudioPro-90min-061-20261103-2247.mp4`, 1,327,132,068 bytes,
+SHA256 `6a50a5ddf669c61b8b8f413d40993e77d628ccdb22372c62a4e165b5c7a3a245`.
+AAC is 5,417.023500 s and 1280×720 H.264 is 5,417.048567 s: a 25.067 ms
+duration difference. Complete audio/video decoding reports zero errors; all
+253,923 audio and 164,153 video packets have timing, no backwards DTS, and
+maximum positive gaps of 0.688 ms audio / 2.834 ms video. All 90 minute-spaced
+visual samples were inspected, including the seven UI interaction markers:
+audience slides and animations progress through slide 7, with no captured
+controller or sustained black output. QuickTime opened the final file, played
+the beginning and middle, and played the final seconds to its normal end.
+
+**Overall uninterrupted-sound acceptance is NOT passed.** Every minute has
+nonzero audio, but a finer decoded-sample inspection found two digital-silence
+intervals: 205.824875 s for 124.750 ms and 1,734.186500 s for 128.250 ms.
+Independent 48 kHz stereo extraction confirms both channels are silent there;
+there is no corresponding MP4 timestamp discontinuity. The saved file cannot
+identify whether this originated in the wireless receiver, USB/OS capture or
+audio processing. There was no simultaneous pre-encoder reference capture, so
+attribution and speech intelligibility remain unresolved. Decoded AAC also has
+101 / 43,336,192 mono 8 kHz samples at or above unity; lossy-codec overshoot is
+not proof of source clipping, and input gain still needs a real speech check.
+
+The original packet/decode inspector labeled the file passed because it did
+not gate decoded silence. That original result is preserved, not overwritten.
+The inspector now separately reports media-timeline success and signal review,
+and refuses an overall pass on ≥100 ms digital-silence intervals. Re-analysis
+of the same immutable file fails that gate as expected. New counterexamples
+cover the observed 128.25 ms run, trailing silence, ordinary zero crossings
+and AAC overshoot. All 50 unit/regression tests pass. No packaged runtime was
+changed after this recording; only the analysis tooling and evidence changed.
+
+Private evidence: ignored `output/endurance-061-20261103-2247/` (monitor,
+interaction markers, original `analysis/`, stricter `analysis-signal-strict/`,
+stereo zero-run confirmation and contact sheet); final MP4 under the owner's
+SSD `SundayPresenterTests` directory. `dist/endurance-0.6.1-manifest.json` binds
+the build, recording and analyses. Recording/finalization/video endurance is
+demonstrated; a clean-audio whole-service claim is withheld. The next diagnostic
+must compare pre-encoder physical-input samples with normalized/encoded samples
+to locate these short silences before another clean-audio acceptance run.
+Nothing was uploaded, streamed, deployed or published as a website download.
+
+## #643 whole-service endurance follow-up — 0.6.1 candidate (2026-11-03)
+
+Owner requested a full-service-duration recording. The first installed 0.6.0
+attempt used real Office PPT + AudioPro and an external SSD, starting at
+22:24:26 America/Chicago. It failed at about 46.46 seconds: the five-second
+encoder no-output guard fired. An independent file-growth monitor confirmed
+stalled writes; the app remained alive and SSD free space was about 197 GiB.
+The partial is retained. This is a failed endurance result, not a 90-minute pass.
+
+A separate 150-second actual AudioPro repro exposed a measurable clock defect:
+audio 148.500917 s versus video 150.337667 s. The previous short hardware smoke
+only checked codecs/decodability, so its old PASS label does not establish sync;
+the tightened skew gate rejects this saved counterexample.
+
+The recording audio now passes from the exact selected physical source through
+a 48 kHz Web Audio MediaStreamDestination before encoding. No speaker connection
+is made; source-ended still stops/finalizes, and original/normalized tracks plus
+the context close on stop. Audio and canvas retain their native capture timestamps.
+The corresponding 150-second hardware test yields audio 150.420708 s and video
+150.448433 s (~28 ms), independently decoded without errors. A real Office PPT +
+AudioPro + same-SSD repro then ran 229 seconds and finalized normally: audio
+229.098042 s / video 229.119467 s (~21 ms), zero full-decode errors, no backward
+DTS, maximum positive packet gaps about 0.69 ms audio / 1.73 ms video. These are
+short corrected checks; the full 90-minute run remains required.
+
+Capture/encoder failure diagnostics retain track/recorder/context/timer states,
+without document URLs or audio samples. A read-only endurance monitor checks
+file growth, early finalization, process survival, disk space and RSS. Its separate
+inspector streams all packet timestamps, fully decodes video/audio, writes one
+visual sample per minute, and summarizes decoded audio in bounded per-minute bins.
+It fails on insufficient track duration, >350 ms A/V duration difference,
+backward DTS, missing timing or significant packet gaps. This measures the file's
+media timeline, not acoustic latency or speech intelligibility.
+
+48 unit/regression tests pass, including clock-normalization routing and cleanup,
+physical-device binding/source loss, and rejected packet-gap/skew counterexamples.
+Raw evidence stays in ignored output and on the owner's SSD. No website release
+or deployment occurred. Full endurance verdict will be appended after recording,
+finalization, full decoding and visual inspection actually finish.
+
+
+## #643 local PPT + host microphone recording — 0.6.0 (2026-11-03)
+
+Authorized next milestone: a local video file before YouTube/Meet streaming.
+The controller enumerates/selects a precise microphone, chooses an MP4 path,
+starts/stops recording, shows input level/progress, and reveals the result.
+No network publication or Remote audio was started. Device enumeration requests
+OS consent but opens no track. Start verifies the actual exact deviceId, with
+no fallback. OUTPUT capture is shared with Remote; the recording branch draws
+the same track through a 1280×720, 30 fps canvas and combines it with one microphone
+track. Audio is never routed to speakers by the recorder.
+
+Two actual counterexamples changed the implementation. Sparse ScreenCaptureKit
+frames caused the initial video track to end about a second before audio; canvas
+sampling fixes the still-frame timeline. A timeslice alone did not flush MP4
+before stop; matching 500 ms keyframe interval/timeslice now produces incrementally
+readable audio/video packets. That bridge was independently read with ffprobe
+before stopping the encoder. There is no production FFmpeg dependency or silent
+codec fallback. H.264/AAC support is checked before capture.
+
+File data is streamed with strictly ordered, trusted-main-frame IPC. Renderer and
+writer queues reject more than 16 MiB; the two-second backlog and five-second
+encoder-output checks stop a failed branch. Finalization waits for encoder stop,
+queued writes and fsync, then reserves a new output name and renames its partial
+file. Existing files are never overwritten. Storage/encoding/renderer failure
+reports an error and retains a partial file. Source/preparation/minimize loss and
+microphone-ended stop and finalize the existing clip. Restart is explicit.
+Startup cancellation and reentrant source-loss cleanup cannot open a late mic.
+Quit finalizes first and guards repeated cleanup; an old installed build exposed
+a repeated-quit destroyed-window error, fixed in this pilot.
+
+Validation:
+
+- 43 tests pass, including shared capture ownership/cancellation, write ordering/size, ENOSPC preservation, name
+  collisions, startup cancellation, reentrant source loss, late/untrusted IPC,
+  concurrent recording intent and preserved permission-error messages.
+- Full capture/recording smoke passes with actual OUTPUT and generated reference
+  audio. In the final two-minute run, independently decoded video is 126.059533 s
+  and audio 126.036771 s (about 23 ms duration difference). A PPT color switch and
+  tone-frequency switch occur at 2.50 s / 2.45 s (about 50 ms; visual sampling is
+  250 ms, so this is a bounded marker check, not a precision latency measurement).
+- Both H.264 and AAC decode without ffmpeg errors. The smoke checks pre-stop MP4
+  packets, same capture track during a Remote offer, Remote teardown preserving
+  recording, source privacy auto-finalization, microphone-ended finalization,
+  repeated recording and released tracks. Raw evidence: ignored
+  `output/smoke/recording-result.json`; recordings under
+  `output/smoke/recording-1793762196212/`.
+- Actual AudioPro X5 USB input was explicitly selected in the development runtime
+  and recorded for ten seconds, using 48 kHz/two channels. AAC/H.264 independently
+  decode; measured nonzero RMS is about 0.000538, a very quiet input. This proves
+  hardware capture, not intelligible human speech or the transmitter's battery
+  health. Evidence: ignored `output/smoke/hardware-recording-result.json`.
+- QuickTime opened a final short MP4, played to its end and showed the changed
+  PPT/animation state. Existing full native Remote video/fullscreen/button/arrow,
+  20-switch/privacy/reconnect smoke passes after the shared-capture refactor.
+- Both native architectures build; final DMG/ZIP/signature and installed-source
+  checks are recorded with `dist/local-recording-0.6.0-manifest.json`.
+  DMG SHA256: `4043b2c1955119058282671a27a99e68423cc85bdafd03fd9c9ff359d7720285`. Remote 0.5.3 remains
+  compatible, so the owner only needs the new Presenter for recording.
+
+Installed-app verification is separately bounded. The final 0.6.0 controller and
+wireless microphone selection were exercised through normal UI, and the retained
+Microsoft session opened the owner's real PowerPoint slideshow without edits.
+An initial recording failed because TCC rejected the old ad-hoc ScreenCapture code
+requirement; this is not a passing recording. The stale Presenter-only screen
+entry was removed/re-added through System Settings for the final canonical
+`/Applications/Sunday Presenter.app`. Microphone consent had the same stale-signature
+failure; only this app's Microphone status was reset and a new prompt requested.
+The computer-use tool is prohibited from operating UserNotificationCenter; the
+owner explicitly completed the fresh microphone consent. The final installed
+0.6.0 app then recorded the real Office slideshow and actual AudioPro X5 through
+the normal UI, using the Save dialog and Stop/Save button. The app showed active
+recording, live input level and growing file size. Two native Right presses
+advanced the real slideshow without stopping recording. Stop/Save visibly
+reported the final MP4, with no recording left running.
+
+The actual clip is 33.518533 s / 10,153,997 bytes: H.264 1280×720 video and AAC
+48 kHz/stereo audio. Independent full decoding reports zero errors. Audio duration
+is 33.194042 s (about 325 ms shorter than video); decoded RMS is 0.003089 and peak
+0.137600. This is measured signal, not an intelligibility or acoustic-sync verdict.
+Extracted frames at 5 s and 27 s visibly contain different audience slides, with
+no controller/editor UI. QuickTime opens the file as a 34-second movie and plays
+it. Private evidence: `output/smoke/installed-recording-result.json` and
+`installed-real-ppt-5.png` / `installed-real-ppt-27.png` in the same ignored directory.
+The local real recording is in the owner's Movies folder; it was not uploaded.
+Old app bundles remain preserved under local state. No TCC database editing or
+system protection disable occurred.
+
+Remaining: spoken microphone/acoustic-sync acceptance, whole-service duration,
+target MacBook/hotspot performance, and
+YouTube/scheduling/standalone test-mic/mute features. A local two-minute file does
+not establish 90-minute drift/resource behavior or broadcast readiness.
+
+
+## #643 Remote viewing stability and compact controls — 0.5.3 (2026-11-03)
+
+After updating to 0.5.2, the owner confirmed Pro/Air pairing over iPhone Personal
+Hotspot works, but reported a later interruption which recovered after clicking.
+This report establishes hotspot pairing; duration and full service acceptance
+remain open. The precise cause of that physical interruption was not logged.
+
+A deterministic regression demonstrates two defects in the previous viewer:
+a connected still slide with no additional decoded frames is treated as failed
+after eight seconds, and even a brief ICE disconnection immediately tears down
+the session. Both counterexamples fail against 0.5.2 and pass against 0.5.3.
+The viewer now retains still slides, automatically resumes paused video, allows
+five seconds for transient ICE recovery, and still retries persistent failure
+or a 25-second first-frame timeout. The native heartbeat uses common run-loop
+modes; a scoped user-initiated/display-awake activity is held only while live
+playback is visible, and released on disconnect, switch, close, minimize or quit.
+This reduces idle scheduling/sleep risks without claiming to fix every hotspot
+drop. Apple references: [activity options](https://developer.apple.com/documentation/foundation/processinfo/activityoptions)
+and [primary fullscreen](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/fullscreenprimary).
+
+The large heading is removed. Video fills the upper window, with host/status,
+pairing (only when needed), slide controls and Full Screen below. Native primary
+fullscreen replaces the old auxiliary floating-window configuration; the button,
+green window control and Control-Command-F are available.
+
+
+Validation on Apple Silicon macOS 26.5.2: 31 tests pass; both native targets
+build. Native fullscreen entry/exit passes, the viewer occupies more than 85%
+of content height (about 89% at the default size), controls are below the viewer,
+and the display-awake activity is present during live playback. A three-minute
+actual OUTPUT → native WebKit stream left completely untouched retained the same
+session. The subsequent 20-switch, native button/viewer-arrow, privacy stop,
+source recovery and reconnect smoke checks also pass. Activity creation/release also passes the compiled native regression.
+Visual inspection confirms the compact footer and removed heading.
+
+The Remote-only universal 0.5.3 ZIP passes integrity and deep/strict signature
+checks; the extracted media matches source and the executable includes x86_64
+and arm64. ZIP SHA256:
+`de11f394cd50bbf1f5f176b123a502df06ff04f56230d37fa02829d5a3bd0a7e`.
+Presenter 0.5.1 remains compatible; no website publication or host update.
+Physical hotspot idle duration and whole-service reliability remain pending.
+
+## #643 switching Presenter hosts — Remote 0.5.2 (2026-11-03)
+
+The owner confirmed two physical Macs connected on the same home network. When
+moving Remote to a MacBook Pro Presenter on iPhone Personal Hotspot, the screenshot
+showed the Pro in the service selector but no endpoint. Native resolution returned
+early whenever the advertised certificate identity differed from the remembered
+Mac, including after explicit host selection. This is a proven client defect;
+its repair does not yet establish two-Mac hotspot acceptance.
+
+Remote now resolves only the selected host and uses its advertised identity for
+certificate pinning. It reuses the saved token only for that exact identity;
+another host requires its own pairing code. The prior saved pair remains intact
+until a new pairing succeeds. Host switching clears command/video state and
+invalidates late responses; the host selector stays visible when connected.
+
+A compiled native regression exercises the actual RemoteApp with two synthetic
+Bonjour services: old saved pairing → new host, old-token isolation, ignored
+background resolution, return to the saved host, cleared controls/busy state,
+and a delayed old-host response after switching. Both native architectures build.
+The complete 27-test suite passes; the extended delayed-response check also
+passes. Remote 0.5.2 is compatible with Presenter 0.5.1 and packaged separately;
+no website installer update or Presenter permission change is needed.
+
+The full Electron → native WebKit video smoke also passes: 1280×720 video only,
+20 switches preserving the session, native buttons and viewer-focused arrows,
+privacy stop, source recovery and reconnect. ZIP integrity and deep/strict bundle
+signature verification pass. The Remote-only universal ZIP SHA256 is
+`6e9dd499b66837f6b6595a2369178ea913b4229d5c3f17ec0838d8d68b40b273`.
+Actual Pro/Air hotspot pairing, video and controls still need owner verification.
+
+
+## #643 embedded slide-control fix — 0.5.1 (2026-11-03)
+
+The owner reported working video but no Remote slide response in a real Office
+slideshow. Direct host keyboard input advanced its animation. A new opaque
+iframe fixture reproduced the failure: WebContents/frame focus reported success,
+but Electron `sendInputEvent` delivered no keys to the child document.
+
+The host now restores the confirmed playback frame and uses a temporary,
+in-process Chromium input session for embedded frames. It checks the current
+Stage binding again before delivery, sends one key-down/up pair, then detaches;
+no global OS keystrokes or debugging network listener is added. Top-level
+presentations retain the ordinary input path. API references:
+[Electron keyboard input](https://www.electronjs.org/docs/latest/api/web-contents),
+[Electron in-process debugger](https://www.electronjs.org/docs/latest/api/debugger).
+Remote's arrow filter now excludes only the visible pairing editor, and command
+errors remain visible for eight seconds instead of being overwritten by polling.
+
+Validation: the embedded-frame counterexample and retained presentation smoke
+pass. The native Remote video smoke now exercises the actual NSButton action and
+a queued arrow event with WKWebView focused; each advances exactly once. Local
+720p receive, 20 deck switches, source stop/recovery and reconnect also pass.
+The 26 existing protocol/presentation tests pass. Reproduce with `npm run smoke`
+or `npm run smoke:video`; the isolated smoke shortcut avoids the installed app's
+Command-P binding. No microphone, recording or YouTube feature was added.
+
+The local 0.5.1 DMG/ZIP, installed host/Remote signatures, ZIP integrity and
+packaged/installed source comparisons pass. The two /Applications apps were
+updated with originals preserved in the private `ops-643` local-state backup.
+The existing Microsoft session and host pairing identity were retained, and the
+owner's current PPT was reopened at slide 6 without editing its contents.
+
+After the owner completed macOS Keychain authorization, actual installed Remote
+control passed on the owner's real Office slideshow: its Next button advanced
+slide 6 to animation 1/3, then an arrow with the Remote viewer focused advanced it
+to animation 2/3. The PowerPoint accessibility state independently confirmed both
+steps. After screen capture was renewed, the same tests passed again with live
+video: all three animations, slide 6 → 7, and the Previous button back to 6.
+No manuscript or slide contents were edited.
+
+The installed host's screen-recording grant needed renewal after the ad-hoc
+update. macOS logged `Failed to match existing code requirement` for this bundle
+and ScreenCapture; toggling/restarting alone retained that stale requirement.
+Removing the old entry and re-adding the installed /Applications Presenter through
+System Settings, then restarting it, restored actual Remote video. Only this
+existing grant was renewed. Pairing and Microsoft credentials were retained; no
+keychain ACL or website release changed. A SHA-bound local record of installed
+versions and the actual Office actions is kept outside Git at
+`~/.local/state/sunday-presenter/ops-643/actual-office-0.5.1.json`.
+Second physical Mac/hotspot validation and the existing full-docs/frontend
+dependency failures remain outside this change.
+
+## #643 local PPT video pilot — 0.5.0 (2026-11-03)
+
+Scope: video from the unique Presenter OUTPUT to native Sunday Remote, with the
+existing paired slide control. No microphone capture, recording, YouTube or
+schedule is implemented. The owner uses a wireless mic on the host; Remote mic
+relay is deferred, PPT audio is excluded, and later YouTube work uses a reusable
+stream key rather than OAuth/API lifecycle management.
+
+Local evidence on Apple Silicon macOS 26.5.2 / Electron 45.2.1:
+
+- 26 Node tests cover retained playback/pairing, authenticated video signaling,
+  rejection of audio/data/public ICE candidates, SDP bounds, setup deadline,
+  idempotent answers, stale session cancellation, bounded replacements and closed
+  services rejecting delayed restarts.
+- Native Remote compiles for arm64 and x86_64. Runtime validation below uses the
+  arm64 slice and system WebKit on this Mac, not a claimed minimum-OS matrix.
+- `npm run smoke:video` exercises actual native window capture and native
+  WKWebView receive on the same unlocked Mac with disposable TLS pairing.
+  Remote decodes 1280×720 video; pixel samples distinguish the two fixture decks
+  (sermon `[111,47,25,255]`, worship `[17,60,79,255]`). Selected ICE candidates are
+  host/host, and both sender and receiver have zero audio tracks.
+- Twenty deck switches retain one media session and OUTPUT. A native Remote
+  button advances the host's actual fixture slide. Moving the active page to
+  private preparation and minimizing OUTPUT stop capture; re-confirming the
+  source and viewer reconnection resume with fresh sessions and no new pairing.
+- An additional active-shutdown smoke stops a live capture before destroying its
+  renderer; the closed service rejects a delayed viewer restart and the app exits.
+- The full retained playback smoke also passes popup opener/POST, controller
+  focus, duplicate slide commands, navigation/fullscreen/crash invalidation and
+  source identity checks. It does not sign in to Microsoft or Meet.
+
+Reproduce with an unlocked desktop and no installed Presenter running:
+
+```sh
+cd tools/sunday-presenter
+npm ci
+npm test
+npm run smoke:video
+```
+
+Raw evidence and viewer image: ignored `output/smoke/video-result.json` and
+`output/smoke/remote-video.png`. Tests use synthetic slides in the real OUTPUT,
+not a camera, desktop fallback or mocked video track. The test probe's token is
+passed over stdin and is not saved in the user's Keychain or package.
+
+Local package verification also passes: universal Remote build, ad-hoc deep/strict
+signatures, DMG checksum and both ZIP integrity checks. The host ASAR's capture,
+signaling and renderer source bytes match this checkout; test/output/native build
+directories are excluded. Checksums are saved in ignored
+`dist/local-pilot-manifest.json`. These packages were not installed or published.
+
+Pending before field use: second physical Mac, iPhone hotspot/Bonjour, real Office
+slides/animations, all target OS/CPU versions, full-screen keyboard focus and
+long-duration behavior. 0.5.0 is a local pilot, not an installed production update.
+No YouTube stream or audio recording was started; the Phase 1 release below is
+unchanged. Frontend type-check remains blocked by inherited missing `cytoscape`
+and `react-quill-new`; no frontend sources or dependencies changed.
+
 ## Current release scope — Phase 1, 0.4.0 (2026-11-03)
 
 The owner explicitly split delivery: #598 is Phase 1 production playback and

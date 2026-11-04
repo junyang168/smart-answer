@@ -6,22 +6,23 @@ const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('.
 const { Website } = require('./website.cjs');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
+const { HostVideo } = require('./host-video.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
 else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter'));
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
-let controller, output, preparation, stage, officeSession, quitting = false, testOrigin;
-let website, remoteControl, awakeBlocker;
+let controller, output, preparation, stage, officeSession, quitting = false, quitReady = false, quitCleanupDone = false, quitTask, testOrigin;
+let website, remoteControl, awakeBlocker, hostVideo;
 let keyQueue = Promise.resolve();
-let folderTimer;
+let folderTimer, choosingRecording = false;
 let filePlan = null;
 let folderMessage = '';
 const folderRuns = new Map();
 const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
-const controlShortcut = 'CommandOrControl+P';
+const controlShortcut = smoke ? 'CommandOrControl+Shift+Alt+P' : 'CommandOrControl+P';
 
 function toggleControls() {
   // Recovery action is idempotent. Close/hide is an explicit panel action.
@@ -31,6 +32,7 @@ function toggleControls() {
 }
 
 function changed(reason) {
+  if (quitCleanupDone) return;
   // Every successful presentation, leaves only slides.
   if (reason === 'present' && controller && !controller.isDestroyed()) {
     controller.hide();
@@ -38,11 +40,12 @@ function changed(reason) {
     stage.get(stage.active).view.webContents.focus();
   }
   if (stage) remoteControl?.observe(stage.active);
+  hostVideo?.observe();
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  folderMessage }; }
+  folderMessage, recording: hostVideo?.recording.snapshot() }; }
 
 
 function remotePreferences() {
@@ -152,6 +155,22 @@ async function act(action, args = {}) {
       folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
       break;
     }
+    case 'record-devices': await hostVideo.recording.devices(); break;
+    case 'record-start': {
+      if (choosingRecording || hostVideo.recording.run) throw Error('錄影操作尚未完成。');
+      choosingRecording = true;
+      try {
+        if (!hostVideo.ready()) throw Error('請先播放已確認的 PPT，再開始錄影。');
+        const result = await dialog.showSaveDialog(controller, { title: '儲存 PPT＋麥克風錄影',
+          defaultPath: path.join(app.getPath('videos'), `Sunday-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`),
+          filters: [{ name: 'MP4 影片', extensions: ['mp4'] }] });
+        if (result.canceled || !result.filePath) break;
+        await hostVideo.recording.start({ target: result.filePath, deviceId: args.deviceId });
+      } finally { choosingRecording = false; }
+      break;
+    }
+    case 'record-stop': await hostVideo.recording.stop(); break;
+    case 'record-reveal': hostVideo.recording.reveal(); break;
     case 'remote-forget': await remoteControl.forget(); break;
     case 'remote-start': await remoteControl.start(); break;
     case 'remote-stop': await remoteControl.stop(); break;
@@ -201,6 +220,7 @@ async function sendSlideKey(key, expectedActive, valid = () => true) {
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
       if (stage.active === null) throw Error('尚未播放簡報。');
       const wc = stage.get(stage.active).view.webContents;
+      const focusedFrame = wc.focusedFrame;
       app.focus({ steal: true });
       output.show();
       output.focus();
@@ -217,8 +237,47 @@ async function sendSlideKey(key, expectedActive, valid = () => true) {
         throw Error('請先選取輸出視窗，再試一次。');
       }
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
-      wc.sendInputEvent({ type: 'keyDown', keyCode: key });
-      wc.sendInputEvent({ type: 'keyUp', keyCode: key });
+      const frames = wc.mainFrame.framesInSubtree;
+      const powerpoint = frames.filter(frame => {
+        try { return /(^|\.)powerpoint\.officeapps\.live\.com$/.test(new URL(frame.url).hostname); } catch { return false; }
+      });
+      let target = focusedFrame && focusedFrame !== wc.mainFrame && frames.includes(focusedFrame) ? focusedFrame :
+        powerpoint.length === 1 ? powerpoint[0] : wc.mainFrame;
+      // Restore the actual slideshow document. A wrapper's focused WebContents
+      // alone is insufficient for cross-origin/opaque embedded presentations.
+      for (let depth = 0; depth < 5; depth++) {
+        await Promise.race([
+          target.executeJavaScript(`(() => {
+            window.focus();
+            const visible = [...document.querySelectorAll('iframe,frame')].filter(el => {
+              const r = el.getBoundingClientRect(), style = getComputedStyle(el);
+              return style.visibility !== 'hidden' && style.display !== 'none' &&
+                r.width >= innerWidth * .8 && r.height >= innerHeight * .8 && r.right > 0 && r.bottom > 0;
+            });
+            const active = document.activeElement;
+            const player = visible.includes(active) ? active : visible.length === 1 ? visible[0] : null;
+            if (player) { player.focus({ preventScroll: true }); player.contentWindow?.focus(); }
+          })()`, true),
+          new Promise((_, reject) => setTimeout(() => reject(Error('投影片尚未取得焦點，請重新選取播放畫面。')), 1000))
+        ]);
+        if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
+        const next = wc.focusedFrame;
+        if (!next || next === target || !frames.includes(next)) break;
+        target = next;
+      }
+      if (target !== wc.mainFrame) {
+        if (wc.debugger.isAttached()) throw Error('請先關閉此簡報的開發工具，再試一次。');
+        wc.debugger.attach('1.3');
+        try {
+          const code = key === 'Right' ? 'ArrowRight' : 'ArrowLeft';
+          const vk = key === 'Right' ? 39 : 37;
+          await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: code, code, windowsVirtualKeyCode: vk });
+          await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: code, code, windowsVirtualKeyCode: vk });
+        } finally { if (wc.debugger.isAttached()) wc.debugger.detach(); }
+      } else {
+        wc.sendInputEvent({ type: 'keyDown', keyCode: key });
+        wc.sendInputEvent({ type: 'keyUp', keyCode: key });
+      }
 }
 
 app.whenReady().then(async () => {
@@ -276,6 +335,9 @@ app.whenReady().then(async () => {
   controller.setPosition(panelArea.x + Math.max(0, panelArea.width - 780), panelArea.y + 30);
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
+  hostVideo = new HostVideo({ output, changed, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
+  output.on('minimize', () => hostVideo.observe());
+  output.on('hide', () => hostVideo.observe());
   let remoteIdentity, identityError;
   if (!smoke) {
     try { remoteIdentity = identity(path.join(app.getPath('userData'), 'remote')); }
@@ -283,7 +345,7 @@ app.whenReady().then(async () => {
   }
   remoteControl = new RemoteControl({ state: () => stage.snapshot(), changed,
     advertise: smoke ? () => () => {} : undefined,
-    identity: remoteIdentity,
+    identity: remoteIdentity, video: hostVideo,
     key: (key, active, valid) => {
       const task = keyQueue.then(() => sendSlideKey(key, active, valid));
       keyQueue = task.catch(() => {}); return task;
@@ -297,12 +359,12 @@ app.whenReady().then(async () => {
   }
   output.on('resize', () => stage.layout());
   output.on('move', () => preparation.setPosition(...output.getPosition()));
-  output.on('close', event => { if (!quitting) event.preventDefault(); });
+  output.on('close', event => { if (!quitReady) event.preventDefault(); });
   preparation.on('close', event => {
-    if (!quitting) { event.preventDefault(); preparation.hide(); }
+    if (!quitReady) { event.preventDefault(); preparation.hide(); }
   });
   controller.on('close', event => {
-    if (!quitting) { event.preventDefault(); controller.hide(); }
+    if (!quitReady) { event.preventDefault(); controller.hide(); }
   });
   controller.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   controller.webContents.on('will-navigate', event => event.preventDefault());
@@ -310,7 +372,7 @@ app.whenReady().then(async () => {
     if (event.sender !== controller.webContents || event.senderFrame !== controller.webContents.mainFrame ||
         event.senderFrame.url !== controlURL) throw Error('Untrusted caller');
     try { return { state: await act(action, args) }; }
-    catch (error) { return { error: error.message }; }
+    catch (error) { return { error: error?.message || String(error) || '操作未完成。' }; }
   });
   if (smoke) controller.webContents.on('console-message', (_event, ...args) => console.log('controller:', ...args));
   await controller.loadFile(path.join(__dirname, 'control.html'));
@@ -350,15 +412,15 @@ app.whenReady().then(async () => {
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        website, remoteControl, setOrigin: origin => { testOrigin = origin; } });
+        website, remoteControl, hostVideo, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
       console.log('SMOKE PASS');
       app.quit();
-    } catch (error) { console.error(error); app.exit(1); }
+    } catch (error) { console.error(error); await hostVideo?.close(); app.exit(1); }
   }
-}).catch(error => {
+}).catch(async error => {
   if (smoke) console.error(error);
   else dialog.showErrorBox('Sunday Presenter 未能啟動', error.message);
-  app.exit(1);
+  await hostVideo?.close(); app.exit(1);
 });
 app.on('activate', () => toggleControls());
 app.on('second-instance', () => {
@@ -368,8 +430,14 @@ app.on('second-instance', () => {
     controller.show(); controller.moveTop(); controller.focus();
   }
 });
-app.on('before-quit', () => {
-  quitting = true;
+app.on('before-quit', event => {
+  if (!quitReady && hostVideo) {
+    event.preventDefault(); quitting = true;
+    quitTask ||= Promise.allSettled([hostVideo.close(), remoteControl?.stop()]).then(() => { quitReady = true; app.quit(); });
+    return;
+  }
+  if (quitCleanupDone) return;
+  quitCleanupDone = true; quitting = true;
   globalShortcut.unregisterAll();
   clearInterval(folderTimer);
   if (awakeBlocker !== undefined && powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker);

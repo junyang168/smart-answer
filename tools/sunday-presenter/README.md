@@ -1,11 +1,124 @@
-# Sunday Presenter — Phase 1 (#598)
+# Sunday Presenter — Meet-first PPT and Remote pilot (#643)
 
 Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
 window and a paired local speaker remote. Google Meet is operated manually.
-YouTube streaming, speaker microphone relay and automated broadcasting belong to
-Phase 2 (#643).
+Phase 2 (#643) rolls out in three steps:
 
-## Install and use
+1. This Sunday, use Presenter to switch PPT/OUTPUT; both host and speaker laptops
+   remain in Meet with the existing service/audio workflow. A separate device
+   observes the Remote video as a side test without issuing slide commands.
+2. After that is stable, the speaker uses Remote and the existing wireless mic;
+   its receiver feeds Meet on the host. Only the host laptop joins Meet.
+3. Add YouTube after the app and Meet/Remote workflow are stable.
+
+Local recording is optional and starts only on explicit Start Recording; it is
+not required to use PPT, Remote or Meet. Presenter microphone permission and a
+recording destination are unnecessary for that Meet-only workflow. Meet still
+needs its own permission and input selection. YouTube broadcasting is deferred
+until the app/Meet path is stable. Remote microphone relay remains deferred.
+
+The [Phase 2 design](../../docs/sunday-presenter-phase2-design.md) covers local
+point-to-point PPT video, replacing the AirPlay dependency,
+plus optional recording and later YouTube streaming with a reusable stream key and fixed viewing
+link. PPT audio capture, Google OAuth and Remote microphone relay are outside this
+design; only the selected wireless microphone on the host supplies audio. It is
+a design draft, not an implemented capability of the Phase 1 release below.
+
+## Local video pilot — 0.5.1 (#643)
+
+The worktree pilot adds a resizable PPT viewer to the native Remote. When paired
+with this Presenter, it receives only the current OUTPUT over local WebRTC and
+keeps the existing slide buttons and arrow keys. Remote requests no microphone
+or camera permission. The host allows capture of the exact OUTPUT window only;
+preparation, source loss and minimization stop the viewer instead of selecting
+another window. Pairing and slide control continue using certificate-pinned TLS.
+
+0.5.1 fixes slide keys in embedded PowerPoint pages, accepts arrow keys when the
+Remote video viewer has focus, and keeps command errors visible across state
+polls. The host restores the confirmed player frame and uses Chromium's input
+path for embedded frames; it does not click the slide or send global OS keys.
+
+Remote 0.5.2 fixes switching from a remembered Presenter to another Mac. Only
+the selected host is resolved; remembered credentials are reused only for their
+exact certificate identity. Selecting another host requests that host's six-digit
+code, and late replies from the previous connection cannot change the new one.
+The host selector remains available after connecting. This Remote-only update
+works with Presenter 0.5.1; only the most recently paired host is remembered.
+
+Remote 0.5.3 places the PPT above a compact bottom control area, removes the
+large heading, and adds a Full Screen button plus Control-Command-F. The window
+now uses macOS primary full-screen behavior. Playback keeps the Mac awake only
+while a live presentation is visible, and the heartbeat runs in common run-loop
+modes. A still slide no longer triggers reconnect merely because decoded frames
+stop increasing; brief ICE disconnections get five seconds to recover, while
+persistent failure and first-frame timeout still reconnect automatically.
+
+## Local MP4 recording — 0.6.1 candidate (#643)
+
+The controller selects an explicit host microphone and save location, starts
+recording, displays its input meter, and stops/finalizes an MP4. OUTPUT is captured
+once and shared with Remote. The recording branch samples that same track through
+a 1280×720 canvas at 30 fps so an unchanged slide has continuous video timing.
+The selected microphone passes through a 48 kHz Web Audio destination before
+encoding, keeping a continuous audio render clock. Direct USB-track recording
+showed a 1.84-second audio/video duration difference in a 150-second physical
+AudioPro test; the normalized path reduced that difference to about 28 ms.
+A 90-minute installed-app run saved 90:17 of actual PPT + AudioPro to SSD,
+fully decoded without errors, with a 25 ms A/V duration difference. Video,
+writing and finalization endurance passed; two ~0.13-second decoded audio
+silences remain unattributed, so uninterrupted-sound acceptance is pending.
+See `acceptance.md` for the measured limits. Capture/encoder state is retained on failure without
+logging document URLs or audio samples.
+
+MediaRecorder uses H.264/AAC, 500 ms keyframes/timeslices, incremental bounded IPC
+and file writes. It never captures PPT/system audio or routes microphone audio
+to the speakers. Remote still receives video only and needs no microphone access.
+
+Choose **選擇／更新麥克風**, select the wireless receiver, then start and choose
+an MP4 path (including an SSD). Refreshing devices requests OS permission but
+opens no microphone track. Start uses exact deviceId, without fallback to another
+input. Source/preparation/minimize loss or microphone disconnection automatically
+stops and finalizes the current clip. Encoding/storage failure retains a named
+partial file, reports failure, and never overwrites a completed recording.
+Queues are limited to two seconds or 16 MiB; missing encoder output also stops
+recording. Quit waits for finalization and releases microphone/capture resources.
+
+`npm run smoke:recording` records actual OUTPUT plus generated reference audio,
+checks that MP4 packets are readable before stop, independently decodes both
+tracks with ffprobe/ffmpeg, and compares a PPT color change with a tone change.
+It also checks Remote/recording capture ownership, source privacy stop and mic
+loss. Add `-- --recording-long-smoke` for an additional untouched 120 seconds.
+`electron . --smoke --focus-smoke --recording-hardware-smoke` explicitly selects
+the actual AudioPro X5 input, records ten seconds and inspects decoded AAC.
+These verification tools are not required by the packaged recording feature.
+
+This remains a local pilot. Fixed-key YouTube streaming, scheduling, standalone
+microphone test/mute and clean-audio full-service acceptance remain unimplemented
+or pending. Website downloads remain the previously released 0.4.0. Remote 0.5.3
+is compatible with this host; only Presenter needs updating for local recording.
+
+Run the pilot from this worktree with `npm ci` and `npm start` in this directory;
+quit the installed Presenter first. Build the Remote with `node build-native.cjs`,
+then open `output/native/Sunday Remote.app`. Use the existing six-digit pairing
+flow. Presenter may need macOS Screen Recording permission; Remote needs local
+network access. No Accessibility, microphone or camera permission is needed for
+this video milestone. Full screen is available through Remote's window controls.
+
+After an ad-hoc pilot update, macOS can retain the old signing requirement even
+when Screen Recording shows On. If capture remains denied, remove only the old
+Presenter entry in System Settings, add `/Applications/Sunday Presenter.app`
+again, and restart Presenter. Complete any Keychain prompt yourself to retain the
+existing Remote pair. The 0.5.1 installed-app check passed actual Office animation,
+next/previous controls and live video after that renewal; no PPT content changed.
+
+`npm run smoke:video` builds both Remote architectures and runs the real Electron
+OUTPUT → native WKWebView loop on one unlocked Mac. It uses disposable pairing
+and a separate host profile, never saved user accounts. Evidence is written to
+`output/smoke/video-result.json` and `output/smoke/remote-video.png`. This confirms
+local engine integration, not a second physical Mac, church hotspot, real Office
+files, minimum-OS support or a full service's duration. See [acceptance](acceptance.md).
+
+## Install and use — released Phase 1
 
 Download v0.4.0 from church administration → Sunday service → Download Sunday
 Apps. Install Sunday Presenter on an Apple Silicon Mac (macOS 13+) and Sunday
