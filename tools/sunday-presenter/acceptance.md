@@ -1,3 +1,38 @@
+## #655 free automatic renewal pilot (2026-11-04)
+
+Owner subsequently trusted the developer, opened the real iPad app and reported
+working PPT/control on Wi-Fi and an iPhone hotspot. These are owner-reported
+functional checks, not full-service or 90-minute stability acceptance.
+
+Free Personal Team renewal was exercised with the existing Xcode account and
+certificate. Backing up/removing only the matching cached profile made Xcode
+issue a genuinely newer profile: expiry advanced from November 11 at 13:47 to
+14:31 Chicago time. devicectl confirmed a successful wireless installation with
+the iPad passcode-locked after first unlock. No USB, paid service or repeated
+Keychain password was used. The deployed helper then completed another actual
+locked Wi-Fi renewal/install, advancing expiry to 14:36.
+
+The first real user LaunchAgent run could not access its SSD work directory
+(`Operation not permitted`). No renewal was claimed from that failure. The
+dedicated fixed snapshot/build workspace (~81 MiB initially) was moved into the
+private user application-support directory; the large DeviceSupport cache stays
+on SSD. A subsequent background run correctly reported `not_due`. An explicit
+one-off launchd test then successfully built/signed a newer profile; its final
+lock check observed iPad had been unlocked and deferred installation. Full
+background installation is pending a locked-device retry at this checkpoint.
+
+The hourly user LaunchAgent is installed and loaded. The helper checks actual
+profile expiry, team/bundle/device, fixed source hashes, device lock/first unlock,
+Sunday in America/Chicago, disk space, one-build/day budget and command timeouts.
+Failed builds/installs cannot advance installed expiry; signed pending artifacts
+are reused. Ten deterministic counterexample tests cover guard, failure, cache
+restore, throttle and timeout behavior; all 54 top-level regression tests pass.
+No Full Disk Access, credential sharing, certificate revocation or automatic
+source-code upgrades were introduced. Mac sleep/logout, unreachable/never-locked
+iPad and Apple/Keychain reauthorization can still prevent unattended renewal;
+long-term/weekly operation and locked-Mac behavior are not yet established.
+See [renewal operations](ipad/README.md#free-owner-only-automatic-renewal-pilot-655).
+
 ## #652 physical iPad installation; first launch awaits device trust (2026-11-04)
 
 The owner connected an iPad Air (5th generation), iPadOS 27.2 (24B119), enabled
