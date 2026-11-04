@@ -1,5 +1,24 @@
 # Sunday Presenter acceptance evidence
 
+## #652 agreement confirmed; administrator authorization required (2026-11-04)
+
+The owner explicitly replied agreeing to the displayed Xcode and Apple SDKs
+Agreement. The normal Xcode UI's Agree button was pressed. It became disabled,
+but first-launch status remains exit 69 and SDK lookup still reports that the
+license has not been recorded. Xcode 26.6 / build 17F113 is readable; that fact
+alone does not establish successful first-launch setup.
+
+The computer-use tool explicitly refuses access to com.apple.SecurityAgent for
+safety reasons. An independent supported CLI path was checked with the owner's
+agreement authority: `xcodebuild -license accept` reports that administrator
+privileges are required. A noninteractive administrator attempt fails immediately
+with "sudo: a password is required". No password was read, entered, guessed or
+requested in chat; no authorization/security setting was altered. Further
+first-launch setup needs the owner to complete the Mac's system authorization.
+Simulator installation/build/run and SSD relocation remain pending. Source and
+installed Presenter behavior are unchanged; the existing tests do not become
+an iPad runtime pass. The prior pending-agreement observations below are history.
+
 ## #652 Xcode installed; first-launch agreement pending (2026-11-04)
 
 The owner authorized installing Xcode and the iPad simulator. The signed-in Mac

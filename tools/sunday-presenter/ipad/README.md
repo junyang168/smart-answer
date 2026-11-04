@@ -79,9 +79,15 @@ Apple references: [local network privacy](https://developer.apple.com/documentat
 Initial checks found only Command Line Tools; `xcrun --sdk iphoneos
 --show-sdk-path` failed. With owner installation authorization, the Mac App Store
 then installed its last compatible release, Xcode 26.6, in `/Applications`. macOS
-remains 26.5.2. First launch is currently stopped at the Xcode and Apple SDKs
-Agreement (EA1990, 2026-01-21), pending explicit agreement confirmation. It has
-not been accepted automatically. SSD relocation and simulator setup are pending. The portable check command passes 38 production-scope/TLS/redirect assertions;
+remains 26.5.2. The owner then explicitly confirmed the displayed Xcode and Apple SDKs
+Agreement (EA1990, 2026-01-21), and Agree was pressed through the normal UI.
+First launch is still incomplete: recording the agreement requires administrator
+authorization. The official unprivileged command reports that requirement, and
+a noninteractive sudo attempt returns "a password is required". The computer-use
+tool refuses SecurityAgent access, so the owner must complete system authorization
+locally or through their own remote connection. Do not send a password in chat.
+SSD relocation and simulator setup are pending; no successful global license
+registration or simulator run is claimed. The portable check command passes 38 production-scope/TLS/redirect assertions;
 all 51 Presenter/Remote regression tests pass. Both Mac Remote architectures
 build with the shared viewer changes. Project/plist resources validate and UIKit
 source parses. No iOS simulator/device build, installable IPA or physical
