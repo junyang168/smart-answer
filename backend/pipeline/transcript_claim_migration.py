@@ -1,0 +1,348 @@
+"""Versioned beta-source handoff to the existing Claim Management Update.
+
+This module freezes inputs, registers one source epoch, and prepares ordinary
+bounded Update jobs. It does not implement a second reviewer, retry loop,
+scheduler, Claim writer, or qualification database. Public transcripts and beta
+review decisions are never changed here.
+"""
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
+
+from backend.pipeline import claim_management as cm
+from backend.pipeline.cvp_sql_commit import binding, check_binding
+from backend.pipeline.source_projection import project_script
+from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+
+VERSION = 'wang_transcript_claim_migration_v1'
+SOURCE_KIND = 'transcript_claim_source_registration_v1'
+RULES = '''Treat this as a newly authorized source-version migration, not a retry
+of an old unchanged-source action. Existing action answers/budgets/holds remain
+history. Review every target using the complete NEW own source. Soft-deleted
+words are not source: neither quotations nor Claim summaries may reintroduce
+their teaching without independent undeleted professor support. Check assertion,
+negation, conditions, scripture, argument steps and speaker attribution. Audience
+questions/interjections are context, not professor assertions; evaluate his actual
+response. Repair the Claim and all necessary own Evidence/Fragments/Questions/
+Observations/Positions/relations. Retire unsupported claims with a specific
+source-based reason; do not preserve unsupported summaries by relabelling them.
+Use existing active same-source Claims rather than inventing duplicates. Preserve
+unresolved genuine human decisions. Resolve model/engineering/material defects
+autonomously within the existing bounded recovery contract. Only an unavoidable
+content question supported by exact source/context goes to the owner. CVP/route
+semantic maintenance is a separate downstream handoff, not approval by this job.'''
+
+
+def read(path):
+    return json.loads(Path(path).read_bytes())
+
+
+def immutable(path, value):
+    write_immutable(Path(path), value)
+    return binding(Path(path))
+
+
+def sha(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _write_bytes(path, raw):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open('xb') as stream:
+            stream.write(raw)
+    except FileExistsError:
+        if path.read_bytes() != raw:
+            raise ValueError('frozen source bytes differ')
+    return binding(path)
+
+
+def beta_source(rows, context, *, item):
+    """Keep physical IDs/empty rows and attach exact sidecar media boundaries."""
+    result = deepcopy(rows)
+    seen = set()
+    for row in result:
+        pid = str(row['index'])
+        if pid in seen:
+            raise ValueError('beta paragraph IDs are ambiguous')
+        seen.add(pid)
+        if row.get('type') == 'subtitle':
+            continue
+        clock = context.get('paragraph_bindings', {}).get(pid)
+        if clock is None:
+            raise ValueError('missing beta media binding: ' + pid)
+        start, end = clock.get('start_ms'), clock.get('end_ms')
+        if (start is None or end is None or start < 0 or end < start):
+            raise ValueError('invalid beta media boundary: ' + pid)
+        row['start_time'], row['end_time'] = start / 1000, end / 1000
+    return {'metadata': {'transcript_id': item, 'beta_revision': context['revision'],
+                         'candidate_source': True, 'human_content_approval': False},
+            'script': result}
+
+
+def _population(records, source_id):
+    payloads = {key: state['payload'] for key, state in records.items()}
+    selected, excluded = [], []
+    for (collection, oid), state in records.items():
+        if collection != 'claims' or state.get('retired'):
+            continue
+        own = cm.own_source_ids(state['payload'], {
+            cm.source.key(*key): value for key, value in payloads.items()})
+        if source_id not in own:
+            continue
+        if state['payload'].get('review_status') == 'superseded':
+            excluded.append(oid)
+        elif own != {source_id}:
+            raise ValueError('source migration has an indirect/multi-source owner: ' + oid)
+        else:
+            selected.append(oid)
+    return selected, excluded
+
+
+def _ordered_claims(records, source_id, ids):
+    """Old bound paragraph order is scheduling only, never a new anchor map."""
+    payloads = {cm.source.key(*key): v['payload'] for key, v in records.items()}
+    rank = {}
+    for cid in ids:
+        claim = payloads['claims/' + cid]
+        keys = []
+        for eid in claim.get('evidence_step_ids', []):
+            evidence = payloads.get('evidence_steps/' + eid, {})
+            fids = {evidence.get('source_fragment_id'), *evidence.get('source_fragment_ids', [])} - {None}
+            for fid in fids:
+                fragment = payloads.get('source_fragments/' + fid, {})
+                if fragment.get('source_id') == source_id:
+                    key = str(fragment.get('paragraph_key', ''))
+                    if key.startswith('S') and key[1:].isdigit():
+                        keys.append(int(key[1:]))
+        if not keys:
+            raise ValueError('Claim has no source-bound scheduling position: ' + cid)
+        rank[cid] = min(keys)
+    return sorted(ids, key=lambda cid: (rank[cid], cid)), rank
+
+
+def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=5):
+    if not instruction.strip() or not 1 <= group_size <= 10:
+        raise ValueError('owner direction and group size 1..10 required')
+    root, beta_root = Path(root).resolve(), Path(beta_root).resolve()
+    intent = {'schema_version': VERSION, 'source_id': source_id, 'item': item,
+              'beta_root': str(beta_root), 'instruction': instruction, 'group_size': group_size}
+    root.mkdir(parents=True, exist_ok=True)
+    immutable(root/'intent.json', intent)
+    if (root/'manifest.json').exists():
+        return load(root)
+    source = store.get_record_state('source_documents', source_id)
+    if not source or source['retired'] or source['payload'].get('transcript_id') != item:
+        raise ValueError('missing/foreign registered source')
+    rowpath = beta_root/'script_review'/f'{item}.json'
+    contextpath = beta_root/'transcript_review'/item/'context.json'
+    rowraw, contextraw = rowpath.read_bytes(), contextpath.read_bytes()
+    rows, context = json.loads(rowraw), json.loads(contextraw)
+    candidate = beta_source(rows, context, item=item)
+    projection = project_script(candidate['script'])
+    oldraw = Path(source['payload']['source_path']).read_bytes()
+    if sha(oldraw) != source['payload'].get('source_file_sha256'):
+        raise ValueError('registered old source file drift')
+    if project_script(json.loads(oldraw)['script']).body_sha256 != source['payload']['source_body_sha256']:
+        raise ValueError('registered old body drift')
+    if projection.body_sha256 == source['payload']['source_body_sha256']:
+        raise ValueError('no source epoch change; reuse existing Claim authority')
+    records = store.read_affected_context([('source_documents', source_id)])
+    ids, excluded = _population(records, source_id)
+    ids, rank = _ordered_claims(records, source_id, ids)
+    if not ids:
+        raise ValueError('source has no live Claims')
+    frozen = [{'collection': col, 'object_id': oid, **cm.model_state(state)}
+              for (col, oid), state in sorted(records.items())]
+    before = _write_bytes(root/'source-before.json', oldraw)
+    after = immutable(root/'source-after.json', candidate)
+    immutable(root/'beta-before.json', {'script': rows, 'context': context})
+    frozen_binding = immutable(root/'records-before.json', frozen)
+    newdoc = deepcopy(source['payload'])
+    newdoc.update(source_path=after['path'], source_file_sha256=after['file_sha256'],
+                  source_sha256=projection.body_sha256, source_body_sha256=projection.body_sha256,
+                  source_text_sha256=projection.spoken_text_sha256,
+                  anchor_binding_sha256=projection.body_sha256,
+                  editorial_structure_sha256=projection.editorial_structure_sha256,
+                  editorial_topology_sha256=projection.editorial_topology_sha256)
+    # Reuse the existing bounded unit schema and current subscription direction.
+    policy = read(Path(__file__).parent/'policies/wang_claim_management_bounded_unit_v1.json')
+    policy.update(policy_id='wang_transcript_claim_migration_v1', api_spend=None,
+                  proposal_empty_arrays='program_validated_v1')
+    policy['models']['opus']['backend'] = 'claude_subscription'
+    cm.Policy.model_validate(policy)
+    pb = immutable(root/'policy.json', policy)
+    manifest = {**intent, 'before': before, 'after': after, 'records': frozen_binding,
+                'before_source_record': cm.model_state(source), 'after_source_record': newdoc,
+                'beta_revision': context['revision'], 'beta_files': {
+                    str(rowpath): sha(rowraw), str(contextpath): sha(contextraw)},
+                'claim_ids': ids, 'excluded_superseded_ids': excluded,
+                'groups': [ids[i:i+group_size] for i in range(0, len(ids), group_size)],
+                'scheduling_old_paragraphs': rank, 'policy': pb,
+                'claim_approval_granted': False, 'public_transcript_changed': False}
+    for path, expected in manifest['beta_files'].items():
+        if sha(Path(path).read_bytes()) != expected:
+            raise ValueError('beta changed during source freeze')
+    immutable(root/'manifest.json', manifest)
+    return manifest
+
+
+def load(root):
+    root = Path(root).resolve()
+    m = read(root/'manifest.json')
+    if m.get('schema_version') != VERSION:
+        raise ValueError('unsupported migration contract')
+    for key in ('before', 'after', 'records', 'policy'):
+        check_binding(m[key])
+    flat = [cid for group in m['groups'] for cid in group]
+    if flat != m['claim_ids'] or len(set(flat)) != len(flat):
+        raise ValueError('migration Claim population has a gap/duplicate')
+    if not flat or any(not 1 <= len(group) <= 10 for group in m['groups']):
+        raise ValueError('invalid migration groups')
+    return m
+
+
+def register(store, root):
+    """Only register the immutable internal source; no Claim approval/write."""
+    root = Path(root).resolve();m = load(root)
+    package_id = 'transcript-source-' + cm.sha256_json({
+        'source_id': m['source_id'], 'before': m['before']['file_sha256'],
+        'after': m['after']['file_sha256']})[:32]
+    current = store.get_record_state('source_documents', m['source_id'])
+    receipt = root/'source-registration.json'
+    if receipt.exists():
+        value = read(receipt)
+        history = store.get_change_history(value['change_set_id'])
+        if not history or history['status'] != 'applied':
+            raise ValueError('registered source has no applied ChangeSet')
+        if current['payload'].get('source_file_sha256') != m['after']['file_sha256']:
+            raise ValueError('source has moved beyond this migration')
+        return value
+    # Recover a committed-but-unacknowledged handoff without a second write.
+    if current['payload'].get('source_file_sha256') == m['after']['file_sha256']:
+        intent = read(root/'source-registration-intent.json')
+        history = store.get_change_history(intent['change_set_id'])
+        ops = (history or {}).get('operations', [])
+        if (not history or history['status'] != 'applied' or len(ops) != 1
+                or ops[0].get('collection') != 'source_documents'
+                or ops[0].get('object_id') != m['source_id']
+                or ops[0].get('before_sha256') != m['before_source_record']['content_sha256']
+                or ops[0].get('after_sha256') != current['content_sha256']
+                or ops[0].get('after_revision') != current['revision']):
+            raise ValueError('source registration has an unverified commit; do not reapply')
+        value = {'change_set_id': intent['change_set_id'], 'status': 'applied',
+                 'recovered_without_second_write': True}
+        immutable(receipt, value)
+        return value
+    if cm.model_state(current) != m['before_source_record']:
+        raise ValueError('source registration CAS changed')
+    if sha(Path(current['payload']['source_path']).read_bytes()) != m['before']['file_sha256']:
+        raise ValueError('registered old source file drift before handoff')
+    for path, expected in m['beta_files'].items():
+        if sha(Path(path).read_bytes()) != expected:
+            raise ValueError('beta changed before registration')
+    plan = store.plan_package({'package_id': package_id,
+                              'source_documents': [m['after_source_record']]}, source_kind=SOURCE_KIND)
+    if len(plan.operations) != 1 or plan.operations[0].collection != 'source_documents':
+        raise ValueError('source registration tried to alter knowledge content')
+    immutable(root/'source-registration-intent.json', {'package_id': package_id,
+              'fingerprint': plan.fingerprint_sha256, 'source_id': m['source_id'],
+              'change_set_id': plan.change_set_id})
+    value = store.apply_plan(plan, metadata={'actor': 'owner_authorized_migration',
+        'reason': m['instruction'], 'migration_manifest': binding(root/'manifest.json'),
+        'source_registration_only': True, 'human_content_approval': False})
+    immutable(receipt, value)
+    return value
+
+
+def prepare_unit(store, root, index):
+    from backend.pipeline.claim_management_intake import prepare as intake
+    root = Path(root).resolve();m = load(root)
+    register_receipt = read(root/'source-registration.json')
+    current = store.get_record_state('source_documents', m['source_id'])
+    if current['payload'].get('source_file_sha256') != m['after']['file_sha256']:
+        raise ValueError('registered source epoch changed')
+    group = m['groups'][index]
+    unit = root/'units'/f'{index:03d}'
+    # This explicit before/after authority is part of every ordinary Update.
+    direction = (m['instruction'] + '\n' + RULES + '\nNew committed source ChangeSet: '
+        + register_receipt['change_set_id'] + '\nOld file SHA: ' + m['before']['file_sha256']
+        + '\nNew file SHA: ' + m['after']['file_sha256'])
+    return intake(group, unit, instruction=direction, groups=[group], store=store,
+                  policy=m['policy']['path'], creation_count=3,
+                  legacy_ai_findings_direction=m['instruction'])
+
+
+def run_unit(store, root, index, *, capacity):
+    from backend.pipeline import claim_management_batch as batch
+    root = Path(root).resolve();m = load(root)
+    prepared = prepare_unit(store, root, index)
+    if prepared.get('excluded'):
+        return {'status': 'paused', 'excluded': prepared['excluded']}
+    result = batch.run(prepared['manifest']['path'], root/'units'/f'{index:03d}'/'batch',
+                       model_capacity=capacity)
+    return {'group': m['groups'][index], 'result': result}
+
+
+def verify(store, root):
+    """Current native qualifications plus exact live quotation checks."""
+    root = Path(root).resolve();m = load(root)
+    snapshot = cm.source.source_snapshot(cm.source.FileBinding.model_validate(m['after']))
+    results = {}
+    for cid in m['claim_ids']:
+        state = store.get_record_state('claims', cid)
+        if not state or state['retired']:
+            results[cid] = {'status': 'retired_or_missing', 'qualification': store.claim_management_qualification(cid)}
+            continue
+        qualification = store.claim_management_qualification(cid)
+        failures = []
+        records = store.read_claim_context([('claims', cid)])
+        for (col, oid), value in records.items():
+            if col != 'source_fragments' or value['retired'] or value['payload'].get('source_id') != m['source_id']:
+                continue
+            fragment = value['payload'];p = snapshot['paragraphs'].get(str(fragment.get('paragraph_key')), {})
+            if (not fragment.get('verbatim_excerpt') or fragment['verbatim_excerpt'] not in p.get('text', '')
+                    or fragment.get('source_sha256') != snapshot['body_sha256']):
+                failures.append(oid)
+        results[cid] = {'status': 'current' if qualification.get('ready') and not failures else 'pending',
+                        'qualification': qualification, 'invalid_live_quote_ids': failures}
+    value = {'schema_version': VERSION, 'source_id': m['source_id'],
+             'results': results, 'complete': all(r['status']=='current' for r in results.values()),
+             'cvp_route_migration_complete': False}
+    # A report is a dated view, not another qualification authority.
+    from backend.api.sc_api.transcript_review import atomic
+    atomic(root/'current-report.json', value)
+    return value
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=['prepare','register','prepare-unit','run-unit','verify'])
+    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--source-id');parser.add_argument('--item')
+    parser.add_argument('--beta-root', type=Path);parser.add_argument('--instruction-file', type=Path)
+    parser.add_argument('--group-size', type=int, default=5);parser.add_argument('--unit', type=int)
+    parser.add_argument('--capacity', type=Path);parser.add_argument('--execute', action='store_true')
+    args = parser.parse_args()
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    store = PostgresKnowledgeStore()
+    if args.command=='prepare':
+        value=prepare(store,beta_root=args.beta_root,item=args.item,source_id=args.source_id,
+                      root=args.root,instruction=args.instruction_file.read_text(),group_size=args.group_size)
+        print(json.dumps({'claim_count':len(value['claim_ids']),'groups':len(value['groups'])}))
+        return
+    if not args.execute:
+        parser.error('mutating/model stages require --execute')
+    if args.command=='register':value=register(store,args.root)
+    elif args.command=='prepare-unit':value=prepare_unit(store,args.root,args.unit)
+    elif args.command=='run-unit':value=run_unit(store,args.root,args.unit,capacity=read(args.capacity))
+    else:value=verify(store,args.root)
+    print(json.dumps(value,ensure_ascii=False,default=str))
+
+
+if __name__=='__main__':main()
