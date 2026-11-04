@@ -92,6 +92,11 @@ def compile_projection(cursor,request,before,policy):
     authority=json.loads(cm.source.verify_file(request.authorization).read_text())
     from backend.pipeline.claim_legacy_ai_reopen import authorized_markers
     reopened = authorized_markers(cursor, request, before, authority)
+    from backend.pipeline.claim_source_epoch_reassessment import authorized_markers as epoch_markers
+    epoch = epoch_markers(cursor, request, before, authority)
+    if set(epoch) & set(reopened):
+        raise ValueError('source epoch and legacy AI reopening cannot overlap')
+    reopened.update(epoch)
     if reopened:
         result.update(contract=REOPEN_CONTRACT, legacy_ai_findings_markers=reopened, stale_review_markers=stale)
     repair=authority.get('stale_ai_provenance_repair')

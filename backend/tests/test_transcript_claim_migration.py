@@ -158,3 +158,55 @@ def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_
     assert request.operation=='Update' and request.target_keys==['claims/D']
     assert request.source_bindings['S'].file_sha256==m['after']['file_sha256']
     assert migration.register(store,root)==result
+
+
+@pytest.mark.parametrize('fault',[None,'human','late_human','system','source_drift'])
+def test_source_epoch_reassesses_only_ai_questions_on_actual_new_source(case,postgres_store,fault):
+    from backend.pipeline.claim_source_epoch_reassessment import marker,VERSION
+    from backend.pipeline.claim_metadata_projection import compile_projection
+    from backend.pipeline import claim_management_batch as batch
+    fake,beta,root,_,_=case;store=postgres_store
+    package={'package_id':'synthetic-new-source-ai-question'}
+    for (col,_),row in fake.rows.items():
+        payload=deepcopy(row['payload'])
+        if col=='claims':payload['review_status']='candidate'
+        package.setdefault(col,[]).append(payload)
+    store.apply_plan(store.plan_package(package))
+    store.record_review('claims','D',decision='human_review_required',reviewer_kind='human' if fault=='human' else 'ai',
+                        reason='old AI source question',reviewer_id='fixture-ai')
+    # Synthetic legacy AI provenance, restricted to this disposable database.
+    artifact={'resolution':{'schema_version':'wang_claim_ai_review_provenance_v1',
+        'claim_id':'D','approval_status':'not_human_approved','target_review_status':'human_review_required'}}
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.review_events SET artifact=%s::jsonb WHERE collection='claims' AND object_id='D'",(json.dumps(artifact),))
+    if fault=='system':store.record_review('claims','D',decision='human_review_required',reviewer_kind='system',reason='real pending hold')
+    migration.prepare(store,beta_root=beta,item='lecture',source_id='S',root=root,
+                      instruction='審查新版本，僅真正無法解決交人工',group_size=1)
+    receipt=migration.register(store,root)
+    epoch=migration.immutable(root/'source-epoch-reassessment.json',{'schema_version':VERSION,
+        'manifest':migration.binding(root/'manifest.json'),'change_set_id':receipt['change_set_id']})
+    s=store.get_record_state('claims','D')
+    if fault=='source_drift':
+        current=store.get_record_state('source_documents','S')['payload'];current['title']='another epoch'
+        store.apply_plan(store.plan_package({'package_id':'synthetic-source-drift','source_documents':[current]}))
+    with store.connect() as conn,conn.cursor() as cursor:
+        if fault=='source_drift':
+            with pytest.raises(ValueError,match='current identity/version drift'):marker(cursor,'D',s,epoch)
+            return
+        proof=marker(cursor,'D',s,epoch)
+    if fault in ('human','system'):
+        assert proof is None
+        return
+    assert proof and set(proof)=={'before_pin','events_sha256'}
+    prepared=migration.prepare_unit(store,root,0)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'units/000/batch',store=store)
+    request,_=next(iter(jobs.values()));records=store.read_claim_context([('claims','D')])
+    before={migration.cm.source.key(*k):migration.cm.model_state(v) for k,v in records.items()}
+    policy=migration.cm.Policy.model_validate_json(Path(request.policy.path).read_text())
+    if fault=='late_human':store.record_review('claims','D',decision='human_review_required',reviewer_kind='human',reason='keep decision')
+    with store.connect() as conn,conn.cursor() as cursor:
+        if fault=='late_human':
+            with pytest.raises(ValueError,match='history changed'):compile_projection(cursor,request,before,policy)
+        else:
+            projection=compile_projection(cursor,request,before,policy)
+            assert 'claims/D' in projection['legacy_ai_findings_markers']

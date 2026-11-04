@@ -137,7 +137,8 @@ def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=
     if (root/'manifest.json').exists():
         return load(root)
     source = store.get_record_state('source_documents', source_id)
-    if not source or source['retired'] or source['payload'].get('transcript_id') != item:
+    if (not source or source['retired'] or source['payload'].get('transcript_id') != item
+            or source['payload'].get('source_type') != 'sermon_transcript'):
         raise ValueError('missing/foreign registered source')
     rowpath = beta_root/'script_review'/f'{item}.json'
     contextpath = beta_root/'transcript_review'/item/'context.json'
@@ -269,13 +270,25 @@ def prepare_unit(store, root, index):
         raise ValueError('registered source epoch changed')
     group = m['groups'][index]
     unit = root/'units'/f'{index:03d}'
+    from backend.pipeline.claim_source_epoch_reassessment import VERSION as EPOCH_VERSION
+    epoch=immutable(root/'source-epoch-reassessment.json',{'schema_version':EPOCH_VERSION,
+        'manifest':binding(root/'manifest.json'),'change_set_id':register_receipt['change_set_id']})
+    # Preserve the rejected preflight. No action, reservation or answer existed;
+    # this is a recorded input repair, not a new budget after a model rejection.
+    old_prepared=unit/'prepared.json'
+    if old_prepared.exists():
+        prior=read(old_prepared)
+        if prior.get('manifest') is None and not prior.get('inputs') and prior.get('excluded'):
+            immutable(unit/'preflight-repair.json',{'previous':binding(old_prepared),
+                'epoch':epoch,'model_calls':0,'reason':'new source epoch AI-only question admission'})
+            unit=unit/'source-epoch-preflight-repair'
     # This explicit before/after authority is part of every ordinary Update.
     direction = (m['instruction'] + '\n' + RULES + '\nNew committed source ChangeSet: '
         + register_receipt['change_set_id'] + '\nOld file SHA: ' + m['before']['file_sha256']
         + '\nNew file SHA: ' + m['after']['file_sha256'])
     return intake(group, unit, instruction=direction, groups=[group], store=store,
                   policy=m['policy']['path'], creation_count=3,
-                  legacy_ai_findings_direction=m['instruction'])
+                  legacy_ai_findings_direction=m['instruction'],source_epoch_reassessment=epoch)
 
 
 def run_unit(store, root, index, *, capacity):
@@ -284,7 +297,8 @@ def run_unit(store, root, index, *, capacity):
     prepared = prepare_unit(store, root, index)
     if prepared.get('excluded'):
         return {'status': 'paused', 'excluded': prepared['excluded']}
-    result = batch.run(prepared['manifest']['path'], root/'units'/f'{index:03d}'/'batch',
+    batch_root=Path(prepared['manifest']['path']).parent/'batch'
+    result = batch.run(prepared['manifest']['path'], batch_root,
                        model_capacity=capacity)
     return {'group': m['groups'][index], 'result': result}
 
