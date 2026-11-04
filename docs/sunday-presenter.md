@@ -1,5 +1,10 @@
 # Sunday Presenter and OneDrive (#590)
 
+Umbrella epic: [SSA-E12 — Sunday Service Agent (#658)](https://github.com/junyang168/smart-answer/issues/658).
+The long-term goal is full automation with human review and approval; Presenter
+and iPad Remote currently establish the Foundation. Preparation and rollout
+boundaries are recorded in [Sunday Service Agent goals](sunday-assistant.md#sunday-service-agent-的目標與追蹤).
+
 Current delivery: #598 is Phase 1 (0.4.0), with PPT playback and local speaker
 slide control. Google Meet joining, sharing, microphone and recording are manual.
 Phase 2 #643 adds YouTube broadcasting and microphone relay inside Sunday Remote.

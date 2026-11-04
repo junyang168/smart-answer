@@ -1,5 +1,13 @@
 # 主日資料助理
 
+## Sunday Service Agent 的目標與追蹤
+
+此助理屬於獨立根 epic **[SSA-E12 — Sunday Service Agent (#658)](https://github.com/junyang168/smart-answer/issues/658)**，與 PPT 預備、Presenter、iPad Remote、本機錄影及後續直播共同追蹤。相關歷史卡與進行中卡透過真實 sub-issue 關係歸屬 E12；新增卡使用 `scripts/ticket.sh --epic E12`。共用平台運維仍歸 E10。
+
+Owner 的終局目標是 **完全自動化主日預備與既定流程，人工只需審核與 approve**。他經常外出，仍可能需要在旅館甚至郵輪手工準備 PPT；系統應讓他在這些情境也只需審核與 approve，不必逐步製作、搬移或銜接軟體。網路不穩時的恢復、審核對象與 approve 範圍需另行設計／驗證，不宣稱現在已有離線或跨網路遠端操作能力，也不在此新增現場審批關卡。
+
+目前建立的是 Foundation。本週固定 MacBook Presenter 0.5.1＋現有 iPad Remote，保留原有 Meet 流程；Mac mini 僅供開發。先驗證整場、配對保存與斷線恢復；自動更新留到下週，排程維持停用。長期主日流程 PPT 自動翻頁另行探索，講道 PPT 仍由講員控制。這個願景不改變以下既有資料收集與發送設定。
+
 **目前階段：不向群內發問。** `group_questions_enabled=false`，問題只留網站後台；測試及正式設定的周五催補提醒也暫時關閉。收集、明確資料寫入與請假成功回執可繼續。發送前 backend 與 bridge 都重查設定，已佇列的追問轉為 `held`；日後開啟發問也不會自動補發舊問題。只有操作者另行啟用才發新問題。
 
 此助理連接三個 WhatsApp 資料來源群，整理資料到現有主日及同工表單。
