@@ -523,7 +523,7 @@ export default function OriginalAudioPage() {
                     })()
                   ) : sermon.media_kind === "audio" && (
                     <ScriptureSlide
-                      slug={verseAt(sermon, seconds, passage)}
+                      slug={verseAt(sermon, seconds, section.passage)}
                       title={currentJudgement?.judgement ?? ""}
                       points={currentJudgement?.points ?? []}
                       application={currentJudgement?.application ?? false}
@@ -662,17 +662,18 @@ export default function OriginalAudioPage() {
                               onClick={() => playFrom(sermon, mark.at)}
                               className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-white"
                             >
+                              {/* 没在播的条目用正常的深色：灰色在这一页专指「不屬本章釋經」。 */}
                               <span
-                                className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-400"}`}
+                                className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-500"}`}
                               >
                                 {clock(mark.at)}
                               </span>
                               <span
-                                className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-slate-900" : "text-slate-600"}`}
+                                className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-indigo-700" : "text-slate-900"}`}
                               >
                                 {mark.judgement}
                               </span>
-                              <span className="font-mono text-[0.7rem] text-slate-400">
+                              <span className="font-mono text-[0.7rem] text-slate-500">
                                 {minutes(mark.seconds)}
                               </span>
                             </button>

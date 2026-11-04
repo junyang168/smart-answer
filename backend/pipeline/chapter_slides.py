@@ -378,12 +378,177 @@ def save(
     }
 
 
+# ---------------------------------------------------------------------------
+# 审阅与修正
+#
+# 负责人 2026-11-03：用审阅、修正的方法提高质量。一轮 = 一次完整审阅 + 作者按审
+# 阅修正一次；修正稿再完整审阅一次，审阅同时给出下一轮的意见。修正稿必须过同一
+# 套程序核对才替换存档；不过就留原稿。轮数有上限，审不完的交给负责人。
+
+MOST_ROUNDS = 2
+
+REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音的同步投影片。聽眾一邊聽錄音，一邊看投影片。
+
+使用者給你：保留的逐字稿（每句有編號 S0001 起），以及投影片（每張的第一句、標題、要點與它出現的那一句、顯示的經文與讀到的那一句）。要點在它標的那一句才出現；經文在讀到的那一句才出現。
+
+逐張對照逐字稿檢查：
+1. 忠實：要點只寫他講的，沒有加入他沒講的解釋、評論；沒有把「很好的證據」寫成「證明」；沒有把會眾的話當成他的話；沒有搞錯誰說的、在講哪一卷書。
+2. 完整：他這一段的問題、理由、結論、勸告都在；問題和它的答案在同一張；例子和它說明的道理在同一張；沒有只留鋪陳、漏了結論。
+3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
+4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
+
+只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
+
+grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、或漏了他讀的經文時為 true。
+
+用繁體中文。"""
+
+REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "grade": {"type": "string", "enum": ["A", "B", "C"]},
+        "blocking": {"type": "boolean"},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "slide": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文"]},
+                    "problem": {"type": "string"},
+                    "fix": {"type": "string"},
+                },
+                "required": ["slide", "kind", "problem", "fix"],
+            },
+        },
+    },
+    "required": ["grade", "blocking", "findings"],
+}
+
+REVISE_PROMPT = SYSTEM_PROMPT + """
+
+這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。交回完整的一份投影片（不是只交改動的）。"""
+
+
+def show_slides(slides: list[dict[str, Any]]) -> str:
+    """把存档的投影片写成审稿人、作者都读得懂的文字。"""
+
+    from backend.api.scripture import format_chinese_reference
+
+    lines: list[str] = []
+    for number, slide in enumerate(slides, 1):
+        lines.append(f"第 {number} 張（{slide['first']}–{slide['last']}）{slide['title']}　經節：{','.join(slide['verses'])}")
+        for point in slide["points"]:
+            lines.append(f"  · [{point['sentence']}] {point['text']}")
+        for item in slide["scriptures"]:
+            lines.append(f"  經文 [{item['sentence']}] {format_chinese_reference(item['slug'])}")
+    return "\n".join(lines)
+
+
+def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """存档的投影片写回模型回答的样子，作者修正时从它出发。"""
+
+    from backend.api.scripture import format_chinese_reference
+
+    return [
+        {
+            "first": slide["first"],
+            "title": slide["title"],
+            "points": slide["points"],
+            "verses": ", ".join(v.split("-", 1)[1].replace("-", ":", 1) for v in slide["verses"]),
+            "scriptures": [
+                {"sentence": item["sentence"], "ref": format_chinese_reference(item["slug"])}
+                for item in slide["scriptures"]
+            ],
+        }
+        for slide in slides
+    ]
+
+
+def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) -> Path:
+    return record_path(data_base_dir, passage, lecture).with_suffix(f".review-{revision}.json")
+
+
+def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
+    """审阅当前存档的投影片，审阅绑定投影片存档的 SHA。"""
+
+    record = load_record(data_base_dir, chapter.passage, lecture)
+    if record is None:
+        return {"lecture": lecture, "status": "no_slides"}
+    decisions_record = json.loads(
+        chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
+    )
+    prompt = user_prompt(lecture, decisions_record) + "\n\n投影片：\n" + show_slides(record["slides"])
+    answer = client.generate_json(REVIEW_PROMPT, prompt, REVIEW_SCHEMA)
+    revision = int(record.get("revision", 0))
+    out = {
+        "slides_sha256": chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture)),
+        "revision": revision,
+        "model": getattr(client, "model", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **answer,
+    }
+    target = review_path(data_base_dir, chapter.passage, lecture, revision)
+    target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
+            "blocking": answer["blocking"], "findings": len(answer["findings"]), "file": str(target)}
+
+
+def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
+    """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
+
+    path = record_path(data_base_dir, chapter.passage, lecture)
+    record = load_record(data_base_dir, chapter.passage, lecture)
+    if record is None:
+        return {"lecture": lecture, "status": "no_slides"}
+    revision = int(record.get("revision", 0))
+    review_file = review_path(data_base_dir, chapter.passage, lecture, revision)
+    if not review_file.exists():
+        return {"lecture": lecture, "status": "not_reviewed"}
+    verdict = json.loads(review_file.read_text(encoding="utf-8"))
+    if verdict.get("slides_sha256") != chapter_exposition.file_sha256(path):
+        return {"lecture": lecture, "status": "review_is_for_other_slides"}
+    if not verdict["findings"]:
+        return {"lecture": lecture, "status": "nothing_to_fix"}
+    if revision >= MOST_ROUNDS:
+        return {"lecture": lecture, "status": "rounds_used_up", "findings": len(verdict["findings"])}
+    decisions_record = json.loads(
+        chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
+    )
+    kept = kept_pieces(decisions_record)
+    findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in verdict["findings"])
+    prompt = (
+        user_prompt(lecture, decisions_record)
+        + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
+        + "\n\n審稿人的意見：\n" + findings
+    )
+    response = client.generate_json(REVISE_PROMPT, prompt, RESPONSE_SCHEMA)
+    problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
+    if problems:
+        rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
+        rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},
+                                       ensure_ascii=False, indent=1), encoding="utf-8")
+        return {"lecture": lecture, "status": "rejected", "problems": problems, "file": str(rejected)}
+    path.with_suffix(f".revision-{revision}.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    record.update({
+        "revision": revision + 1,
+        "revised_from_review_sha256": chapter_exposition.file_sha256(review_file),
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "slides": slides,
+        "unshown_references": unshown,
+        "raw_slides": response.get("slides") or [],
+    })
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"lecture": lecture, "status": "revised", "revision": revision + 1, "slides": len(slides)}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("passage", choices=sorted(chapter_material.CHAPTERS))
     parser.add_argument("--lecture", action="append", default=[], help="只跑这几堂，如 （二）1")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
     args = parser.parse_args(argv)
 
     from backend.api.config import DATA_BASE_PATH
@@ -399,6 +564,18 @@ def main(argv: list[str] | None = None) -> int:
     client = ClaudeSubscriptionClient(model=args.model)
     failed = False
     for lecture in lectures:
+        if args.review:
+            data = Path(DATA_BASE_PATH)
+            while True:
+                report = review(chapter, lecture, data_base_dir=data, client=client)
+                print(json.dumps(report, ensure_ascii=False))
+                if report["status"] != "reviewed" or not report["findings"]:
+                    break
+                report = revise(chapter, lecture, data_base_dir=data, client=client)
+                print(json.dumps(report, ensure_ascii=False))
+                if report["status"] != "revised":
+                    break
+            continue
         report = decide(chapter, lecture, data_base_dir=Path(DATA_BASE_PATH), client=client, force=args.force)
         print(json.dumps(report, ensure_ascii=False))
         failed = failed or report["status"] not in {"saved", "unchanged"}

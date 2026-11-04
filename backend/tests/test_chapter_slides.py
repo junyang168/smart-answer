@@ -121,3 +121,46 @@ def test_slides_are_dropped_once_the_keep_decisions_are_rerun(tmp_path):
     assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L") is not None
     decisions.write_text('{"rerun": true}')
     assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L") is None
+
+
+class FakeClient:
+    model = "fake"
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.prompts = []
+
+    def generate_json(self, system, user, schema):
+        self.prompts.append(user)
+        return self.answers.pop(0)
+
+
+def _decided(tmp_path):
+    record = {"pieces": KEPT, "decisions": [
+        {"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    path = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    first = {"slides": [slide("S0001", "5:1-48", points=("重複", "重複的另一說法"))]}
+    client = FakeClient([first])
+    assert chapter_slides.decide(CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "saved"
+
+
+def test_a_revision_replaces_the_slides_only_after_review_and_the_same_checks(tmp_path):
+    _decided(tmp_path)
+    finding = {"grade": "B", "blocking": False, "findings": [
+        {"slide": "S0001", "kind": "跟得上", "problem": "兩條說同一件事", "fix": "刪一條，加他的結論"}]}
+    bad = {"slides": [slide("S0002")]}  # 不從第一句開始：程序核對不過，原稿不動
+    client = FakeClient([finding, bad])
+    assert chapter_slides.review(CHAPTER, "L", data_base_dir=tmp_path, client=client)["findings"] == 1
+    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "rejected"
+    assert "兩條說同一件事" in client.prompts[-1] and "重複的另一說法" in client.prompts[-1]
+    assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")["slides"][0]["points"][1]["text"] == "重複的另一說法"
+
+    good = {"slides": [slide("S0001", "5:1-48", points=("一", "他的結論"))]}
+    client = FakeClient([good])
+    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "revised"
+    record = chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")
+    assert record["revision"] == 1 and record["slides"][0]["points"][1]["text"] == "他的結論"
+    # 修正后的稿子还没审过，不能再按旧审阅修。
+    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([]))["status"] == "not_reviewed"

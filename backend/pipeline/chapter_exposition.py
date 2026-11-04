@@ -273,6 +273,10 @@ def load_record(
     return record
 
 
+#: 比这短的保留片段是一句话的碎片，不自成一段。
+SHORTEST_ALONE_SECONDS = 20
+
+
 def lecture_rows(chapter: Chapter, record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """一堂课在各段里的一行：保留的片段，以及夹在中间的灰色片段。
 
@@ -296,6 +300,18 @@ def lecture_rows(chapter: Chapter, record: dict[str, Any]) -> dict[str, dict[str
     kept_sections = [section for section in owner if section]
     if not kept_sections:
         return {}
+
+    # 太短的保留片段不自成一段，跟着它前面（没有就后面）那个保留片段的段：
+    # （二）5 把 5:38-39 论证中间的一句「我們要愛仇敵。」（3 秒）切出来标了
+    # 5:44，5:43-48 就多出一行 0 分钟。
+    for index, piece in enumerate(pieces):
+        if owner[index] is None or piece["end"] - piece["start"] >= SHORTEST_ALONE_SECONDS:
+            continue
+        before = [s for s in owner[:index] if s]
+        after = [s for s in owner[index + 1:] if s]
+        neighbour = before[-1] if before else (after[0] if after else None)
+        if neighbour:
+            owner[index] = neighbour
 
     rows: dict[str, dict[str, Any]] = {}
 

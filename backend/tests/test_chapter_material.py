@@ -159,3 +159,17 @@ def test_slide_points_are_the_claims_own_evidence_steps_with_his_words():
     out = claim_points({"provenance": {"claim_ids": ["c"]}}, claims, steps, fragments)
     assert [p["text"] for p in out["points"]] == ["第一步", "第二步", "第三步"]
     assert out["points"][0]["quote"] == "他的原話"
+
+
+def test_a_sentence_long_kept_piece_stays_with_the_argument_around_it():
+    # （二）5：5:38-39 論證中間的「我們要愛仇敵。」3 秒，標了 5:44，5:43-48 多出 0 分鐘的一行。
+    pieces = [
+        {"id": "U001", "start": 0.0, "end": 100.0, "text": "以眼還眼。"},
+        {"id": "U002", "start": 100.0, "end": 103.0, "text": "我們要愛仇敵。"},
+        {"id": "U003", "start": 103.0, "end": 200.0, "text": "右臉左臉。"},
+    ]
+    chapter = Chapter(passage="mat-5-1-48", series="S", lectures=("L",), sections=("mat-5-38-42", "mat-5-43-48"))
+    decisions = check([keep("U001", "5:38"), keep("U002", "5:44", "應用"), keep("U003", "5:39")], pieces, chapter)[1]
+    rows = lecture_rows(chapter, {"pieces": pieces, "decisions": decisions})
+    assert list(rows) == ["mat-5-38-42"]
+    assert rows["mat-5-38-42"]["stretches"] == [{"start": 0.0, "end": 200.0}]
