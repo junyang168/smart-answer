@@ -1,5 +1,32 @@
 # Sunday Presenter acceptance evidence
 
+## #652 iPad-first pilot source — not an iPad build (2026-11-04)
+
+The owner identified iPad as the primary Remote target. The iPad-only UIKit
+project reuses the existing bundled WebRTC receiver and host protocol. It provides
+Bonjour host selection, per-host Keychain pairing, exact-certificate/endpoint pin,
+no HTTP redirects, touch/keyboard controls with live binding, observer mode on
+by default, expanded viewer and foreground reconnection. Background/resign-active
+stops the local viewer and cancels the URLSession; the host's existing lease can
+expire within 15 seconds. No remote microphone, recording or streaming outlet
+was introduced. The installed Mac apps and their permissions were not changed.
+
+Available validation: all 51 unit/regression tests pass, including 38 iPad
+production-scope/TLS/redirect assertions. The actual Foundation/Security client
+compiles on the Mac SDK; production scope and TLS-delegate tests exercise a generated real test
+certificate, wrong pin/endpoint/port, missing trust, redirects, host-switch/stale
+state rejection, observer gating and background invalidation. Project/plist and
+resource paths validate, UIKit source parses, and both existing Mac Remote
+architectures build. These checks do not type-check UIKit against an iOS SDK or
+establish iPad WebRTC/permissions/layout behavior.
+
+The development Mac has Command Line Tools only; no Xcode was found by application
+inventory/Spotlight, and both iphoneos and iphonesimulator SDK lookup fail. The
+simulator build command correctly exits nonzero instead of producing an artifact.
+Actual iOS build, signing, installation, hardware/network and full-service
+acceptance remain outstanding. The first-Sunday plan stays unchanged until those
+checks finish. Source, commands and Apple references are in `ipad/README.md`.
+
 ## #643 refined three-step rollout (2026-11-04)
 
 The owner clarified that this Sunday is an observational first step: Presenter

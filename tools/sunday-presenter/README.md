@@ -24,6 +24,17 @@ link. PPT audio capture, Google OAuth and Remote microphone relay are outside th
 design; only the selected wireless microphone on the host supplies audio. It is
 a design draft, not an implemented capability of the Phase 1 release below.
 
+## iPad-first Remote pilot (#652)
+
+The owner identified iPad as the actual speaker-device goal; Mac use is a
+constraint of the current service workflow. [The iPad target](ipad/README.md)
+adds a UIKit viewer/controller using the same bundled WebRTC receiver and pinned
+Presenter protocol. It defaults to observe-only mode. Pairing, host isolation,
+touch navigation, expanded viewing and foreground reconnect are implemented as
+pilot source. The development Mac has no full Xcode/iOS SDK: there is no
+installable iPad artifact or physical-device acceptance yet. Keep the first
+Sunday's two-laptop Meet workflow until the actual iPad has been built and tested.
+
 ## Local video pilot — 0.5.1 (#643)
 
 The worktree pilot adds a resizable PPT viewer to the native Remote. When paired

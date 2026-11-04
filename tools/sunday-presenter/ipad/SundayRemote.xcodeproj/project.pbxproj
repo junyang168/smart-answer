@@ -1,0 +1,35 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+ECA1A52A00E642BD92F97071 = { isa = PBXFileReference; path = "SundayRemote/AppDelegate.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+73EC8A593F3E23BC3ED044CB = { isa = PBXBuildFile; fileRef = ECA1A52A00E642BD92F97071; };
+B19969C43130027C6A618F04 = { isa = PBXFileReference; path = "SundayRemote/RemoteViewController.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+E65F73DE5E48FE19AED89A5B = { isa = PBXBuildFile; fileRef = B19969C43130027C6A618F04; };
+FCC82928FA91BF4DF1665E9F = { isa = PBXFileReference; path = "SundayRemote/RemoteClient.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+1FC9A7790BBDEA42C2F4E9CE = { isa = PBXBuildFile; fileRef = FCC82928FA91BF4DF1665E9F; };
+7F26BF869C541F7D7CED20C5 = { isa = PBXFileReference; path = "SundayRemote/RemoteScope.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+9F2042068410DE05EB8D0882 = { isa = PBXBuildFile; fileRef = 7F26BF869C541F7D7CED20C5; };
+653D169136127BAF36285D76 = { isa = PBXFileReference; path = "SundayRemote/PairStore.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+F5063D8B3597938951756803 = { isa = PBXBuildFile; fileRef = 653D169136127BAF36285D76; };
+69CFFB670AD1E7309BE65EC9 = { isa = PBXFileReference; path = "../native/RemoteVideoView.swift"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.swift"; };
+3B3AAD0A31E1173F68615EDA = { isa = PBXBuildFile; fileRef = 69CFFB670AD1E7309BE65EC9; };
+B5865E8A58A432561CFC103E = { isa = PBXFileReference; path = "../media/remote.html"; sourceTree = SOURCE_ROOT; lastKnownFileType = "text.html"; };
+CC5264405E8ABA03C0244A10 = { isa = PBXBuildFile; fileRef = B5865E8A58A432561CFC103E; };
+930D95B5ADA59CCC093C6F5D = { isa = PBXFileReference; path = "../media/remote.js"; sourceTree = SOURCE_ROOT; lastKnownFileType = "sourcecode.javascript"; };
+5A439142B5A6885ADDF3025A = { isa = PBXBuildFile; fileRef = 930D95B5ADA59CCC093C6F5D; };
+1AA9345BDAB26146CB2831C8 = { isa = PBXFileReference; path = "../media/remote.css"; sourceTree = SOURCE_ROOT; lastKnownFileType = "text.css"; };
+5BA1A7FD612088A75FE1EB98 = { isa = PBXBuildFile; fileRef = 1AA9345BDAB26146CB2831C8; };
+A8792157CB4F27FB949C035F = { isa = PBXFileReference; explicitFileType = wrapper.application; path = SundayRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+0A3E27B8CA818264D75C8D81 = { isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A8792157CB4F27FB949C035F); };
+AD936FCBED631FA67E05C3EA = { isa = PBXGroup; sourceTree = "<group>"; children = (ECA1A52A00E642BD92F97071,B19969C43130027C6A618F04,FCC82928FA91BF4DF1665E9F,7F26BF869C541F7D7CED20C5,653D169136127BAF36285D76,69CFFB670AD1E7309BE65EC9,B5865E8A58A432561CFC103E,930D95B5ADA59CCC093C6F5D,1AA9345BDAB26146CB2831C8,0A3E27B8CA818264D75C8D81); };
+878A52FC5FF6A57D50B7B870 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (73EC8A593F3E23BC3ED044CB,E65F73DE5E48FE19AED89A5B,1FC9A7790BBDEA42C2F4E9CE,9F2042068410DE05EB8D0882,F5063D8B3597938951756803,3B3AAD0A31E1173F68615EDA); runOnlyForDeploymentPostprocessing = 0; };
+E2AA269EB967A8853A258BFA = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+41D311A605520FC7B8B9A980 = { isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = media; dstSubfolderSpec = 7; files = (CC5264405E8ABA03C0244A10,5A439142B5A6885ADDF3025A,5BA1A7FD612088A75FE1EB98); name = "Bundled receiver only"; runOnlyForDeploymentPostprocessing = 0; };
+2B23A31EEC75B029432F2445 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
+EDDA600A3F771F810A8065C9 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = "org.dallas-hlc.sunday-remote.ipad"; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = SundayRemote/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; SWIFT_EMIT_LOC_STRINGS = YES; }; };
+07CA1E69F6068DEA30A4DA6B = { isa = XCBuildConfiguration; name = Release; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
+594BCDCC96599D88EF772A08 = { isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = "org.dallas-hlc.sunday-remote.ipad"; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = SundayRemote/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; SWIFT_EMIT_LOC_STRINGS = YES; }; };
+F905B102B4F13BD6617D8EB3 = { isa = XCConfigurationList; buildConfigurations = (2B23A31EEC75B029432F2445,07CA1E69F6068DEA30A4DA6B); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+CE4CD5ACDBC4A8D938AD23C0 = { isa = XCConfigurationList; buildConfigurations = (EDDA600A3F771F810A8065C9,594BCDCC96599D88EF772A08); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+34A04005BCAF206EEC990BD9 = { isa = PBXNativeTarget; buildConfigurationList = CE4CD5ACDBC4A8D938AD23C0; buildPhases = (878A52FC5FF6A57D50B7B870,E2AA269EB967A8853A258BFA,41D311A605520FC7B8B9A980); buildRules = (); dependencies = (); name = SundayRemote; productName = SundayRemote; productReference = A8792157CB4F27FB949C035F; productType = "com.apple.product-type.application"; };
+244210E48437B6556980A702 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = F905B102B4F13BD6617D8EB3; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = AD936FCBED631FA67E05C3EA; productRefGroup = 0A3E27B8CA818264D75C8D81; projectDirPath = ""; projectRoot = ""; targets = (34A04005BCAF206EEC990BD9); };
+}; rootObject = 244210E48437B6556980A702; }
