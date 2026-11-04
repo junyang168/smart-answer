@@ -1,5 +1,56 @@
 # Sunday Presenter acceptance evidence
 
+## #643 completed 90-minute installed-app run — qualified result (2026-11-04)
+
+Installed 0.6.1 (runtime commit `0697a29b`) recorded the owner's actual Office
+slideshow and explicitly selected AudioPro X5 into an external SSD, from
+2026-11-03 22:47 to 2026-11-04 00:17 America/Chicago. Normal Stop/Save displayed
+saved; the final file exists and no partial remains. The independent monitor
+reached its 90-minute deadline without a process loss or file-growth alarm.
+Its 91 minute checkpoints show a peak combined app/helper RSS of 1,277 MiB
+and an ending RSS of 940 MiB; these are sampled observations, not a leak proof.
+
+Final recording: `PPT-AudioPro-90min-061-20261103-2247.mp4`, 1,327,132,068 bytes,
+SHA256 `6a50a5ddf669c61b8b8f413d40993e77d628ccdb22372c62a4e165b5c7a3a245`.
+AAC is 5,417.023500 s and 1280×720 H.264 is 5,417.048567 s: a 25.067 ms
+duration difference. Complete audio/video decoding reports zero errors; all
+253,923 audio and 164,153 video packets have timing, no backwards DTS, and
+maximum positive gaps of 0.688 ms audio / 2.834 ms video. All 90 minute-spaced
+visual samples were inspected, including the seven UI interaction markers:
+audience slides and animations progress through slide 7, with no captured
+controller or sustained black output. QuickTime opened the final file, played
+the beginning and middle, and played the final seconds to its normal end.
+
+**Overall uninterrupted-sound acceptance is NOT passed.** Every minute has
+nonzero audio, but a finer decoded-sample inspection found two digital-silence
+intervals: 205.824875 s for 124.750 ms and 1,734.186500 s for 128.250 ms.
+Independent 48 kHz stereo extraction confirms both channels are silent there;
+there is no corresponding MP4 timestamp discontinuity. The saved file cannot
+identify whether this originated in the wireless receiver, USB/OS capture or
+audio processing. There was no simultaneous pre-encoder reference capture, so
+attribution and speech intelligibility remain unresolved. Decoded AAC also has
+101 / 43,336,192 mono 8 kHz samples at or above unity; lossy-codec overshoot is
+not proof of source clipping, and input gain still needs a real speech check.
+
+The original packet/decode inspector labeled the file passed because it did
+not gate decoded silence. That original result is preserved, not overwritten.
+The inspector now separately reports media-timeline success and signal review,
+and refuses an overall pass on ≥100 ms digital-silence intervals. Re-analysis
+of the same immutable file fails that gate as expected. New counterexamples
+cover the observed 128.25 ms run, trailing silence, ordinary zero crossings
+and AAC overshoot. All 50 unit/regression tests pass. No packaged runtime was
+changed after this recording; only the analysis tooling and evidence changed.
+
+Private evidence: ignored `output/endurance-061-20261103-2247/` (monitor,
+interaction markers, original `analysis/`, stricter `analysis-signal-strict/`,
+stereo zero-run confirmation and contact sheet); final MP4 under the owner's
+SSD `SundayPresenterTests` directory. `dist/endurance-0.6.1-manifest.json` binds
+the build, recording and analyses. Recording/finalization/video endurance is
+demonstrated; a clean-audio whole-service claim is withheld. The next diagnostic
+must compare pre-encoder physical-input samples with normalized/encoded samples
+to locate these short silences before another clean-audio acceptance run.
+Nothing was uploaded, streamed, deployed or published as a website download.
+
 ## #643 whole-service endurance follow-up — 0.6.1 candidate (2026-11-03)
 
 Owner requested a full-service-duration recording. The first installed 0.6.0

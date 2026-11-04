@@ -52,8 +52,11 @@ The selected microphone passes through a 48 kHz Web Audio destination before
 encoding, keeping a continuous audio render clock. Direct USB-track recording
 showed a 1.84-second audio/video duration difference in a 150-second physical
 AudioPro test; the normalized path reduced that difference to about 28 ms.
-A 90-minute actual-PPT/physical-mic acceptance run is required before claiming
-whole-service endurance. Capture/encoder state is retained on failure without
+A 90-minute installed-app run saved 90:17 of actual PPT + AudioPro to SSD,
+fully decoded without errors, with a 25 ms A/V duration difference. Video,
+writing and finalization endurance passed; two ~0.13-second decoded audio
+silences remain unattributed, so uninterrupted-sound acceptance is pending.
+See `acceptance.md` for the measured limits. Capture/encoder state is retained on failure without
 logging document URLs or audio samples.
 
 MediaRecorder uses H.264/AAC, 500 ms keyframes/timeslices, incremental bounded IPC
@@ -79,7 +82,7 @@ the actual AudioPro X5 input, records ten seconds and inspects decoded AAC.
 These verification tools are not required by the packaged recording feature.
 
 This remains a local pilot. Fixed-key YouTube streaming, scheduling, standalone
-microphone test/mute and full-service endurance acceptance remain unimplemented
+microphone test/mute and clean-audio full-service acceptance remain unimplemented
 or pending. Website downloads remain the previously released 0.4.0. Remote 0.5.3
 is compatible with this host; only Presenter needs updating for local recording.
 

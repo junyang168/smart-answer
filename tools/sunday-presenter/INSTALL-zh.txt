@@ -1,6 +1,6 @@
 Sunday Presenter 0.6.1 — PPT＋主機麥克風本機錄影測試版
 
-0.6.1 修正實體 USB 麥克風長錄時聲畫時間逐漸偏移的問題；完整一場驗收進行中。
+0.6.1 已完成 90 分 17 秒實體 PPT＋AudioPro／SSD 錄影，儲存及畫面正常、聲畫時長差約 25 ms；音軌有兩處約 0.13 秒靜音尚待查明，尚未通過「聲音完全不中斷」驗收。
 
 將 Sunday Presenter 拖入主電腦 Applications。Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本。
 講員可繼續使用 Sunday Remote 0.5.3；本次只錄影時不必更新 Remote。
