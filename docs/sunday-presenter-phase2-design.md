@@ -4,7 +4,7 @@
 > 日期：2026-11-03。
 > 追蹤：[主卡 #643](https://github.com/junyang168/smart-answer/issues/643)。
 > 基線：Phase 1 v0.4.0、已合併的 [PR #611](https://github.com/junyang168/smart-answer/pull/611)，程式檢視基線 `2b93ae7007ca4de60d267062a2ff2e8007b6ee5d`。
-> 當前進度：0.6.0 本機 PPT＋指定主機麥克風 MP4 錄影原型已實作；Remote 畫面、翻頁、主機切換與全螢幕亦已有原型及本地測試。YouTube／排程尚未實作；未部署／發布網站下載。完整主日與各實體機仍待驗收。
+> 當前進度：0.6.1 本機 PPT＋指定主機麥克風 MP4 錄影原型正在整場驗收；Remote 畫面、翻頁、主機切換與全螢幕亦已有原型及本地測試。YouTube／排程尚未實作；未部署／發布網站下載。完整主日與各實體機仍待驗收。
 > 原型證據與未測範圍見 [acceptance](../tools/sunday-presenter/acceptance.md)。
 
 ## 1. 要解決的問題與使用方式
@@ -151,6 +151,8 @@ Remote 不請求麥克風、不傳音訊、不控制收音；不需要音訊授�
 Owner 已確認不需要 PPT 內嵌影片／音樂的聲音。OUTPUT 只擷取 video，不請求 Office frame audio 或系統 loopback，不新增系統音訊擷取權限。錄影／推流的 audio track 只有選定的無線麥克風或靜音；Remote 只收到 video。既有 Stage 本地播放行為沿用 Phase 1。
 
 ### 6.3 同一主電腦上的聲畫
+
+0.6.0 的實體 USB 直接 audio track 長測曾出現累積時長差（150 秒中短約 1.84 秒）。0.6.1 把精確選定的輸入經 48 kHz Web Audio MediaStreamDestination 正規化後交給錄影器；沒有接到喇叭。修正後相同 150 秒硬體測試時長差約 28 ms，真實 Office／SSD 229 秒重測差約 21 ms；完整 90 分鐘仍以實際長測結果為準，不以短測推算。
 
 主電腦把同一 OUTPUT 的 video track 與本地麥克風經閘門後的 audio track 組成廣播 MediaStream，供錄影及推流使用。兩台電腦之間不傳音訊，移除原 v1 的雙機音訊同步、漂移修正與恢復協議；仍以實體拍手／畫面標記檢查錄影和觀眾端聲畫，確認裝置、擷取與編碼延遲可接受。
 

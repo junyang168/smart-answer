@@ -42,12 +42,20 @@ modes. A still slide no longer triggers reconnect merely because decoded frames
 stop increasing; brief ICE disconnections get five seconds to recover, while
 persistent failure and first-frame timeout still reconnect automatically.
 
-## Local MP4 recording — 0.6.0 (#643)
+## Local MP4 recording — 0.6.1 candidate (#643)
 
 The controller selects an explicit host microphone and save location, starts
 recording, displays its input meter, and stops/finalizes an MP4. OUTPUT is captured
 once and shared with Remote. The recording branch samples that same track through
 a 1280×720 canvas at 30 fps so an unchanged slide has continuous video timing.
+The selected microphone passes through a 48 kHz Web Audio destination before
+encoding, keeping a continuous audio render clock. Direct USB-track recording
+showed a 1.84-second audio/video duration difference in a 150-second physical
+AudioPro test; the normalized path reduced that difference to about 28 ms.
+A 90-minute actual-PPT/physical-mic acceptance run is required before claiming
+whole-service endurance. Capture/encoder state is retained on failure without
+logging document URLs or audio samples.
+
 MediaRecorder uses H.264/AAC, 500 ms keyframes/timeslices, incremental bounded IPC
 and file writes. It never captures PPT/system audio or routes microphone audio
 to the speakers. Remote still receives video only and needs no microphone access.

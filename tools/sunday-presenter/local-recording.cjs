@@ -1,4 +1,4 @@
-const { ipcMain, systemPreferences, shell } = require('electron');
+const { ipcMain, systemPreferences, shell, app } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -18,7 +18,15 @@ class LocalRecording {
       catch (error) { this.stop(error.message, true).catch(() => {}); throw error; }
     });
     this.onFault = (event, id, message, graceful = false) => {
-      if (trusted(event) && id === this.run.id) this.stop(String(message).slice(0, 300), graceful !== true).catch(() => {});
+      if (!trusted(event) || id !== this.run.id) return;
+      // Preserve only capture/encoder state, never audio samples or document URLs.
+      const diagnostic = this.execute('window.recordingHost.stats()').catch(() => ({}));
+      this.stop(String(message).slice(0, 300), graceful !== true).catch(() => {});
+      diagnostic.then(stats => {
+        if (!app) return;
+        const entry = { at: new Date().toISOString(), reason: String(message).slice(0, 300), stats };
+        fs.appendFile(path.join(app.getPath('userData'), 'recording-errors.jsonl'), JSON.stringify(entry) + '\n').catch(() => {});
+      });
     };
     this.onLevel = (event, id, level) => {
       if (!trusted(event) || id !== this.run.id || !Number.isFinite(level) || level < 0 || level > 1) return;

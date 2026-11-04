@@ -1,4 +1,6 @@
-Sunday Presenter 0.6.0 — PPT＋主機麥克風本機錄影測試版
+Sunday Presenter 0.6.1 — PPT＋主機麥克風本機錄影測試版
+
+0.6.1 修正實體 USB 麥克風長錄時聲畫時間逐漸偏移的問題；完整一場驗收進行中。
 
 將 Sunday Presenter 拖入主電腦 Applications。Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本。
 講員可繼續使用 Sunday Remote 0.5.3；本次只錄影時不必更新 Remote。

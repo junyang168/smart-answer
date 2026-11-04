@@ -1,5 +1,46 @@
 # Sunday Presenter acceptance evidence
 
+## #643 whole-service endurance follow-up — 0.6.1 candidate (2026-11-03)
+
+Owner requested a full-service-duration recording. The first installed 0.6.0
+attempt used real Office PPT + AudioPro and an external SSD, starting at
+22:24:26 America/Chicago. It failed at about 46.46 seconds: the five-second
+encoder no-output guard fired. An independent file-growth monitor confirmed
+stalled writes; the app remained alive and SSD free space was about 197 GiB.
+The partial is retained. This is a failed endurance result, not a 90-minute pass.
+
+A separate 150-second actual AudioPro repro exposed a measurable clock defect:
+audio 148.500917 s versus video 150.337667 s. The previous short hardware smoke
+only checked codecs/decodability, so its old PASS label does not establish sync;
+the tightened skew gate rejects this saved counterexample.
+
+The recording audio now passes from the exact selected physical source through
+a 48 kHz Web Audio MediaStreamDestination before encoding. No speaker connection
+is made; source-ended still stops/finalizes, and original/normalized tracks plus
+the context close on stop. Audio and canvas retain their native capture timestamps.
+The corresponding 150-second hardware test yields audio 150.420708 s and video
+150.448433 s (~28 ms), independently decoded without errors. A real Office PPT +
+AudioPro + same-SSD repro then ran 229 seconds and finalized normally: audio
+229.098042 s / video 229.119467 s (~21 ms), zero full-decode errors, no backward
+DTS, maximum positive packet gaps about 0.69 ms audio / 1.73 ms video. These are
+short corrected checks; the full 90-minute run remains required.
+
+Capture/encoder failure diagnostics retain track/recorder/context/timer states,
+without document URLs or audio samples. A read-only endurance monitor checks
+file growth, early finalization, process survival, disk space and RSS. Its separate
+inspector streams all packet timestamps, fully decodes video/audio, writes one
+visual sample per minute, and summarizes decoded audio in bounded per-minute bins.
+It fails on insufficient track duration, >350 ms A/V duration difference,
+backward DTS, missing timing or significant packet gaps. This measures the file's
+media timeline, not acoustic latency or speech intelligibility.
+
+48 unit/regression tests pass, including clock-normalization routing and cleanup,
+physical-device binding/source loss, and rejected packet-gap/skew counterexamples.
+Raw evidence stays in ignored output and on the owner's SSD. No website release
+or deployment occurred. Full endurance verdict will be appended after recording,
+finalization, full decoding and visual inspection actually finish.
+
+
 ## #643 local PPT + host microphone recording — 0.6.0 (2026-11-03)
 
 Authorized next milestone: a local video file before YouTube/Meet streaming.

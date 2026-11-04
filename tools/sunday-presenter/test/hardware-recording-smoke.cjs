@@ -11,14 +11,28 @@ exports.run = async ({ hostVideo, act, evidence }) => {
   assert.ok(mic, 'Actual AudioPro X5 receiver must be explicitly present; never fall back to another mic.');
   const target = path.join(evidence, `AudioPro-X5-actual-${Date.now()}.mp4`);
   await recorder.start({ target, deviceId: mic.id });
-  console.log('ACTUAL MICROPHONE RECORDING: ten seconds, AudioPro X5 only.');
+  const durationArg = process.argv.find(arg => arg.startsWith('--recording-hardware-seconds='));
+  const seconds = durationArg ? Number(durationArg.split('=')[1]) : 10;
+  assert.ok(seconds > 0 && seconds <= 6000);
+  console.log(`ACTUAL MICROPHONE RECORDING: ${seconds} seconds, AudioPro X5 only.`);
   let peak = 0;
-  for (let i = 0; i < 20; i++) { await new Promise(resolve => setTimeout(resolve, 500)); peak = Math.max(peak, recorder.snapshot().level); }
+  for (let i = 0; i < seconds * 2; i++) {
+    await new Promise(resolve => setTimeout(resolve, 500)); peak = Math.max(peak, recorder.snapshot().level);
+    if (i % 20 === 0 || recorder.snapshot().status !== 'recording') {
+      const diagnostics = await hostVideo.window.webContents.executeJavaScript('window.recordingHost.stats()');
+      console.log('HARDWARE PROGRESS', JSON.stringify({ seconds: i / 2, status: recorder.snapshot().status, diagnostics }));
+      fs.appendFileSync(path.join(evidence,'hardware-diagnostics.jsonl'), JSON.stringify({ seconds:i/2,status:recorder.snapshot().status,diagnostics })+'\n');
+    }
+    assert.equal(recorder.snapshot().status, 'recording', JSON.stringify(recorder.snapshot()));
+  }
   const result = await recorder.stop();
   assert.equal(result.status, 'saved', JSON.stringify(result));
   const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', target], { encoding: 'utf8' }));
   assert.equal(probe.streams.find(s => s.codec_type === 'audio')?.codec_name, 'aac');
   assert.equal(probe.streams.find(s => s.codec_type === 'video')?.codec_name, 'h264');
+  const audioDuration = Number(probe.streams.find(s => s.codec_type === 'audio').duration);
+  const videoDuration = Number(probe.streams.find(s => s.codec_type === 'video').duration);
+  assert.ok(Math.abs(audioDuration - videoDuration) < 0.35, JSON.stringify({ audioDuration, videoDuration }));
   execFileSync('ffmpeg', ['-v', 'error', '-i', target, '-f', 'null', '-'], { stdio: 'pipe' });
   const pcm = execFileSync('ffmpeg', ['-v', 'error', '-i', target, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-'], { maxBuffer: 10 * 1024 * 1024 });
   let squares = 0, max = 0;

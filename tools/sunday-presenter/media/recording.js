@@ -1,8 +1,20 @@
-let recording;
+let recording, lastFailureStats;
+function recordingStats(item = recording) {
+  if (!item) return lastFailureStats || { active: false };
+  const mic = item.microphone?.getAudioTracks()[0];
+  return { active: true, draws: item.draws || 0, chunks: item.sequence,
+    lastChunkAgeMs: performance.now() - (item.lastChunk || performance.now()), pendingBytes: item.pending,
+    recorderState: item.recorder?.state, audioContextState: item.audioContext?.state,
+    audioContextSeconds: item.audioContext?.currentTime, normalizedState: item.normalizedAudio?.readyState, microphoneState: mic?.readyState, microphoneMuted: mic?.muted,
+    canvasState: item.canvasTrack?.readyState, sourceState: item.outputTrack?.readyState, sourceMuted: item.outputTrack?.muted,
+    videoPaused: item.videoElement?.paused, videoReadyState: item.videoElement?.readyState,
+    videoSeconds: item.videoElement?.currentTime, videoFrames: item.videoElement?.getVideoPlaybackQuality().totalVideoFrames,
+    documentVisibility: document.visibilityState };
+}
 const recordingError = error => error?.message || String(error);
 const releaseTracks = item => {
   clearInterval(item.meter); clearInterval(item.drawTimer);
-  item.canvasTrack?.stop();
+  item.canvasTrack?.stop(); item.normalizedAudio?.stop();
   if (item.videoElement) { item.videoElement.pause(); item.videoElement.srcObject = null; }
   item.microphone?.getTracks().forEach(track => track.stop());
   item.audioContext?.close().catch(() => {});
@@ -10,7 +22,7 @@ const releaseTracks = item => {
 };
 function failRecording(item, error) {
   if (recording !== item || item.stopping) return;
-  item.error ||= recordingError(error);
+  item.error ||= recordingError(error); lastFailureStats = recordingStats(item);
   window.recordingBridge.fault(item.id, item.error);
 }
 function stopEarly(item, message) {
@@ -19,6 +31,7 @@ function stopEarly(item, message) {
 }
 window.addEventListener('output-capture-ended', () => { if (recording) stopEarly(recording, 'PPT 畫面擷取已停止，錄影已儲存。'); });
 window.recordingHost = {
+  stats: recordingStats,
   async devices() {
     const devices = (await navigator.mediaDevices.enumerateDevices())
       .filter(d => d.kind === 'audioinput' && !['default', 'communications'].includes(d.deviceId));
@@ -37,7 +50,18 @@ window.recordingHost = {
       const mic = item.microphone.getAudioTracks()[0];
       if (!mic || mic.getSettings().deviceId !== deviceId) throw Error('無法使用選定的麥克風；不會自動改用其他裝置。');
       mic.addEventListener('ended', () => stopEarly(item, '選定的麥克風已中斷，錄影已停止並儲存。'));
-      const video = await window.outputCapture.acquire('recording');
+      // Drive the encoder from the Web Audio render clock rather than the USB
+      // source's push timing. Actual AudioPro direct-track recording lost about
+      // 1.8 seconds of audio in 150 seconds; destination output is continuous.
+      item.audioContext = new AudioContext({ sampleRate: 48000 });
+      item.audioSource = item.audioContext.createMediaStreamSource(item.microphone);
+      item.audioDestination = item.audioContext.createMediaStreamDestination();
+      item.audioDestination.channelCount = Math.min(2, mic.getSettings().channelCount || 1);
+      item.analyser = item.audioContext.createAnalyser(); item.analyser.fftSize = 1024;
+      item.audioSource.connect(item.audioDestination); item.audioSource.connect(item.analyser);
+      item.normalizedAudio = item.audioDestination.stream.getAudioTracks()[0];
+      await item.audioContext.resume();
+      const video = await window.outputCapture.acquire('recording'); item.outputTrack = video.getVideoTracks()[0];
       if (recording !== item || item.stopping) throw Error('錄影已取消。');
       // ScreenCaptureKit can omit unchanged frames. Sample the SAME captured
       // OUTPUT into a recording-only canvas so a still slide has a continuous
@@ -49,6 +73,7 @@ window.recordingHost = {
       const context = canvas.getContext('2d', { alpha: false });
       const frames = canvas.captureStream(0); item.canvasTrack = frames.getVideoTracks()[0];
       const draw = () => {
+        item.draws = (item.draws || 0) + 1;
         const width = item.videoElement.videoWidth, height = item.videoElement.videoHeight;
         if (!width || !height) return;
         const scale = Math.min(canvas.width / width, canvas.height / height);
@@ -57,7 +82,7 @@ window.recordingHost = {
         item.canvasTrack.requestFrame();
       };
       draw(); item.drawTimer = setInterval(draw, 1000 / 30);
-      const stream = new MediaStream([item.canvasTrack, mic]);
+      const stream = new MediaStream([item.canvasTrack, item.normalizedAudio]);
       item.recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000, audioBitsPerSecond: 192000, videoKeyFrameIntervalDuration: 500 });
       item.finished = new Promise(resolve => { item.recorder.onstop = resolve; });
       item.recorder.onerror = event => failRecording(item, event.error || Error('影音編碼失敗。'));
@@ -75,9 +100,7 @@ window.recordingHost = {
           if (!item.pending) item.oldest = 0;
         }).catch(error => { item.error ||= recordingError(error); window.recordingBridge.fault(id, item.error); });
       };
-      item.audioContext = new AudioContext(); await item.audioContext.resume();
-      const source = item.audioContext.createMediaStreamSource(item.microphone);
-      const analyser = item.audioContext.createAnalyser(); analyser.fftSize = 1024; source.connect(analyser);
+      const analyser = item.analyser;
       const samples = new Float32Array(analyser.fftSize);
       item.meter = setInterval(() => {
         if (performance.now() - item.lastChunk > 5000) { failRecording(item, Error('影音編碼超過五秒沒有輸出，錄影已停止。')); return; }
