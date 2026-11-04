@@ -1246,34 +1246,31 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
 
 
 def _chapter_slides(
-    whole_chapter: Any,
-    record: dict[str, Any],
-    slides_record: dict[str, Any],
+    lecture_rows: dict[str, dict[str, Any]],
+    timed_slides: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """存档的投影片排进各段：从第一个片段开始的时刻换上，经文在读到的时刻出现。"""
+    """投影片排进各段：跟着它第一句所在的片段归段。"""
 
     from backend.api.scripture import format_chinese_reference
-    from backend.pipeline import chapter_material, chapter_slides
 
-    pieces = {piece["id"]: piece for piece in record["pieces"]}
+    section_of_piece = {
+        piece["id"]: section
+        for section, value in lecture_rows.items()
+        for piece in value["pieces"]
+    }
     out: dict[str, list[dict[str, Any]]] = {}
-    for slide in slides_record["slides"]:
-        own = [pieces[piece_id] for piece_id in slide["pieces"]]
-        section = chapter_material.section_of(whole_chapter, slide["verses"][0])
+    for slide in timed_slides:
+        section = section_of_piece.get(slide["piece"])
         if section is None:
             continue
         out.setdefault(section, []).append({
-            "at": own[0]["start"],
-            "seconds": sum(piece["end"] - piece["start"] for piece in own),
+            "at": slide["at"],
+            "seconds": slide["seconds"],
             "title": slide["title"],
             "points": slide["points"],
             "verses": slide["verses"],
             "scriptures": [
-                {
-                    "at": chapter_slides.at_of(pieces[item["piece"]], item["slug"]),
-                    "scripture": item["slug"],
-                    "label": format_chinese_reference(item["slug"]),
-                }
+                {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
                 for item in slide["scriptures"]
             ],
         })
@@ -1331,12 +1328,9 @@ def _chapter_sections(
         # 有投影片的，片段归哪一段按它所在投影片的经节：（二）1 开头讲登山宝训
         # 结构的三分半是一张投影片，不该因为最后一个片段提到 5:13 就被拆去 5:13-16。
         slides_record = chapter_slides.load_record(data_base_dir, whole_chapter.passage, lecture)
+        timed_slides = None
         if slides_record:
-            slide_verses = {
-                piece_id: slide["verses"]
-                for slide in slides_record["slides"]
-                for piece_id in slide["pieces"]
-            }
+            slide_verses, timed_slides = chapter_slides.placed(record, slides_record)
             record = {
                 **record,
                 "decisions": [
@@ -1347,7 +1341,7 @@ def _chapter_sections(
             }
         lecture_rows = chapter_exposition.lecture_rows(whole_chapter, record)
         slides_by_section = (
-            _chapter_slides(whole_chapter, record, slides_record) if slides_record else None
+            _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else None
         )
 
         # 这一堂的主张：落在哪个保留片段，就讲那个片段的经节。

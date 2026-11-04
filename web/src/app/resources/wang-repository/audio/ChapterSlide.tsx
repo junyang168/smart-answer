@@ -47,7 +47,7 @@ export default function ChapterSlide({ slide, seconds }: { slide: ChapterSlideDa
   const shown = [...read].reverse();
   return (
     <section className="flex min-h-[20rem] flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
-      <header className="border-b border-slate-800 pb-4">
+      <header className={shown.length > 0 ? "border-b border-slate-800 pb-4" : ""}>
         <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-amber-400">
           要點 · 編輯整理
         </p>

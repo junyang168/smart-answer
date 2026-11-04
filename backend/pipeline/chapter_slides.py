@@ -4,9 +4,12 @@
 的呈现，（二）1 开头三分半讲登山宝训的结构，幻灯只剩一条。投影片要像查经 PPT
 那样，由模型读逐字稿写要点；**教授讲到、读到的经文必须显示在投影片上。**
 
-模型只给：每张投影片涵盖哪几个保留片段、标题、要点、讲第五章哪几节、读到了哪
-些经文（在哪个片段）。时间由程序按片段推算；经文全文由页面按出处去取，模型不
-抄经文。
+模型只给：每张投影片从哪一句开始、标题、要点、讲第五章哪几节、读到了哪些经文
+（在哪一句）。时间由程序按字的位置推算；经文全文由页面按出处去取，模型不抄经
+文。
+
+投影片在句子上换，不在片段上换：第一版按约 300 字的片段换，评审发现一个话题的
+尾巴、下一个话题的开头常落在别的投影片上（问题在这一张、答案在下一张）。
 
 用法::
 
@@ -26,25 +29,42 @@ from typing import Any
 from backend.pipeline import chapter_exposition, chapter_material
 from backend.pipeline.chapter_material import Chapter
 
-SCHEMA_VERSION = "chapter_slides_v1"
+SCHEMA_VERSION = "chapter_slides_v2"
 
 DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 
 MOST_POINTS = 4
 FEWEST_POINTS = 2
 
-SYSTEM_PROMPT = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼。
+SYSTEM_PROMPT = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
-使用者給你這一堂課裡解釋馬太福音第五章的逐字稿片段（已編號、按時間排；中間略去的部分不在其中）。請把這些片段分成一張張投影片。
+使用者給你這一堂課裡解釋馬太福音第五章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
 
-規則：
-- 每張投影片涵蓋連續的幾個片段（first 到 last）。全部片段都要被涵蓋，按順序，不重疊、不遺漏。
-- 一張講一個話題；教授換話題就換一張。一張通常 1 到 4 個片段。
-- title：這一張在講什麼，短（不超過 14 字）。
-- points：2 到 4 條要點。短句（每條不超過 24 字），是重點，不是逐字稿的句子。只寫教授講的，不加你自己的解釋或評論。
-- scriptures：教授在這張投影片範圍內讀到或引用的每一處經文，一處都不能少——包括馬太福音第五章本身和別卷書，按出現順序。piece 寫是在哪個片段讀到的；ref 寫書卷全名加章節，如「以賽亞書 61:1-2」「馬太福音 5:3」。他只說了書卷和章、沒說節的，從上下文判斷他指的是哪幾節。同一段經文在同一張裡讀了幾次，只列第一次。經文全文由程序另外顯示，要點裡不必抄經文。
-- verses：這一張解釋第五章的哪幾節，格式「5:3-10」，幾處用逗號分開。講整篇登山寶訓結構的，寫「5:1-12」。
-- 用繁體中文。"""
+分張：
+- 每張投影片從某一句開始（first），到下一張的第一句之前為止。第一張從第一句開始。
+- 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。
+- 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
+
+要點（points，2 到 4 條，每條不超過 28 字）：
+- 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
+- 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
+- 不重複前面投影片已經有的要點。
+- 只寫教授講的，不加你自己的解釋或評論；他說「很好的證據」就不要寫成「證明」。
+- 講見證、故事時，要點要寫出這個故事要說明的道理，以及他給的勸告。
+- 聽眾提問時，第一條寫「問：……」，其餘寫他的回答。
+- 短句，是重點，不是逐字稿的句子。
+
+title：這一張在講什麼，不超過 14 字，不加引號。
+
+scriptures：這一張裡教授（或會眾）讀出來、或幾乎逐字引用的每一處經文，一處都不能少——包括馬太福音第五章本身和別卷書，按出現順序。
+- sentence 寫開始讀它的那一句；ref 寫書卷全名加章節，寫他實際讀的那幾節，如「以賽亞書 61:1-2」。
+- 只提到書卷、章節而沒有讀出經文的不列（例如「如果你去看二十三章」）。
+- 同一段經文在同一張裡讀了幾次，只列第一次。
+- 經文全文由程序顯示，要點裡不必抄經文。
+
+verses：這一張在解釋第五章的哪幾節，格式「5:3-10」，幾處用逗號分開。講整篇登山寶訓結構的，寫「5:1-48」。
+
+用繁體中文。"""
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -55,7 +75,6 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "first": {"type": "string"},
-                    "last": {"type": "string"},
                     "title": {"type": "string"},
                     "points": {"type": "array", "items": {"type": "string"}},
                     "verses": {"type": "string"},
@@ -63,12 +82,12 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "properties": {"piece": {"type": "string"}, "ref": {"type": "string"}},
-                            "required": ["piece", "ref"],
+                            "properties": {"sentence": {"type": "string"}, "ref": {"type": "string"}},
+                            "required": ["sentence", "ref"],
                         },
                     },
                 },
-                "required": ["first", "last", "title", "points", "verses", "scriptures"],
+                "required": ["first", "title", "points", "verses", "scriptures"],
             },
         }
     },
@@ -83,20 +102,62 @@ def kept_pieces(decisions_record: dict[str, Any]) -> list[dict[str, Any]]:
     return [piece for piece in decisions_record["pieces"] if piece["id"] in keep]
 
 
+def sentences(kept: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """保留片段切成句子，编号 S0001 起；每句的时间按它在片段里的字位置推算。"""
+
+    out: list[dict[str, Any]] = []
+    for piece in kept:
+        text = piece["text"]
+        length = max(len(text), 1)
+        span = piece["end"] - piece["start"]
+        for match in chapter_exposition._SENTENCE.finditer(text):
+            if not match.group().strip():
+                continue
+            out.append({
+                "id": f"S{len(out) + 1:04d}",
+                "piece": piece["id"],
+                "start": piece["start"] + span * match.start() / length,
+                "end": piece["start"] + span * match.end() / length,
+                "text": match.group().strip(),
+            })
+    return out
+
+
 def _clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
 
 def user_prompt(lecture: str, decisions_record: dict[str, Any]) -> str:
     position = {piece["id"]: index for index, piece in enumerate(decisions_record["pieces"])}
+    kept = kept_pieces(decisions_record)
+    by_piece: dict[str, list[dict[str, Any]]] = {}
+    for sentence in sentences(kept):
+        by_piece.setdefault(sentence["piece"], []).append(sentence)
     lines: list[str] = []
     previous = None
-    for piece in kept_pieces(decisions_record):
+    for piece in kept:
         if previous is not None and position[piece["id"]] != position[previous["id"]] + 1:
-            lines.append("（……中間略去……）\n")
-        lines.append(f"[{piece['id']}] {_clock(piece['start'])}–{_clock(piece['end'])}\n{piece['text']}\n")
+            lines.append("（……中間略去……）")
+        lines.append(f"〔{_clock(piece['start'])}〕")
+        lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
     return f"課程：{lecture}\n\n" + "\n".join(lines)
+
+
+def _covers(shown: list[dict[str, Any]], wanted: dict[str, Any]) -> bool:
+    return any(
+        item["slug_book"] == wanted["slug_book"]
+        and item["chapter"] == wanted["chapter"]
+        and item["start"] <= wanted["start"] <= item["end"]
+        for item in shown
+    )
+
+
+def _title(text: str) -> str:
+    text = text.strip()
+    while len(text) >= 2 and text[0] in "「『\"“" and text[-1] in "」』\"”":
+        text = text[1:-1].strip()
+    return text
 
 
 def check(
@@ -106,40 +167,47 @@ def check(
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
-    问题让整份作废：漏片段、乱序、要点条数不对、经节读不出来、经文出处读不出来
-    或不在这一张的片段里。
+    问题让整份作废：第一张不从第一句开始、乱序、要点条数不对、经节读不出来、经
+    文出处读不出来或不在这一张的句子里。
 
-    第二项不作废，列给负责人看：程序认经文出处会认错（「路加福音十六章十六節」
-    认出一个 16:1），他报段落结构时说的「五章十三節到七章二十九節」也不是在读
-    经文。
+    第二项不作废，列给负责人看：程序认经文出处会认错（「路加啊，第十章二十四
+    節」认成马太 10:24），他报段落结构时说的「五章十三節到七章二十九節」也不是
+    在读经文。
     """
 
     from backend.api.scripture import parse_reference, reference_slugs, spoken_references
 
-    ids = [piece["id"] for piece in kept]
-    by_id = {piece["id"]: piece for piece in kept}
+    lines = sentences(kept)
+    ids = [s["id"] for s in lines]
     problems: list[str] = []
     unshown: list[str] = []
-    normalised: list[dict[str, Any]] = []
-    cursor = 0
+    starts: list[int] = []
     for slide in slides:
-        title = str(slide.get("title") or "").strip()
-        first, last = slide.get("first"), slide.get("last")
-        if first not in by_id or last not in by_id:
-            problems.append(f"{title}: 片段編號不對（{first}–{last}）")
+        first = slide.get("first")
+        if first not in ids:
+            problems.append(f"{slide.get('title')}: 第一句編號不對（{first}）")
+            starts.append(-1)
             continue
-        a, b = ids.index(first), ids.index(last)
-        if a != cursor:
-            expected = ids[cursor] if cursor < len(ids) else "（已完）"
-            problems.append(f"{title}: 從 {first} 開始，應從 {expected}")
-        if b < a:
-            problems.append(f"{title}: last 在 first 之前")
-            continue
-        cursor = max(cursor, b + 1)
-        own = ids[a:b + 1]
+        starts.append(ids.index(first))
+    if not lines:
+        return (["沒有保留的句子"] if slides else []), [], []
+    if starts and starts[0] != 0:
+        problems.append(f"第一張應從 {ids[0]} 開始")
+    if any(b <= a for a, b in zip(starts, starts[1:])):
+        problems.append("投影片的第一句沒有按次序遞增")
+    if problems:
+        return problems, unshown, []
+
+    normalised: list[dict[str, Any]] = []
+    for index, slide in enumerate(slides):
+        a = starts[index]
+        b = starts[index + 1] if index + 1 < len(starts) else len(lines)
+        own = lines[a:b]
+        own_ids = [s["id"] for s in own]
+        title = _title(str(slide.get("title") or ""))
         points = [str(p).strip() for p in slide.get("points") or [] if str(p).strip()]
         if not title:
-            problems.append(f"{first}: 沒有標題")
+            problems.append(f"{own_ids[0]}: 沒有標題")
         if not FEWEST_POINTS <= len(points) <= MOST_POINTS:
             problems.append(f"{title}: 要點 {len(points)} 條")
         verses = chapter_exposition.parse_verses(str(slide.get("verses") or ""), chapter)
@@ -151,34 +219,24 @@ def check(
             if len(slugs) != 1:
                 problems.append(f"{title}: 經文出處讀不出來（{item.get('ref')}）")
                 continue
-            if item.get("piece") not in own:
-                problems.append(f"{title}: {item.get('ref')} 的片段 {item.get('piece')} 不在這一張")
+            if item.get("sentence") not in own_ids:
+                problems.append(f"{title}: {item.get('ref')} 的句子 {item.get('sentence')} 不在這一張")
                 continue
-            scriptures.append({"piece": item["piece"], "slug": slugs[0]})
+            scriptures.append({"sentence": item["sentence"], "slug": slugs[0]})
         shown = [parse_reference(item["slug"]) for item in scriptures]
-        for piece_id in own:
-            for _, slug in spoken_references(by_id[piece_id]["text"]):
-                if not _covers_parsed(shown, parse_reference(slug)):
-                    unshown.append(f"{title}（{piece_id}）：逐字稿裡有 {slug}")
+        for line in own:
+            for _, slug in spoken_references(line["text"]):
+                if not _covers(shown, parse_reference(slug)):
+                    unshown.append(f"{title}（{line['id']}）：逐字稿裡有 {slug}")
         normalised.append({
-            "pieces": own,
+            "first": own_ids[0],
+            "last": own_ids[-1],
             "title": title,
             "points": points,
             "verses": verses or [],
             "scriptures": scriptures,
         })
-    if cursor != len(ids):
-        problems.append(f"漏了 {len(ids) - cursor} 個片段")
     return problems, unshown, normalised
-
-
-def _covers_parsed(shown: list[dict[str, Any]], wanted: dict[str, Any]) -> bool:
-    return any(
-        item["slug_book"] == wanted["slug_book"]
-        and item["chapter"] == wanted["chapter"]
-        and item["start"] <= wanted["start"] <= item["end"]
-        for item in shown
-    )
 
 
 def record_path(data_base_dir: Path, passage: str, lecture: str) -> Path:
@@ -204,17 +262,34 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
-def at_of(piece: dict[str, Any], slug: str) -> float:
-    """经文在这个片段里第几秒读到：程序认得出出处的，按字的位置推；认不出就从片段开头。"""
+def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[
+    dict[str, list[str]], list[dict[str, Any]]
+]:
+    """片段归哪张投影片的经节、每张投影片从第几秒开始、经文第几秒出现。
 
-    from backend.api.scripture import parse_reference, spoken_references
+    片段按它第一句所在那张投影片的经节归段；投影片跟着它第一句所在的片段归段，
+    这样一张投影片和它开始时播的录音总在同一段里。
+    """
 
-    wanted = parse_reference(slug)
-    length = max(len(piece["text"]), 1)
-    for offset, found in spoken_references(piece["text"]):
-        if _covers_parsed([wanted], parse_reference(found)):
-            return piece["start"] + (piece["end"] - piece["start"]) * offset / length
-    return piece["start"]
+    lines = sentences(kept_pieces(decisions_record))
+    index = {s["id"]: i for i, s in enumerate(lines)}
+    piece_verses: dict[str, list[str]] = {}
+    timed: list[dict[str, Any]] = []
+    for slide in slides_record["slides"]:
+        own = lines[index[slide["first"]]:index[slide["last"]] + 1]
+        for line in own:
+            piece_verses.setdefault(line["piece"], slide["verses"])
+        timed.append({
+            **slide,
+            "piece": own[0]["piece"],
+            "at": own[0]["start"],
+            "seconds": own[-1]["end"] - own[0]["start"],
+            "scriptures": [
+                {**item, "at": lines[index[item["sentence"]]]["start"]}
+                for item in slide["scriptures"]
+            ],
+        })
+    return piece_verses, timed
 
 
 def decide(
