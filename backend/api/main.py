@@ -37,6 +37,7 @@ from .reference_commentary import router as reference_commentary_router
 from .original_audio import router as original_audio_router
 from .source_coverage import router as source_coverage_router
 from .public_wang_articles import router as public_wang_articles_router
+from .public_repository import router as public_repository_router
 from .matthew_exposition_progress import router as matthew_exposition_progress_router
 from .wang_operations import router as wang_operations_router
 from .wang_articles import router as wang_articles_router
@@ -89,6 +90,7 @@ app.include_router(reference_commentary_router)
 app.include_router(original_audio_router)
 app.include_router(source_coverage_router)
 app.include_router(public_wang_articles_router)
+app.include_router(public_repository_router)
 app.include_router(matthew_exposition_progress_router)
 app.include_router(wang_operations_router)
 app.include_router(wang_articles_router)

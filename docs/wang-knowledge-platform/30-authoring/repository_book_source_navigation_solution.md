@@ -47,7 +47,7 @@
 
 ### 3.3 第三层：按章页面
 
-就是太 5 那一页：按经节次序放他在所选来源里讲这一章的原声、同步幻灯，不属本章释经的部分灰色收起。网址改为按书卷和章（如 `/resources/wang-repository/matt/5`），现在的 `/audio/mat-5-1-48` 转到新网址。
+就是太 5 那一页：按经节次序放他在所选来源里讲这一章的原声、同步幻灯，不属本章释经的部分灰色收起。网址是 `/resources/wang-repository/books/mat/5`（`books/` 一层是因为文库下已有 `[unitId]` 这个动态段，同一层不能再放 `[book]`）。原来的 `/audio/mat-5-1-48` 照旧能打开，同一个组件。
 
 一章有几个来源时，页面顶上一排来源标签，默认是读者在第一层选的那个。
 
@@ -76,7 +76,16 @@
 
 第 3 条只改配置的形状；别的来源、别的章的按章页面怎么做（达拉斯讲道不是按章的系列，筆記是文字），各自另开卡。
 
-## 六、负责人的决定（2026-11-04）
+## 六、实现
+
+- **接口** `backend/api/public_repository.py`：`/public/repository/books`（来源清单与书卷）、`/books/{书卷}`（有讲道的章）、`/books/{书卷}/{章}`（各来源的讲道、按章页面）。现读讲道目录和马太福音来源地图。
+- **一篇讲道归哪卷书、哪一章**看目录的 `canonical_scriptures`（它的主要经文），不看 `books`：`books` 是提到过的书卷，哥林多前书按它有 124 篇，按主要经文是 81 篇。
+- **主愛中華錄音事奉**：`sermon_catalog.normalize_sermon_source` 加了 `gtl.org` 一条，讲道目录已重建（重建前的目录备份在会话 scratchpad）。
+- **按章页面**挂在哪个来源下：`chapter_material.Chapter.source`，太 5 是紐約靈命進深會。
+- **原来的入口**（綜合文章／教授原聲 两排 tab）移到 `/resources/wang-repository/library`，新入口右上角「按講論主題」「綜合文章」进去。
+- **章页面**里，有按章页面的来源嵌入原来的原声页组件（`audio/OriginalAudio.tsx`）；其余来源列出讲道或笔记，链到它们自己的页面。
+
+## 七、负责人的决定（2026-11-04）
 
 1. 笔记这个来源叫「教授釋經筆記」。
 2. 章列表只列有讲道的章。
@@ -88,6 +97,6 @@
 
 > **读者**：负责人、Developer
 > **类型**：规范
-> **状态**：当前（负责人 2026-11-04 定了来源名、章列表与其他教会三点；批准后开实现卡）
-> **与代码对齐**：未核对
+> **状态**：当前（负责人 2026-11-04 定了来源名、章列表与其他教会三点，看过视觉设计后同意实现；在本卡 #648 实现）
+> **与代码对齐**：2026-11-04（核对到 #648 分支）：`backend/api/public_repository.py`、`backend/pipeline/sermon_catalog.py`、`backend/pipeline/chapter_material.py`、`web/src/app/resources/wang-repository/page.tsx`、`web/src/app/resources/wang-repository/books/`、`web/src/app/resources/wang-repository/library/page.tsx`、`web/src/app/resources/wang-repository/audio/OriginalAudio.tsx`
 > **权威范围**：王教授圣经讲论文库入口页的导航：先选书卷和来源，再选章，进按章页面；来源清单从哪里来。不管按章页面本身的内容（见 #636），也不管综合文章怎么写。

@@ -23,6 +23,9 @@ class Chapter:
     lectures: tuple[str, ...]
     #: 页面按经节次序分段，用和合本的分段。
     sections: tuple[str, ...] = field(default_factory=tuple)
+    #: 这些讲道属于哪个来源（讲道目录的 `source_organization`）；文库入口按它把
+    #: 按章页面放在这个来源下面。
+    source: str = "紐約靈命進深會"
 
 
 _NYSC_2 = "2011 NYSC 專題：馬太福音釋經（二）"
