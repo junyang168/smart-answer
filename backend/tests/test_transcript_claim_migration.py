@@ -168,12 +168,68 @@ def test_explicit_rejected_recovery_cannot_touch_an_active_controller(case):
     import fcntl
     _,_,root,_,_=case;prepare(case)
     unit=root/'units/000'
-    manifest=migration.immutable(unit/'manifest.json',{'jobs':[],'max_workers':1})
+    request=migration.immutable(unit/'request.json',{'action_id':'original','target_keys':['claims/D'],'source_bindings':{}})
+    manifest=migration.immutable(unit/'manifest.json',{'jobs':[{'request':request,'root':str(unit/'execution')}],'max_workers':1})
     migration.immutable(unit/'prepared.json',{'manifest':manifest})
     (unit/'batch').mkdir()
     with (unit/'batch/controller.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        with pytest.raises(BlockingIOError):migration.resume_rejected_unit(None,root,0)
+        store=SimpleNamespace(get_cvp_group=lambda key:None)
+        with pytest.raises(BlockingIOError):migration.resume_rejected_unit(store,root,0)
+
+
+@pytest.mark.parametrize('defect',[None,'source','membership','outside','missing','unadmitted'])
+def test_resume_follows_only_the_exact_sql_admitted_action_head(case,defect):
+    from backend.pipeline import claim_management as cm
+    _,_,root,_,_=case;m=prepare(case)
+    unit=root/'units/000'
+    original={'action_id':'original','target_keys':['claims/D'],'source_bindings':{'S':m['after']}}
+    child={**original,'action_id':'successor','predecessor_action_id':'original'}
+    execution=unit/'ordinary-recovery-v1'
+    first='CMA-'+cm.sha256_json('original');second='CMA-'+cm.sha256_json('successor')
+    rows={first:{'request':original,'continued_by':second},second:{'request':child,
+        'execution_root':str(execution),'continuation':{'predecessor_action_id':'original'}}}
+    if defect=='source':child['source_bindings']={'other':m['after']}
+    if defect=='membership':child['target_keys']=['claims/C']
+    if defect=='outside':rows[second]['execution_root']=str(root.parent/'another-unit')
+    if defect=='missing':rows.pop(second)
+    if defect=='unadmitted':rows[second]['continuation']={}
+    request=migration.immutable(unit/'request.json',original)
+    manifest=migration.immutable(unit/'manifest.json',{'jobs':[{'request':request,'root':str(unit/'execution')}],'max_workers':1})
+    prepared={'manifest':manifest}
+    store=SimpleNamespace(get_cvp_group=lambda key:deepcopy(rows.get(key)))
+    if defect:
+        with pytest.raises(ValueError):migration.current_unit_prepared(store,root,0,prepared)
+    else:
+        selected=migration.current_unit_prepared(store,root,0,prepared)
+        assert migration.current_unit_prepared(store,root,0,prepared)==selected
+        job=migration.read(selected['manifest']['path'])['jobs'][0]
+        assert migration.read(job['request']['path'])==child and job['root']==str(execution)
+        assert migration.read(manifest['path'])['jobs'][0]['root']==str(unit/'execution')
+
+
+def test_verify_uses_own_proof_and_never_treats_unrun_units_as_complete(case):
+    store,_,root,_,_=case;m=prepare(case);migration.register(store,root)
+    snapshot=migration.cm.source.source_snapshot(migration.cm.source.FileBinding.model_validate(m['after']))
+    for cid in ('C','D'):
+        store.rows['source_fragments','F'+cid]['payload'].update(
+            paragraph_key='S0001',verbatim_excerpt='保留。',source_sha256=snapshot['body_sha256'])
+    store.rows['source_fragments','unrelated-private-quote']=state({
+        'fragment_id':'unrelated-private-quote','source_id':'S','paragraph_key':'S0001',
+        'verbatim_excerpt':'不可作證據。','source_sha256':'old'})
+    store.claim_management_qualification=lambda cid:{'ready':True}
+    store.read_claim_context=lambda keys:deepcopy(store.rows)
+    report=migration.verify(store,root)
+    assert all(v['status']=='current' for v in report['results'].values())
+    assert report['complete'] is False and report['created_claim_ids']==[]
+    # A target's own deleted quote must fail even if some legacy qualification
+    # flag says ready; the neighbour's private quote above did not fail it.
+    store.rows['source_fragments','FC']['payload']['verbatim_excerpt']='不可作證據。'
+    report=migration.verify(store,root)
+    assert report['results']['C']['status']=='pending'
+    assert report['results']['C']['invalid_live_quote_ids']==['FC']
+    store.rows['claims','C']['retired']=True
+    assert migration.verify(store,root)['results']['C']['status']=='retired_or_missing'
 
 
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):

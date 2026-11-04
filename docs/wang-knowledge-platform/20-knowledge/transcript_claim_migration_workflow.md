@@ -38,6 +38,9 @@ ChangeSet 前後雜湊與當前行恢復回執，不重複寫入。
 `run-unit` 在模型呼叫前，將固定分母、共用容量及這組確切 action 登記到現有
 Claim refresh 管理頁；保留其他 campaign。每次返回讀取原 SQL action、呼叫帳、
 資格與未完原因，不把 batch 函式的空返回值當作完成。管理頁只觀察，不負責恢復。
+已有正式 successor 時，沿 SQL `continued_by` 鏈接續，驗證 predecessor、固定來源／組員、
+原執行目錄及無循環；保留原請求，僅將 SQL 已接受的同一 head 編成 batch 輸入。
+這不建立新 action、不補模型額度，也不以新 root 重跑舊工作。
 
 既有 Claim 先經完整自身來源與證據審閱；需修改時由既有 GPT／Opus 有界流程處理。
 負責人不逐條核對；執行者處理材料、程式、普通模型異議及合法接續，只有原文確實不能
@@ -69,7 +72,11 @@ Claim 摘要也不得重新引入只有已刪文字才支持的教導。另有�
 
 `verify --execute` 消費現有當前資格，另外核對實際有效正文中的引用，不建立第二套批准。
 原分母每條都有保留、更新、替代、退役或未完成去向；新建項另列。
-尚未逐項核實退休證明、未用的來源支援記錄、獨立來源覆蓋、CVP／論證連結及讀者消費端時，
+程序沿已登記接續取得原目標及新建項，退休項須通過既有 completed action 的
+Opus retirement verdict 與精確當前回讀；缺失／未證明退休仍是不完整。
+引文核對沿用共同只讀自身證據 footprint，不把鄰居私有片段誤算成本條依據。
+所有組都真實完成後才可得到 `complete=true`，且 `completion_scope` 明示只涵蓋
+Claims 與自身證據。尚未核實未用的來源支援記錄、獨立來源覆蓋、CVP／論證連結及讀者消費端時，
 不得宣稱整個 migration 完成。`cvp_route_migration_complete=false` 明確保留該下游邊界。
 
 CLI 接點：

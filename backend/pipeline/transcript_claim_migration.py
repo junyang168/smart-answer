@@ -297,12 +297,54 @@ def run_unit(store, root, index, *, capacity):
     prepared = prepare_unit(store, root, index)
     if prepared.get('excluded'):
         return {'status': 'paused', 'excluded': prepared['excluded']}
+    prepared=current_unit_prepared(store,root,index,prepared)
     register_progress(root, prepared, capacity)
     batch_root=Path(prepared['manifest']['path']).parent/'batch'
     batch.run(prepared['manifest']['path'], batch_root, model_capacity=capacity)
     from backend.pipeline.claim_refresh_handoff import inspect
     result = inspect(batch_root, store=store, check_completion=True)
     return {'group': m['groups'][index], 'result': result}
+
+
+def current_unit_prepared(store, root, index, prepared):
+    """Follow only SQL's already-admitted continuation; create no new action."""
+    root=Path(root).resolve();m=load(root)
+    check_binding(prepared['manifest'])
+    jobs=read(prepared['manifest']['path'])['jobs']
+    if len(jobs)!=1:raise ValueError('migration unit needs one exact joint action')
+    check_binding(jobs[0]['request'])
+    original=read(jobs[0]['request']['path']);request=original
+    expected=['claims/'+cid for cid in m['groups'][index]]
+    if original['target_keys']!=expected:raise ValueError('migration unit membership changed')
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request['action_id']))
+    seen=set();execution=None
+    while parent:
+        if parent['request']!=request:raise ValueError('saved migration action differs from SQL')
+        rid='CMA-'+cm.sha256_json(request['action_id'])
+        if rid in seen:raise ValueError('migration continuation cycle')
+        seen.add(rid)
+        following=parent.get('continued_by')
+        if not following:break
+        child=store.get_cvp_group(following)
+        if not child:raise ValueError('migration continuation head is missing')
+        next_request=child['request']
+        if (following!='CMA-'+cm.sha256_json(next_request['action_id'])
+                or next_request.get('predecessor_action_id')!=request['action_id']
+                or child.get('continuation',{}).get('predecessor_action_id')!=request['action_id']
+                or next_request['target_keys']!=expected
+                or next_request['source_bindings']!=original['source_bindings']):
+            raise ValueError('migration continuation changed its admitted source/group')
+        execution=Path(child['execution_root']).resolve()
+        unit=root/'units'/f'{index:03d}'
+        if not execution.is_relative_to(unit):raise ValueError('migration continuation escaped its unit')
+        request=next_request;parent=child
+    if execution is None:return prepared
+    directory=root/'units'/f'{index:03d}'/'admitted-action-heads'/cm.sha256_json(request['action_id'])
+    rb=immutable(directory/'request.json',request)
+    mb=immutable(directory/'manifest.json',{'jobs':[{'request':rb,'root':str(execution)}],'max_workers':1})
+    immutable(directory/'origin.json',{'original_manifest':prepared['manifest'],
+        'head_run_id':'CMA-'+cm.sha256_json(request['action_id']),'new_action':False,'new_budget':False})
+    return {**prepared,'manifest':mb}
 
 
 def register_progress(root, prepared, capacity):
@@ -358,8 +400,8 @@ def resume_rejected_unit(store, root, index):
     root=Path(root).resolve();m=load(root)
     unit=root/'units'/f'{index:03d}'
     if (unit/'preflight-repair.json').exists():unit=unit/'source-epoch-preflight-repair'
-    prepared=read(unit/'prepared.json');check_binding(prepared['manifest'])
-    batch_root=unit/'batch';result={}
+    prepared=current_unit_prepared(store,root,index,read(unit/'prepared.json'))
+    batch_root=Path(prepared['manifest']['path']).parent/'batch';result={}
     with ExitStack() as stack:
         controller=stack.enter_context((batch_root/'controller.lock').open('a'))
         fcntl.flock(controller,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -393,17 +435,48 @@ def verify(store, root):
     """Current native qualifications plus exact live quotation checks."""
     root = Path(root).resolve();m = load(root)
     snapshot = cm.source.source_snapshot(cm.source.FileBinding.model_validate(m['after']))
+    document=store.get_record_state('source_documents',m['source_id'])
+    if (not document or document['retired'] or
+            document['payload'].get('source_file_sha256')!=m['after']['file_sha256']):
+        raise ValueError('migration verification source epoch changed')
+    from backend.pipeline import claim_management_batch as batch
+    jobs={}
+    for index in range(len(m['groups'])):
+        unit=root/'units'/f'{index:03d}'
+        if (unit/'preflight-repair.json').exists():unit=unit/'source-epoch-preflight-repair'
+        if not (unit/'prepared.json').exists():continue
+        prepared=read(unit/'prepared.json')
+        if not prepared.get('manifest'):continue
+        prepared=current_unit_prepared(store,root,index,prepared)
+        for job in read(prepared['manifest']['path'])['jobs']:
+            check_binding(job['request'])
+            request=cm.Request.model_validate_json(Path(job['request']['path']).read_text())
+            jobs[request.action_id]=(request,Path(job['root']))
+    native=batch._paragraph_results(store,jobs)
+    created=[key.split('/',1)[1] for key in native['created_keys']]
+    retired=set(native.get('retired_keys',[]))
+    from backend.pipeline.claim_direct_scope import scope
     results = {}
-    for cid in m['claim_ids']:
+    for cid in dict.fromkeys([*m['claim_ids'],*created]):
         state = store.get_record_state('claims', cid)
         if not state or state['retired']:
-            results[cid] = {'status': 'retired_or_missing', 'qualification': store.claim_management_qualification(cid)}
+            results[cid] = {'status': 'reviewed_retirement' if 'claims/'+cid in retired else 'retired_or_missing',
+                            'qualification': store.claim_management_qualification(cid)}
             continue
         qualification = store.claim_management_qualification(cid)
         failures = []
         records = store.read_claim_context([('claims', cid)])
+        # Use the common read-only own-proof footprint. A neighbour's private
+        # fragments are not this Claim's evidence or migration obligation.
+        probe=cm.Request(action_id='migration-quote-check',operation='Update',allowed_operations=['Update'],
+            target_keys=['claims/'+cid],permissions=[],source_bindings={m['source_id']:m['after']},policy=m['policy'],
+            authorization={'path':str(root/'not-an-execution-authority'),'file_sha256':'0'*64})
+        states={cm.source.key(*key):cm.model_state(value) for key,value in records.items()}
+        own=scope(probe,states,include_write_context=False,include_owner_context=False,
+                  include_impact_evidence=False)['record_keys']
         for (col, oid), value in records.items():
-            if col != 'source_fragments' or value['retired'] or value['payload'].get('source_id') != m['source_id']:
+            if (col != 'source_fragments' or cm.source.key(col,oid) not in own
+                    or value['retired'] or value['payload'].get('source_id') != m['source_id']):
                 continue
             fragment = value['payload'];p = snapshot['paragraphs'].get(str(fragment.get('paragraph_key')), {})
             if (not fragment.get('verbatim_excerpt') or fragment['verbatim_excerpt'] not in p.get('text', '')
@@ -412,7 +485,11 @@ def verify(store, root):
         results[cid] = {'status': 'current' if qualification.get('ready') and not failures else 'pending',
                         'qualification': qualification, 'invalid_live_quote_ids': failures}
     value = {'schema_version': VERSION, 'source_id': m['source_id'],
-             'results': results, 'complete': all(r['status']=='current' for r in results.values()),
+             'results': results,'original_claim_ids':m['claim_ids'],'created_claim_ids':created,
+             'native_completion':native,
+             'complete':all(r['status'] in {'current','reviewed_retirement'} for r in results.values())
+                        and len(jobs)==len(m['groups']) and native['all_actions_completed'],
+             'completion_scope':'claims_and_own_evidence_only',
              'cvp_route_migration_complete': False}
     # A report is a dated view, not another qualification authority.
     from backend.api.sc_api.transcript_review import atomic
