@@ -77,9 +77,11 @@ def render(value):
     rows=[]
     for c in value['claims']:
         status='缺少記錄' if c['after_pin'] is None else '已退役（保留歷史）' if c['retired'] else '陳述有變更' if c['statement_changed'] else '陳述相同'
+        saved=c.get('saved_verification')
+        check='無保存的核實結果' if not saved else '保存時核實通過' if saved['status'] in {'current','reviewed_retirement'} else '保存時尚未通過'
         rows.append('<tr><td>'+cell(c['claim_id'])+'</td><td>'+cell(c['before_statement'])+'</td><td>'+
             ('已退役' if c['retired'] else cell(c['after_statement']))+'</td><td>'+status+
-            '<br><small>'+cell(', '.join(c['changed_fields']))+'</small></td></tr>')
+            '<br>'+check+'<br><small>'+cell(', '.join(c['changed_fields']))+'</small></td></tr>')
     extra=[]
     for row in value['dependent_changes']:
         extra.append('<details><summary>'+cell(row['record_key'])+' · '+cell(', '.join(row['changed_fields']))+
