@@ -1,5 +1,23 @@
 # Sunday Presenter acceptance evidence
 
+## #652 Xcode installed; first-launch agreement pending (2026-11-04)
+
+The owner authorized installing Xcode and the iPad simulator. The signed-in Mac
+App Store offered its last compatible Xcode release because the current listing
+requires macOS 26.6. After the normal Download confirmation, installation completed
+and the app's Info.plist identifies version 26.6. It is currently in
+`/Applications/Xcode.app`; macOS remains 26.5.2, and no OS update was initiated.
+The installed bundle occupies about 4.0 GiB of allocated disk blocks; the internal
+volume still showed about 36 GiB free after installation. Relocation to SSD is
+pending first-launch setup; no completed SSD move is claimed.
+
+Opening Xcode showed its Xcode and Apple SDKs Agreement, identifier EA1990 dated
+2026-01-21. Agree has not been pressed; explicit action-time confirmation was
+requested, separately from software-install authorization. No password, account
+agreement or security control was bypassed. Simulator setup, iOS compilation and
+actual app testing remain outstanding. Earlier missing-toolchain observations
+below are historical; they are not a claim that Xcode is still uninstalled.
+
 ## #652 iPad-first pilot source — not an iPad build (2026-11-04)
 
 The owner identified iPad as the primary Remote target. The iPad-only UIKit

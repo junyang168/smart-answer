@@ -76,8 +76,12 @@ Apple references: [local network privacy](https://developer.apple.com/documentat
 
 ## Current evidence and limits
 
-This development Mac has Command Line Tools, no detected Xcode installation,
-and `xcrun --sdk iphoneos --show-sdk-path` fails. The portable check command passes 38 production-scope/TLS/redirect assertions;
+Initial checks found only Command Line Tools; `xcrun --sdk iphoneos
+--show-sdk-path` failed. With owner installation authorization, the Mac App Store
+then installed its last compatible release, Xcode 26.6, in `/Applications`. macOS
+remains 26.5.2. First launch is currently stopped at the Xcode and Apple SDKs
+Agreement (EA1990, 2026-01-21), pending explicit agreement confirmation. It has
+not been accepted automatically. SSD relocation and simulator setup are pending. The portable check command passes 38 production-scope/TLS/redirect assertions;
 all 51 Presenter/Remote regression tests pass. Both Mac Remote architectures
 build with the shared viewer changes. Project/plist resources validate and UIKit
 source parses. No iOS simulator/device build, installable IPA or physical
