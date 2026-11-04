@@ -210,6 +210,12 @@ slide confirmations. A timing hold belonging only to a fully soft-deleted
 paragraph does not block publication; missing or unqualified timing for surviving
 text still does. Original timing records remain unchanged.
 
+The reviewed publication JSON retains deletion marks as part of its immutable
+source snapshot. The public `final_sermon` reader always projects soft deletions
+out, including requests with `remove_tags=false`; public Markdown copy and model
+consumers receive that same clean payload. Full edit markup remains available
+through the authenticated editor/history, not the reader endpoint.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from
