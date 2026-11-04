@@ -296,6 +296,27 @@ def test_question_quote_admission_uses_same_reachability_on_frozen_projection(ca
     else:assert error is None,error
 
 
+def test_comparison_is_readonly_escapes_text_and_does_not_invent_qualification(case):
+    from backend.pipeline.transcript_claim_migration_report import compare
+    store,_,root,_,_=case;m=prepare(case);migration.register(store,root)
+    payload=deepcopy(store.rows['claims','C']['payload']);payload['statement']='<img src=x onerror=bad()>'
+    store.rows['claims','C']=state(payload,2)
+    snapshot=migration.cm.source.source_snapshot(migration.cm.source.FileBinding.model_validate(m['after']))
+    payload=deepcopy(store.rows['source_fragments','FC']['payload'])
+    payload.update(paragraph_key='S0001',verbatim_excerpt='保留。',source_sha256=snapshot['body_sha256'])
+    store.rows['source_fragments','FC']=state(payload,2)
+    store.read_current_records=lambda keys:{key:deepcopy(store.rows[key]) for key in keys if key in store.rows}
+    result=compare(store,root);data=migration.read(result['data']);html=Path(result['comparison']).read_text()
+    assert result['claim_count']==2 and result['statement_changes']==1
+    assert not data['qualification_checked_by_this_report'] and not data['created_inventory_available']
+    assert not data['all_data_migrated'] and data['claims'][0]['saved_verification'] is None
+    assert 'H' not in {c['claim_id'] for c in data['claims']}
+    assert '<img src=x' not in html and '&lt;img src=x' in html
+    assert data['fragment_current_source_match']['source_fragments/FC'] is True
+    assert data['fragment_current_source_match']['source_fragments/FD'] is False
+    assert store.writes==1
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}

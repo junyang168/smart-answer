@@ -88,6 +88,12 @@ Opus retirement verdict 與精確當前回讀；缺失／未證明退休仍是�
 Claims 與自身證據。尚未核實未用的來源支援記錄、獨立來源覆蓋、CVP／論證連結及讀者消費端時，
 不得宣稱整個 migration 完成。`cvp_route_migration_complete=false` 明確保留該下游邊界。
 
+`comparison --execute` 使用固定 before 與共同批量 current reader 產生
+`comparison.json`／`comparison.html`，列出原 Claim 陳述、目前陳述、欄位差異及同源相關資料
+的精確變更。它不呼叫模型、不改 SQL、不判定意思等價，也不產生新資格。
+若尚無正式 verification，表中不假造通過或新建項完整清單；若已有 verification，
+只顯示保存時點的核實結果，不能當成永久當前資格。
+
 CLI 接點：
 
 ```bash
@@ -96,6 +102,7 @@ backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration register
 backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration prepare-unit --root RUN --unit 0 --execute
 backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration run-unit --root RUN --unit 0 --capacity SHARED_CAPACITY --execute
 backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration verify --root RUN --execute
+backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration comparison --root RUN --execute
 ```
 
 正式執行前須完成適當測試與提交。隔離測試通過、已登記來源或已啟動 batch 均不等於

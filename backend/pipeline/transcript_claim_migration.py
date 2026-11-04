@@ -504,7 +504,7 @@ def verify(store, root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare','register','prepare-unit','run-unit','resume-rejected-unit','verify'])
+    parser.add_argument('command', choices=['prepare','register','prepare-unit','run-unit','resume-rejected-unit','verify','comparison'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id');parser.add_argument('--item')
     parser.add_argument('--beta-root', type=Path);parser.add_argument('--instruction-file', type=Path)
@@ -524,6 +524,9 @@ def main():
     elif args.command=='prepare-unit':value=prepare_unit(store,args.root,args.unit)
     elif args.command=='run-unit':value=run_unit(store,args.root,args.unit,capacity=read(args.capacity))
     elif args.command=='resume-rejected-unit':value=resume_rejected_unit(store,args.root,args.unit)
+    elif args.command=='comparison':
+        from backend.pipeline.transcript_claim_migration_report import compare
+        value=compare(store,args.root)
     else:value=verify(store,args.root)
     print(json.dumps(value,ensure_ascii=False,default=str))
 
