@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide, { type OriginalLanguageEvent } from "../ScriptureSlide";
+import ScriptureSlide, { type OriginalLanguageEvent, type SlidePoint } from "../ScriptureSlide";
+import ChapterSlide, { type ChapterSlideData } from "../ChapterSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -28,7 +29,19 @@ import ScriptureSlide, { type OriginalLanguageEvent } from "../ScriptureSlide";
  * 看文章。
  */
 
-type Stretch = { start: number; end: number };
+/** 一段录音。按章的页面里，不属这一章释经的片段也在，标为 `left_out`：听不
+ * 听由读者决定，默认收起（负责人 2026-11-03）。 */
+type Stretch = {
+  start: number;
+  end: number;
+  left_out?: boolean;
+  /** 为什么不算这一章的释经。编辑整理，不是他的话。 */
+  reasons?: string[];
+  /** 每个片段自己的理由与时间。 */
+  parts?: { start: number; end: number; reason: string }[];
+  /** 这一段的逐字稿。 */
+  text?: string;
+};
 /** 教授念到经文的时刻。只在幻灯角上标一行小字，主经文不跟着换。 */
 type Spoken = { at: number; scripture: string; label: string };
 type Provenance = {
@@ -41,6 +54,10 @@ type Judgement = {
   at: number;
   judgement: string;
   seconds: number;
+  /** 这条主张自己的证据步骤：他怎样推到这个判断。 */
+  points?: SlidePoint[];
+  /** 主张类型是应用。 */
+  application?: boolean;
   scripture: string;
   provenance?: Provenance;
 };
@@ -57,7 +74,10 @@ type Sermon = {
   /** 他念到某一节的时刻。念出来的比报出来的准。 */
   readings: { at: number; scripture: string }[];
   original_language_events: OriginalLanguageEvent[];
+  /** 按章页面：模型读逐字稿写的投影片。有它就不用 Claim 拼的幻灯。 */
+  slides?: ChapterSlideData[];
   seconds: number;
+  left_out_seconds?: number;
 };
 
 /** 錄音的來源。
@@ -211,6 +231,13 @@ function citedAt(sermon: Sermon, seconds: number, passage: string) {
   return cited && !inside(cited.scripture, passage) ? cited.label : "";
 }
 
+/** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
+type Section = { passage: string; label: string; sermons: Sermon[] };
+
+/** 这一行此刻要播的几段：收起时只播保留的，展开时连灰色的一起按原来的次序播。 */
+const visible = (sermon: Sermon, showLeftOut: boolean) =>
+  showLeftOut ? sermon.stretches : sermon.stretches.filter((stretch) => !stretch.left_out);
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
@@ -218,13 +245,34 @@ export default function OriginalAudioPage() {
   const passage = String(useParams()?.passage ?? "");
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
-  const [sermons, setSermons] = useState<Sermon[] | null>(null);
+  const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState<string[]>([]);
+  // 不属这一章释经的片段，默认收起；读者要听就打开。
+  const [showLeftOut, setShowLeftOut] = useState(false);
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
   const [paused, setPaused] = useState(false);
   // 幻灯的标题要跟着他讲到哪里换，所以得知道播到第几秒。
   const [at, setAt] = useState(0);
   const media = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
+  // 要跳到的那一刻，等新的播放器载入后再跳。
+  //
+  // 换一行就是换一个播放器元素。`setTimeout(0)` 时新元素常常还没挂上——自动接下
+  // 一段是在 timeupdate 里触发的，React 不急着提交——于是跳转落在旧元素上，新的
+  // 从 0:00 播起：5:13-16 放完，5:17-20 从（二）1 的开头放，而不是 36 分。
+  const pendingSeek = useRef<number | null>(null);
+
+  function applyPendingSeek() {
+    const element = media.current;
+    if (!element || pendingSeek.current === null) return;
+    // 离目标还远就跳，到了才算数。旧元素在卸下之前也可能收到这一跳，所以不能
+    // 跳一次就清掉——要等挂上的那个元素真的播到了那里。
+    if (Math.abs(element.currentTime - pendingSeek.current) > 1) {
+      element.currentTime = pendingSeek.current;
+    } else {
+      pendingSeek.current = null;
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -237,7 +285,10 @@ export default function OriginalAudioPage() {
         const data = await response.json();
         setLabel(data.label ?? "");
         setTitle(data.title ?? "");
-        setSermons(data.sermons ?? []);
+        setMissing(data.missing_lectures ?? []);
+        setSections(
+          data.sections ?? [{ passage: data.passage, label: "", sermons: data.sermons ?? [] }],
+        );
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "讀不到");
       }
@@ -254,11 +305,12 @@ export default function OriginalAudioPage() {
   function playFrom(sermon: Sermon, seconds: number) {
     const index = Math.max(
       0,
-      sermon.stretches.findIndex((stretch) => seconds < stretch.end),
+      visible(sermon, showLeftOut).findIndex((stretch) => seconds < stretch.end),
     );
     setPlaying({ sermon, index });
     setPaused(false);
     setAt(seconds);
+    pendingSeek.current = seconds;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
@@ -269,16 +321,31 @@ export default function OriginalAudioPage() {
   }
 
   function play(sermon: Sermon, index = 0) {
+    const start = visible(sermon, showLeftOut)[index].start;
     setPlaying({ sermon, index });
     setPaused(false);
-    setAt(sermon.stretches[index].start);
+    setAt(start);
+    pendingSeek.current = start;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
-        element.currentTime = sermon.stretches[index].start;
+        element.currentTime = start;
         void element.play();
       }
     }, 0);
+  }
+
+  /** 收起或展开灰色片段。正在播的那一行，按此刻的位置重新对上它在新列表里的第几段。 */
+  function switchLeftOut(show: boolean) {
+    setShowLeftOut(show);
+    if (!playing) return;
+    const now = media.current?.currentTime ?? at;
+    const list = visible(playing.sermon, show);
+    const index = list.findIndex((stretch) => now < stretch.end);
+    if (index < 0) return;
+    setPlaying({ ...playing, index });
+    // 收起时正落在灰色片段里，跳到下一段保留的。
+    if (now < list[index].start && media.current) media.current.currentTime = list[index].start;
   }
 
   /** 真的暫停，不是把播放器關掉。
@@ -287,7 +354,7 @@ export default function OriginalAudioPage() {
    * 按的人以為自己暫停了，回來卻得從頭找。圖示承諾什麼，就要做什麼。
    */
   function toggle(sermon: Sermon) {
-    if (playing?.sermon.source_id !== sermon.source_id) {
+    if (playing?.sermon !== sermon) {
       play(sermon);
       return;
     }
@@ -303,13 +370,29 @@ export default function OriginalAudioPage() {
   function onTimeUpdate() {
     const element = media.current;
     if (!element || !playing) return;
+    if (pendingSeek.current !== null) {
+      applyPendingSeek();
+      return;
+    }
     setAt(element.currentTime);
-    const stretch = playing.sermon.stretches[playing.index];
-    if (element.currentTime < stretch.end) return;
+    const list = visible(playing.sermon, showLeftOut);
+    const stretch = list[playing.index];
+    if (!stretch || element.currentTime < stretch.end) return;
     const next = playing.index + 1;
-    if (next < playing.sermon.stretches.length) {
-      element.currentTime = playing.sermon.stretches[next].start;
+    if (next < list.length) {
+      // 相连的两段不必跳：设一次 currentTime 就会顿一下。
+      if (Math.abs(list[next].start - element.currentTime) > 1) {
+        element.currentTime = list[next].start;
+      }
       setPlaying({ ...playing, index: next });
+      return;
+    }
+    // 这一行放完，接着放下一行。按章的页面是按经节次序排的，接着放就是接着往
+    // 下一节讲，哪怕下一行是另一堂课。
+    const rows = (sections ?? []).flatMap((section) => section.sermons);
+    const following = rows[rows.indexOf(playing.sermon) + 1];
+    if (following?.media_url) {
+      play(following);
     } else {
       element.pause();
     }
@@ -321,7 +404,7 @@ export default function OriginalAudioPage() {
         <p className="mx-auto max-w-4xl px-5 py-16 text-rose-800">{error}</p>
       </main>
     );
-  if (!sermons)
+  if (!sections)
     return (
       <main className="min-h-screen bg-stone-50">
         <p className="mx-auto max-w-4xl px-5 py-16 text-stone-600" role="status">
@@ -329,6 +412,10 @@ export default function OriginalAudioPage() {
         </p>
       </main>
     );
+
+  const hasLeftOut = sections.some((section) =>
+    section.sermons.some((sermon) => sermon.stretches.some((stretch) => stretch.left_out)),
+  );
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -347,18 +434,55 @@ export default function OriginalAudioPage() {
             {title || label}
           </h1>
           <p className="max-w-3xl text-lg leading-8 text-stone-600">
-            他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
-            每一遍的理由都不一樣，所以不合併。
+            {sections.length > 1
+              ? `按經節次序，從 ${label} 一段段聽他講。每一段收他在各堂課裡講這幾節的原聲，放完自動接下一段。`
+              : `他在 ${sections[0]?.sermons.length ?? 0} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。每一遍的理由都不一樣，所以不合併。`}
           </p>
+          {hasLeftOut && (
+            // 不属这一章释经的部分——见证、别处经文、无关的问答——没有删，只是
+            // 默认收起。要听的人打开，它们就回到原来的位置，连续播放也会播。
+            <label className="flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700 shadow-sm">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={showLeftOut}
+                onChange={(event) => switchLeftOut(event.target.checked)}
+                className="h-4 w-4 accent-stone-500"
+              />
+              顯示其餘部分（見證、別處經文、與本章無關的問答，以灰色標出）
+            </label>
+          )}
+          {missing.length > 0 && (
+            <p className="text-sm text-stone-500">
+              尚未整理：{missing.map((lecture) => lecture.split("：").pop()).join("、")}
+            </p>
+          )}
         </header>
 
+        {sections.map((section) => (
+        <section key={section.passage} className="flex flex-col gap-3">
+        {section.label && (
+          <h2 className="font-serif text-xl font-bold text-stone-900">
+            {section.label}
+            <span className="ml-3 font-mono text-sm font-normal text-stone-400">
+              {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+            </span>
+          </h2>
+        )}
+
         <ul className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
-        {sermons.map((sermon) => {
-          const open = playing?.sermon.source_id === sermon.source_id;
+        {section.sermons.map((sermon) => {
+          const open = playing?.sermon === sermon;
           const seconds = open ? at : (sermon.stretches[0]?.start ?? 0);
           const currentJudgement = judgementAt(sermon, seconds);
+          const leftOutHere = open
+            ? sermon.stretches.find(
+                (stretch) => stretch.left_out && stretch.start <= seconds && seconds < stretch.end,
+              )
+            : undefined;
+          const shown = visible(sermon, showLeftOut);
           return (
-            <li key={sermon.source_id}>
+            <li key={`${section.passage}-${sermon.source_id}`}>
               <button
                 type="button"
                 onClick={() => toggle(sermon)}
@@ -371,6 +495,9 @@ export default function OriginalAudioPage() {
                 <span className="flex-1 text-[0.88rem] text-slate-900">{sermon.title}</span>
                 <span className="font-mono text-[0.75rem] text-slate-400">
                   {minutes(sermon.seconds)}
+                  {showLeftOut && (sermon.left_out_seconds ?? 0) >= 30 && (
+                    <span className="ml-2 text-stone-300">+ {minutes(sermon.left_out_seconds ?? 0)}</span>
+                  )}
                 </span>
               </button>
 
@@ -380,10 +507,26 @@ export default function OriginalAudioPage() {
                 <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
                   {/* 只有录音的讲道，屏幕上放教授正在解的经文和他立的判断。有画
                       面的不放——那些本来就有得看。 */}
-                  {sermon.media_kind === "audio" && (
+                  {leftOutHere ? (
+                    // 正在播的是不属这一章释经的片段：不拿上一张幻灯冒充。
+                    <div className="rounded-xl border border-dashed border-stone-300 bg-stone-100 px-5 py-6 text-stone-500">
+                      <p className="text-xs font-bold">不屬本章釋經 · 編輯整理</p>
+                      <p className="mt-2 text-sm leading-6">
+                        {leftOutHere.parts?.find((part) => part.start <= seconds && seconds < part.end)?.reason ??
+                          leftOutHere.reasons?.[0]}
+                      </p>
+                    </div>
+                  ) : sermon.slides && sermon.slides.length > 0 ? (
+                    (() => {
+                      const slide = [...sermon.slides].reverse().find((item) => item.at <= seconds) ?? sermon.slides[0];
+                      return slide ? <ChapterSlide slide={slide} seconds={seconds} /> : null;
+                    })()
+                  ) : sermon.media_kind === "audio" && (
                     <ScriptureSlide
-                      slug={verseAt(sermon, seconds, passage)}
+                      slug={verseAt(sermon, seconds, section.passage)}
                       title={currentJudgement?.judgement ?? ""}
+                      points={currentJudgement?.points ?? []}
+                      application={currentJudgement?.application ?? false}
                       originalLanguage={originalLanguageAt(sermon, seconds)}
                       cited={citedAt(sermon, seconds, passage)}
                     />
@@ -395,6 +538,7 @@ export default function OriginalAudioPage() {
                       controls
                       autoPlay
                       onTimeUpdate={onTimeUpdate}
+                      onLoadedMetadata={applyPendingSeek}
                       onPlay={() => setPaused(false)}
                       onPause={() => setPaused(true)}
                       className="w-full rounded-lg"
@@ -406,25 +550,30 @@ export default function OriginalAudioPage() {
                       controls
                       autoPlay
                       onTimeUpdate={onTimeUpdate}
+                      onLoadedMetadata={applyPendingSeek}
                       onPlay={() => setPaused(false)}
                       onPause={() => setPaused(true)}
                       className="w-full"
                     />
                   )}
-                  {sermon.stretches.length > 1 && (
+                  {shown.length > 1 && (
                     // 一堂課裡他把同一件事講了幾次，中間岔去講別的。斷口看
                     // 得見就夠了，不必打斷聽——放完一段自己跳到下一段。
                     <div className="flex items-center gap-1">
-                      {sermon.stretches.map((stretch, index) => (
+                      {shown.map((stretch, index) => (
                         <button
                           key={stretch.start}
                           type="button"
                           onClick={() => play(sermon, index)}
-                          title={`第 ${index + 1} 段 · ${clock(stretch.start)}`}
+                          title={`第 ${index + 1} 段 · ${clock(stretch.start)}${stretch.left_out ? " · 不屬本章釋經" : ""}`}
                           className={`h-1.5 rounded-full transition ${
                             index === playing?.index
-                              ? "bg-indigo-600"
-                              : "bg-slate-300 hover:bg-slate-400"
+                              ? stretch.left_out
+                                ? "bg-stone-500"
+                                : "bg-indigo-600"
+                              : stretch.left_out
+                                ? "bg-stone-200 hover:bg-stone-300"
+                                : "bg-slate-300 hover:bg-slate-400"
                           }`}
                           style={{ flexGrow: Math.max(1, stretch.end - stretch.start) }}
                         />
@@ -454,32 +603,83 @@ export default function OriginalAudioPage() {
                       判断就是目录。点一条跳到他说那句话的地方，之后照常往下
                       播，不断——播放的连续区间和读者的入口是两件事。 */}
                   <ul className="flex flex-col divide-y divide-slate-200/70 border-t border-slate-200 pt-1">
-                    {sermon.judgements.map((mark) => {
-                      const here = currentJudgement?.at === mark.at;
-                      return (
-                        <li key={mark.at}>
-                          <button
-                            type="button"
-                            onClick={() => playFrom(sermon, mark.at)}
-                            className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-white"
-                          >
-                            <span
-                              className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-400"}`}
+                    {[
+                      ...sermon.judgements.map((mark) => ({ at: mark.at, mark })),
+                      ...(showLeftOut
+                        ? sermon.stretches
+                            .filter((stretch) => stretch.left_out)
+                            .map((stretch) => ({ at: stretch.start, stretch }))
+                        : []),
+                    ]
+                      .sort((a, b) => a.at - b.at)
+                      .map((item) => {
+                        if ("stretch" in item && item.stretch) {
+                          const stretch = item.stretch;
+                          const here = leftOutHere === stretch;
+                          // 灰色片段留在原来的位置：他在这里岔开去讲了别的。
+                          return (
+                            <li key={`grey-${stretch.start}`} className="bg-stone-50/60">
+                              <button
+                                type="button"
+                                onClick={() => playFrom(sermon, stretch.start)}
+                                className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-stone-100"
+                              >
+                                <span className={`font-mono text-[0.7rem] ${here ? "text-stone-600" : "text-stone-300"}`}>
+                                  {clock(stretch.start)}
+                                </span>
+                                <span className={`flex-1 text-[0.8rem] leading-snug ${here ? "text-stone-600" : "text-stone-400"}`}>
+                                  不屬本章釋經：{stretch.reasons?.[0]}
+                                  {(stretch.reasons?.length ?? 0) > 1 && `（另 ${(stretch.reasons?.length ?? 1) - 1} 處）`}
+                                </span>
+                                <span className="font-mono text-[0.7rem] text-stone-300">
+                                  {minutes(stretch.end - stretch.start)}
+                                </span>
+                              </button>
+                              {stretch.text && (
+                                <details className="pb-2 pl-12 pr-2 text-[0.78rem] text-stone-400">
+                                  <summary className="cursor-pointer select-none">各處理由與逐字稿</summary>
+                                  {(stretch.parts?.length ?? 0) > 1 && (
+                                    <ul className="mt-1 flex flex-col gap-0.5">
+                                      {stretch.parts?.map((part) => (
+                                        <li key={part.start}>
+                                          <span className="font-mono">{clock(part.start)}</span> {part.reason}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  <p className="mt-2 whitespace-pre-line leading-relaxed">{stretch.text}</p>
+                                </details>
+                              )}
+                            </li>
+                          );
+                        }
+                        const mark = (item as { mark: Judgement }).mark;
+                        const here = !leftOutHere && currentJudgement?.at === mark.at;
+                        return (
+                          <li key={mark.at}>
+                            <button
+                              type="button"
+                              onClick={() => playFrom(sermon, mark.at)}
+                              className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-white"
                             >
-                              {clock(mark.at)}
-                            </span>
-                            <span
-                              className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-slate-900" : "text-slate-600"}`}
-                            >
-                              {mark.judgement}
-                            </span>
-                            <span className="font-mono text-[0.7rem] text-slate-400">
-                              {minutes(mark.seconds)}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
+                              {/* 没在播的条目用正常的深色：灰色在这一页专指「不屬本章釋經」。 */}
+                              <span
+                                className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-500"}`}
+                              >
+                                {clock(mark.at)}
+                              </span>
+                              <span
+                                className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-indigo-700" : "text-slate-900"}`}
+                              >
+                                {mark.judgement}
+                              </span>
+                              <span className="font-mono text-[0.7rem] text-slate-500">
+                                {minutes(mark.seconds)}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
                   </ul>
                 </div>
               )}
@@ -487,6 +687,8 @@ export default function OriginalAudioPage() {
           );
         })}
         </ul>
+        </section>
+        ))}
       </div>
     </main>
   );
