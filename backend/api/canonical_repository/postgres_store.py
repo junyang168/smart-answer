@@ -8414,19 +8414,28 @@ class PostgresKnowledgeStore:
                 )
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
-                self._assert_edge_integrity(cursor, plan)
+                retirement_package = None
+                pending_edges = None
+                if plan.source_kind == 'wang_claim_management_v2':
+                    if transaction_context is None:
+                        raise ChangeSetConflict('Claim management lacks transaction authority')
+                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
+                    pending_edges = self._assert_no_uncoordinated_semantic_references(
+                        cursor, plan, scoped=True, retirement_package=retirement_package)
+                if pending_edges:
+                    self._assert_edge_integrity(cursor, plan, historical_pending_edges=pending_edges)
+                else:
+                    self._assert_edge_integrity(cursor, plan)
                 self._assert_no_dangling_package_references(
                     cursor, plan, scoped=(transaction_context is not None
                                           or plan.source_kind == 'argument_route_resolution_v2')
                 )
-                retirement_package = None
                 if plan.source_kind == 'wang_claim_sql_retirement_v1':
                     if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
                     retirement_package = sql_group['reviewed']['evidence']['package']['payload']
-                if plan.source_kind == 'wang_claim_management_v2':
-                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
-                self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
-                                                                 retirement_package=retirement_package)
+                if plan.source_kind != 'wang_claim_management_v2':
+                    self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
+                                                                     retirement_package=retirement_package)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -8771,7 +8780,7 @@ class PostgresKnowledgeStore:
                 )
 
     @classmethod
-    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan) -> None:
+    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan, *, historical_pending_edges=None) -> None:
         """Validate every arriving edge against the transaction's final graph.
 
         Model validators are useful early feedback, but the database write is
@@ -8859,6 +8868,13 @@ class PostgresKnowledgeStore:
                         key[0], stored_operation_payload(planned)
                     )
                 if str(from_id) in retiring_ids or str(to_id) in retiring_ids:
+                    # Only the exact existing assertion authenticated by the
+                    # common pending-consumer validator may remain as history.
+                    # No edge payload/state is rewritten, and arriving edges
+                    # still require current endpoints below.
+                    if (planned is None and getattr(plan, 'source_kind', None) == 'wang_claim_management_v2'
+                            and (historical_pending_edges or {}).get(key) == (str(from_id), str(to_id))):
+                        continue
                     surviving_references.append(
                         (key[0], key[1], str(from_id), str(to_id))
                     )
@@ -9033,7 +9049,7 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _assert_no_uncoordinated_semantic_references(
         cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False, retirement_package=None
-    ) -> None:
+    ) -> dict[tuple[str, str], tuple[str, str]] | None:
         """Do not retire extraction identity under current CVR records.
 
         Model-local ordinals are not semantic identity. Re-extraction therefore
@@ -9043,6 +9059,10 @@ class PostgresKnowledgeStore:
         silently leaving them attached to retired content is forbidden. An
         ``update`` preserves the same object id and is therefore deliberately
         not included: references to an identity-preserving update remain valid.
+        Authenticated Claim pending consumers may instead remain exact historical
+        assertions, protected by the durable management obligation and retired
+        Claim eligibility. Return only their checked existing endpoint pairs to
+        the common edge validator; this does not withdraw or approve any link.
         """
 
         if not any(
@@ -9067,6 +9087,7 @@ class PostgresKnowledgeStore:
                 (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
             )
             rows = cursor.fetchall()
+        historical_edges = {}
         if retirement_package is not None and plan.source_kind == 'wang_claim_management_v2':
             from backend.pipeline.cvp_sql_actions import validate_claim_management_package, pending_consumer_validation_payload
             from backend.pipeline.source_reconciliation_runner import body, read
@@ -9084,6 +9105,10 @@ class PostgresKnowledgeStore:
                 if key in pending:
                     if key not in before or before[key]['payload'] != payload:
                         raise ChangeSetConflict('pending historical consumer current payload drift')
+                    if col in EDGE_COLLECTIONS:
+                        start, end, _ = PostgresKnowledgeStore._edge_values(col, payload)
+                        if {start, end} & retired_ids:
+                            historical_edges[col, oid] = (start, end)
                     payload = pending_consumer_validation_payload(col, payload, retired_ids)
                 checked.append((col, oid, payload))
             rows = checked
@@ -9114,6 +9139,7 @@ class PostgresKnowledgeStore:
                 "master data still references the predecessor: "
                 + " | ".join(sorted(blockers)[:20])
             )
+        return historical_edges or None
 
     @staticmethod
     def _assert_obsolete_candidate_retirement(
