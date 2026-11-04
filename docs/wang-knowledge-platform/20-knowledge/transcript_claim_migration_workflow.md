@@ -3,7 +3,7 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
 ## 目錄
@@ -23,7 +23,7 @@
 既有 worker 須先查實際 process、保存答覆及 transaction，不能以停止檔代替中止中的 worker。
 
 ```bash
-backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --root RUN --output PREVIEW --align-sequence
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --root RUN --output PREVIEW --align-sequence --calibrate-context
 ```
 
 輸入沿用已凍結新舊原件、同源片段及目前正式記錄，包括此 run 已提交的新建物件；
@@ -37,6 +37,22 @@ backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --roo
 具體上下文位置、對齊範圍和差異，不以相似比例冒充意思等價。
 另外不重跑對齊的字面核查會檢查上下文唯一性、新引文逐字切片、時間和明確刪除線位置。
 程式 SHA 與核查結果一起保存。省略該選項則沿用第一版，舊輸出不覆寫。
+
+`--calibrate-context` 是第三版補充，只處理第二版未可靠定位的項目，不能單獨省略
+`--align-sequence` 使用。它交叉核對舊引用的音訊時間區間、新段落時間、唯一前後文，以及
+原件內實際出現的書卷／章／節；經文辨識沿用共用 scripture parser，不查標準經文來補寫原話。
+「音訊位置」指已保存時間碼，本階段未重聽、未重新轉錄，也不因時間接近就放行。
+
+舊 `（問：）`／`（答：）` 等前綴可明確另存為 metadata；只有移除這些標記後的文字完全
+對得上時才提出自動搬遷。短句局部搜尋只能在唯一前後文夾出的受限區間內、時間相符且
+只有一個候選時使用；允許一字修正來找位置，但不以此自動批准改動的引文。
+原引用有多個出現位置時保存所有候選，只有每次都指向同一新段落、刪除及講者結果一致時
+才能按段落層級合併。不會任選第一次，也不以寬廣的舊時間區間裁定重複短答。
+
+文字差異大時仍可在前後文和時間一致下定位來源段落，標示引文邊界待 refresh，不提出
+自動替換文字。若舊引文明指唯一經節，在該候選段落中也只出現一次，則以那一節在來源裡
+的實際子句縮小候選。例如同段先後提到五章十五節和十九節時，不能只取最早的相似句。
+所有校準依據、實際來源切片、問答前綴及時間核查結果均隨輸出保存，供機械回查。
 
 分類規則：
 

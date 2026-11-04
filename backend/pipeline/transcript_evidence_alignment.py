@@ -60,13 +60,16 @@ class SourceAlignment:
         for row in rows:
             if row['simple']:self.deleted.update(row['start']+i for i,flag in enumerate(row['deleted']) if flag)
 
-    def candidate(self,fragment):
+    def candidate(self,fragment,*,old_occurrence=None):
         quote=fragment.get('verbatim_excerpt') or '';key=str(fragment.get('paragraph_key'))
         if (not quote or fragment.get('source_modality')=='visual' or
                 fragment.get('source_sha256')!=self.old['body_sha256']):return None
         paragraph=self.old['paragraphs'].get(key,{}).get('text','');hits=positions(paragraph,quote)
-        if len(hits)!=1:return None
-        start=self.starts[key]+hits[0];end=start+len(quote)
+        if old_occurrence is None:
+            if len(hits)!=1:return None
+            old_occurrence=hits[0]
+        elif old_occurrence not in hits:return None
+        start=self.starts[key]+old_occurrence;end=start+len(quote)
         a=bisect_left(self.left_offsets,start);b=bisect_left(self.left_offsets,end)
         if a==b:return None
         matched=[i for i in range(a,b) if i in self.char_map]
@@ -199,8 +202,15 @@ def verify_preview(report,old,new,document):
             counts['unique_anchor_bindings']+=1
         if row['status']=='auto_rebind':
             fields=row['proposed_fields'];paragraph=new['paragraphs'][fields['paragraph_key']]
+            unchanged=literal_layout(fields['verbatim_excerpt'])[0]==literal_layout(row['quote'])[0]
+            projection=row.get('metadata_projection')
+            if projection:
+                from backend.pipeline.transcript_evidence_calibration import content_quote
+                old_body,prefix=content_quote(row['quote']);new_body,_=content_quote(fields['verbatim_excerpt'])
+                unchanged=(projection=={'kind':'speaker_prefix_only','removed_prefix':prefix}
+                    and literal_layout(old_body)[0]==literal_layout(new_body)[0])
             if (not fields['verbatim_excerpt'] or fields['verbatim_excerpt'] not in paragraph['text'] or
-                    literal_layout(fields['verbatim_excerpt'])[0]!=literal_layout(row['quote'])[0] or
+                    not unchanged or
                     fields['source_sha256']!=new['body_sha256'] or row.get('change_flags')):
                 raise ValueError('automatic quote changed lexical content or has unresolved flags')
             if fields['media_time']!=paragraph.get('start_time') or fields['media_end_time']!=paragraph.get('end_time'):
@@ -210,5 +220,12 @@ def verify_preview(report,old,new,document):
             raise ValueError('changed quotation cannot be an automatic write proposal')
         if row['status']=='source_deleted' and row['proposed_fields'].get('anchor_state')!='source_deleted':
             raise ValueError('deleted source must not acquire an active binding')
+        calibration=row.get('calibration')
+        if calibration:
+            from backend.pipeline.transcript_evidence_calibration import audio_position
+            actual=audio_position({'media_time':row.get('old_media_time'),'media_end_time':row.get('old_media_end_time')},
+                row['candidate_segments'])
+            if actual!=calibration['audio_position'] or not actual['consistent']:
+                raise ValueError('calibrated location lacks saved matching audio timecodes')
     return {'literal_checks':counts,'content_equivalence_proven':False,'qualification_granted':False,
             'model_calls':0,'production_writes':0}
