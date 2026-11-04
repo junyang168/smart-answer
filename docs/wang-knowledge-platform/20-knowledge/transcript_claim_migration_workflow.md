@@ -60,6 +60,11 @@ Claim 摘要也不得重新引入只有已刪文字才支持的教導。另有�
 小組按來源順序推進。程序停止後由執行者查保存答覆、實際 worker、SQL checkpoint 與
 原剩餘預算，依既有恢復接點續跑；不清空舊錯誤或盲重送。後組修改共享材料時核對前組資格。
 
+明確的 returned-rejected 答覆可用 `resume-rejected-unit --execute`，先取得原 controller、
+維護、registry、同源及 worker 鎖，驗證確切 action 與固定組員，再交既有
+`resume_rejected_output` 認證原材料、答覆、錯誤和剩餘額度。此步零模型呼叫、零新增預算；
+成功後仍以原 `run-unit` 執行普通修訂與獨立審閱。未知呼叫、人工疑問及預算不足不由此解除。
+
 ## 4. 回讀與下游交接
 
 `verify --execute` 消費現有當前資格，另外核對實際有效正文中的引用，不建立第二套批准。

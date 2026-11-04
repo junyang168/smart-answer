@@ -345,6 +345,50 @@ def register_progress(root, prepared, capacity):
     return entry
 
 
+def resume_rejected_unit(store, root, index):
+    """Explicitly admit a saved rejected answer to native correction; no call."""
+    import fcntl
+    import os
+    from contextlib import ExitStack
+    from backend.pipeline.claim_management_batch import load as load_batch
+    from backend.pipeline.claim_review_recovery import resume_rejected_output
+    from backend.pipeline.source_reconciliation_runner import exclusive
+    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
+    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    root=Path(root).resolve();m=load(root)
+    unit=root/'units'/f'{index:03d}'
+    if (unit/'preflight-repair.json').exists():unit=unit/'source-epoch-preflight-repair'
+    prepared=read(unit/'prepared.json');check_binding(prepared['manifest'])
+    batch_root=unit/'batch';result={}
+    with ExitStack() as stack:
+        controller=stack.enter_context((batch_root/'controller.lock').open('a'))
+        fcntl.flock(controller,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        stack.enter_context(maintenance_lock())
+        stack.enter_context(exclusive_cvp_run_lock({'global_lock_path':str(Path(os.environ['DATA_BASE_DIR'])/
+            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
+        capacity=read(root/'capacity.json')
+        lane=Path(capacity['root'])/'sources'/(cm.sha256_json(m['source_id'])+'.lock')
+        handle=stack.enter_context(lane.open('a'))
+        fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        _,jobs=load_batch(prepared['manifest']['path'],batch_root,store=store)
+        if {key for request,_ in jobs.values() for key in request.target_keys}!={
+                'claims/'+cid for cid in m['groups'][index]}:
+            raise ValueError('rejected recovery changed fixed group membership')
+        for aid,(request,execution) in jobs.items():
+            stack.enter_context(exclusive(execution))
+            parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+            if (not parent or parent['request']!=request.model_dump(mode='json')
+                    or parent['execution_root']!=str(execution) or parent.get('continued_by')):
+                raise ValueError('rejected recovery requires the exact original action head')
+            rejected=parent['result'].get('returned_rejected_call')
+            if not rejected:
+                result[aid]={'status':'unchanged','result':parent['result']}
+                continue
+            rid,role=rejected.rsplit(':',1)
+            result[aid]=resume_rejected_output(store,rid,role=role,error=parent['result']['detail'])
+    return {'model_calls':0,'new_budget':False,'recoveries':result}
+
+
 def verify(store, root):
     """Current native qualifications plus exact live quotation checks."""
     root = Path(root).resolve();m = load(root)
@@ -378,7 +422,7 @@ def verify(store, root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare','register','prepare-unit','run-unit','verify'])
+    parser.add_argument('command', choices=['prepare','register','prepare-unit','run-unit','resume-rejected-unit','verify'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id');parser.add_argument('--item')
     parser.add_argument('--beta-root', type=Path);parser.add_argument('--instruction-file', type=Path)
@@ -397,6 +441,7 @@ def main():
     if args.command=='register':value=register(store,args.root)
     elif args.command=='prepare-unit':value=prepare_unit(store,args.root,args.unit)
     elif args.command=='run-unit':value=run_unit(store,args.root,args.unit,capacity=read(args.capacity))
+    elif args.command=='resume-rejected-unit':value=resume_rejected_unit(store,args.root,args.unit)
     else:value=verify(store,args.root)
     print(json.dumps(value,ensure_ascii=False,default=str))
 

@@ -164,6 +164,18 @@ def test_source_epoch_admission_code_is_bound_in_model_audit_contract(tmp_path):
     assert 'backend/pipeline/claim_source_epoch_reassessment.py' in contract['implementation']
 
 
+def test_explicit_rejected_recovery_cannot_touch_an_active_controller(case):
+    import fcntl
+    _,_,root,_,_=case;prepare(case)
+    unit=root/'units/000'
+    manifest=migration.immutable(unit/'manifest.json',{'jobs':[],'max_workers':1})
+    migration.immutable(unit/'prepared.json',{'manifest':manifest})
+    (unit/'batch').mkdir()
+    with (unit/'batch/controller.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):migration.resume_rejected_unit(None,root,0)
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}
