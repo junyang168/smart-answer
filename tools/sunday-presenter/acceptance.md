@@ -1,5 +1,18 @@
 # Sunday Presenter acceptance evidence
 
+## #643 refined three-step rollout (2026-11-04)
+
+The owner clarified that this Sunday is an observational first step: Presenter
+switches PPT/OUTPUT; both host and speaker laptops stay in Meet, keeping the
+existing service/audio workflow. A separate device observes Remote video without
+issuing live slide commands. Step 2 introduces speaker-operated Remote and the
+existing wireless microphone feeding the host's Meet; only the host joins Meet.
+Step 3 adds YouTube after those paths stabilize. The v4 design and instructions
+supersede the earlier wording that put speaker Remote/wireless mic into the first
+step. This is a rollout plan, not evidence those service steps already passed.
+Recording stays optional/inactive throughout. No runtime logic or installed app
+was changed, and no meeting, microphone test or streaming session was started.
+
 ## #643 owner rollout decision — Meet first, recording optional (2026-11-04)
 
 The owner directed continued Google Meet use while Presenter/Remote stabilizes,

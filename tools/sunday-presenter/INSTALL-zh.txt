@@ -7,8 +7,10 @@ Sunday Presenter 0.6.1 — Google Meet 優先，PPT＋Remote 測試版
 
 1. 開啟 Presenter，打開本週 PPT。首次在 App 內登入 Microsoft。
 2. 在 PowerPoint 啟動投影片放映，確認畫面後按「確認並播放」。
-3. 在 Google Meet 手動加入會議，分享 Sunday Presenter — OUTPUT 視窗，並在 Meet 選擇主電腦的無線麥克風。
-   先維持這條流程，等 app／Remote 穩定後再轉 YouTube。
+3. 本主日：主 laptop 和講員 laptop 都加入 Google Meet，沿用現有崇拜與收音流程；主 laptop 用 Presenter 切換 PPT／OUTPUT。
+   另用一台裝置監看 Remote 畫面，監看端不操作翻頁，講員本週不依賴 Remote。
+4. 第二步才讓講員使用 Remote 和現有無線麥克風，接收器接主 laptop，由主 laptop 的 Meet 收音；只有主 laptop 加入 Meet。
+5. 第三步等前兩步穩定後再接 YouTube。
 
 本機錄影為選用，預設不啟動；只用 Meet 時不必設定錄影位置或授權 Presenter 麥克風。
 Meet 仍需自己的收音權限與裝置選擇。開啟 app、播放 PPT、連上 Remote 都不會自動錄影。

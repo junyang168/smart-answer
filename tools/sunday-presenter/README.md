@@ -2,8 +2,15 @@
 
 Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
 window and a paired local speaker remote. Google Meet is operated manually.
-Phase 2 (#643) first stabilizes PPT video, Remote and the Google Meet workflow.
-In Meet, manually share OUTPUT and select the host's wireless microphone.
+Phase 2 (#643) rolls out in three steps:
+
+1. This Sunday, use Presenter to switch PPT/OUTPUT; both host and speaker laptops
+   remain in Meet with the existing service/audio workflow. A separate device
+   observes the Remote video as a side test without issuing slide commands.
+2. After that is stable, the speaker uses Remote and the existing wireless mic;
+   its receiver feeds Meet on the host. Only the host laptop joins Meet.
+3. Add YouTube after the app and Meet/Remote workflow are stable.
+
 Local recording is optional and starts only on explicit Start Recording; it is
 not required to use PPT, Remote or Meet. Presenter microphone permission and a
 recording destination are unnecessary for that Meet-only workflow. Meet still

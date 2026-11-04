@@ -1,6 +1,6 @@
 # Sunday Presenter Phase 2 設計：先用 Google Meet 穩定 PPT 與 Remote，再接 YouTube
 
-> 狀態：設計草案 v3，依 owner 指示採 Meet 優先，待原型驗證；不是已實作或已驗收的功能。
+> 狀態：設計草案 v4，依 owner 指示分三步上線，待原型驗證；不是已實作或已驗收的功能。
 > 日期：2026-11-04。
 > 追蹤：[主卡 #643](https://github.com/junyang168/smart-answer/issues/643)。
 > 基線：Phase 1 v0.4.0、已合併的 [PR #611](https://github.com/junyang168/smart-answer/pull/611)，程式檢視基線 `2b93ae7007ca4de60d267062a2ff2e8007b6ee5d`。
@@ -11,17 +11,17 @@
 
 主電腦已能保持敬拜、講道兩份 PowerPoint 原檔開啟，切換時保留頁面狀態，並用一個固定 OUTPUT 視窗供現場 TV 和分享使用。現在講員還需要 AirPlay 看畫面、Sunday Remote 翻頁、Google Meet 收音，操作分散；AirPlay 全屏會遮住 Remote。
 
-Owner 於 2026-11-04 確認實作順序：**第一步繼續使用 Google Meet，先把 Presenter／Remote 穩定；YouTube Live 延到 app 穩定後。自動錄影必須可以獨立關閉，預設關閉。**
+Owner 於 2026-11-04 確認以下三步上線順序。**本主日只進第一步，第二步尚未成為現場操作要求。自動錄影必須可以獨立關閉，預設關閉。**
 
-目前使用流程：
+| 上線步驟 | 現場操作 | 驗證目標 |
+| --- | --- | --- |
+| 第一步：本主日維持現有崇拜流程 | 主 laptop 用 Sunday Presenter 切換兩份 PPT／OUTPUT；主 laptop 和講員 laptop 都加入 Google Meet，收音及講員操作沿用現有流程。另用一台裝置監看／測試 Remote 畫面傳輸，監看端不操作現場翻頁 | Presenter 切換、動畫、Meet 對外畫面與完整場穩定；旁路記錄 Remote 畫面延遲、掉線與恢復，不讓其成敗阻擋崇拜 |
+| 第二步：講員正式使用 Remote 與無線麥克風 | 講員用 Remote 看 PPT／翻頁，使用現有無線麥克風；接收器接主 laptop，由主 laptop 的 Meet 選取收音。只有主 laptop 加入 Google Meet | 講員端畫面／按鍵、主電腦 Meet 實際聲畫、無線收音及整場穩定；講員 laptop 不加入 Meet 也能完成流程 |
+| 第三步：接入 YouTube | 前兩步穩定後，才實作／測試固定 stream key 的 YouTube 路徑 | 獨立觀眾端收到真實聲畫，驗證開始／停止與故障恢復後再遷移 |
 
-1. 主電腦載入敬拜與講道兩份 PPT，操作者確認觀眾播放頁面。
-2. 講員開啟 Sunday Remote，連回已配對主電腦，在同一個視窗看目前 PPT 和翻頁；Remote 不收音。
-3. 操作者在 Google Meet 手動加入會議，分享固定的 `Sunday Presenter — OUTPUT` 視窗，並在 Meet 選擇接在主電腦的無線麥克風。
-4. Presenter 本機錄影保持關閉；若需要額外本機副本，才明確選擇錄影裝置、位置並按「開始錄影」。不錄影、未選儲存位置或未授權 Presenter 麥克風，都不能阻擋 PPT／Remote／Meet 使用。
-5. 結束時由操作者停止 Meet 分享／離開會議；若另外開了本機錄影，按「停止並儲存」。關閉本機錄影只影響 Presenter 的錄影分支，不能停掉 Meet、PPT 或 Remote。
+三步都不要求開啟 Presenter 本機錄影。現在只有明確選裝置、位置並按「開始錄影」才錄製；未選位置或未授權 Presenter 麥克風不能阻擋 PPT／Remote／Meet。需要本機副本時另行啟用並依自身結果驗收。第一步不改 Meet 收音，第二步才把無線麥克風接到主電腦 Meet；這不新增 Remote 網路音訊功能。
 
-此階段不啟動 YouTube 或定時推流，也不把完整本機錄影驗收作為 Meet 路徑的前置條件。Meet 的加入、分享、收音與觀眾端實際聲畫仍需獨立驗證；先前本機錄影測試不能當作 Meet 成功的證據。
+第一步監看裝置屬旁路測試，不取代講員原本的操作，也不發出翻頁命令。結束時依現有流程停止 Meet 分享／離開會議；若另開了本機錄影，再停止並儲存。此階段不啟動 YouTube 或定時推流，先前本機錄影測試也不能當作 Meet 或 Remote 整場成功的證據。
 
 後續 YouTube 路徑仍保留固定 stream key／固定觀看入口的設計，待兩台目標 Mac、iPhone 熱點、整場 Meet 與 Remote 穩定性驗收後再實作。以下 YouTube、FFmpeg、廣播 workflow 與排程章節均為後續設計，不是目前安裝版已有功能。
 
@@ -38,7 +38,7 @@ Owner 於 2026-11-04 確認實作順序：**第一步繼續使用 Google Meet，
 | 控制與配對 | 沿用 Bonjour、憑證釘選 TLS、Keychain 與 bearer token | 翻頁不依賴影音通道健康；既有配對不是任意瀏覽器可用的網站登入 |
 | Presenter 媒體執行環境 | 獨立、可信任的本地 Electron renderer／session | 使用現有 Chromium WebRTC，權限不給 Office 頁面 |
 | Remote 媒體執行環境 | 優先保留 Swift AppKit，新增只載入內附程式的 `WKWebView` | 重用系統 WebRTC，保留原生配對與按鍵；實際 OS、可信來源與權限相容性先做原型 |
-| 當前對外會議 | Google Meet 手動分享 OUTPUT，Meet 選擇主電腦無線麥克風 | 不需要啟用 Presenter 錄影或設定 YouTube |
+| 對外會議的兩步遷移 | 第一步主／講員 laptop 都加入 Meet、沿用現有收音；第二步只有主 laptop 加入，改接現有無線麥克風 | 第一步 Remote 僅旁路監看，第二步才供講員正式使用；均不要求本機錄影 |
 | YouTube 出口（延後） | 主電腦本地橋接 → 內附 FFmpeg → 固定 stream key 的 RTMPS | 不使用 YouTube API／Google OAuth；Studio 預先設定 auto-start／auto-stop |
 | 音訊來源 | 只有接在主電腦的指定無線麥克風 | 不擷取 Remote、PPT、內建麥克風或系統音效 |
 | 本地錄影 | 選用、預設關閉，與會議／網路出口分開 | 關閉或失敗不阻擋 Meet、PPT、Remote；未來自動錄影也有獨立關閉選項 |
@@ -48,7 +48,7 @@ Owner 於 2026-11-04 確認實作順序：**第一步繼續使用 Google Meet，
 
 ### 2.1 資料流
 
-當前：OUTPUT → Meet 視窗分享 → 觀眾；主電腦無線麥克風 → Meet 收音。OUTPUT 同時供現場 TV 與 Remote；本機錄影是明確手動開始的選用分支。以下圖示是延後的 YouTube 路徑，REC 分支只在本機錄影已啟用時建立。
+第一步：OUTPUT → Meet 視窗分享 → 觀眾，主／講員 laptop 仍都在 Meet，收音沿用現有流程；Remote 在另一台裝置旁路監看。第二步：OUTPUT 同時供現場 TV、講員 Remote 與 Meet；主電腦無線麥克風 → Meet，只有主 laptop 在 Meet。本機錄影都是明確手動開始的選用分支。以下圖示是延後的 YouTube 路徑，REC 分支只在本機錄影已啟用時建立。
 
 ```mermaid
 flowchart LR
@@ -147,7 +147,7 @@ SDP 中的 DTLS fingerprint 經既有受認證信令傳遞，WebRTC 自己處理
 
 ### 6.1 本地裝置選擇與開始／停止
 
-當前 Meet 階段由操作者在 Meet 選擇收音裝置及控制靜音；Presenter 不需為此開啟麥克風。以下是選用本機錄影與後續 YouTube 的 Presenter 收音契約。
+第一步保持原有 Meet 收音安排；第二步才由主電腦 Meet 選擇現有無線麥克風及控制靜音。Presenter 不需為 Meet 收音而開啟麥克風。以下是選用本機錄影與後續 YouTube 的 Presenter 收音契約。
 
 Owner 已有無線麥克風，接收器接主電腦，作為錄影及 YouTube 唯一音訊輸入。準備時在主電腦明確選擇該裝置；首次 OS 麥克風授權在主電腦完成。以受信任媒體 renderer 的 `getUserMedia`、精確 `deviceId` 和 audio-only constraints 擷取，確認實際 track 裝置，不使用系統預設輸入自動替換。
 
@@ -298,7 +298,8 @@ FFmpeg 的 argv 只帶非秘密的 RTMPS base endpoint；stream key 作為 `rtmp
 | --- | --- | --- |
 | M0：技術 spike | 目標 OS／CPU 記錄、唯一 OUTPUT 真實擷取、WKWebView WebRTC／權限、本地 candidates、可用 codec、連續容器橋接、僅講員聲音的路徑與基本效能均有量測 | 停在設計／adapter 修訂，不先建完整 YouTube 流程 |
 | M1：本地雙機 | 真實兩份 PPT、切換／動畫／雙端翻頁，Remote 只接收畫面，配對撤銷、失聯／重連與熱點互通通過；無音訊協商或權限要求 | 不宣稱可取代 AirPlay 正式使用 |
-| M2：Meet 優先穩定 | 兩台目標 Mac 與 iPhone 熱點下，Meet 分享固定 OUTPUT 並接收主電腦無線麥克風；Remote 翻頁、動畫、全螢幕、斷線恢復與整場獨立觀眾端聲畫通過。本機錄影關閉、未授權 Presenter 麥克風或未選錄影位置時仍可完成流程 | 留在 Meet pilot，先修 Presenter／Remote；不開始 YouTube 實作 |
+| M2a：本主日旁路驗證 | 主／講員 laptop 都在 Meet，沿用既有崇拜與收音；Presenter 切換正常，另一裝置旁路觀察 Remote，完整場記錄掉線／恢復而不操作現場 | 保持現有 Meet 流程，不要求講員依賴 Remote |
+| M2b：講員改用 Remote／無線麥克風 | 兩台目標 Mac 與 iPhone 熱點下，Meet 分享固定 OUTPUT 並接收主電腦無線麥克風；Remote 翻頁、動畫、全螢幕、斷線恢復與整場獨立觀眾端聲畫通過。本機錄影關閉、未授權 Presenter 麥克風或未選錄影位置時仍可完成流程 | 留在 Meet pilot，先修 Presenter／Remote；不開始 YouTube 實作 |
 | M3：選用本機錄影（獨立，不阻擋 M4） | 手動開始／停止／儲存、關閉後資源釋放、指定裝置與故障隔離、完整場長聲畫驗收；錄影錯誤不拖停 Meet／Remote | 僅停用錄影，不阻擋已驗證的 Meet 路徑 |
 | M4：YouTube 與日常流程（延後） | Meet／app 穩定後才實作：FFmpeg 橋接、固定 key 非公開授權測試、同 key 再開播、網站入口、觀眾確認與故障恢復；自動錄影關閉時仍可推流，且不寫檔。排程另測 DST／就緒條件 | 繼續 Meet，不啟用 YouTube／無人按鍵的定時開場；不要求同時遷移 |
 
