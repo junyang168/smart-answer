@@ -13,10 +13,10 @@ if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.
 else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter'));
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
-let controller, output, preparation, stage, officeSession, quitting = false, testOrigin;
+let controller, output, preparation, stage, officeSession, quitting = false, quitReady = false, quitCleanupDone = false, quitTask, testOrigin;
 let website, remoteControl, awakeBlocker, hostVideo;
 let keyQueue = Promise.resolve();
-let folderTimer;
+let folderTimer, choosingRecording = false;
 let filePlan = null;
 let folderMessage = '';
 const folderRuns = new Map();
@@ -32,6 +32,7 @@ function toggleControls() {
 }
 
 function changed(reason) {
+  if (quitCleanupDone) return;
   // Every successful presentation, leaves only slides.
   if (reason === 'present' && controller && !controller.isDestroyed()) {
     controller.hide();
@@ -44,7 +45,7 @@ function changed(reason) {
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  folderMessage }; }
+  folderMessage, recording: hostVideo?.recording.snapshot() }; }
 
 
 function remotePreferences() {
@@ -154,6 +155,22 @@ async function act(action, args = {}) {
       folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
       break;
     }
+    case 'record-devices': await hostVideo.recording.devices(); break;
+    case 'record-start': {
+      if (choosingRecording || hostVideo.recording.run) throw Error('錄影操作尚未完成。');
+      choosingRecording = true;
+      try {
+        if (!hostVideo.ready()) throw Error('請先播放已確認的 PPT，再開始錄影。');
+        const result = await dialog.showSaveDialog(controller, { title: '儲存 PPT＋麥克風錄影',
+          defaultPath: path.join(app.getPath('videos'), `Sunday-${new Date().toISOString().replace(/[:.]/g, '-')}.mp4`),
+          filters: [{ name: 'MP4 影片', extensions: ['mp4'] }] });
+        if (result.canceled || !result.filePath) break;
+        await hostVideo.recording.start({ target: result.filePath, deviceId: args.deviceId });
+      } finally { choosingRecording = false; }
+      break;
+    }
+    case 'record-stop': await hostVideo.recording.stop(); break;
+    case 'record-reveal': hostVideo.recording.reveal(); break;
     case 'remote-forget': await remoteControl.forget(); break;
     case 'remote-start': await remoteControl.start(); break;
     case 'remote-stop': await remoteControl.stop(); break;
@@ -318,7 +335,7 @@ app.whenReady().then(async () => {
   controller.setPosition(panelArea.x + Math.max(0, panelArea.width - 780), panelArea.y + 30);
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
-  hostVideo = new HostVideo({ output, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
+  hostVideo = new HostVideo({ output, changed, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
   output.on('minimize', () => hostVideo.observe());
   output.on('hide', () => hostVideo.observe());
   let remoteIdentity, identityError;
@@ -342,12 +359,12 @@ app.whenReady().then(async () => {
   }
   output.on('resize', () => stage.layout());
   output.on('move', () => preparation.setPosition(...output.getPosition()));
-  output.on('close', event => { if (!quitting) event.preventDefault(); });
+  output.on('close', event => { if (!quitReady) event.preventDefault(); });
   preparation.on('close', event => {
-    if (!quitting) { event.preventDefault(); preparation.hide(); }
+    if (!quitReady) { event.preventDefault(); preparation.hide(); }
   });
   controller.on('close', event => {
-    if (!quitting) { event.preventDefault(); controller.hide(); }
+    if (!quitReady) { event.preventDefault(); controller.hide(); }
   });
   controller.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   controller.webContents.on('will-navigate', event => event.preventDefault());
@@ -355,7 +372,7 @@ app.whenReady().then(async () => {
     if (event.sender !== controller.webContents || event.senderFrame !== controller.webContents.mainFrame ||
         event.senderFrame.url !== controlURL) throw Error('Untrusted caller');
     try { return { state: await act(action, args) }; }
-    catch (error) { return { error: error.message }; }
+    catch (error) { return { error: error?.message || String(error) || '操作未完成。' }; }
   });
   if (smoke) controller.webContents.on('console-message', (_event, ...args) => console.log('controller:', ...args));
   await controller.loadFile(path.join(__dirname, 'control.html'));
@@ -414,12 +431,13 @@ app.on('second-instance', () => {
   }
 });
 app.on('before-quit', event => {
-  if (!quitting && hostVideo) {
+  if (!quitReady && hostVideo) {
     event.preventDefault(); quitting = true;
-    Promise.allSettled([hostVideo.close(), remoteControl?.stop()]).then(() => app.quit());
+    quitTask ||= Promise.allSettled([hostVideo.close(), remoteControl?.stop()]).then(() => { quitReady = true; app.quit(); });
     return;
   }
-  quitting = true;
+  if (quitCleanupDone) return;
+  quitCleanupDone = true; quitting = true;
   globalShortcut.unregisterAll();
   clearInterval(folderTimer);
   if (awakeBlocker !== undefined && powerSaveBlocker.isStarted(awakeBlocker)) powerSaveBlocker.stop(awakeBlocker);

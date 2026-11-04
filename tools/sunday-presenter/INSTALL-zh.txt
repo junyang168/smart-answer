@@ -1,31 +1,26 @@
-Sunday Presenter 0.5.1 — PPT 點對點畫面測試版
+Sunday Presenter 0.6.0 — PPT＋主機麥克風本機錄影測試版
 
-主電腦安裝 Sunday Presenter；講員電腦安裝 Sunday Remote。將 App 拖入 Applications。
-Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 Intel／Apple Silicon。
+將 Sunday Presenter 拖入主電腦 Applications。Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本。
+講員可繼續使用 Sunday Remote 0.5.3；本次只錄影時不必更新 Remote。
 
-1. 開啟 Presenter，按「開啟本週 PPT」，首次在 App 內登入 Microsoft。
-2. App 自動識別敬拜與講道。進入 PowerPoint 投影片放映，確認畫面後按「確認並播放」。
-3. 正式播放時設定窗口自動隱藏。⌘1 敬拜、⌘2 講道；方向鍵翻頁。點 Dock 圖示或 ⌘P 叫回設定。
-4. 按「開啟講員翻頁」。講員開啟 Sunday Remote，首次輸入主電腦的六位數字，以後記住配對並自動重連。
-   兩台 Mac 連同一個 Wi-Fi／手機熱點，首次允許本機網路。Remote 顯示同一個 OUTPUT，上一頁／下一頁與主電腦控制同一份 PPT。
-   Presenter 需允許螢幕錄製以分享 OUTPUT；Remote 不需要麥克風或攝影機。兩端更新到這個測試版本才有畫面。
-5. 手動在 Chrome 加入 Google Meet，分享唯一的「Sunday Presenter — OUTPUT」視窗。
-   主電腦的 Meet 麥克風保持關閉，可用耳機監聽。講員電腦手動開啟 Meet 麥克風，並將揚聲器靜音，避免回音。
-   開始前從另一台裝置確認觀眾能看到並聽到。錄影、關麥與離開 Meet 都由你手動操作。
-6. HDMI 接 TV；Remote 直接看 OUTPUT，不需 AirPlay。切換敬拜／講道時保持同一個分享視窗。
-   回到準備畫面或最小化 OUTPUT 時 Remote 停止顯示；重新確認並播放才恢復。
+1. 開啟 Presenter，打開本週 PPT。首次在 App 內登入 Microsoft。
+2. 在 PowerPoint 啟動投影片放映，確認畫面後按「確認並播放」。
+3. 點 Dock 圖示或 ⌘P 叫回設定，在「PPT＋麥克風錄影」按「選擇／更新麥克風」。
+   首次允許 Sunday Presenter 的麥克風權限。選擇你的無線接收器；不會在裝置中斷時自動換用其他麥克風。
+4. 按「開始錄影並選擇儲存位置」，選擇新的 MP4 檔名，可儲存到 SSD。
+   Presenter 也需要 macOS 螢幕錄影權限。只有已確認的 OUTPUT 視窗和選定麥克風會錄進影片。
+   錄影中顯示收音電平；請先對麥克風說話，確認電平及短片聲音，再錄整場。
+5. 按「停止並儲存」，等到「已儲存」後可在 Finder 顯示並用 QuickTime 播放。
+   正常切換敬拜／講道會持續錄影。回到準備畫面、最小化輸出或麥克風中斷時，自動停止並完成目前片段。
+   磁碟／編碼出錯會顯示失敗並保留 .partial.mp4，不能把它當成已完成的影片。
 
-0.5.1 修正內嵌 PowerPoint 的 Remote 翻頁，以及 Remote 畫面區的方向鍵。
-本測試版只新增 PPT 畫面傳輸，不會自動加入 Meet、開關麥克風、操作錄影或在 10 點自動開始。
-Presenter／Remote 不需要輔助使用或麥克風權限；Chrome 的分享及收音權限請依 Meet 提示設定。
-舊版升級請退出並更新兩台電腦的 App。舊的 Meet／定時設定不再執行。
-後續錄影／YouTube 將使用接在主電腦的無線麥克風和固定 stream key，目前尚未實作；Remote 收音已延後。
-本機已通過單一 Mac 的真實視窗擷取與原生 Remote 接收測試。另一台實體 Mac、實際 PPT、熱點及完整一場時長仍待驗收。
+講員看畫面／翻頁：兩台連同一個 Wi-Fi／iPhone 熱點，允許本機網路；主機開啟講員翻頁，Remote 選主機並輸入六位數。
+Remote 可按「全螢幕」或 ⌃⌘F。方向鍵翻頁，兩份 PPT 切換保留頁面。Remote 不收音、不播聲音。
+Meet 仍由操作者手動加入、分享 OUTPUT 和選擇收音。這版不會啟動 YouTube 或排程。
 
-⌘Q：離開 App。關閉設定窗口只隱藏設定，播放繼續。
-App 運行時防止閒置睡眠，不會解除手動鎖屏。
-切換保留已載入頁面；背景影片、計時動畫可能繼續執行，請預先測試實際檔案。
+⌘Q 會停止收音並等待錄影完成再退出。關閉設定窗口只隱藏設定，PPT／錄影繼續。
+本機已通過短片解碼、影音標記同步、兩分鐘錄製及 AudioPro X5 實際輸入測試；完整一場時長仍待實測。
 
+升級請先退出舊版，再替換 Applications 的 App。原型為 ad-hoc 簽章，未有 Developer ID／公證。
+若升級後舊的螢幕錄影授權不再適用，請在系統設定移除舊 Presenter 項目，再加入 Applications 裡的新 App，重開後再試。
 安裝包不包含帳號、登入資料、簡報或配對身份。每台電腦自行登入 Microsoft。
-這個版本尚未取得 Apple Developer ID 簽章／公證。若 macOS 阻擋開啟，確認來源後到
-「系統設定 → 隱私權與安全性」按「仍要打開」；不要關閉系統安全保護。

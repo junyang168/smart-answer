@@ -31,6 +31,33 @@ async function act(action, args) {
 }
 function render(state) {
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
+  const recording = state.recording || { status: 'idle', devices: [] };
+  const recordingBusy = ['starting', 'recording', 'stopping'].includes(recording.status);
+  const mic = document.querySelector('#record-mic');
+  const previousMic = mic.value;
+  const deviceKey = JSON.stringify(recording.devices);
+  if (mic.dataset.devices !== deviceKey) {
+    mic.replaceChildren();
+    for (const device of recording.devices) { const option = new Option(device.label, device.id); mic.add(option); }
+    if ([...mic.options].some(option => option.value === previousMic)) mic.value = previousMic;
+    mic.dataset.devices = deviceKey;
+  }
+  mic.disabled = recordingBusy;
+  document.querySelector('#record-devices').disabled = recordingBusy;
+  document.querySelector('#record-start').hidden = recordingBusy;
+  document.querySelector('#record-start').disabled = !mic.value || state.active === null;
+  document.querySelector('#record-stop').hidden = !recordingBusy;
+  document.querySelector('#record-stop').disabled = recording.status === 'stopping';
+  document.querySelector('#record-reveal').hidden = !['saved', 'error'].includes(recording.status) || !(recording.path || recording.partialPath);
+  document.querySelector('#record-level').value = Math.min(1, (recording.level || 0) * 5);
+  const duration = recording.startedAt ? Math.floor(((recording.stoppedAt || Date.now()) - recording.startedAt) / 1000) : 0;
+  document.querySelector('#record-status').textContent = recording.status === 'recording' ?
+    `● 錄影中 · ${duration} 秒 · ${recording.microphone} · ${Math.round((recording.bytes || 0) / 1024 / 1024)} MiB · ${recording.path}` :
+    recording.status === 'starting' ? '正在啟動 PPT 畫面和麥克風…' :
+    recording.status === 'stopping' ? '正在停止收音並儲存錄影，請稍候…' :
+    recording.status === 'saved' ? `已儲存：${recording.path}${recording.stopReason ? ' · ' + recording.stopReason : ''}` :
+    recording.status === 'error' ? `${recording.error}${recording.partialPath ? ' · 未完成檔案：' + recording.partialPath : ''}` :
+    '錄下觀眾 PPT 畫面和選定麥克風，儲存為 MP4。';
   const remote = state.remote;
   document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired ? '講員已連線，可以翻頁。' :
     remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
@@ -104,5 +131,7 @@ function render(state) {
 for (const button of document.querySelectorAll('[data-action]')) button.onclick = () => act(button.dataset.action);
 for (const button of document.querySelectorAll('[data-take]')) button.onclick = () => act('take', { deck: button.dataset.take });
 for (const button of document.querySelectorAll('[data-folder]')) button.onclick = () => act('sunday-folder', { deck: button.dataset.folder });
+document.querySelector('#record-start').onclick = () => act('record-start', { deviceId: document.querySelector('#record-mic').value });
+document.querySelector('#record-mic').onchange = () => act('state');
 window.presenter.onState(render);
 act('state');

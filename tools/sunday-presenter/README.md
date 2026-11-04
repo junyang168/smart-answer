@@ -1,4 +1,4 @@
-# Sunday Presenter — Phase 1 (#598)
+# Sunday Presenter — local recording pilot (#643)
 
 Phase 1 provides two persistent PowerPoint web presentations, one audience OUTPUT
 window and a paired local speaker remote. Google Meet is operated manually.
@@ -42,9 +42,38 @@ modes. A still slide no longer triggers reconnect merely because decoded frames
 stop increasing; brief ICE disconnections get five seconds to recover, while
 persistent failure and first-frame timeout still reconnect automatically.
 
-This is the first Phase 2 milestone, not a broadcast release. Wireless microphone
-input, recording, fixed-key YouTube streaming and scheduling remain unimplemented.
-The installed/released 0.4.0 apps and website downloads are unchanged.
+## Local MP4 recording — 0.6.0 (#643)
+
+The controller selects an explicit host microphone and save location, starts
+recording, displays its input meter, and stops/finalizes an MP4. OUTPUT is captured
+once and shared with Remote. The recording branch samples that same track through
+a 1280×720 canvas at 30 fps so an unchanged slide has continuous video timing.
+MediaRecorder uses H.264/AAC, 500 ms keyframes/timeslices, incremental bounded IPC
+and file writes. It never captures PPT/system audio or routes microphone audio
+to the speakers. Remote still receives video only and needs no microphone access.
+
+Choose **選擇／更新麥克風**, select the wireless receiver, then start and choose
+an MP4 path (including an SSD). Refreshing devices requests OS permission but
+opens no microphone track. Start uses exact deviceId, without fallback to another
+input. Source/preparation/minimize loss or microphone disconnection automatically
+stops and finalizes the current clip. Encoding/storage failure retains a named
+partial file, reports failure, and never overwrites a completed recording.
+Queues are limited to two seconds or 16 MiB; missing encoder output also stops
+recording. Quit waits for finalization and releases microphone/capture resources.
+
+`npm run smoke:recording` records actual OUTPUT plus generated reference audio,
+checks that MP4 packets are readable before stop, independently decodes both
+tracks with ffprobe/ffmpeg, and compares a PPT color change with a tone change.
+It also checks Remote/recording capture ownership, source privacy stop and mic
+loss. Add `-- --recording-long-smoke` for an additional untouched 120 seconds.
+`electron . --smoke --focus-smoke --recording-hardware-smoke` explicitly selects
+the actual AudioPro X5 input, records ten seconds and inspects decoded AAC.
+These verification tools are not required by the packaged recording feature.
+
+This remains a local pilot. Fixed-key YouTube streaming, scheduling, standalone
+microphone test/mute and full-service endurance acceptance remain unimplemented
+or pending. Website downloads remain the previously released 0.4.0. Remote 0.5.3
+is compatible with this host; only Presenter needs updating for local recording.
 
 Run the pilot from this worktree with `npm ci` and `npm start` in this directory;
 quit the installed Presenter first. Build the Remote with `node build-native.cjs`,

@@ -1,5 +1,84 @@
 # Sunday Presenter acceptance evidence
 
+## #643 local PPT + host microphone recording — 0.6.0 (2026-11-03)
+
+Authorized next milestone: a local video file before YouTube/Meet streaming.
+The controller enumerates/selects a precise microphone, chooses an MP4 path,
+starts/stops recording, shows input level/progress, and reveals the result.
+No network publication or Remote audio was started. Device enumeration requests
+OS consent but opens no track. Start verifies the actual exact deviceId, with
+no fallback. OUTPUT capture is shared with Remote; the recording branch draws
+the same track through a 1280×720, 30 fps canvas and combines it with one microphone
+track. Audio is never routed to speakers by the recorder.
+
+Two actual counterexamples changed the implementation. Sparse ScreenCaptureKit
+frames caused the initial video track to end about a second before audio; canvas
+sampling fixes the still-frame timeline. A timeslice alone did not flush MP4
+before stop; matching 500 ms keyframe interval/timeslice now produces incrementally
+readable audio/video packets. That bridge was independently read with ffprobe
+before stopping the encoder. There is no production FFmpeg dependency or silent
+codec fallback. H.264/AAC support is checked before capture.
+
+File data is streamed with strictly ordered, trusted-main-frame IPC. Renderer and
+writer queues reject more than 16 MiB; the two-second backlog and five-second
+encoder-output checks stop a failed branch. Finalization waits for encoder stop,
+queued writes and fsync, then reserves a new output name and renames its partial
+file. Existing files are never overwritten. Storage/encoding/renderer failure
+reports an error and retains a partial file. Source/preparation/minimize loss and
+microphone-ended stop and finalize the existing clip. Restart is explicit.
+Startup cancellation and reentrant source-loss cleanup cannot open a late mic.
+Quit finalizes first and guards repeated cleanup; an old installed build exposed
+a repeated-quit destroyed-window error, fixed in this pilot.
+
+Validation:
+
+- 43 tests pass, including shared capture ownership/cancellation, write ordering/size, ENOSPC preservation, name
+  collisions, startup cancellation, reentrant source loss, late/untrusted IPC,
+  concurrent recording intent and preserved permission-error messages.
+- Full capture/recording smoke passes with actual OUTPUT and generated reference
+  audio. In the final two-minute run, independently decoded video is 126.059533 s
+  and audio 126.036771 s (about 23 ms duration difference). A PPT color switch and
+  tone-frequency switch occur at 2.50 s / 2.45 s (about 50 ms; visual sampling is
+  250 ms, so this is a bounded marker check, not a precision latency measurement).
+- Both H.264 and AAC decode without ffmpeg errors. The smoke checks pre-stop MP4
+  packets, same capture track during a Remote offer, Remote teardown preserving
+  recording, source privacy auto-finalization, microphone-ended finalization,
+  repeated recording and released tracks. Raw evidence: ignored
+  `output/smoke/recording-result.json`; recordings under
+  `output/smoke/recording-1793762196212/`.
+- Actual AudioPro X5 USB input was explicitly selected in the development runtime
+  and recorded for ten seconds, using 48 kHz/two channels. AAC/H.264 independently
+  decode; measured nonzero RMS is about 0.000538, a very quiet input. This proves
+  hardware capture, not intelligible human speech or the transmitter's battery
+  health. Evidence: ignored `output/smoke/hardware-recording-result.json`.
+- QuickTime opened a final short MP4, played to its end and showed the changed
+  PPT/animation state. Existing full native Remote video/fullscreen/button/arrow,
+  20-switch/privacy/reconnect smoke passes after the shared-capture refactor.
+- Both native architectures build; final DMG/ZIP/signature and installed-source
+  checks are recorded with `dist/local-recording-0.6.0-manifest.json`.
+  DMG SHA256: `4043b2c1955119058282671a27a99e68423cc85bdafd03fd9c9ff359d7720285`. Remote 0.5.3 remains
+  compatible, so the owner only needs the new Presenter for recording.
+
+Installed-app verification is separately bounded. The final 0.6.0 controller and
+wireless microphone selection were exercised through normal UI, and the retained
+Microsoft session opened the owner's real PowerPoint slideshow without edits.
+An initial recording failed because TCC rejected the old ad-hoc ScreenCapture code
+requirement; this is not a passing recording. The stale Presenter-only screen
+entry was removed/re-added through System Settings for the final canonical
+`/Applications/Sunday Presenter.app`. Microphone consent had the same stale-signature
+failure; only this app's Microphone status was reset and a new prompt requested.
+The computer-use tool is prohibited from operating UserNotificationCenter, so
+owner consent is pending for the final installed real-PPT/microphone recording.
+The final controller is left open at the microphone consent request, with no
+recording running. Old app bundles are preserved under the owner's local state directory. No TCC
+database editing or system protection disable occurred.
+
+Remaining: final installed-app mic consent/recording check, spoken microphone
+acceptance, whole-service duration, target MacBook/hotspot performance, and
+YouTube/scheduling/standalone test-mic/mute features. A local two-minute file does
+not establish 90-minute drift/resource behavior or broadcast readiness.
+
+
 ## #643 Remote viewing stability and compact controls — 0.5.3 (2026-11-03)
 
 After updating to 0.5.2, the owner confirmed Pro/Air pairing over iPhone Personal

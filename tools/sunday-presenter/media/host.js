@@ -1,3 +1,32 @@
+// One exact OUTPUT capture track shared by the local recording and Remote.
+const captureOwners = new Set();
+let capturedOutput, capturingOutput;
+window.outputCapture = {
+  async acquire(owner) {
+    captureOwners.add(owner);
+    if (!capturedOutput) {
+      capturingOutput ||= navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, audio: false })
+        .then(stream => {
+          capturedOutput = stream;
+          stream.getVideoTracks()[0].addEventListener('ended', () => {
+            capturedOutput = null; captureOwners.clear();
+            window.dispatchEvent(new Event('output-capture-ended'));
+          });
+          if (!captureOwners.size) { stream.getTracks().forEach(track => track.stop()); capturedOutput = null; }
+          return stream;
+        }).finally(() => { capturingOutput = null; });
+      await capturingOutput;
+    }
+    if (!captureOwners.has(owner) || !capturedOutput) throw Error('PPT 畫面擷取已取消。');
+    return capturedOutput;
+  },
+  release(owner) {
+    captureOwners.delete(owner);
+    if (!captureOwners.size && capturedOutput) {
+      capturedOutput.getTracks().forEach(track => track.stop()); capturedOutput = null;
+    }
+  }
+};
 let current;
 async function gathered(pc) {
   if (pc.iceGatheringState === 'complete') return;
@@ -10,17 +39,18 @@ async function gathered(pc) {
 function stop(id) {
   if (!current || (id && current.id !== id)) return;
   const item = current; current = null;
-  item.stream?.getTracks().forEach(track => track.stop()); item.pc.close();
+  window.outputCapture.release('remote'); item.pc.close();
 }
 window.videoBridge.onStop(stop);
+window.addEventListener('output-capture-ended', () => stop());
 window.videoHost = {
   stop,
   async offer(id) {
     stop();
     const item = { id, pc: new RTCPeerConnection({ iceServers: [] }) }; current = item;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }, audio: false });
-      if (current !== item) { stream.getTracks().forEach(track => track.stop()); throw Error('Cancelled'); }
+      const stream = await window.outputCapture.acquire('remote');
+      if (current !== item) { throw Error('Cancelled'); }
       item.stream = stream;
       const track = stream.getVideoTracks()[0];
       track.addEventListener('ended', () => stop(id));

@@ -50,3 +50,7 @@ p { margin: 8px 0; }
 header { position: relative; }
 header h1 { font-size: 20px; }
 #hide-panel { padding: 6px 9px; font-size: 12px; margin-right: 6px; }
+
+#record-mic { max-width: 100%; min-width: 150px; padding: 8px; border-radius: 6px; background: #172231; color: #e9edf5; border: 1px solid #435269; }
+#record-status { overflow-wrap: anywhere; }
+#record-level { width: 160px; margin-left: 8px; }

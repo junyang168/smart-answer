@@ -174,6 +174,12 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await act('key', { key: 'Right' });
     await until(async () => await wc(sermon).executeJavaScript('steps') === 12, 'operator still controls the same page');
     await remoteControl.stop();
+    if (process.argv.includes('--recording-hardware-smoke')) {
+      await require('./hardware-recording-smoke.cjs').run({ hostVideo, act, evidence });
+    }
+    if (process.argv.includes('--recording-smoke')) {
+      await require('./recording-smoke.cjs').run({ hostVideo, stage, act, output, worship, sermon, evidence });
+    }
     if (process.argv.includes('--video-smoke')) {
       await require('./video-smoke.cjs').run({ hostVideo, stage, act, output, worship, sermon, evidence });
     }

@@ -4,7 +4,7 @@
 > 日期：2026-11-03。
 > 追蹤：[主卡 #643](https://github.com/junyang168/smart-answer/issues/643)。
 > 基線：Phase 1 v0.4.0、已合併的 [PR #611](https://github.com/junyang168/smart-answer/pull/611)，程式檢視基線 `2b93ae7007ca4de60d267062a2ff2e8007b6ee5d`。
-> 當前進度：0.5.1 本地 PPT video／內嵌翻頁原型已實作，單機 Electron → 原生 Remote 測試通過；其他 Phase 2 能力仍待實作。未啟用麥克風或 YouTube，未部署／發布網站下載。
+> 當前進度：0.6.0 本機 PPT＋指定主機麥克風 MP4 錄影原型已實作；Remote 畫面、翻頁、主機切換與全螢幕亦已有原型及本地測試。YouTube／排程尚未實作；未部署／發布網站下載。完整主日與各實體機仍待驗收。
 > 原型證據與未測範圍見 [acceptance](../tools/sunday-presenter/acceptance.md)。
 
 ## 1. 要解決的問題與使用方式
@@ -173,6 +173,14 @@ Remote 不播放音訊。主電腦監聽僅接操作者選定的耳機，不自�
 - 保留容器自己的時間資訊；不用 chunk 到達時間、固定假設幀率或日期時間重建媒體 timestamps。
 
 兩個 recorder 加上 WebRTC 可能增加編碼、IPC 與記憶體成本。這是 M0／M2 的效能門檻，不承諾零複製或一次編碼；若不足，先比較可重用的 native／既有 muxer 橋接，再修訂設計，不在正式使用時無聲降級成截圖輪詢。
+
+**0.6.0 本機子里程碑的實作調整：** 先不加入 FFmpeg 轉碼／推流依賴，使用 pinned Electron 已實測的 H.264／AAC fragmented MP4，直接增量寫入暫存檔，MediaRecorder 正常 stop、寫入完成及 fsync 後才更名為最終檔案。以 ffprobe／ffmpeg 對測試檔獨立解碼及 QuickTime 實播；程式本身不把每段檔案送完整離線解碼，這與將來正式交付前的完整驗證門檻分開記錄。
+
+MP4 分段只能在關鍵幀輸出時 flush；實測只設 timeslice 不足以保證早期輸出。錄影分支因此同時設定 500 ms keyframe interval 和 timeslice，已驗證 stop 前增量檔案有可讀取的 audio／video packets，並設無輸出逾時。這是本機錄影橋接驗證，不代表已實作 RTMPS 推流。[Chromium MP4 分段依據](https://chromium.googlesource.com/chromium/src/+/357dfa363d81c1f5f77a77f4f04d56de3a70eec1%5E%21/)
+
+ScreenCaptureKit 可能省略不變的 PPT 幀；直接把稀疏軌道交給 MP4 muxer 會讓畫面尾端時長短於音訊。0.6.0 保留一次 OUTPUT 擷取，Remote 使用原 track，錄影從同一 track 經 canvas 以 30 fps 取樣，維持靜止頁面的時間軸；沒有換成桌面擷取，也不以 chunk 到達時間重建 timestamps。這增加一條畫面重採樣分支，必須量測其效能；目前只有本地兩分鐘測試，不能推論整場或所有 Mac 的資源表現。
+
+本機 UI 暫時採「開始錄影／停止並儲存」，尚無完整崇拜 workflow、獨立試麥／靜音／恢復或排程。裝置列舉不打開錄音軌；只有明確開始才擷取選定 deviceId，裝置中斷則停止並完成目前片段，重新錄製需操作者再按開始。來源失效／進入準備也完成目前片段。磁碟或編碼失敗保留 partial 並明示失敗，不宣稱檔案已完成。
 
 ### 7.2 格式與有界資源
 
