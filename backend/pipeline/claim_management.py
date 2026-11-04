@@ -1266,12 +1266,45 @@ def partition_targets(request, before):
         payload = before.get(permission.key, {}).get("payload", {})
         if permission.collection == "evidence_steps":
             join(source.key("claims", cid) for cid in payload.get("produced_claim_ids", []))
+        elif permission.collection == 'questions':
+            join(source.key('claims', cid) for cid in payload.get('answer_claim_ids', []))
         elif permission.collection in {"claim_relations", "claim_relation_constraints", "knowledge_relations"}:
             join(source.key("claims", payload[k]) for k in ("from_id", "to_id", "source_id", "target_id", "from_claim_id", "to_claim_id") if payload.get(k))
+    payloads = {k: v['payload'] for k, v in before.items()}
+    support_collections = CLAIM_COLLECTIONS - {'claims', 'claim_relations', 'claim_relation_constraints'}
+    shared_writes = {p.key: set() for p in request.permissions if p.collection in support_collections}
+    if shared_writes:
+        # Follow a target's own inputs, not other Claims or consumers of a
+        # shared premise. Only writable support can coordinate transactions.
+        owned, incoming = {}, {}
+        active = lambda key: request.operation == 'Restore' or not before[key].get('retired', False)
+        for key, payload in payloads.items():
+            if not active(key):
+                continue
+            if key.startswith('evidence_steps/'):
+                for cid in payload.get('produced_claim_ids', []):
+                    owned.setdefault(source.key('claims', cid), set()).add(key)
+            elif key.startswith('knowledge_relations/') and payload.get('to_id'):
+                incoming.setdefault(payload['to_id'], set()).add(key)
+        for target in targets:
+            pending, seen = [target, *owned.get(target, ())], set()
+            while pending:
+                key = pending.pop()
+                if key in seen or key not in before or not active(key):
+                    continue
+                seen.add(key)
+                if key in shared_writes:
+                    shared_writes[key].add(target)
+                collection, oid = source.split_key(key)
+                pending.extend(dep for dep in domain_dependencies(collection, payloads[key], payloads)
+                               if source.split_key(dep)[0] in support_collections)
+                if collection != 'claims':
+                    pending.extend(incoming.get(oid, ()))
+        for owners in shared_writes.values():
+            join(owners)
     # New shared Evidence/fragment/relationship writes can coordinate owners
     # which were disjoint in the old graph. The original source-scoped create
     # grants already authorize that scope; group these targets before calling.
-    payloads = {k: v['payload'] for k, v in before.items()}
     for grant in request.creation_permissions:
         join(k for k in targets if grant.source_id in own_source_ids(payloads[k], payloads))
     groups = {}
