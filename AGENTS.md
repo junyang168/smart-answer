@@ -210,6 +210,7 @@ create an approved ticket, not permission to create one automatically.
 ```bash
 scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md
 scripts/ticket.sh --ops --title "OPS-13 — ..." --body-file card.md
+scripts/ticket.sh --epic E12 --title "SSA — ..." --body-file card.md
 ```
 
 Use the script rather than `gh issue create`. A card is three things — a repo
@@ -219,7 +220,11 @@ its epic — and `gh issue create` writes only the first. Five existing cards
 one; the board is where this work is read, so a card that is missing from it
 does not exist to the person tracking it.
 
-Epics are E01–E10, issues #3–#12. `--ops` is shorthand for E10 plus the
+Epics E01–E10 are issues #3–#12; E11 is Reference Commentary Sources (#378),
+and E12 is Sunday Service Agent (#658). Sunday preparation, PPT, Presenter,
+Remote/iPad, recording and service streaming cards belong to E12; shared
+platform operations remain in E10. Use `--epic E12` for new Sunday cards.
+`--ops` is shorthand for E10 plus the
 `infrastructure` label — a different kind of card, not a card kept off the
 board. Operations tickets used to be repo-only, and the twelve of them were
 invisible in the one place this work is read: what OPS covered could not be

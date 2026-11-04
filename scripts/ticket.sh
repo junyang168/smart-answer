@@ -9,6 +9,7 @@
 #
 #   scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md
 #   scripts/ticket.sh --ops --title "OPS-13 — ..." --body-file card.md
+#   scripts/ticket.sh --epic E12 --title "SSA — ..." --body-file card.md
 #   scripts/ticket.sh --epic E02 --title ... --body-file ... --dry-run
 #
 # `--ops` is shorthand for "E10 plus the infrastructure label", not an escape
@@ -43,6 +44,7 @@ epic_issue() {
     E09) echo 11 ;;  # Public Repository & Reader Experience
     E10) echo 12 ;;  # Platform Operations, Integrity & Delivery Control
     E11) echo 378 ;; # Reference Commentary Sources
+    E12) echo 658 ;; # Sunday Service Agent
     *)   return 1 ;;
   esac
 }
@@ -71,8 +73,8 @@ if (( OPS )); then
   [[ -z "$EPIC" ]] || fail "--ops already means --epic E10; pass one or the other"
   EPIC="E10"
 fi
-[[ -n "$EPIC" ]] || fail "--epic is required (E01..E11), or pass --ops for an operations ticket"
-EPIC_ISSUE="$(epic_issue "$EPIC")" || fail "unknown epic: $EPIC (expected E01..E11)"
+[[ -n "$EPIC" ]] || fail "--epic is required (E01..E12), or pass --ops for an operations ticket"
+EPIC_ISSUE="$(epic_issue "$EPIC")" || fail "unknown epic: $EPIC (expected E01..E12)"
 
 if (( DRY )); then
   printf 'would create: %s\n' "$TITLE"
