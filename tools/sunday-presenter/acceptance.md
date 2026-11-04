@@ -1,5 +1,44 @@
 # Sunday Presenter acceptance evidence
 
+## #643 embedded slide-control fix — 0.5.1 (2026-11-03)
+
+The owner reported working video but no Remote slide response in a real Office
+slideshow. Direct host keyboard input advanced its animation. A new opaque
+iframe fixture reproduced the failure: WebContents/frame focus reported success,
+but Electron `sendInputEvent` delivered no keys to the child document.
+
+The host now restores the confirmed playback frame and uses a temporary,
+in-process Chromium input session for embedded frames. It checks the current
+Stage binding again before delivery, sends one key-down/up pair, then detaches;
+no global OS keystrokes or debugging network listener is added. Top-level
+presentations retain the ordinary input path. API references:
+[Electron keyboard input](https://www.electronjs.org/docs/latest/api/web-contents),
+[Electron in-process debugger](https://www.electronjs.org/docs/latest/api/debugger).
+Remote's arrow filter now excludes only the visible pairing editor, and command
+errors remain visible for eight seconds instead of being overwritten by polling.
+
+Validation: the embedded-frame counterexample and retained presentation smoke
+pass. The native Remote video smoke now exercises the actual NSButton action and
+a queued arrow event with WKWebView focused; each advances exactly once. Local
+720p receive, 20 deck switches, source stop/recovery and reconnect also pass.
+The 26 existing protocol/presentation tests pass. Reproduce with `npm run smoke`
+or `npm run smoke:video`; the isolated smoke shortcut avoids the installed app's
+Command-P binding. No microphone, recording or YouTube feature was added.
+
+The local 0.5.1 DMG/ZIP, installed host/Remote signatures, ZIP integrity and
+packaged/installed source comparisons pass. The two /Applications apps were
+updated with originals preserved in the private `ops-643` local-state backup.
+The existing Microsoft session and host pairing identity were retained, and the
+owner's current PPT was reopened at slide 6 without editing its contents.
+
+Actual Office Remote-key acceptance is still pending: normal Remote startup is
+waiting in macOS Keychain `SecItemCopyMatching` for the existing saved pair.
+This is separate from the passing disposable-pair video/keyboard smoke. No keychain
+ACL, credential, system security setting or website release was changed. The
+owner was asked to complete any macOS authorization prompt directly. Second
+physical Mac/hotspot validation and the existing full-docs/frontend dependency
+failures also remain outside this change.
+
 ## #643 local PPT video pilot — 0.5.0 (2026-11-03)
 
 Scope: video from the unique Presenter OUTPUT to native Sunday Remote, with the

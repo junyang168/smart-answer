@@ -1,4 +1,4 @@
-Sunday Presenter 0.5.0 — PPT 點對點畫面測試版
+Sunday Presenter 0.5.1 — PPT 點對點畫面測試版
 
 主電腦安裝 Sunday Presenter；講員電腦安裝 Sunday Remote。將 App 拖入 Applications。
 Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 Intel／Apple Silicon。
@@ -15,6 +15,7 @@ Presenter 需要 Apple Silicon Mac、macOS 13 或更新版本；Remote 支援 In
 6. HDMI 接 TV；Remote 直接看 OUTPUT，不需 AirPlay。切換敬拜／講道時保持同一個分享視窗。
    回到準備畫面或最小化 OUTPUT 時 Remote 停止顯示；重新確認並播放才恢復。
 
+0.5.1 修正內嵌 PowerPoint 的 Remote 翻頁，以及 Remote 畫面區的方向鍵。
 本測試版只新增 PPT 畫面傳輸，不會自動加入 Meet、開關麥克風、操作錄影或在 10 點自動開始。
 Presenter／Remote 不需要輔助使用或麥克風權限；Chrome 的分享及收音權限請依 Meet 提示設定。
 舊版升級請退出並更新兩台電腦的 App。舊的 Meet／定時設定不再執行。

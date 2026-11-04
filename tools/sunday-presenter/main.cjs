@@ -22,7 +22,7 @@ let folderMessage = '';
 const folderRuns = new Map();
 const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
 const labels = { worship: '主日崇拜', sermon: '講道' };
-const controlShortcut = 'CommandOrControl+P';
+const controlShortcut = smoke ? 'CommandOrControl+Shift+Alt+P' : 'CommandOrControl+P';
 
 function toggleControls() {
   // Recovery action is idempotent. Close/hide is an explicit panel action.
@@ -203,6 +203,7 @@ async function sendSlideKey(key, expectedActive, valid = () => true) {
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
       if (stage.active === null) throw Error('尚未播放簡報。');
       const wc = stage.get(stage.active).view.webContents;
+      const focusedFrame = wc.focusedFrame;
       app.focus({ steal: true });
       output.show();
       output.focus();
@@ -219,8 +220,47 @@ async function sendSlideKey(key, expectedActive, valid = () => true) {
         throw Error('請先選取輸出視窗，再試一次。');
       }
       if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
-      wc.sendInputEvent({ type: 'keyDown', keyCode: key });
-      wc.sendInputEvent({ type: 'keyUp', keyCode: key });
+      const frames = wc.mainFrame.framesInSubtree;
+      const powerpoint = frames.filter(frame => {
+        try { return /(^|\.)powerpoint\.officeapps\.live\.com$/.test(new URL(frame.url).hostname); } catch { return false; }
+      });
+      let target = focusedFrame && focusedFrame !== wc.mainFrame && frames.includes(focusedFrame) ? focusedFrame :
+        powerpoint.length === 1 ? powerpoint[0] : wc.mainFrame;
+      // Restore the actual slideshow document. A wrapper's focused WebContents
+      // alone is insufficient for cross-origin/opaque embedded presentations.
+      for (let depth = 0; depth < 5; depth++) {
+        await Promise.race([
+          target.executeJavaScript(`(() => {
+            window.focus();
+            const visible = [...document.querySelectorAll('iframe,frame')].filter(el => {
+              const r = el.getBoundingClientRect(), style = getComputedStyle(el);
+              return style.visibility !== 'hidden' && style.display !== 'none' &&
+                r.width >= innerWidth * .8 && r.height >= innerHeight * .8 && r.right > 0 && r.bottom > 0;
+            });
+            const active = document.activeElement;
+            const player = visible.includes(active) ? active : visible.length === 1 ? visible[0] : null;
+            if (player) { player.focus({ preventScroll: true }); player.contentWindow?.focus(); }
+          })()`, true),
+          new Promise((_, reject) => setTimeout(() => reject(Error('投影片尚未取得焦點，請重新選取播放畫面。')), 1000))
+        ]);
+        if (stage.active !== expectedActive || !valid()) throw Error('畫面已切換，請再按一次。');
+        const next = wc.focusedFrame;
+        if (!next || next === target || !frames.includes(next)) break;
+        target = next;
+      }
+      if (target !== wc.mainFrame) {
+        if (wc.debugger.isAttached()) throw Error('請先關閉此簡報的開發工具，再試一次。');
+        wc.debugger.attach('1.3');
+        try {
+          const code = key === 'Right' ? 'ArrowRight' : 'ArrowLeft';
+          const vk = key === 'Right' ? 39 : 37;
+          await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: code, code, windowsVirtualKeyCode: vk });
+          await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: code, code, windowsVirtualKeyCode: vk });
+        } finally { if (wc.debugger.isAttached()) wc.debugger.detach(); }
+      } else {
+        wc.sendInputEvent({ type: 'keyDown', keyCode: key });
+        wc.sendInputEvent({ type: 'keyUp', keyCode: key });
+      }
 }
 
 app.whenReady().then(async () => {
@@ -355,7 +395,7 @@ app.whenReady().then(async () => {
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        website, remoteControl, hostVideo, setOrigin: origin => { testOrigin = origin; } });
+        website, remoteControl, hostVideo, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
       console.log('SMOKE PASS');
       app.quit();
     } catch (error) { console.error(error); await hostVideo?.close(); app.exit(1); }

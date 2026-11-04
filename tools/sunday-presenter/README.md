@@ -13,7 +13,7 @@ link. PPT audio capture, Google OAuth and Remote microphone relay are outside th
 design; only the selected wireless microphone on the host supplies audio. It is
 a design draft, not an implemented capability of the Phase 1 release below.
 
-## Local video pilot — 0.5.0 (#643)
+## Local video pilot — 0.5.1 (#643)
 
 The worktree pilot adds a resizable PPT viewer to the native Remote. When paired
 with this Presenter, it receives only the current OUTPUT over local WebRTC and
@@ -21,6 +21,11 @@ keeps the existing slide buttons and arrow keys. Remote requests no microphone
 or camera permission. The host allows capture of the exact OUTPUT window only;
 preparation, source loss and minimization stop the viewer instead of selecting
 another window. Pairing and slide control continue using certificate-pinned TLS.
+
+0.5.1 fixes slide keys in embedded PowerPoint pages, accepts arrow keys when the
+Remote video viewer has focus, and keeps command errors visible across state
+polls. The host restores the confirmed player frame and uses Chromium's input
+path for embedded frames; it does not click the slide or send global OS keys.
 
 This is the first Phase 2 milestone, not a broadcast release. Wireless microphone
 input, recording, fixed-key YouTube streaming and scheduling remain unimplemented.

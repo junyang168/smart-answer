@@ -11,6 +11,12 @@ if CommandLine.arguments.contains("--video-probe") {
             DispatchQueue.main.async {
                 switch command {
                 case "right": delegate.forward()
+                case "right-button": delegate.next.performClick(nil)
+                case "right-viewer":
+                    delegate.show(); delegate.window.makeFirstResponder(delegate.videoView?.webView)
+                    if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: delegate.window.windowNumber, context: nil, characters: "\u{F703}", charactersIgnoringModifiers: "\u{F703}", isARepeat: false, keyCode: 124) {
+                        NSApp.postEvent(event, atStart: false)
+                    }
                 case "left": delegate.back()
                 case "reconnect": delegate.resetVideo("測試重新連線")
                 case "diagnose": delegate.videoView?.webView.evaluateJavaScript("JSON.stringify({url:location.href,ready:document.readyState,body:document.body?.innerHTML,pc:typeof RTCPeerConnection,viewer:typeof window.remoteVideo,bridge:typeof window.webkit.messageHandlers.video,pcstate:typeof current !== 'undefined' ? current?.pc?.connectionState : null,answer:typeof current !== 'undefined' ? !!current?.pc?.localDescription : false})") { value, error in emitJSON(["op": "diagnose", "value": value ?? NSNull(), "error": error?.localizedDescription ?? ""]) }

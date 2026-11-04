@@ -4,7 +4,7 @@
 > 日期：2026-11-03。
 > 追蹤：[主卡 #643](https://github.com/junyang168/smart-answer/issues/643)。
 > 基線：Phase 1 v0.4.0、已合併的 [PR #611](https://github.com/junyang168/smart-answer/pull/611)，程式檢視基線 `2b93ae7007ca4de60d267062a2ff2e8007b6ee5d`。
-> 當前進度：0.5.0 本地 PPT video 原型已實作，單機 Electron → 原生 Remote 測試通過；其他 Phase 2 能力仍待實作。未啟用麥克風或 YouTube，未部署／發布網站下載。
+> 當前進度：0.5.1 本地 PPT video／內嵌翻頁原型已實作，單機 Electron → 原生 Remote 測試通過；其他 Phase 2 能力仍待實作。未啟用麥克風或 YouTube，未部署／發布網站下載。
 > 原型證據與未測範圍見 [acceptance](../tools/sunday-presenter/acceptance.md)。
 
 ## 1. 要解決的問題與使用方式
@@ -301,7 +301,7 @@ FFmpeg 的 argv 只帶非秘密的 RTMPS base endpoint；stream key 作為 `rtmp
 
 ## 12. 發行與尚待驗證的事項
 
-Phase 1 v0.4.0 維持已發布功能；0.5.0 為本地 PPT video pilot，未完成正式雙機驗收。Phase 2 使用新的版本及 pilot 標示，保留回退安裝包；依既有 immutable publisher 發布，不覆蓋同版本 bytes。媒體模組、FFmpeg 架構、code signing、notarization、授權 notices 與 executable checksum 納入安裝包檢查。不把 ad-hoc 簽章描述成 Developer ID／已公證；更新後麥克風、擷取與本機網路權限要重新實測。
+Phase 1 v0.4.0 維持已發布功能；0.5.1 為本地 PPT video pilot，未完成正式雙機驗收。Phase 2 使用新的版本及 pilot 標示，保留回退安裝包；依既有 immutable publisher 發布，不覆蓋同版本 bytes。媒體模組、FFmpeg 架構、code signing、notarization、授權 notices 與 executable checksum 納入安裝包檢查。不把 ad-hoc 簽章描述成 Developer ID／已公證；更新後麥克風、擷取與本機網路權限要重新實測。
 
 實作前的未決事項以 M0／M2 解答，當前不請 owner 代替工程選型：
 

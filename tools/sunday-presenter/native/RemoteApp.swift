@@ -12,6 +12,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
     var endpoint: URL?, fingerprint = "", token: String?, binding = ""
     var saved: [String: String] = [:]
     var busy = false, polling = false
+    var commandError = "", commandErrorUntil = Date.distantPast
     var timer: Timer?
     var lastResolve = Date.distantPast
     var videoView: RemoteVideoView?
@@ -82,7 +83,11 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         if !videoProbe { browser.delegate = self; browser.searchForServices(ofType: sundayServiceType, inDomain: "local.") }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self = self, self.window.isKeyWindow, !(self.window.firstResponder is NSTextView) else { return event }
+            guard let self = self, self.window.isKeyWindow else { return event }
+            // WebKit can use a text-view responder too. Only the visible pairing
+            // field is text entry; do not discard arrows in the PPT viewer.
+            if !self.code.isHidden, self.window.firstResponder === self.code.currentEditor() { return event }
+            if !event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty { return event }
             if event.keyCode == 123 { self.back(); return nil }
             if event.keyCode == 124 { self.forward(); return nil }
             return event
@@ -201,7 +206,7 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         let live = state["live"] as? Bool == true
         previous.isEnabled = live && !busy; next.isEnabled = live && !busy
         code.isHidden = token != nil; connect.isHidden = token != nil; computers.isHidden = token != nil
-        status.stringValue = "已連線 · \(state["deck"] as? String ?? "尚未播放")"
+        status.stringValue = Date() < commandErrorUntil ? commandError : "已連線 · \(state["deck"] as? String ?? "尚未播放")"
         if live, (state["capabilities"] as? [String])?.contains("ppt-video-v1") == true { pollVideo() }
         else { resetVideo(live ? "主電腦版本只支援翻頁，請更新 Presenter。" : "等待主電腦播放已確認的 PPT") }
     }
@@ -260,8 +265,10 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         request("key", body: ["key": key, "binding": binding, "id": UUID().uuidString]) { result in
             self.busy = false
             switch result {
-            case .success(let value): self.apply(value)
-            case .failure(let error): self.status.stringValue = error.localizedDescription; self.poll()
+            case .success(let value): self.commandError = ""; self.commandErrorUntil = .distantPast; self.apply(value)
+            case .failure(let error):
+                self.commandError = error.localizedDescription; self.commandErrorUntil = Date().addingTimeInterval(8)
+                self.status.stringValue = self.commandError; self.poll()
             }
         }
     }

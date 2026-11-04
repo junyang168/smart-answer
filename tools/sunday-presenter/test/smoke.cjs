@@ -23,7 +23,7 @@ async function until(check, message) {
   throw Error(`Timed out: ${message}`);
 }
 
-exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, setOrigin }) => {
+exports.run = async ({ stage, act, output, preparation, controller, toggleControls, website, remoteControl, hostVideo, controlShortcut, setOrigin }) => {
   const { globalShortcut, screen } = require('electron');
   let postedBody, apiFailure = false, apiCalls = 0;
   const server = http.createServer((request, response) => {
@@ -36,6 +36,9 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ date, folderName, timezone: 'America/Chicago', folderExists: true,
         folderUrl: `https://onedrive.live.com/my?id=%2Fpersonal%2Ffixture%2FDocuments%2F${folderName}` }));
+    } else if (request.url === '/embedded') {
+      response.setHeader('Content-Type', 'text/html');
+      response.end('<!doctype html><title>Embedded.pptx</title><iframe sandbox="allow-scripts" src="/frame" style="border:0;width:100vw;height:100vh"></iframe>');
     } else if (request.url === '/post') {
       postedBody = '';
       request.on('data', data => { postedBody += data; });
@@ -71,7 +74,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
   };
   try {
     assert.equal(controller.isVisible(), false);
-    assert.equal(globalShortcut.isRegistered('CommandOrControl+P'), true);
+    assert.equal(globalShortcut.isRegistered(controlShortcut), true);
     assert.equal(output.isVisible(), false);
     assert.equal(output.isFullScreen(), false);
     assert.equal(controller.isFullScreen(), false);
@@ -102,6 +105,20 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     console.log('smoke: loading');
     const worship = await load('worship'), sermon = await load('sermon');
     const tokens = await Promise.all([worship, sermon].map(p => wc(p).executeJavaScript('token')));
+    if (process.argv.includes('--focus-smoke')) {
+      await act('open', { deck: 'sermon', url: origin + '/embedded' });
+      const embedded = stage.get(stage.selected.sermon);
+      await until(() => embedded.loaded && wc(embedded).mainFrame.frames.length === 1, 'embedded slideshow loaded');
+      const frame = wc(embedded).mainFrame.frames[0];
+      await until(async () => await frame.executeJavaScript('typeof steps') === 'number', 'iframe keys loaded');
+      await act('arm', { id: embedded.id }); await act('take', { deck: 'sermon' });
+      await frame.executeJavaScript('window.focus(); document.body.tabIndex=0; document.body.focus()');
+      controller.show(); controller.focus();
+      await act('key', { key: 'Right' });
+      await until(async () => await frame.executeJavaScript('steps') === 1, 'embedded frame receives arrow after focus restore');
+      stage.remove(embedded.id); wc(embedded).close(); stage.selected.sermon = sermon.id;
+      console.log('IFRAME FOCUS PASS');
+    }
     assert.equal(await wc(worship).executeJavaScript('sensitiveBridge'), 'undefined');
     assert.equal(wc(worship).getLastWebPreferences().nodeIntegration, false);
     assert.equal(wc(worship).getLastWebPreferences().sandbox, true);

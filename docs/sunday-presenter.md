@@ -12,7 +12,7 @@ The [Phase 2 design](./sunday-presenter-phase2-design.md) proposes direct local
 PPT video from Presenter to Sunday Remote, followed by YouTube broadcasting with a reusable stream key and fixed channel viewing link.
 Only the selected wireless microphone on the host supplies broadcast audio.
 The design records reuse choices, media isolation, failure handling and the
-physical-device acceptance gates. The 0.5.0 local video pilot has passed a
+physical-device acceptance gates. The 0.5.1 local video pilot has passed a
 single-Mac Electron-to-native-Remote fixture test; other Phase 2 features remain
 unimplemented. See the [pilot evidence](../tools/sunday-presenter/acceptance.md).
 

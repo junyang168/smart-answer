@@ -68,8 +68,10 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
       assert.throws(() => hostVideo.request({ op: 'start', clientId: 'test-viewer-12345' }), /stopped/);
       console.log('VIDEO ACTIVE SHUTDOWN PASS'); return;
     }
-    const steps = await sermon.view.webContents.executeJavaScript('steps'); child.stdin.write('right\n');
-    await wait(async () => await sermon.view.webContents.executeJavaScript('steps') === steps + 1, 'native Remote slide key');
+    const steps = await sermon.view.webContents.executeJavaScript('steps'); child.stdin.write('right-button\n');
+    await wait(async () => await sermon.view.webContents.executeJavaScript('steps') === steps + 1, 'native Remote button');
+    child.stdin.write('right-viewer\n');
+    await wait(async () => await sermon.view.webContents.executeJavaScript('steps') === steps + 2, 'native arrow with WebKit focused');
     for (let i = 0; i < 20; i++) { await act('take', { deck: i % 2 ? 'sermon' : 'worship' }); await new Promise(resolve => setTimeout(resolve, 100)); }
     await act('take', { deck: 'worship' });
     let pixel;
@@ -89,7 +91,7 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
       macOS: require('node:child_process').execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(),
       nativeWebKitDecodedFrames: true, audioTracks: 0, selectedCandidates: latest.candidates,
       colors: { sermon: sermonPixel, worship: pixel }, stableSessionAcross20DeckSwitches: true,
-      nativeSlideControl: true, preparationStopsCapture: true, sourceRecovery: true, viewerReconnect: true,
+      nativeSlideControl: true, nativeButton: true, nativeArrowWithViewerFocused: true, preparationStopsCapture: true, sourceRecovery: true, viewerReconnect: true,
       minimizedStopsCapture: true, host: stats, physicalSecondMacAndHotspot: 'NOT TESTED', realOfficePPT: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'video-result.json'), JSON.stringify(result, null, 2)); console.log('VIDEO SMOKE PASS', result);
   } finally { child?.stdin.end('quit\n'); child?.kill(); await hostVideo.halt(); await remote.stop(); fs.rmSync(temp, { recursive: true, force: true }); }
