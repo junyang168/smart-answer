@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { ReviewTextDiff } from "./ReviewTextDiff";
+import { pendingTimingIds } from "./review-timing";
 import {
   SubtitleSuggestions,
   type SubtitleSuggestion,
@@ -956,15 +957,9 @@ function TranscriptProofreader({
   const spokenRows = doc.script.filter((p) => p.type !== "subtitle");
   const confirmed = spokenRows.filter((p) => paragraphReviewed(p.index)).length;
   const pendingParagraph = spokenRows.find((p) => !paragraphReviewed(p.index));
-  const timingBlocked = Boolean(
-    doc.context.timing_quality &&
-    doc.context.timing_quality.status !== "qualified",
-  );
-  const timingPending = doc.script.filter(
-    (p) =>
-      doc.context.timing_quality?.paragraph_states?.[p.index]?.status ===
-      "withheld",
-  );
+  const pendingTiming = pendingTimingIds(doc.script, doc.context.timing_quality);
+  const timingBlocked = pendingTiming.length > 0;
+  const timingPending = doc.script.filter((p) => pendingTiming.includes(p.index));
   useEffect(() => {
     if (!navigationTarget) return;
     // Wait until React has opened the destination editor, including re-clicks.
@@ -1953,8 +1948,7 @@ function TranscriptProofreader({
                   >
                     ▶ {stamp(binding.start_ms)}–{stamp(binding.end_ms)}
                   </button>
-                  {doc.context.timing_quality?.paragraph_states?.[p.index]
-                    ?.status === "withheld" && (
+                  {pendingTiming.includes(p.index) && (
                     <span
                       className="rounded bg-amber-50 px-2 py-1 text-amber-800"
                       title="本段的起點或結尾尚待確認；文字校對狀態保留。"

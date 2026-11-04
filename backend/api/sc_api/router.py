@@ -46,6 +46,7 @@ if beta_data_dir:
             beta_owner="junyang168@gmail.com",
             role_root=DATA_BASE_PATH,
             api_base="/api/sc_api/beta",
+            production_root=DATA_BASE_PATH,
         ),
         prefix="/beta",
     )

@@ -173,6 +173,43 @@ shared production transcript, reconcile every writer with the migrated-document
 guards. Legacy nginx `/sc_api/` URLs now pass through the modern Next.js proxy;
 the former port-8000 writer was retired in #591.
 
+### Moving a reviewed Beta draft into production
+
+Use the same ticket worktree and exact catalog item. First make an independent,
+verified backup outside both data roots, then promote that snapshot:
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_review_promotion backup --beta-root BETA --production-root DATA --item ITEM --backup-root BACKUP
+backend/.venv/bin/python -m backend.pipeline.transcript_review_promotion promote --beta-root BETA --production-root DATA --item ITEM --backup-root BACKUP
+```
+
+The backup includes both catalogs, role configuration, every matching script
+variant, review sidecars, immutable revisions, operation receipts and media.
+Checksums are verified before draft migration. Promotion compares exact item
+versions and ownership against that backup, preserves unrelated catalog rows,
+and retains a durable intent for interrupted-copy recovery. A different existing
+production review draft is never overwritten.
+
+Production receives the Beta review draft, its matching editor baseline,
+complete history/media and current owner/assignment epoch. The legacy raw
+timeline and public publication stay in place. Prior production baseline and
+ownership remain in the verified backup. Review decisions and timing records
+are copied without adding approvals; promotion does not publish or update Claims.
+
+A SHA-bound `production-link.json` in the archived Beta review folder makes all
+Beta routes for that item use the production store: autosave, claims, history,
+media and publication. Other Beta items keep their storage. The backend checks
+the configured production root and promotion receipt; a bad handoff fails closed.
+A request that selected the old store before the switch is rejected inside its
+workflow lock, preserving one writable draft and the existing permission checks.
+
+Deploy router support through `scripts/deploy.sh` before installing the handoff.
+The editor URL remains `/admin/transcript-beta/ITEM`; its publish button then
+writes production's publication. Publishing still requires actual paragraph and
+slide confirmations. A timing hold belonging only to a fully soft-deleted
+paragraph does not block publication; missing or unqualified timing for surviving
+text still does. Original timing records remain unchanged.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from
