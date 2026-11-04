@@ -297,10 +297,52 @@ def run_unit(store, root, index, *, capacity):
     prepared = prepare_unit(store, root, index)
     if prepared.get('excluded'):
         return {'status': 'paused', 'excluded': prepared['excluded']}
+    register_progress(root, prepared, capacity)
     batch_root=Path(prepared['manifest']['path']).parent/'batch'
-    result = batch.run(prepared['manifest']['path'], batch_root,
-                       model_capacity=capacity)
+    batch.run(prepared['manifest']['path'], batch_root, model_capacity=capacity)
+    from backend.pipeline.claim_refresh_handoff import inspect
+    result = inspect(batch_root, store=store, check_completion=True)
     return {'group': m['groups'][index], 'result': result}
+
+
+def register_progress(root, prepared, capacity):
+    """Expose the frozen population and exact actions to the existing reader."""
+    import fcntl
+    import os
+    from backend.api.sc_api.transcript_review import atomic
+    root=Path(root).resolve();m=load(root)
+    source_key=m['source_id']
+    if (root/'progress-plan.json').exists():
+        prior=read(root/'progress-plan.json')
+        if len(prior['sources'])!=1:raise ValueError('migration progress needs one exact source')
+        source_key=next(iter(prior['sources']))
+    plan={'original_count':len(m['claim_ids']),'sources':{source_key:{
+        'source_id':m['source_id'],'name':m['item'],
+        'groups':[{'id':f'{i:03d}','members':g} for i,g in enumerate(m['groups'])]}}}
+    for name,value in [('progress-plan.json',plan),('capacity.json',capacity)]:
+        path=root/name
+        if path.exists():
+            if read(path)!=value:raise ValueError('registered migration progress input changed')
+        else:immutable(path,value)
+    jobs=read(prepared['manifest']['path'])['jobs']
+    ids={read(job['request']['path'])['action_id'] for job in jobs}
+    index=Path(os.environ.get('WANG_CLAIM_REFRESH_CAMPAIGNS_FILE') or
+               str(Path(os.environ['DATA_BASE_DIR'])/'wang-knowledge-platform/admin/claim-refresh-campaigns.json'))
+    index.parent.mkdir(parents=True,exist_ok=True)
+    with index.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        data=read(index) if index.exists() else {'campaigns':[]}
+        matches=[e for e in data['campaigns'] if e['root']==str(root)]
+        if len(matches)>1:raise ValueError('duplicate migration progress root')
+        entry=matches[0] if matches else {'id':'transcript-migration-'+sha(str(root).encode())[:24],
+            'title':m['item']+' · Claim 來源移植','root':str(root),
+            'plan':binding(root/'progress-plan.json'),'seed_action_ids':[]}
+        if entry['plan']!=binding(root/'progress-plan.json'):
+            raise ValueError('registered migration population changed')
+        entry['seed_action_ids']=sorted(set(entry['seed_action_ids'])|ids)
+        if not matches:data['campaigns'].append(entry)
+        atomic(index,data)
+    return entry
 
 
 def verify(store, root):

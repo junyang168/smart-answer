@@ -408,7 +408,7 @@ def audit_contract(root, policy=None):
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
-        files += [pipeline/'prompts/claim_management_compact_v4.md', pipeline/'claim_legacy_ai_reopen.py',
+        files += [pipeline/'prompts/claim_management_compact_v4.md', pipeline/'claim_legacy_ai_reopen.py', pipeline/'claim_source_epoch_reassessment.py',
                   repository/'backend/api/canonical_repository/claim_identity_allocation.py']
     files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     if policy is not None and policy.review_unit_contract:

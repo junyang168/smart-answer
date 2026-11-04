@@ -134,6 +134,36 @@ def test_frozen_policy_is_subscription_only_and_original_not_modified(case):
     assert original==(Path(migration.__file__).parent/'policies/wang_claim_management_bounded_unit_v1.json').read_bytes()
 
 
+def test_progress_registration_preserves_other_campaigns_and_reuses_fixed_population(case,monkeypatch,tmp_path):
+    _,_,root,_,_=case;prepare(case)
+    index=tmp_path/'campaigns.json'
+    index.write_text(json.dumps({'campaigns':[{'id':'other','root':'elsewhere'}]}))
+    monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
+    monkeypatch.setenv('WANG_CLAIM_REFRESH_CAMPAIGNS_FILE',str(index))
+    request=migration.immutable(root/'request-test.json',{'action_id':'exact-action'})
+    manifest=migration.immutable(root/'batch-test.json',{'jobs':[{'request':request,'root':str(root/'execution')}],'max_workers':1})
+    prepared={'manifest':manifest}
+    capacity={'root':str(tmp_path/'shared-existing-capacity'),'action_window':4}
+    entry=migration.register_progress(root,prepared,capacity)
+    assert migration.register_progress(root,prepared,capacity)==entry
+    values=migration.read(index)['campaigns']
+    assert len(values)==2 and values[0]=={'id':'other','root':'elsewhere'}
+    assert entry['seed_action_ids']==['exact-action']
+    from backend.api.claim_refresh_progress import frozen_plan
+    path=Path(entry['plan']['path']);stat=path.stat()
+    plan=frozen_plan(str(path),stat.st_mtime_ns,stat.st_size,entry['plan']['file_sha256'])
+    assert plan['original_count']==2
+    with pytest.raises(ValueError,match='input changed'):
+        migration.register_progress(root,prepared,{**capacity,'action_window':8})
+
+
+def test_source_epoch_admission_code_is_bound_in_model_audit_contract(tmp_path):
+    from backend.pipeline import claim_management as cm
+    policy=cm.Policy.model_validate_json((Path(migration.__file__).parent/'policies/wang_claim_management_bounded_unit_v1.json').read_text())
+    contract=cm.audit_contract(tmp_path,policy)
+    assert 'backend/pipeline/claim_source_epoch_reassessment.py' in contract['implementation']
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}
