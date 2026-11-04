@@ -84,6 +84,20 @@ with `/usr/bin/python3 tools/sunday-presenter/ipad/test_renew.py`.
 
 The original pilot description and historical checkpoints follow.
 
+**Current operational hold (2026-11-04):** both the hourly agent and the one-off
+background verifier were unloaded after the owner reported that the iPad could
+discover the MacBook but repeatedly requested a six-digit code. The owner then
+reported successful connection after pairing again. Initial, renewed and
+background-candidate app signatures have the same application/team identifiers;
+this comparison does not establish why the old pairing was unavailable or
+rejected. The client also selects the first discovered host on foreground return,
+which can select the Mac mini instead of MacBook; host selection and pair retention
+need separate verification. Do not call this an expiry failure or a proven
+Keychain-loss bug. The background verifier had signed a newer candidate but
+deferred installation when the iPad was unlocked; it did not install that
+candidate. Keep automatic updates disabled until reconnect/pair retention on the
+intended MacBook is checked. The existing iPad app remains installed.
+
 iPad is the intended speaker device. The existing Mac app remains available
 for the current service; it is not a requirement for the future speaker setup.
 This target depends on the unmerged Presenter/video pilot in #643 / PR #644.

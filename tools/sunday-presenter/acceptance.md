@@ -21,7 +21,16 @@ one-off launchd test then successfully built/signed a newer profile; its final
 lock check observed iPad had been unlocked and deferred installation. Full
 background installation is pending a locked-device retry at this checkpoint.
 
-The hourly user LaunchAgent is installed and loaded. The helper checks actual
+The hourly user LaunchAgent was installed and loaded during the test. It and the
+one-off verifier were subsequently unloaded for a reported MacBook pairing
+problem: discovery worked, the iPad requested a code, and the owner reported
+recovery after pairing again. Signatures retain the same application/team ID;
+the root cause of the unavailable/rejected old pairing is unproven. The client's
+first-discovered-host selection can also choose Mac mini after foreground return.
+Automatic updates remain disabled pending MacBook pair-retention/reconnect checks;
+do not present the schedule as active or post-update pairing as accepted.
+
+The helper checks actual
 profile expiry, team/bundle/device, fixed source hashes, device lock/first unlock,
 Sunday in America/Chicago, disk space, one-build/day budget and command timeouts.
 Failed builds/installs cannot advance installed expiry; signed pending artifacts
