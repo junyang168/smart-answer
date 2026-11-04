@@ -52,6 +52,8 @@ def context_roots(request, *, exists=None):
     else:
         keys.update(p.key for p in request.permissions)
     keys.update(cm.source.key('source_documents', sid) for sid in request.source_bindings)
+    from backend.pipeline.claim_direct_scope import retirement_reference_keys
+    keys.update(retirement_reference_keys(request))
     return sorted(cm.source.split_key(key) for key in keys)
 
 

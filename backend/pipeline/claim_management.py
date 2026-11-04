@@ -920,6 +920,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     if (policy.review_purpose == 'source_impact') != is_source_impact(request):
         raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    if 'retirement_reference_keys' in authority and request.operation != 'Retire':
+        raise ValueError('retirement reference authority belongs only to Retire')
     expected = request.model_dump(mode="json", exclude={"authorization", "policy"})
     if (authority.get("schema_version") != VERSION
             or authority.get("authorized_by") != "owner"
@@ -1067,7 +1069,12 @@ def audit_keys(request, before, candidate=None):
     from backend.pipeline.claim_direct_scope import enabled, scope
     if enabled(request):
         return scope(request, before, candidate)['record_keys']
-    return legacy_audit_keys(request, before, candidate)
+    keys = legacy_audit_keys(request, before, candidate)
+    if getattr(request, 'operation', None) == 'Retire':
+        from backend.pipeline.claim_direct_scope import retirement_reference_keys
+        if set(retirement_reference_keys(request)) & set(keys):
+            raise ValueError('readonly retirement reference cannot replace a required audit object')
+    return keys
 
 
 def legacy_audit_keys(request, before, candidate=None):
@@ -1160,6 +1167,8 @@ def unlinkable_questions(request, before):
 
 
 def original_goal(request, before):
+    from backend.pipeline.claim_direct_scope import retirement_references
+    retirement_references(request, before)
     missing = unlinkable_questions(request, before)
     if missing:
         raise ValueError('Claim creation requires answer_claim_ids on every question it reads: ' + ', '.join(missing))
@@ -1334,6 +1343,11 @@ def model_packet(materials):
             materials['before'], materials['transaction_before'])
         if materials['existing_evidence_owner_claims'] != expected:
             raise ValueError('existing Evidence owner reference facts drifted from frozen transaction context')
+    from backend.pipeline.claim_direct_scope import retirement_references
+    reference_request = Request.model_validate(materials.get('unit_request') or materials.get('request'))
+    expected = retirement_references(reference_request, materials.get('transaction_before', materials['before']))
+    if expected != materials.get('retirement_reference_claims', {}):
+        raise ValueError('retirement reference facts drifted from frozen transaction context')
     packet = {k: deepcopy(v) for k, v in materials.items()
               if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
