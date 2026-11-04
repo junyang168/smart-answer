@@ -17,7 +17,26 @@ def compare(store, root):
     owned={key for key,state in before.items() if key.split('/',1)[0] in cm.CLAIM_COLLECTIONS
         and cm.own_source_ids(state['payload'],payloads)=={manifest['source_id']}}
     report=migration.read(root/'current-report.json') if (root/'current-report.json').exists() else None
-    created=report.get('created_claim_ids',[]) if report else []
+    # SQL's applied creation facts include support objects, not only Claims.
+    # Inspect only this run's known requests; never discover a new population
+    # by scanning the repository or interpreting model proposals as commits.
+    created_records=set();actions=set()
+    for path in (root/'units').glob('**/request.json'):
+        request=cm.Request.model_validate_json(path.read_text());aid=request.action_id
+        if aid in actions:continue
+        parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
+        if not parent:continue
+        if (parent.get('kind')!='claim_management_action' or parent['request']!=request.model_dump(mode='json')
+                or request.model_dump(mode='json')['source_bindings']!={manifest['source_id']:manifest['after']}
+                or not Path(parent['execution_root']).resolve().is_relative_to(root)):
+            raise ValueError('comparison action escaped its exact migration source/root')
+        actions.add(aid)
+        created_records.update(parent.get('created_keys',[]))
+    if any(key.split('/',1)[0] not in cm.CLAIM_COLLECTIONS for key in created_records):
+        raise ValueError('comparison creation facts exceed the Claim domain')
+    created=sorted(set((report or {}).get('created_claim_ids',[]))|{
+        key.split('/',1)[1] for key in created_records if key.startswith('claims/')})
+    owned.update(created_records)
     owned.update('claims/'+cid for cid in [*manifest['claim_ids'],*created])
     source_key='source_documents/'+manifest['source_id']
     current={cm.source.key(*key):state for key,state in store.read_current_records(
@@ -46,7 +65,7 @@ def compare(store, root):
             f=new['payload'];p=snapshot['paragraphs'].get(str(f.get('paragraph_key')),{});quote=f.get('verbatim_excerpt')
             fragment_status[key]=bool(quote and quote in p.get('text','')
                                       and f.get('source_sha256')==snapshot['body_sha256'])
-        if pin(old)==pin(new):continue
+        if pin(old)==pin(new) and key not in created_records:continue
         a=(old or {}).get('payload',{});b=(new or {}).get('payload',{})
         changed=fields(a,b)
         dependents.append({'record_key':key,'before_pin':pin(old),'after_pin':pin(new),
@@ -57,14 +76,16 @@ def compare(store, root):
         'beta_revision':manifest['beta_revision'],'migration_manifest':migration.binding(root/'manifest.json'),
         'before_source':manifest['before'],'after_source':manifest['after'],
         'claims':claims,'dependent_changes':dependents,'fragment_current_source_match':fragment_status,
-        'created_inventory_available':report is not None,'qualification_checked_by_this_report':False,
+        'created_inventory_available':report is not None or bool(actions),
+        'created_record_keys':sorted(created_records),'qualification_checked_by_this_report':False,
         'saved_verification_at':datetime.fromtimestamp((root/'current-report.json').stat().st_mtime,timezone.utc).isoformat() if report else None,
         'all_data_migrated':False}
     from backend.api.sc_api.transcript_review import atomic
     atomic(root/'comparison.json',value)
     (root/'comparison.html').write_text(render(value))
     return {'comparison':str(root/'comparison.html'),'data':str(root/'comparison.json'),
-            'claim_count':len(claims),'statement_changes':sum(c['statement_changed'] for c in claims),
+            'claim_count':len(claims),'statement_changes':sum(c['statement_changed'] and c['before_pin'] is not None for c in claims),
+            'created_claim_count':len(created),
             'dependent_changes':len(dependents),'qualification_checked':False}
 
 
@@ -76,7 +97,7 @@ def render(value):
     def cell(text):return escape(str(text)) if text is not None else '—'
     rows=[]
     for c in value['claims']:
-        status='缺少記錄' if c['after_pin'] is None else '已退役（保留歷史）' if c['retired'] else '陳述有變更' if c['statement_changed'] else '陳述相同'
+        status='缺少記錄' if c['after_pin'] is None else '已退役（保留歷史）' if c['retired'] else '新增 Claim' if c['before_pin'] is None else '陳述有變更' if c['statement_changed'] else '陳述相同'
         saved=c.get('saved_verification')
         check='無保存的核實結果' if not saved else '保存時核實通過' if saved['status'] in {'current','reviewed_retirement'} else '保存時尚未通過'
         rows.append('<tr><td>'+cell(c['claim_id'])+'</td><td>'+cell(c['before_statement'])+'</td><td>'+
@@ -84,7 +105,8 @@ def render(value):
             '<br>'+check+'<br><small>'+cell(', '.join(c['changed_fields']))+'</small></td></tr>')
     extra=[]
     for row in value['dependent_changes']:
-        extra.append('<details><summary>'+cell(row['record_key'])+' · '+cell(', '.join(row['changed_fields']))+
+        missing=' · 目前缺少記錄' if row['after_pin'] is None else ''
+        extra.append('<details><summary>'+cell(row['record_key'])+missing+' · '+cell(', '.join(row['changed_fields']))+
             '</summary><div class="pair"><pre>'+cell(json.dumps(row['before'],ensure_ascii=False,indent=2))+
             '</pre><pre>'+cell(json.dumps(row['after'],ensure_ascii=False,indent=2))+'</pre></div></details>')
     matched=sum(value['fragment_current_source_match'].values());total=len(value['fragment_current_source_match'])

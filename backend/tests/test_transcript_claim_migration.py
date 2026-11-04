@@ -317,6 +317,34 @@ def test_comparison_is_readonly_escapes_text_and_does_not_invent_qualification(c
     assert store.writes==1
 
 
+def test_comparison_counts_only_native_applied_creations_and_includes_new_support(case):
+    from backend.pipeline.transcript_claim_migration_report import compare
+    from backend.pipeline import claim_management as cm
+    store,_,root,_,_=case;m=prepare(case);migration.register(store,root)
+    req=cm.Request(action_id='applied-source-job',operation='Update',allowed_operations=['Update'],
+        target_keys=['claims/D'],source_bindings={'S':m['after']},policy=m['policy'],authorization=m['policy'])
+    migration.immutable(root/'units/000/request.json',req.model_dump(mode='json'))
+    parent={'kind':'claim_management_action','request':req.model_dump(mode='json'),
+        'execution_root':str(root/'units/000/execution'),
+        'created_keys':['claims/NEW','source_fragments/NEW-F','source_fragments/MISSING']}
+    store.get_cvp_group=lambda key:deepcopy(parent)
+    store.rows['claims','NEW']=state({'claim_id':'NEW','statement':'新主張','occurrences':[{'source_id':'S'}]})
+    store.rows['source_fragments','NEW-F']=state({'fragment_id':'NEW-F','source_id':'S',
+        'paragraph_key':'S0001','verbatim_excerpt':'保留。'})
+    store.read_current_records=lambda keys:{key:deepcopy(store.rows[key]) for key in keys if key in store.rows}
+    result=compare(store,root);data=migration.read(result['data'])
+    assert result['created_claim_count']==1 and result['statement_changes']==0 and result['claim_count']==3
+    changes={row['record_key']:row for row in data['dependent_changes']}
+    assert changes['source_fragments/NEW-F']['before_pin'] is None
+    assert changes['source_fragments/NEW-F']['after_pin'] is not None
+    assert changes['source_fragments/MISSING']['after_pin'] is None
+    assert data['created_inventory_available'] and not data['qualification_checked_by_this_report']
+    assert '新增 Claim' in Path(result['comparison']).read_text()
+    # A saved proposal is not an applied creation fact.
+    parent['created_keys']=[]
+    assert compare(store,root)['created_claim_count']==0
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}

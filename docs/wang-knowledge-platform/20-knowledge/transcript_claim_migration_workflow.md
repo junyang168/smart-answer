@@ -91,6 +91,8 @@ Claims 與自身證據。尚未核實未用的來源支援記錄、獨立來源�
 `comparison --execute` 使用固定 before 與共同批量 current reader 產生
 `comparison.json`／`comparison.html`，列出原 Claim 陳述、目前陳述、欄位差異及同源相關資料
 的精確變更。它不呼叫模型、不改 SQL、不判定意思等價，也不產生新資格。
+新建清單消費本任務正式 SQL action 的已提交 `created_keys`，包含新 Claim 與支援物件；
+模型提案不算已新建。新增 Claim 與原分母的陳述修改分開計數，缺少當前物件明示為缺口。
 若尚無正式 verification，表中不假造通過或新建項完整清單；若已有 verification，
 只顯示保存時點的核實結果，不能當成永久當前資格。
 
