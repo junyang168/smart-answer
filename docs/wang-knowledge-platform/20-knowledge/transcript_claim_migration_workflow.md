@@ -3,10 +3,48 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
-## 1. 來源與範圍
+## 1. 純程式證據搬遷 dry-run
+
+先做來源定位，再由負責人另外啟動現有 Update／Claim refresh。這兩步不綁成同一次模型任務。
+本節入口沒有 apply 模式、不呼叫模型、不寫入 SQL，只產生固定輸入、搬遷提案及對照表。
+先前已完成的內容交易保留，不自動撤銷。停止 refresh 後，在同一 run 保存
+`refresh-stopped.json`；`run-unit` 與 `resume-rejected-unit` 見到此記錄即拒絕呼叫。
+既有 worker 須先查實際 process、保存答覆及 transaction，不能以停止檔代替中止中的 worker。
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_migration --root RUN --output PREVIEW
+```
+
+輸入沿用已凍結新舊原件、同源片段及目前正式記錄，包括此 run 已提交的新建物件；
+不把模型提案或已預留 ID 當已寫入。輸出 `current-records.json`、`dry-run.json`、
+可篩選的 `comparison.html` 及 `comparison.csv`，保留執行程式 SHA、來源 SHA 與每條當前版本。
+相同輸入重跑產生相同結果；來源或目前記錄漂移時不覆寫舊 preview。
+這是 dry-run 輸出版本，不另建模型 action、預算或重試 root。
+
+分類規則：
+
+- 已綁定新版且引文、有效定位均可驗證：保留，列作已搬遷。
+- 舊來源引文可驗證，原段落／上下文或足夠長的引文在新舊來源均唯一：提出新定位。
+  比對可忽略限定的中文敘述標點、逗號與排版空白，保留英文字詞邊界、數字分隔、
+  否定文字、經節冒號、小數點與數學符號。待綁引文逐字取自新版，不自行改寫文字。
+  這證明文字對應，不證明標點改動前後語義相同，也不授予新的 Claim 資格。
+- 唯一對應的那次引文全部或部分落在 `~~刪除線~~`：擬將片段的
+  `anchor_state`、`source_binding_status` 標為 `source_deleted`，顯示「已經刪除」。
+  保留歷史引文及原始定位，不將其冒充新來源的有效證據；不能因別處同一句被刪就標記本條。
+- 一個 Evidence 的所有引用均如此失效，擬標為「已經刪除」；仍有其他引用則擬標為
+  「部分證據已刪除」。不因一個片段失效就自動退休整條 Claim。
+- 引文找不到、重複位置不能消歧、來源版本不明、講者標記改變、跨新段落或視覺內容：
+  列為例外，附原引文、原因、相關 Claim 與下游連接。找不到不等於已刪除。
+
+時間直接取已凍結 Beta 的段落起訖，不宣稱逐字對齊。若日後實作 apply，須使用此精確
+preview 的來源、記錄版本與實際寫集，走既有 transaction／ChangeSet／歷史及回讀；
+未通過內容 refresh 的 Claim 不得因此取得新資格。生產消費端排除刪除證據、撤銷舊資格及
+CVP／論證層接續須在真正 apply 前完成驗證；本 dry-run 不宣稱那些寫入或下游移植已完成。
+
+## 2. 來源與範圍
 
 每次指定現有 `source_id`、確切講道 ID、Beta 根目錄、固定輸出 root 及原始負責人指示。
 重跑沿用同一 root、清單、來源、policy 與普通 Update action，不換 root 重置預算。
@@ -17,7 +55,7 @@
 不證明新引文位置。保留物理段落 ID、空白／全刪除段落與小標題，從 sidecar 取得確切時間。
 人工校對狀態不由此流程更改，也不因 AI 處理而冒充人工通過。
 
-## 2. 來源版本登記
+## 3. 來源版本登記
 
 `register --execute` 使用共同 store 的 plan/apply、版本 CAS、ChangeSet 及歷史，
 只更新該 SourceDocument 的來源版本與內部不可變快照位置。
@@ -28,7 +66,7 @@ ChangeSet 前後雜湊與當前行恢復回執，不重複寫入。
 來源版本改變後舊 Claim 資格不得充作新版本通過。歷史 action、模型答覆、預算和人工作出的
 決定均保留；不得將一個舊的未知呼叫重新發出。新版本維護須有這次的明確指示。
 
-## 3. 自動審查與修訂
+## 4. 另行啟動的內容審查與修訂
 
 `prepare-unit --execute` 接既有 `claim_management_intake.prepare` 的固定同源小組，
 `run-unit --execute` 接既有 batch、Update、共用模型容量與持久呼叫帳。
@@ -77,7 +115,7 @@ Evidence 而留下問題的舊引用。被保護、缺失或跨來源的問題�
 檢查。已通過的答覆若停在程式提交門檻，修復後以既有 returned-review recovery 核驗
 並接續原答覆，保留原始 SHA、模型消耗及實際寫集，不為純程式修復重送內容審查。
 
-## 4. 回讀與下游交接
+## 5. 回讀與下游交接
 
 `verify --execute` 消費現有當前資格，另外核對實際有效正文中的引用，不建立第二套批准。
 原分母每條都有保留、更新、替代、退役或未完成去向；新建項另列。

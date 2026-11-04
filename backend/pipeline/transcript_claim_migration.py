@@ -299,6 +299,7 @@ def prepare_unit(store, root, index):
 def run_unit(store, root, index, *, capacity):
     from backend.pipeline import claim_management_batch as batch
     root = Path(root).resolve();m = load(root)
+    assert_refresh_enabled(root)
     prepared = prepare_unit(store, root, index)
     if prepared.get('excluded'):
         return {'status': 'paused', 'excluded': prepared['excluded']}
@@ -309,6 +310,11 @@ def run_unit(store, root, index, *, capacity):
     from backend.pipeline.claim_refresh_handoff import inspect
     result = inspect(batch_root, store=store, check_completion=True)
     return {'group': m['groups'][index], 'result': result}
+
+
+def assert_refresh_enabled(root):
+    if (Path(root)/'refresh-stopped.json').exists():
+        raise ValueError('owner stopped model refresh; evidence dry-run only')
 
 
 def current_unit_prepared(store, root, index, prepared):
@@ -403,6 +409,7 @@ def resume_rejected_unit(store, root, index):
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
     root=Path(root).resolve();m=load(root)
+    assert_refresh_enabled(root)
     unit=root/'units'/f'{index:03d}'
     if (unit/'preflight-repair.json').exists():unit=unit/'source-epoch-preflight-repair'
     prepared=current_unit_prepared(store,root,index,read(unit/'prepared.json'))
