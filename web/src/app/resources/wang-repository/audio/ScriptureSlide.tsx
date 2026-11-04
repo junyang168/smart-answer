@@ -45,7 +45,7 @@ export type SlidePoint = {
  */
 const cache = new Map<string, Promise<{ reference: string; passages: Passages }>>();
 
-function load(slug: string) {
+export function load(slug: string) {
   const hit = cache.get(slug);
   if (hit) return hit;
   const pending = (async () => {
@@ -60,7 +60,7 @@ function load(slug: string) {
 }
 
 /** 接口回的是 HTML 片段（`<p>`、`<br/>`、`[18]` 这样的节号）。幻灯只要字。 */
-function plain(html: string | undefined) {
+export function plain(html: string | undefined) {
   if (!html) return "";
   return html
     .replace(/<br\s*\/?>/gi, " ")

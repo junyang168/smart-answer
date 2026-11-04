@@ -1245,6 +1245,41 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     return index
 
 
+def _chapter_slides(
+    whole_chapter: Any,
+    record: dict[str, Any],
+    slides_record: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """存档的投影片排进各段：从第一个片段开始的时刻换上，经文在读到的时刻出现。"""
+
+    from backend.api.scripture import format_chinese_reference
+    from backend.pipeline import chapter_material, chapter_slides
+
+    pieces = {piece["id"]: piece for piece in record["pieces"]}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for slide in slides_record["slides"]:
+        own = [pieces[piece_id] for piece_id in slide["pieces"]]
+        section = chapter_material.section_of(whole_chapter, slide["verses"][0])
+        if section is None:
+            continue
+        out.setdefault(section, []).append({
+            "at": own[0]["start"],
+            "seconds": sum(piece["end"] - piece["start"] for piece in own),
+            "title": slide["title"],
+            "points": slide["points"],
+            "verses": slide["verses"],
+            "scriptures": [
+                {
+                    "at": chapter_slides.at_of(pieces[item["piece"]], item["slug"]),
+                    "scripture": item["slug"],
+                    "label": format_chinese_reference(item["slug"]),
+                }
+                for item in slide["scriptures"]
+            ],
+        })
+    return out
+
+
 def _chapter_sections(
     whole_chapter: Any,
     *,
@@ -1267,7 +1302,7 @@ def _chapter_sections(
     节，「应用」也看片段。
     """
 
-    from backend.pipeline import chapter_exposition
+    from backend.pipeline import chapter_exposition, chapter_slides
 
     by_lecture = {
         str(document.get("transcript_id") or ""): (source_id, document)
@@ -1293,7 +1328,27 @@ def _chapter_sections(
             # 没有存档、或逐字稿变了：这一堂不上页面，页面上说明缺了哪一堂。
             missing.append(lecture)
             continue
+        # 有投影片的，片段归哪一段按它所在投影片的经节：（二）1 开头讲登山宝训
+        # 结构的三分半是一张投影片，不该因为最后一个片段提到 5:13 就被拆去 5:13-16。
+        slides_record = chapter_slides.load_record(data_base_dir, whole_chapter.passage, lecture)
+        if slides_record:
+            slide_verses = {
+                piece_id: slide["verses"]
+                for slide in slides_record["slides"]
+                for piece_id in slide["pieces"]
+            }
+            record = {
+                **record,
+                "decisions": [
+                    {**decision, "verses": slide_verses.get(decision["id"], decision.get("verses"))}
+                    if decision.get("keep") else decision
+                    for decision in record["decisions"]
+                ],
+            }
         lecture_rows = chapter_exposition.lecture_rows(whole_chapter, record)
+        slides_by_section = (
+            _chapter_slides(whole_chapter, record, slides_record) if slides_record else None
+        )
 
         # 这一堂的主张：落在哪个保留片段，就讲那个片段的经节。
         kept_pieces = [
@@ -1351,8 +1406,24 @@ def _chapter_sections(
                         return piece["kind"]
                 return ""
 
-            judgements = []
-            for mark in judgement_during(spans, kept, verses, provenance_by_section.get(section, {})):
+            if slides_by_section is not None:
+                # 投影片：模型读逐字稿写的要点，和他读到的经文。
+                slides = slides_by_section.get(section, [])
+                judgements = [
+                    {
+                        "at": slide["at"],
+                        "judgement": slide["title"],
+                        "seconds": slide["seconds"],
+                        "scripture": slide["verses"][0] if slide["verses"] else "",
+                        "points": [],
+                        "application": False,
+                    }
+                    for slide in slides
+                ]
+            else:
+                slides = None
+                judgements = []
+            for mark in ([] if slides is not None else judgement_during(spans, kept, verses, provenance_by_section.get(section, {}))):
                 mark = {**mark, **claim_points(mark, claims, steps, fragments)}
                 mark["application"] = kind_at(mark["at"]) == "應用"
                 if not mark.get("scripture"):
@@ -1370,6 +1441,7 @@ def _chapter_sections(
                 "media_duration": sermon["media_duration"],
                 "stretches": value["stretches"],
                 "judgements": judgements,
+                **({"slides": slides} if slides is not None else {}),
                 "spoken": spoken_during(kept, sermon),
                 "readings": [
                     {"at": at, "scripture": slug}

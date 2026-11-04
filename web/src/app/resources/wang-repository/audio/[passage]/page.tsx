@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import ScriptureSlide, { type OriginalLanguageEvent, type SlidePoint } from "../ScriptureSlide";
+import ChapterSlide, { type ChapterSlideData } from "../ChapterSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -73,6 +74,8 @@ type Sermon = {
   /** 他念到某一节的时刻。念出来的比报出来的准。 */
   readings: { at: number; scripture: string }[];
   original_language_events: OriginalLanguageEvent[];
+  /** 按章页面：模型读逐字稿写的投影片。有它就不用 Claim 拼的幻灯。 */
+  slides?: ChapterSlideData[];
   seconds: number;
   left_out_seconds?: number;
 };
@@ -513,6 +516,11 @@ export default function OriginalAudioPage() {
                           leftOutHere.reasons?.[0]}
                       </p>
                     </div>
+                  ) : sermon.slides ? (
+                    (() => {
+                      const slide = [...sermon.slides].reverse().find((item) => item.at <= seconds) ?? sermon.slides[0];
+                      return slide ? <ChapterSlide slide={slide} seconds={seconds} /> : null;
+                    })()
                   ) : sermon.media_kind === "audio" && (
                     <ScriptureSlide
                       slug={verseAt(sermon, seconds, passage)}
