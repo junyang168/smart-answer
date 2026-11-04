@@ -32,6 +32,20 @@ def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
+def pending_timing_ids(rows,context):
+    from backend.pipeline.source_projection import live_text
+    timing=context.get('timing_quality') or {}
+    if not timing or timing.get('status')=='qualified':return []
+    states=timing.get('paragraph_states') or {}
+    active=[str(p['index']) for p in rows if p.get('type')!='subtitle' and live_text(p.get('text','')).strip()]
+    missing=[pid for pid in active if states.get(pid,{}).get('status')!='qualified']
+    if missing:return missing
+    bad=[pid for pid,s in states.items() if s.get('status')!='qualified']
+    known={str(p['index']) for p in rows}
+    if timing.get('status')=='withheld' and bad and all(pid in known and pid not in active for pid in bad):return []
+    return ['unresolved_timing_quality']
+
+
 def read(path, default=None):
     return json.loads(path.read_bytes()) if path.exists() else copy.deepcopy(default)
 
@@ -90,6 +104,8 @@ class ReviewStore:
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / "workflow.lock").open("a+b") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
+            if (folder / "production-link.json").exists():
+                raise ReviewError(409, "此稿已移交正式資料，請重新載入編輯頁；本機修改仍保留")
             self.recover(item)
             yield
 
@@ -609,9 +625,9 @@ class ReviewStore:
                 raise ReviewError(403, "沒有發佈權限")
             rows, c = self.load(item)
             self.version(rows, c, request.get("version"))
-            timing=c.get('timing_quality') or {}
-            if timing and timing.get('status')!='qualified':
-                count=sum(v.get('status')!='qualified' for v in timing.get('paragraph_states',{}).values())
+            pending_timing=pending_timing_ids(rows,c)
+            if pending_timing:
+                count=len(pending_timing)
                 raise ReviewError(409,f'還有 {count} 段時間邊界尚未通過原聲核對，不能發佈。')
             missing = []
             for p in rows:

@@ -44,7 +44,7 @@ def authenticated_actor(request: Request, body: bytes = b""):
     return actor
 
 
-def create_review_router(root: Path, *, beta_owner: str | None = None, role_root: Path | None = None, api_base="/api/sc_api"):
+def create_review_router(root: Path, *, beta_owner: str | None = None, role_root: Path | None = None, api_base="/api/sc_api", production_root: Path | None = None):
     class PrivateReviewRoute(APIRoute):
         def get_route_handler(self):
             handler = super().get_route_handler()
@@ -72,6 +72,26 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
         route_class=PrivateReviewRoute if (beta_owner or role_root is not None) else APIRoute,
     )
     store = ReviewStore(root, public_api_base=api_base + "/review_public", permission_root=role_root)
+
+    default_store = store
+
+    def store_for(item):
+        from .transcript_review import read, file_hash
+        marker = read(default_store.folder(item) / "production-link.json")
+        if marker is None:
+            return default_store
+        if (production_root is None or marker.get("schema_version") != "transcript-production-link.v1"
+                or marker.get("item") != item
+                or marker.get("production_root") != str(Path(production_root).resolve())):
+            raise ReviewError(503, "正式稿件移交設定不一致，請聯絡管理員")
+        target = ReviewStore(Path(production_root), permission_root=role_root,
+            public_api_base="/api/sc_api/review_public")
+        receipt = target.folder(item) / "beta-promotion.json"
+        value = read(receipt, {})
+        if (file_hash(receipt) != marker.get("receipt_sha256")
+                or value.get("item") != item or not target.enabled(item)):
+            raise ReviewError(503, "正式稿件移交尚未完成")
+        return target
 
     async def payload_from(request):
         try:
@@ -110,13 +130,16 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
         rows = json.loads((store.root / "config/sermon.json").read_text())
         items = []
         for row in rows:
-            if store.enabled(row["item"]):
-                store.require(actor, row["item"])
-                items.append({key: row.get(key) for key in ("item", "title", "assigned_to_name", "status")})
+            selected = call(lambda: store_for(row["item"]))
+            if selected.enabled(row["item"]):
+                selected.require(actor, row["item"])
+                _, current = selected.meta(row["item"])
+                items.append({key: current.get(key) for key in ("item", "title", "assigned_to_name", "status")})
         return items
 
     @router.get("/review_mode/{item}")
     def mode(item: str):
+        store = call(lambda: store_for(item))
         # Public capability probe only; no identity, source paths or draft text.
         def result():
             store.meta(item)
@@ -138,10 +161,12 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_candidate/{item}")
     def candidate(item: str, request: Request):
+        store = call(lambda: store_for(item))
         return call(lambda: store.candidate(authenticated_actor(request), item))
 
     @router.post("/review_candidate/{item}")
     async def candidate_command(item: str, request: Request):
+        store = call(lambda: store_for(item))
         raw = await request.body()
         actor = authenticated_actor(request, raw)
         payload = await payload_from(request)
@@ -151,6 +176,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_document/{item}")
     def document(item: str, request: Request):
+        store = call(lambda: store_for(item))
         actor = authenticated_actor(request)
         doc = call(lambda: store.document(actor, item))
         access = {
@@ -169,6 +195,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.patch("/review_document/{item}")
     async def update(item: str, request: Request):
+        store = call(lambda: store_for(item))
         raw = await request.body()
         actor = authenticated_actor(request, raw)
         payload = await payload_from(request)
@@ -178,6 +205,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.post("/review_document/{item}/recover_pending")
     async def recover_pending(item: str, request: Request):
+        store = call(lambda: store_for(item))
         from .transcript_recovery import prepare_recovery
         raw = await request.body()
         actor = authenticated_actor(request, raw)
@@ -188,6 +216,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.post("/review_document/{item}/heading_suggestions")
     async def heading_suggestions(item: str, request: Request):
+        store = call(lambda: store_for(item))
         from starlette.concurrency import run_in_threadpool
         from backend.pipeline.subtitle_generation import generate_subtitles, SubtitleGenerationError
         from backend.pipeline.source_projection import spoken_source_rows
@@ -216,6 +245,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.post("/review_document/{item}/{action}")
     async def command(item: str, action: str, request: Request):
+        store = call(lambda: store_for(item))
         raw = await request.body()
         actor = authenticated_actor(request, raw)
         payload = await payload_from(request)
@@ -229,30 +259,34 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_document/{item}/baseline")
     def baseline(item: str, request: Request):
+        store = call(lambda: store_for(item))
         def result():
             from .transcript_review import read
 
             with store.lock(item):
                 store.require(authenticated_actor(request), item)
                 store.load(item)
-                return read(root / "script_patched" / f"{item}.json", [])
+                return read(store.root / "script_patched" / f"{item}.json", [])
 
         return call(result)
 
     @router.get("/review_document/{item}/history")
     def history(item: str, request: Request, before: int = 10**12):
+        store = call(lambda: store_for(item))
         return call(
             lambda: store.history(authenticated_actor(request), item, before=before)
         )
 
     @router.get("/review_document/{item}/revisions/{revision}")
     def revision(item: str, revision: int, request: Request):
+        store = call(lambda: store_for(item))
         return call(
             lambda: store.revision(authenticated_actor(request), item, revision)
         )
 
     @router.get("/review_document/{item}/operations/{operation_id}")
     def operation(item: str, operation_id: str, request: Request):
+        store = call(lambda: store_for(item))
         actor = authenticated_actor(request)
 
         def result():
@@ -264,6 +298,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_document/{item}/assets/{asset_id}")
     def asset(item: str, asset_id: str, request: Request):
+        store = call(lambda: store_for(item))
         path = call(
             lambda: store.asset_path(item, asset_id, actor=authenticated_actor(request))
         )
@@ -273,6 +308,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_document/{item}/media")
     def media(item: str, request: Request):
+        store = call(lambda: store_for(item))
         actor = authenticated_actor(request)
 
         def path():
@@ -296,6 +332,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_public/{item}/assets/{asset_id}")
     def public_asset(item: str, asset_id: str):
+        store = call(lambda: store_for(item))
         return FileResponse(
             call(lambda: store.asset_path(item, asset_id, public=True)),
             media_type="image/png",
@@ -303,6 +340,7 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
 
     @router.get("/review_public/{item}")
     def public_document(item: str):
+        store = call(lambda: store_for(item))
         def result():
             store.meta(item)
             with store.lock(item):

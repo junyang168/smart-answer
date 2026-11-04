@@ -70,7 +70,7 @@ def relation_endpoint_instruction():
 
 
 def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None,
-            legacy_ai_findings_direction=None):
+            legacy_ai_findings_direction=None, source_epoch_reassessment=None, include_question_evidence=False):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -115,6 +115,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         if not isinstance(legacy_ai_findings_direction, str) or not legacy_ai_findings_direction.strip():
             raise ValueError('legacy AI finding refresh requires explicit owner direction')
         intent['legacy_ai_findings_direction'] = legacy_ai_findings_direction
+    if source_epoch_reassessment is not None:
+        check_binding(source_epoch_reassessment)
+        intent['source_epoch_reassessment'] = source_epoch_reassessment
+    if include_question_evidence:
+        intent['include_question_evidence'] = True
     immutable(root / 'intake.json', intent)
     store = store if store is not None else PostgresKnowledgeStore()
     receipt = root / 'prepared.json'
@@ -131,6 +136,7 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     excluded = {}
     sampling_candidates = set()
     legacy_markers = {}
+    epoch_markers = {}
     for cid in ids:
         state = store.get_record_state('claims', cid)
         if state is None or state['retired']:
@@ -144,6 +150,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                     if proof := marker(cursor, cid, state):
                         legacy_markers['claims/' + cid] = proof
                         sampling = True
+            if not sampling and source_epoch_reassessment is not None:
+                from backend.pipeline.claim_source_epoch_reassessment import marker as epoch_marker
+                with store.connect() as conn, conn.cursor() as cursor:
+                    if proof := epoch_marker(cursor,cid,state,source_epoch_reassessment):
+                        epoch_markers['claims/'+cid]=proof;sampling=True
             if sampling:sampling_candidates.add(cid)
             else:excluded[cid] = {'status': 'paused', 'reason': 'human_hold'}
     jobs, inputs = [], []
@@ -226,16 +237,41 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
                 raise ValueError('Claim creation Question must belong to the target own source: ' + key)
             request.permissions.append(cm.source.Permission(collection='questions',
                 object_id=key.split('/', 1)[1], fields=['answer_claim_ids']))
+        required=[]
+        if include_question_evidence:
+            # Question text and its literal source are one maintenance unit.
+            # Neither promotes another answer Claim to a write/review target.
+            linked={key for key,state in before.items() if key.startswith('questions/')
+                and not state['retired'] and set(state['payload'].get('answer_claim_ids',[])) & set(members)}
+            for key in sorted(linked):
+                question=before[key]['payload']
+                fragments=set(question.get('source_fragment_ids') or [])
+                if question.get('source_fragment_id'):fragments.add(question['source_fragment_id'])
+                required.extend([key,*[cm.source.key('source_fragments',fid) for fid in sorted(fragments)]])
+            required=sorted(set(required))
+            granted_by_key={p.key:p for p in request.permissions}
+            for key in required:
+                state=before.get(key)
+                if (not state or state['retired'] or state['payload'].get('review_status') in cm.HELD
+                        or cm.own_source_ids(state['payload'],payloads)!=own):
+                    raise ValueError('required Question evidence is missing, held or belongs to another source: '+key)
+                col,oid=cm.source.split_key(key)
+                granted_by_key[key]=cm.source.Permission(collection=col,object_id=oid,fields=sorted(FIELDS[col]))
+            request.permissions=list(granted_by_key.values())
         authorization = {'schema_version': cm.VERSION, 'authorized_by': 'owner',
             'authorization_quote': instruction, 'human_content_approval': False,
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
-            'policy': policy_binding, 'required_maintenance_keys': [],
+            'policy': policy_binding, 'required_maintenance_keys': required,
             'review_questions': [instruction]}
         reopened = {key: proof for key, proof in legacy_markers.items() if key in request.target_keys}
         if reopened:
             authorization['legacy_ai_findings_refresh'] = {
                 'authorization_quote': legacy_ai_findings_direction, 'claims': reopened}
             authorization['review_questions'].extend(before[key]['payload']['review_note'] for key in reopened)
+        epoch = {key:proof for key,proof in epoch_markers.items() if key in request.target_keys}
+        if epoch:
+            authorization['source_epoch_ai_reassessment']={'epoch':source_epoch_reassessment,'claims':epoch}
+            authorization['review_questions'].extend(before[key]['payload']['review_note'] for key in epoch)
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:

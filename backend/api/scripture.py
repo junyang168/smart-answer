@@ -722,6 +722,24 @@ def _spoken_book(token: Optional[str]) -> Optional[str]:
     return None
 
 
+def spoken_chapters(text: str) -> list[tuple[int, str]]:
+    """Literal spoken book/chapter mentions, including those without a verse.
+
+    Shares the book aliases and numeral parser with spoken_references; it does
+    not invent a verse or infer a reference from a quotation's content.
+    """
+    found: list[tuple[int, str]] = []
+    carried_book: Optional[str] = None
+    for match in _SPOKEN_REFERENCE_PATTERN.finditer(text or ""):
+        book = _spoken_book(match.group("book"))
+        if book:
+            carried_book = book
+        chapter = chinese_number(match.group("chapter"))
+        if carried_book and chapter:
+            found.append((match.start(), f"{carried_book}-{chapter}"))
+    return found
+
+
 def spoken_references(text: str) -> list[tuple[int, str]]:
     """教授在这段话里念到的经文，按出现次序返回 `(第几个字, slug)`。
 
