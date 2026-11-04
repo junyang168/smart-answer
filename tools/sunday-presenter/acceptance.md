@@ -1,5 +1,47 @@
 # Sunday Presenter acceptance evidence
 
+## #643 Remote viewing stability and compact controls — 0.5.3 (2026-11-03)
+
+After updating to 0.5.2, the owner confirmed Pro/Air pairing over iPhone Personal
+Hotspot works, but reported a later interruption which recovered after clicking.
+This report establishes hotspot pairing; duration and full service acceptance
+remain open. The precise cause of that physical interruption was not logged.
+
+A deterministic regression demonstrates two defects in the previous viewer:
+a connected still slide with no additional decoded frames is treated as failed
+after eight seconds, and even a brief ICE disconnection immediately tears down
+the session. Both counterexamples fail against 0.5.2 and pass against 0.5.3.
+The viewer now retains still slides, automatically resumes paused video, allows
+five seconds for transient ICE recovery, and still retries persistent failure
+or a 25-second first-frame timeout. The native heartbeat uses common run-loop
+modes; a scoped user-initiated/display-awake activity is held only while live
+playback is visible, and released on disconnect, switch, close, minimize or quit.
+This reduces idle scheduling/sleep risks without claiming to fix every hotspot
+drop. Apple references: [activity options](https://developer.apple.com/documentation/foundation/processinfo/activityoptions)
+and [primary fullscreen](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/fullscreenprimary).
+
+The large heading is removed. Video fills the upper window, with host/status,
+pairing (only when needed), slide controls and Full Screen below. Native primary
+fullscreen replaces the old auxiliary floating-window configuration; the button,
+green window control and Control-Command-F are available.
+
+
+Validation on Apple Silicon macOS 26.5.2: 31 tests pass; both native targets
+build. Native fullscreen entry/exit passes, the viewer occupies more than 85%
+of content height (about 89% at the default size), controls are below the viewer,
+and the display-awake activity is present during live playback. A three-minute
+actual OUTPUT → native WebKit stream left completely untouched retained the same
+session. The subsequent 20-switch, native button/viewer-arrow, privacy stop,
+source recovery and reconnect smoke checks also pass. Activity creation/release also passes the compiled native regression.
+Visual inspection confirms the compact footer and removed heading.
+
+The Remote-only universal 0.5.3 ZIP passes integrity and deep/strict signature
+checks; the extracted media matches source and the executable includes x86_64
+and arm64. ZIP SHA256:
+`de11f394cd50bbf1f5f176b123a502df06ff04f56230d37fa02829d5a3bd0a7e`.
+Presenter 0.5.1 remains compatible; no website publication or host update.
+Physical hotspot idle duration and whole-service reliability remain pending.
+
 ## #643 switching Presenter hosts — Remote 0.5.2 (2026-11-03)
 
 The owner confirmed two physical Macs connected on the same home network. When

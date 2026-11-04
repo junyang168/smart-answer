@@ -1,10 +1,9 @@
 const video = document.querySelector('video'), message = document.querySelector('#message');
-let current, lastFrames = 0, lastProgress = 0;
+let current;
 const notify = value => window.webkit.messageHandlers.video.postMessage(value);
 function stop(text = '等待主電腦播放 PPT') {
   const old = current; current = null;
-  old?.pc?.close(); video.srcObject = null; document.body.classList.remove('receiving'); message.textContent = text;
-  lastFrames = 0; lastProgress = 0;
+  clearTimeout(old?.disconnectTimer); old?.pc?.close(); video.srcObject = null; document.body.classList.remove('receiving'); message.textContent = text;
 }
 async function gathered(pc) {
   if (pc.iceGatheringState === 'complete') return;
@@ -25,7 +24,7 @@ window.remoteVideo = {
     if (value.status === 'failed') { stop(value.error || '畫面連線失敗'); notify({ op: 'failed', sessionId: value.sessionId, error: value.error || '畫面連線失敗' }); return; }
     if (!value.offer || current?.id === value.sessionId) return;
     stop('正在連接 PPT 畫面…');
-    const item = { id: value.sessionId, pc: null };
+    const item = { id: value.sessionId, pc: null, started: performance.now(), receivedFrame: false };
     try {
       item.pc = new RTCPeerConnection({ iceServers: [] }); current = item;
       item.pc.ontrack = event => {
@@ -34,9 +33,15 @@ window.remoteVideo = {
         video.srcObject = new MediaStream([event.track]); video.play().catch(() => {});
       };
       item.pc.onconnectionstatechange = () => {
-        if (current === item && ['failed', 'disconnected', 'closed'].includes(item.pc.connectionState)) {
+        if (current !== item) return;
+        clearTimeout(item.disconnectTimer);
+        const failed = () => {
+          if (current !== item) return;
           stop('畫面已斷線，正在重連…'); notify({ op: 'failed', sessionId: item.id });
-        }
+        };
+        if (['failed', 'closed'].includes(item.pc.connectionState)) failed();
+        // ICE may recover from a short hotspot interruption without renegotiation.
+        else if (item.pc.connectionState === 'disconnected') item.disconnectTimer = setTimeout(failed, 5000);
       };
       await item.pc.setRemoteDescription(value.offer);
       if (item.pc.getTransceivers().length !== 1 || item.pc.getTransceivers()[0].receiver.track.kind !== 'video') throw Error('Video only');
@@ -52,8 +57,13 @@ setInterval(async () => {
     const stats = [...(await item.pc.getStats()).values()]; if (current !== item) return;
     const inbound = stats.find(s => s.type === 'inbound-rtp' && (s.kind === 'video' || s.mediaType === 'video'));
     const frames = inbound?.framesDecoded || 0;
-    if (frames > lastFrames) { lastFrames = frames; lastProgress = performance.now(); document.body.classList.add('receiving'); }
-    if (lastProgress && performance.now() - lastProgress > 8000) { stop('畫面接收中斷，正在重連…'); notify({ op: 'failed', sessionId: item.id }); return; }
+    if (frames > 0) { item.receivedFrame = true; document.body.classList.add('receiving'); }
+    // A still slide may produce no new frames. ICE and native authenticated
+    // polling detect lost transport; frame-count inactivity is not a disconnect.
+    if (!item.receivedFrame && performance.now() - item.started > 25000) {
+      stop('畫面連線未完成，正在重試…'); notify({ op: 'failed', sessionId: item.id }); return;
+    }
+    if (video.srcObject && video.paused) video.play().catch(() => {});
     notify({ op: 'stats', sessionId: item.id, frames, width: video.videoWidth, height: video.videoHeight,
       audio: item.pc.getReceivers().some(r => r.track.kind === 'audio'),
       candidates: stats.filter(s => s.type === 'candidate-pair' && s.nominated).map(s => ({ local: stats.find(c => c.id === s.localCandidateId)?.candidateType, remote: stats.find(c => c.id === s.remoteCandidateId)?.candidateType })) });

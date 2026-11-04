@@ -34,6 +34,14 @@ code, and late replies from the previous connection cannot change the new one.
 The host selector remains available after connecting. This Remote-only update
 works with Presenter 0.5.1; only the most recently paired host is remembered.
 
+Remote 0.5.3 places the PPT above a compact bottom control area, removes the
+large heading, and adds a Full Screen button plus Control-Command-F. The window
+now uses macOS primary full-screen behavior. Playback keeps the Mac awake only
+while a live presentation is visible, and the heartbeat runs in common run-loop
+modes. A still slide no longer triggers reconnect merely because decoded frames
+stop increasing; brief ICE disconnections get five seconds to recover, while
+persistent failure and first-frame timeout still reconnect automatically.
+
 This is the first Phase 2 milestone, not a broadcast release. Wireless microphone
 input, recording, fixed-key YouTube streaming and scheduling remain unimplemented.
 The installed/released 0.4.0 apps and website downloads are unchanged.

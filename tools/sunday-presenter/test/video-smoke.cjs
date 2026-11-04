@@ -18,7 +18,7 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
         let text = ''; res.on('data', chunk => { text += chunk; }); res.on('end', () => resolve(JSON.parse(text)));
       }); req.on('error', reject); req.end(JSON.stringify({ code: remote.snapshot().code }));
   });
-  let child, childError, latest, samples = [], buffer = '', screenshot = false;
+  let child, childError, latest, samples = [], buffer = '', screenshot = false, layouts = [];
   const wait = async (check, label, ms = 30000) => {
     const end = Date.now() + ms;
     while (Date.now() < end) {
@@ -45,6 +45,7 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
         const line = buffer.slice(0, i); buffer = buffer.slice(i + 1);
         try {
           const value = JSON.parse(line);
+          if (value.op === 'layout') layouts.push(value);
           if (value.op === 'stats') latest = value;
           if (value.op === 'sample') samples.push(value.value);
           if (value.op === 'snapshot') screenshot = value.ok;
@@ -67,6 +68,31 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
       assert.equal((await hostVideo.stats()).state, 'stopped');
       assert.throws(() => hostVideo.request({ op: 'start', clientId: 'test-viewer-12345' }), /stopped/);
       console.log('VIDEO ACTIVE SHUTDOWN PASS'); return;
+    }
+    const layout = async () => {
+      const count = layouts.length; child.stdin.write('layout\n');
+      await wait(() => layouts.length > count, 'native layout'); return layouts.at(-1);
+    };
+    const normalLayout = await layout();
+    assert.ok(normalLayout.viewerHeight / normalLayout.height > 0.85, JSON.stringify(normalLayout));
+    assert.ok(normalLayout.controlsTop <= normalLayout.viewerBottom);
+    assert.equal(normalLayout.awake, true);
+    child.stdin.write('fullscreen\n');
+    await wait(async () => (await layout()).fullscreen && layouts.at(-1).fullscreenTitle === '退出全螢幕', 'native fullscreen enters');
+    assert.ok(latest.frames > 0);
+    child.stdin.write('fullscreen\n');
+    await wait(async () => !(await layout()).fullscreen && layouts.at(-1).fullscreenTitle === '全螢幕', 'native fullscreen exits');
+    if (process.argv.includes('--video-idle-smoke')) {
+      // Leave the still slide and client untouched for three real minutes.
+      const until = Date.now() + 180000;
+      while (Date.now() < until) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (childError) throw Error(childError);
+        assert.equal(hostVideo.sessions.current?.id, firstSession);
+      }
+      assert.equal(latest.sessionId, firstSession);
+      assert.equal((await layout()).awake, true);
+      console.log('VIDEO UNTOUCHED 180 SECOND PASS');
     }
     const steps = await sermon.view.webContents.executeJavaScript('steps'); child.stdin.write('right-button\n');
     await wait(async () => await sermon.view.webContents.executeJavaScript('steps') === steps + 1, 'native Remote button');
@@ -91,6 +117,8 @@ exports.run = async ({ hostVideo, stage, act, output, worship, sermon, evidence 
       macOS: require('node:child_process').execFileSync('sw_vers', ['-productVersion'], { encoding: 'utf8' }).trim(),
       nativeWebKitDecodedFrames: true, audioTracks: 0, selectedCandidates: latest.candidates,
       colors: { sermon: sermonPixel, worship: pixel }, stableSessionAcross20DeckSwitches: true,
+      compactBottomControls: true, nativeFullscreenRoundTrip: true, idleAwakeAssertion: true,
+      untouchedSeconds: process.argv.includes('--video-idle-smoke') ? 180 : 0,
       nativeSlideControl: true, nativeButton: true, nativeArrowWithViewerFocused: true, preparationStopsCapture: true, sourceRecovery: true, viewerReconnect: true,
       minimizedStopsCapture: true, host: stats, physicalSecondMacAndHotspot: 'NOT TESTED', realOfficePPT: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'video-result.json'), JSON.stringify(result, null, 2)); console.log('VIDEO SMOKE PASS', result);

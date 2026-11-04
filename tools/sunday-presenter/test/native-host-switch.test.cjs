@@ -79,6 +79,10 @@ remote.selectComputer()
 RunLoop.main.run(until: Date().addingTimeInterval(0.4))
 precondition(!staleCompleted, "late response from previous host must not mutate new connection")
 remote.session.invalidateAndCancel()
+remote.setViewingActive(true)
+precondition(remote.viewingActivity != nil, "visible live presentation holds an activity")
+remote.setViewingActive(false)
+precondition(remote.viewingActivity == nil, "stopped presentation releases its activity")
 print("native host-switch regression passed")
 `;
     const file = path.join(temp, 'main.swift');

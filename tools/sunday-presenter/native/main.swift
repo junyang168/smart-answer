@@ -18,6 +18,17 @@ if CommandLine.arguments.contains("--video-probe") {
                         NSApp.postEvent(event, atStart: false)
                     }
                 case "left": delegate.back()
+                case "fullscreen": delegate.fullScreen.performClick(nil)
+                case "layout":
+                    delegate.window.contentView?.layoutSubtreeIfNeeded()
+                    let content = delegate.window.contentView!
+                    let viewer = delegate.videoView!.webView.frame
+                    emitJSON(["op": "layout", "fullscreen": delegate.window.styleMask.contains(.fullScreen),
+                              "width": content.bounds.width, "height": content.bounds.height,
+                              "viewerHeight": viewer.height, "viewerBottom": viewer.minY,
+                              "controlsTop": delegate.next.convert(delegate.next.bounds, to: content).maxY,
+                              "awake": delegate.viewingActivity != nil,
+                              "fullscreenTitle": delegate.fullScreen.title])
                 case "reconnect": delegate.resetVideo("測試重新連線")
                 case "diagnose": delegate.videoView?.webView.evaluateJavaScript("JSON.stringify({url:location.href,ready:document.readyState,body:document.body?.innerHTML,pc:typeof RTCPeerConnection,viewer:typeof window.remoteVideo,bridge:typeof window.webkit.messageHandlers.video,pcstate:typeof current !== 'undefined' ? current?.pc?.connectionState : null,answer:typeof current !== 'undefined' ? !!current?.pc?.localDescription : false})") { value, error in emitJSON(["op": "diagnose", "value": value ?? NSNull(), "error": error?.localizedDescription ?? ""]) }
                 case "sample": delegate.videoView?.webView.evaluateJavaScript("window.remoteVideo.sample()") { value, error in emitJSON(["op": "sample", "value": value ?? NSNull(), "error": error?.localizedDescription ?? ""]) }
