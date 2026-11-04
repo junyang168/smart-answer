@@ -91,6 +91,24 @@ def test_reference_cannot_hide_an_actual_required_audit_dependency(tmp_path):
         cm.audit_keys(request, records)
 
 
+def test_retired_shared_support_is_history_not_another_live_review_root(tmp_path):
+    request = reference_request(tmp_path, ['claims/REFERENCE'])
+    records = {'claims/'+cid: snapshot(cid) for cid in ['A', 'B', 'REFERENCE']}
+    records['source_documents/S'] = {'payload': {'source_id': 'S'}, 'retired': False}
+    for cid in ['A', 'B']:
+        records['claims/'+cid]['payload']['opposed_position_ids'] = ['OLD']
+    records['position_nodes/OLD'] = {'payload': {'position_id': 'OLD', 'title': 'old opposition'}, 'retired': True}
+    assert 'position_nodes/OLD' in cm.audit_keys(request, records)
+    assert 'claims/B' not in cm.audit_keys(request, records)
+    # Existing full Retire requests retain their frozen scope.
+    legacy_path = tmp_path / 'legacy'; legacy_path.mkdir()
+    legacy = reference_request(legacy_path)
+    assert 'claims/B' in cm.audit_keys(legacy, records)
+    # Active shared support still requires all of its real current owners.
+    records['position_nodes/OLD']['retired'] = False
+    assert 'claims/B' in cm.audit_keys(request, records)
+
+
 @pytest.mark.parametrize('concurrent_change', [False, True])
 @pytest.mark.parametrize('reference_source', ['S', 'T'])
 def test_retire_reference_is_pinned_but_not_reviewed_written_or_qualified(action, concurrent_change, reference_source):
@@ -156,3 +174,47 @@ def test_other_operations_cannot_import_retirement_reference_authority(action):
     authorize(request, {'retirement_reference_keys': ['claims/D']})
     with pytest.raises(ValueError, match='belongs only to Retire'):
         cm.load_authority(request)
+
+
+def test_legacy_two_source_targets_retire_sequentially_without_reviving_old_shared_position(action):
+    store, _, _, _, tmp_path, _ = action
+    other = tmp_path / 'old-note-source.json'
+    other.write_text(json.dumps({'script': [{'text': '甲是假设，不是断言。'}]}))
+    seed_claims(store, ['D'])
+    store.apply_plan(store.plan_package({'package_id': 'legacy-retired-position',
+        'source_documents': [{'source_id': 'T', 'source_type': 'notes_manuscript', 'title': 'old notes',
+            'source_path': str(other), 'source_file_sha256': binding(other)['file_sha256']}],
+        'claims': [{'claim_id': cid, 'statement': '甲是假设。', 'claim_type': 'exegesis',
+            'occurrences': [{'source_id': sid, 'anchors': []} for sid in ['S', 'T']],
+            'opposed_position_ids': ['P']} for cid in ['A', 'B']],
+        'position_nodes': [{'position_id': 'P', 'title': 'old opposition'}]}))
+    # Reproduce legacy data predating the dangling-reference guard. Normal
+    # retirement correctly refuses to create this historical inconsistency.
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET retired_at=now() WHERE collection='position_nodes' AND object_id='P'")
+    old_position = store.get_record_state('position_nodes', 'P')
+    request, output = operation_request(action, 'Retire', ['A', 'B'])
+    request.source_bindings['T'] = cm.source.FileBinding.model_validate(binding(other))
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent / 'wang_claim_management_opus_only_v1.json').read_text())
+    policy.budget.gpt_calls = policy.budget.opus_calls = 3
+    policy.budget.max_revisions = 2
+    policy_path = tmp_path / 'two-unit-retirement-policy.json'; policy_path.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(policy_path))
+    authorize(request, {'retirement_reference_keys': ['claims/D']})
+    def propose(packet):
+        target = packet['unit_request']['target_keys'][0]
+        assert {k for k in packet['before'] if k.startswith('claims/')} == {target}
+        assert packet['before']['position_nodes/P']['retired']
+        candidate = cm.existing_candidate(packet['before'])
+        disposition = next(d for d in candidate.dispositions if d.record_key == target)
+        disposition.action = 'retire'
+        disposition.reason = 'synthetic old duplicate with preserved reference teaching'
+        disposition.citations = [cm.Citation(source_id='S', paragraph_key='S0001', exact_quote='甲是假设，不是断言。')]
+        return candidate.model_dump(mode='json')
+    ports = SyntheticPorts(store, tmp_path, proposal=propose)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus', 'gpt', 'opus']
+    assert all(store.get_record_state('claims', cid)['retired'] for cid in ['A', 'B'])
+    assert store.get_record_state('position_nodes', 'P') == old_position
+    assert not store.claim_management_qualification('D')

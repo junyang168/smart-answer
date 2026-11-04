@@ -1084,6 +1084,9 @@ def legacy_audit_keys(request, before, candidate=None):
     remain transaction read pins and pending consumers, not Claim audit proofs.
     """
     roots = set(request.target_keys)
+    from backend.pipeline.claim_direct_scope import retirement_reference_keys
+    historical_leaves = (getattr(request, 'operation', None) == 'Retire'
+                         and bool(retirement_reference_keys(request)))
     from backend.pipeline.claim_joint_update import enabled, required_keys
     if enabled(request):
         roots.update(k for k in required_keys(request, strict=False) if k in before)
@@ -1132,6 +1135,12 @@ def legacy_audit_keys(request, before, candidate=None):
         payload = records.get(key)
         if payload is None:
             raise ValueError("Claim audit denominator has a missing dependency: " + key)
+        # New retirement comparisons keep already-retired, non-writable
+        # support as history. Its old consumers are not current review roots.
+        # Targets and explicit writes still retain their full reviewed scope,
+        # including their exact retired postimages on readback.
+        if historical_leaves and key not in roots and before.get(key, {}).get('retired'):
+            continue
         collection, _ = source.split_key(key)
         refs = domain_dependencies(collection, payload, records)
         refs.update(related.get(key, ()))
