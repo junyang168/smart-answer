@@ -268,6 +268,34 @@ def test_new_migration_unit_includes_question_and_quote_without_extra_claim_targ
     assert 'claims/C' not in grants
 
 
+@pytest.mark.parametrize('defect',[None,'missing_own_evidence','hidden_claim','unrelated_grant'])
+def test_question_quote_admission_uses_same_reachability_on_frozen_projection(case,defect):
+    from backend.pipeline import claim_management as cm,claim_joint_update as joint
+    store,_,root,_,_=case;m=prepare(case);migration.register(store,root)
+    store.rows['questions','Q']=state({'question_id':'Q','text':'問句','answer_claim_ids':['C'],'source_fragment_ids':['FQ']})
+    store.rows['source_fragments','FQ']=state({'fragment_id':'FQ','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'舊話。'})
+    store.rows['claim_relations','R']=state({'claim_relation_id':'R','from_id':'C','to_id':'D','relation_type':'supports'})
+    req=cm.Request(action_id='question-context',operation='Update',allowed_operations=['Update'],
+        target_keys=['claims/C'],source_bindings={'S':m['after']},policy=m['policy'],
+        authorization={'path':str(root/'context-auth.json'),'file_sha256':'0'*64},
+        permissions=[cm.source.Permission(collection='source_fragments',object_id='FQ',fields=['verbatim_excerpt'])])
+    auth={'schema_version':cm.VERSION,'authorized_by':'owner','authorization_quote':'修正問題引用',
+        'human_content_approval':False,'request':req.model_dump(mode='json',exclude={'authorization','policy'}),
+        'policy':m['policy'],'required_maintenance_keys':['source_fragments/FQ'],'review_questions':['核對問題引用']}
+    req.authorization=cm.source.FileBinding.model_validate(migration.immutable(root/'context-auth.json',auth))
+    before={cm.source.key(*key):cm.model_state(value) for key,value in store.rows.items()}
+    policy=cm.Policy.model_validate(migration.read(m['policy']['path']))
+    goal=cm.original_goal(req,before)
+    projected=deepcopy(goal['original_objects'])
+    assert 'claims/D' in projected and 'evidence_steps/ED' not in projected
+    if defect=='missing_own_evidence':projected.pop('evidence_steps/EC')
+    if defect=='hidden_claim':req.permissions.append(cm.source.Permission(collection='claims',object_id='D',fields=['statement']))
+    if defect=='unrelated_grant':req.permissions.append(cm.source.Permission(collection='source_fragments',object_id='FH',fields=['verbatim_excerpt']))
+    error=joint.admission_error(req,policy,projected,goal)
+    if defect:assert error is not None
+    else:assert error is None,error
+
+
 def test_real_sql_handoff_preserves_claims_and_uses_native_update(case,postgres_store):
     fake,beta,root,_,_=case
     package={'package_id':'synthetic-migration-native-fixture'}

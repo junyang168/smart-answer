@@ -179,7 +179,13 @@ def admission_error(request, policy, before, goal):
         # Inspect declared roots, without treating unused grants as new roots.
         from types import SimpleNamespace
         natural = request.model_copy(deep=True, update={'permissions': []})
-        reachable = set(cm.audit_keys(natural, before))
+        from backend.pipeline.claim_direct_scope import enabled as direct_enabled, scope as direct_scope
+        # Reachability is a read-only question. Hypothetical write consumers
+        # can demand a neighbour's private evidence which was never part of
+        # the real request or its frozen model frame. Actual write scopes and
+        # transaction consumer guards remain checked independently below.
+        reachable = (set(direct_scope(natural,before,include_write_context=False)['record_keys'])
+                     if direct_enabled(natural,policy) else set(cm.audit_keys(natural,before)))
         # A writable relation in that closure brings its other end into review,
         # so what review then shows is reachable too -- one hop: relations
         # granted beyond the closure do not extend it further (#459, P06-CL001:
