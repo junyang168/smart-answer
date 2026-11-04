@@ -67,14 +67,28 @@ requirement; this is not a passing recording. The stale Presenter-only screen
 entry was removed/re-added through System Settings for the final canonical
 `/Applications/Sunday Presenter.app`. Microphone consent had the same stale-signature
 failure; only this app's Microphone status was reset and a new prompt requested.
-The computer-use tool is prohibited from operating UserNotificationCenter, so
-owner consent is pending for the final installed real-PPT/microphone recording.
-The final controller is left open at the microphone consent request, with no
-recording running. Old app bundles are preserved under the owner's local state directory. No TCC
-database editing or system protection disable occurred.
+The computer-use tool is prohibited from operating UserNotificationCenter; the
+owner explicitly completed the fresh microphone consent. The final installed
+0.6.0 app then recorded the real Office slideshow and actual AudioPro X5 through
+the normal UI, using the Save dialog and Stop/Save button. The app showed active
+recording, live input level and growing file size. Two native Right presses
+advanced the real slideshow without stopping recording. Stop/Save visibly
+reported the final MP4, with no recording left running.
 
-Remaining: final installed-app mic consent/recording check, spoken microphone
-acceptance, whole-service duration, target MacBook/hotspot performance, and
+The actual clip is 33.518533 s / 10,153,997 bytes: H.264 1280×720 video and AAC
+48 kHz/stereo audio. Independent full decoding reports zero errors. Audio duration
+is 33.194042 s (about 325 ms shorter than video); decoded RMS is 0.003089 and peak
+0.137600. This is measured signal, not an intelligibility or acoustic-sync verdict.
+Extracted frames at 5 s and 27 s visibly contain different audience slides, with
+no controller/editor UI. QuickTime opens the file as a 34-second movie and plays
+it. Private evidence: `output/smoke/installed-recording-result.json` and
+`installed-real-ppt-5.png` / `installed-real-ppt-27.png` in the same ignored directory.
+The local real recording is in the owner's Movies folder; it was not uploaded.
+Old app bundles remain preserved under local state. No TCC database editing or
+system protection disable occurred.
+
+Remaining: spoken microphone/acoustic-sync acceptance, whole-service duration,
+target MacBook/hotspot performance, and
 YouTube/scheduling/standalone test-mic/mute features. A local two-minute file does
 not establish 90-minute drift/resource behavior or broadcast readiness.
 
