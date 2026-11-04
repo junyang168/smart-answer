@@ -280,7 +280,9 @@ def main():
             except BlockingIOError:
                 print('another_run_active')
                 return
-            run(cfg, args.force_due)
+            result = run(cfg, args.force_due)
+            if result['status'] in ['needs_attention', 'device_probe_failed']:
+                raise SystemExit(1)
 
 
 if __name__ == '__main__':
