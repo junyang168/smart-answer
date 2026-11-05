@@ -3,16 +3,17 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-04，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
 ## 目錄
 
 - [1. 純程式證據搬遷 dry-run](#1-純程式證據搬遷-dry-run)
-- [2. 來源與範圍](#2-來源與範圍)
-- [3. 來源版本登記](#3-來源版本登記)
-- [4. 另行啟動的內容審查與修訂](#4-另行啟動的內容審查與修訂)
-- [5. 回讀與下游交接](#5-回讀與下游交接)
+- [2. 已發布版本的程式搬遷](#2-已發布版本的程式搬遷)
+- [3. 來源與範圍](#3-來源與範圍)
+- [4. 來源版本登記](#4-來源版本登記)
+- [5. 另行啟動的內容審查與修訂](#5-另行啟動的內容審查與修訂)
+- [6. 回讀與下游交接](#6-回讀與下游交接)
 
 ## 1. 純程式證據搬遷 dry-run
 
@@ -80,7 +81,54 @@ preview 的來源、記錄版本與實際寫集，走既有 transaction／Change
 未通過內容 refresh 的 Claim 不得因此取得新資格。生產消費端排除刪除證據、撤銷舊資格及
 CVP／論證層接續須在真正 apply 前完成驗證；本 dry-run 不宣稱那些寫入或下游移植已完成。
 
-## 2. 來源與範圍
+## 2. 已發布版本的程式搬遷
+
+負責人明確授權只搬遷引文與定位時，使用 `transcript_evidence_apply`，不啟動模型或恢復
+已停止的 refresh。它讀取當前 SourceDocument、所有同源片段及反向依賴，逐一識別舊來源
+版本。新來源必須與指定公開發布檔的有效正文、物理段落及時間完全相符；舊 preview 不直接
+成為寫入權限。當前資料、原件、對照表、精確寫集與程式 SHA 都保存為不可變檔。
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_apply prepare --root PREVIEW --source-id SOURCE --old-source OLD_FILE --old-source PREVIOUS_BETA --published PUBLISHED_FILE --instruction-file DIRECTION
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_apply apply --root PREVIEW
+backend/.venv/bin/python -m backend.pipeline.transcript_evidence_apply verify --root PREVIEW
+```
+
+限定寫入 SourceFragment 的逐字引文、來源版本／雜湊、段落與時間，以及相關 Evidence
+的來源狀態、講者標記及撤回支持資格；不新建 Claim，不改 Claim 陳述、Evidence 陳述或
+論證關係。已綁到新版本的片段保留；依負責人方向，純確認語也不能因先前綁定有效就
+繼續作證據。原文找不到不表示已刪除。
+
+精確字面對應可重綁；用字改變時，必須有兩側唯一上下文、對應的引文兩端、受限文字比例、
+唯一的單段逐字切片及一致的既有時間碼，才搬遷新版引文。此類 Evidence 標記
+`source_binding_status=needs_claim_refresh`、`support_eligibility=withheld_unreviewed`、
+`valid_for_identity_review=false`，不能把位置可靠冒充意思等價或新的內容批准。
+尚未確定的跨段、邊界、重複位置及未知來源不能直接套用。執行者可逐條核對完整新舊
+上下文、時間及直接使用者，將技術定位結論保存在 `--calibration FILE` 指定的不可變
+決定檔；每條綁定原片段 revision／SHA、目標正文 SHA、實際逐字切片與具體理由。
+程序再獨立核查切片、唯一性及時間，不因技術定位而授予內容批准。
+
+跨段或同一舊片段被不同問題共用時，以確定的來源切片新建有決定性 ID 的 atomic
+SourceFragment，各有真實段落時間；原片段保留歷史並標為已由精確片段替代。
+Evidence、Question、Observation、Position 的來源引用完整重綁；需要依使用者區分
+出現位置時逐一保存選擇，不任取一次。CVP／Route 的舊引用不在此獲得新資格。
+
+「很重要」「有沒有聽懂？」「對不對？」等獨立強調或確認語，標 `anchor_state=context_only`。
+Evidence 從有效 `source_fragment_ids` 移出它們，另存 `context_fragment_ids`，並撤回
+支持資格；Question 的課堂語境仍保留。只做有限的完整字面規則，不因一段實質論述
+含有「很重要」就移除整段。整條 Evidence 只剩這些話時標 `source_binding_status=context_only`。
+
+唯一綁定的引文落在明確刪除線時，片段標 `anchor_state=source_deleted`，並保存
+`deleted_in_source_sha256`；歷史引文與舊定位保留。Evidence 按所有／部分引用刪除標記
+`source_deleted`／`partially_deleted`，同時撤回支持資格。不自動退休整條 Claim。
+
+apply 與既有維護和 Claim 執行者共用鎖，不終止其他任務。寫入前核對完整當前讀集，
+共同 store 在同一 advisory-locked SQL transaction 再檢查逐項 revision、內容 SHA 與
+退役狀態，然後走既有 ChangeSet、歷史及依賴失效機制。任一並行修改或原件漂移都停止，
+不能覆寫舊對照表後繼續。已提交但回執遺失時，依同一 ChangeSet 回讀恢復，不重複寫入。
+回讀核對實際更新、未改 Claim 與未改原件；不把搬遷稱為完整 Claim／CVP 更新。
+
+## 3. 來源與範圍
 
 每次指定現有 `source_id`、確切講道 ID、Beta 根目錄、固定輸出 root 及原始負責人指示。
 重跑沿用同一 root、清單、來源、policy 與普通 Update action，不換 root 重置預算。
@@ -91,7 +139,7 @@ CVP／論證層接續須在真正 apply 前完成驗證；本 dry-run 不宣稱�
 不證明新引文位置。保留物理段落 ID、空白／全刪除段落與小標題，從 sidecar 取得確切時間。
 人工校對狀態不由此流程更改，也不因 AI 處理而冒充人工通過。
 
-## 3. 來源版本登記
+## 4. 來源版本登記
 
 `register --execute` 使用共同 store 的 plan/apply、版本 CAS、ChangeSet 及歷史，
 只更新該 SourceDocument 的來源版本與內部不可變快照位置。
@@ -102,7 +150,7 @@ ChangeSet 前後雜湊與當前行恢復回執，不重複寫入。
 來源版本改變後舊 Claim 資格不得充作新版本通過。歷史 action、模型答覆、預算和人工作出的
 決定均保留；不得將一個舊的未知呼叫重新發出。新版本維護須有這次的明確指示。
 
-## 4. 另行啟動的內容審查與修訂
+## 5. 另行啟動的內容審查與修訂
 
 `prepare-unit --execute` 接既有 `claim_management_intake.prepare` 的固定同源小組，
 `run-unit --execute` 接既有 batch、Update、共用模型容量與持久呼叫帳。
@@ -151,7 +199,7 @@ Evidence 而留下問題的舊引用。被保護、缺失或跨來源的問題�
 檢查。已通過的答覆若停在程式提交門檻，修復後以既有 returned-review recovery 核驗
 並接續原答覆，保留原始 SHA、模型消耗及實際寫集，不為純程式修復重送內容審查。
 
-## 5. 回讀與下游交接
+## 6. 回讀與下游交接
 
 `verify --execute` 消費現有當前資格，另外核對實際有效正文中的引用，不建立第二套批准。
 原分母每條都有保留、更新、替代、退役或未完成去向；新建項另列。
