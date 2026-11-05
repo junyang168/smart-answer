@@ -53,17 +53,56 @@ def stopped(truncated):
     return store, old, root, previous, new, next_root, policy, proof
 
 
-def test_owner_stop_uses_remaining_budget_and_current_existing_review(stopped):
+@pytest.mark.parametrize('refused_first', [False, True])
+def test_owner_stop_uses_remaining_budget_and_current_existing_review(stopped, monkeypatch, refused_first):
     store, old, root, previous, new, next_root, policy, proof = stopped
     accounting = cm.continuation_budget(previous, new, policy)
     assert accounting['spent_generations']['gpt'] == 1
     ports = SyntheticPorts(store, next_root, opus=lambda _: {'complete_review': True, 'findings': [], 'prior_findings': []})
+    if refused_first:
+        with monkeypatch.context() as patch:
+            patch.setattr('backend.pipeline.claim_joint_update.admission_error', lambda *args: 'old reachability guard')
+            assert execute_claim_management(store, new, root=next_root, ports=ports)['reason'] == 'engineering_required'
+        assert ports.calls == []
+        from backend.pipeline.claim_review_recovery import recover_refused_admission, VERSION
+        parent = store.get_cvp_group('CMA-' + cm.sha256_json(new.action_id))
+        metadata = {k: v for k, v in parent.items() if k not in {'run_id', 'status', 'error'}}
+        path = next_root.parent / 'recover-admission.json'
+        path.write_text(json.dumps({'schema_version': VERSION, 'action_id': new.action_id,
+            'authorized_by': 'owner', 'authorization_quote': 'fix engineering and resume',
+            'human_content_approval': False, 'prior_metadata_sha256': cm.sha256_json(metadata)}))
+        recover_refused_admission(store, new.action_id, authorization=binding(path))
     result = execute_claim_management(store, new, root=next_root, ports=ports)
     assert result['status'] == 'completed', result
     assert ports.calls == ['opus']  # No GPT restatement of mechanically repaired input.
     prior = store.get_cvp_group('CMA-' + cm.sha256_json(old.action_id))
     assert prior['call_reservations'][proof['slot']] == previous['call_reservations'][proof['slot']]
     assert prior['continued_by']
+
+
+def test_historical_grant_is_reachable_only_through_its_actual_replacement_slices(stopped, tmp_path):
+    store, _, _, _, new, _, _, _ = stopped
+    before = {cm.source.key(*k): cm.model_state(v) for k, v in store.read_claim_context([('claims', 'C')]).items()}
+    # The base stopped fixture has Claim-only grants. Add a fragment to a
+    # separate synthetic historical frame to exercise the admission projection.
+    key = 'source_fragments/F'
+    before[key] = {'revision': 1, 'content_sha256': 'a' * 64, 'retired': False, 'payload': {'fragment_id': 'F'}}
+    new = new.model_copy(deep=True)
+    new.permissions.append(cm.source.Permission(collection='source_fragments', object_id='F', fields=['paragraph_key']))
+    auth = json.loads(Path(new.authorization.path).read_text())
+    material = body(read(Path(auth['owner_stopped_resume']['saved_files']['materials.json']['path'])))
+    material['unit_request']['permissions'] = new.model_dump(mode='json')['permissions']
+    material['before'][key] = deepcopy(before[key])
+    path = tmp_path / 'historical-material.json'; write(path, material)
+    auth['owner_stopped_resume']['saved_files']['materials.json'] = binding(path)
+    auth_path = tmp_path / 'projection-authority.json'; auth_path.write_text(json.dumps(auth))
+    new.authorization = cm.source.FileBinding.model_validate(binding(auth_path))
+    before[key]['payload'].update(anchor_state='replaced_by_precise_fragments', replacement_fragment_ids=['NEW1', 'NEW2'])
+    reachable = {'source_fragments/NEW1', 'source_fragments/NEW2'}
+    assert resume.historical_replacement_keys(new, before, reachable) == {key}
+    assert resume.historical_replacement_keys(new, before, {'source_fragments/NEW1'}) == set()
+    before[key]['payload']['anchor_state'] = 'source_version_bound'
+    assert resume.historical_replacement_keys(new, before, reachable) == set()
 
 
 @pytest.mark.parametrize('defect', ['missing_exit', 'changed_stdout', 'returned_answer', 'wrong_stop', 'missing_authority', 'more_budget'])

@@ -103,3 +103,33 @@ def verify_migrations(previous, current, proof, histories):
                           'payload': op['after'], 'retired': False}
     if any(current.get(k) != v for k, v in state.items()):
         raise ValueError('stopped-call input changed outside the pinned locator migrations')
+
+
+def historical_replacement_keys(request, before, reachable):
+    """Old grants remain dormant when all replacement slices are reachable.
+
+    Admission alone grants no calls: the store must subsequently authenticate
+    the stopped predecessor, remaining budget and complete migration chain.
+    """
+    authority = json.loads(cm.source.verify_file(request.authorization).read_text())
+    proof = authority.get('owner_stopped_resume')
+    if not proof:
+        return set()
+    bound = proof['saved_files']['materials.json']; check_binding(bound)
+    material = body(read(Path(bound['path'])))
+    old = cm.Request.model_validate(material['unit_request'])
+    if (old.action_id != request.predecessor_action_id
+            or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
+            or old.permissions != request.permissions
+            or material['original_goal'].get('required_maintenance_keys')
+               != authority.get('required_maintenance_keys')):
+        raise ValueError('replacement references must retain the original stopped request scope')
+    result = set()
+    for p in request.permissions:
+        if p.collection != 'source_fragments' or p.key not in before or p.key not in material['before']:
+            continue
+        f = before[p.key]['payload']; ids = f.get('replacement_fragment_ids') or []
+        if (not before[p.key]['retired'] and f.get('anchor_state') == 'replaced_by_precise_fragments'
+                and ids and all(cm.source.key('source_fragments', fid) in reachable for fid in ids)):
+            result.add(p.key)
+    return result
