@@ -7953,6 +7953,9 @@ class PostgresKnowledgeStore:
         expected_registry_fingerprint_sha256: Optional[str] = None,
         registry_collections: Sequence[str] = (),
         expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
+        expected_current_record_pins: Optional[
+            Mapping[tuple[str, str], tuple[int, str, bool] | None]
+        ] = None,
         expected_current_route_material_pins: Optional[Mapping[tuple[str, str], tuple[int, str, bool]]] = None,
         expected_route_scope_sets: Optional[Mapping[str, Any]] = None,
         expected_current_claim_related_records: Optional[
@@ -8066,6 +8069,11 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                if expected_current_record_pins is not None:
+                    # A code-only migration may read unchanged shared records
+                    # as well as its write targets. Protect that complete read
+                    # set in the same short, advisory-locked transaction.
+                    self._assert_transaction_read_pins(cursor, expected_current_record_pins)
                 if expected_current_route_material_pins is not None:
                     self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
                     viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
