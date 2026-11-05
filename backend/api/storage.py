@@ -452,6 +452,7 @@ class ArticleRepository:
         )
 
 
+    @sunday_write
     def create_fellowship(self, entry: FellowshipEntry) -> FellowshipEntry:
         entries = self._load_fellowship_entries()
         if any(existing.date == entry.date for existing in entries):
@@ -460,6 +461,7 @@ class ArticleRepository:
         self._save_fellowship_entries(entries)
         return entry
 
+    @sunday_write
     def update_fellowship(self, date: str, entry: FellowshipEntry) -> FellowshipEntry:
         entries = self._load_fellowship_entries()
         target = None
@@ -475,6 +477,7 @@ class ArticleRepository:
         self._save_fellowship_entries(entries)
         return entry
 
+    @sunday_write
     def delete_fellowship(self, date: str) -> None:
         entries = self._load_fellowship_entries()
         new_entries = [entry for entry in entries if entry.date != date]
@@ -482,6 +485,7 @@ class ArticleRepository:
             raise ValueError(f"Fellowship date {date} not found")
         self._save_fellowship_entries(new_entries)
 
+    @sunday_write
     def set_fellowship_email_content(
         self,
         date: str,

@@ -52,7 +52,11 @@ def state():
     worker = agent.store.get("worker")
     if worker and (datetime.now(timezone.utc) - datetime.fromisoformat(worker["at"])).total_seconds() > 180:
         worker = {**worker, "status": "stale", "error": "處理程序超過三分鐘沒有更新，請檢查是否仍在運行"}
-    return {"settings": agent.store.settings().model_dump(), "messages": agent.store.messages(),
+    fellowship = []
+    if agent.store.settings().fellowship_enabled:
+        from backend.sunday_assistant.fellowship import Fellowship
+        fellowship = Fellowship(agent).state()
+    return {"fellowship": fellowship, "settings": agent.store.settings().model_dump(), "messages": [row for row in agent.store.messages() if row["payload"]["group_id"] != agent.store.settings().admin_group],
             "proposals": agent.store.proposals(), "outbox": agent.store.outbox(),
             "worker": worker, "bridge": bridge,
             "conflicts": agent.conflicts(), "sunday": day, "missing": agent.missing(day),
@@ -101,9 +105,17 @@ def settings(payload: Settings):
         raise HTTPException(422, "夫妻對應的姓名必須存在於同工名單")
     if any(target not in names or (alias in names and alias != target) for alias, target in payload.worker_aliases.items()):
         raise HTTPException(422, "姓名別名需對應現有同工，不能改指向另一位現有同工")
+    if payload.fellowship_enabled:
+        if payload.fellowship_since is None:
+            payload.fellowship_since = datetime.now(timezone.utc)
+        if payload.fellowship_start_date is None:
+            payload.fellowship_start_date = payload.fellowship_since.astimezone(ZONE).date()
     before = waiting_identity_states(agent.store)
     agent.store.put("settings", payload.model_dump())
     recheck_waiting(agent.store, before)
+    if payload.fellowship_enabled:
+        with agent.store.db() as db:
+            db.execute("UPDATE messages SET status='queued' WHERE status='fellowship_paused' AND json_extract(payload,'$.group_id')=?",(payload.admin_group,))
     return payload
 
 
@@ -146,6 +158,9 @@ def bridge_config():
     except (ValueError, OSError):
         mail = None  # An email setup failure must not disconnect WhatsApp.
     return {"allow_speaker_followup": bool(config.enabled and mail and mail.get('enabled') and mail.get('saturday_followup', True)),
+            "allow_fellowship": bool(config.enabled and config.fellowship_enabled),
+            "ingest_groups": sorted(config.ingest_group_ids),
+            "fellowship_since": config.fellowship_since.timestamp() if config.fellowship_since else None,
             "enabled": config.enabled, "groups": sorted(config.source_group_ids), "availability_group": config.availability_group,
             "allow_questions": config.group_questions_enabled, "allow_reminders": config.reminders_enabled,
             "allow_admin_help": config.admin_help_enabled, "admin_group": config.admin_group,

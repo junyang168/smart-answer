@@ -116,9 +116,9 @@ def test_get_fellowship_email_content_honors_reminder_template_override(monkeypa
     assert content.html == "<p>06/05|Host|Title|Series|3</p>"
 
 
-def test_admin_email_send_records_production_reminder_status(monkeypatch):
+def test_admin_email_send_records_production_reminder_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_BASE_DIR", str(tmp_path))
     sent = {}
-    recorded = {}
     monkeypatch.setattr(
         service,
         "get_fellowship_email_content",
@@ -132,16 +132,10 @@ def test_admin_email_send_records_production_reminder_status(monkeypatch):
         "send_email",
         lambda **kwargs: sent.update(kwargs),
     )
-    monkeypatch.setattr(
-        service,
-        "record_fellowship_email_sent",
-        lambda event_date: recorded.update(event_date=event_date),
-    )
-
     result = service.email_fellowship("2026-06-05")
 
     assert sent["recipients"] == ["person@example.com"]
-    assert recorded["event_date"].isoformat() == "2026-06-05"
+    assert load_last_sent_fellowship_date(tmp_path / "notification/last_sent.json") == "2026-06-05"
     assert result.dry_run is False
 
 
