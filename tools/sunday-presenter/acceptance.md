@@ -1225,3 +1225,23 @@ readback confirms both version fields are 0.6.3. The device was passcode-locked,
 so launch and post-update pairing/video acceptance are not inferred from that
 readback. No signing identity, account or developer permissions were added.
 The #655 automatic-renewal hold remains unchanged.
+
+Final 0.6.3 deployment readback: the exact packaged Mac app played the real
+29-slide OneDrive sermon to its end. Extra native Right, Space, Enter and canvas
+click stayed on the same OUTPUT; Left returned to slide 29. No recording or
+microphone was enabled. The idle installed Mac Presenter and both existing Mac
+Remote copies were updated to 0.6.3, with prior bundles saved as rollback ZIPs
+on SSD. All installed version fields and deep/strict signatures verify.
+
+The owner-authorized website publication selects 0.6.3 with pilot status.
+The authenticated production admin page displays v0.6.3; an actual browser
+download returned Sunday-Presenter-0.6.3-mac-arm64.dmg. Its SHA256 equals the
+published manifest (05e478eb996fbe089b331b4f6a993a2fc66e204e4a9681b3809af2516aa55c9e).
+Remote ZIP SHA256 is 3b9d230d38cf165ad318438073569a32b60b863666d615b872cd3fa9404f92dd.
+Both published file sizes and hashes were independently read back. No website
+code changed or website service restart was needed. Private receipts and
+screenshots are on SSD under SundayPresenterTests/releases/0.6.3-89402585.
+The code artifact is bound to commit 89402585; this subsequent documentation
+update does not change packaged code. PR #653 remains stacked on #644; publication
+was expressly requested and does not imply completion of the remaining physical
+service/hotspot/renewal acceptance gates.
