@@ -13,6 +13,43 @@ from backend.pipeline.cvp_sql_commit import check_binding
 VERSION='wang_claim_source_epoch_reassessment_v1'
 
 
+def _locator_lineage(cursor, claim_id, revision, reviewed, state, source_id):
+    """Prove every intervening revision was a saved program-only anchor sync."""
+    rows=cursor.execute('''SELECT v.revision,v.payload,v.content_sha256,
+        c.change_set_id,c.source_kind,c.status,c.metadata
+        FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id)
+        WHERE v.collection='claims' AND v.object_id=%s AND v.revision>%s
+        ORDER BY v.revision''',(claim_id,revision)).fetchall()
+    if [r[0] for r in rows]!=list(range(revision+1,state['revision']+1)):return None
+    previous=reviewed[0];proof=[]
+    for rev,payload,digest,cs,kind,status,metadata in rows:
+        if (kind!='wang_transcript_claim_anchor_sync_v1' or status!='applied'
+                or metadata.get('actor')!='owner_authorized_locator_sync'
+                or metadata.get('model_calls')!=0
+                or metadata.get('claim_prose_changed') is not False
+                or metadata.get('new_qualification_granted') is not False
+                or record_content_sha(payload)!=digest
+                or {k:v for k,v in previous.items() if k not in ('revision','occurrences')}
+                    !={k:v for k,v in payload.items() if k not in ('revision','occurrences')}):return None
+        bound=metadata.get('migration_plan')
+        try:
+            check_binding(bound)
+            plan=json.loads(Path(bound['path']).read_bytes())
+        except (ValueError,TypeError,KeyError,OSError):return None
+        if (plan.get('schema_version')!=kind or plan.get('change_set_id')!=cs
+                or plan.get('intent',{}).get('source_id')!=source_id):return None
+        candidates=[p for p in plan.get('package',{}).get('claims',[])
+                    if p.get('claim_id')==claim_id]
+        if len(candidates)!=1 or {**candidates[0],'revision':rev}!=payload:return None
+        op=cursor.execute('''SELECT before_sha256,after_sha256,after_revision
+            FROM wang_knowledge.change_operations WHERE change_set_id=%s
+            AND collection='claims' AND object_id=%s AND operation='update' ''',(cs,claim_id)).fetchall()
+        if op!=[(record_content_sha(previous),digest,rev)]:return None
+        proof.append([rev,digest,cs,bound]);previous=payload
+    if previous!=state['payload'] or record_content_sha(previous)!=state['content_sha256']:return None
+    return proof
+
+
 def marker(cursor, claim_id, state, epoch):
     if state.get('retired') or state['payload'].get('review_status')!='human_review_required':
         return None
@@ -59,7 +96,7 @@ def marker(cursor, claim_id, state, epoch):
     if not events or any(event[1]=='human' for event in events):return None
     revision,kind,decision,artifact,reason=events[0]
     resolution=(artifact or {}).get('resolution',{})
-    if (kind!='ai' or decision!='human_review_required' or revision!=state['revision']
+    if (kind!='ai' or decision!='human_review_required' or revision>state['revision']
             or resolution.get('schema_version')!='wang_claim_ai_review_provenance_v1'
             or resolution.get('claim_id')!=claim_id
             or resolution.get('approval_status')!='not_human_approved'
@@ -70,11 +107,18 @@ def marker(cursor, claim_id, state, epoch):
         FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id)
         WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s''',
         (claim_id,revision)).fetchone()
-    if (not reviewed or reviewed[2]!='applied' or reviewed[0]!=state['payload']
-            or record_content_sha(reviewed[0])!=reviewed[1] or reviewed[1]!=state['content_sha256']):return None
+    if (not reviewed or reviewed[2]!='applied'
+            or record_content_sha(reviewed[0])!=reviewed[1]):return None
+    lineage=None
+    if revision==state['revision']:
+        if reviewed[0]!=state['payload'] or reviewed[1]!=state['content_sha256']:return None
+    else:
+        lineage=_locator_lineage(cursor,claim_id,revision,reviewed,state,manifest['source_id'])
+        if not lineage:return None
+    facts={'events':events,'epoch':epoch,'operation':operation,'source_pin':list(current[:2])}
+    if lineage:facts['locator_lineage']=lineage
     return {'before_pin':[state['revision'],state['content_sha256'],False],
-            'events_sha256':sha256_json({'events':events,'epoch':epoch,'operation':operation,
-                                        'source_pin':list(current[:2])})}
+            'events_sha256':sha256_json(facts)}
 
 
 def authorized_markers(cursor, request, before, authority):

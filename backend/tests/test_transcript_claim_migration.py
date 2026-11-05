@@ -436,3 +436,34 @@ def test_source_epoch_reassesses_only_ai_questions_on_actual_new_source(case,pos
         else:
             projection=compile_projection(cursor,request,before,policy)
             assert 'claims/D' in projection['legacy_ai_findings_markers']
+
+
+@pytest.mark.parametrize('fault',[None,'twice','content','manual','bad_plan','human_actor','missing_revision','bad_hash','wrong_operation'])
+def test_source_epoch_locator_lineage_is_only_mechanical(tmp_path,fault):
+    from backend.pipeline.claim_source_epoch_reassessment import _locator_lineage
+    before={'claim_id':'D','revision':1,'statement':'unchanged judgment',
+        'review_status':'human_review_required','occurrences':[{'source_id':'S'}]}
+    previous=before;rows=[];operations={}
+    for rev in range(2,4 if fault=='twice' else 3):
+        payload=deepcopy(previous);payload['revision']=rev
+        payload['occurrences'][0]['anchors']=[{'paragraph_key':f'S{rev:04d}'}]
+        if fault=='content':payload['statement']='changed judgment'
+        kind='knowledge_package' if fault=='manual' else 'wang_transcript_claim_anchor_sync_v1'
+        cs=f'KCS-locator-{rev}'
+        bound=migration.immutable(tmp_path/f'{rev}.json',{'schema_version':kind,'change_set_id':cs,
+            'intent':{'source_id':'wrong' if fault=='bad_plan' else 'S'},
+            'package':{'claims':[{**payload,'revision':rev-1}]}})
+        digest=record_content_sha(payload)
+        rows.append((rev,payload,'bad' if fault=='bad_hash' else digest,cs,kind,'applied',
+            {'actor':'human' if fault=='human_actor' else 'owner_authorized_locator_sync',
+             'model_calls':0,'claim_prose_changed':False,'new_qualification_granted':False,'migration_plan':bound}))
+        operations[cs]=[(record_content_sha(previous),digest,rev)]
+        if fault=='wrong_operation':operations[cs]=[]
+        previous=payload
+    class Cursor:
+        def execute(self,sql,args):
+            self.result=([] if fault=='missing_revision' else rows) if 'object_versions' in sql else operations[args[0]]
+            return self
+        def fetchall(self):return self.result
+    result=_locator_lineage(Cursor(),'D',1,(before,record_content_sha(before),'applied'),state(previous,previous['revision']),'S')
+    assert bool(result)==(fault in (None,'twice'))
