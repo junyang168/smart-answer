@@ -60,6 +60,37 @@ def test_step_can_also_name_its_exact_bound_fragment(material):
     assert all(v.approved for v in output.review(raw,m,candidate).verdicts)
 
 
+@pytest.mark.parametrize('problem', ['missing_paragraph', 'empty_paragraph', 'wrong_excerpt', 'empty_excerpt'])
+def test_retained_binding_cannot_borrow_a_repaired_previous_draft(material, problem):
+    m, candidate = material
+    m['previous_candidate'] = candidate.model_dump(mode='json')
+    fragment = m['before']['source_fragments/F']['payload']
+    if problem == 'missing_paragraph': fragment['paragraph_key'] = 'S9999'
+    if problem == 'empty_paragraph': m['sources']['S']['paragraphs']['S0001']['text'] = ''
+    if problem == 'wrong_excerpt': fragment['verbatim_excerpt'] = '甲是斷言。'
+    if problem == 'empty_excerpt': fragment['verbatim_excerpt'] = ' '
+    assert not candidate.records
+    with pytest.raises(ValueError, match='exact current source'):
+        output.review(answer(), m, candidate)
+
+
+def test_correct_actual_postimage_repairs_retained_binding(material):
+    m, candidate = material
+    m['before']['source_fragments/F']['payload']['paragraph_key'] = 'S9999'
+    fixed = deepcopy(m['before']['source_fragments/F']['payload'])
+    fixed['paragraph_key'] = 'S0001'
+    candidate.records = [cm.source.Row(collection='source_fragments', object_id='F', payload=fixed)]
+    er.validate_assessments(er.BindingFindingsReview.model_validate(answer()), m, candidate)
+
+
+def test_unrelated_source_change_does_not_invalidate_literal_own_binding(material):
+    m, candidate = material
+    m['before']['source_fragments/F']['payload']['source_sha256'] = 'old_whole_source_hash'
+    m['sources']['S']['body_sha256'] = 'new_whole_source_hash'
+    m['sources']['S']['paragraphs']['S0002'] = {'text': '別處改了。'}
+    er.validate_assessments(er.BindingFindingsReview.model_validate(answer()), m, candidate)
+
+
 def test_explicit_fragment_uses_candidate_binding_not_previous_binding(material):
     m,candidate=material
     step=deepcopy(m['before']['evidence_steps/E']['payload'])

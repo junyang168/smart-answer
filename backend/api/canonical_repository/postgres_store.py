@@ -3436,6 +3436,15 @@ class PostgresKnowledgeStore:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
+                    elif continuation.get('completed_no_write_binding_repair'):
+                        if (child['materials']['round_id'] not in prior['latest_rounds'].values()
+                                or child.get('outcome') != 'completed' or child.get('change_set_ids')
+                                or not child.get('opus_approved') or not child.get('program_readback_complete')
+                                or child.get('candidate', {}).get('records')
+                                or any(d['action'] != 'retain' for d in child['candidate']['dispositions'])
+                                or before != child['materials'].get('transaction_before',child['materials']['before'])):
+                            raise ChangeSetConflict('binding repair cannot replay committed data or cross SQL input drift')
+                        self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
                     elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not opus_handoff):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
                 if continuation.get('related_owner_target_extension'):
@@ -3750,7 +3759,7 @@ class PostgresKnowledgeStore:
         from backend.pipeline import claim_management as cm
         from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
         from backend.pipeline.source_reconciliation_runner import read, body
-        from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins
+        from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, pins
         check_binding(receipt_binding)
         receipt = body(read(Path(receipt_binding['path'])))
         materials, candidate, review, passed = validate_claim_stage_receipt(receipt)
@@ -3896,6 +3905,14 @@ class PostgresKnowledgeStore:
                         passed = False
                 if stage == 'opus':
                     value['opus_approved'] = passed
+                    from backend.pipeline.claim_quote_projection import selected as quote_contract, project_review
+                    if contract := quote_contract(materials):
+                        source_raw = body(read(Path(receipt['materials']['path']).parent/'opus.raw.json'))
+                        _,corrections = project_review(source_raw['response'],materials['sources'],contract=contract)
+                        if corrections:
+                            value.setdefault('source_quote_corrections',{})['opus'] = {
+                                'original_raw':binding(Path(receipt['materials']['path']).parent/'opus.raw.json'),
+                                'corrections':corrections,'verdicts_unchanged':True}
                 # Every prior issue in this unit is explicitly reconciled;
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
@@ -4029,6 +4046,13 @@ class PostgresKnowledgeStore:
                         actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
+                    from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                    if own_evidence_enabled(child['materials']['policy']):
+                        own_keys = set(child['materials']['unit_request']['target_keys']) | {
+                            d['record_key'] for d in child['candidate']['dispositions']
+                            if d['action'] == 'create' and d['record_key'].startswith('claims/')}
+                        active = {k:s['payload'] for k,s in observed.items() if not s['retired']}
+                        assert_current_fragments(active, child['materials']['sources'], own_keys & active.keys())
                 if not report_only:
                     from backend.pipeline.claim_joint_update import verify_completion
                     verify_completion(value['original_goal'], child, observed)
@@ -4217,6 +4241,15 @@ class PostgresKnowledgeStore:
                         'human_hold','withheld_unreviewed','rejected','superseded'} or (
                         state['payload'].get('review_status') == 'human_review_required' and not replaced_spot_check):
                     continue
+                from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                if own_evidence_enabled(value['materials']['policy']):
+                    try:
+                        assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in records.items()
+                                                  if s['retired_at'] is None},
+                                                 value['materials']['sources'], ['claims/'+claim_id])
+                    except (ValueError, KeyError) as exc:
+                        return {'ready': False, 'reason': 'current_own_source_bindings_invalid',
+                                'run_id': rid, 'detail': str(exc)}
                 result = {'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': proof,
                         'question_scope': value['materials']['original_goal']['required_questions']}
@@ -4232,7 +4265,8 @@ class PostgresKnowledgeStore:
                         own = Request.model_validate(value['materials']['unit_request']).model_copy(
                             update={'target_keys':['claims/'+claim_id], 'permissions':[]})
                         protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()},
-                                          include_write_context=False)['writable_record_keys']
+                                          include_write_context=False, include_impact_evidence=False,
+                                          include_contextual_evidence=False)['writable_record_keys']
                 except ValueError as exc:
                     return {'ready': False, 'reason': 'current_own_evidence_scope_incomplete',
                             'run_id': rid, 'detail': str(exc)}

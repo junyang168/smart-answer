@@ -448,6 +448,20 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
                 if destination.read_bytes()!=payload:raise ValueError('recovery attempted to overwrite original model evidence')
             else:destination.write_bytes(payload)
         materials=deepcopy(value['materials']);materials['audit_contract']=current_contract
+        from backend.pipeline.claim_quote_projection import CONTRACT as QUOTE_CONTRACT, NEAR_CONTRACT, SPAN_CONTRACT, FIELD as QUOTE_FIELD, project_review
+        quote_mode = direction.get('source_quote_projection')
+        if quote_mode is not None:
+            if not isinstance(quote_mode,str) or quote_mode not in {QUOTE_CONTRACT,NEAR_CONTRACT,SPAN_CONTRACT} or not unrecorded:
+                raise ValueError('source quote review recovery requires one unaccepted returned review')
+            if (parent['result'].get('detail') != 'citation is not an exact quote from the complete own source'
+                    or direction.get('original_raw') != binding(old_root/'opus.raw.json')):
+                raise ValueError('source quote review recovery requires its exact recorded citation rejection and raw')
+            raw = body(read(old_root/'opus.raw.json'))
+            _,corrections = project_review(raw['response'],materials['sources'],contract=quote_mode)
+            if not corrections:
+                raise ValueError('source quote recovery has no unique bound source correction')
+            materials[QUOTE_FIELD] = {'contract':quote_mode,'authorization':authorization,
+                                     'original_raw':binding(old_root/'opus.raw.json')}
         if transaction_context:
             materials['transaction_before'] = transaction_context.pop('current_transaction_before')
         if cm.model_packet(materials)!=cm.model_packet(value['materials']):
@@ -465,8 +479,12 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
                 'recovery_root':str(root),'current_contract':current_contract,'model_inputs_unchanged':True,
                 'model_calls':0,'candidate_unchanged':True,'human_content_approval':False,
                 'unaccepted_result_validated':True,'returned_review_passed':passed}
+            if quote_mode:
+                record['source_quote_corrections'] = corrections
             write(root/'engineering-recovery.json',record)
             parent.update(audit_contract=current_contract,result={'status':'running'})
+            if quote_mode:
+                parent[QUOTE_FIELD] = materials[QUOTE_FIELD]
             if 'gpt' in value['materials']['roles']:
                 parent['call_reservations'][round_id+':gpt']['result']=receipts['candidate']
             value.update(materials=materials,stage_results={'candidate':receipts['candidate']},
@@ -543,7 +561,14 @@ def recover_returned_candidate(store, round_id, *, authorization):
             raise ValueError('identity recovery needs a returned original proposal and its unused independent review')
         material = value['materials']; policy = cm.Policy.model_validate(material['policy'])
         metadata_mode = direction.get('program_metadata_projection') is True
-        if material['request']['operation'] != 'Update' or (policy.model_output_contract and not (metadata_mode and policy.model_output_contract == 'claim_changes_v4')):
+        from backend.pipeline.claim_quote_projection import CONTRACT as QUOTE_CONTRACT, NEAR_CONTRACT, SPAN_CONTRACT, FIELD as QUOTE_FIELD
+        requested_quote_contract = direction.get('source_quote_projection')
+        quote_mode = isinstance(requested_quote_contract,str) and requested_quote_contract in {QUOTE_CONTRACT,NEAR_CONTRACT,SPAN_CONTRACT}
+        if 'source_quote_projection' in direction and not quote_mode:
+            raise ValueError('unknown source quote projection contract')
+        if metadata_mode and quote_mode:
+            raise ValueError('one recovery cannot introduce two projection modes')
+        if material['request']['operation'] != 'Update' or (policy.model_output_contract and not ((metadata_mode or quote_mode) and policy.model_output_contract == 'claim_changes_v4')):
             raise ValueError('identity recovery requires its original legacy or explicitly managed metadata contract')
         old_root = Path(value.get('recovery_root', Path(parent['execution_root']) / round_id))
         intent = body(read(old_root / 'gpt.reservation.json'))
@@ -557,7 +582,26 @@ def recover_returned_candidate(store, round_id, *, authorization):
         raw = validate_claim_stage(old_root, 'gpt', policy, cm.model_packet(material))
         if direction.get('original_raw') != binding(old_root / 'gpt.raw.json'):
             raise ValueError('identity recovery direction must bind the exact returned raw')
-        if metadata_mode:
+        if quote_mode:
+            exit_proof = returned_proposal_transport(old_root, raw)
+            if (material.get(QUOTE_FIELD,{}).get('contract') == requested_quote_contract
+                    or policy.source_quote_projection == requested_quote_contract):
+                raise ValueError('source quote recovery cannot stack or replace a prior projection')
+            error = parent['result'].get('detail')
+            if error not in {'new/updated fragment lacks an exact complete own source paragraph/excerpt',
+                             'citation is not an exact quote from the complete own source'}:
+                raise ValueError('source quote recovery requires an exact returned source-quote rejection')
+            try:
+                original_candidate, _ = expand_candidate(raw['response'], material)
+                cm.validate_candidate(cm.Request.model_validate(material['unit_request']), material['before'],
+                    original_candidate, material['sources'], created_keys=material['created_keys'],
+                    original_replacements=material['replacements'], metadata_projection=material.get('program_metadata_projection'))
+            except ValueError as exc:
+                if str(exc) != error: raise
+            else:
+                raise ValueError('source quote recovery requires a reproducible original refusal')
+            mappings = []
+        elif metadata_mode:
             exit_proof = returned_proposal_transport(old_root, raw)
             if slot.get('rejection') and slot['rejection'].get('raw') != binding(old_root/'gpt.raw.json'):
                 raise ValueError('recorded rejection does not bind this exact original raw')
@@ -600,7 +644,10 @@ def recover_returned_candidate(store, round_id, *, authorization):
                     os.fsync(stream.fileno())
         material = deepcopy(material)
         material['audit_contract'] = current
-        if metadata_mode:
+        if quote_mode:
+            material[QUOTE_FIELD] = {'contract':requested_quote_contract, 'authorization':authorization,
+                                    'original_raw':binding(old_root/'gpt.raw.json')}
+        elif metadata_mode:
             from backend.pipeline.claim_metadata_projection import compile_projection, FIELD
             material[FIELD] = compile_projection(cursor, cm.Request.model_validate(material['unit_request']), material['before'], policy)
             if not material[FIELD]:raise ValueError('managed metadata recovery has no verified projection')
@@ -612,6 +659,8 @@ def recover_returned_candidate(store, round_id, *, authorization):
         if cm.model_packet(material) != cm.model_packet(value['materials']):
             raise ValueError('identity recovery changed the original complete GPT input')
         candidate, normalization = expand_candidate(raw['response'], material)
+        if quote_mode and not normalization.get('source_quote_corrections'):
+            raise ValueError('source quote recovery has no unique punctuation-only correction')
         cm.validate_candidate(cm.Request.model_validate(material['unit_request']), material['before'], candidate,
             material['sources'], created_keys=material['created_keys'], original_replacements=material['replacements'], metadata_projection=material.get('program_metadata_projection'))
         if policy.all_findings_to_gpt:
@@ -630,6 +679,9 @@ def recover_returned_candidate(store, round_id, *, authorization):
             'recovery_root':str(root), 'identity_corrections':mappings, 'model_inputs_unchanged':True,
             'model_calls':0, 'call_reservations_unchanged':True, 'human_content_approval':False,
             **({'transport_exit':exit_proof,'program_metadata_projection':material['program_metadata_projection']} if metadata_mode else {})}
+        if quote_mode:
+            record.update(transport_exit=exit_proof, source_quote_corrections=normalization['source_quote_corrections'],
+                          source_quote_projection=material[QUOTE_FIELD])
         write(root / 'engineering-recovery.json', record)
         value.update(materials=material, recovery_root=str(root), outcome=None,
                      engineering_candidate_recoveries=history + [record])

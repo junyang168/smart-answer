@@ -111,6 +111,146 @@ def test_neighbour_delta_preserves_complete_reference_approval_without_re_review
     assert ports.calls==['gpt','opus']
 
 
+@pytest.mark.parametrize('change,allowed', [
+    ({'paragraph_key':'S0058', 'media_time':1021.32, 'source_sha256':'new'}, True),
+    ({'verbatim_excerpt':'甲是断言。'}, False),
+    ({'source_id':'OTHER'}, False),
+    ({'speaker':'audience'}, False),
+    ({'extraction_section_index':9}, False),
+])
+def test_literal_fragment_handoff_allows_only_locator_repairs(change, allowed):
+    before={'source_id':'S', 'verbatim_excerpt':'甲是假设，不是断言。',
+            'paragraph_key':'S0001', 'media_time':0}
+    assert reuse.literal_fragment_rebinding(before, {**before, **change}) is allowed
+
+
+@pytest.mark.parametrize('changed_words',[False,True])
+def test_reviewed_literal_locator_repair_preserves_an_existing_shared_owner_pass(claims,changed_words):
+    store,root=claims
+    ec=store.get_record_state('evidence_steps','EC')['payload']
+    store.apply_plan(store.plan_package({'package_id':'shared-literal',
+        'evidence_steps':[{**ec,'source_fragment_ids':['FC','FD']}]}))
+    old=original_pass(store,root)
+    path=policy_file(root.parent)
+    policy=cm.Policy.model_validate_json(path.read_text());policy.initial_candidate='proposal'
+    path.write_text(policy.model_dump_json())
+    prepared=intake.prepare(['C'],root/'locator-peer',instruction='Repair the same literal locator',
+        groups=[['C']],policy=path,store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'locator-peer/batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    def propose(packet):
+        return {'changes':[{'record_key':'source_fragments/FD',
+            'fields_json':json.dumps({'anchor_state':'source_version_bound',
+                **({'verbatim_excerpt':'甲是假设'} if changed_words else {})}),
+            'reason':'bind unchanged literal to current source',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}],
+            'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=pass_review)
+    assert execute_claim_management(store,request,root=execution,ports=ports)['status']=='completed'
+    q=store.claim_management_qualification('D')
+    if changed_words:
+        assert not q['ready']
+        return
+    peer=store.claim_management_qualification('C')['run_id']
+    assert q['ready'] and q['run_id']==old, store.get_cvp_group(peer).get('reference_qualification_handoffs')
+    proof=store.get_cvp_group(old)['readonly_claim_qualifications']['D']
+    assert 'source_fragments/FD' in proof['context_reviews']
+    assert ports.calls==['gpt','opus']
+
+
+@pytest.mark.parametrize('changed_words',[False,True])
+def test_two_flat_peer_reviews_share_only_a_reviewed_literal_locator_repair(claims,changed_words):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'third-shared-owner',
+        'claims':[{'claim_id':'T','statement':'甲是假设。','claim_type':'exegesis',
+            'occurrences':[{'source_id':'S','anchors':[]}],'evidence_step_ids':['ET']}],
+        'evidence_steps':[{'evidence_step_id':'ET','statement':'甲是假设。',
+            'produced_claim_ids':['T'],'source_fragment_ids':['FC'],
+            'support_eligibility':'eligible_candidate','speaker':'professor','stance':'asserted'}],
+        'claim_relations':[
+            {'claim_relation_id':'RT','from_id':'D','to_id':'T','relation_type':'supports'},
+            {'claim_relation_id':'R','from_id':'D','to_id':'C','relation_type':'supports'}]}))
+    initial=intake.prepare(['D'],root/'original',instruction='Complete D itself',
+        groups=[['D']],policy=policy_file(root.parent),store=store)
+    _,jobs=batch.load(initial['manifest']['path'],root/'original/batch',store=store)
+    original,original_root=next(iter(jobs.values()))
+    assert execute_claim_management(store,original,root=original_root,
+        ports=SyntheticPorts(store,original_root,opus=pass_review))['status']=='completed'
+    old=store.claim_management_qualification('D')['run_id']
+    reuse.admit(store,'D',old)
+    first,_=update_neighbour(store,root)
+    path=policy_file(root.parent)
+    policy=cm.Policy.model_validate_json(path.read_text());policy.initial_candidate='proposal'
+    path.write_text(policy.model_dump_json())
+    prepared=intake.prepare(['T'],root/'second-peer',instruction='Repair a shared literal locator',
+        groups=[['T']],policy=path,store=store)
+    _,jobs=batch.load(prepared['manifest']['path'],root/'second-peer/batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    def propose(packet):
+        cite=[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]
+        return {'changes':[
+            {'record_key':'claims/T','fields_json':json.dumps({'scripture_refs':['馬太福音13:1-52']}),
+             'reason':'reviewed reference correction','citations':cite},
+            {'record_key':'source_fragments/FC','fields_json':json.dumps({
+                'anchor_state':'source_version_bound',
+                **({'verbatim_excerpt':'甲是假设'} if changed_words else {})}),
+             'reason':'bind literal to current source','citations':cite}],
+            'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=pass_review)
+    assert execute_claim_management(store,request,root=execution,ports=ports)['status']=='completed'
+    q=store.claim_management_qualification('D')
+    if changed_words:
+        assert not q['ready']
+    else:
+        assert q['ready'] and q['run_id']==old
+        proof=store.get_cvp_group(old)['readonly_claim_qualifications']['D']
+        assert proof['context_reviews']['claims/C']['round_id']==first
+        assert len(proof['context_reviews'])==2
+    assert ports.calls==['gpt','opus']
+
+
+def test_reviewed_background_locator_does_not_become_an_unresolved_own_objection(claims):
+    store,root=claims
+    store.apply_plan(store.plan_package({'package_id':'background-source',
+        'claim_relations':[{'claim_relation_id':'R','from_id':'C','to_id':'D','relation_type':'supports'}],
+        'knowledge_relations':[{'relation_id':'ER','from_id':'ED','to_id':'EC','relation_type':'contextualizes'}]}))
+    initial=intake.prepare(['C'],root/'initial-background',instruction='Review C and retain the background lead',
+        groups=[['C']],policy=policy_file(root.parent),store=store)
+    _,jobs=batch.load(initial['manifest']['path'],root/'initial-background/batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    def review(packet):
+        result=pass_review(packet)
+        result['findings']=[{'target_key':'source_fragments/FD','component':'locator',
+            'category':'evidence','reason':'background locator to repair with D',
+            'acceptance_condition':'bind background source when reviewing D',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+            'affected_target_keys':[],'affected_write_keys':[],
+            'impact_reason':'ED only contextualizes EC; no impact on C or its own EC binding'}]
+        return result
+    assert execute_claim_management(store,request,root=execution,
+        ports=SyntheticPorts(store,execution,opus=review))['status']=='completed'
+    old=store.claim_management_qualification('C')['run_id']
+    path=policy_file(root.parent);p=cm.Policy.model_validate_json(path.read_text())
+    p.initial_candidate='proposal';path.write_text(p.model_dump_json())
+    peer=intake.prepare(['D'],root/'background-peer',instruction='Repair D own source locator',
+        groups=[['D']],policy=path,store=store)
+    _,jobs=batch.load(peer['manifest']['path'],root/'background-peer/batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    def propose(packet):
+        return {'changes':[{'record_key':'source_fragments/FD',
+            'fields_json':json.dumps({'anchor_state':'source_version_bound'}),
+            'reason':'repair own literal locator',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}]}],
+            'creations':[],'retirements':[],'findings':[],'finding_resolutions':[]}
+    ports=SyntheticPorts(store,execution,proposal=propose,opus=pass_review)
+    assert execute_claim_management(store,request,root=execution,ports=ports)['status']=='completed'
+    newer=store.claim_management_qualification('D')['run_id']
+    reuse.admit(store,'C',old,peer_run_id=newer)
+    assert store.claim_management_qualification('C')['ready']
+    assert store.get_cvp_group(old)['context_findings']
+    assert ports.calls==['gpt','opus']
+
+
 @pytest.mark.parametrize('defect',[None,'owner_addition','own_evidence','incident_relation','reference_objection','legacy_peer'])
 def test_fresh_target_can_join_its_original_pass_to_a_reviewed_neighbour_delta(claims,defect):
     store,root=claims

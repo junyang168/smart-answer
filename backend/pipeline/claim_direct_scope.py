@@ -126,7 +126,8 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
 
 
 def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
-          include_impact_evidence=True):
+          include_impact_evidence=True, include_contextual_evidence=True, include_maintenance=True,
+          obligation_only=False):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -140,7 +141,11 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
     from backend.pipeline.claim_review_units import enabled as bounded_unit
     bounded = bounded_unit(request)
     writes = [d.record_key for d in candidate.dispositions if d.action != 'retain'] if candidate else []
-    base_roots = review_roots(request, bounded=bounded)
+    base_roots = review_roots(request, bounded=bounded) if include_maintenance else targets
+    if obligation_only:
+        from backend.pipeline.claim_joint_update import required_keys
+        base_roots = targets | ({k for k in required_keys(request, strict=False)
+                                 if not k.startswith('claims/')} if include_maintenance else set())
     roots = base_roots | set(writes)
     maintenance = base_roots - targets
     def named(col, oid):
@@ -184,7 +189,7 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
             elif col in cm.RELATION_COLLECTIONS:
                 impact_claims.update(k for k in deps(key, rows) if k.startswith('claims/'))
     content_claims = targets | impact_claims | {k for k in roots if k.startswith('claims/')}
-    if bounded:
+    if bounded or obligation_only:
         # An affected owner is inspected for the shared delta, not assigned
         # another complete Claim review or a new qualification by proximity.
         content_claims = targets | {k for k in roots if k.startswith('claims/')}
@@ -203,7 +208,14 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
                 destination = value.get('to_id') or value.get('target_id')
                 for endpoint in ends:
                     if endpoint.split('/', 1)[1] == destination:
-                        incoming.setdefault(endpoint, set()).update(ends | {relation})
+                        # Background remains visible in ordinary packets. For
+                        # mandatory maintenance, the edge itself is still our
+                        # relation, but its contextual source is not a premise.
+                        # A direct/shared binding or another support path still
+                        # reaches that source independently.
+                        upstream = (ends if include_contextual_evidence
+                                    or value.get('relation_type') != 'contextualizes' else set())
+                        incoming.setdefault(endpoint, set()).update(upstream | {relation})
             support_indexes[id(rows)] = incoming
         incoming = support_indexes[id(rows)]
         found = set(); pending = list(seeds)
@@ -336,19 +348,29 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
             'content_claim_keys': sorted(content_claims), 'neighbour_claim_keys': sorted(neighbours),
             'relation_keys': sorted(relations), 'source_ids': sorted(source_ids),
             'maintenance_keys': sorted(maintenance)}
-    if bounded:
+    if bounded or obligation_only:
         result['impact_claim_keys'] = sorted(impact_claims - content_claims)
         result['writable_record_keys'] = sorted(writable)
     return result
 
 
-def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True):
+def obligation_keys(request, before, candidate=None):
+    """Own complete support and explicit maintenance, excluding spare grants."""
+    return set(scope(request, before, candidate, include_write_context=False,
+        include_owner_context=False, include_impact_evidence=False,
+        include_contextual_evidence=False, obligation_only=True)['writable_record_keys'])
+
+
+def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True,
+                   include_maintenance=True):
     """Check adjacency at roots, not reverse closure at every read endpoint."""
     from backend.pipeline import claim_management as cm
     from backend.pipeline.claim_review_units import enabled as bounded_unit
     bounded = bounded_unit(request)
     roots = {cm.source.split_key(k) for k in review_roots(request,
         actual_write_keys=actual_write_keys if bounded else (), bounded=bounded)}
+    if not include_maintenance:
+        roots = {cm.source.split_key(k) for k in set(request.target_keys) | set(actual_write_keys)}
     consumers = store._claim_reference_consumers(cursor, roots)
     # New incoming non-Claim support can change the target's argument even
     # when no root row changed. Other Claims sharing evidence stay outside.
@@ -367,6 +389,6 @@ def assert_current(store, cursor, request, records, *, actual_write_keys=(), inc
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
     selected = scope(request, {cm.source.key(*k): v for k, v in records.items()},
-                     include_write_context=include_write_context)
+                     include_write_context=include_write_context, include_maintenance=include_maintenance)
     if not set(selected['record_keys']) <= {cm.source.key(*k) for k in records}:
         raise ValueError('direct Claim scope has incomplete current evidence')
