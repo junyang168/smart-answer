@@ -6,14 +6,15 @@ import { Suspense, useEffect, useState } from "react";
 import { SourceChips, type SourceCount } from "../navigation";
 
 /**
- * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写各来源各几篇，以及
- * 点进去是什么：按章页面、按段落原声，或讲道列表。
+ * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写这一章讲什么（有按章
+ * 页面的用那一页的标题），以及点进去是什么：按章页面、按段落原声，或讲道列表。
+ * 不写各来源几篇——听的人不在乎（负责人 2026-11-05）。
  */
 
 type Chapter = {
   chapter: number;
   sources: SourceCount[];
-  page: { kind: "chapter" | "passages"; source: string } | null;
+  page: { kind: "chapter" | "passages"; source: string; title?: string } | null;
   articles: { title: string; href: string }[];
 };
 
@@ -99,16 +100,7 @@ function BookChapters() {
                       className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
                     >
                       <span className="w-24 font-serif text-xl font-bold">第 {chapter.chapter} 章</span>
-                      <span className="flex flex-[1_1_320px] flex-wrap gap-x-3.5 gap-y-1.5 text-sm text-stone-700">
-                        {chapter.shown.map((item) => (
-                          <span key={item.name}>
-                            {item.name}{" "}
-                            <span className="font-mono text-stone-600">
-                              {item.count} {item.unit}
-                            </span>
-                          </span>
-                        ))}
-                      </span>
+                      <span className="flex-[1_1_320px] text-[15px] text-stone-700">{page?.title ?? ""}</span>
                       <span className="flex flex-wrap gap-2">
                         {chapter.articles.length > 0 && (
                           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>

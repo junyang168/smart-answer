@@ -49,3 +49,10 @@ def test_gtl_org_is_its_own_source():
     source = normalize_sermon_source({"source": "http://www.gtl.org"})
     assert source["source_organization"] == "主愛中華錄音事奉"
     assert source["source_url"] == "http://www.gtl.org"
+
+
+def test_a_chapter_with_its_own_page_carries_that_pages_one_line_title():
+    result = repo.book_chapters(repo.items(CATALOG, COVERAGE), "mat", [])
+    five, twenty_four = result["chapters"]
+    assert five["page"]["title"] == "八福與彌賽亞的身份，成全律法，與超越法利賽人的義"
+    assert twenty_four["page"] is None

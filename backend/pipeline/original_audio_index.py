@@ -1385,7 +1385,7 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
         # 页面地址，用的都是这一个 slug。
         "passage": passage,
         "label": format_chinese_reference(passage),
-        "title": PASSAGE_TITLES.get(passage, ""),
+        "title": passage_title(passage, data_base_dir),
         "sermons": rows(chosen.items()),
     }
     if whole_chapter is not None:
@@ -1757,6 +1757,14 @@ PASSAGE_TITLES: dict[str, str] = {
     "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
 }
 
+def passage_title(passage: str, data_base_dir: Path) -> str:
+    """页面的一句话标题：按章页面用程序生成的存档（`chapter_title`），没有才用手写的。"""
+
+    from backend.pipeline import chapter_title
+
+    return chapter_title.load(data_base_dir, passage) or PASSAGE_TITLES.get(passage, "")
+
+
 PASSAGES: tuple[tuple[str, str], ...] = (
     # 按章：哪些片段是释经由 `chapter_exposition` 逐片段决定。
     ("mat-5-1-48", "太5:1–48"),
@@ -1794,7 +1802,7 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
         out.append({
             "passage": slug,
             "label": label,
-            "title": PASSAGE_TITLES.get(slug, ""),
+            "title": passage_title(slug, data_base_dir),
             "scripture": {
                 "book": reference["osis_book"],
                 "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),

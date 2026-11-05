@@ -127,6 +127,7 @@ def books(materials: list[dict[str, Any]]) -> dict[str, Any]:
 def chapter_pages() -> dict[tuple[str, int], dict[str, Any]]:
     """有按章页面的章，和只有按段落原声页的章。"""
 
+    from backend.api.config import DATA_BASE_PATH
     from backend.pipeline import chapter_material, original_audio_index
     from backend.api.scripture import parse_reference
 
@@ -137,6 +138,8 @@ def chapter_pages() -> dict[tuple[str, int], dict[str, Any]]:
             "kind": "chapter",
             "source": chapter.source,
             "passage": chapter.passage,
+            # 书卷页每章一行写它讲什么；按章页面的标题就是这一句（负责人 2026-11-05）。
+            "title": original_audio_index.passage_title(chapter.passage, Path(DATA_BASE_PATH)),
         }
     for passage, label in original_audio_index.PASSAGES:
         reference = parse_reference(passage)
