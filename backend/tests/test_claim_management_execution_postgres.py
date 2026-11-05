@@ -223,6 +223,52 @@ def seed_claims(store, ids):
          'occurrences': [{'source_id': 'S', 'anchors': []}]} for cid in ids]}))
 
 
+def test_legacy_retirement_with_shared_position_is_one_atomic_two_source_unit(action):
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    store, _, _, _, tmp_path, _ = action
+    other = tmp_path / 'other-source.json'
+    other.write_text(json.dumps({'script': [{'text': '甲是假设，不是断言。'}]}))
+    store.apply_plan(store.plan_package({'package_id': 'legacy-shared-opposition',
+        'source_documents': [{'source_id': 'T', 'title': 'synthetic notes', 'source_type': 'notes_manuscript',
+            'source_path': str(other), 'source_file_sha256': binding(other)['file_sha256']}],
+        'claims': [{'claim_id': cid, 'statement': '甲是假设。', 'claim_type': 'exegesis',
+            'occurrences': [{'source_id': sid, 'anchors': []} for sid in ['S', 'T']],
+            'opposed_position_ids': ['P'] if cid in 'AB' else [], 'evidence_step_ids': ['E'+cid]} for cid in 'ABC'],
+        'evidence_steps': [{'evidence_step_id': 'E'+cid, 'statement': '甲是假设。', 'produced_claim_ids': [cid]} for cid in 'ABC'],
+        'position_nodes': [{'position_id': 'P', 'title': 'synthetic old opposition'}],
+        'claim_relations': [{'claim_relation_id': 'AC', 'from_id': 'A', 'to_id': 'C', 'relation_type': 'supports'}]}))
+    request, output = operation_request(action, 'Retire', list('ABC'))
+    request.source_bindings['T'] = cm.source.FileBinding.model_validate(binding(other))
+    request.policy = cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY.parent / 'wang_claim_management_opus_only_v1.json'))
+    request.permissions += [cm.source.Permission(collection='evidence_steps', object_id='E'+cid, fields=['produced_claim_ids']) for cid in 'ABC']
+    request.permissions += [cm.source.Permission(collection='position_nodes', object_id='P', fields=['title']),
+                            cm.source.Permission(collection='claim_relations', object_id='AC', fields=['reason'])]
+    authorize(request, {})
+    def propose(packet):
+        unit = packet['unit_request']
+        if '__claim_request_ref__' in unit:
+            unit = packet[unit['__claim_request_ref__']]
+        assert set(unit['target_keys']) == {'claims/'+cid for cid in 'ABC'}
+        assert set(packet['sources']) == {'S', 'T'}
+        candidate = cm.existing_candidate(packet['before'])
+        for disposition in candidate.dispositions:
+            if disposition.record_key.startswith('source_documents/'):
+                continue
+            disposition.action = 'retire'
+            disposition.reason = 'synthetic reviewed duplicate and its obsolete support'
+            disposition.citations = [cm.Citation(source_id='S', paragraph_key='S0001', exact_quote='甲是假设，不是断言。')]
+        return candidate.model_dump(mode='json')
+    ports = SyntheticPorts(store, tmp_path, proposal=propose)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus']
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    assert len(parent['original_goal']['units']) == 1
+    assert all(store.get_record_state('claims', cid)['retired'] for cid in 'ABC')
+    with store.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM wang_knowledge.change_sets WHERE source_kind=%s', (cm.VERSION,)).fetchone() == (1,)
+
+
 @pytest.mark.parametrize('operation',['Create','Update','Retire','Restore','Split','Merge'])
 def test_opus_only_completes_with_real_program_readback_and_no_gemini(action,operation):
     store,original,_,_,tmp_path,_=action
@@ -842,6 +888,17 @@ def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(act
     assert after['engineering_review_recoveries'][0]['original_round']=={k:v for k,v in before.items() if k not in {'run_id','status','error'}}
     assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
     assert recover_returned_review(store,rid,authorization=binding(direction))==path
+    # A later transaction-only recovery sees relocated stage receipts, while
+    # the original completed call slots must retain their original bindings.
+    again=tmp_path/'returned-review-recovery-again.json'
+    again.write_text(json.dumps({'schema_version':VERSION,'round_id':rid,
+        'authorized_by':'owner','authorization_quote':'recover the same saved review again without repeating calls',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json(
+            {k:v for k,v in after.items() if k not in {'run_id','status','error'}})}))
+    second=recover_returned_review(store,rid,authorization=binding(again))
+    assert second!=path
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert ports.calls==['opus']
     result=execute_claim_management(store,request,root=root,ports=ports)
     assert result['status']=='completed',result
     assert ports.calls==['opus']
@@ -1012,10 +1069,10 @@ def test_unrecorded_negative_review_recovery_records_human_outcome_without_calls
         result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='persistent',reason='source needs clarification',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
         return result.model_dump(mode='json')
     actual=cm.finding_blocks
-    def old(finding,request=None,candidate=None):
+    def old(finding,request=None,candidate=None,**kwargs):
         if candidate and not finding.get('affected_target_keys') and any(d.record_key==finding['target_key'] and d.action!='retain' for d in candidate.dispositions):
             raise ValueError('target or actual write finding cannot be dismissed as readonly context')
-        return actual(finding,request,candidate)
+        return actual(finding,request,candidate,**kwargs)
     monkeypatch.setattr(cm,'finding_blocks',old)
     before=store.get_record_state('observations','O');ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=propose)
     result=execute_claim_management(store,request,root=root,ports=ports)

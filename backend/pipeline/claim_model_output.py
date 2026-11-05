@@ -6,8 +6,9 @@ Historical policies keep their original schemas and interpretation.
 """
 from copy import copy, deepcopy
 import json
-from typing import Literal
+from typing import Literal, Union
 
+from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
 from pydantic import Field, create_model
 from backend.pipeline import claim_management as cm
 
@@ -88,8 +89,18 @@ def scoped_adapter(adapter, packet):
     def key_type(keys):
         return Literal[tuple(sorted(keys))] if keys else str
 
+    def array_field(empty=False, **kwargs):
+        if empty:
+            kwargs['max_length'] = 0  # Still enforced by the response model.
+            if not reviewing and packet['policy'].get('proposal_empty_arrays') == 'program_validated_v1':
+                # Some structured decoders loop on maxItems:0. Remove only
+                # this wire hint; returned items remain forbidden by Pydantic.
+                kwargs['json_schema_extra'] = lambda schema: schema.pop('maxItems', None)
+                kwargs['description'] = kwargs.get('description', '') + ' Must be []; program validation forbids every item.'
+        return Field(**kwargs)
+
     def key_list(keys, description):
-        return (list[key_type(keys)], Field(description=description, **({'max_length': 0} if not keys else {})))
+        return (list[key_type(keys)], array_field(not keys, description=description))
 
     impact = {
         'affected_target_keys': key_list(targets, 'Only affected Claim keys from unit_request.target_keys. Never Evidence, Observation, relation, or readonly neighbour keys.'),
@@ -103,29 +114,45 @@ def scoped_adapter(adapter, packet):
     if reviewing:
         from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled
         base = BindingFindingsReview if binding_enabled(packet['policy']) else FindingsReview
-        model = create_model('ScopedFindingsReview', __base__=base,
-            findings=(list[finding], ...),
-            prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+        fields = dict(findings=(list[finding], ...),
+            prior_findings=(list[resolution], array_field(not pending)))
+        if binding_enabled(packet['policy']) and packet.get('initial_review_references'):
+            from backend.pipeline.claim_evidence_review import BindingAssessment
+            fresh = set(packet['own_evidence_bindings'])
+            assessment = create_model('ScopedFreshBindingAssessment', __base__=BindingAssessment,
+                claim_key=(key_type(fresh), Field(description='Only a currently pending own-evidence Claim; reused approvals are references.')))
+            fields['binding_assessments'] = (list[assessment], Field(min_length=len(fresh), max_length=len(fresh)))
+        if packet['policy'].get('review_unit_contract'):
+            fields['complete_review'] = (Literal[True], Field(description=
+                'Every content Claim was reviewed individually; references were checked only for their role '
+                'in this unit and actual shared-write impacts. Does not reapprove reference Claims.'))
+        model = create_model('ScopedFindingsReview', __base__=base, **fields)
     else:
         change = create_model('ScopedChange', __base__=Change, record_key=(key_type(writable), ...))
-        fields = dict(changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
+        fields = dict(changes=(list[change], array_field(not writable)),
             findings=(list[finding], ...),
-            finding_resolutions=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+            finding_resolutions=(list[resolution], array_field(not pending)))
         if contract in {CREATING_CONTRACT, MANAGED_CONTRACT}:
             creatable = {p['collection'] for p in request.get('creation_permissions', [])}
             identity = {}
             if contract == MANAGED_CONTRACT:
-                slots = set(packet['original_goal']['claim_creation_allocations'].values())
+                slots = set(allocated_ids(packet['original_goal']['claim_creation_allocations']))
                 identity['object_id'] = (key_type(slots), ...)
             creation = create_model('ScopedCreation', __base__=Creation, collection=(key_type(creatable), ...), **identity)
-            fields['creations'] = (list[creation], Field(**({'max_length': 0} if not creatable else
-                                                          {'max_length': 1} if contract == MANAGED_CONTRACT else {})))
+            support = creatable - {'claims'}
+            if contract == MANAGED_CONTRACT and support:
+                claim_creation = create_model('ScopedClaimCreation', __base__=Creation,
+                    collection=(Literal['claims'], ...), **identity)
+                support_creation = create_model('ScopedSupportCreation', __base__=Creation,
+                    collection=(key_type(support), ...))
+                creation = Union[claim_creation, support_creation] if 'claims' in creatable else support_creation
+            fields['creations'] = (list[creation], array_field(not creatable, **({'max_length': len(slots)} if creatable and contract == MANAGED_CONTRACT and not support else {})))
         if contract == MANAGED_CONTRACT:
             allowed = {k for k in writable if k in targets or k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
             if 'Retire' not in request['allowed_operations']:
                 allowed = set()
             retirement = create_model('ScopedRetirement', __base__=Retirement, record_key=(key_type(allowed), ...))
-            fields['retirements'] = (list[retirement], Field(**({'max_length': 0} if not allowed else {})))
+            fields['retirements'] = (list[retirement], array_field(not allowed))
         base = ManagedChanges if contract == MANAGED_CONTRACT else CreatingChanges if contract == CREATING_CONTRACT else Changes
         model = create_model('ScopedChanges', __base__=base, **fields)
     schema_sha = cm.sha256_json(model.model_json_schema())
@@ -175,7 +202,11 @@ def candidate(raw, materials):
         raise ValueError('legacy identity recovery cannot upgrade the model output contract')
     managed = materials['policy']['model_output_contract'] == MANAGED_CONTRACT
     creating = materials['policy']['model_output_contract'] in {CREATING_CONTRACT, MANAGED_CONTRACT}
-    wire = (ManagedChanges if managed else CreatingChanges if creating else Changes).model_validate(raw)
+    from backend.pipeline.claim_metadata_projection import project_support_aliases, project_candidate
+    wire_type = ManagedChanges if managed else CreatingChanges if creating else Changes
+    wire = wire_type.model_validate(raw)
+    projected_raw, support_ids = project_support_aliases(raw, materials)
+    if support_ids:wire = wire_type.model_validate(projected_raw)
     request = cm.Request.model_validate(materials['unit_request'])
     if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
@@ -204,7 +235,7 @@ def candidate(raw, materials):
         key = cm.source.key(creation.collection, creation.object_id)
         if key in seen or key in before or creation.collection not in cm.KNOWLEDGE_COLLECTIONS:
             raise ValueError('created record repeated, already present or of an unknown collection')
-        if managed and creation.object_id not in materials['original_goal']['claim_creation_allocations'].values():
+        if managed and creation.collection == 'claims' and creation.object_id not in allocated_ids(materials['original_goal']['claim_creation_allocations']):
             raise ValueError('created identity is not a program-reserved Claim slot')
         seen.add(key)
         fields = object_json(creation.fields_json)
@@ -228,15 +259,21 @@ def candidate(raw, materials):
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
-    return result, receipt
+    if support_ids:receipt['support_creation_identities']=support_ids
+    return project_candidate(result, receipt, materials)
 
 
 def review(raw, materials, proposal):
     if not enabled(materials):
         return cm.Review.model_validate(raw)
-    from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments
+    from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments, reused_assessments
     binding = binding_enabled(materials['policy'])
     wire = (BindingFindingsReview if binding else FindingsReview).model_validate(raw)
+    reused = reused_assessments(materials, proposal) if binding else {}
+    if reused:
+        if set(reused) & {a.claim_key for a in wire.binding_assessments}:
+            raise ValueError('initially approved unchanged Claims are references, not fresh assessments')
+        wire = wire.model_copy(update={'binding_assessments': [*wire.binding_assessments, *reused.values()]})
     if binding:
         validate_assessments(wire, materials, proposal)
     request = cm.Request.model_validate(materials['unit_request'])
@@ -251,10 +288,15 @@ def review(raw, materials, proposal):
     if rejected - set(denominator):
         raise ValueError('review finding outside complete frozen scope')
     assessments = {a.claim_key: a.reason for a in wire.binding_assessments} if binding else {}
+    for key in reused:
+        assessments[key] = 'Reused the exact unchanged initial Claim assessment; not a new model vote. ' + assessments[key]
+    bounded = bool(materials['policy'].get('review_unit_contract'))
     return cm.Review(proposal_sha256=proposal.digest, verdicts=[cm.source.Verdict(
         record_key=key, approved=key not in rejected,
         reason=('Reviewer reported an unresolved issue.' if key in rejected else
-                assessments.get(key, 'Reviewer explicitly approved this unchallenged record in the complete-scope review.')),
+                assessments.get(key, 'Checked only as dependency, reference or actual-change impact for the fixed unit; '
+                    'no independent Claim reapproval.' if bounded else
+                    'Reviewer explicitly approved this unchallenged record in the complete-scope review.')),
         problems=['reported finding'] if key in rejected else []) for key in denominator],
         findings=wire.findings, prior_findings=wire.prior_findings,
         answered_questions=cm.operation_questions(materials['original_goal'], proposal))

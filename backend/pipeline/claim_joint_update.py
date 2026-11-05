@@ -39,9 +39,27 @@ def required_keys(request, *, strict=True):
     return list(keys)
 
 
+def context_roots(request, *, exists=None):
+    """Read explicit maintenance; let admission persist invalid-list refusals."""
+    from backend.pipeline import claim_management as cm
+    keys = set(request.target_keys)
+    if enabled(request):
+        # Claims must be explicit targets, never hidden maintenance roots.
+        # Initial admission can omit a missing maintenance row only so its
+        # unchanged required list is durably refused before any model call.
+        keys.update(k for k in required_keys(request, strict=False) if not k.startswith('claims/')
+            and (exists is None or exists(*cm.source.split_key(k))))
+    else:
+        keys.update(p.key for p in request.permissions)
+    keys.update(cm.source.key('source_documents', sid) for sid in request.source_bindings)
+    from backend.pipeline.claim_direct_scope import retirement_reference_keys
+    keys.update(retirement_reference_keys(request))
+    return sorted(cm.source.split_key(key) for key in keys)
+
+
 def finding_permission_extension(previous, old, request):
     """A linked action may authorize a known readonly finding, not widen reads."""
-    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted'}:
+    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted', 'no_progress'}:
         return False
     prior = {p.key: p for p in old.permissions}
     current = {p.key: p for p in request.permissions}
@@ -49,11 +67,65 @@ def finding_permission_extension(previous, old, request):
     findings = {f['target_key'] for f in previous.get('findings', {}).values()
                 if f['category'] != 'source_uncertain'}
     frozen = previous['original_goal']['original_objects']
+    old_creations = getattr(old, 'creation_permissions', [])
+    new_creations = getattr(request, 'creation_permissions', [])
+    if old_creations != new_creations:
+        if prior != current:
+            return False
+        from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+        before = {(p.collection,p.source_id):p for p in old_creations}
+        after = {(p.collection,p.source_id):p for p in new_creations}
+        extra = set(after) - set(before)
+        sources = {p.source_id for p in old_creations if p.collection == 'claims'}
+        cited = {c['source_id'] for f in previous.get('findings',{}).values()
+                 if f['category'] in {'mapping','evidence'} for c in f['citations']}
+        return bool(extra and len(before)==len(old_creations) and len(after)==len(new_creations)
+            and all(after.get(k)==p for k,p in before.items())
+            and all(sid in sources & cited & set(old.source_bindings)
+                and col in SUPPORT_CREATION_FIELDS
+                and set(after[col,sid].fields)<=SUPPORT_CREATION_FIELDS[col] for col,sid in extra))
+    if previous['result']['reason'] == 'no_progress':
+        # An omitted ordinary field can strand a real engineering correction.
+        # The linked request supplies new exact authority, but no new objects,
+        # source scope, Claim neighbours, or call allowance.
+        from backend.pipeline.claim_management_intake import FIELDS
+        extended = {k for k in prior.keys() & current.keys() if prior[k] != current[k]}
+        return bool(not added and extended and extended <= findings and extended <= set(frozen)
+            and set(prior) == set(current)
+            and all(not frozen[k]['retired'] and not k.startswith('claims/')
+                and set(prior[k].fields) < set(current[k].fields)
+                and set(current[k].fields) <= FIELDS.get(current[k].collection, set()) for k in extended)
+            and all(prior[k] == current[k] for k in prior.keys() - extended))
     return bool(added and added <= findings and added <= set(frozen)
         and all(current.get(key) == value for key, value in prior.items())
         # A Claim may be added only when it is already a target: the rule is
         # against hidden Claims, not the action's own (#459: CL004).
         and all((not key.startswith('claims/') or key in request.target_keys) and not frozen[key]['retired'] for key in added))
+
+
+def owner_target_extension(previous, old, request):
+    """An explicit joint follow-up may include one already inspected owner."""
+    from backend.pipeline import claim_management as cm
+    extra=set(request.target_keys)-set(old.target_keys)
+    if (not extra or not set(old.target_keys)<set(request.target_keys) or len(request.target_keys)>2
+            or old.creation_permissions!=request.creation_permissions
+            or not finding_permission_extension(previous,old,request)):
+        return False
+    frozen=previous['original_goal']['original_objects']
+    named={f['target_key'] for f in previous.get('findings',{}).values() if f['category']!='source_uncertain'}
+    old_grants={p.key:p for p in old.permissions};new_grants={p.key:p for p in request.permissions}
+    if not extra<=named & set(frozen) or set(new_grants)-set(old_grants)!=extra:
+        return False
+    from backend.pipeline.claim_management_intake import FIELDS
+    if any(not key.startswith('claims/') or frozen[key]['retired']
+           or not set(new_grants[key].fields)<=FIELDS['claims'] for key in extra):
+        return False
+    payloads={k:v['payload'] for k,v in frozen.items()}
+    if any(not (own:=cm.own_source_ids(payloads[key],payloads)) or not own<=set(old.source_bindings) for key in extra):
+        return False
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    return (authority.get('authorized_by')=='owner' and authority.get('human_content_approval') is False
+        and authority.get('owner_target_extension')=={'previous_target_keys':old.target_keys,'added_target_keys':sorted(extra)})
 
 
 def creates(policy):
@@ -77,14 +149,26 @@ def admission_error(request, policy, before, goal):
     try:
         if len(request.target_keys) > (policy.joint_update_max_targets or 1):
             raise ValueError('joint Update exceeds joint_update_max_targets')
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        if bounded_unit(request, policy):
+            from backend.pipeline import claim_management as cm
+            payloads = {k: v['payload'] for k, v in before.items()}
+            own = [cm.own_source_ids(payloads[k], payloads) for k in request.target_keys]
+            if len(request.source_bindings) != 1 or any(s != set(request.source_bindings) for s in own):
+                raise ValueError('bounded review unit must belong to exactly one same source')
         if request.creation_permissions and not creates(policy):
             raise ValueError('joint Update supports existing retain/update only; creation requires a separate capability')
         if creates(policy) and request.creation_permissions:
             from backend.pipeline import claim_management as cm
             payloads = {k: v['payload'] for k, v in before.items()}
             own = set().union(*(cm.own_source_ids(payloads[k], payloads) for k in request.target_keys))
-            if any(p.collection != 'claims' or p.source_id not in own for p in request.creation_permissions):
-                raise ValueError('joint Update may create only a Claim from a target\'s own source')
+            claims = {p.source_id for p in request.creation_permissions if p.collection == 'claims'}
+            from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+            if any(p.source_id not in own or p.collection != 'claims' and (
+                    policy.model_output_contract != 'claim_changes_v4'
+                    or p.source_id not in claims or p.collection not in SUPPORT_CREATION_FIELDS
+                    or not set(p.fields)<=SUPPORT_CREATION_FIELDS[p.collection]) for p in request.creation_permissions):
+                raise ValueError('joint Update creation requires a target-own Claim or its source-scoped evidence')
         if not policy.all_findings_to_gpt:
             raise ValueError('joint Update must adjudicate all findings with GPT')
         required = required_keys(request)
@@ -92,10 +176,16 @@ def admission_error(request, policy, before, goal):
                 or list(goal.get('units', {}).values()) != [request.target_keys]):
             raise ValueError('joint Update must bind every target and required maintenance item to one unit')
         from backend.pipeline import claim_management as cm
-        # Required keys must not seed their own reachability proof.
+        # Inspect declared roots, without treating unused grants as new roots.
         from types import SimpleNamespace
         natural = request.model_copy(deep=True, update={'permissions': []})
-        reachable = set(cm.audit_keys(natural, before))
+        from backend.pipeline.claim_direct_scope import enabled as direct_enabled, scope as direct_scope
+        # Reachability is a read-only question. Hypothetical write consumers
+        # can demand a neighbour's private evidence which was never part of
+        # the real request or its frozen model frame. Actual write scopes and
+        # transaction consumer guards remain checked independently below.
+        reachable = (set(direct_scope(natural,before,include_write_context=False)['record_keys'])
+                     if direct_enabled(natural,policy) else set(cm.audit_keys(natural,before)))
         # A writable relation in that closure brings its other end into review,
         # so what review then shows is reachable too -- one hop: relations
         # granted beyond the closure do not extend it further (#459, P06-CL001:
@@ -103,6 +193,25 @@ def admission_error(request, policy, before, goal):
         hop = [p for p in request.permissions if p.collection in cm.RELATION_COLLECTIONS and p.key in reachable]
         if hop:
             reachable |= set(cm.audit_keys(request.model_copy(deep=True, update={'permissions': hop}), before))
+        # Creation must be able to attach its answer to a Question already
+        # read as a shared-use consumer. This link-only grant does not make
+        # the Question, its old answers or their neighbours review roots.
+        from backend.pipeline.claim_direct_scope import owner_context_enabled, scope as direct_scope
+        if owner_context_enabled(request):
+            read = set(cm.audit_keys(request, before))
+            payloads = {k: v['payload'] for k, v in before.items()}
+            neighbours = set(direct_scope(natural, before)['neighbour_claim_keys'])
+            neighbour_ids = {k.split('/', 1)[1] for k in neighbours}
+            linkable = {p.key for p in request.permissions
+                if p.collection == 'questions' and set(p.fields) == {'answer_claim_ids'}}
+            linkable.update(p.key for p in request.permissions
+                if p.collection == 'evidence_steps' and set(p.fields) == {'produced_claim_ids'}
+                and p.key in payloads and (
+                    set(payloads[p.key].get('produced_claim_ids', [])) & neighbour_ids
+                    or any(p.object_id in payloads[k].get('evidence_step_ids', []) for k in neighbours)))
+            reachable.update(p.key for p in request.permissions if p.key in linkable
+                and p.key in read and p.key in before and not before[p.key]['retired']
+                and cm.own_source_ids(payloads[p.key], payloads) == set(request.source_bindings))
         permissions = {p.key for p in request.permissions}
         if (permissions | set(required)) - reachable:
             raise ValueError('joint Update permission/required maintenance item is unreachable from its target closure')
@@ -127,9 +236,21 @@ def validate_candidate_scope(request, before, candidate):
     if candidate.operation not in {None, 'Update'} or candidate.replacements:
         raise ValueError('joint Update supports existing retain/update only')
     created = [d.record_key for d in candidate.dispositions if d.action == 'create']
-    # One new same-source Claim per action, under an explicit creation grant.
-    if created and (not request.creation_permissions or len(created) > 1 or not created[0].startswith('claims/')):
-        raise ValueError('joint Update may create at most one granted Claim')
+    # Legacy grants retain their single slot; managed actions use only their
+    # exact frozen SQL allocations, which can explicitly contain several IDs.
+    authority=json.loads(cm.source.verify_file(request.authorization).read_text())
+    allocations=authority.get('claim_creation_allocations',{})
+    from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
+    slots=allocated_ids(allocations)
+    claim_creations=[key for key in created if key.startswith('claims/')]
+    if claim_creations and (not request.creation_permissions or len(claim_creations)>(len(slots) if slots else 1)
+            or slots and not {key.split('/',1)[1] for key in claim_creations}<=set(slots)):
+        raise ValueError('joint Update creation exceeds the exact granted Claim identities')
+    from backend.pipeline.claim_management_intake import SUPPORT_CREATION_FIELDS
+    granted={p.collection for p in request.creation_permissions}
+    if any(key.split('/',1)[0] not in SUPPORT_CREATION_FIELDS or key.split('/',1)[0] not in granted
+           for key in created if not key.startswith('claims/')):
+        raise ValueError('joint Update support creation exceeds its exact source-scoped grants')
     for disposition in candidate.dispositions:
         if disposition.action == 'retire':
             col = disposition.record_key.split('/', 1)[0]

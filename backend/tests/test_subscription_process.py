@@ -127,7 +127,9 @@ run([sys.executable,'-c','import time; print("already on disk",flush=True); time
  input='',env=dict(os.environ),timeout=5,directory=sys.argv[1])
 ''')
     root = tmp_path/'transport'
-    parent = subprocess.Popen([sys.executable,str(caller),str(root)])
+    environment = dict(os.environ)
+    environment['PYTHONPATH'] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parents[2]), environment.get('PYTHONPATH')]))
+    parent = subprocess.Popen([sys.executable,str(caller),str(root)], env=environment)
     try:
         for _ in range(100):
             if (root/'stdout.log').exists() and (root/'stdout.log').read_text(): break
@@ -163,6 +165,7 @@ def test_common_bound_call_recovers_returned_output_without_reservation_or_gener
     runner.root=tmp_path/'round'
     raw=runner.call_bound('gpt',{'input':'complete'},adapter,expected=('fake','codex_subscription'))
     (runner.root/'gpt.raw.json').unlink()  # returned CLI, parent not yet saved common raw
+    runner.ports.model_call_capacity = lambda *a: pytest.fail('replay acquired model capacity')
     monkeypatch.setattr(subprocess,'run',lambda *a,**k: pytest.fail('recovery sent another call'))
     recovered=runner.call_bound('gpt',{'input':'complete'},adapter,expected=('fake','codex_subscription'))
     assert recovered['response']==raw['response']=={'ok':True}
@@ -177,7 +180,8 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     from backend.pipeline import claim_management_batch as batch
     from backend.pipeline import source_reconciliation_runtime as runtime
     from backend.api.canonical_repository import postgres_store as pg, viewpoint_production_safety as safety
-    from backend.pipeline.claim_management import sha256_json
+    from backend.pipeline.claim_management import sha256_json, DEFAULT_POLICY, source
+    from backend.pipeline.source_reconciliation_runner import binding
     @contextmanager
     def locked(*args,**kwargs):
         with (tmp_path/('lock'+str(len(list(tmp_path.glob('lock*')))))).open('a') as fd: yield fd
@@ -185,8 +189,9 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     monkeypatch.setattr(safety,'exclusive_cvp_run_lock',locked)
     monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
     bound=SimpleNamespace(model_dump=lambda: {})
+    policy=source.FileBinding.model_validate(binding(DEFAULT_POLICY))
     requests={k:(SimpleNamespace(target_keys=['claims/'+k],permissions=[],source_bindings={},
-        authorization=bound,policy=bound),tmp_path/k) for k in ['a','b']}
+        authorization=bound,policy=policy),tmp_path/k) for k in ['a','b']}
     monkeypatch.setattr(batch,'load',lambda *a: ({'max_workers':2},requests))
     monkeypatch.setattr(batch,'check_binding',lambda binding: None)
     class Store:

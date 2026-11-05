@@ -1,0 +1,106 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { load, plain } from "./ScriptureSlide";
+
+/**
+ * 按章页面的投影片：模型读保留的逐字稿写的要点，和教授此刻为止读到的经文。
+ *
+ * 负责人 2026-11-03：投影片要像查经 PPT，呈现他讲的内容，而不是 Claim 的论证结
+ * 构；**他讲到、读到的经文必须显示在投影片上。** 要点是编辑整理，不冒充原话；
+ * 经文是和合本全文，按出处去取，不经模型。
+ */
+
+export type ChapterSlideData = {
+  at: number;
+  seconds: number;
+  title: string;
+  /** 每条要点在他讲到的那一句才出现（at）。 */
+  points: { at: number; text: string }[];
+  verses: string[];
+  scriptures: { at: number; scripture: string; label: string }[];
+};
+
+/** `mat-5-4-9` → 逐节的出处 `mat-5-4` … `mat-5-9`；读不出的整段当一节。 */
+function eachVerse(slug: string): { number: string; slug: string }[] {
+  const match = slug.match(/^([a-z0-9]+)-(\d+)-(\d+)(?:-(\d+))?$/);
+  if (!match) return [{ number: "", slug }];
+  const [, book, chapter, from, to] = match;
+  const first = Number(from);
+  const last = to ? Number(to) : first;
+  if (last < first || last - first > 30) return [{ number: "", slug }];
+  return Array.from({ length: last - first + 1 }, (_, index) => ({
+    number: String(first + index),
+    slug: `${book}-${chapter}-${first + index}`,
+  }));
+}
+
+/** 一节一行、带节号——他一节一节读，听众要找得到他读到哪里。 */
+function Verse({ slug, label, latest }: { slug: string; label: string; latest: boolean }) {
+  const verses = eachVerse(slug);
+  const [texts, setTexts] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all(verses.map((verse) => load(verse.slug).then((data) => plain(data.passages.zh)))).then((loaded) => {
+      if (alive) setTexts(loaded);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+  return (
+    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
+      <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
+      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200" : "text-[0.9rem] leading-6 text-slate-500"}`}>
+        {verses.map((verse, index) => (
+          <li key={verse.slug} className="flex gap-2.5">
+            {verse.number && (
+              <span className="w-5 shrink-0 pt-[0.15rem] text-right font-mono text-[0.7rem] text-amber-300/60">
+                {verse.number}
+              </span>
+            )}
+            <span>{texts ? texts[index] : "……"}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+export default function ChapterSlide({ slide, seconds }: { slide: ChapterSlideData; seconds: number }) {
+  // 要点和经文都是他讲到、读到了才出现。新读的经文放在最上面、亮着。
+  const points = slide.points.filter((item) => item.at <= seconds + 1);
+  const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
+  const shown = [...read].reverse();
+  return (
+    <section className="flex min-h-[20rem] flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
+      <header>
+        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
+        {points.length > 0 && (
+          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed">
+            {points.map((point, index) => (
+              <li
+                key={point.text}
+                className={`flex gap-3 ${index === points.length - 1 ? "text-white" : "text-slate-400"}`}
+              >
+                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
+                  {index + 1}
+                </span>
+                <span>{point.text}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </header>
+      {shown.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {shown.map((item, index) => (
+            <Verse key={`${item.at}-${item.scripture}`} slug={item.scripture} label={item.label} latest={index === 0} />
+          ))}
+        </div>
+      )}
+      <p className="mt-auto text-right text-[0.65rem] tracking-[0.15em] text-slate-600">要點為編輯整理，非原話</p>
+    </section>
+  );
+}

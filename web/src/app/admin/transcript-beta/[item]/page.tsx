@@ -16,7 +16,7 @@ export default async function BetaEditor({
           className="text-blue-700 underline"
           href={`/admin/transcript-beta/${encodeURIComponent(item)}/published`}
         >
-          查看測試發佈版
+          查看發佈版
         </Link>
       </div>
       <TranscriptReviewEntry

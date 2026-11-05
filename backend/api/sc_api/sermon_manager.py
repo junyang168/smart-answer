@@ -776,7 +776,11 @@ class SermonManager:
             from .transcript_review import read
             published = read(Path(self.base_folder)/'script_published'/f'{item}.json')
             if published is not None:
-                return published
+                from backend.pipeline.source_projection import live_script
+                # Publication keeps the reviewed source intact for history.
+                # Reader/model consumers always receive the live projection;
+                # raw revisions are available through authenticated history.
+                return {**published, 'script': live_script(published.get('script', []))}
         sermon = self._sm.get_sermon_metadata(user_id, item)
         status = sermon.status
         sd = ScriptDelta(self.base_folder, item)

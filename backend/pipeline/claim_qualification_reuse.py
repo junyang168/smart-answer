@@ -20,20 +20,8 @@ def legacy_spot_check_replaced(cursor, claim_id, state, value):
             or value.get('outcome') != 'completed' or not value.get('opus_approved')
             or not value.get('program_readback_complete')):
         return False
-    events = cursor.execute("""SELECT object_revision,reviewer_kind,decision,artifact
-        FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s
-        ORDER BY created_at DESC,review_event_id DESC""", (claim_id,)).fetchall()
-    if not events or any(kind == 'human' for _,kind,_,_ in events):
-        return False
-    revision,kind,decision,artifact = events[0]
-    resolution = (artifact or {}).get('resolution', {})
-    return (revision == state['revision'] and kind == 'ai' and decision == 'human_review_required'
-        and resolution.get('schema_version') == 'wang_legacy_ai_review_reconciliation_v1'
-        and resolution.get('claim_id') == claim_id
-        and resolution.get('approval_status') == 'not_human_approved'
-        and resolution.get('independent_review_decision') == 'pass'
-        and resolution.get('adjudication_status') == 'human_spot_check'
-        and resolution.get('target_review_status') == 'human_review_required')
+    from backend.pipeline.claim_metadata_projection import sampling_marker
+    return bool(sampling_marker(cursor, claim_id, state))
 
 
 def anchor_pruning(before, after):
@@ -254,8 +242,14 @@ def evidence(value):
     approval=value['reviewed']['evidence']['approval'];check_binding(approval)
     raw=body(read(Path(approval['path'])))['response']
     from backend.pipeline.claim_model_output import review
-    from backend.pipeline.claim_management import Candidate
+    from backend.pipeline.claim_management import Candidate, Request, validate_review, audit_keys, operation_questions
     decoded = review(raw, value['materials'], Candidate.model_validate(value['candidate']))
+    if value['materials']['policy'].get('review_unit_contract'):
+        m=value['materials'];request=Request.model_validate(m['unit_request']);candidate=Candidate.model_validate(value['candidate'])
+        if not validate_review(candidate,decoded,audit_keys(request,m['before'],candidate),
+                operation_questions(m['original_goal'],candidate),m['unresolved'],m['sources'],
+                request=request,records=m['before']):
+            raise ValueError('completed review retains an unresolved own-data issue')
     return bound,decoded.model_dump(mode='json')
 
 
@@ -306,7 +300,8 @@ def current_pins(store,cursor,value):
         for bound in peer['materials']['unit_request']['source_bindings'].values():
             verify_current_source_binding(bound)
         peer_current=store._assert_transaction_read_pins(cursor,fresh)
-        store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'])
+        store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'],
+            actual_write_keys=[d['record_key'] for d in peer['candidate']['dispositions'] if d['action']!='retain'])
         if 'human_source_decisions' in peer['materials']:
             from backend.pipeline.claim_human_source import assert_current
             assert_current(cursor,peer['materials']['unit_request']['source_bindings'],peer['materials']['human_source_decisions'])
@@ -336,7 +331,8 @@ def admit(store,cursor,original_id,peer_id):
     # Original-only evidence is still covered by the original full review:
     # verify it is exactly unchanged, instead of sending it to the peer model.
     current=store._assert_transaction_read_pins(cursor,{**original,**fresh} if bounded else fresh)
-    store._assert_claim_management_scope(cursor,fresh,records={k:current[k] for k in fresh},request=peer['materials']['unit_request'])
+    store._assert_claim_management_scope(cursor,fresh,records={k:current[k] for k in fresh},request=peer['materials']['unit_request'],
+        actual_write_keys=[d['record_key'] for d in peer['candidate']['dispositions'] if d['action']!='retain'])
     if bounded:
         for value in (old,peer):
             if 'human_source_decisions' in value['materials']:
@@ -365,7 +361,8 @@ def admit(store,cursor,original_id,peer_id):
     if not legacy or has_objections:
         changes,basis,objections=reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review,old_review)
     if not changes:raise ValueError('qualification has no context drift to revalidate')
-    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated},request=old['materials']['unit_request'])
+    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated},request=old['materials']['unit_request'],
+        actual_write_keys=[d['record_key'] for d in old['candidate']['dispositions'] if d['action']!='retain'])
     for key in protected:
         if key.startswith('claims/') and cursor.execute("""SELECT 1 FROM wang_knowledge.pipeline_runs
             WHERE metadata->'blocked_current_claim_ids' ? %s AND started_at>
@@ -424,4 +421,6 @@ def after_completion(store,cursor,peer_id,peer):
         try:proof=admit(store,cursor,row[0],peer_id)
         except (ValueError,ChangeSetConflict):continue
         restored.extend(proof['event_ids'])
+    from backend.pipeline.claim_review_reuse import after_completion as reuse_context
+    reuse_context(store, cursor, peer_id, peer)
     return sorted(set(restored))
