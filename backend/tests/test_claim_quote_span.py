@@ -63,11 +63,12 @@ def test_only_the_bound_paragraph_and_typed_quote_are_corrected():
     assert fixed['binding_assessments'] == raw['binding_assessments']
 
 
-def seed_source(store):
-    literal = '這項判斷必須根據原文的證據來理解，不能只看表面的說法。'
+def seed_source(store, real_case=None):
+    literal = real_case['expected_literal'] if real_case else '這項判斷必須根據原文的證據來理解，不能只看表面的說法。'
     document = deepcopy(store.get_record_state('source_documents', 'S')['payload'])
     file = Path(document['source_path'])
-    file.write_text(json.dumps({'script': [{'text': '教授接著說明：'+literal}]}))
+    text = real_case['paragraph'] if real_case else '教授接著說明：'+literal
+    file.write_text(json.dumps({'script': [{'text': text}]}))
     document['source_file_sha256'] = binding(file)['file_sha256']
     fragment = dict(store.get_record_state('source_fragments', 'FC')['payload'], verbatim_excerpt=literal)
     store.apply_plan(store.plan_package({'package_id': 'literal-span-source',
@@ -236,10 +237,11 @@ def test_similarity_does_not_erase_negation_scope_scripture_or_technical_terms(q
 
 
 @pytest.mark.parametrize('interrupt', [False, True])
-def test_first_opus_sees_calibrated_existing_quote_and_only_target_support_is_written(claims, monkeypatch, interrupt):
+@pytest.mark.parametrize('real_case', REAL_QUOTES, ids=lambda c:c['original_call'][4:12]+'-'+str(len(c['returned_quote'])))
+def test_first_opus_sees_calibrated_existing_quote_and_only_target_support_is_written(claims, monkeypatch, interrupt, real_case):
     store, root = claims
-    literal = seed_source(store)
-    wrong = literal.replace('原文的證據', '原文證據')
+    literal = seed_source(store, real_case)
+    wrong = real_case['returned_quote']
     fragments = [dict(store.get_record_state('source_fragments', fid)['payload'], verbatim_excerpt=wrong)
                  for fid in ['FC', 'FD']]
     store.apply_plan(store.plan_package({'package_id': 'first-review-quote-preflight', 'source_fragments': fragments,

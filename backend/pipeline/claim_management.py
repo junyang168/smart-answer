@@ -1684,9 +1684,20 @@ def continuation_budget(previous, request, policy):
     refusal_proofs = {}
     if refusal_retry is not None:
         same_policy = lambda p: p.model_dump(mode='json', exclude={'policy_id', 'budget'})
+        old_settings, new_settings = same_policy(original), same_policy(policy)
+        retry_fields = {'predecessor_action_id', 'prior_metadata_sha256', 'slot', 'failure', 'authorization_quote'}
+        quote_upgrade = refusal_retry.get('source_quote_projection') if isinstance(refusal_retry, dict) else None
+        if quote_upgrade is not None:
+            from backend.pipeline.claim_quote_projection import CONTRACT as PUNCT, NEAR_CONTRACT, SPAN_CONTRACT
+            if (quote_upgrade != {'from': original.source_quote_projection, 'to': SPAN_CONTRACT}
+                    or original.source_quote_projection not in {None, PUNCT, NEAR_CONTRACT}
+                    or policy.source_quote_projection != SPAN_CONTRACT):
+                raise ValueError('refusal continuation permits only an explicit literal-source calibration upgrade')
+            retry_fields.add('source_quote_projection')
+            old_settings['source_quote_projection'] = SPAN_CONTRACT
         current_contract = audit_contract(Path(previous['execution_root']) / 'refusal-retry-contract', original)
         if (not isinstance(refusal_retry, dict)
-                or set(refusal_retry) != {'predecessor_action_id', 'prior_metadata_sha256', 'slot', 'failure', 'authorization_quote'}
+                or set(refusal_retry) != retry_fields
                 or refusal_retry['predecessor_action_id'] != old.action_id
                 or refusal_retry['prior_metadata_sha256'] != sha256_json(previous)
                 or not refusal_retry['authorization_quote']
@@ -1696,7 +1707,7 @@ def continuation_budget(previous, request, policy):
                 or previous['original_goal'].get('subscription_refusal_retries')
                 or previous.get('continuation', {}).get('original_goal', {}).get('subscription_refusal_retries')
                 or previous.get('continuation', {}).get('subscription_refusal_retry')
-                or same_policy(policy) != same_policy(original)
+                or new_settings != old_settings
                 or policy.budget.max_output_tokens != original.budget.max_output_tokens
                 or policy.budget.max_request_bytes != original.budget.max_request_bytes
                 or any(current_contract['implementation'].get(k) != v

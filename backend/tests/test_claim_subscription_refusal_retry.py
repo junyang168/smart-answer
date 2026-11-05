@@ -104,3 +104,26 @@ def test_same_task_retry_refuses_changed_model_facts_before_any_call(refused,dri
     with pytest.raises(ChangeSetConflict):execute_claim_management(store,new,root=nroot,ports=ports)
     assert ports.calls==[]
     assert not store.get_cvp_group('CMA-'+cm.sha256_json(old.action_id)).get('continued_by')
+
+
+@pytest.mark.parametrize('fault', [None, 'missing_direction', 'wrong_from', 'other_change'])
+def test_explicit_quote_calibration_upgrade_preserves_spent_refusal_and_other_settings(refused, fault):
+    store, old, root, previous, key, slot, new, nroot, policy = refused
+    from backend.pipeline.claim_quote_projection import SPAN_CONTRACT
+    authority = json.loads(Path(new.authorization.path).read_text())
+    authority['subscription_refusal_retry']['source_quote_projection'] = {
+        'from': previous['policy'].get('source_quote_projection'), 'to': SPAN_CONTRACT}
+    policy.source_quote_projection = SPAN_CONTRACT
+    if fault == 'missing_direction':authority['subscription_refusal_retry'].pop('source_quote_projection')
+    elif fault == 'wrong_from':authority['subscription_refusal_retry']['source_quote_projection']['from'] = 'source_literal_near_match_v1'
+    elif fault == 'other_change':policy.initial_candidate = 'proposal'
+    Path(new.authorization.path).write_text(json.dumps(authority))
+    new.authorization = cm.source.FileBinding.model_validate(binding(Path(new.authorization.path)))
+    if fault:
+        with pytest.raises(ValueError):cm.continuation_budget(previous, new, policy)
+        return
+    proof = cm.continuation_budget(previous, new, policy)
+    assert proof['spent_generations']['opus'] == 1 and proof['remaining_generations']['opus'] == 2
+    assert proof['original_goal']['subscription_refusal_retries'] == [key]
+    assert proof['subscription_refusal_retry']['direction']['source_quote_projection']['to'] == SPAN_CONTRACT
+    assert previous['call_reservations'][key]['state'] == 'started'
