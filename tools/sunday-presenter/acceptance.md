@@ -674,3 +674,11 @@ counterexamples, extra forward keys/clicks and backward navigation, alongside
 the existing 20 deck switches, shared page state, remote deduplication,
 fullscreen exit, navigation and renderer crash checks. Its end-key assertions
 use DOM events; actual native input was verified separately above.
+
+The final signed 0.4.1 package was also launched by its exact dist path and
+retested against the real OneDrive sermon. It held the end notice after the
+same native Right/Space/Enter/click sequence; Left returned to slides 29 and
+28. Escape intentionally returned to settings and revoked readiness, as before.
+Final private proof: 041-packaged-end-holds.png and
+041-packaged-returned-slide28.png in the same evidence directory. Deep/strict
+bundle signature, DMG checksum verification and Remote ZIP integrity all pass.
