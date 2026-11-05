@@ -322,7 +322,11 @@ def prepare(store,root,*,source_id,evidence_run,published,instruction):
         return saved
     if not instruction.strip():raise ValueError('owner direction required')
     er=m.read(evidence_run/'plan.json');history=store.get_change_history(er['change_set_id'])
-    if er['source_id']!=source_id or not history or history['status']!='applied':raise ValueError('missing applied Evidence handoff')
+    if er['source_id']!=source_id:raise ValueError('Evidence handoff source differs')
+    if not history or history['status']!='applied':
+        cm.source.verify_file(er['report'])
+        if m.read(er['report']['path'])['updates']:raise ValueError('missing applied Evidence handoff')
+        ea.verify(store,evidence_run)  # A fresh, exact no-op has no transaction history.
     cm.source.verify_file(er['records']);prior=m.read(er['records']['path'])
     records={cm.source.key(*k):cm.model_state(v) for k,v in store.read_affected_context([('source_documents',source_id)]).items()}
     source=records['source_documents/'+source_id]['payload'];current=m.binding(Path(source['source_path']));pub=m.binding(Path(published))

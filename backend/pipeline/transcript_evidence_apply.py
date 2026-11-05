@@ -429,6 +429,11 @@ def apply(store, root):
     pins = {cm.source.split_key(k): (v['revision'], v['content_sha256'], v['retired'])
             for k, v in records.items()}
     pins.update({cm.source.split_key(k):None for k in report.get('created_keys',[])})
+    if not plan.operations:
+        result = {'status': 'already_synchronized', 'change_set_id': None, 'model_calls': 0}
+        m.immutable(root/'apply.json', result)
+        verify(store, root)
+        return result
     result = store.apply_plan(plan, metadata={'actor': 'owner_authorized_code_migration',
         'reason': p['instruction'], 'migration_plan': m.binding(root/'plan.json'),
         'content_approval_granted': False, 'model_calls': 0}, expected_current_record_pins=pins)
@@ -440,7 +445,9 @@ def apply(store, root):
 def verify(store, root):
     root = Path(root); p = m.read(root/'plan.json'); report = m.read(p['report']['path'])
     before = m.read(p['records']['path']); history = store.get_change_history(p['change_set_id'])
-    if not history or history['status'] != 'applied': raise ValueError('missing committed history')
+    if report['updates'] and (not history or history['status'] != 'applied'):
+        raise ValueError('missing committed history')
+    for bound in [p['implementation'], p['records'], p['report']]: cm.source.verify_file(bound)
     current = store.read_current_records([cm.source.split_key(k) for k in set(before)|set(report.get('created_keys',[]))])
     mismatches = []
     for key, state in before.items():
@@ -457,7 +464,7 @@ def verify(store, root):
         if not actual or actual['revision'] != 1 or actual['payload'] != report['updates'][key]:
             raise ValueError('created atomic source fragment readback differs: '+key)
     source_files_current(p)
-    result = {'status': 'verified', 'change_set_id': p['change_set_id'],
+    result = {'status': 'verified', 'change_set_id': p['change_set_id'] if report['updates'] else None,
               'summary': report['summary'], 'updated_records': len(report['updates']),
               'model_calls': 0, 'claim_prose_changed': False,
               'content_approval_granted': False, 'downstream_requalification_complete': False}

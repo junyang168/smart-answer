@@ -1,0 +1,148 @@
+import json
+from unittest.mock import patch
+
+import pytest
+
+from backend.pipeline import transcript_locator_migration as flow
+from backend.pipeline import transcript_evidence_apply as ea
+from backend.pipeline import transcript_claim_migration as m
+from backend.tests.test_transcript_evidence_apply import relocation
+from backend.tests.test_claim_management_postgres import postgres_store, _temporary_postgres
+from backend.tests.test_transcript_claim_anchor_sync import anchor
+
+
+def setup(case):
+    store, root, old, published = case
+    c = store.get_record_state('claims', 'C')['payload']
+    c['occurrences'][0]['anchors'] = [anchor('E', '教授原話'),
+                                    anchor('E', '第二處是明確刪除的內容。', 'S0002', 5)]
+    store.apply_plan(store.plan_package({'claims': [c]}))
+    direction = root.parent / 'direction.txt'
+    direction.write_text('只搬遷 Evidence 與 Claim 定位，排除軟刪除和口頭語；不呼叫模型。')
+    args = dict(source_id='S', old_paths=[old], published=published, instruction_file=direction)
+    return store, root, args
+
+
+def test_sql_end_to_end_resume_and_readonly_prepare(relocation):
+    store, root, args = setup(relocation)
+    before = store.get_record_state('claims', 'C')
+    preview = flow.prepare(store, root, **args)
+    assert preview['exceptions'] == []
+    assert store.get_record_state('claims', 'C') == before
+    result = flow.run(store, root)
+    assert result['updated_claims'] == 1
+    assert result['model_calls'] == 0
+    after = store.get_record_state('claims', 'C')
+    assert after['payload']['statement'] == before['payload']['statement']
+    assert len(after['payload']['occurrences'][0]['anchors']) == 1
+    # No re-alignment or replay of the obsolete Evidence verification baseline.
+    with patch.object(ea, 'apply', side_effect=AssertionError('Evidence replay')), \
+         patch.object(ea, 'prepare', side_effect=AssertionError('Evidence replan')):
+        assert flow.prepare(store, root, **args) == preview
+        assert flow.run(store, root) == result
+        assert flow.verify(store, root) == result
+    assert store.get_record_state('claims', 'C') == after
+
+
+def test_resume_after_evidence_commit_and_claim_reply_loss(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args)
+    ea.apply(store, root / 'evidence')
+    original = flow.anchors.apply
+    def lose_reply(*a, **kw):
+        original(*a, **kw)
+        raise RuntimeError('lost Claim reply')
+    with patch.object(flow.anchors, 'apply', side_effect=lose_reply):
+        with pytest.raises(RuntimeError, match='lost Claim reply'):
+            flow.run(store, root)
+    before = store.get_record_state('claims', 'C')
+    assert flow.run(store, root)['status'] == 'locator_migration_verified'
+    assert store.get_record_state('claims', 'C') == before
+
+
+def test_handoff_catches_edit_between_stages(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args)
+    ea.apply(store, root / 'evidence')
+    claim = store.get_record_state('claims', 'C')['payload']
+    claim['statement'] = '保存另一位同工的修改'
+    store.apply_plan(store.plan_package({'claims': [claim]}))
+    with pytest.raises(ValueError, match='post-commit verification differs'):
+        flow.run(store, root)
+    assert not (root / 'anchors/plan.json').exists()
+
+
+def test_changed_inputs_and_unknown_epoch_stop_before_write(relocation):
+    store, root, args = setup(relocation)
+    fragment = store.get_record_state('source_fragments', 'F1')['payload']
+    fragment['source_sha256'] = '0' * 64
+    store.apply_plan(store.plan_package({'source_fragments': [fragment]}))
+    assert flow.prepare(store, root, **args)['exceptions']
+    before = store.get_record_state('source_fragments', 'F2')
+    with pytest.raises(ValueError, match='unresolved locators'):
+        flow.run(store, root)
+    assert store.get_record_state('source_fragments', 'F2') == before
+    args['instruction_file'].write_text('changed')
+    with pytest.raises(ValueError):
+        flow.prepare(store, root, **args)
+
+
+def test_same_run_worker_lock(tmp_path):
+    with flow.run_lock(tmp_path):
+        with pytest.raises(ValueError, match='already has a worker'):
+            with flow.run_lock(tmp_path):
+                pass
+
+
+def test_post_evidence_edit_is_rejected_at_stage_handoff(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args)
+    original = ea.apply
+    def concurrent_change(*a, **kw):
+        result = original(*a, **kw)
+        claim = store.get_record_state('claims', 'C')['payload']
+        claim['statement'] = '保留並行修改'
+        store.apply_plan(store.plan_package({'claims': [claim]}))
+        return result
+    with patch.object(ea, 'apply', side_effect=concurrent_change):
+        with pytest.raises(ValueError, match='handoff preimage differs'):
+            flow.run(store, root)
+    assert store.get_record_state('claims', 'C')['payload']['statement'] == '保留並行修改'
+    assert not (root / 'result.json').exists()
+
+
+def test_tampered_exception_preview_cannot_enable_apply(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args)
+    preview = m.read(root / 'preview.json');preview['exceptions'] = [{'fake': True}]
+    (root / 'preview.json').write_text(json.dumps(preview))
+    with pytest.raises(ValueError):
+        flow.run(store, root)
+
+
+def test_fresh_run_on_already_synchronized_data(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args);flow.run(store, root)
+    after = store.get_record_state('claims', 'C')
+    root = root.parent / 'fresh-run'
+    flow.prepare(store, root, **args)
+    with patch.object(store, 'apply_plan', side_effect=AssertionError('no-op SQL write')):
+        result = flow.run(store, root)
+        assert flow.verify(store, root) == result
+    assert result['evidence_change_set'] is None
+    assert result['claim_change_set'] is None
+    assert result['updated_claims'] == 0
+    assert result['updated_evidence_records'] == 0
+    assert store.get_record_state('claims', 'C') == after
+
+
+def test_completed_run_detects_later_sql_drift(relocation):
+    store, root, args = setup(relocation)
+    flow.prepare(store, root, **args);flow.run(store, root)
+    receipt = (root / 'result.json').read_bytes()
+    claim = store.get_record_state('claims', 'C')['payload']
+    claim['statement'] = '之後的合法新版本'
+    store.apply_plan(store.plan_package({'claims': [claim]}))
+    with pytest.raises(ValueError, match='postimage readback differs'):
+        flow.verify(store, root)
+    assert (root / 'result.json').read_bytes() == receipt
