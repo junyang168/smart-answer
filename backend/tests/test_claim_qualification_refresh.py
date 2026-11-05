@@ -141,7 +141,13 @@ def test_source_second_paragraph_requalifies_first_before_reporting_complete(act
     store,old,cid,root=fixture(action)
     d=store.get_record_state('claims','D')['payload'];d['evidence_step_ids'].append('EA')
     ea=store.get_record_state('evidence_steps','EA')['payload'];ea['produced_claim_ids'].append('D');ea['statement']='中保。'
-    store.apply_plan(store.plan_package({'package_id':'cross-paragraph-shared-evidence','claims':[d],'evidence_steps':[ea]}))
+    # D is also a shared Evidence owner in the first review. Its retained
+    # excerpt must already exist in current source; a synthetic pass cannot
+    # approve the old, nonexistent sentence. D's later Update still expands
+    # this partial quote and changes EA, exercising the intended handoff.
+    fd=store.get_record_state('source_fragments','FD')['payload'];fd['verbatim_excerpt']='教授否定'
+    store.apply_plan(store.plan_package({'package_id':'cross-paragraph-shared-evidence','claims':[d],
+                                       'evidence_steps':[ea],'source_fragments':[fd]}))
     clients={};events=[]
     def execute(manifest,output):
         plan,jobs=batch.load(manifest,output,store=store)
@@ -171,7 +177,8 @@ def test_source_second_paragraph_requalifies_first_before_reporting_complete(act
                     'reason':'shared evidence full wording','citations':[cite(packet,'S0003')]})
                 return {'changes':changes,'creations':[],'retirements':[],'findings':[],'finding_resolutions':resolutions(packet)}
             port=clients.setdefault(aid,SyntheticPorts(store,execution,opus=review,proposal=proposal))
-            assert execute_claim_management(store,req,root=execution,ports=port)['status']=='completed'
+            outcome=execute_claim_management(store,req,root=execution,ports=port)
+            assert outcome['status']=='completed',outcome
     monkeypatch.setattr(batch,'run',execute)
     if interrupt:
         original_run=refresh.run;interrupted=[]

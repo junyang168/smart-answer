@@ -28,7 +28,7 @@ class Change(cm.source.Contract):
 
 
 class Changes(cm.source.Contract):
-    changes: list[Change]
+    changes: list[Change] = Field(description='Complete intended patch against frozen before, not a delta against previous_candidate. Re-emit every intended uncommitted change; omitted records retain SQL before. Previous candidates are references only.')
     findings: list[cm.JointFinding]
     finding_resolutions: list[cm.JointFindingResolution]
 

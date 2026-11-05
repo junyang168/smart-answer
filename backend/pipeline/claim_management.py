@@ -1706,6 +1706,11 @@ def continuation_budget(previous, request, policy):
     extension = authority.get('owner_call_extension')
     from backend.pipeline.claim_metadata_projection import repair_extension,repair_defects
     engineering_repair = repair_extension(previous,request,policy,authority)
+    from backend.pipeline.claim_evidence_review import repair_extension as binding_repair_extension
+    binding_repair = binding_repair_extension(previous,request,policy,authority)
+    if engineering_repair and binding_repair:
+        raise ValueError('one continuation cannot consume two engineering repairs')
+    engineering_repair = engineering_repair or binding_repair
     used_engineering_repairs = repair_defects(previous)
     target_extension = owner_target_extension(previous, old, request)
     support_creation = (request.creation_permissions != old.creation_permissions
@@ -1738,7 +1743,7 @@ def continuation_budget(previous, request, policy):
              or target_extension and previous['result'].get('reason') == 'budget_exhausted')
         and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
-    completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
+    completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh and not binding_repair
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
     permissions = {p.key:set(p.fields) for p in request.permissions}
     # A saved own-data issue may create its missing Claim. Keep the original
@@ -1774,7 +1779,7 @@ def continuation_budget(previous, request, policy):
             or output_limit and previous['result'].get('reason') == 'model_failed'
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
-            or extension_basis == 'remaining_findings' and bool(previous['findings'])
+            or extension_basis == 'remaining_findings' and (bool(previous['findings']) or binding_repair is not None)
                 and (previous['result'].get('reason') == 'budget_exhausted' or engineering_repair is not None)
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
@@ -1971,6 +1976,7 @@ def continuation_budget(previous, request, policy):
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
         **({'codex_quota_resumption': quota_refusals} if quota_refusals else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
+        **({'completed_no_write_binding_repair':True} if binding_repair else {}),
         **({'engineering_repair_defects':used_engineering_repairs} if used_engineering_repairs else {}),
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),

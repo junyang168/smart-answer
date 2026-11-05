@@ -15,6 +15,81 @@ from backend.pipeline.claim_model_output import FindingsReview
 CONTRACT = 'claim_own_evidence_v1'
 QUESTIONS = {'own_evidence_coverage', 'quotation_attribution'}
 INITIAL_REUSE = 'claim_initial_assessment_reuse_v1'
+RETAINED_BINDING_DEFECT = 'retained_own_source_binding_false_completion_v1'
+
+
+def repair_extension(previous, request, policy, authority):
+    """One existing-run engineering pair for a proven, completed no-write defect.
+
+    This cannot replay committed data or turn the invalid old vote into approval.
+    The ordinary successor independently reviews a newly proposed full postimage.
+    """
+    repair = authority.get('own_source_binding_repair')
+    if repair is None:
+        return None
+    import hashlib
+    from backend.pipeline.claim_metadata_projection import repair_defects
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
+    from backend.pipeline.source_reconciliation_runner import body, read
+    old = cm.Request.model_validate(previous['request'])
+    original = cm.Policy.model_validate(previous['policy'])
+    fields = {'defect', 'predecessor_action_id', 'prior_metadata_sha256', 'round_id',
+              'fixed_commit', 'fixed_parent', 'implementation', 'test_evidence', 'saved_inputs'}
+    if (not isinstance(repair, dict) or set(repair) != fields
+            or repair['defect'] != RETAINED_BINDING_DEFECT
+            or RETAINED_BINDING_DEFECT in repair_defects(previous)
+            or repair['predecessor_action_id'] != old.action_id
+            or repair['prior_metadata_sha256'] != cm.sha256_json(previous)
+            or previous['result']['status'] != 'completed'
+            or previous.get('created_keys') or previous.get('replacements')
+            or len(previous['latest_rounds']) != 1
+            or repair['round_id'] not in previous['latest_rounds'].values()
+            or request.model_dump(exclude={'action_id','predecessor_action_id','authorization','policy'})
+                != old.model_dump(exclude={'action_id','predecessor_action_id','authorization','policy'})
+            or policy.model_dump(exclude={'policy_id','initial_candidate','budget'})
+                != original.model_dump(exclude={'policy_id','initial_candidate','budget'})
+            or policy.initial_candidate != 'proposal' or policy.independent_audit_required
+            or policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
+            or policy.budget.gemini_calls or policy.budget.max_revisions != 1
+            or any(not isinstance(repair[k], str) or len(repair[k]) != 40
+                   or any(c not in '0123456789abcdef' for c in repair[k])
+                   for k in ('fixed_commit','fixed_parent'))):
+        raise ValueError('invalid one-time retained source binding engineering repair')
+    root = Path(previous['execution_root']) / repair['round_id']
+    names = ['materials','candidate','opus.raw','readback','package']
+    if any(s['round_id'] == repair['round_id'] and s['role'] == 'gpt' and s['state'] == 'completed'
+           for s in previous['call_reservations'].values()):
+        names.append('gpt.raw')
+    expected_inputs = {name: binding(root / (name + '.json')) for name in names}
+    if repair['saved_inputs'] != expected_inputs:
+        raise ValueError('retained binding repair saved input drift')
+    for bound in expected_inputs.values():
+        check_binding(bound)
+    material = body(read(root / 'materials.json'))
+    candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
+    if (candidate.records or any(d.action != 'retain' for d in candidate.dispositions)
+            or material['before'] != previous['original_goal']['original_objects']
+            or material['unit_request']['target_keys'] != old.target_keys
+            or not enabled(material['policy'])):
+        raise ValueError('retained binding repair requires unchanged SQL before and an all-retain candidate')
+    rows = {k:s['payload'] for k,s in material['before'].items() if not s['retired']}
+    try:
+        assert_current_fragments(rows, material['sources'], old.target_keys)
+    except ValueError:
+        pass
+    else:
+        raise ValueError('retained binding repair requires a reproducible actual source binding defect')
+    paths = ('backend/pipeline/claim_evidence_review.py','backend/pipeline/claim_model_output.py',
+             'backend/pipeline/claim_management.py','backend/pipeline/claim_review_reuse.py',
+             'backend/api/canonical_repository/postgres_store.py')
+    repo = Path(__file__).resolve().parents[2]
+    implementation = {p:hashlib.sha256((repo/p).read_bytes()).hexdigest() for p in paths}
+    report = json.loads(cm.source.verify_file(cm.source.FileBinding.model_validate(repair['test_evidence'])).read_text())
+    if (repair['implementation'] != implementation or report.get('implementation') != implementation
+            or report.get('failed') != 0 or not report.get('passed',0) > 0
+            or report.get('defect') != RETAINED_BINDING_DEFECT):
+        raise ValueError('retained binding repair requires passing fixed-implementation tests')
+    return deepcopy(repair)
 
 
 def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
@@ -268,6 +343,31 @@ def add_packet(packet, candidate=None, *, materials=None):
     return packet
 
 
+def assert_current_fragments(rows, sources, claim_keys):
+    """Check actual own bindings, including retains; previous drafts prove nothing.
+
+    A source-wide hash may change outside this Claim's evidence. The exact
+    paragraph and literal excerpt must still exist in the bound current source.
+    Neighbours' private evidence is intentionally outside this check.
+    """
+    for key in claim_keys:
+        own = cm.own_source_ids(rows[key], rows)
+        for eid in rows[key].get('evidence_step_ids', []):
+            step = rows[cm.source.key('evidence_steps', eid)]
+            fragments = set(step.get('source_fragment_ids') or [])
+            if step.get('source_fragment_id'):
+                fragments.add(step['source_fragment_id'])
+            for fid in fragments:
+                fragment = rows.get(cm.source.key('source_fragments', fid), {})
+                sid = fragment.get('source_id')
+                paragraph = sources.get(sid, {}).get('paragraphs', {}).get(str(fragment.get('paragraph_key')), {})
+                excerpt = fragment.get('verbatim_excerpt')
+                if (sid not in own or not isinstance(excerpt, str) or not excerpt.strip()
+                        or excerpt not in paragraph.get('text', '')):
+                    raise ValueError('own Evidence lacks an exact current source paragraph/excerpt: '
+                                     + key + ' -> ' + fid)
+
+
 def validate_assessments(review, materials, candidate):
     request = cm.Request.model_validate(materials['unit_request'])
     table = evidence_table(request, materials['before'], candidate)
@@ -305,6 +405,12 @@ def validate_assessments(review, materials, candidate):
                     steps[k]['support_eligibility'] in {'eligible', 'eligible_candidate'}
                     for k in cited_steps):
                 raise ValueError('professor judgment cannot be supported only by context/ineligible Evidence')
+            # A failing review must still reach GPT with its concrete repair
+            # findings. Only an otherwise-positive own-basis assessment may
+            # establish a passing candidate; it cannot approve stale retains.
+            bound = {a.claim_key} | set(steps) | {f for e in steps.values() for f in e['fragment_keys']}
+            if not rejected & bound:
+                assert_current_fragments(rows, materials['sources'], [a.claim_key])
         else:
             bound = set(steps) | {f for step in steps.values() for f in step['fragment_keys']}
             # A binding objection belongs on the exact bound excerpt too.

@@ -3436,6 +3436,15 @@ class PostgresKnowledgeStore:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
+                    elif continuation.get('completed_no_write_binding_repair'):
+                        if (child['materials']['round_id'] not in prior['latest_rounds'].values()
+                                or child.get('outcome') != 'completed' or child.get('change_set_ids')
+                                or not child.get('opus_approved') or not child.get('program_readback_complete')
+                                or child.get('candidate', {}).get('records')
+                                or any(d['action'] != 'retain' for d in child['candidate']['dispositions'])
+                                or before != child['materials'].get('transaction_before',child['materials']['before'])):
+                            raise ChangeSetConflict('binding repair cannot replay committed data or cross SQL input drift')
+                        self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
                     elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not opus_handoff):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
                 if continuation.get('related_owner_target_extension'):
@@ -4029,6 +4038,13 @@ class PostgresKnowledgeStore:
                         actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
+                    from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                    if own_evidence_enabled(child['materials']['policy']):
+                        own_keys = set(child['materials']['unit_request']['target_keys']) | {
+                            d['record_key'] for d in child['candidate']['dispositions']
+                            if d['action'] == 'create' and d['record_key'].startswith('claims/')}
+                        active = {k:s['payload'] for k,s in observed.items() if not s['retired']}
+                        assert_current_fragments(active, child['materials']['sources'], own_keys & active.keys())
                 if not report_only:
                     from backend.pipeline.claim_joint_update import verify_completion
                     verify_completion(value['original_goal'], child, observed)
@@ -4217,6 +4233,15 @@ class PostgresKnowledgeStore:
                         'human_hold','withheld_unreviewed','rejected','superseded'} or (
                         state['payload'].get('review_status') == 'human_review_required' and not replaced_spot_check):
                     continue
+                from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                if own_evidence_enabled(value['materials']['policy']):
+                    try:
+                        assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in records.items()
+                                                  if s['retired_at'] is None},
+                                                 value['materials']['sources'], ['claims/'+claim_id])
+                    except (ValueError, KeyError) as exc:
+                        return {'ready': False, 'reason': 'current_own_source_bindings_invalid',
+                                'run_id': rid, 'detail': str(exc)}
                 result = {'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': proof,
                         'question_scope': value['materials']['original_goal']['required_questions']}

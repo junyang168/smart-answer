@@ -278,6 +278,12 @@ def verify(store, cursor, claim_id, proof):
     from backend.pipeline.claim_direct_scope import assert_current
     assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states,
                    include_write_context=False)
+    from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+    if own_evidence_enabled(cm.Request.model_validate(proof['scope_request'])):
+        material = cursor.execute('SELECT metadata->\'materials\' FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                                  (proof['review_run_id'],)).fetchone()[0]
+        assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in states.items()
+                                  if s['retired_at'] is None}, material['sources'], ['claims/'+claim_id])
     state = states[('claims', claim_id)]
     if state['retired_at'] is not None:
         raise ValueError('review reuse cannot release retired or held content')
