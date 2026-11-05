@@ -4,6 +4,7 @@ const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
 const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('./folder-wizard.js');
 const { Website } = require('./website.cjs');
+const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
 
@@ -108,6 +109,14 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
       stage.prepare(page.id); controller.moveTop();
     }
     changed();
+  });
+  // Office renders the show inside a cross-origin iframe. Protect its own
+  // document as well as the outer page, without replacing/reloading either.
+  wc.on('did-frame-finish-load', (_event, _mainFrame, processId, routingId) => {
+    try {
+      const frame = require('electron').webFrameMain.fromId(processId, routingId);
+      frame?.executeJavaScript(`(${protectSlideshowEnd.toString()})()`).catch(() => {});
+    } catch { /* A frame may detach while its load event is being delivered. */ }
   });
   wc.on('did-stop-loading', changed);
   wc.on('page-title-updated', (_event, title) => { page.title = title.slice(0, 180); changed(); });
