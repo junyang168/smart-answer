@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 
 CONTRACT = 'source_literal_punctuation_v1'
 NEAR_CONTRACT = 'source_literal_near_match_v1'
+SPAN_CONTRACT = 'source_literal_span_v2'
 FIELD = 'program_source_quote_projection'
 
 
@@ -40,6 +41,94 @@ def _near_excerpt(excerpt, paragraph):
     return ranked[0]
 
 
+def _span_excerpt(excerpt, paragraph):
+    """Find a unique nearby literal span, including quotes starting mid-sentence.
+
+    Disjoint exact seeds locate short windows; banded edit alignment then
+    resolves their actual boundaries. Work is bounded by quote length and a
+    small edit allowance, not every pair of paragraph substring boundaries.
+    """
+    size = len(excerpt)
+    if size < 12:
+        return excerpt
+    budget = max(3, min(8, size // 8))
+    markers = _meaning_markers(excerpt)
+    windows = set()
+    for part in range(budget + 1):
+        offset = part * size // (budget + 1)
+        stop = min((part + 1) * size // (budget + 1), offset + 12)
+        seed = excerpt[offset:stop]
+        position = paragraph.find(seed)
+        while position >= 0:
+            start = position - offset
+            if start >= -budget:
+                windows.add((max(0, start - budget), min(len(paragraph), start + size + budget)))
+            position = paragraph.find(seed, position + 1)
+    matches = {}
+    for left, right in sorted(windows):
+        text = paragraph[left:right]
+        previous = {j: (0, j) for j in range(min(len(text), 2 * budget) + 1)}
+        for i, char in enumerate(excerpt, 1):
+            current = {0: (i, 0)} if i <= budget else {}
+            for j in range(max(1, i - budget), min(len(text), i + 3 * budget) + 1):
+                options = [(cost + extra, start) for value, extra in (
+                    (previous.get(j), 1), (current.get(j - 1), 1),
+                    (previous.get(j - 1), char != text[j - 1]))
+                    if value is not None for cost, start in [value]]
+                if options:
+                    best = min(options)
+                    if best[0] <= budget:
+                        current[j] = best
+            previous = current
+            if not previous:
+                break
+        else:
+            for end, (distance, start) in previous.items():
+                a, b = left + start, left + end
+                # Keep a real source terminator when the model supplied one;
+                # a spurious period on a half-sentence may simply disappear.
+                if unicodedata.category(excerpt[-1]).startswith('P'):
+                    while b < len(paragraph) and unicodedata.category(paragraph[b]).startswith('P'):
+                        b += 1
+                literal = paragraph[a:b]
+                if len(literal) < 12 or _meaning_markers(literal) != markers:
+                    continue
+                score = SequenceMatcher(None, excerpt, literal, autojunk=False).ratio()
+                # Three changed letters in a short quote can fall just below
+                # 90%; require both a tight edit bound and >=85% in that case.
+                if score < .9 and not (size <= 40 and distance <= 3 and score >= .85):
+                    continue
+                matches[a, b] = max(matches.get((a, b), 0), score)
+    ranked = sorted(matches, key=lambda span: (-matches[span], abs(span[1] - span[0] - size), span))
+    if not ranked:
+        return excerpt
+    best = ranked[0]
+    literal = paragraph[best[0]:best[1]]
+    if paragraph.find(literal) != best[0] or paragraph.find(literal, best[0] + 1) >= 0:
+        return excerpt
+    for other in ranked[1:]:
+        # Nested boundary variants of this occurrence are not another quote.
+        nested = (best[0] <= other[0] and other[1] <= best[1]
+                  or other[0] <= best[0] and best[1] <= other[1])
+        if not nested and matches[best] - matches[other] < .02:
+            return excerpt
+    return paragraph[best[0]:best[1]]
+
+
+def _meaning_markers(text):
+    """A nearby verse, negation or scope change is not a copying typo.
+
+    This does not judge theology. It leaves recognizable substantive changes
+    to the existing content repair, instead of letting similarity erase them.
+    """
+    numbers = re.findall(r'[-+−]?\d+(?:[.:/–—-]\d+)*', text)
+    terms = re.findall(r'[A-Za-z\u0370-\u03ff\u1f00-\u1fff\u0590-\u05ff]+', text)
+    words = ''.join(c for c in text if not c.isspace() and not unicodedata.category(c).startswith('P'))
+    critical = [(m.group(), words[max(0, m.start()-2):m.start()], words[m.end():m.end()+2])
+                for m in re.finditer(r'沒有|没有|所有|主要|唯一|必須|必须|可能|一定|應該|应该|不|非|未|無|只|仅|僅|都|全', words)]
+    return numbers, terms, critical
+
+
 def source_excerpt(excerpt, paragraph, *, contract=CONTRACT):
     if not isinstance(paragraph, str):
         return excerpt
@@ -61,6 +150,8 @@ def source_excerpt(excerpt, paragraph, *, contract=CONTRACT):
         return excerpt
     start = haystack.find(needle)
     if start < 0:
+        if contract == SPAN_CONTRACT:
+            return _span_excerpt(excerpt, paragraph)
         return _near_excerpt(excerpt,paragraph) if contract == NEAR_CONTRACT else excerpt
     if haystack.find(needle,start+1) >= 0:
         return excerpt
@@ -87,6 +178,7 @@ def project_review(raw, sources, *, contract=CONTRACT):
 def _project(raw,sources,citation_fields,contract,*,fragments=False):
     value = deepcopy(raw)
     changes = []
+    restored = {}
 
     def correct(node, field, path):
         if field == 'exact_quote' and node.get('source_epoch','current') != 'current':
@@ -94,7 +186,12 @@ def _project(raw,sources,citation_fields,contract,*,fragments=False):
         sid, pk = node.get('source_id'), str(node.get('paragraph_key'))
         paragraph = sources.get(sid,{}).get('paragraphs',{}).get(pk,{})
         old = node.get(field)
-        new = source_excerpt(old, paragraph.get('text',''),contract=contract)
+        if not isinstance(old, str):
+            return  # Leave malformed fields to the ordinary typed validator.
+        identity = (sid, pk, old)
+        if identity not in restored:
+            restored[identity] = source_excerpt(old, paragraph.get('text',''),contract=contract)
+        new = restored[identity]
         if new != old:
             node[field] = new
             changes.append({'path':path+[field], 'source_id':sid, 'paragraph_key':pk,

@@ -5,10 +5,11 @@
 > **状态**：当前规范；普通双目标联合 Update 已完成有界真实审阅与回读验收；常规联合策略容量为 2，旧策略保持原契约。
 > **与代码对齐**：第 5.3 节独立判断遗漏的审阅规则、同轮新建同源 Claim 与双向归属校验于 2026-10-22 核对到引入 `one_sided_owner_pairs` 与 `test_claim_hidden_judgement.py` 的提交；概括语义力度的既有审阅理由于 2026-10-18 核对到 `claim_management_review_v2.md`、`claim_management_compact_v1/v2.md` 与 `claim_own_evidence_v1.md`；具体维护问题冻结与已知权限缺口提前暂停于 2026-10-18 核对到 `a60e4bba`；自身证据覆盖与经文论据归属契约于 2026-10-18 核对到 `a14d8242`；已记录只读异议的联合权限接续于 2026-10-17 核对到 `0077424e`；以下既有项目于 2026-10-16 核对：精简模型输出、显式授权接续及只读资格刷新核对到 `4ee96f3`，真实验收见实施检查点；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。第 9.1 节人工修改／确认的持久登记、自动带入和当前证据核实对齐到 `f6101f47`。
 > **程序字段边界对齐**：2026-10-30 核对到 `5866447c`：旧 AI 抽查的准备／资格／写入共用分类、原审阅历史的事务重检、同源支持对象的程序身份，以及复用已返回 GPT、保留原预算的机械候选接续。同一 Update 中的退休分类另核对到 `0dd9e631`，退休保留历史 payload。旧请求只有经过正式恢复才能获得该投影，不改写历史 raw 或解释旧完成事实。
+> **引文校正与代码对齐**：2026-11-05，第 8.1 节核对本工作树的 `claim_quote_projection`、候选展开及 `test_claim_quote_span.py`；覆盖送审前校正、多轮传递、中断接续及真实引文回放，不代表已部署或重跑历史操作。
 > **失效 AI 审核字段对齐**：2026-11-02，精确旧版本与审核事件核验、`claim_metadata_projection_v2` 及完整候选的程序投影核对到 `65930b78`；有界工程补轮复用既有 `remaining_findings` 接续，核对本工作树的 `repair_extension` 和 `continuation_budget`，不新增恢复流程或改写原调用记录。
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
-> **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，默认 v8 支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
+> **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，v8 起支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
 > **無進展工程接續對齊**：2026-10-29，第 8.1 節核對本工作樹的 `returned_no_progress_input`、`continuation_budget` 與 `finding_permission_extension`；完整返回不等於內容通過，補齊原非 Claim 物件的普通欄位也不增加原調用及修訂預算。
 > **分区 refresh 排程设计**：2026-10-29，第 11.7 节另行规定按来源串行、GPT／Opus 各两个全局 session、持续补位及供应商限流控制。该编排待实施，不能把旧 batch 的两个 action 上限视为已满足新需求。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
@@ -19,7 +20,7 @@ Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整�
 
 普通双目标联合 Update 新任务可显式选择 [joint Update v6 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v6.json)，容量为 2，采用简化输出、Claim 一跳上下文与 Opus＋程序回读；输出中的 ID 由本次冻结范围约束。既有 v1–v5 policy 及已绑定任务保持原模型输入／输出契约，不升级历史答复。单条及其他 operations 的默认 policy 保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
 
-Claim ID 清单的新任务默认采用 [joint Update v8 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v8.json)，继承 v7 的单条同源创建能力，使用 `claim_changes_v4` 明确表达程序预留身份与退休处置。其具体能力见第 11.1／11.3 节；已有清单恢复使用任务保存的 policy，不能因缺省配置变化升级旧请求、旧输出或预算。
+Claim ID 清单的新任务默认采用 [joint Update v9 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v9.json)，继承 v8 的同源创建、SQL 身份预留及退休处置，并启用第 8.1 节的送审前引文校正；输出保持 `claim_changes_v4`。其具体能力见第 11.1／11.3 节；已有清单恢复使用任务保存的 policy，不能因缺省配置变化升级旧请求、旧输出或预算。
 
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
@@ -352,6 +353,12 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 旧 AI 抽查标记不等于人工暂停。managed v4 Update 准备、资格查询与写入使用同一分类规则：只接纳当前 revision 的正式旧迁移事件，且独立 AI 复审为 pass、处置为 human_spot_check、没有任何人工审阅历史。修改该目标内容时，程序将其旧标记投影为 candidate，保留全部旧审阅事件及其他 provenance；不授予模型修改审批字段的权利，也不声称人工批准。Opus 审阅实际完整后像，短事务再次核对对象 pins 与审阅事件摘要；新增人工决定、来源疑点、旧审核失败或版本不匹配仍阻挡。同一 Update 中已授权的退休也按此分类，不改写被退休对象的历史 payload。没有实际修改时不清除标记，仍按原只读当前资格规则处理。
 
 当前主张也可能继承了另一条历史主张的 AI 审核字段。managed v4 Update 仅在以下事实均由程序核实时使用 `claim_metadata_projection_v2`：对象是有写权的当前目标；没有任何人工审核事件；最新事件为较早版本的 AI 审核；该版本实际已提交，其 statement 与当前不同；当前四个审核字段仍逐项等于旧版本。程序把当前 `review_status` 设为 candidate，清空 `reviewed_by`、`reviewed_at`、`review_note`，其余内容不因这项投影改变。无内容修改的目标也可产生这项机械更新；退休仍保留原 payload。旧版本与全部事件不动，清理不是批准。模型不能修改这些字段，Opus 必须看到完整投影后像，交易中重核原版本、事件与当前 pins。无法证明失效、后来已另行修改的字段及任何人工决定都不清理；旧冻结契约保持原解释。
+
+引文机械校正位于每轮 GPT 候选展开之后、候选校验及 Opus 审阅之前。`source_literal_span_v2` 在已绑定来源及段落内寻找唯一的原文字面片段，允许句中起引；只校正已提议写入的 SourceFragment 引文和型别化 Citation。通常至少 90% 相似；12–40 字符的短引文另允许至多三次字符编辑且至少 85% 相似。多个近似位置、过短、差异过大或涉及否定／范围限定、数字／经文编号、技术词变化的引文保留给正常处置，不换来源／段落凑匹配，不改 Claim 判断、Evidence 关系或审核结论。
+
+每轮保存原始答复、校正前后值、规则版本与完整校正候选的 SHA；Opus 审阅该完整候选。下一轮 GPT 接收已保存的校正候选和 Opus 的全部异议，新输出再次经过同一校正与校验，不把旧错字带回正式候选。Opus 返回报告中的型别化引文也先机械校正、再解析结果，保留原 verdict、finding 与处置。校正不解决内容异议、不新增模型轮次；中断后按原绑定复用已返回答复，事务与回读仍核实真正通过的后像。
+
+新清单默认策略 v9 及有界单元默认策略 v2 启用此规则；已保存请求沿原 policy，不追溯更改旧匹配算法、原答或预算。旧引文拒收只能经正式机械恢复接入新规则，之后仍须使用原未用 Opus 和正常提交／回读，不能将引文已逐字一致当成内容通过。
 
 结果统一为完成或暂停未完成；暂停原因独立记录，业务结论与 checkpoint 不互相代替。Read 按读取契约完成。新 policy 的 Review 同样先把审计异议交 GPT 判定，内容保持只读；未解决或超预算则暂停，不把报告已产生说成操作完成。执行维护和资格确认按下表结案。
 

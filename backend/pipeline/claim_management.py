@@ -84,7 +84,7 @@ class Policy(source.Contract):
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
     proposal_empty_arrays: Literal['program_validated_v1'] | None = None
-    source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1'] | None = None
+    source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1','source_literal_span_v2'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -2050,11 +2050,11 @@ def require_full_sources(request, before, candidate=None, *, qualification=False
 
 
 def normalize_candidate(raw, sources, *, source_quote_projection=False):
-    """Program owns verifiable hashes; never repair source words or judgement.
+    """Program owns hashes and explicitly enabled literal quote restoration.
 
-    The original GPT response stays immutable. This projection changes only
+    The original GPT response stays immutable. By default this changes only
     derived hashes of explicitly proposed own-source fragments. An explicitly
-    enabled projection may also restore uniquely matching source punctuation;
+    enabled projection may also restore uniquely matching source quotations;
     its exact old/new values are disclosed and still independently reviewed.
     """
     original = Candidate.model_validate(decode_candidate(raw))

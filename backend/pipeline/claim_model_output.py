@@ -184,17 +184,19 @@ def object_json(text):
 
 def candidate(raw, materials):
     """Program expands implicit retains; normal permission/source checks follow."""
+    from backend.pipeline.claim_quote_projection import selected as quote_contract
+    quote_projection = quote_contract(materials)
     if not enabled(materials):
         recovery = materials.get('candidate_identity_recovery')
         if not recovery:
-            result, receipt = cm.normalize_candidate(raw, materials['sources'])
+            result, receipt = cm.normalize_candidate(raw, materials['sources'], source_quote_projection=quote_projection)
             return cm.normalize_legacy_restorations(result, receipt, materials)
         corrected, mappings = retained_candidate_projection(raw, materials['before'], materials['sources'])
         if recovery != {'rule':'retained_fragment_exact_citation_v1',
                 'raw_response_sha256':cm.sha256_json(raw), 'before_sha256':cm.sha256_json(materials['before']),
                 'corrections':mappings}:
             raise ValueError('candidate identity recovery proof drift')
-        result, receipt = cm.normalize_candidate(corrected.model_dump(mode='json'), materials['sources'])
+        result, receipt = cm.normalize_candidate(corrected.model_dump(mode='json'), materials['sources'], source_quote_projection=quote_projection)
         receipt['raw_candidate_sha256'] = cm.Candidate.model_validate(cm.decode_candidate(raw)).digest
         receipt['identity_recovery'] = recovery
         return result, receipt
@@ -256,8 +258,6 @@ def candidate(raw, materials):
                                                 citations=retirement.citations)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
-    from backend.pipeline.claim_quote_projection import selected as quote_contract
-    quote_projection = quote_contract(materials)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'],
                                            source_quote_projection=quote_projection)
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),

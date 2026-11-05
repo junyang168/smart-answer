@@ -1,4 +1,4 @@
-"""Literal source punctuation is mechanical; teaching words and bindings are not."""
+"""Literal source restoration preserves decisions and binding identities."""
 from copy import deepcopy
 import pytest
 from backend.pipeline.claim_quote_projection import source_excerpt,project,CONTRACT,FIELD
@@ -72,9 +72,11 @@ from backend.pipeline.cvp_sql_commit import binding
 from backend.pipeline.claim_review_recovery import recover_returned_candidate,CANDIDATE_IDENTITY_VERSION
 
 
-def test_saved_punctuation_rejection_reuses_gpt_and_only_original_unused_opus(claims):
+@pytest.mark.parametrize('projection', [CONTRACT, 'source_literal_span_v2'])
+def test_saved_punctuation_rejection_reuses_gpt_and_only_original_unused_opus(claims, projection):
  store,root=claims
- prepared=intake.prepare(['C'],root,instruction='Refresh the complete Claim',store=store)
+ prepared=intake.prepare(['C'],root,instruction='Refresh the complete Claim',store=store,
+                         policy=intake.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json')
  request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
  cite={'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}
  def review(packet):
@@ -105,7 +107,7 @@ def test_saved_punctuation_rejection_reuses_gpt_and_only_original_unused_opus(cl
  metadata=lambda value:{k:v for k,v in value.items()if k not in {'run_id','status','error'}}
  direction={'schema_version':CANDIDATE_IDENTITY_VERSION,'round_id':rid,'authorized_by':'owner',
   'authorization_quote':'Automatically restore punctuation from its unique bound source and reuse the saved response',
-  'human_content_approval':False,'source_quote_projection':CONTRACT,
+  'human_content_approval':False,'source_quote_projection':projection,
   'prior_metadata_sha256':cm.sha256_json(metadata(old)),
   'prior_parent_sha256':cm.sha256_json(metadata(parent)),'original_raw':raw}
  path=root/'punctuation-authority.json';path.write_text(json.dumps(direction));authority=binding(path)
@@ -155,7 +157,8 @@ def test_review_quote_projection_never_changes_verdict_or_finding_reason():
  assert fixed['findings'][0]['citations'][0]['exact_quote'] in text
 
 
-def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(claims):
+@pytest.mark.parametrize('projection', [NEAR_CONTRACT, 'source_literal_span_v2'])
+def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(claims, projection):
  from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
  from backend.pipeline.source_reconciliation_runner import body,read
  store,root=claims
@@ -164,7 +167,8 @@ def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(cl
  wrong=text.replace('假设性质','一个假设性质')
  file.write_text(json.dumps({'script':[{'text':text}]}));doc['source_file_sha256']=binding(file)['file_sha256']
  store.apply_plan(store.plan_package({'package_id':'long-source','source_documents':[doc]}))
- prepared=intake.prepare(['C'],root,instruction='Refresh complete own evidence',store=store)
+ prepared=intake.prepare(['C'],root,instruction='Refresh complete own evidence',store=store,
+                         policy=intake.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v8.json')
  request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
  cite={'source_id':'S','paragraph_key':'S0001','exact_quote':text}
  def review(packet):
@@ -195,7 +199,7 @@ def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(cl
  parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()));old=store.get_cvp_group(rid)
  original=binding(execution/rid/'opus.raw.json');slots=deepcopy(parent['call_reservations'])
  direction={'schema_version':VERSION,'round_id':rid,'authorized_by':'owner','authorization_quote':'Copy the uniquely matching bound source instead of repeating a model call',
-  'human_content_approval':False,'record_unaccepted_result':True,'source_quote_projection':NEAR_CONTRACT,
+  'human_content_approval':False,'record_unaccepted_result':True,'source_quote_projection':projection,
   'prior_metadata_sha256':cm.sha256_json({k:v for k,v in old.items()if k not in {'run_id','status','error'}}),
   'original_raw':original}
  path=root/'review-quote-authority.json';path.write_text(json.dumps(direction));authority=binding(path)
