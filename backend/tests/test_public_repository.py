@@ -1,5 +1,7 @@
 """文库入口：书卷、来源、章。"""
 
+from pathlib import Path
+
 from backend.api import public_repository as repo
 from backend.pipeline.sermon_catalog import normalize_sermon_source
 
@@ -54,5 +56,22 @@ def test_gtl_org_is_its_own_source():
 def test_a_chapter_with_its_own_page_carries_that_pages_one_line_title():
     result = repo.book_chapters(repo.items(CATALOG, COVERAGE), "mat", [])
     five, twenty_four = result["chapters"]
-    assert five["page"]["title"] == "八福與彌賽亞的身份，成全律法，與超越法利賽人的義"
+    from backend.api.config import DATA_BASE_PATH
+    from backend.pipeline import original_audio_index
+
+    assert five["page"]["title"] == original_audio_index.passage_title("mat-5-1-48", Path(DATA_BASE_PATH))
+    assert five["page"]["title"]
     assert twenty_four["page"] is None
+
+
+def test_a_chapter_page_is_labelled_by_its_recordings(tmp_path, monkeypatch):
+    from backend.pipeline import original_audio_index
+
+    data = tmp_path / "data"
+    video = tmp_path / "video"
+    video.mkdir()
+    (video / "A.mp4").write_bytes(b"")
+    (video / "B.mp3").write_bytes(b"")
+    assert original_audio_index.media_file(data, "A") == (video / "A.mp4", "video")
+    assert original_audio_index.media_file(data, "B") == (video / "B.mp3", "audio")
+    assert original_audio_index.media_file(data, "C") is None

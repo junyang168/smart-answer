@@ -140,6 +140,11 @@ def chapter_pages() -> dict[tuple[str, int], dict[str, Any]]:
             "passage": chapter.passage,
             # 书卷页每章一行写它讲什么；按章页面的标题就是这一句（负责人 2026-11-05）。
             "title": original_audio_index.passage_title(chapter.passage, Path(DATA_BASE_PATH)),
+            # 全是录像就叫「逐節觀看」，否则「逐節聆聽」（负责人 2026-11-05）。
+            "media": "video" if all(
+                (found := original_audio_index.media_file(Path(DATA_BASE_PATH), lecture)) and found[1] == "video"
+                for lecture in chapter.lectures
+            ) else "audio",
         }
     for passage, label in original_audio_index.PASSAGES:
         reference = parse_reference(passage)

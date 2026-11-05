@@ -14,7 +14,7 @@ import { SourceChips, type SourceCount } from "../navigation";
 type Chapter = {
   chapter: number;
   sources: SourceCount[];
-  page: { kind: "chapter" | "passages"; source: string; title?: string } | null;
+  page: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video" } | null;
   articles: { title: string; href: string }[];
 };
 
@@ -28,8 +28,9 @@ export default function BookPage() {
   );
 }
 
-// 標籤寫點進去能做什麼，不寫頁面的內部名稱（負責人 2026-11-05）。
-const PAGE_LABEL = { chapter: "逐節聆聽", passages: "按段落原聲" } as const;
+// 標籤寫點進去能做什麼，不寫頁面的內部名稱；錄像叫觀看，錄音叫聆聽（負責人 2026-11-05）。
+const pageLabel = (page: NonNullable<Chapter["page"]>) =>
+  page.kind === "passages" ? "按段落原聲" : page.media === "video" ? "逐節觀看" : "逐節聆聽";
 
 function BookChapters() {
   const slug = String(useParams()?.book ?? "");
@@ -116,7 +117,7 @@ function BookChapters() {
                               page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
                             }`}
                           >
-                            {PAGE_LABEL[page.kind]}
+                            {pageLabel(page)}
                           </span>
                         )}
                       </span>
