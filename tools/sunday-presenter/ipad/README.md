@@ -21,12 +21,29 @@ No desktop host/recording code or credentials are packaged. iPad uses inline,
 muted video; the viewer denies camera/microphone requests. Screen idle prevention
 is scoped to visible, foreground received video and released on suspension.
 No audio relay, local recording, Meet automation, YouTube or background streaming
-is implemented here. One active Remote viewer and one paired speaker remain the host limits; pairing
-the iPad replaces the previous Mac Remote pairing. This does not remove either
+is implemented here. One active Remote video viewer remains the host limit.
+Presenter 0.6.5 remembers up to eight explicitly paired Remotes. Use
+"配對另一台 Remote" on the host to issue a new single-use code without revoking
+the Mac/iPad's existing pairing; "重設所有配對" explicitly revokes them all.
+This does not remove either
 laptop from Meet. The host may retain its capture lease for up to 15 seconds
 after local suspension; PPT/Meet output continues.
 
 ## Build and local checks
+
+The iPad "關於" button and Mac "關於 Sunday Remote" menu show the installed
+bundle version and build. Install upgrades in place with the same bundle ID,
+Apple team/application identifier and Keychain groups; do not uninstall first.
+Keychain denial/locked-device/entitlement failures are reported as storage
+access errors and do not delete saved pairing. A pair already revoked by an
+older single-peer host needs one new pairing; its secret cannot be recovered
+from the host's hash.
+
+Mac native builds read `SUNDAY_MAC_SIGN_IDENTITY` or the private local file
+`~/.config/sunday-presenter/signing.json` (`macSigningIdentity`) to keep the same
+Apple certificate identity across updates. Ad-hoc fallback prints a warning:
+its changing code hash may require Keychain access approval after an upgrade.
+No broad Keychain ACL, password export or new signing certificate is created.
 
 Provisional deployment target: iPadOS 16.0 or newer; the owner's actual iPad
 model/OS is still to be confirmed. No external Swift packages are required.

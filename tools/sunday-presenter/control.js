@@ -59,8 +59,9 @@ function render(state) {
     recording.status === 'error' ? `${recording.error}${recording.partialPath ? ' · 未完成檔案：' + recording.partialPath : ''}` :
     '本機錄影未啟動；需要 MP4 副本時才手動開始。';
   const remote = state.remote;
-  document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired ? '講員已連線，可以翻頁。' :
-    remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
+  document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired && !remote?.code ? 'Remote 已連線，可以翻頁。' :
+    remote?.enabled ? (remote.code ? `請在新 Remote 輸入 ${remote.code}（五分鐘內）；既有配對會保留。` : `已記住 ${remote.rememberedCount || 1} 台 Remote，等待自動連線。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
+  document.querySelector('#remote-pair').hidden = !remote?.enabled;
   document.querySelector('#remote-start').hidden = !!remote?.enabled;
   document.querySelector('#remote-stop').hidden = !remote?.enabled;
   const website = state.website;

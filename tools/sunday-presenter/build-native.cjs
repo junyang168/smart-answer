@@ -3,6 +3,9 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { version } = require('./package.json');
 const { bonjourType } = require('./protocol.json');
+const signingConfig = process.env.SUNDAY_PRESENTER_SIGNING_CONFIG || path.join(require('node:os').homedir(), '.config/sunday-presenter/signing.json');
+const signingIdentity = process.env.SUNDAY_MAC_SIGN_IDENTITY ||
+  (fs.existsSync(signingConfig) ? JSON.parse(fs.readFileSync(signingConfig, 'utf8')).macSigningIdentity : null) || '-';
 if (!/^_[a-z][a-z0-9-]{0,14}\._tcp$/.test(bonjourType)) throw Error('Bonjour protocol name must be at most 15 ASCII characters');
 
 const output = path.join(__dirname, 'output', 'native');
@@ -40,7 +43,9 @@ fs.writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encodin
 <key>NSBonjourServices</key><array><string>${bonjourType}</string></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>`);
-execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', bundle], { stdio: 'inherit' });
+if (signingIdentity === '-') console.warn('Remote uses an ad-hoc signature: an upgrade may require Keychain access approval. Configure the same Apple signing identity for persistent upgrade identity.');
+execFileSync('/usr/bin/codesign', ['--force', '--identifier', 'org.dallas-hlc.sunday-remote', '--sign', signingIdentity, bundle], { stdio: 'inherit' });
+execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle], { stdio: 'inherit' });
 // Refresh Launch Services' Info.plist cache after an in-place development build.
 // Otherwise Bonjour can reject a newly declared service as missing config.
 fs.utimesSync(bundle, new Date(), new Date());

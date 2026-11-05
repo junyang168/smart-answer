@@ -182,6 +182,7 @@ async function act(action, args = {}) {
     case 'record-stop': await hostVideo.recording.stop(); break;
     case 'record-reveal': hostVideo.recording.reveal(); break;
     case 'remote-forget': await remoteControl.forget(); break;
+    case 'remote-pair': remoteControl.openPairing(); break;
     case 'remote-start': await remoteControl.start(); break;
     case 'remote-stop': await remoteControl.stop(); break;
     case 'refresh-folder': await website.refresh(); break;

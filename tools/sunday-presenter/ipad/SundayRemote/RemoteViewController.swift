@@ -12,6 +12,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
     private let nextButton = UIButton(type: .system)
     private let fullscreen = UIButton(type: .system)
     private let forget = UIButton(type: .system)
+    private let about = UIButton(type: .system)
     private let observing = UISwitch()
     private let connection = UIStackView()
     private let pairing = UIStackView()
@@ -47,11 +48,13 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         configure(nextButton, "下一頁 →", #selector(forward))
         configure(fullscreen, "全螢幕", #selector(toggleFullscreen))
         configure(forget, "重新配對", #selector(resetPair))
+        configure(about, "關於", #selector(showAbout))
+        about.accessibilityIdentifier = "remote-about"
         observing.isOn = true; observing.accessibilityLabel = "只看畫面，停用翻頁"
         observing.addTarget(self, action: #selector(observeChanged), for: .valueChanged)
         let observeLabel = UILabel(); observeLabel.text = "只看畫面"; observeLabel.textColor = .white
         observeLabel.font = .preferredFont(forTextStyle: .footnote)
-        let options = row([observeLabel, observing, UIView(), forget])
+        let options = row([observeLabel, observing, UIView(), about, forget])
         connection.axis = .vertical; connection.spacing = 4
         connection.addArrangedSubview(computers); connection.addArrangedSubview(status)
         connection.addArrangedSubview(options)
@@ -83,6 +86,14 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
     }
     private func row(_ views: [UIView]) -> UIStackView {
         let stack = UIStackView(arrangedSubviews: views); stack.axis = .horizontal; stack.spacing = 8; stack.alignment = .center; return stack
+    }
+    @objc private func showAbout() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "未知版本"
+        let build = info["CFBundleVersion"] as? String ?? "未知"
+        let alert = UIAlertController(title: "Sunday Remote", message: "版本 \(version)\nBuild \(build)\niPadOS", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "關閉", style: .default))
+        present(alert, animated: true)
     }
     private func configure(_ button: UIButton, _ title: String, _ action: Selector) {
         var config = UIButton.Configuration.tinted(); config.title = title

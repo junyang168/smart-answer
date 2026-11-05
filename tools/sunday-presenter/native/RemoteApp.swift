@@ -120,6 +120,8 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
             computers.widthAnchor.constraint(lessThanOrEqualToConstant: 330)
         ])
         let menu = NSMenu(); let appMenu = NSMenu(); let item = NSMenuItem(); item.submenu = appMenu; menu.addItem(item)
+        appMenu.addItem(withTitle: "關於 Sunday Remote", action: #selector(showAbout), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "顯示遙控器", action: #selector(show), keyEquivalent: "p").target = self
         appMenu.addItem(withTitle: "離開 Sunday Remote", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let viewItem = NSMenuItem(); let viewMenu = NSMenu(title: "顯示"); viewItem.submenu = viewMenu; menu.addItem(viewItem)
@@ -141,6 +143,14 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
         }
     }
     @objc func toggleFullScreen() { window.toggleFullScreen(nil) }
+    @objc func showAbout() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Sunday Remote",
+            .applicationVersion: info["CFBundleShortVersionString"] as? String ?? "未知版本",
+            .version: info["CFBundleVersion"] as? String ?? "未知 Build"
+        ])
+    }
     func windowDidEnterFullScreen(_ notification: Notification) { fullScreen.title = "退出全螢幕" }
     func windowDidExitFullScreen(_ notification: Notification) { fullScreen.title = "全螢幕" }
     func windowWillClose(_ notification: Notification) { setViewingActive(false) }
@@ -219,7 +229,12 @@ final class RemoteApp: NSObject, NSApplicationDelegate, NetServiceBrowserDelegat
                 endpoint = url; fingerprint = id
                 connectedService = service
                 // A remembered token belongs only to its exact pinned host.
-                token = pairStore.load(id)
+                do { token = try pairStore.load(id) }
+                catch {
+                    token = nil; code.isHidden = true; connect.isHidden = true
+                    status.stringValue = error.localizedDescription
+                    return
+                }
                 code.isHidden = token != nil; connect.isHidden = token != nil
                 if token != nil { poll() }
                 else { status.stringValue = "找到主電腦，請輸入這台主電腦的六位數字。" }

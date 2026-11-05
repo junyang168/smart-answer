@@ -124,7 +124,10 @@ final class RemoteClient: NSObject, NetServiceBrowserDelegate, NetServiceDelegat
             guard found, let endpoint = URL(string: "https://\(String(cString: host)):\(sender.port)") else { continue }
             if scope.endpoint == endpoint && scope.fingerprint == fingerprint { return }
             disconnect("正在驗證主電腦…")
-            guard scope.select(endpoint: endpoint, fingerprint: fingerprint, savedToken: store.load(fingerprint)) else { return }
+            let savedToken: String?
+            do { savedToken = try store.load(fingerprint) }
+            catch { status = error.localizedDescription; changed(); return }
+            guard scope.select(endpoint: endpoint, fingerprint: fingerprint, savedToken: savedToken) else { return }
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 5; config.timeoutIntervalForResource = 10
             config.httpShouldSetCookies = false; config.urlCache = nil

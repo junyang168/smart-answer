@@ -2,20 +2,26 @@ import Foundation
 import Security
 
 protocol PairStorage {
-    func load(_ fingerprint: String) -> String?
+    func load(_ fingerprint: String) throws -> String?
     func save(_ token: String, for fingerprint: String) throws
     func remove(_ fingerprint: String)
 }
 
 struct PairStore: PairStorage {
+    private let service: String
+    private let legacyService: String?
+    init(service: String? = nil, legacyService: String? = nil) {
     #if os(macOS)
-    private let service = "org.dallas-hlc.sunday-remote"
+        self.service = service ?? "org.dallas-hlc.sunday-remote.v2"
+        self.legacyService = legacyService ?? (service == nil ? "org.dallas-hlc.sunday-remote" : nil)
     #else
-    private let service = "org.dallas-hlc.sunday-remote.ipad"
+        self.service = service ?? "org.dallas-hlc.sunday-remote.ipad"
+        self.legacyService = nil
     #endif
-    private func query(_ fingerprint: String) -> [String: Any] {
+    }
+    private func query(_ fingerprint: String, service: String? = nil) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service,
+         kSecAttrService as String: service ?? self.service,
          kSecAttrAccount as String: fingerprint]
     }
     static func legacyToken(_ data: Data, for fingerprint: String) -> String? {
@@ -25,19 +31,40 @@ struct PairStore: PairStorage {
               RemoteScope.validToken(token) else { return nil }
         return token
     }
-    func load(_ fingerprint: String) -> String? {
+    static func decodedToken(status: OSStatus, data: Data?) throws -> String? {
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw RemoteError("配對資料仍保留，但 Keychain 暫時無法讀取（\(status)）。請解鎖裝置或允許 Sunday Remote 存取，再重新選擇主電腦。")
+        }
+        guard let data = data, let token = String(data: data, encoding: .utf8), RemoteScope.validToken(token) else {
+            throw RemoteError("已存配對資料無法解讀，請核對後才重新配對。")
+        }
+        return token
+    }
+    func load(_ fingerprint: String) throws -> String? {
         guard RemoteScope.validFingerprint(fingerprint) else { return nil }
         var q = query(fingerprint); q[kSecReturnData as String] = true
         var item: CFTypeRef?
-        if SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-           let data = item as? Data, let token = String(data: data, encoding: .utf8),
-           RemoteScope.validToken(token) { return token }
+        let status = SecItemCopyMatching(q as CFDictionary, &item)
+        if let token = try Self.decodedToken(status: status, data: item as? Data) { return token }
         #if os(macOS)
-        // Preserve the installed Mac's old single-host pairing during upgrade.
-        // Read only its exact host; new pairings use fingerprint-specific items.
-        q = query("paired-presenter"); q[kSecReturnData as String] = true
-        if SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-           let data = item as? Data { return Self.legacyToken(data, for: fingerprint) }
+        // Authorized migration creates an item owned by the current stable
+        // Apple-signed app, rather than retaining an old ad-hoc-code ACL.
+        // Keep the old item as recovery material; never widen its access ACL.
+        if let legacyService = legacyService {
+            for account in [fingerprint, "paired-presenter"] {
+                q = query(account, service: legacyService); q[kSecReturnData as String] = true
+                let legacyStatus = SecItemCopyMatching(q as CFDictionary, &item)
+                if legacyStatus == errSecItemNotFound { continue }
+                let token = account == fingerprint
+                    ? try Self.decodedToken(status: legacyStatus, data: item as? Data)
+                    : legacyStatus == errSecSuccess ? (item as? Data).flatMap { Self.legacyToken($0, for: fingerprint) } : nil
+                if legacyStatus != errSecSuccess {
+                    throw RemoteError("舊配對仍保留，但 Keychain 無法讀取（\(legacyStatus)）。請允許 Sunday Remote 存取後重新選擇主電腦。")
+                }
+                if let token = token { try save(token, for: fingerprint); return token }
+            }
+        }
         #endif
         return nil
     }
@@ -62,11 +89,14 @@ struct PairStore: PairStorage {
         guard RemoteScope.validFingerprint(fingerprint) else { return }
         SecItemDelete(query(fingerprint) as CFDictionary)
         #if os(macOS)
-        var q = query("paired-presenter"); q[kSecReturnData as String] = true
-        var item: CFTypeRef?
-        if SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-           let data = item as? Data, Self.legacyToken(data, for: fingerprint) != nil {
-            SecItemDelete(query("paired-presenter") as CFDictionary)
+        if let legacyService = legacyService {
+            SecItemDelete(query(fingerprint, service: legacyService) as CFDictionary)
+            var q = query("paired-presenter", service: legacyService); q[kSecReturnData as String] = true
+            var item: CFTypeRef?
+            if SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
+               let data = item as? Data, Self.legacyToken(data, for: fingerprint) != nil {
+                SecItemDelete(query("paired-presenter", service: legacyService) as CFDictionary)
+            }
         }
         #endif
     }

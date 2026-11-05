@@ -15,6 +15,14 @@ check(PairStore.legacyToken(legacyPair,for:b)==nil,"old Mac token cannot authent
 check(PairStore.legacyToken(Data("invalid".utf8),for:a)==nil,"invalid legacy payload is ignored")
 let invalidPair=try JSONSerialization.data(withJSONObject:["fingerprint":a,"token":"invalid\nheader"])
 check(PairStore.legacyToken(invalidPair,for:a)==nil,"legacy bearer token is validated")
+let missingPair=try PairStore.decodedToken(status:errSecItemNotFound,data:nil)
+check(missingPair==nil,"only a missing Keychain item means unpaired")
+let restoredPair=try PairStore.decodedToken(status:errSecSuccess,data:Data(tokenA.utf8))
+check(restoredPair==tokenA,"saved pairing restores across builds")
+for status in [errSecInteractionNotAllowed,errSecAuthFailed,errSecMissingEntitlement] {
+    do { _ = try PairStore.decodedToken(status:status,data:nil); check(false,"Keychain access failure must not become missing pair") }
+    catch { check(error.localizedDescription.contains("配對資料仍保留"),"storage failure preserves pairing and explains recovery") }
+}
 let urlA = URL(string: "https://192.168.1.2:43123")!, urlB = URL(string: "https://192.168.1.3:43124")!
 var scope = RemoteScope()
 check(scope.observing && !scope.canFlip, "first run observes without controlling")
