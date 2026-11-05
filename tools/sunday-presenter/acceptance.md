@@ -641,3 +641,36 @@ latest.json now selects 0.3.8. Presenter DMG: 131544108 bytes,
 SHA256 aa14483f181134a5d0db0c1f993fd7e4abc9df2dc6e0bd2ce8c17754bebbeaed.
 Remote ZIP: 464105 bytes,
 SHA256 8b4251f4f167da558af83fa3ac5bc775e305ce5197db57470600807ffc7622b1.
+
+## End-of-show regression — 0.4.1 (2026-11-04)
+
+Reproduced the owner's report on the installed 0.6.1 pilot using the real
+29-slide sermon in the 11-8-2026 OneDrive folder. PowerPoint displayed
+"End of slide show, click to exit."; one further Right dismissed HTML
+fullscreen, and the app's leave-html-full-screen handler disarmed the deck
+and hid OUTPUT. The page remained loaded, but the user had to prepare it again.
+The released 0.4.0 has the same exit handling.
+
+The fix protects the visible PowerPoint end notice in each loaded document,
+including its cross-origin frame. Extra advance keys and canvas clicks are
+consumed only there. Left/Up/PageUp and explicit exit controls remain available.
+Fullscreen exit, navigation and renderer failure still revoke audience readiness
+so an editor or login page cannot accidentally appear on the shared output.
+Hidden, transparent and offscreen end notices do not block ordinary input.
+No remote-page Node/controller bridge is exposed.
+
+A separate app built from the Phase 1 worktree, without replacing the installed
+0.6.1 pilot, was tested against the same actual OneDrive sermon. At the end,
+Right twice, Space, Enter and a canvas click kept the same OUTPUT open. Left
+returned to slide 29, another Left to slide 28, and advancing again reached the
+end notice. No deck was reopened. Private screenshots:
+~/.local/state/sunday-presenter/ops-598/end-fix-holds-end-screen.png and
+end-fix-returned-slide28.png. This is development-Mac verification, not an
+independent main-laptop or receiver test.
+
+All 19 Node tests and the Electron smoke suite passed. The latter exercises
+an opaque-origin iframe with a dismissible end notice, hidden notice
+counterexamples, extra forward keys/clicks and backward navigation, alongside
+the existing 20 deck switches, shared page state, remote deduplication,
+fullscreen exit, navigation and renderer crash checks. Its end-key assertions
+use DOM events; actual native input was verified separately above.
