@@ -76,10 +76,13 @@ def seed_source(store):
 
 
 @pytest.mark.parametrize('interrupt', [False, True])
-def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resume(claims, monkeypatch, interrupt):
+@pytest.mark.parametrize('omit_calibrated_quote', [False, True])
+def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resume(claims, monkeypatch, interrupt, omit_calibrated_quote):
     store, root = claims
     literal = seed_source(store)
     wrong = [literal.replace('原文的證據', '原文證據'), literal.replace('表面的說法', '表面說法')]
+    fragment = dict(store.get_record_state('source_fragments', 'FC')['payload'], verbatim_excerpt=wrong[0])
+    store.apply_plan(store.plan_package({'package_id': 'existing-quote-needs-preflight', 'source_fragments': [fragment]}))
     prepared = intake.prepare(['C'], root, instruction='Refresh C with its own complete evidence.', store=store)
     request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
     assert cm.Policy.model_validate_json(Path(request.policy.path).read_text()).source_quote_projection == SPAN_CONTRACT
@@ -90,10 +93,10 @@ def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resum
     def review(packet):
         number = states['opus']; states['opus'] += 1
         result = pass_review(packet)
-        if number:
-            assert next(r['payload']['verbatim_excerpt'] for r in packet['candidate']['records']
-                        if r['collection'] == 'source_fragments') == literal
-            assert all(c['exact_quote'] == literal for d in packet['candidate']['dispositions'] for c in d['citations'])
+        assert next(r['payload']['verbatim_excerpt'] for r in packet['candidate']['records']
+                    if r['collection'] == 'source_fragments') == literal
+        assert all(c['exact_quote'] == literal for d in packet['candidate']['dispositions'] for c in d['citations'])
+        assert store.get_record_state('source_fragments', 'FC')['payload']['verbatim_excerpt'] == wrong[0]
         # Every genuine content issue is independent of the quote correction.
         if number < 2:
             result['findings'] = [{'target_key': 'claims/C', 'component': 'statement.'+str(number),
@@ -108,13 +111,14 @@ def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resum
     def propose(packet):
         number = states['gpt']; states['gpt'] += 1
         assert all(c['exact_quote'] == literal for f in packet['unresolved'].values() for c in f['citations'])
-        if number:
-            assert next(r['payload']['verbatim_excerpt'] for r in packet['previous_candidate']['records']
-                        if r['collection'] == 'source_fragments') == literal
+        assert next(r['payload']['verbatim_excerpt'] for r in packet['previous_candidate']['records']
+                    if r['collection'] == 'source_fragments') == literal
         statement = '應依據原文證據理解教授主張。' if not number else '應依據原文證據理解教授主張，不能只看表面的說法。'
+        edits = [('claims/C', {'statement': statement})]
+        if not omit_calibrated_quote:
+            edits.append(('source_fragments/FC', {'verbatim_excerpt': wrong[number]}))
         return {'changes': [{'record_key': key, 'fields_json': json.dumps(fields),
-                'reason': 'Preserve the source teaching.', 'citations': [citation(wrong[number])]} for key, fields in [
-                    ('claims/C', {'statement': statement}), ('source_fragments/FC', {'verbatim_excerpt': wrong[number]})]],
+                'reason': 'Preserve the source teaching.', 'citations': [citation(wrong[number])]} for key, fields in edits],
             'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': [
                 {'finding_id': fid, 'disposition': 'resolved', 'reason': 'Preserve the requested distinction.',
                  'citations': [citation(wrong[number])], 'affected_target_keys': ['claims/C'],
@@ -144,6 +148,8 @@ def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resum
         receipt = body(read(execution/rid/'candidate-normalization.json'))
         assert receipt['model_response_sha256'] == cm.sha256_json(raw)
         assert len(receipt['source_quote_corrections']) >= 3
+        if omit_calibrated_quote:
+            assert receipt['inherited_initial_quote_preflight']['record_keys'] == ['source_fragments/FC']
         assert any(w in json.dumps(raw, ensure_ascii=False) for w in wrong)
     assert store.get_record_state('source_fragments', 'FC')['payload']['verbatim_excerpt'] == literal
     assert store.get_record_state('claims', 'D') == untouched
@@ -227,3 +233,133 @@ def test_malformed_quote_stays_for_the_typed_validator(bad_quote):
 ])
 def test_similarity_does_not_erase_negation_scope_scripture_or_technical_terms(quote, paragraph):
     assert source_excerpt(quote, paragraph, contract=SPAN_CONTRACT) == quote
+
+
+@pytest.mark.parametrize('interrupt', [False, True])
+def test_first_opus_sees_calibrated_existing_quote_and_only_target_support_is_written(claims, monkeypatch, interrupt):
+    store, root = claims
+    literal = seed_source(store)
+    wrong = literal.replace('原文的證據', '原文證據')
+    fragments = [dict(store.get_record_state('source_fragments', fid)['payload'], verbatim_excerpt=wrong)
+                 for fid in ['FC', 'FD']]
+    store.apply_plan(store.plan_package({'package_id': 'first-review-quote-preflight', 'source_fragments': fragments,
+        'claim_relations': [{'claim_relation_id': 'CD', 'from_id': 'C', 'to_id': 'D',
+                             'relation_type': 'supports', 'reason': 'Neighbour reference.'}],
+        'knowledge_relations': [{'relation_id': 'BACKGROUND', 'from_id': 'ED', 'to_id': 'EC',
+                                 'relation_type': 'contextualizes', 'reason': 'Reference-only background.'}]}))
+    prepared = intake.prepare(['C'], root, instruction='Calibrate own literal evidence before the first review.', store=store,
+        policy=intake.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v2.json', groups=[['C']])
+    request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
+    # Spare permission on a neighbour's private quote is not a maintenance root.
+    assert any(p.key == 'source_fragments/FD' and 'verbatim_excerpt' in p.fields for p in request.permissions)
+    untouched = {key: store.get_record_state(*key.split('/')) for key in ['claims/C', 'claims/D', 'source_fragments/FD']}
+    def review(packet):
+        assert store.get_record_state('source_fragments', 'FC')['payload']['verbatim_excerpt'] == wrong
+        assert 'source_fragments/FD' in packet['before']
+        assert [(r['collection'], r['object_id'], r['payload']['verbatim_excerpt'])
+                for r in packet['candidate']['records']] == [('source_fragments', 'FC', literal)]
+        assert 'source_fragments/FD' not in {d['record_key'] for d in packet['candidate']['dispositions'] if d['action'] != 'retain'}
+        return pass_review(packet)
+    ports = DurableSyntheticPorts(store, execution, opus=review)
+    record = store.record_claim_management_stage
+    stopped = []
+    def before_first_review(rid, receipt):
+        result = record(rid, receipt)
+        if interrupt and not stopped and body(read(Path(receipt['path'])))['stage'] == 'candidate':
+            stopped.append(rid)
+            raise RuntimeError('synthetic stop after initial calibration and before first Opus')
+        return result
+    monkeypatch.setattr(store, 'record_claim_management_stage', before_first_review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    if interrupt:
+        assert result['reason'] == 'engineering_required', result
+        assert ports.calls == []
+        assert store.get_record_state('source_fragments', 'FC')['payload']['verbatim_excerpt'] == wrong
+        result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus']  # No GPT was needed for a mechanical preflight.
+    parent = store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    rid = next(iter(parent['latest_rounds'].values()))
+    receipt = body(read(execution/rid/'candidate-normalization.json'))
+    assert receipt['initial_quote_preflight']['record_keys'] == ['source_fragments/FC']
+    assert receipt['source_quote_corrections'][0]['before'] == wrong
+    assert receipt['source_quote_corrections'][0]['after'] == literal
+    assert store.get_record_state('source_fragments', 'FC')['payload']['verbatim_excerpt'] == literal
+    assert {key: store.get_record_state(*key.split('/')) for key in untouched} == untouched
+    assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('write_permission', [False, True])
+def test_initial_calibration_never_bypasses_permission_or_review_approval(claims, write_permission):
+    from backend.tests.test_claim_management_human_source_follow_up import authorize
+    store, root = claims
+    literal = seed_source(store); wrong = literal.replace('原文的證據', '原文證據')
+    fragment = dict(store.get_record_state('source_fragments', 'FC')['payload'], verbatim_excerpt=wrong)
+    store.apply_plan(store.plan_package({'package_id': 'preflight-rejection-before-commit', 'source_fragments': [fragment]}))
+    policy = cm.Policy.model_validate_json(intake.DEFAULT_POLICY.read_text())
+    policy.budget.max_revisions = policy.budget.gpt_calls = 0; policy.budget.opus_calls = 1
+    p = root.parent/'first-review-only-policy.json'; p.write_text(policy.model_dump_json())
+    prepared = intake.prepare(['C'], root, instruction='Calibrate within permission and require review.', policy=p, store=store)
+    request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
+    if not write_permission:
+        request.permissions = [p.model_copy(update={'fields': [f for f in p.fields if f != 'verbatim_excerpt']})
+                               if p.key == 'source_fragments/FC' else p for p in request.permissions]
+        a = json.loads(cm.source.verify_file(request.authorization).read_text())
+        authorize(request, {k:v for k,v in a.items() if k not in {'request', 'policy'}})
+    before = store.get_record_state('source_fragments', 'FC')
+    def review(packet):
+        rows = {r['collection']+'/'+r['object_id']:r['payload'] for r in packet['candidate']['records']}
+        assert ('source_fragments/FC' in rows) == write_permission
+        if write_permission:assert rows['source_fragments/FC']['verbatim_excerpt'] == literal
+        result = pass_review(packet)
+        result['binding_assessments'][0]['sufficient'] = False
+        result['findings'] = [{'target_key': 'claims/C', 'component': 'statement', 'category': 'content',
+            'reason': 'Target still needs a substantive decision.', 'acceptance_condition': 'Preserve the source meaning.',
+            'citations': [{'source_id':'S','paragraph_key':'S0001','exact_quote':literal}],
+            'affected_target_keys':['claims/C'], 'affected_write_keys':[], 'impact_reason':'Target content remains unresolved.'}]
+        return result
+    ports = DurableSyntheticPorts(store, execution, opus=review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'paused' and result['reason'] == 'budget_exhausted', result
+    assert ports.calls == ['opus'] and store.get_record_state('source_fragments', 'FC') == before
+
+
+def test_initial_calibrated_pass_remains_reference_during_another_targets_revision(claims):
+    store, root = claims
+    literal = seed_source(store); wrong = literal.replace('原文的證據', '原文證據')
+    fragment = dict(store.get_record_state('source_fragments', 'FD')['payload'], verbatim_excerpt=wrong)
+    d = dict(store.get_record_state('claims', 'D')['payload'], statement='教授要求按原文證據理解。')
+    store.apply_plan(store.plan_package({'package_id':'calibrated-initial-pass', 'claims':[d], 'source_fragments':[fragment]}))
+    prepared = intake.prepare(['C','D'], root, instruction='Calibrate both before first review and retain genuine passes.',
+        policy=intake.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v2.json', groups=[['C','D']], store=store)
+    request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
+    cite = {'source_id':'S','paragraph_key':'S0001','exact_quote':literal}
+    def review(packet):
+        assert next(r['payload']['verbatim_excerpt']for r in packet['candidate']['records']
+                    if r['object_id']=='FD') == literal
+        result = pass_review(packet)
+        if not packet['round_number']:
+            assert set(packet['own_evidence_bindings']) == {'claims/C','claims/D'}
+            result['findings'] = [{'target_key':'claims/C','component':'statement','category':'content',
+                'reason':'C is unsupported.','acceptance_condition':'Use the professor actual teaching.','citations':[cite],
+                'affected_target_keys':['claims/C'],'affected_write_keys':[],'impact_reason':'C only; D basis is complete.'}]
+        else:
+            assert packet['initial_review_references']['claim_keys'] == ['claims/D']
+            assert set(packet['own_evidence_bindings']) == {'claims/C'}
+            result['prior_findings'] = [{'finding_id':fid,'disposition':'resolved','reason':'Actual teaching preserved.',
+                'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':['claims/C'],
+                'impact_reason':'C source meaning restored.'} for fid in packet['unresolved']]
+        return result
+    def propose(packet):
+        assert next(r['payload']['verbatim_excerpt']for r in packet['previous_candidate']['records']
+                    if r['object_id']=='FD') == literal
+        return {'changes':[{'record_key':'claims/C','fields_json':json.dumps({'statement':'教授要求按原文證據理解，不能只看表面。'}),
+            'reason':'Actual teaching.','citations':[cite]}], 'creations':[],'retirements':[],'findings':[],
+            'finding_resolutions':[{'finding_id':fid,'disposition':'resolved','reason':'Actual teaching.', 'citations':[cite],
+                'affected_target_keys':['claims/C'],'affected_write_keys':['claims/C'],'impact_reason':'C source distinction.'}
+                for fid in packet['unresolved']]}
+    ports = DurableSyntheticPorts(store, execution, opus=review, proposal=propose)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls == ['opus','gpt','opus']
+    assert store.claim_management_qualification('C')['ready'] and store.claim_management_qualification('D')['ready']

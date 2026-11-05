@@ -126,7 +126,8 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
                     continue
                 prior = store.get_cvp_group(slot['round_id'])
                 if (prior['materials']['round_number'] == 0 and prior['materials']['roles'] == ['opus']
-                        and prior.get('candidate') and not prior['candidate']['records']):
+                        and prior.get('candidate') and reusable_initial_candidate(prior['materials'],
+                            cm.Candidate.model_validate(prior['candidate']))):
                     eligible.append(slot['round_id'])
             if eligible:
                 break
@@ -171,6 +172,17 @@ def freeze_initial_review_reuse(store, request, *, initial_round_id=None):
     return proof
 
 
+def reusable_initial_candidate(materials, candidate):
+    """Old unchanged frames, or exactly proved new initial quote calibration."""
+    if not candidate.records and all(d.action == 'retain' for d in candidate.dispositions):
+        return True
+    from backend.pipeline.claim_quote_projection import SPAN_CONTRACT, initial_candidate
+    if materials['policy'].get('source_quote_projection') != SPAN_CONTRACT:
+        return False
+    expected, receipt = initial_candidate(materials)
+    return bool(receipt.get('initial_quote_preflight') and expected == candidate)
+
+
 def _initial_review(proof):
     from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.source_reconciliation_runner import body, read
@@ -188,8 +200,8 @@ def _initial_review(proof):
             or material['round_id'] != proof['round_id'] or material['round_number'] != 0
             or material['request']['action_id'] != proof['review_action_id']
             or material.get('initial_assessment_reuse') or material['roles'] != ['opus']
-            or candidate.records or any(d.action != 'retain' for d in candidate.dispositions)):
-        raise ValueError('initial reuse is limited to one unchanged existing-candidate review')
+            or not reusable_initial_candidate(material, candidate)):
+        raise ValueError('initial reuse requires the exact unchanged or program-calibrated existing-candidate review')
     root = Path(proof['materials']['path']).parent
     if Path(proof['raw']['path']) != root / 'opus.raw.json':
         raise ValueError('initial assessment raw belongs to a different review')
@@ -208,7 +220,7 @@ def reused_assessments(materials, candidate):
     if not proof:
         return {}
     from backend.pipeline.claim_direct_scope import scope
-    old, _, (wire, review) = _initial_review(proof)
+    old, initial, (wire, review) = _initial_review(proof)
     request = cm.Request.model_validate(materials['unit_request'])
     origin = request.predecessor_action_id
     visited = set()
@@ -234,6 +246,8 @@ def reused_assessments(materials, candidate):
         # not the lawful successor. Review every target on the current facts.
         return {}
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
+    original = deepcopy(old['before'])
+    original.update({row.key: {'payload': row.payload, 'retired': False} for row in initial.records})
     current = deepcopy(materials['before'])
     current.update({row.key: {'payload': row.payload, 'retired': False} for row in candidate.records})
     retired = {d.record_key for d in candidate.dispositions if d.action == 'retire'}
@@ -248,19 +262,19 @@ def reused_assessments(materials, candidate):
         if owner_context_enabled(request):
             original_own = cm.Request.model_validate(old['unit_request']).model_copy(
                 deep=True, update={'target_keys': [key], 'permissions': []})
-            left = set(scope(original_own, old['before'], include_write_context=False)['record_keys'])
+            left = set(scope(original_own, original, include_write_context=False)['record_keys'])
             right = set(scope(own, current, include_write_context=False)['record_keys'])
         else:
             # Frozen older wires declared their fresh assessment set using
             # this exact projection; never reinterpret a saved approval.
-            left = set(scope(own, old['before'])['record_keys'])
+            left = set(scope(own, original)['record_keys'])
             right = set(scope(own, current)['record_keys'])
         if left != right or not left <= approved:
             continue
         if any(f['target_key'] in left or key in (f.get('affected_target_keys') or []) for f in issues):
             continue
-        if any(old['before'][k]['retired'] != current[k]['retired']
-               or {n:v for n,v in old['before'][k]['payload'].items() if n != 'revision'}
+        if any(original[k]['retired'] != current[k]['retired']
+               or {n:v for n,v in original[k]['payload'].items() if n != 'revision'}
                   != {n:v for n,v in current[k]['payload'].items() if n != 'revision'} for k in left):
             continue
         reused[key] = assessment

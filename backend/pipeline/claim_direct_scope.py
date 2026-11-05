@@ -126,7 +126,8 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
 
 
 def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
-          include_impact_evidence=True, include_contextual_evidence=True, include_maintenance=True):
+          include_impact_evidence=True, include_contextual_evidence=True, include_maintenance=True,
+          obligation_only=False):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -141,6 +142,9 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
     bounded = bounded_unit(request)
     writes = [d.record_key for d in candidate.dispositions if d.action != 'retain'] if candidate else []
     base_roots = review_roots(request, bounded=bounded) if include_maintenance else targets
+    if obligation_only:
+        from backend.pipeline.claim_joint_update import required_keys
+        base_roots = targets | {k for k in required_keys(request, strict=False) if not k.startswith('claims/')}
     roots = base_roots | set(writes)
     maintenance = base_roots - targets
     def named(col, oid):
@@ -184,7 +188,7 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
             elif col in cm.RELATION_COLLECTIONS:
                 impact_claims.update(k for k in deps(key, rows) if k.startswith('claims/'))
     content_claims = targets | impact_claims | {k for k in roots if k.startswith('claims/')}
-    if bounded:
+    if bounded or obligation_only:
         # An affected owner is inspected for the shared delta, not assigned
         # another complete Claim review or a new qualification by proximity.
         content_claims = targets | {k for k in roots if k.startswith('claims/')}
@@ -343,10 +347,17 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
             'content_claim_keys': sorted(content_claims), 'neighbour_claim_keys': sorted(neighbours),
             'relation_keys': sorted(relations), 'source_ids': sorted(source_ids),
             'maintenance_keys': sorted(maintenance)}
-    if bounded:
+    if bounded or obligation_only:
         result['impact_claim_keys'] = sorted(impact_claims - content_claims)
         result['writable_record_keys'] = sorted(writable)
     return result
+
+
+def obligation_keys(request, before, candidate=None):
+    """Own complete support and explicit maintenance, excluding spare grants."""
+    return set(scope(request, before, candidate, include_write_context=False,
+        include_owner_context=False, include_impact_evidence=False,
+        include_contextual_evidence=False, obligation_only=True)['writable_record_keys'])
 
 
 def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True,

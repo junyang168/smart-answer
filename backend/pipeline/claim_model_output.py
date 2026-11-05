@@ -213,6 +213,10 @@ def candidate(raw, materials):
     if request.operation != 'Update' or (request.creation_permissions and not creating) or materials['replacements']:
         raise ValueError('compact decisions support existing Update only')
     before = materials['before']
+    from backend.pipeline.claim_quote_projection import SPAN_CONTRACT, initial_candidate
+    preflight, preflight_receipt = (initial_candidate(materials)
+        if materials['policy'].get('source_quote_projection') == SPAN_CONTRACT else (None, {}))
+    preflight_rows = {r.key:r for r in preflight.records} if preflight else {}
     dispositions = {k:cm.ObjectDisposition(record_key=k, action='retain',
         reason='Unchanged frozen input; proposer supplied no modification.') for k in sorted(before)}
     rows, seen = [], set()
@@ -227,7 +231,7 @@ def candidate(raw, materials):
         if set(fields) & (cm.MECHANICAL_FIELDS | cm.source.PROVENANCE | cm.FRAGMENT_HASH_FIELDS | {identity}):
             raise ValueError('changed fields include program-owned identity, provenance or hashes')
         payload = deepcopy(before[key]['payload'])
-        if all(payload.get(k) == v for k,v in fields.items()):
+        if all(payload.get(k) == v for k,v in fields.items()) and key not in preflight_rows:
             raise ValueError('unchanged object must be omitted from changes')
         payload.update(fields)
         rows.append(cm.source.Row(collection=collection, object_id=oid, payload=payload))
@@ -256,12 +260,26 @@ def candidate(raw, materials):
         seen.add(key)
         dispositions[key] = cm.ObjectDisposition(record_key=key, action='retire', reason=retirement.reason,
                                                 citations=retirement.citations)
+    inherited = []
+    if preflight:
+        initial_dispositions = {d.record_key:d for d in preflight.dispositions}
+        for key in sorted(preflight_rows):
+            if dispositions[key].action != 'retain':
+                continue  # Explicit edits/retirements still own their postimage.
+            row = preflight_rows[key]
+            rows.append(cm.source.Row(collection=row.collection, object_id=row.object_id,
+                                      payload=deepcopy(before[key]['payload'])))
+            dispositions[key] = initial_dispositions[key].model_copy(deep=True)
+            inherited.append(key)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'],
                                            source_quote_projection=quote_projection)
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
+    if inherited:
+        receipt['inherited_initial_quote_preflight'] = {
+            **preflight_receipt['initial_quote_preflight'], 'record_keys': inherited}
     if support_ids:receipt['support_creation_identities']=support_ids
     return project_candidate(result, receipt, materials)
 

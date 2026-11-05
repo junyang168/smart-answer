@@ -18,6 +18,54 @@ def selected(materials):
     return materials.get(FIELD, {}).get('contract') or materials['policy'].get('source_quote_projection')
 
 
+def initial_candidate(materials):
+    """Calibrate authorized own-source quotations before the first Opus call.
+
+    The database is still the immutable before image. Corrections become
+    ordinary proposed updates, independently reviewed and committed normally.
+    Old frozen policies and returned-review recovery do not gain new writes.
+    """
+    from backend.pipeline import claim_management as cm
+    candidate = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
+    original = candidate.digest
+    corrected_keys = []
+    request = cm.Request.model_validate(materials['unit_request'])
+    if materials['policy'].get('source_quote_projection') == SPAN_CONTRACT and request.operation == 'Update':
+        from backend.pipeline.claim_direct_scope import obligation_keys
+        own = obligation_keys(request, materials['before'])
+        grants = {p.key for p in request.permissions if 'verbatim_excerpt' in p.fields}
+        dispositions = {d.record_key: d for d in candidate.dispositions}
+        for key in sorted(own & grants):
+            state = materials['before'].get(key)
+            if not key.startswith('source_fragments/') or not state or state['retired']:
+                continue
+            value = state['payload']
+            sid, pk = value.get('source_id'), value.get('paragraph_key')
+            paragraph = materials['sources'].get(sid, {}).get('paragraphs', {}).get(str(pk), {}).get('text', '')
+            old = value.get('verbatim_excerpt')
+            if not isinstance(old, str):
+                continue
+            literal = source_excerpt(old, paragraph, contract=SPAN_CONTRACT)
+            if literal == old:
+                continue
+            # Preserve the old value until the common normalizer restores it,
+            # so the standard receipt records the exact original/replacement.
+            candidate.records.append(cm.source.Row(collection='source_fragments',
+                object_id=key.split('/', 1)[1], payload=deepcopy(value)))
+            disposition = dispositions[key]
+            disposition.action = 'update'
+            disposition.reason = 'Program restored a unique literal own-source quotation before initial review; no content approval.'
+            disposition.citations = [cm.Citation(source_id=sid, paragraph_key=str(pk), exact_quote=literal)]
+            corrected_keys.append(key)
+    candidate, receipt = cm.normalize_candidate(candidate.model_dump(mode='json'), materials['sources'],
+                                                 source_quote_projection=selected(materials))
+    if corrected_keys:
+        receipt['initial_quote_preflight'] = {'contract': SPAN_CONTRACT,
+            'original_existing_candidate_sha256': original,
+            'before_sha256': cm.sha256_json(materials['before']), 'record_keys': corrected_keys}
+    return candidate, receipt
+
+
 def _near_excerpt(excerpt, paragraph):
     # Similarity selects a literal SOURCE span, never a Claim judgment.
     # Use sentence boundaries within the already-bound paragraph only.

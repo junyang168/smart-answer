@@ -800,13 +800,11 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
         blocks = joint_blocks(finding, request, candidate)
         from backend.pipeline.claim_review_units import enabled as bounded
         if not blocks and records is not None and bounded(request):
-            from backend.pipeline.claim_direct_scope import scope
+            from backend.pipeline.claim_direct_scope import obligation_keys
             # Complete Update includes its own evidence/relations/questions,
             # even when its Claim sentence is correct and no write exists.
             # Unused capability and reference-private data do not seed scope.
-            blocks = finding['target_key'] in scope(request, records, candidate,
-                include_write_context=False, include_owner_context=False,
-                include_impact_evidence=False, include_contextual_evidence=False)['writable_record_keys']
+            blocks = finding['target_key'] in obligation_keys(request, records, candidate)
             if blocks and unused_source_fragment_context(finding, records, candidate):
                 blocks = False
         return blocks
