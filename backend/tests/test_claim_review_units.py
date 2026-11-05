@@ -216,6 +216,87 @@ def test_contextual_evidence_stays_visible_without_becoming_a_private_repair_obl
     assert cm.finding_blocks(edge, request, candidate, records=before)  # Our direct relation is still ours.
 
 
+def test_persistent_contextual_quote_defect_does_not_invalidate_completed_target_qualification(claims):
+    store, root = claims
+    store.apply_plan(store.plan_package({'package_id': 'contextual-private-source-binding',
+        'knowledge_relations': [{'relation_id': 'BACKGROUND', 'from_id': 'ED', 'to_id': 'EC',
+                                'relation_type': 'contextualizes', 'reason': 'Background only, not a premise.'}]}))
+    prepared = intake.prepare(['C'], root, instruction='Refresh C; preserve background-only leads.',
+                              policy=policy_file(root.parent), groups=[['C']], store=store)
+    request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
+    def review(packet):
+        result = pass_review(packet)
+        assert 'source_fragments/FD' in packet['before']
+        result['findings'] = [{'target_key': 'source_fragments/FD', 'component': 'source_binding',
+            'category': 'evidence', 'reason': 'A background-only binding needs later review with D.',
+            'acceptance_condition': 'Check D own evidence in its ordered group.',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}],
+            'affected_target_keys': [], 'affected_write_keys': [],
+            'impact_reason': 'Unwritten background ED is not C own evidence or a supporting premise.'}]
+        return result
+    ports = SyntheticPorts(store, execution, opus=review)
+    result = execute_claim_management(store, request, root=execution, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus']
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    assert not parent['findings'] and len(parent['context_findings']) == 1
+    assert store.claim_management_qualification('C')['ready']
+    assert store.claim_management_qualification('D') is None
+
+
+def test_completed_claim_reuse_does_not_inherit_disconnected_group_maintenance(claims):
+    store, root = claims
+    store.apply_plan(store.plan_package({'package_id': 'orphan-maintenance-for-reuse',
+        'claim_relations': [{'claim_relation_id': 'CD', 'from_id': 'C', 'to_id': 'D',
+                             'relation_type': 'supports', 'reason': 'C supports the neighbouring D.'}],
+        'questions': [{'question_id': 'ORPHAN', 'text': '未回答的問題？', 'source_fragment_ids': ['FD'],
+                       'answer_state': 'unanswered', 'answer_claim_ids': []}]}))
+    prepared = intake.prepare(['C'], root, instruction='Refresh C and inspect the explicitly required question.',
+                              policy=policy_file(root.parent), groups=[['C']], store=store)
+    request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
+    authority = json.loads(cm.source.verify_file(request.authorization).read_text())
+    request.permissions.append(cm.source.Permission(collection='questions', object_id='ORPHAN', fields=['answer_claim_ids']))
+    authorize(request, {**{k:v for k,v in authority.items() if k not in {'request', 'policy'}},
+                        'required_maintenance_keys': ['questions/ORPHAN']})
+    ports = SyntheticPorts(store, execution, opus=pass_review)
+    assert execute_claim_management(store, request, root=execution, ports=ports)['status'] == 'completed'
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    rid = next(iter(parent['latest_rounds'].values()))
+    proof = claim_review_reuse.admit(store, 'C', rid)
+    assert proof['scope_role'] == claim_review_reuse.OWN_SCOPE
+    assert 'questions/ORPHAN' not in proof['protected_record_keys']
+    assert store.claim_management_qualification('C')['ready']
+    assert ports.calls == ['opus']
+    # A later independent Update reviews D and its private FD. Neither FD
+    # nor the old group's disconnected maintenance becomes C's own basis.
+    peer_policy = cm.Policy.model_validate_json(__import__('pathlib').Path(request.policy.path).read_text())
+    peer_policy.initial_candidate = 'proposal'
+    peer_path = root.parent/'peer-policy.json'
+    peer_path.write_text(peer_policy.model_dump_json())
+    prepared_peer = intake.prepare(['D'], root.parent/'peer', instruction='Refresh D and its literal source.',
+                                   policy=peer_path, groups=[['D']], store=store)
+    peer, peer_execution = next(iter(batch.load(prepared_peer['manifest']['path'], root.parent/'peer-batch', store=store)[1].values()))
+    citation = {'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}
+    def propose(packet):
+        return {'changes': [{'record_key': key, 'fields_json': json.dumps(fields),
+            'reason': 'Synthetic independently reviewed neighbour delta.', 'citations': [citation]}
+            for key, fields in [('claims/D', {'statement': '甲是假设，不是断言。'}),
+                                 ('source_fragments/FD', {'verbatim_excerpt': '甲是假设'})]],
+            'creations': [], 'retirements': [], 'findings': [], 'finding_resolutions': []}
+    peer_ports = SyntheticPorts(store, peer_execution, proposal=propose, opus=pass_review)
+    assert execute_claim_management(store, peer, root=peer_execution, ports=peer_ports)['status'] == 'completed'
+    peer_parent = store.get_cvp_group('CMA-' + cm.sha256_json(peer.action_id))
+    peer_rid = next(iter(peer_parent['latest_rounds'].values()))
+    joined = claim_review_reuse.admit(store, 'C', rid, peer_run_id=peer_rid)
+    assert joined['contract'] == claim_review_reuse.CONTEXT_CONTRACT
+    assert store.claim_management_qualification('C')['ready']
+    assert peer_ports.calls == ['gpt', 'opus'] and ports.calls == ['opus']
+    changed = dict(store.get_record_state('evidence_steps', 'EC')['payload'], statement='A different own argument.')
+    store.apply_plan(store.plan_package({'package_id': 'own-evidence-change-still-blocks', 'evidence_steps': [changed]}))
+    with pytest.raises(ValueError, match='argument/context changed'):
+        claim_review_reuse.admit(store, 'C', rid, peer_run_id=peer_rid)
+
+
 def test_three_member_unit_uses_one_existing_update_and_retains_all_results(claims):
     store, root = claims
     store.apply_plan(store.plan_package({'package_id': 'third-unit-member',

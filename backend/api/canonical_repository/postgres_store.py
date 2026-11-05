@@ -4265,7 +4265,8 @@ class PostgresKnowledgeStore:
                         own = Request.model_validate(value['materials']['unit_request']).model_copy(
                             update={'target_keys':['claims/'+claim_id], 'permissions':[]})
                         protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()},
-                                          include_write_context=False)['writable_record_keys']
+                                          include_write_context=False, include_impact_evidence=False,
+                                          include_contextual_evidence=False)['writable_record_keys']
                 except ValueError as exc:
                     return {'ready': False, 'reason': 'current_own_evidence_scope_incomplete',
                             'run_id': rid, 'detail': str(exc)}

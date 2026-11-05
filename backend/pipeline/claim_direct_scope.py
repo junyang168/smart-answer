@@ -126,7 +126,7 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
 
 
 def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
-          include_impact_evidence=True, include_contextual_evidence=True):
+          include_impact_evidence=True, include_contextual_evidence=True, include_maintenance=True):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -140,7 +140,7 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
     from backend.pipeline.claim_review_units import enabled as bounded_unit
     bounded = bounded_unit(request)
     writes = [d.record_key for d in candidate.dispositions if d.action != 'retain'] if candidate else []
-    base_roots = review_roots(request, bounded=bounded)
+    base_roots = review_roots(request, bounded=bounded) if include_maintenance else targets
     roots = base_roots | set(writes)
     maintenance = base_roots - targets
     def named(col, oid):
@@ -349,13 +349,16 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
     return result
 
 
-def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True):
+def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True,
+                   include_maintenance=True):
     """Check adjacency at roots, not reverse closure at every read endpoint."""
     from backend.pipeline import claim_management as cm
     from backend.pipeline.claim_review_units import enabled as bounded_unit
     bounded = bounded_unit(request)
     roots = {cm.source.split_key(k) for k in review_roots(request,
         actual_write_keys=actual_write_keys if bounded else (), bounded=bounded)}
+    if not include_maintenance:
+        roots = {cm.source.split_key(k) for k in set(request.target_keys) | set(actual_write_keys)}
     consumers = store._claim_reference_consumers(cursor, roots)
     # New incoming non-Claim support can change the target's argument even
     # when no root row changed. Other Claims sharing evidence stay outside.
@@ -374,6 +377,6 @@ def assert_current(store, cursor, request, records, *, actual_write_keys=(), inc
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
     selected = scope(request, {cm.source.key(*k): v for k, v in records.items()},
-                     include_write_context=include_write_context)
+                     include_write_context=include_write_context, include_maintenance=include_maintenance)
     if not set(selected['record_keys']) <= {cm.source.key(*k) for k in records}:
         raise ValueError('direct Claim scope has incomplete current evidence')
