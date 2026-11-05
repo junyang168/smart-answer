@@ -1202,3 +1202,26 @@ stage.cjs equality and the installed Remote's actual control-gate probe pass.
 Previous app bundles were retained as rollback ZIPs on SSD, not extra launchable
 App copies. Release/install receipts are under the private local test artifact
 folder, not a public download. No website release was published.
+
+## Coordinated Mac/iPad deployment — 0.6.3 (2026-11-05)
+
+The owner requested the slideshow-end fix on iPad and the current Mac version
+on the church website. The 0.6.2 Mac/iPad pilot is the release base; publishing
+0.4.1 alone did not update that pilot. Presenter now includes the exact reviewed
+end-notice protection from Phase 1 PR #663. The iPad sends slide commands to
+this same protected host page; it does not open or dismiss a separate Office
+slideshow. All three products keep the common 0.6.3 version authority.
+
+All 56 Node regressions, the 42 production Swift scope/redirect checks, and
+the full Electron smoke pass. Smoke includes an opaque-origin slideshow frame,
+extra advances/clicks at the end, backward navigation, invisible end-text
+counterexamples, and the previous switching/navigation/crash protections.
+The prior real Office end-of-show verification is recorded under #598 / PR #663.
+
+The new iPad bundle was signed with the existing team and application identity;
+its profile includes the existing target iPad. Signature verification passed.
+It was installed over the existing app without uninstalling; physical-device
+readback confirms both version fields are 0.6.3. The device was passcode-locked,
+so launch and post-update pairing/video acceptance are not inferred from that
+readback. No signing identity, account or developer permissions were added.
+The #655 automatic-renewal hold remains unchanged.
