@@ -451,10 +451,7 @@ export default function OriginalAudio({
           className="flex w-fit items-center gap-3 rounded-xl bg-stone-900 px-5 py-3 text-white shadow-sm hover:bg-stone-700"
         >
           <span aria-hidden="true">▶</span>
-          <span>
-            <span className="block font-semibold">從頭開始聽</span>
-            <span className="block text-sm text-stone-300">投影片、逐字稿、播放控制在同一個畫面</span>
-          </span>
+          <span className="font-semibold">從頭開始聽</span>
         </Link>
         <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {sections.map((section) => (
