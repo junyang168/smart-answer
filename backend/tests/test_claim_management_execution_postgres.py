@@ -695,7 +695,8 @@ def test_explicit_schema_recovery_carries_budget_history_and_prevents_fork(actio
     with pytest.raises(ValueError,match='proven pre-generation'):cm.continuation_budget(previous,next_request,reduced)
 
 
-def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,monkeypatch):
+@pytest.mark.parametrize('normal_pin_closure',[True,False])
+def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,monkeypatch,normal_pin_closure):
     store, _, _, _, tmp_path, _ = action
     seed_claims(store,['C','D'])
     request,root=operation_request(action,'Update',['C'])
@@ -715,8 +716,16 @@ def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,mon
         if packet['round_number']==0:return rejected(packet)
         content_review_finished=True
         return passing(packet)
+    if not normal_pin_closure:
+        # Reproduce a saved pre-fix plan that omitted transaction-only pins.
+        monkeypatch.setattr(store,'read_affected_context',lambda keys:{})
     ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=corrected)
     result=execute_claim_management(store,request,root=root,ports=ports)
+    if normal_pin_closure:
+        assert result['status']=='completed',result
+        assert ports.calls==['opus','gpt','opus']
+        assert store.claim_management_qualification('C')['ready']
+        return
     assert result['detail']=='transaction omitted a current affected consumer',result
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
     round_before=store.get_cvp_group(rid);assert round_before['checkpoint']=='reviewed'

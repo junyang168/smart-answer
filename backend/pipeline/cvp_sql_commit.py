@@ -219,6 +219,22 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
             evidence['claim_management_scope'].update(joint_update_contract=CONTRACT,
                 audit_record_keys=sorted(material['before']))
         evidence['pending_cvp_management_record_keys'] = application['pending_consumers']
+        # The transaction rechecks consumers of every declared root, including
+        # writable shared support. Claim intake closes only target consumers.
+        # Add SQL pins without enlarging the independent content review scope.
+        affected = store.read_affected_context([
+            tuple(k) for k in evidence['claim_management_scope']['consumer_roots']])
+        from backend.pipeline import claim_management as cm
+        candidate = cm.Candidate.model_validate((store.get_cvp_group(run_id) or {})['candidate'])
+        request = cm.Request.model_validate(material['unit_request'])
+        states = {cm.source.key(*k): cm.model_state(v) for k,v in affected.items()}
+        if cm.audit_keys(request, {**states, **material['before']}, candidate) != cm.audit_keys(request, material['before'], candidate):
+            raise ValueError('transaction consumers change the content review denominator; fresh review required')
+        for key,pin in pins(affected).items():
+            if key in complete_pins and complete_pins[key] != pin:
+                raise ValueError('model materials changed before SQL consumer pin closure')
+            complete_pins[key] = pin
+        evidence['read_pins'] = pin_rows(complete_pins)
     previous_pending=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
     # Pending is a durable obligation, not a request to mutate every row.
     # Even an explicit empty list must not erase an earlier obligation.
