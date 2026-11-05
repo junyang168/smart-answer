@@ -123,7 +123,14 @@ function Chapter() {
             )}
 
             {current.page?.kind === "chapter" ? (
-              <OriginalAudio key={current.page.passage} passage={current.page.passage} embedded />
+              <OriginalAudio
+                key={current.page.passage}
+                passage={current.page.passage}
+                embedded
+                listenHref={(section) =>
+                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}`
+                }
+              />
             ) : (
               <div className="flex flex-col gap-4">
                 {current.page?.kind === "passages" && (

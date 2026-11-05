@@ -1283,6 +1283,26 @@ def _chapter_slides(
     return out
 
 
+def _transcript(lines: list[dict[str, Any]], stretches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """这一行的逐字稿：起点落在它某一段录音里的句子，标出是否属灰色片段。"""
+
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        home = next(
+            (item for item in stretches if item["start"] <= line["start"] < item["end"]),
+            None,
+        )
+        if home is None:
+            continue
+        out.append({
+            "at": round(line["start"], 2),
+            "end": round(line["end"], 2),
+            "text": line["text"],
+            **({"left_out": True} if home.get("left_out") else {}),
+        })
+    return out
+
+
 def _chapter_sections(
     whole_chapter: Any,
     *,
@@ -1346,6 +1366,9 @@ def _chapter_sections(
                 ],
             }
         lecture_rows = chapter_exposition.lecture_rows(whole_chapter, record)
+        # 逐字稿一句一行、带时间：听的人边听边看他此刻说的那一句，点一句跳过去。
+        # 保留的和不保留的都切——灰色片段打开时，它的逐字稿也在原来的位置。
+        lines = chapter_slides.sentences(record.get("pieces") or [])
         slides_by_section = (
             _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else None
         )
@@ -1442,6 +1465,7 @@ def _chapter_sections(
                 "stretches": value["stretches"],
                 "judgements": judgements,
                 **({"slides": slides} if slides is not None else {}),
+                "transcript": _transcript(lines, value["stretches"]),
                 "spoken": spoken_during(kept, sermon),
                 "readings": [
                     {"at": at, "scripture": slug}

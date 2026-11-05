@@ -30,7 +30,7 @@ import ChapterSlide, { type ChapterSlideData } from "./ChapterSlide";
 
 /** 一段录音。按章的页面里，不属这一章释经的片段也在，标为 `left_out`：听不
  * 听由读者决定，默认收起（负责人 2026-11-03）。 */
-type Stretch = {
+export type Stretch = {
   start: number;
   end: number;
   left_out?: boolean;
@@ -49,7 +49,7 @@ type Provenance = {
   source_fragment_ids: string[];
 };
 /** 他立起一个判断的时刻。幻灯的标题跟着这个走。 */
-type Judgement = {
+export type Judgement = {
   at: number;
   judgement: string;
   seconds: number;
@@ -60,7 +60,7 @@ type Judgement = {
   scripture: string;
   provenance?: Provenance;
 };
-type Sermon = {
+export type Sermon = {
   source_id: string;
   transcript_id: string;
   title: string;
@@ -75,6 +75,8 @@ type Sermon = {
   original_language_events: OriginalLanguageEvent[];
   /** 按章页面：模型读逐字稿写的投影片。有它就不用 Claim 拼的幻灯。 */
   slides?: ChapterSlideData[];
+  /** 按章页面：逐字稿一句一行、带时间；`left_out` 的属灰色片段。 */
+  transcript?: { at: number; end: number; text: string; left_out?: boolean }[];
   seconds: number;
   left_out_seconds?: number;
 };
@@ -85,13 +87,13 @@ type Sermon = {
  * `/dev-media`：Next 的 dev rewrite 會把整個檔案緩衝完才回應（59 MB 等八秒
  * 仍然 `buffered: null`），而直接連 nginx:8888 又被 CORS 擋下。
  */
-const mediaSrc = (url: string) =>
+export const mediaSrc = (url: string) =>
   process.env.NODE_ENV === "production"
     ? url
     : url.replace("/web/video/", "/dev-media/");
 
 /** 播到这一刻，对应哪条来源绑定的 Claim。 */
-function judgementAt(sermon: Sermon, seconds: number) {
+export function judgementAt(sermon: Sermon, seconds: number) {
   let held = sermon.judgements[0];
   for (const mark of sermon.judgements) {
     if (mark.at > seconds) break;
@@ -119,7 +121,7 @@ function judgementAt(sermon: Sermon, seconds: number) {
  */
 const MOST_VERSES = 4;
 
-function verseAt(sermon: Sermon, seconds: number, passage: string) {
+export function verseAt(sermon: Sermon, seconds: number, passage: string) {
   let slug = sermon.judgements[0]?.scripture || passage;
   let since = 0;
   for (const mark of sermon.judgements) {
@@ -196,7 +198,7 @@ function inside(slug: string, passage: string) {
  * (Petrus)」，再说「這磐石(petra)」，两个摆在一起才看得出他在比什么。换到下
  * 一个 Claim 就清空，不能把上一题的希腊文一路带到整篇讲道结尾。
  */
-function originalLanguageAt(sermon: Sermon, seconds: number) {
+export function originalLanguageAt(sermon: Sermon, seconds: number) {
   const current = judgementAt(sermon, seconds);
   if (!current) return [];
   const index = sermon.judgements.indexOf(current);
@@ -221,7 +223,7 @@ function originalLanguageAt(sermon: Sermon, seconds: number) {
  *
  * 主经文不跟着它换：他整段都在拆 16:18-19 的希腊文，翻出去的是旁证。
  */
-function citedAt(sermon: Sermon, seconds: number, passage: string) {
+export function citedAt(sermon: Sermon, seconds: number, passage: string) {
   let cited: Spoken | null = null;
   for (const mark of sermon.spoken) {
     if (mark.at > seconds) break;
@@ -231,20 +233,29 @@ function citedAt(sermon: Sermon, seconds: number, passage: string) {
 }
 
 /** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
-type Section = { passage: string; label: string; sermons: Sermon[] };
+export type Section = { passage: string; label: string; sermons: Sermon[] };
 
 /** 这一行此刻要播的几段：收起时只播保留的，展开时连灰色的一起按原来的次序播。 */
-const visible = (sermon: Sermon, showLeftOut: boolean) =>
+export const visible = (sermon: Sermon, showLeftOut: boolean) =>
   showLeftOut ? sermon.stretches : sermon.stretches.filter((stretch) => !stretch.left_out);
 
-const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+export const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
 /**
  * 一段经文的原声。单独成页（`/audio/<passage>`），也嵌在按章页面里
  * （`embedded`：标题、返回链接由按章页面给）。
  */
-export default function OriginalAudio({ passage, embedded = false }: { passage: string; embedded?: boolean }) {
+export default function OriginalAudio({
+  passage,
+  embedded = false,
+  listenHref,
+}: {
+  passage: string;
+  embedded?: boolean;
+  /** 按章页面：每一段进聆听模式的地址。 */
+  listenHref?: (section: string) => string;
+}) {
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
   const [sections, setSections] = useState<Section[] | null>(null);
@@ -464,6 +475,19 @@ export default function OriginalAudio({ passage, embedded = false }: { passage: 
               尚未整理：{missing.map((lecture) => lecture.split("：").pop()).join("、")}
             </p>
           )}
+          {listenHref && sections.length > 0 && (
+            // 认真听的人要投影片、逐字稿和播放控制在同一个画面（负责人 2026-11-04）。
+            <Link
+              href={listenHref(sections[0].passage)}
+              className="flex w-fit items-center gap-3 rounded-xl bg-stone-900 px-5 py-3 text-white shadow-sm hover:bg-stone-700"
+            >
+              <span aria-hidden="true">▶</span>
+              <span>
+                <span className="block font-semibold">聆聽模式</span>
+                <span className="block text-sm text-stone-300">投影片、逐字稿、播放控制在同一個畫面，可跳上一段、下一段</span>
+              </span>
+            </Link>
+          )}
         </header>
 
         {sections.map((section) => (
@@ -474,6 +498,14 @@ export default function OriginalAudio({ passage, embedded = false }: { passage: 
             <span className="ml-3 font-mono text-sm font-normal text-stone-400">
               {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
             </span>
+            {listenHref && (
+              <Link
+                href={listenHref(section.passage)}
+                className="ml-4 align-middle font-sans text-sm font-semibold text-amber-800 hover:text-amber-900"
+              >
+                ▶ 聽這段
+              </Link>
+            )}
           </h2>
         )}
 

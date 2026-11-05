@@ -178,3 +178,21 @@ def test_a_slide_shows_in_every_section_its_time_reaches():
     out = _chapter_slides(rows, timed)
     assert out["mat-5-17-20"][0]["at"] == 50.0
     assert out["mat-5-1-12"][0]["at"] == 100.0 and out["mat-5-1-12"][0]["seconds"] == 70.0
+
+
+def test_each_row_gets_its_own_timed_transcript_with_grey_lines_marked():
+    from backend.pipeline.original_audio_index import _transcript
+
+    pieces = [
+        {"id": "U001", "start": 0.0, "end": 10.0, "text": "第一句。第二句。"},
+        {"id": "U002", "start": 10.0, "end": 20.0, "text": "見證一句。"},
+        {"id": "U003", "start": 30.0, "end": 40.0, "text": "別的段。"},
+    ]
+    lines = chapter_slides.sentences(pieces)
+    stretches = [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0, "left_out": True}]
+
+    rows = _transcript(lines, stretches)
+
+    assert [row["text"] for row in rows] == ["第一句。", "第二句。", "見證一句。"]
+    assert [row["at"] for row in rows] == [0.0, 5.0, 10.0]
+    assert [row.get("left_out", False) for row in rows] == [False, False, True]
