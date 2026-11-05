@@ -6,6 +6,9 @@
 > **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`、`backend.pipeline.transcript_claim_anchor_sync`、`backend.pipeline.transcript_locator_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
+完整的新稿三方合併、正式 editor 採用、發布及 Claim 交接見
+[新逐字稿升級流程](./transcript_upgrade_workflow.md)。本文是其中來源／Claim 階段，不能代替前面的舊校對保留。
+
 ## 目錄
 
 - [1. 純程式證據搬遷 dry-run](#1-純程式證據搬遷-dry-run)

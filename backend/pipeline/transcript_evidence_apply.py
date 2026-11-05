@@ -97,7 +97,20 @@ def segment_fields(segment, new):
 
 
 def snap(path):
-    return cm.source.source_snapshot(m.binding(Path(path)))
+    bound = m.binding(Path(path))
+    from backend.pipeline.transcript_publication_projection import spoken_document
+    document, stripped = spoken_document(m.read(path))
+    if not stripped:
+        return cm.source.source_snapshot(bound)
+    from backend.pipeline.source_projection import project_script
+    projection = project_script(document.get('script') if isinstance(document, dict) else document)
+    if projection.visual_blocks:
+        raise ValueError('visual source changes require a separately scoped visual adapter')
+    cm.source.verify_file(bound)
+    return {'file': bound, 'body_sha256': projection.body_sha256,
+            'spoken_text_sha256': projection.spoken_text_sha256,
+            'editorial_structure_sha256': projection.editorial_structure_sha256,
+            'paragraphs': {f'S{i:04d}': row for i, row in enumerate(projection.spoken_rows, 1)}}
 
 
 def fields_for(row, fragment, new):
