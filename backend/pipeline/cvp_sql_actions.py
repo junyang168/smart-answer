@@ -296,7 +296,10 @@ def validate_claim_management_package(package):
     if enabled(request, policy):
         if unit_request.model_dump(mode='json') != original:
             raise ValueError('joint Update package cannot narrow its complete original unit')
-        if refusal := admission_error(request, policy, materials['before'], {**materials['original_goal'],
+        # Authority was admitted against the complete frozen transaction view.
+        # The model projection can omit unused historic grants, including an
+        # old fragment whose replacement slices are the active own Evidence.
+        if refusal := admission_error(request, policy, materials.get('transaction_before', materials['before']), {**materials['original_goal'],
                 'units': {materials['unit_id']: request.target_keys}}):
             raise ValueError('joint Update package admission: ' + refusal)
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
