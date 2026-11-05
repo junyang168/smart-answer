@@ -84,7 +84,7 @@ class Policy(source.Contract):
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
     proposal_empty_arrays: Literal['program_validated_v1'] | None = None
-    source_quote_projection: Literal['source_literal_punctuation_v1'] | None = None
+    source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -2062,7 +2062,7 @@ def normalize_candidate(raw, sources, *, source_quote_projection=False):
     quote_changes = []
     if source_quote_projection:
         from backend.pipeline.claim_quote_projection import project
-        result, quote_changes = project(result, sources)
+        result, quote_changes = project(result, sources, **({'contract':source_quote_projection} if isinstance(source_quote_projection,str) else {}))
     changes = []
     for row in result.records:
         if row.collection != 'source_fragments':

@@ -256,9 +256,8 @@ def candidate(raw, materials):
                                                 citations=retirement.citations)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
-    from backend.pipeline.claim_quote_projection import CONTRACT as QUOTE_CONTRACT, FIELD as QUOTE_FIELD
-    quote_projection = materials['policy'].get('source_quote_projection') == QUOTE_CONTRACT or (
-        materials.get(QUOTE_FIELD,{}).get('contract') == QUOTE_CONTRACT)
+    from backend.pipeline.claim_quote_projection import selected as quote_contract
+    quote_projection = quote_contract(materials)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'],
                                            source_quote_projection=quote_projection)
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
@@ -272,6 +271,9 @@ def review(raw, materials, proposal):
         return cm.Review.model_validate(raw)
     from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments, reused_assessments
     binding = binding_enabled(materials['policy'])
+    from backend.pipeline.claim_quote_projection import selected as quote_contract, project_review
+    if contract := quote_contract(materials):
+        raw,_ = project_review(raw,materials['sources'],contract=contract)
     wire = (BindingFindingsReview if binding else FindingsReview).model_validate(raw)
     reused = reused_assessments(materials, proposal) if binding else {}
     if reused:

@@ -642,6 +642,9 @@ def execute_claim_management(store, request, *, root, ports):
                             materials['program_owned_fields']['retirement_reference_claims'] = RETIREMENT_REFERENCE_NOTE
                         if parent.get('continuation'):
                             materials['continuation'] = parent['continuation']
+                        from backend.pipeline.claim_quote_projection import FIELD as QUOTE_FIELD
+                        if parent.get(QUOTE_FIELD):
+                            materials[QUOTE_FIELD] = parent[QUOTE_FIELD]
                         if policy.legacy_ai_supersession_restore:
                             materials['program_owned_fields']['legacy_ai_supersession_restore'] = (
                                 'Explicit Restore may restore an old AI-superseded Claim even when its SQL retired flag is false. '

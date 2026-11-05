@@ -120,3 +120,95 @@ def test_saved_punctuation_rejection_reuses_gpt_and_only_original_unused_opus(cl
  receipt=json.loads((Path(recovered)/'candidate-normalization.json').read_text())
  assert len(receipt['source_quote_corrections'])==2
  assert recover_returned_candidate(store,rid,authorization=authority)==recovered
+
+from backend.pipeline.claim_quote_projection import NEAR_CONTRACT,project_review
+
+@pytest.mark.parametrize('quote,source,expected',[
+ ('所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的人的。看到沒有？',
+  '所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的。看到沒有？這種經文很多。',
+  '所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的。看到沒有？'),
+ ('聽眾問：那能不能理解成說靈魂得救，身體還沒有得贖？教授：不是，那個說法錯了。',
+  '聽眾問：那能不能理解成說靈魂得救，身體還沒有得贖？教授：不是，那個說法錯。',
+  '聽眾問：那能不能理解成說靈魂得救，身體還沒有得贖？教授：不是，那個說法錯。'),
+ ('教授長篇解釋這一段聖經原文的意思與我們的看法。',
+  '完全不相干的另外一個問題，沒有引用的相同句子。','教授長篇解釋這一段聖經原文的意思與我們的看法。'),
+ ('教授說這一段解釋是完全相同的意思。',
+  '教授說這一段解釋是完全不同的意思。教授說這一段解釋是完全相近的意思。',
+  '教授說這一段解釋是完全相同的意思。'),
+])
+def test_near_source_quote_is_unique_literal_source_copy(quote,source,expected):
+ assert source_excerpt(quote,source,contract=NEAR_CONTRACT)==expected
+
+
+def test_review_quote_projection_never_changes_verdict_or_finding_reason():
+ text='所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的。看到沒有？這種經文很多。'
+ wrong='所以你們是誰？你們的身體是誰？你們的身體不是你們肉體，你們整個的人的。看到沒有？'
+ raw={'complete_review':True,'binding_assessments':[{'claim_key':'claims/C','sufficient':False}],
+      'findings':[{'reason':'Claim wording is unsupported; keep this finding.',
+                   'citations':[{'source_id':'S','paragraph_key':'S1','exact_quote':wrong}]}],
+      'prior_findings':[]}
+ fixed,changes=project_review(raw,{'S':{'paragraphs':{'S1':{'text':text}}}},contract=NEAR_CONTRACT)
+ assert raw['findings'][0]['citations'][0]['exact_quote']==wrong
+ assert len(changes)==1
+ assert fixed['binding_assessments']==raw['binding_assessments']
+ assert fixed['findings'][0]['reason']==raw['findings'][0]['reason']
+ assert fixed['findings'][0]['citations'][0]['exact_quote'] in text
+
+
+def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(claims):
+ from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+ from backend.pipeline.source_reconciliation_runner import body,read
+ store,root=claims
+ doc=deepcopy(store.get_record_state('source_documents','S')['payload']);file=Path(doc['source_path'])
+ text='甲是假设，不是断言。这里特别强调的是原句的假设性质，不是陈述实际已经发生的事实。'
+ wrong=text.replace('假设性质','一个假设性质')
+ file.write_text(json.dumps({'script':[{'text':text}]}));doc['source_file_sha256']=binding(file)['file_sha256']
+ store.apply_plan(store.plan_package({'package_id':'long-source','source_documents':[doc]}))
+ prepared=intake.prepare(['C'],root,instruction='Refresh complete own evidence',store=store)
+ request,execution=next(iter(batch.load(prepared['manifest']['path'],root/'batch',store=store)[1].values()))
+ cite={'source_id':'S','paragraph_key':'S0001','exact_quote':text}
+ def review(packet):
+  result=pass_review(packet)
+  if not packet['candidate']['records']:
+   result['binding_assessments'][0]['sufficient']=False
+   result['findings']=[{'target_key':'claims/C','component':'statement','category':'mapping',
+    'reason':'Keep the distinction between a hypothesis and an assertion.','acceptance_condition':'full precision',
+    'citations':[{**cite,'exact_quote':wrong}],'affected_target_keys':['claims/C'],
+    'affected_write_keys':[],'impact_reason':'own source judgment'}]
+  result['prior_findings']=[{'finding_id':fid,'disposition':'resolved','reason':'own source precise',
+   'citations':[cite],'affected_target_keys':['claims/C'],'affected_write_keys':['claims/C'],
+   'impact_reason':'complete hypothesis wording'} for fid in packet['unresolved']]
+  return result
+ def proposal(packet):
+  assert packet['policy'].get('source_quote_projection') is None  # original policy never rewritten
+  return {'changes':[
+   {'record_key':'claims/C','fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),'reason':'precise','citations':[cite]},
+   {'record_key':'source_fragments/FC','fields_json':json.dumps({'verbatim_excerpt':wrong}),
+    'reason':'complete source quotation','citations':[{**cite,'exact_quote':wrong}]}],
+   'creations':[],'retirements':[],'findings':[],'finding_resolutions':[
+    {'finding_id':fid,'disposition':'resolved','reason':'source precise','citations':[cite],
+     'affected_target_keys':['claims/C'],'affected_write_keys':['claims/C'],'impact_reason':'source wording'}
+    for fid in packet['unresolved']]}
+ ports=DurableSyntheticPorts(store,execution,opus=review,proposal=proposal)
+ failed=execute_claim_management(store,request,root=execution,ports=ports)
+ assert failed['detail']=='citation is not an exact quote from the complete own source',failed
+ parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()));old=store.get_cvp_group(rid)
+ original=binding(execution/rid/'opus.raw.json');slots=deepcopy(parent['call_reservations'])
+ direction={'schema_version':VERSION,'round_id':rid,'authorized_by':'owner','authorization_quote':'Copy the uniquely matching bound source instead of repeating a model call',
+  'human_content_approval':False,'record_unaccepted_result':True,'source_quote_projection':NEAR_CONTRACT,
+  'prior_metadata_sha256':cm.sha256_json({k:v for k,v in old.items()if k not in {'run_id','status','error'}}),
+  'original_raw':original}
+ path=root/'review-quote-authority.json';path.write_text(json.dumps(direction));authority=binding(path)
+ restored=recover_returned_review(store,rid,authorization=authority,unrecorded=True)
+ assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+ proof=body(read(Path(restored)/'engineering-recovery.json'))
+ assert not proof['returned_review_passed'] and len(proof['source_quote_corrections'])==1
+ result=execute_claim_management(store,request,root=execution,ports=ports)
+ assert result['status']=='completed',result
+ assert ports.calls==['opus','gpt','opus']
+ assert binding(execution/rid/'opus.raw.json')==original
+ reviewed=store.get_cvp_group(rid)
+ assert not reviewed['opus_approved'] and len(reviewed['findings'])==1
+ assert len(reviewed['source_quote_corrections']['opus']['corrections'])==1
+ assert store.get_record_state('source_fragments','FC')['payload']['verbatim_excerpt']==text
+ assert store.claim_management_qualification('C')['ready']

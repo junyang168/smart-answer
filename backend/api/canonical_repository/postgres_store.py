@@ -3759,7 +3759,7 @@ class PostgresKnowledgeStore:
         from backend.pipeline import claim_management as cm
         from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
         from backend.pipeline.source_reconciliation_runner import read, body
-        from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins
+        from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, pins
         check_binding(receipt_binding)
         receipt = body(read(Path(receipt_binding['path'])))
         materials, candidate, review, passed = validate_claim_stage_receipt(receipt)
@@ -3905,6 +3905,14 @@ class PostgresKnowledgeStore:
                         passed = False
                 if stage == 'opus':
                     value['opus_approved'] = passed
+                    from backend.pipeline.claim_quote_projection import selected as quote_contract, project_review
+                    if contract := quote_contract(materials):
+                        source_raw = body(read(Path(receipt['materials']['path']).parent/'opus.raw.json'))
+                        _,corrections = project_review(source_raw['response'],materials['sources'],contract=contract)
+                        if corrections:
+                            value.setdefault('source_quote_corrections',{})['opus'] = {
+                                'original_raw':binding(Path(receipt['materials']['path']).parent/'opus.raw.json'),
+                                'corrections':corrections,'verdicts_unchanged':True}
                 # Every prior issue in this unit is explicitly reconciled;
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
