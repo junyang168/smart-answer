@@ -250,6 +250,102 @@ def _timeline(sermon: dict[str, Any]) -> list[tuple[int, float]]:
     return anchors
 
 
+#: 语音识别的原始输出：一条 3–5 秒，带毫秒起止。整理过的逐字稿每段记着它来自
+#: 第几条到第几条（`start_index`/`end_index`）。
+RECOGNITION_DIR = "script"
+
+
+def _recognition_timeline(sermon: dict[str, Any], data_base_dir: Path) -> list[tuple[int, float]]:
+    """把整理过的逐字稿逐字对上语音识别的原始输出，得到细的「第几个字 → 第几秒」。
+
+    `_timeline` 只有段首有时间，一段三分钟，段内按字数插值，误差约 ±15 秒——聆
+    听模式里逐字稿的高亮就跟不上他（负责人 2026-11-04：「播到下一段，高亮不
+    动」）。语音识别的原始输出每 3–5 秒一条、带毫秒；整理过的段落记着自己来自
+    哪几条。两边的字大多相同（整理只改标点、错字、删口头语），逐字比对后，每一
+    处对上的字就是一个锚点。
+
+    位置的算法与 `_timeline` 相同（删去删除线后的字数累计）。没有原始输出、或段
+    落没有记来源的，返回空。
+    """
+
+    from difflib import SequenceMatcher
+
+    transcript_id = str(sermon.get("transcript_id") or "")
+    path = Path(data_base_dir) / RECOGNITION_DIR / f"{transcript_id}.json"
+    if not transcript_id or not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    entries = {
+        int(entry["index"]): entry
+        for entry in (raw.get("entries") if isinstance(raw, dict) else None) or []
+        if isinstance(entry.get("index"), int) and entry.get("start_ms") is not None
+    }
+    anchors: list[tuple[int, float]] = []
+    position = 0
+    for segment in sermon.get("segments") or []:
+        text = STRIKETHROUGH.sub("", str(segment.get("text") or ""))
+        low = segment.get("start_index", segment.get("index"))
+        high = segment.get("end_index")
+        if isinstance(low, int) and isinstance(high, int) and text:
+            heard: list[str] = []
+            times: list[float] = []
+            for number in range(low, high + 1):
+                entry = entries.get(number)
+                if not entry:
+                    continue
+                said = str(entry.get("text") or "")
+                begin, end = float(entry["start_ms"]), float(entry.get("end_ms") or entry["start_ms"])
+                for offset, character in enumerate(said):
+                    heard.append(character)
+                    times.append((begin + (end - begin) * offset / max(len(said), 1)) / 1000)
+            if heard:
+                matcher = SequenceMatcher(None, text, "".join(heard), autojunk=False)
+                for mine, theirs, size in matcher.get_matching_blocks():
+                    if size >= 2:
+                        anchors.append((position + mine, times[theirs]))
+        position += len(text)
+    # 只留两边都往前走的锚点：比对偶尔把一个常见词对到别处去。
+    kept: list[tuple[int, float]] = []
+    for item in anchors:
+        if not kept or (item[0] > kept[-1][0] and item[1] >= kept[-1][1]):
+            kept.append(item)
+    return kept
+
+
+def retimer(sermon: dict[str, Any], data_base_dir: Path) -> Any:
+    """按段首插值的秒数 → 对上语音识别的秒数。没有原始输出时原样返回。
+
+    存档的片段时间（`chapter_exposition` 的决定）是按 `_timeline` 算的，不能改；
+    这里在显示时换算。同一个字位置在两条时间线上各有一个秒数，两条都随字位置
+    递增，所以换算是单调的，在锚点之间线性插值。
+    """
+
+    fine = _recognition_timeline(sermon, data_base_dir)
+    coarse = _timeline(sermon)
+    pairs: list[tuple[float, float]] = []
+    for position, seconds in fine:
+        before = _at(coarse, position)
+        if before is None:
+            continue
+        if not pairs or (before > pairs[-1][0] and seconds >= pairs[-1][1]):
+            pairs.append((before, seconds))
+    if len(pairs) < 2:
+        return lambda seconds: seconds
+
+    def convert(seconds: float) -> float:
+        if seconds <= pairs[0][0]:
+            return pairs[0][1] + (seconds - pairs[0][0])
+        for (a0, b0), (a1, b1) in zip(pairs, pairs[1:]):
+            if seconds < a1:
+                return b0 + (seconds - a0) / (a1 - a0) * (b1 - b0)
+        return pairs[-1][1] + (seconds - pairs[-1][0])
+
+    return convert
+
+
 def _at(anchors: list[tuple[int, float]], position: int) -> float | None:
     """第 `position` 个字大约在第几秒。"""
 
@@ -1283,6 +1379,47 @@ def _chapter_slides(
     return out
 
 
+def _retimed(convert: Any, row: dict[str, Any]) -> dict[str, Any]:
+    """一行里所有的秒数都换到对上语音识别的时间线上。
+
+    录音的起止、投影片和要点出现的时刻、逐字稿每一句，用同一个换算，彼此仍然
+    对得上：一句话在哪一段录音里、要点在哪一句出现，都不变。
+    """
+
+    def at(items: list[dict[str, Any]] | None, *keys: str) -> list[dict[str, Any]]:
+        return [{**item, **{key: round(convert(item[key]), 2) for key in keys if key in item}} for item in items or []]
+
+    stretches = [
+        {**item, "start": round(convert(item["start"]), 2), "end": round(convert(item["end"]), 2),
+         **({"parts": at(item["parts"], "start", "end")} if "parts" in item else {})}
+        for item in row["stretches"]
+    ]
+    out = {
+        **row,
+        "stretches": stretches,
+        "judgements": [
+            {**mark, "at": round(convert(mark["at"]), 2),
+             "seconds": round(convert(mark["at"] + mark.get("seconds", 0)) - convert(mark["at"]), 2)}
+            for mark in row["judgements"]
+        ],
+        "spoken": at(row.get("spoken"), "at"),
+        "readings": at(row.get("readings"), "at"),
+        "original_language_events": at(row.get("original_language_events"), "at"),
+        "transcript": at(row.get("transcript"), "at", "end"),
+        "seconds": sum(item["end"] - item["start"] for item in stretches if not item.get("left_out")),
+        "left_out_seconds": sum(item["end"] - item["start"] for item in stretches if item.get("left_out")),
+    }
+    if "slides" in row:
+        out["slides"] = [
+            {**slide, "at": round(convert(slide["at"]), 2),
+             "seconds": round(convert(slide["at"] + slide["seconds"]) - convert(slide["at"]), 2),
+             "points": at(slide["points"], "at"),
+             "scriptures": at(slide["scriptures"], "at")}
+            for slide in row["slides"]
+        ]
+    return out
+
+
 def _transcript(lines: list[dict[str, Any]], stretches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """这一行的逐字稿：起点落在它某一段录音里的句子，标出是否属灰色片段。"""
 
@@ -1369,6 +1506,8 @@ def _chapter_sections(
         # 逐字稿一句一行、带时间：听的人边听边看他此刻说的那一句，点一句跳过去。
         # 保留的和不保留的都切——灰色片段打开时，它的逐字稿也在原来的位置。
         lines = chapter_slides.sentences(record.get("pieces") or [])
+        # 存档的时间按段首插值，差到十几秒；显示时换成对上语音识别的时间。
+        retime = retimer(sermon, data_base_dir)
         slides_by_section = (
             _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else None
         )
@@ -1455,7 +1594,7 @@ def _chapter_sections(
                         "",
                     )
                 judgements.append(mark)
-            rows_by_section[section].append({
+            rows_by_section[section].append(_retimed(retime, {
                 "source_id": source_id,
                 "transcript_id": sermon["transcript_id"],
                 "title": sermon["title"],
@@ -1478,7 +1617,7 @@ def _chapter_sections(
                 "left_out_seconds": sum(
                     item["end"] - item["start"] for item in value["stretches"] if item.get("left_out")
                 ),
-            })
+            }))
 
     sections = [
         {

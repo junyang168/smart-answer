@@ -95,9 +95,13 @@ export default function ChapterListener({
   const clip: Clip | undefined = clips[position.clip];
 
   useEffect(() => {
+    // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
+    // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
+    let alive = true;
     fetch(`/api/public/original-audio/${passage}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data) => {
+        if (!alive) return;
         const loaded: Section[] = data.sections ?? [];
         const list = playlist(loaded, false);
         const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
@@ -108,7 +112,10 @@ export default function ChapterListener({
           pending.current = { time: list[first].start, play: false };
         }
       })
-      .catch(() => setError("讀不到這一章的錄音。"));
+      .catch(() => alive && setError("讀不到這一章的錄音。"));
+    return () => {
+      alive = false;
+    };
     // 只在進來時讀一次；換段由頁面自己處理，不重新讀。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passage]);
@@ -182,7 +189,13 @@ export default function ChapterListener({
 
   function onTimeUpdate() {
     const element = media.current;
-    if (!element || !clip || pending.current) return;
+    if (!element || !clip) return;
+    // 該跳而還沒跳的，錄音一能定位就跳，不只等 loadedmetadata：那個事件一個檔
+    // 只來一次，錯過了，時間就永遠不更新，逐字稿的高亮停在第一句。
+    if (pending.current) {
+      if (element.readyState > 0) onLoaded();
+      return;
+    }
     if (element.currentTime >= clip.end) {
       advance();
       return;
