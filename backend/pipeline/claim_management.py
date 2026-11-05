@@ -405,7 +405,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_historical_stage.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'claim_evidence_review.py', pipeline/'claim_quote_projection.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_evidence_review.py', pipeline/'claim_stopped_resume.py', pipeline/'claim_quote_projection.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
@@ -1676,6 +1676,8 @@ def continuation_budget(previous, request, policy):
     original = Policy.model_validate(previous['policy'])
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    from backend.pipeline.claim_stopped_resume import authorize as authorize_stopped_resume
+    stopped_resume = authorize_stopped_resume(previous, request, authority)
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
@@ -1839,6 +1841,9 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
+        if stopped_resume and key == stopped_resume['slot']:
+            spent[slot['role']] += 1
+            continue
         from backend.pipeline.claim_review_recovery import closed_codex_quota_refusal
         quota_refusal = closed_codex_quota_refusal(previous, key, slot, authority)
         if quota_refusal is not None:
@@ -1994,6 +1999,7 @@ def continuation_budget(previous, request, policy):
         **({'subscription_refusal_retry': {'direction': refusal_retry, 'failures': refusal_proofs}} if refusal_retry is not None else {}),
         **({'source_support_creation':True} if support_creation else {}),
         **({'related_owner_target_extension':True} if target_extension else {}),
+        **({'owner_stopped_resume': stopped_resume} if stopped_resume else {}),
         'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':continued_goal,
         **({'historical_rejected_stages':historical_stages} if historical_stages else {}),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
