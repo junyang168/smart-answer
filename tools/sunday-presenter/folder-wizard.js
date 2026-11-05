@@ -15,7 +15,7 @@ function isDocumentURL(value) {
   try {
     const u = new URL(value);
     return u.protocol === 'https:' && (u.hostname === 'onedrive.live.com' ||
-      u.hostname.endsWith('.sharepoint.com')) && /\/doc\.aspx$/i.test(u.pathname);
+      u.hostname.endsWith('.sharepoint.com')) && /\/doc2?\.aspx$/i.test(u.pathname);
   } catch { return false; }
 }
 function sameFolderURL(actual, expected) {
