@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -274,6 +275,20 @@ def _recognition_timeline(sermon: dict[str, Any], data_base_dir: Path) -> list[t
     path = Path(data_base_dir) / RECOGNITION_DIR / f"{transcript_id}.json"
     if not transcript_id or not path.is_file():
         return []
+    # 逐字比对一堂课要 0.1 秒；两边的文字不变，结果就不变。
+    texts = "\x00".join(str(segment.get("text") or "") for segment in sermon.get("segments") or [])
+    key = (str(path), path.stat().st_mtime_ns, hashlib.sha256(texts.encode("utf-8")).hexdigest())
+    if key in _RECOGNITION_CACHE:
+        return _RECOGNITION_CACHE[key]
+    anchors = _align_recognition(sermon, path, SequenceMatcher)
+    _RECOGNITION_CACHE[key] = anchors
+    return anchors
+
+
+_RECOGNITION_CACHE: dict[tuple[str, int, str], list[tuple[int, float]]] = {}
+
+
+def _align_recognition(sermon: dict[str, Any], path: Path, SequenceMatcher: Any) -> list[tuple[int, float]]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1165,6 +1180,52 @@ def claim_points(
     }
 
 
+class _Lazy(dict):
+    """第一次被读时才装载的字典。"""
+
+    def __init__(self, load: Any) -> None:
+        super().__init__()
+        self._load = load
+        self._loaded = False
+
+    def _ensure(self) -> None:
+        if not self._loaded:
+            self._loaded = True
+            self.update(self._load())
+
+    def __getitem__(self, key: Any) -> Any:
+        self._ensure()
+        return super().__getitem__(key)
+
+    def __contains__(self, key: object) -> bool:
+        self._ensure()
+        return super().__contains__(key)
+
+    def __iter__(self) -> Any:
+        self._ensure()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._ensure()
+        return super().__len__()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._ensure()
+        return super().get(key, default)
+
+    def items(self) -> Any:
+        self._ensure()
+        return super().items()
+
+    def keys(self) -> Any:
+        self._ensure()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._ensure()
+        return super().values()
+
+
 def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
 
@@ -1179,9 +1240,11 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     def by_id(collection: str, key: str) -> dict[str, dict[str, Any]]:
         return {str(row.get(key)): row for row in store.list_records(collection) if row.get(key)}
 
-    claims = by_id("claims", "claim_id")
-    steps = by_id("evidence_steps", "evidence_step_id")
-    fragments = by_id("source_fragments", "fragment_id")
+    # 主张、证据步骤、来源片段一共十四万多条，读一遍两秒；按章页面有投影片的讲
+    # 道根本用不到它们。用到时才读，读一次。
+    claims = _Lazy(lambda: by_id("claims", "claim_id"))
+    steps = _Lazy(lambda: by_id("evidence_steps", "evidence_step_id"))
+    fragments = _Lazy(lambda: by_id("source_fragments", "fragment_id"))
     documents = by_id("source_documents", "source_id")
     sermons = Sermons(data_base_dir)
 
@@ -1521,7 +1584,8 @@ def _chapter_sections(
         verses: dict[str, str] = {}
         spans_by_section: dict[str, list[tuple[float, float, str]]] = {}
         provenance_by_section: dict[str, dict[str, dict[str, list[str]]]] = {}
-        for claim_id, claim in claims.items():
+        # 有投影片的讲道，幻灯的标题来自投影片，用不到主张。
+        for claim_id, claim in ({} if timed_slides is not None else claims).items():
             if str(claim.get("review_status") or "") == "superseded":
                 continue
             if not any(
