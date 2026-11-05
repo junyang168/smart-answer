@@ -85,6 +85,7 @@ class Policy(source.Contract):
     legacy_ai_supersession_restore: Literal[True] | None = None
     proposal_empty_arrays: Literal['program_validated_v1'] | None = None
     source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1','source_literal_span_v2'] | None = None
+    retry_context_contract: Literal['claim_database_retry_v1'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -96,7 +97,7 @@ class Policy(source.Contract):
             value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays', 'source_quote_projection'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays', 'source_quote_projection', 'retry_context_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -113,6 +114,8 @@ class Policy(source.Contract):
 
     @model_validator(mode="after")
     def exact_roles(self):
+        if self.retry_context_contract and self.model_output_contract != 'claim_changes_v4':
+            raise ValueError('database retry context requires managed content Update')
         if set(self.models) != set(MODELS):
             raise ValueError("all three independent model roles must be bound")
         for role, (model, backend) in MODELS.items():
@@ -415,6 +418,8 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.review_unit_contract:
         files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
                   pipeline/'prompts/claim_bounded_review_unit_v1.md']
+    if policy is not None and policy.retry_context_contract:
+        files += [pipeline/'claim_database_retry.py', pipeline/'prompts/claim_database_retry_v1.md']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -1415,6 +1420,8 @@ def model_packet(materials):
                 if restored != materials[name]:
                     raise ValueError('Claim request reference changed authority')
     from backend.pipeline.claim_evidence_review import add_packet
+    from backend.pipeline.claim_database_retry import project
+    packet = project(packet, materials)
     return add_packet(packet)
 
 

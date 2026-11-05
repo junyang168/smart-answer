@@ -685,6 +685,9 @@ def execute_claim_management(store, request, *, root, ports):
                             materials['existing_evidence_owner_claims'] = evidence_owner_references(
                                 unit_request, before, transaction_before)
                             materials['program_owned_fields']['existing_evidence_owner_claims'] = EVIDENCE_OWNER_NOTE
+                        from backend.pipeline.claim_database_retry import unresolved_for_retry
+                        materials['unresolved'] = unresolved_for_retry(
+                            materials['policy'], materials['unresolved'], prior)
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)

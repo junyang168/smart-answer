@@ -221,7 +221,8 @@ def test_retired_claims_are_separate_from_ready_handoff(action,monkeypatch):
 
 
 @pytest.mark.parametrize('defect',['current','opus','foreign','drift','budget','repeat','tamper','missing','intent','creation','duplicate','missing_reference','transaction_consumer','transaction_consumer_opus','evidence_drift','scope_drift','transcript_alias'])
-def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect):
+@pytest.mark.parametrize('fresh_context', [False, True])
+def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_review(action,monkeypatch,defect,fresh_context):
     from backend.pipeline import claim_management_intake as intake
     from backend.pipeline.claim_review_recovery import consumed_rejected_citations
     alias='the recorded sermon name'
@@ -248,6 +249,10 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
             'affected_target_keys':['claims/D'],'affected_write_keys':['source_fragments/FD'],'impact_reason':'own bound evidence'} for fid in packet['unresolved']]
     def proposal(packet):
         inputs=packet['original_goal'].get('unaccepted_model_inputs')
+        recovered = bool(inputs) or bool(packet.get('retry_context', {}).get('last_validation_error'))
+        if fresh_context and recovered:
+            assert not inputs and 'previous_candidate' not in packet
+            assert 'TYPO。' not in json.dumps(packet, ensure_ascii=False)
         if inputs:
             original=inputs[0]['response']
             if defect=='creation':
@@ -264,21 +269,21 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
                 original_item=original['findings'][0] if inputs[0]['role']=='opus' else original['finding_resolutions'][0]
                 assert original_item['citations'][0]['exact_quote'].endswith('TYPO。')
         creations=[]
-        if defect=='creation' and not inputs:
+        if defect=='creation' and not recovered:
             oid=packet['original_goal']['claim_creation_allocations']['S']
             creations=[{'collection':'claims','object_id':oid,'reason':'new source judgment','citations':[citation],
                 'fields_json':json.dumps({'statement':'教授否定这个译法。','claim_type':'explicit_claim','attribution':'professor',
                     'occurrences':[{'source_id':'S'}],'evidence_step_ids':['ED'],'visibility':'internal'})}]
         changes=[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
             'reason':'repair bound excerpt','citations':[citation]}]
-        if defect=='duplicate' and not inputs:changes+=deepcopy(changes)
-        if defect=='missing_reference' and not inputs:
+        if defect=='duplicate' and not recovered:changes+=deepcopy(changes)
+        if defect=='missing_reference' and not recovered:
             changes.extend([{'record_key':'evidence_steps/ED','fields_json':json.dumps({'source_fragment_ids':['MISSING']}),
                 'reason':'returned malformed reference','citations':[citation]},
                 {'record_key':'claims/D','fields_json':json.dumps({'statement':citation['exact_quote']}),
                  'reason':'source-bound judgment','citations':[citation]}])
         return {'changes':changes,'creations':creations,'retirements':[],'findings':[],
-            'finding_resolutions':resolutions(packet,bad=(not inputs or defect=='repeat') and defect not in {'creation','duplicate','missing_reference'})}
+            'finding_resolutions':resolutions(packet,bad=(not recovered or defect=='repeat') and defect not in {'creation','duplicate','missing_reference'})}
     def review(packet):
         value=pass_review(packet);value['prior_findings']=resolutions(packet)
         if not packet['unresolved']:
@@ -296,7 +301,8 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
             port=clients.setdefault(key,SyntheticPorts(store,execution,opus=review,proposal=proposal))
             execute_claim_management(store,request,root=execution,ports=port)
     monkeypatch.setattr(batch,'run',execute)
-    policy=json.loads(intake.DEFAULT_POLICY.read_text())
+    policy=json.loads((intake.DEFAULT_POLICY if fresh_context else
+        intake.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v9.json').read_text())
     if defect in {'budget','repeat'}:policy['budget']['gpt_calls']=1 if defect=='budget' else 2
     policy_path=root/'selected-policy.json';policy_path.parent.mkdir(parents=True);policy_path.write_text(json.dumps(policy))
     first=intake.run(['D'],root,store=store,instruction='full Update and repair engineering errors',policy=policy_path)
@@ -391,10 +397,14 @@ def test_agent_resume_rejected_proposal_keeps_raw_budget_and_requires_real_revie
                     'authorization_quote':'one correction after verified engineering repair','current_objects_sha256':cm.sha256_json(current),'related_action_metadata_sha256':{}})
             auth_path=output/'authority.json';auth_path.write_text(json.dumps(authority));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
             def valid_proposal(packet):
-                assert packet['previous_candidate'] is None
-                rejected=packet['continuation']['unaccepted_returned_proposals'][latest+':gpt']
-                assert rejected['review_not_accepted'] is True
-                assert rejected['response']['finding_resolutions'][0]['citations'][0]['exact_quote'].endswith('TYPO。')
+                assert packet.get('previous_candidate') is None
+                if fresh_context:
+                    assert 'unaccepted_returned_proposals' not in packet['continuation']
+                    assert packet['retry_context']['last_validation_error'] == error
+                else:
+                    rejected=packet['continuation']['unaccepted_returned_proposals'][latest+':gpt']
+                    assert rejected['review_not_accepted'] is True
+                    assert rejected['response']['finding_resolutions'][0]['citations'][0]['exact_quote'].endswith('TYPO。')
                 return {'changes':[{'record_key':'source_fragments/FD','fields_json':json.dumps({'verbatim_excerpt':citation['exact_quote']}),
                     'reason':'repair exact quote','citations':[citation]}],'creations':[],'retirements':[],'findings':[],
                     'finding_resolutions':resolutions(packet)}

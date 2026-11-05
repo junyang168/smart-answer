@@ -3649,6 +3649,15 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('owner follow-up revision must retain its immediate preceding candidate')
             elif round_number != 0:
                 raise ChangeSetConflict("first Claim round must have ordinal zero")
+            if policy.retry_context_contract:
+                from backend.pipeline.claim_database_retry import unresolved_for_retry
+                pending = {**parent.get('context_findings', {}), **parent['findings']}
+                pending = {k: v for k, v in pending.items()
+                           if v['target_key'] in frozen['before'] or k in parent['findings']}
+                expected = unresolved_for_retry(parent['policy'], pending,
+                    previous if previous_id else None)
+                if frozen.get('unresolved') != expected:
+                    raise ChangeSetConflict('database retry omitted an unwritten repair obligation')
             used_revisions = sum(bool(v) for v in parent["revision_rounds"].values())
             if round_number and used_revisions >= policy.budget.max_revisions:
                 raise ChangeSetConflict("original Claim action revision budget exhausted")
