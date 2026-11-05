@@ -2810,6 +2810,9 @@ def build_change_set_plan(
     source_kind: str = "knowledge_package",
     existing_review_authorities: Mapping[tuple[str, str], str] | None = None,
 ) -> ChangeSetPlan:
+    if ((package.get('source_repair_application') or {}).get('schema_version') == 'wang_transcript_claim_anchor_sync_v1'
+            and source_kind != 'wang_transcript_claim_anchor_sync_v1'):
+        raise ValueError('anchor synchronization cannot borrow another source authority')
     try:
         validate_store_package_authorization(package)
     except ConsensusApplicationError as exc:
@@ -6405,6 +6408,9 @@ class PostgresKnowledgeStore:
         """
 
         claim_writes = None
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_transcript_claim_anchor_sync_v1':
+            if source_kind != 'wang_transcript_claim_anchor_sync_v1' or not transactional or retiring_keys:
+                raise ValueError('Claim anchor synchronization requires its exact guarded metadata plan')
         if source_kind == 'wang_cvp_contextual_summary_v1' or package.get('contextual_summary_application') is not None:
             if source_kind != 'wang_cvp_contextual_summary_v1' or not transactional or retiring_keys:
                 raise ValueError('reviewed contextual summary requires its exact SQL transaction')
@@ -7967,6 +7973,9 @@ class PostgresKnowledgeStore:
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
+        if plan.source_kind == 'wang_transcript_claim_anchor_sync_v1':
+            from backend.pipeline.transcript_claim_anchor_sync import validate_apply_plan
+            validate_apply_plan(plan, metadata, expected_current_record_pins)
         if plan.source_kind == 'argument_route_resolution_v2' and (
             expected_current_route_material_pins is None or expected_route_scope_sets is None
         ):
