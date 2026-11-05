@@ -56,9 +56,6 @@ function playlist(sections: Section[], showLeftOut: boolean): Clip[] {
   return out;
 }
 
-/** 「題：馬太福音釋經（二）2」→「（二）2」。 */
-const lectureName = (title: string) => title.match(/（[^）]+）\s*\d+\s*$/)?.[0] ?? title;
-
 /** 「馬太福音 5:13-16」→「5:13-16」：按鈕上書名是多餘的。 */
 const shortLabel = (label: string) => label.split(" ").pop() || label;
 
@@ -447,11 +444,11 @@ export default function ChapterListener({
               const owner = clips[line.clip];
               return (
                 <div key={`${line.clip}-${line.at}`}>
-                  {startsClip && (
-                    <p className="mb-1 mt-3 font-mono text-[0.7rem] text-stone-500 first:mt-0">
-                      {lectureName(owner.sermon.title)} · 原錄音 {clock(owner.start)}
-                      {owner.stretch.left_out && " · 不屬本章釋經"}
-                    </p>
+                  {/* 換一段錄音（他岔開去講了別的、或換一堂課）只畫一條細線：聽的人
+                      關心的是經節，不是第幾堂課（負責人 2026-11-04）。 */}
+                  {startsClip && index > 0 && <hr className="my-3 border-dashed border-stone-200" />}
+                  {startsClip && owner.stretch.left_out && (
+                    <p className="mb-1 text-[0.7rem] text-stone-400">不屬本章釋經</p>
                   )}
                   <button
                     ref={here ? currentLine : undefined}
@@ -510,7 +507,6 @@ export default function ChapterListener({
               return (
                 <div
                   key={`${item.offset}`}
-                  title={`${lectureName(item.sermon.title)} · ${clock(item.start)}`}
                   className={`relative h-2 overflow-hidden rounded-full ${item.stretch.left_out ? "bg-stone-200" : "bg-slate-200"}`}
                   style={{ flexGrow: Math.max(1, length), flexBasis: 0 }}
                 >
@@ -524,9 +520,6 @@ export default function ChapterListener({
           </div>
           <span className="w-12">{clock(sectionLength)}</span>
         </div>
-        <p className="mt-1 text-center font-mono text-[0.7rem] text-stone-500">
-          {clip && `${lectureName(clip.sermon.title)} · 原錄音 ${clock(time)}`}
-        </p>
 
         <div className="mt-1 flex flex-wrap items-center justify-center gap-1 sm:gap-2">
           <button

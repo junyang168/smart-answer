@@ -239,6 +239,9 @@ export type Section = { passage: string; label: string; sermons: Sermon[] };
 export const visible = (sermon: Sermon, showLeftOut: boolean) =>
   showLeftOut ? sermon.stretches : sermon.stretches.filter((stretch) => !stretch.left_out);
 
+/** 總覽上每段列出幾個題目。 */
+const MOST_TOPICS = 5;
+
 export const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
@@ -426,6 +429,70 @@ export default function OriginalAudio({
       </main>
     );
 
+  if (listenHref) {
+    // 按章頁面的總覽只是經文目錄：聽的人關心的是經節，不是哪一堂課（負責人
+    // 2026-11-04）。點一段就進聆聽模式，從那一段開始；講到的題目是投影片的標題，
+    // 讓人看得出這幾節他講了什麼。
+    const topics = (section: Section) => {
+      const seen = new Set<string>();
+      return section.sermons
+        .flatMap((sermon) =>
+          sermon.slides && sermon.slides.length > 0
+            ? sermon.slides.map((slide) => ({ at: slide.at, text: slide.title }))
+            : sermon.judgements.map((mark) => ({ at: mark.at, text: mark.judgement })),
+        )
+        .filter((item) => item.text && !seen.has(item.text) && seen.add(item.text));
+    };
+    return (
+      <div className="flex flex-col gap-6">
+        {title && <p className="font-serif text-lg text-stone-800">{title}</p>}
+        <Link
+          href={listenHref(sections[0]?.passage ?? passage)}
+          className="flex w-fit items-center gap-3 rounded-xl bg-stone-900 px-5 py-3 text-white shadow-sm hover:bg-stone-700"
+        >
+          <span aria-hidden="true">▶</span>
+          <span>
+            <span className="block font-semibold">從頭開始聽</span>
+            <span className="block text-sm text-stone-300">投影片、逐字稿、播放控制在同一個畫面</span>
+          </span>
+        </Link>
+        <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+          {sections.map((section) => (
+            <li key={section.passage}>
+              <Link
+                href={listenHref(section.passage)}
+                className="flex flex-col gap-1.5 px-5 py-4 hover:bg-amber-50/60 sm:flex-row sm:gap-6"
+              >
+                <span className="flex shrink-0 items-baseline gap-3 sm:w-48">
+                  <span className="font-serif text-lg font-bold text-stone-900">{section.label.split(" ").pop()}</span>
+                  <span className="font-mono text-sm text-stone-500">
+                    {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+                  </span>
+                </span>
+                {/* 一行一個題目，最多五個：一整段連起來的題目是一堵牆，看不出這幾節講了什麼。 */}
+                <span className="flex flex-col text-[0.95rem] leading-7 text-stone-700">
+                  {topics(section)
+                    .slice(0, MOST_TOPICS)
+                    .map((item) => (
+                      <span key={item.text}>{item.text}</span>
+                    ))}
+                  {topics(section).length > MOST_TOPICS && (
+                    <span className="text-sm text-stone-500">還有 {topics(section).length - MOST_TOPICS} 個題目</span>
+                  )}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+        {missing.length > 0 && (
+          <p className="text-sm text-stone-500">
+            尚未整理：{missing.map((lecture) => lecture.split("：").pop()).join("、")}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   const hasLeftOut = sections.some((section) =>
     section.sermons.some((sermon) => sermon.stretches.some((stretch) => stretch.left_out)),
   );
@@ -475,19 +542,6 @@ export default function OriginalAudio({
               尚未整理：{missing.map((lecture) => lecture.split("：").pop()).join("、")}
             </p>
           )}
-          {listenHref && sections.length > 0 && (
-            // 认真听的人要投影片、逐字稿和播放控制在同一个画面（负责人 2026-11-04）。
-            <Link
-              href={listenHref(sections[0].passage)}
-              className="flex w-fit items-center gap-3 rounded-xl bg-stone-900 px-5 py-3 text-white shadow-sm hover:bg-stone-700"
-            >
-              <span aria-hidden="true">▶</span>
-              <span>
-                <span className="block font-semibold">聆聽模式</span>
-                <span className="block text-sm text-stone-300">投影片、逐字稿、播放控制在同一個畫面，可跳上一段、下一段</span>
-              </span>
-            </Link>
-          )}
         </header>
 
         {sections.map((section) => (
@@ -498,14 +552,6 @@ export default function OriginalAudio({
             <span className="ml-3 font-mono text-sm font-normal text-stone-400">
               {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
             </span>
-            {listenHref && (
-              <Link
-                href={listenHref(section.passage)}
-                className="ml-4 align-middle font-sans text-sm font-semibold text-amber-800 hover:text-amber-900"
-              >
-                ▶ 聽這段
-              </Link>
-            )}
           </h2>
         )}
 
