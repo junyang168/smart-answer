@@ -3,7 +3,7 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`、`backend.pipeline.transcript_claim_anchor_sync`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
 ## 目錄
@@ -127,6 +127,31 @@ apply 與既有維護和 Claim 執行者共用鎖，不終止其他任務。寫�
 退役狀態，然後走既有 ChangeSet、歷史及依賴失效機制。任一並行修改或原件漂移都停止，
 不能覆寫舊對照表後繼續。已提交但回執遺失時，依同一 ChangeSet 回讀恢復，不重複寫入。
 回讀核對實際更新、未改 Claim 與未改原件；不把搬遷稱為完整 Claim／CVP 更新。
+
+Claim 的 `occurrences.anchors` 是另外保存的引文、段落與時間，Evidence 搬遷不會自動改到
+這些重複資料。負責人另行授權後，使用以下接點同步。`--evidence-run` 指向已提交的上述
+Evidence 搬遷，沿其實際 preimage 辨識舊引用；當前有效 Evidence／片段仍由 SQL 重讀。
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_claim_anchor_sync prepare --root ANCHOR_PREVIEW --source-id SOURCE --evidence-run EVIDENCE_PREVIEW --published PUBLISHED_FILE --instruction-file DIRECTION
+backend/.venv/bin/python -m backend.pipeline.transcript_claim_anchor_sync apply --root ANCHOR_PREVIEW
+backend/.venv/bin/python -m backend.pipeline.transcript_claim_anchor_sync verify --root ANCHOR_PREVIEW
+```
+
+只改同源 occurrence 的 anchors 及不含舊引文的撤回原因／歷史雜湊。講道名稱作為舊
+`source_id` 的格式須按已登記 SourceDocument aliases 辨識，不能漏掉或當成另一篇；
+真正外源 occurrence 保持不動。已取代／退役 Claim 不改歷史。
+每條定位須連到本 Claim 所有的 Evidence 及當前有效來源片段；原來的細引文仍能逐字
+核對時保留，否則使用該 Evidence 已綁定的新版逐字切片，跨段則展開為各自的定位。
+重疊定位標為同一物理證據基礎只計一次；同段內重複短答只標段落定位，不虛構逐字時間。
+新用字的 highlight 維持 proposed，Claim 的判斷、講者／論據角色及舊審核 provenance
+不改，也不新增審核事件或資格。已刪除或僅語境的引用移出有效 anchors，舊引文只在
+SQL 歷史與私有對照表保留，不放回目前 Claim 供下游當證據使用。
+
+儲存層以 `wang_transcript_claim_anchor_sync_v1` 的精確 adapter 重新計算整份定位投影，
+拒絕額外集合、Claim 文字或 annotation 變更、偽造 preimage、來源漂移及新的內容批准。
+apply 同時驗證凍結 package、完整讀集 pins 與共同交易；不是沿用舊 AI 審核批准新內容。
+已提交重跑只回讀；重新 prepare 若已全部同步則零 SQL 寫入。CVP／Route 的更新仍另列。
 
 ## 3. 來源與範圍
 
