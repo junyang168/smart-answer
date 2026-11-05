@@ -186,3 +186,53 @@ def test_fresh_retry_does_not_drop_other_fixes_that_were_only_in_the_draft(actio
     assert ports.calls == ['opus', 'gpt', 'opus', 'gpt', 'opus']
     assert all(store.get_record_state('claims', key)['payload']['statement'] == '甲是假设，不是断言。' for key in ['C', 'D'])
     assert all(store.claim_management_qualification(key)['ready'] for key in ['C', 'D'])
+
+
+def test_rejected_review_keeps_valid_issues_without_replaying_the_report(action):
+    store, request, root = configure(action, ['C'])
+    issue = {'target_key': 'claims/C', 'category': 'content', 'component': 'source_judgment',
+             'reason': 'The current source judgment needs correction.',
+             'acceptance_condition': 'Restore the actual source judgment.',
+             'citations': [cite()], 'affected_target_keys': ['claims/C'],
+             'affected_write_keys': [], 'impact_reason': 'target own judgment'}
+    reviews = []
+    def opus(packet):
+        reviews.append(packet)
+        if len(reviews) == 1:
+            return {'complete_review': True, 'findings': [issue, deepcopy(issue)], 'prior_findings': []}
+        return {'complete_review': True, 'findings': [], 'prior_findings': decisions(packet)}
+    def propose(packet):
+        assert 'previous_candidate' not in packet
+        assert 'unaccepted_model_inputs' not in packet['original_goal']
+        assert any(f['component'] == 'source_judgment' for f in packet['unresolved'].values())
+        return proposal(packet, [change('claims/C', '甲是假设，不是断言。')])
+    ports = SyntheticPorts(store, root, proposal=propose, opus=opus)
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    assert result['reason'] == 'engineering_required', result
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    rid = next(iter(parent['latest_rounds'].values()))
+    raw = (root / rid / 'opus.raw.json').read_bytes()
+    resume_rejected_output(store, rid, role='opus', error=parent['result']['detail'])
+    parent = store.get_cvp_group(parent['run_id'])
+    assert sum(f['component'] == 'source_judgment' for f in parent['findings'].values()) == 1
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus', 'gpt', 'opus']
+    assert (root / rid / 'opus.raw.json').read_bytes() == raw
+    assert store.claim_management_qualification('C')['ready']
+
+
+def test_ineligible_assessment_error_points_to_current_evidence_without_replaying_verdict():
+    error = 'professor judgment cannot be supported only by context/ineligible Evidence'
+    before = {'evidence_steps/E': {'payload': {'statement': 'actual evidence',
+              'support_eligibility': 'withheld_unreviewed', 'produced_claim_ids': ['C']}}}
+    entry = {'rejection_detail': error, 'response': {'binding_assessments': [{
+        'claim_key': 'claims/C', 'claim_use': 'professor_judgment', 'sufficient': True,
+        'evidence_keys': ['evidence_steps/E'], 'reason': 'REJECTED_VERDICT_NOT_APPROVAL'}]}}
+    material = {'policy': {'retry_context_contract': retry.CONTRACT}, 'round_number': 1,
+                'before': before, 'original_goal': {'unaccepted_model_inputs': [entry]}}
+    packet = retry.project(material, material)
+    assert 'REJECTED_VERDICT_NOT_APPROVAL' not in json.dumps(packet)
+    check = packet['retry_context']['current_record_checks']['evidence_steps/E']
+    assert check['support_eligibility'] == 'withheld_unreviewed'
+    assert check['produced_claim_ids'] == ['C']

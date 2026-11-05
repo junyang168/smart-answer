@@ -31,6 +31,33 @@ def unresolved_for_retry(policy, current, previous):
     return deepcopy(current)
 
 
+def rejected_findings(entry, materials, candidate):
+    """Carry independently well-formed allegations, never a rejected verdict.
+
+    The caller already authenticated the exact raw reply and reproduced its
+    rejection. Invalid allegations remain covered by that rejection; valid
+    source-bound issues must not disappear when the raw draft is discarded.
+    """
+    from backend.pipeline import claim_management as cm
+    if not enabled(materials['policy']) or entry['role'] != 'opus':
+        return []
+    request = cm.Request.model_validate(materials['unit_request'])
+    known = set(materials['before']) | {d.record_key for d in candidate.dispositions}
+    result = []
+    for raw in entry['response'].get('findings', []):
+        try:
+            finding = cm.Finding.model_validate(raw)
+            if finding.target_key not in known:
+                continue
+            cm.validate_citations(finding.citations, materials['sources'])
+            blocks = cm.finding_blocks(finding.model_dump(mode='json'), request,
+                                      candidate, records=materials['before'])
+        except ValueError:
+            continue
+        result.append((finding, blocks))
+    return result
+
+
 def project(packet, materials):
     if not active(materials):
         return packet
@@ -81,6 +108,15 @@ def project(packet, materials):
         error = CITATION_ERROR
     keys = set(latest.get('repeated_change_keys', []))
     keys.update(row['record_key'] for row in latest.get('invalid_fragment_bindings', []))
+    if error == 'professor judgment cannot be supported only by context/ineligible Evidence':
+        for assessment in latest.get('response', {}).get('binding_assessments', []):
+            cited = {key: materials['before'][key]['payload']
+                     for key in assessment.get('evidence_keys', [])
+                     if key.startswith('evidence_steps/') and key in materials['before']}
+            if (assessment.get('sufficient') and assessment.get('claim_use') == 'professor_judgment'
+                    and cited and not any(e.get('support_eligibility') in
+                        {'eligible', 'eligible_candidate'} for e in cited.values())):
+                keys.update(cited)
     checks = {}
     for key in sorted(keys):
         state = materials['before'].get(key)
@@ -96,7 +132,8 @@ def project(packet, materials):
                         fid in (e.get('source_fragment_ids') or []) or e.get('source_fragment_id') == fid):
                     owners.append({'evidence_key': ek, 'claim_ids': e.get('produced_claim_ids', [])})
         checks[key] = {k: payload[k] for k in
-                       ('source_id', 'paragraph_key', 'verbatim_excerpt') if k in payload}
+                       ('source_id', 'paragraph_key', 'verbatim_excerpt', 'statement',
+                        'support_eligibility', 'produced_claim_ids') if k in payload}
         checks[key]['current_owners'] = owners
     result.pop('previous_candidate', None)
     result['retry_context'] = {

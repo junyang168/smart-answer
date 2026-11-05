@@ -1203,6 +1203,14 @@ def resume_rejected_output(store, round_id, *, role, error):
             citations=[cm.Citation(source_id=first['source_id'],paragraph_key=first['paragraph_key'],exact_quote=exact)],
             affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='the rejected answer cannot be used as approval')
         parent['findings'][finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
+        from backend.pipeline.claim_database_retry import rejected_findings
+        carried = []
+        candidate = cm.Candidate.model_validate(value['candidate']) if role == 'opus' else None
+        for issue, blocking in rejected_findings(entry, materials, candidate):
+            fid = issue.identity(parent['action_id'])
+            parent.setdefault('findings' if blocking else 'context_findings', {}).setdefault(
+                fid, issue.model_dump(mode='json'))
+            carried.append(fid)
         parent['original_goal'].setdefault('unaccepted_model_inputs',[]).append(entry)
         for key,s in parent['call_reservations'].items():
             if s['round_id']==round_id and s['state']=='planned':
@@ -1210,6 +1218,8 @@ def resume_rejected_output(store, round_id, *, role, error):
         record = {'original_round':original,'original_parent':original_parent,'input':entry,
             'authorization':request.authorization.model_dump(mode='json'),'new_budget':False,'model_calls':0,
             'content_approved':False,'current_contract':contract}
+        if carried:
+            record['unaccepted_findings_carried_for_reassessment'] = carried
         if current_context:
             record['transaction_context_refresh'] = current_context
         write(destination/'engineering-recovery.json',record)
