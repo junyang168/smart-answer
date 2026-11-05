@@ -1186,3 +1186,19 @@ from a successful signed build. The existing #655 automatic-renewal hold remains
 its frozen source snapshot must be intentionally brought to the accepted release
 before renewal is re-enabled. No renewal schedule, Meet session, microphone,
 recording, website deployment or download publication was started.
+
+Installation follow-up: the paired iPad became reachable through a direct
+lock-state query. It was passcode-locked and unlocked since boot. The signed
+0.6.2 bundle was installed over the existing app, without uninstalling it;
+devicectl readback confirms both version and bundleVersion are 0.6.2. Bundle ID,
+owner team and target-device profile binding were checked before installation.
+The app was not launched while locked, so post-update pairing/video retention
+remains unverified. The automatic-renewal hold is unchanged.
+
+The idle installed Mac Presenter and both existing Mac Remote paths
+(/Applications and ~/Applications) were updated to 0.6.2. Deep/strict signatures,
+both plist version fields, matching Remote executable SHAs, installed Presenter
+stage.cjs equality and the installed Remote's actual control-gate probe pass.
+Previous app bundles were retained as rollback ZIPs on SSD, not extra launchable
+App copies. Release/install receipts are under the private local test artifact
+folder, not a public download. No website release was published.
