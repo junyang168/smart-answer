@@ -98,9 +98,11 @@ class Store:
 
     def receive(self, message):
         settings = self.settings()
-        if message.group_id not in settings.source_group_ids:
+        if message.group_id not in settings.ingest_group_ids:
             raise ValueError("此群未設定為資料來源")
-        if message.text.startswith(("【主日資料提醒】", "【請假登記回覆】", "【主日助理提問】", "【主日資料回覆】")):
+        if message.group_id == settings.admin_group and settings.fellowship_since and (message.source_sent_at or message.sent_at) < settings.fellowship_since:
+            return False
+        if message.text.startswith(("【主日資料提醒】", "【請假登記回覆】", "【主日助理提問】", "【主日資料回覆】", "【團契助理】")):
             return False
         with self.db() as db:
             cur = db.execute("INSERT OR IGNORE INTO messages(id,payload,status,received_at) VALUES (?,?,?,?)",

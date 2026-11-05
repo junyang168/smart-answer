@@ -486,6 +486,14 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('fellowship:'):
+                        from .fellowship import Fellowship
+                        text = Fellowship(self).prepare_delivery(row)
+                        if text is None:
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(),row['key']))
+                            continue
+                        row=dict(row);row['text']=text
                     if row['key'].startswith('absence-query:'):
                         from .absence_query import prepare_delivery
                         text = prepare_delivery(self, row)
@@ -534,7 +542,7 @@ class Assistant:
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
-                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:', 'absence-query:')):
+                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:', 'absence-query:', 'fellowship:')):
                     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
                         state = 'queued'  # Not submitted; a later tick can retry.
                     elif isinstance(exc, httpx.HTTPStatusError):
@@ -628,8 +636,12 @@ class Assistant:
             db.execute("UPDATE messages SET status='processing',error=NULL,attempts=attempts+1 WHERE id=?", (msg.message_id,))
         try:
             settings = self.store.settings()
-            if msg.group_id not in settings.source_group_ids:
+            if msg.group_id not in settings.ingest_group_ids:
                 raise ValueError("資料來源群設定已改變，請核對此消息")
+            if msg.group_id == settings.admin_group and (msg.initial_sync or msg.revoked or msg.unverified_edit):
+                from .fellowship import Fellowship
+                Fellowship(self).finish(msg, "review")
+                return
             if msg.revoked:
                 self.execute_request(msg, Extraction(questions=["此群消息已撤回，請確認原先安排是否取消或另有更正？"]))
             elif msg.unverified_edit:
@@ -647,6 +659,11 @@ class Assistant:
                 with self.store.db() as db:
                     db.execute("UPDATE messages SET status=?,error=NULL WHERE id=?", (outcome["status"], msg.message_id))
         except Exception as exc:
+            from .fellowship import FellowshipPaused
+            if isinstance(exc,FellowshipPaused):
+                with self.store.db() as db:
+                    db.execute("UPDATE messages SET status='fellowship_paused',error=NULL WHERE id=?",(msg.message_id,))
+                return
             with self.store.db() as db:
                 current = db.execute("SELECT status FROM messages WHERE id=?", (msg.message_id,)).fetchone()
                 # A committed tool result is authoritative even if checkpointing
@@ -824,6 +841,9 @@ class Assistant:
                     GmailInbox(self).remind(now)
             except Exception:
                 self.store.put('gmail_worker', {'at': now_text(), 'status': 'error', 'error': '講員郵件提醒檢查失敗'})
+            if settings.fellowship_enabled:
+                from .fellowship import Fellowship
+                Fellowship(self).maintain(now)
             self.deliver_outbox()
             reminder = self.remind(now)
             self.store.put("worker", {"at": now_text(), "status": "idle", "reminder": reminder})
