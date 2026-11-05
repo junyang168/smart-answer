@@ -94,6 +94,62 @@ def evidence_owner_references(request, before, transaction_before):
     return result
 
 
+def shared_support_owner_references(request, before, writable_keys):
+    """Find consumers of writable support, stopping at every Claim boundary.
+
+    Follow source bindings and directed knowledge relations through the
+    existing argument graph. Claim relations, private support of discovered
+    Claims and downstream consumers of those Claims are never traversed.
+    Only new intake uses this discovery; old frozen owner lists stay exact.
+    """
+    from collections import defaultdict
+    from copy import deepcopy
+    from backend.pipeline import claim_management as cm
+    support = {'evidence_steps', 'observations', 'source_fragments', 'position_nodes', 'questions'}
+    seeds = {k for k in writable_keys if k.split('/', 1)[0] in support}
+    if not seeds:
+        return {}
+    rows = {k:v['payload'] for k,v in before.items() if not v.get('retired', False)}
+    all_rows = {k:v['payload'] for k,v in before.items()}
+    by_id, consumers = defaultdict(list), defaultdict(set)
+    for key in rows:
+        if key.split('/', 1)[0] in cm.CLAIM_COLLECTIONS:
+            by_id[key.split('/', 1)[1]].append(key)
+    for key, payload in rows.items():
+        col = key.split('/', 1)[0]
+        if col in support | {'claims'}:
+            for dependency in cm.domain_dependencies(col, payload, rows):
+                if dependency.split('/', 1)[0] in support:
+                    consumers[dependency].add(key)
+            field = {'evidence_steps':'produced_claim_ids', 'questions':'answer_claim_ids'}.get(col)
+            if field:
+                consumers[key].update(cm.source.key('claims', cid) for cid in payload.get(field, []))
+        elif col == 'knowledge_relations':
+            start = by_id.get(payload.get('from_id') or payload.get('source_id'), [])
+            end = by_id.get(payload.get('to_id') or payload.get('target_id'), [])
+            if len(start) == len(end) == 1 and start[0].split('/', 1)[0] in support:
+                consumers[start[0]].add(end[0])
+    found, pending, owners = set(), list(seeds), set()
+    while pending:
+        key = pending.pop()
+        if key in found:
+            continue
+        found.add(key)
+        if key.startswith('claims/'):
+            if key not in before:
+                raise ValueError('shared support owner missing from frozen transaction context: ' + key)
+            if key in rows:
+                owners.add(key)
+            continue
+        pending.extend(consumers.get(key, set()) - found)
+    result = {}
+    for key in sorted(owners - set(request.target_keys)):
+        own = cm.own_source_ids(rows[key], all_rows)
+        if own and own <= set(request.source_bindings):
+            result[key] = deepcopy(before[key])
+    return result
+
+
 def enabled(request, policy=None):
     from backend.pipeline import claim_management as cm
     if isinstance(request, dict):

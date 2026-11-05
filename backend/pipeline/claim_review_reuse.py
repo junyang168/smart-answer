@@ -73,6 +73,17 @@ def answer_extension(before, after):
     return owner_extension(before, after, field="answer_claim_ids")
 
 
+def observation_source_extension(before, after):
+    """Only add sources; the observation and every old binding stay exact.
+
+    The caller also checks unchanged fragments already approved inside the
+    original own basis, a full peer target using the observation, and the
+    original Claim's actual reference role in that independent peer review.
+    """
+    return {'source_fragments/' + fid for fid in
+            owner_extension(before, after, field='source_fragment_ids')}
+
+
 def literal_fragment_rebinding(before, after):
     """A separately reviewed locator repair preserves the exact cited words.
 
@@ -209,6 +220,9 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
             extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb)
                          or record.startswith('questions/') and answer_extension(pa, pb)
                          or record.startswith('source_fragments/') and literal_fragment_rebinding(pa, pb)
+                         or record.startswith('observations/') and (added := observation_source_extension(pa, pb))
+                            and added <= set(left['record_keys']) - neighbours
+                            and all(old[f] == current[f] for f in added)
                          or retired_incident_relation(record, a, b, key))
             if (not peer_run_id or not (record in neighbours and record.startswith('claims/') or extension)
                     or a['retired'] or b['retired'] and not retired_incident_relation(record, a, b, key)):
@@ -380,6 +394,8 @@ def verify_context_reviews(store, cursor, proof):
     Own Claim, evidence content, source and incident edges stay unchanged.
     Additive Evidence consumers and Question answers require a full peer review
     of each added Claim and the shared update, preserving the original role.
+    Observation source additions must reuse unchanged already-approved own
+    fragments and have a real peer target and original reference check.
     This is not permission to promote a reference into a new full approval.
     One latest review per changed neighbour keeps the proof flat.
     """
@@ -388,11 +404,11 @@ def verify_context_reviews(store, cursor, proof):
     original = decoded_pins(proof['original_read_pins'])
     current = decoded_pins(proof['read_pins'])
     protected = {cm.source.split_key(k) for k in proof['protected_record_keys']}
-    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] not in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments'}):
+    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] not in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments', 'observations'}):
         raise ValueError('context reuse changed the original Claim or its own basis')
     changed = {cm.source.key(*k) for k in original if original[k] != current[k]}
     if not changed or changed != set(proof['context_reviews']) or any(
-            not k.startswith(('claims/', 'evidence_steps/', 'questions/', 'claim_relations/', 'source_fragments/')) or
+            not k.startswith(('claims/', 'evidence_steps/', 'questions/', 'claim_relations/', 'source_fragments/', 'observations/')) or
             k.startswith('claims/') and cm.source.split_key(k) in protected for k in changed):
         raise ValueError('context reuse permits only reviewed direct neighbour changes')
     key = 'claims/' + proof['claim_id']
@@ -456,6 +472,21 @@ def verify_context_reviews(store, cursor, proof):
                 if neighbour in scope(request.model_copy(deep=True, update={
                     'target_keys':[claim], 'permissions':[]}), saved_records,
                     include_write_context=False, include_maintenance=False)['writable_record_keys']}
+        observation = neighbour.startswith('observations/')
+        if observation:
+            added = observation_source_extension(old_receipt['actual_records'][neighbour]['payload'],
+                                                 saved_records[neighbour]['payload'])
+            if (not added or not {cm.source.split_key(f) for f in added} <= protected
+                    or any(f not in saved_records or f not in old_receipt['actual_records']
+                           or old_receipt['actual_records'][f] != saved_records[f]
+                           or original.get(cm.source.split_key(f)) != fresh.get(cm.source.split_key(f))
+                           or current.get(cm.source.split_key(f)) != fresh.get(cm.source.split_key(f))
+                           for f in added)):
+                raise ValueError('context reuse Observation needs unchanged already-reviewed source fragments')
+            roots = {claim for claim in selected['content_claim_keys']
+                if neighbour in scope(request.model_copy(deep=True, update={
+                    'target_keys':[claim], 'permissions':[]}), saved_records,
+                    include_write_context=False, include_maintenance=False)['writable_record_keys']}
         if neighbour.startswith('claim_relations/'):
             retirement = retired_incident_relation(neighbour, old_receipt['actual_records'][neighbour],
                 saved_records[neighbour], key)
@@ -464,7 +495,7 @@ def verify_context_reviews(store, cursor, proof):
                 raise ValueError('context reuse requires an exact reviewed incident-edge retirement')
             payloads = {k:v['payload'] for k,v in saved_records.items()}
             roots = set(cm.domain_dependencies('claim_relations', payloads[neighbour], payloads)) & set(selected['content_claim_keys'])
-        if ((not extension and not retirement and not rebinding and neighbour not in selected['content_claim_keys']) or neighbour not in writes
+        if ((not extension and not retirement and not rebinding and not observation and neighbour not in selected['content_claim_keys']) or neighbour not in writes
                 or key not in selected['neighbour_claim_keys']):
             raise ValueError('peer did not review the changed neighbour and original reference role')
         if not roots:
@@ -524,7 +555,7 @@ def verify_context_reviews(store, cursor, proof):
         needed = {cm.source.key(*k) for k in shared} | {key, neighbour} | {'claims/' + cid for cid in extension}
         if (not needed <= approved or key not in retained
                 or any((cm.source.key(*k) not in retained or original[k] != fresh[k])
-                       and not (k[0] in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments'} and cm.source.key(*k) in changed) for k in shared)
+                       and not (k[0] in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments', 'observations'} and cm.source.key(*k) in changed) for k in shared)
                 or fresh.get(cm.source.split_key(neighbour)) != current[cm.source.split_key(neighbour)]):
             raise ValueError('peer omitted or changed the retained original basis')
         # Even a context finding cannot silently negate the preserved Claim.
