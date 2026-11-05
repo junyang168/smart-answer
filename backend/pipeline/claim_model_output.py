@@ -256,7 +256,11 @@ def candidate(raw, materials):
                                                 citations=retirement.citations)
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
-    result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
+    from backend.pipeline.claim_quote_projection import CONTRACT as QUOTE_CONTRACT, FIELD as QUOTE_FIELD
+    quote_projection = materials['policy'].get('source_quote_projection') == QUOTE_CONTRACT or (
+        materials.get(QUOTE_FIELD,{}).get('contract') == QUOTE_CONTRACT)
+    result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'],
+                                           source_quote_projection=quote_projection)
     receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
     if support_ids:receipt['support_creation_identities']=support_ids
