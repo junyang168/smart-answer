@@ -173,22 +173,29 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
     return result
 
 
+def initial_claim_candidate(materials):
+    """One deterministic initial candidate for execution and origin validation."""
+    from backend.pipeline import claim_management as cm
+    if (materials.get('continuation',{}).get('opus_api_transition')
+            or materials.get('continuation',{}).get('opus_subscription_resumption')):
+        original = materials['continuation']['previous_candidates'][materials['unit_id']]
+        if original != materials['previous_candidate']:
+            raise ValueError('Opus transport handoff altered the saved candidate')
+        return cm.normalize_candidate(original, materials['sources'])
+    from backend.pipeline.claim_quote_projection import initial_candidate
+    from backend.pipeline.claim_metadata_projection import project_candidate
+    candidate, receipt = initial_candidate(materials)
+    return project_candidate(candidate, receipt, materials)
+
+
 def validate_claim_candidate_origin(root, materials, policy, sources, candidate):
     from backend.pipeline import claim_management as cm
     if 'gpt' in materials['roles']:
         raw = validate_claim_stage(root, 'gpt', policy, cm.model_packet(materials))
         from backend.pipeline.claim_model_output import candidate as expand_candidate
         expected, receipt = expand_candidate(raw['response'], materials)
-    elif (materials.get('continuation',{}).get('opus_api_transition') or materials.get('continuation',{}).get('opus_subscription_resumption')):
-        original = materials['continuation']['previous_candidates'][materials['unit_id']]
-        if original != materials['previous_candidate']:
-            raise ValueError('Opus transport handoff altered the saved candidate')
-        expected, receipt = cm.normalize_candidate(original, sources)
     else:
-        expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
-        _, receipt = cm.normalize_candidate(expected.model_dump(mode='json'), sources)
-        from backend.pipeline.claim_metadata_projection import project_candidate
-        expected,receipt=project_candidate(expected,receipt,materials)
+        expected, receipt = initial_claim_candidate(materials)
     if candidate != expected or body(read(root / 'candidate-normalization.json')) != receipt:
         raise ValueError('candidate differs from exact raw and proved metadata-only projection')
 
@@ -642,6 +649,9 @@ def execute_claim_management(store, request, *, root, ports):
                             materials['program_owned_fields']['retirement_reference_claims'] = RETIREMENT_REFERENCE_NOTE
                         if parent.get('continuation'):
                             materials['continuation'] = parent['continuation']
+                        from backend.pipeline.claim_quote_projection import FIELD as QUOTE_FIELD
+                        if parent.get(QUOTE_FIELD):
+                            materials[QUOTE_FIELD] = parent[QUOTE_FIELD]
                         if policy.legacy_ai_supersession_restore:
                             materials['program_owned_fields']['legacy_ai_supersession_restore'] = (
                                 'Explicit Restore may restore an old AI-superseded Claim even when its SQL retired flag is false. '
@@ -723,17 +733,12 @@ def execute_claim_management(store, request, *, root, ports):
                         write(path, receipt)
                         return store.record_claim_management_stage(rid, binding(path))
                     if prior['checkpoint'] == 'prepared':
-                        raw_candidate = (call('gpt', cm.model_packet(materials))['response'] if 'gpt' in materials['roles'] else
-                            materials['previous_candidate'] if (materials.get('continuation',{}).get('opus_api_transition') or materials.get('continuation',{}).get('opus_subscription_resumption')) else
-                            cm.existing_candidate(materials['before'], replacements=materials['replacements']).model_dump(mode='json'))
-                        from backend.pipeline.claim_model_output import candidate as expand_candidate
-                        candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']
-                            else cm.normalize_candidate(raw_candidate, materials['sources']))
-                        if ('gpt' not in materials['roles'] and not
-                                (materials.get('continuation',{}).get('opus_api_transition') or
-                                 materials.get('continuation',{}).get('opus_subscription_resumption'))):
-                            from backend.pipeline.claim_metadata_projection import project_candidate
-                            candidate,normalization=project_candidate(candidate,normalization,materials)
+                        if 'gpt' in materials['roles']:
+                            raw_candidate = call('gpt', cm.model_packet(materials))['response']
+                            from backend.pipeline.claim_model_output import candidate as expand_candidate
+                            candidate, normalization = expand_candidate(raw_candidate, materials)
+                        else:
+                            candidate, normalization = initial_claim_candidate(materials)
                         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
                             created_keys=materials['created_keys'], original_replacements=materials['replacements'], metadata_projection=materials.get('program_metadata_projection'))
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))

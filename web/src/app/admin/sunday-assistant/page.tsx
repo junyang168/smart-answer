@@ -8,6 +8,7 @@ type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
   availability_group_name: string; service_group_name: string; songs_group_name: string;
   auto_generate_ppt: boolean; auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  fellowship_enabled: boolean; fellowship_start_date?: string; fellowship_since?: string;
   admin_help_enabled: boolean; admin_group: string; admin_group_name: string;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
   households: string[][]; worker_aliases: Record<string, string>; worship_rotation: string[];
@@ -20,6 +21,7 @@ type Proposal = { id: number; message_id: string; status: string; error?: string
   payload: { operations: Operation[]; questions: string[] } };
 type IdentityAudit = { checked_at?: string; members: { id: string; ids: string[]; labels: string[]; groups: string[]; saved_contact: boolean; worker?: string; candidates: string[]; status: string; reason?: string; lookup_errors: string[] }[]; workers_without_account: string[]; unseen_mappings: { id: string; workers: string[] }[] };
 type Data = {
+  fellowship?: { email_status?: string; previous_day: string; target_day: string; missing: string[]; data: { status: string; questions?: string[] }; fields: { host?: string; title?: string; series?: string; sequence?: number; sourceLinks?: { label: string; url: string }[] } }[];
   ppt_readiness?: { date: string; version?: string; status: string; missing?: string[]; error?: string };
   ppt_jobs?: { day: string; version: string; status: string; error?: string }[];
   identity_audit?: IdentityAudit;
@@ -110,6 +112,21 @@ export default function SundayAssistantPage() {
         <section className={card}><h2 className="font-semibold">{data.sunday} 主日資料</h2><p className="mt-2 text-sm">{data.missing.length ? `尚缺：${data.missing.join("、")}` : "已齊全"}</p><p className="mt-2 text-xs text-slate-500">{labels[data.worker?.reminder || ""] || ""}</p></section>
       </div>
       <SundaySpeakerMail workers={data.workers} />
+      <section className={card}>
+        <h2 className="text-lg font-bold">雙週讀經團契</h2>
+        <label className="mt-3 block"><input type="checkbox" checked={settings.fellowship_enabled ?? false} disabled={!settings.admin_group} onChange={e => patch({ fellowship_enabled: e.target.checked })} /> 在管理員群收集下次團契資料並接續通知 email</label>
+        <p className="mt-2 text-sm text-slate-600">查經結束後的主日下午 3 點詢問；於緊接的週四前回覆，該週四上午 9 點仍缺資料就催補。時間皆為達拉斯時間。日期依排程填入，收集主講、主題、系列、序號與來源連結；序號和連結若無可回覆「無」。</p>
+        <Link href="/admin/fellowship" className="mt-3 inline-block text-sm underline">查看團契表單與通知 email</Link>
+        {settings.fellowship_enabled && !data.fellowship?.length && <p className="mt-3 text-sm text-slate-500">下一次查經結束後，會在主日建立收集待辦。</p>}
+        {data.fellowship?.map(item => <div key={item.previous_day} className="mt-3 rounded border p-3 text-sm">
+          <p className="font-semibold">{item.target_day} 團契 · {item.data.questions?.length ? "待核對" : item.missing.length ? "待補充" : "資料齊備"}</p>
+          <p className="mt-1">主講：{item.fields.host || "待補充"}；主題：{item.fields.title || "待補充"}；系列：{item.fields.series || "待補充"}</p>
+          <p className="mt-1">序號：{item.fields.sequence ?? "未填／無"}；來源連結：{item.fields.sourceLinks?.length || 0} 筆</p>
+          <p className="mt-1">通知 email：{item.email_status === "sent" ? "已寄出" : item.email_status === "sending" ? "寄送中" : item.email_status === "retryable" ? "正在重試寄信" : item.email_status === "expired" ? "已過寄送時段，請管理員核對" : ["unknown", "error"].includes(item.email_status || "") ? "寄送需管理員核對，未繼續自動重寄" : item.missing.length || item.data.questions?.length ? "等待資料補齊" : "依排程寄出"}</p>
+          {!!item.missing.length && <p className="mt-1 text-amber-800">尚缺：{item.missing.join("、")}</p>}
+          {!!item.data.questions?.length && <p className="mt-1 text-amber-800">待核對：{item.data.questions.join("；")}</p>}
+        </div>)}
+      </section>
       <section className={card}><h2 className="text-lg font-bold">主日 PPT</h2>
         <label className="mt-3 block"><input type="checkbox" checked={settings.auto_generate_ppt ?? true} onChange={e => patch({ auto_generate_ppt: e.target.checked })} /> 資料齊備後自動產生 PPT 並通知網站管理員群</label>
         <p className="mt-2 text-sm text-slate-600">司琴可留空。生成前檢查歌詞、讀經安排及未來兩週骨架；資料更正後產生新版。</p>

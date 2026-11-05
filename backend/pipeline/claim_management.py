@@ -84,6 +84,7 @@ class Policy(source.Contract):
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2', 'claim_changes_v3', 'claim_changes_v4'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
     proposal_empty_arrays: Literal['program_validated_v1'] | None = None
+    source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1','source_literal_span_v2'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -95,7 +96,7 @@ class Policy(source.Contract):
             value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays', 'source_quote_projection'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -404,7 +405,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_historical_stage.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_evidence_review.py', pipeline/'claim_quote_projection.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
@@ -799,13 +800,11 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
         blocks = joint_blocks(finding, request, candidate)
         from backend.pipeline.claim_review_units import enabled as bounded
         if not blocks and records is not None and bounded(request):
-            from backend.pipeline.claim_direct_scope import scope
+            from backend.pipeline.claim_direct_scope import obligation_keys
             # Complete Update includes its own evidence/relations/questions,
             # even when its Claim sentence is correct and no write exists.
             # Unused capability and reference-private data do not seed scope.
-            blocks = finding['target_key'] in scope(request, records, candidate,
-                include_write_context=False, include_owner_context=False,
-                include_impact_evidence=False)['writable_record_keys']
+            blocks = finding['target_key'] in obligation_keys(request, records, candidate)
             if blocks and unused_source_fragment_context(finding, records, candidate):
                 blocks = False
         return blocks
@@ -1358,7 +1357,7 @@ def model_packet(materials):
     if expected != materials.get('retirement_reference_claims', {}):
         raise ValueError('retirement reference facts drifted from frozen transaction context')
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse', 'program_source_quote_projection'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))
@@ -1685,9 +1684,20 @@ def continuation_budget(previous, request, policy):
     refusal_proofs = {}
     if refusal_retry is not None:
         same_policy = lambda p: p.model_dump(mode='json', exclude={'policy_id', 'budget'})
+        old_settings, new_settings = same_policy(original), same_policy(policy)
+        retry_fields = {'predecessor_action_id', 'prior_metadata_sha256', 'slot', 'failure', 'authorization_quote'}
+        quote_upgrade = refusal_retry.get('source_quote_projection') if isinstance(refusal_retry, dict) else None
+        if quote_upgrade is not None:
+            from backend.pipeline.claim_quote_projection import CONTRACT as PUNCT, NEAR_CONTRACT, SPAN_CONTRACT
+            if (quote_upgrade != {'from': original.source_quote_projection, 'to': SPAN_CONTRACT}
+                    or original.source_quote_projection not in {None, PUNCT, NEAR_CONTRACT}
+                    or policy.source_quote_projection != SPAN_CONTRACT):
+                raise ValueError('refusal continuation permits only an explicit literal-source calibration upgrade')
+            retry_fields.add('source_quote_projection')
+            old_settings['source_quote_projection'] = SPAN_CONTRACT
         current_contract = audit_contract(Path(previous['execution_root']) / 'refusal-retry-contract', original)
         if (not isinstance(refusal_retry, dict)
-                or set(refusal_retry) != {'predecessor_action_id', 'prior_metadata_sha256', 'slot', 'failure', 'authorization_quote'}
+                or set(refusal_retry) != retry_fields
                 or refusal_retry['predecessor_action_id'] != old.action_id
                 or refusal_retry['prior_metadata_sha256'] != sha256_json(previous)
                 or not refusal_retry['authorization_quote']
@@ -1697,7 +1707,7 @@ def continuation_budget(previous, request, policy):
                 or previous['original_goal'].get('subscription_refusal_retries')
                 or previous.get('continuation', {}).get('original_goal', {}).get('subscription_refusal_retries')
                 or previous.get('continuation', {}).get('subscription_refusal_retry')
-                or same_policy(policy) != same_policy(original)
+                or new_settings != old_settings
                 or policy.budget.max_output_tokens != original.budget.max_output_tokens
                 or policy.budget.max_request_bytes != original.budget.max_request_bytes
                 or any(current_contract['implementation'].get(k) != v
@@ -1706,6 +1716,11 @@ def continuation_budget(previous, request, policy):
     extension = authority.get('owner_call_extension')
     from backend.pipeline.claim_metadata_projection import repair_extension,repair_defects
     engineering_repair = repair_extension(previous,request,policy,authority)
+    from backend.pipeline.claim_evidence_review import repair_extension as binding_repair_extension
+    binding_repair = binding_repair_extension(previous,request,policy,authority)
+    if engineering_repair and binding_repair:
+        raise ValueError('one continuation cannot consume two engineering repairs')
+    engineering_repair = engineering_repair or binding_repair
     used_engineering_repairs = repair_defects(previous)
     target_extension = owner_target_extension(previous, old, request)
     support_creation = (request.creation_permissions != old.creation_permissions
@@ -1738,7 +1753,7 @@ def continuation_budget(previous, request, policy):
              or target_extension and previous['result'].get('reason') == 'budget_exhausted')
         and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
-    completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
+    completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh and not binding_repair
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
     permissions = {p.key:set(p.fields) for p in request.permissions}
     # A saved own-data issue may create its missing Claim. Keep the original
@@ -1774,7 +1789,7 @@ def continuation_budget(previous, request, policy):
             or output_limit and previous['result'].get('reason') == 'model_failed'
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
-            or extension_basis == 'remaining_findings' and bool(previous['findings'])
+            or extension_basis == 'remaining_findings' and (bool(previous['findings']) or binding_repair is not None)
                 and (previous['result'].get('reason') == 'budget_exhausted' or engineering_repair is not None)
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
@@ -1971,6 +1986,7 @@ def continuation_budget(previous, request, policy):
     return {**({'opus_api_transition':api_transition} if api_transition else {}),
         **({'codex_quota_resumption': quota_refusals} if quota_refusals else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
+        **({'completed_no_write_binding_repair':True} if binding_repair else {}),
         **({'engineering_repair_defects':used_engineering_repairs} if used_engineering_repairs else {}),
         **({'opus_subscription_resumption':subscription_resumption} if subscription_resumption else {}),
         **({'api_output_limit_recovery':output_failures} if output_limit else {}),
@@ -2042,14 +2058,20 @@ def require_full_sources(request, before, candidate=None, *, qualification=False
             raise ValueError('current 2.0 qualification requires a single own source; structural repair is required')
 
 
-def normalize_candidate(raw, sources):
-    """Program owns verifiable hashes; never repair source words or judgement.
+def normalize_candidate(raw, sources, *, source_quote_projection=False):
+    """Program owns hashes and explicitly enabled literal quote restoration.
 
-    The original GPT response stays immutable. This projection changes only
-    three derived hash fields of explicitly proposed own-source fragments.
+    The original GPT response stays immutable. By default this changes only
+    derived hashes of explicitly proposed own-source fragments. An explicitly
+    enabled projection may also restore uniquely matching source quotations;
+    its exact old/new values are disclosed and still independently reviewed.
     """
     original = Candidate.model_validate(decode_candidate(raw))
     result = original.model_copy(deep=True)
+    quote_changes = []
+    if source_quote_projection:
+        from backend.pipeline.claim_quote_projection import project
+        result, quote_changes = project(result, sources, **({'contract':source_quote_projection} if isinstance(source_quote_projection,str) else {}))
     changes = []
     for row in result.records:
         if row.collection != 'source_fragments':
@@ -2072,7 +2094,8 @@ def normalize_candidate(raw, sources):
                 payload[field] = value
     return result, {'schema_version': VERSION, 'raw_candidate_sha256': original.digest,
                     'candidate_sha256': result.digest, 'changes': changes,
-                    'reader_visible_text_unchanged': True, 'semantic_decisions_unchanged': True}
+                    'reader_visible_text_unchanged': not quote_changes, 'semantic_decisions_unchanged': True,
+                    **({'source_quote_corrections':quote_changes} if quote_changes else {})}
 
 
 def legacy_ai_supersession(state):

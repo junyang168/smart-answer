@@ -46,7 +46,8 @@ function isOwnReply(message) {
 
 async function capture(message, edited = false, initialSync = false) {
   const group = message.fromMe ? message.to : message.from;
-  if (!config.enabled || !config.groups.includes(group) || isOwnReply(message)) return;
+  if (!config.enabled || !(config.ingest_groups || config.groups).includes(group) || isOwnReply(message)) return;
+  if (group === config.admin_group && (!config.allow_fellowship || !config.fellowship_since || message.timestamp < config.fellowship_since)) return;
   if (message.type === "revoked") {
     lastError = "群消息已撤回，請在後台核對可能已套用的資料";
     return;
@@ -60,7 +61,7 @@ async function capture(message, edited = false, initialSync = false) {
   journal.enqueue({ message_id: version.id, group_id: group,
     sender_id: senderId(message, client.info.wid._serialized),
     sent_at: version.sent_at, source_sent_at: version.source_sent_at, unverified_edit: version.unverified_edit, text: message.body || "",
-    source_id: message.id._serialized, quoted_message_id: quoted, unsupported_media: message.type !== "chat", initial_sync: initialSync });
+    source_id: message.id._serialized, quoted_message_id: quoted, unsupported_media: message.type !== "chat", initial_sync: group === config.admin_group ? false : initialSync });
 }
 
 async function connect() {
@@ -82,7 +83,7 @@ async function connect() {
     client.on("message_edit", message => { capture(message, true).catch(error => { lastError = error.message; synced = false; }); });
     client.on("message_revoke_everyone", (message, before) => {
       const group = message.fromMe ? message.to : message.from;
-      if (!config.enabled || !config.groups.includes(group)) return;
+      if (!config.enabled || !(config.ingest_groups || config.groups).includes(group)) return;
       synced = false;
       journal.enqueue({ message_id: message.id._serialized + ":revoked", group_id: group,
         sender_id: senderId(message, client.info.wid._serialized),
@@ -105,7 +106,7 @@ async function poll() {
         synced = false;
         const chats = await client.getChats();
         groups = chats.filter(c => c.isGroup).map(c => ({ id: c.id._serialized, name: c.name }));
-        for (const group of config.groups) {
+        for (const group of (config.ingest_groups || config.groups)) {
           const chat = chats.find(c => c.id._serialized === group);
           if (!chat) throw new Error(`無法讀取指定群 ${group}`);
           const initialSync = !journal.data.cursors[group];
@@ -124,7 +125,8 @@ async function poll() {
       }
     }
     for (const message of Object.values(journal.data.pending).sort((a, b) => a.sent_at.localeCompare(b.sent_at))) {
-      if (!config.groups.includes(message.group_id)) throw new Error("有待送消息所屬群已改變，請核對橋接記錄");
+      if (message.group_id === config.admin_group && !config.allow_fellowship) { journal.delivered(message.message_id); continue; }
+      if (!(config.ingest_groups || config.groups).includes(message.group_id)) throw new Error("有待送消息所屬群已改變，請核對橋接記錄");
       await backendCall("ingest", message);
       journal.delivered(message.message_id);
     }

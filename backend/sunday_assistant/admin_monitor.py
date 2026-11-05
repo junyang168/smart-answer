@@ -53,6 +53,10 @@ class AdminMonitor:
             ppt = db.execute("SELECT value FROM kv WHERE key='ppt_readiness'").fetchone()
             if ppt and json.loads(ppt[0]).get('status') == 'error':
                 errors += 1
+        with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db:
+            row = db.execute("SELECT value FROM kv WHERE key='fellowship_email'").fetchone()
+            if settings.get('fellowship_enabled') and row and json.loads(row[0]).get('status') == 'error':
+                errors += 1
         # A mail ambiguity or pending OAuth connection is not an internal error.
         config_file = Path(self.env.get('SUNDAY_GMAIL_CONFIG') or self.root.parent / 'config/sunday_gmail.json')
         mail_db = self.root / 'gmail/mail.sqlite3'

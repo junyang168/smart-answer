@@ -55,6 +55,7 @@ function Chapter() {
     data?.sources.find((item) => item.page?.kind === "chapter") ??
     data?.sources[0];
 
+  const fixed = Boolean(wanted) && data?.sources.some((item) => item.name === wanted);
   const choose = (name: string) => router.replace(`${pathname}?source=${encodeURIComponent(name)}`, { scroll: false });
 
   return (
@@ -88,6 +89,10 @@ function Chapter() {
               {data.name} 第 {data.chapter} 章
             </h1>
 
+            {/* 網址已經指定來源（從書卷頁選了來源進來），就不必再給來源的分頁。 */}
+            {fixed ? (
+              <p className="-mt-3 text-[15px] text-stone-600">{current.name}</p>
+            ) : (
             <div role="tablist" aria-label="來源" className="flex flex-wrap gap-1 border-b border-stone-200">
               {data.sources.map((source) => {
                 const on = source.name === current.name;
@@ -110,6 +115,7 @@ function Chapter() {
                 );
               })}
             </div>
+            )}
 
             {data.articles.length > 0 && (
               <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-stone-700">
@@ -123,7 +129,14 @@ function Chapter() {
             )}
 
             {current.page?.kind === "chapter" ? (
-              <OriginalAudio key={current.page.passage} passage={current.page.passage} embedded />
+              <OriginalAudio
+                key={current.page.passage}
+                passage={current.page.passage}
+                embedded
+                listenHref={(section) =>
+                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}`
+                }
+              />
             ) : (
               <div className="flex flex-col gap-4">
                 {current.page?.kind === "passages" && (

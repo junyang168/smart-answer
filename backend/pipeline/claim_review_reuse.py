@@ -5,6 +5,7 @@ policies, budgets and content remain unchanged. Every consumer checks current
 records and adjacency; newly rejected content cannot hide behind an old pass.
 """
 import json
+import hashlib
 from copy import deepcopy
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows, decoded_pins
 
 CONTEXT_CONTRACT = 'claim_complete_review_context_reuse_v2'
+OWN_SCOPE = 'completed_unit_single_claim_scope_v1'
 
 
 def human_evidence_snapshot(cursor, source_ids, frozen, records):
@@ -71,6 +73,23 @@ def answer_extension(before, after):
     return owner_extension(before, after, field="answer_claim_ids")
 
 
+def literal_fragment_rebinding(before, after):
+    """A separately reviewed locator repair preserves the exact cited words.
+
+    This is not fuzzy quotation reuse: the source identity, literal excerpt
+    and every semantic field must remain identical. The peer must still prove
+    the complete current source binding and its actual reviewed write below.
+    """
+    locator_fields = {'revision', 'paragraph_key', 'paragraph_text_sha256',
+        'source_sha256', 'source_segment_index', 'media_time', 'media_end_time',
+        'anchor_state', 'verbatim_excerpt_sha256'}
+    return (bool(before.get('source_id')) and bool(before.get('verbatim_excerpt'))
+        and after.get('verbatim_excerpt_sha256') in {
+            None, hashlib.sha256(before['verbatim_excerpt'].encode('utf-8')).hexdigest()}
+        and {k:v for k,v in before.items() if k not in locator_fields}
+            == {k:v for k,v in after.items() if k not in locator_fields})
+
+
 def retired_incident_relation(key, before, after, claim_key):
     """Only the approved retirement of an existing Claim incident edge."""
     fields = ('from_id', 'to_id', 'source_id', 'target_id', 'from_claim_id', 'to_claim_id')
@@ -78,6 +97,22 @@ def retired_incident_relation(key, before, after, claim_key):
             and claim_key.split('/', 1)[1] in {before['payload'].get(f) for f in fields}
             and {k:v for k,v in before['payload'].items() if k != 'revision'} ==
                 {k:v for k,v in after['payload'].items() if k != 'revision'})
+
+
+def rejection_basis(request, records, protected, *, own_only):
+    """Background read pins are not a target's unresolved own-data finding.
+
+    Those pins still require exact current content or an approved handoff.
+    This changes only which historical findings negate its original pass.
+    """
+    if not own_only:
+        return protected
+    from backend.pipeline.claim_direct_scope import scope
+    own = set(scope(request, records, include_write_context=False,
+        include_owner_context=False, include_impact_evidence=False,
+        include_contextual_evidence=False, obligation_only=True,
+        include_maintenance=False)['writable_record_keys'])
+    return set(protected) & (own | {k for k in protected if k.startswith('source_documents/')})
 
 
 def build(store, claim_id, run_id, *, peer_run_id=None):
@@ -116,7 +151,14 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
     if key not in approved:
         raise ValueError('Claim has an unresolved objection in the prior review')
-    current_states = store.read_claim_context([('claims', claim_id)])
+    own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    own_only = bounded_unit(request)
+    from backend.pipeline.claim_joint_update import context_roots
+    # A completed bounded unit yields individual Claim proofs. Historical
+    # non-unit proofs still include their explicitly required maintenance,
+    # even when it has no graph path from this Claim.
+    current_states = store.read_claim_context([('claims', claim_id)] if own_only else context_roots(own))
     current = {cm.source.key(*k): cm.model_state(v) for k, v in current_states.items()}
     if key not in current or current[key]['retired']:
         raise ValueError('review reuse cannot release retired or held content')
@@ -127,8 +169,8 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
                 raise ValueError('review reuse cannot release retired or held content')
     # Capabilities and other target identities from the old task do not seed
     # a new review. Both old and current direct scope are compared exactly.
-    own = request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []})
-    left, right = (scope(own, rows, include_write_context=False) for rows in (old, current))
+    left, right = (scope(own, rows, include_write_context=False, include_maintenance=not own_only)
+                   for rows in (old, current))
     required = set(left['record_keys']) | set(right['record_keys'])
     neighbours = set(left['neighbour_claim_keys']) | set(right['neighbour_claim_keys'])
     changed_context = set()
@@ -166,18 +208,28 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
         if (changes and not editorial) or a['retired'] != b['retired']:
             extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb)
                          or record.startswith('questions/') and answer_extension(pa, pb)
+                         or record.startswith('source_fragments/') and literal_fragment_rebinding(pa, pb)
                          or retired_incident_relation(record, a, b, key))
             if (not peer_run_id or not (record in neighbours and record.startswith('claims/') or extension)
                     or a['retired'] or b['retired'] and not retired_incident_relation(record, a, b, key)):
                 raise ValueError('review reuse argument/context changed: ' + record)
             changed_context.add(record)
-    if required - neighbours - approved:
+    # A context-only fragment could have an explicit nonblocking locator
+    # finding in the original pass. Its unchanged words still need the new
+    # peer's actual approved repair, checked by verify_context_reviews below.
+    repaired_fragments = {k for k in changed_context if k.startswith('source_fragments/')}
+    if required - neighbours - approved - repaired_fragments:
         raise ValueError('review reuse cannot conceal an unapproved required object')
     proof = {'contract': 'claim_complete_review_reuse_v1', 'claim_id': claim_id,
              'review_run_id': run_id, 'approval': approval, 'readback': receipt['readback'],
              'source_bindings': sources, 'scope_request': own.model_dump(mode='json'),
              'protected_record_keys': sorted(required - neighbours),
              'read_pins': pin_rows(pins({k:v for k,v in current_states.items() if cm.source.key(*k) in required}))}
+    if own_only:
+        # The unit operation has already completed. Reuse this Claim's own
+        # full basis, not every disconnected maintenance root of the group.
+        # Current own bindings/relations and explicit target impacts still gate.
+        proof['scope_role'] = OWN_SCOPE
     if changed_context:
         # A fresh target approval and an admitted bystander approval have the
         # same own-Claim proof. Join the already reviewed neighbour delta
@@ -196,7 +248,8 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION READ ONLY')
         if not changed_context:
-            assert_no_newer_rejection(cursor, claim_id, run_id, proof['protected_record_keys'])
+            assert_no_newer_rejection(cursor, claim_id, run_id,
+                rejection_basis(own, current, proof['protected_record_keys'], own_only=own_only))
         proof['human_source_decisions'] = human_evidence_snapshot(
             cursor, request.source_bindings, materials.get('human_source_decisions', []),
             {k: current[k] for k in required})
@@ -249,11 +302,17 @@ def verify(store, cursor, claim_id, proof):
     if proof.get('proof_sha256') != cm.sha256_json({k:v for k,v in proof.items() if k != 'proof_sha256'}):
         raise ValueError('review reuse proof seal drift')
     cursor.execute("""SELECT metadata->>'outcome',metadata->'opus_approved',
-        metadata->'program_readback_complete',metadata->'reviewed'->'evidence'->'approval'
+        metadata->'program_readback_complete',metadata->'reviewed'->'evidence'->'approval',
+        metadata->'materials'->'policy'->>'review_unit_contract'
         FROM wang_knowledge.pipeline_runs WHERE run_id=%s""", (proof['review_run_id'],))
     row = cursor.fetchone()
     if not row or row[:3] != ('completed', True, True) or row[3] != proof['approval']:
         raise ValueError('original completed review approval changed')
+    own_only = proof.get('scope_role') == OWN_SCOPE
+    if ('scope_role' in proof and not own_only
+            or own_only and (row[4] != 'claim_bounded_review_unit_v1'
+                            or proof['scope_request']['target_keys'] != ['claims/' + claim_id])):
+        raise ValueError('review reuse own-scope role requires its completed bounded unit')
     for name in ('approval', 'readback'):
         check_binding(proof[name])
     for bound in proof['source_bindings'].values():
@@ -271,13 +330,22 @@ def verify(store, cursor, claim_id, proof):
     resolved = {}
     if proof['contract'] == CONTEXT_CONTRACT:
         resolved = verify_context_reviews(store, cursor, proof)
-    assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], proof['protected_record_keys'], resolved=resolved)
+    assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], rejection_basis(
+        cm.Request.model_validate(proof['scope_request']),
+        {cm.source.key(*k):cm.model_state(v) for k,v in states.items()},
+        proof['protected_record_keys'], own_only=own_only), resolved=resolved)
     # The reused proof explicitly protects a direct Claim basis, even when
     # its original review used the legacy transitive scope. Dispatching by
     # that old policy would demand neighbours' private Evidence again.
     from backend.pipeline.claim_direct_scope import assert_current
     assert_current(store, cursor, cm.Request.model_validate(proof['scope_request']), states,
-                   include_write_context=False)
+                   include_write_context=False, include_maintenance=not own_only)
+    from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+    if own_evidence_enabled(cm.Request.model_validate(proof['scope_request'])):
+        material = cursor.execute('SELECT metadata->\'materials\' FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                                  (proof['review_run_id'],)).fetchone()[0]
+        assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in states.items()
+                                  if s['retired_at'] is None}, material['sources'], ['claims/'+claim_id])
     state = states[('claims', claim_id)]
     if state['retired_at'] is not None:
         raise ValueError('review reuse cannot release retired or held content')
@@ -320,11 +388,11 @@ def verify_context_reviews(store, cursor, proof):
     original = decoded_pins(proof['original_read_pins'])
     current = decoded_pins(proof['read_pins'])
     protected = {cm.source.split_key(k) for k in proof['protected_record_keys']}
-    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] not in {'evidence_steps', 'questions', 'claim_relations'}):
+    if set(original) != set(current) or any(original[k] != current[k] for k in protected if k[0] not in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments'}):
         raise ValueError('context reuse changed the original Claim or its own basis')
     changed = {cm.source.key(*k) for k in original if original[k] != current[k]}
     if not changed or changed != set(proof['context_reviews']) or any(
-            not k.startswith(('claims/', 'evidence_steps/', 'questions/', 'claim_relations/')) or
+            not k.startswith(('claims/', 'evidence_steps/', 'questions/', 'claim_relations/', 'source_fragments/')) or
             k.startswith('claims/') and cm.source.split_key(k) in protected for k in changed):
         raise ValueError('context reuse permits only reviewed direct neighbour changes')
     key = 'claims/' + proof['claim_id']
@@ -377,6 +445,17 @@ def verify_context_reviews(store, cursor, proof):
                     for cid in extension)):
                 raise ValueError('context reuse changed shared content beyond reviewed additive Claims')
         roots = {'claims/'+cid for cid in extension} or {neighbour}
+        rebinding = neighbour.startswith('source_fragments/')
+        if rebinding:
+            before_fragment = old_receipt['actual_records'][neighbour]['payload']
+            if not literal_fragment_rebinding(before_fragment, saved_records[neighbour]['payload']):
+                raise ValueError('context reuse cannot change the quoted words or source identity')
+            # Only a complete target review using this exact fragment can
+            # certify its new locator; a nearby reference approval cannot.
+            roots = {claim for claim in selected['content_claim_keys']
+                if neighbour in scope(request.model_copy(deep=True, update={
+                    'target_keys':[claim], 'permissions':[]}), saved_records,
+                    include_write_context=False, include_maintenance=False)['writable_record_keys']}
         if neighbour.startswith('claim_relations/'):
             retirement = retired_incident_relation(neighbour, old_receipt['actual_records'][neighbour],
                 saved_records[neighbour], key)
@@ -385,13 +464,14 @@ def verify_context_reviews(store, cursor, proof):
                 raise ValueError('context reuse requires an exact reviewed incident-edge retirement')
             payloads = {k:v['payload'] for k,v in saved_records.items()}
             roots = set(cm.domain_dependencies('claim_relations', payloads[neighbour], payloads)) & set(selected['content_claim_keys'])
-        if ((not extension and not retirement and neighbour not in selected['content_claim_keys']) or neighbour not in writes
+        if ((not extension and not retirement and not rebinding and neighbour not in selected['content_claim_keys']) or neighbour not in writes
                 or key not in selected['neighbour_claim_keys']):
             raise ValueError('peer did not review the changed neighbour and original reference role')
         if not roots:
             raise ValueError('context peer has no fully reviewed relevant Claim')
         scoped = request.model_copy(deep=True, update={'target_keys':sorted(roots), 'permissions':[]})
-        wanted = set(scope(scoped, saved_records, include_write_context=False)['record_keys'])
+        wanted = set(scope(scoped, saved_records, include_write_context=False,
+                           include_maintenance=False)['record_keys'])
         shared = protected & set(fresh)
         wanted.update(cm.source.key(*k) for k in shared)
         wanted.update({key, neighbour})
@@ -413,14 +493,38 @@ def verify_context_reviews(store, cursor, proof):
             pair = cm.source.split_key(record)
             if record != neighbour and saved_review['round_id'] != rid and pair in relevant:
                 relevant[pair] = current[pair]
+        # A prior neighbour's reference-only fragment may also be repaired by
+        # another peer already in this same flat proof. Reuse that exact write
+        # rather than demanding the old neighbour be reviewed again. Never
+        # substitute a changed quotation, an unreviewed object or an own basis.
+        for other_id in {v['round_id'] for v in proof['context_reviews'].values()} - {rid}:
+            other = store.get_cvp_group(other_id)
+            other_readback, other_review = evidence(other)
+            other_receipt = json.loads(Path(other_readback['path']).read_text())
+            for name in ('readback', 'candidate', 'materials'):
+                check_binding(other_receipt[name])
+            other_records = json.loads(Path(other_receipt['readback']['path']).read_text())['actual_records']
+            other_pins = decoded_pins(other['audited_pins'])
+            other_writes = {d['record_key'] for d in other['candidate']['dispositions'] if d['action'] != 'retain'}
+            other_approved = {v['record_key'] for v in other_review['verdicts'] if v['approved'] and not v['problems']}
+            for pair in relevant.keys() - protected:
+                fragment = cm.source.key(*pair)
+                if (pair[0] == 'source_fragments' and pair in other_pins
+                        and relevant[pair] != other_pins[pair]
+                        and fragment in other_writes & other_approved
+                        and fragment in saved_records and fragment in other_records
+                        and literal_fragment_rebinding(saved_records[fragment]['payload'],
+                                                       other_records[fragment]['payload'])):
+                    relevant[pair] = other_pins[pair]
         observed = store._assert_transaction_read_pins(cursor, relevant)
-        assert_current(store, cursor, scoped, observed, include_write_context=False)
+        assert_current(store, cursor, scoped, observed, include_write_context=False,
+                       include_maintenance=False)
         retained = {d['record_key'] for d in peer['candidate']['dispositions'] if d['action'] == 'retain'}
         approved = {v['record_key'] for v in review['verdicts'] if v['approved'] and not v['problems']}
         needed = {cm.source.key(*k) for k in shared} | {key, neighbour} | {'claims/' + cid for cid in extension}
         if (not needed <= approved or key not in retained
                 or any((cm.source.key(*k) not in retained or original[k] != fresh[k])
-                       and not (k[0] in {'evidence_steps', 'questions', 'claim_relations'} and cm.source.key(*k) in changed) for k in shared)
+                       and not (k[0] in {'evidence_steps', 'questions', 'claim_relations', 'source_fragments'} and cm.source.key(*k) in changed) for k in shared)
                 or fresh.get(cm.source.split_key(neighbour)) != current[cm.source.split_key(neighbour)]):
             raise ValueError('peer omitted or changed the retained original basis')
         # Even a context finding cannot silently negate the preserved Claim.

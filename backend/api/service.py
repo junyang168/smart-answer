@@ -1595,16 +1595,14 @@ def email_fellowship(date: str) -> FellowshipEmailResult:
     if not EMAIL_PRODUCTION:
         recipient_list = [TEST_RECIPIENT]
     try:
-        send_email(
-            recipients=recipient_list,
-            subject=content.subject,
-            text_body=_html_to_text(content.html),
-            html_body=content.html,
-        )
+        def deliver():
+            send_email(recipients=recipient_list, subject=content.subject,
+                       text_body=_html_to_text(content.html), html_body=content.html)
         if EMAIL_PRODUCTION:
-            record_fellowship_email_sent(
-                datetime.strptime(normalized_date, "%m/%d/%Y").date(),
-            )
+            from ..fellowship_delivery import send_once
+            send_once(datetime.strptime(normalized_date, "%m/%d/%Y").date(), deliver)
+        else:
+            deliver()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     return FellowshipEmailResult(

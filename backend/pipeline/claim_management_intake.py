@@ -9,7 +9,7 @@ import json
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_commit import binding, check_binding
 
-DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v8.json'
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v9.json'
 
 # Ordinary content maintenance cannot alter identity, human holds or approval.
 FIELDS = {
