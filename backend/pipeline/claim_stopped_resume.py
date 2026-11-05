@@ -105,7 +105,7 @@ def verify_migrations(previous, current, proof, histories):
         raise ValueError('stopped-call input changed outside the pinned locator migrations')
 
 
-def historical_replacement_keys(request, before, reachable):
+def historical_replacement_keys(request, before, reachable, *, _seen=frozenset()):
     """Old grants remain dormant when all replacement slices are reachable.
 
     Admission alone grants no calls: the store must subsequently authenticate
@@ -114,6 +114,20 @@ def historical_replacement_keys(request, before, reachable):
     authority = json.loads(cm.source.verify_file(request.authorization).read_text())
     proof = authority.get('owner_stopped_resume')
     if not proof:
+        parent_bound = authority.get('predecessor_request')
+        if parent_bound:
+            if request.action_id in _seen:
+                raise ValueError('historical replacement request cycle')
+            check_binding(parent_bound)
+            parent = cm.Request.model_validate_json(Path(parent_bound['path']).read_text())
+            if (request.predecessor_action_id != parent.action_id
+                    or parent.operation != request.operation
+                    or parent.target_keys != request.target_keys
+                    or parent.source_bindings != request.source_bindings
+                    or parent.permissions != request.permissions
+                    or required_maintenance(parent) != authority.get('required_maintenance_keys')):
+                raise ValueError('historical replacement relay changed original scope')
+            return historical_replacement_keys(parent, before, reachable, _seen=_seen | {request.action_id})
         return set()
     bound = proof['saved_files']['materials.json']; check_binding(bound)
     material = body(read(Path(bound['path'])))
@@ -133,3 +147,7 @@ def historical_replacement_keys(request, before, reachable):
                 and ids and all(cm.source.key('source_fragments', fid) in reachable for fid in ids)):
             result.add(p.key)
     return result
+
+
+def required_maintenance(request):
+    return json.loads(cm.source.verify_file(request.authorization).read_text()).get('required_maintenance_keys')

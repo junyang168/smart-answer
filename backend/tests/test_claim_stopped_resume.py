@@ -100,6 +100,19 @@ def test_historical_grant_is_reachable_only_through_its_actual_replacement_slice
     before[key]['payload'].update(anchor_state='replaced_by_precise_fragments', replacement_fragment_ids=['NEW1', 'NEW2'])
     reachable = {'source_fragments/NEW1', 'source_fragments/NEW2'}
     assert resume.historical_replacement_keys(new, before, reachable) == {key}
+    # A normal bounded correction may inherit the same dormant grant without
+    # claiming that its own predecessor was the original owner-stopped call.
+    parent_path = tmp_path / 'parent-request.json'; parent_path.write_text(new.model_dump_json())
+    child = new.model_copy(deep=True)
+    child.action_id += '-follow'; child.predecessor_action_id = new.action_id
+    child_auth = {'predecessor_request': binding(parent_path),
+                  'required_maintenance_keys': auth['required_maintenance_keys']}
+    child_path = tmp_path / 'child-authority.json'; child_path.write_text(json.dumps(child_auth))
+    child.authorization = cm.source.FileBinding.model_validate(binding(child_path))
+    assert resume.historical_replacement_keys(child, before, reachable) == {key}
+    child.permissions = child.permissions[:-1]
+    with pytest.raises(ValueError, match='changed original scope'):
+        resume.historical_replacement_keys(child, before, reachable)
     assert resume.historical_replacement_keys(new, before, {'source_fragments/NEW1'}) == set()
     before[key]['payload']['anchor_state'] = 'source_version_bound'
     assert resume.historical_replacement_keys(new, before, reachable) == set()
