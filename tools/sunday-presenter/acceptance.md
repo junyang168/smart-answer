@@ -1152,3 +1152,37 @@ latest.json now selects 0.3.8. Presenter DMG: 131544108 bytes,
 SHA256 aa14483f181134a5d0db0c1f993fd7e4abc9df2dc6e0bd2ce8c17754bebbeaed.
 Remote ZIP: 464105 bytes,
 SHA256 8b4251f4f167da558af83fa3ac5bc775e305ce5197db57470600807ffc7622b1.
+
+## Mac/iPad release alignment — 0.6.2 (2026-11-05)
+
+The owner requested synchronizing the Mac counterpart with iPad and keeping all
+versions equal. Presenter, universal Mac Remote, signed iPad device bundle and
+simulator bundle now have both version fields set to 0.6.2. The single authority
+is package.json; the generated Xcode project no longer carries a separate 0.1.0.
+
+Mac keeps its existing window/UI and now supports observer mode and per-host
+pair storage through the same production PairStore/RemoteScope used on iPad.
+It preserves the old Mac single-host item only for that exact fingerprint;
+forget/revocation does not erase another host. The Mac network session uses the
+shared immutable endpoint/certificate delegate, rejects redirects and cancels
+old sessions on host changes. The existing destroyed-view close/quit repair is
+included in the Presenter release.
+
+Validation: 56 Node regression tests pass. They compile and exercise the actual
+Mac button/keyboard command path, host switching and late responses; preserve
+multiple in-memory host pairs without writing test credentials to the user's
+Keychain; exercise legacy-pair decoding; and use the built Mac executable with
+real local TLS to verify correct pin acceptance, wrong-pin rejection and denied
+redirects. The shared scope suite has 42 checks. Mac builds both arm64/x86_64;
+Xcode 26.6 builds the simulator and signs the physical-device architecture using
+the existing owner team. Device bundle deep/strict signature verification passes.
+Builds use explicit DEVELOPER_DIR and SSD DerivedData; global CLT selection is
+unchanged. Website tsc was attempted; this unchanged frontend checkout has its
+existing missing cytoscape/react-quill-new dependencies, not a native App error.
+
+At this checkpoint the physical iPad is paired but disconnected in devicectl.
+Device installation and post-update pairing/video retention are not inferred
+from a successful signed build. The existing #655 automatic-renewal hold remains;
+its frozen source snapshot must be intentionally brought to the accepted release
+before renewal is re-enabled. No renewal schedule, Meet session, microphone,
+recording, website deployment or download publication was started.

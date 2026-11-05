@@ -9,6 +9,12 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
 }
 let a = String(repeating: "a", count: 64), b = String(repeating: "b", count: 64)
 let tokenA=String(repeating:"A",count:43),tokenB=String(repeating:"B",count:43)
+let legacyPair=try JSONSerialization.data(withJSONObject:["fingerprint":a,"token":tokenA])
+check(PairStore.legacyToken(legacyPair,for:a)==tokenA,"Mac upgrade preserves its exact old host pairing")
+check(PairStore.legacyToken(legacyPair,for:b)==nil,"old Mac token cannot authenticate a different host")
+check(PairStore.legacyToken(Data("invalid".utf8),for:a)==nil,"invalid legacy payload is ignored")
+let invalidPair=try JSONSerialization.data(withJSONObject:["fingerprint":a,"token":"invalid\nheader"])
+check(PairStore.legacyToken(invalidPair,for:a)==nil,"legacy bearer token is validated")
 let urlA = URL(string: "https://192.168.1.2:43123")!, urlB = URL(string: "https://192.168.1.3:43124")!
 var scope = RemoteScope()
 check(scope.observing && !scope.canFlip, "first run observes without controlling")

@@ -10,10 +10,14 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskD
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let trust = challenge.protectionSpace.serverTrust,
-              let certificate = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else {
+              let trust = challenge.protectionSpace.serverTrust else {
             completionHandler(.cancelAuthenticationChallenge, nil); return
         }
+        let certificate: SecCertificate?
+        if #available(macOS 12.0, iOS 15.0, *) {
+            certificate = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first
+        } else { certificate = SecTrustGetCertificateAtIndex(trust, 0) }
+        guard let certificate = certificate else { completionHandler(.cancelAuthenticationChallenge, nil); return }
         let digest = SHA256.hash(data: SecCertificateCopyData(certificate) as Data).map { String(format: "%02x", $0) }.joined()
         guard scope.acceptsPin(digest, host: challenge.protectionSpace.host, port: challenge.protectionSpace.port) else {
             completionHandler(.cancelAuthenticationChallenge, nil); return

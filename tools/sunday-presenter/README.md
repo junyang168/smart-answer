@@ -220,3 +220,16 @@ Published installers are immutable files outside Git. scripts/publish-sunday-pre
 uses --status released for Phase 1; the website accepts released and older pilot
 manifests. Build verification and real user observations are in acceptance.md.
 Website/storage API: ../../docs/sunday-presenter.md.
+
+## Shared release version and Mac/iPad Remote behavior
+
+Presenter, Mac Remote and iPad Remote use the same release version from
+`package.json`. Run `ipad/generate-project.cjs` after a version change; both Xcode
+configurations obtain `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` from that
+value. Do not manually version the generated project separately.
+
+Both Remote apps start in observer mode. Disable **只看畫面** explicitly to enable
+slide buttons and keyboard navigation. Pairings are stored separately for each
+pinned Presenter identity; **重新配對** removes only the selected host. Mac upgrades
+can read the previous single-host Keychain item only for its exact fingerprint.
+Both clients use the same endpoint/certificate checks and reject HTTP redirects.

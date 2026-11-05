@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const root = __dirname;
+const {version} = require('../package.json');
+if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('App version must contain three numeric components');
 const id = name => crypto.createHash('sha256').update(name).digest('hex').slice(0,24).toUpperCase();
 const q = value => JSON.stringify(value);
 const files = ['AppDelegate.swift','RemoteViewController.swift','RemoteClient.swift','RemoteScope.swift','PairStore.swift']
@@ -23,7 +25,7 @@ add('frameworks','isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; f
 add('resources',`isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = media; dstSubfolderSpec = 7; files = (${media.map(f=>id('build:'+f)).join(',')}); name = "Bundled receiver only"; runOnlyForDeploymentPostprocessing = 0;`);
 for (const mode of ['Debug','Release']) {
   add('project:'+mode,`isa = XCBuildConfiguration; name = ${mode}; buildSettings = { CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = ${q(mode==='Debug'?'-Onone':'-O')}; };`);
-  add('target:'+mode,`isa = XCBuildConfiguration; name = ${mode}; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = "org.dallas-hlc.sunday-remote.ipad"; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = SundayRemote/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; SWIFT_EMIT_LOC_STRINGS = YES; };`);
+  add('target:'+mode,`isa = XCBuildConfiguration; name = ${mode}; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = "org.dallas-hlc.sunday-remote.ipad"; PRODUCT_NAME = "$(TARGET_NAME)"; INFOPLIST_FILE = SundayRemote/Info.plist; GENERATE_INFOPLIST_FILE = NO; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = ${version}; MARKETING_VERSION = ${version}; SWIFT_EMIT_LOC_STRINGS = YES; };`);
 }
 for (const kind of ['project','target']) add(kind+':configs',`isa = XCConfigurationList; buildConfigurations = (${id(kind+':Debug')},${id(kind+':Release')}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;`);
 add('target',`isa = PBXNativeTarget; buildConfigurationList = ${id('target:configs')}; buildPhases = (${id('sources')},${id('frameworks')},${id('resources')}); buildRules = (); dependencies = (); name = SundayRemote; productName = SundayRemote; productReference = ${id('product')}; productType = "com.apple.product-type.application";`);
