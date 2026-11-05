@@ -7,7 +7,7 @@ import { SourceChips, type SourceCount } from "../navigation";
 
 /**
  * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写这一章讲什么（有按章
- * 页面的用那一页的标题），以及点进去是什么：按章页面、按段落原声，或讲道列表。
+ * 页面的用那一页的标题），以及点进去是什么：逐节聆听、按段落原声；只有讲道的章不加标签。
  * 不写各来源几篇——听的人不在乎（负责人 2026-11-05）。
  */
 
@@ -109,13 +109,16 @@ function BookChapters() {
                         {chapter.articles.length > 0 && (
                           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
                         )}
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[13px] ${
-                            page?.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
-                          }`}
-                        >
-                          {page ? PAGE_LABEL[page.kind] : "講道列表"}
-                        </span>
+                        {/* 沒有逐節聆聽的章不加標籤：「講道列表」什麼也沒告訴讀者（負責人 2026-11-05）。 */}
+                        {page && (
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[13px] ${
+                              page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
+                            }`}
+                          >
+                            {PAGE_LABEL[page.kind]}
+                          </span>
+                        )}
                       </span>
                     </Link>
                   </li>
