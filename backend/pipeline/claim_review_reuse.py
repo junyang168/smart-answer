@@ -99,6 +99,22 @@ def retired_incident_relation(key, before, after, claim_key):
                 {k:v for k,v in after['payload'].items() if k != 'revision'})
 
 
+def rejection_basis(request, records, protected, *, own_only):
+    """Background read pins are not a target's unresolved own-data finding.
+
+    Those pins still require exact current content or an approved handoff.
+    This changes only which historical findings negate its original pass.
+    """
+    if not own_only:
+        return protected
+    from backend.pipeline.claim_direct_scope import scope
+    own = set(scope(request, records, include_write_context=False,
+        include_owner_context=False, include_impact_evidence=False,
+        include_contextual_evidence=False, obligation_only=True,
+        include_maintenance=False)['writable_record_keys'])
+    return set(protected) & (own | {k for k in protected if k.startswith('source_documents/')})
+
+
 def build(store, claim_id, run_id, *, peer_run_id=None):
     from backend.pipeline.claim_direct_scope import scope
     from backend.pipeline.claim_model_output import review as decode_review
@@ -198,7 +214,11 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
                     or a['retired'] or b['retired'] and not retired_incident_relation(record, a, b, key)):
                 raise ValueError('review reuse argument/context changed: ' + record)
             changed_context.add(record)
-    if required - neighbours - approved:
+    # A context-only fragment could have an explicit nonblocking locator
+    # finding in the original pass. Its unchanged words still need the new
+    # peer's actual approved repair, checked by verify_context_reviews below.
+    repaired_fragments = {k for k in changed_context if k.startswith('source_fragments/')}
+    if required - neighbours - approved - repaired_fragments:
         raise ValueError('review reuse cannot conceal an unapproved required object')
     proof = {'contract': 'claim_complete_review_reuse_v1', 'claim_id': claim_id,
              'review_run_id': run_id, 'approval': approval, 'readback': receipt['readback'],
@@ -228,7 +248,8 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION READ ONLY')
         if not changed_context:
-            assert_no_newer_rejection(cursor, claim_id, run_id, proof['protected_record_keys'])
+            assert_no_newer_rejection(cursor, claim_id, run_id,
+                rejection_basis(own, current, proof['protected_record_keys'], own_only=own_only))
         proof['human_source_decisions'] = human_evidence_snapshot(
             cursor, request.source_bindings, materials.get('human_source_decisions', []),
             {k: current[k] for k in required})
@@ -309,7 +330,10 @@ def verify(store, cursor, claim_id, proof):
     resolved = {}
     if proof['contract'] == CONTEXT_CONTRACT:
         resolved = verify_context_reviews(store, cursor, proof)
-    assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], proof['protected_record_keys'], resolved=resolved)
+    assert_no_newer_rejection(cursor, claim_id, proof['review_run_id'], rejection_basis(
+        cm.Request.model_validate(proof['scope_request']),
+        {cm.source.key(*k):cm.model_state(v) for k,v in states.items()},
+        proof['protected_record_keys'], own_only=own_only), resolved=resolved)
     # The reused proof explicitly protects a direct Claim basis, even when
     # its original review used the legacy transitive scope. Dispatching by
     # that old policy would demand neighbours' private Evidence again.
@@ -469,6 +493,29 @@ def verify_context_reviews(store, cursor, proof):
             pair = cm.source.split_key(record)
             if record != neighbour and saved_review['round_id'] != rid and pair in relevant:
                 relevant[pair] = current[pair]
+        # A prior neighbour's reference-only fragment may also be repaired by
+        # another peer already in this same flat proof. Reuse that exact write
+        # rather than demanding the old neighbour be reviewed again. Never
+        # substitute a changed quotation, an unreviewed object or an own basis.
+        for other_id in {v['round_id'] for v in proof['context_reviews'].values()} - {rid}:
+            other = store.get_cvp_group(other_id)
+            other_readback, other_review = evidence(other)
+            other_receipt = json.loads(Path(other_readback['path']).read_text())
+            for name in ('readback', 'candidate', 'materials'):
+                check_binding(other_receipt[name])
+            other_records = json.loads(Path(other_receipt['readback']['path']).read_text())['actual_records']
+            other_pins = decoded_pins(other['audited_pins'])
+            other_writes = {d['record_key'] for d in other['candidate']['dispositions'] if d['action'] != 'retain'}
+            other_approved = {v['record_key'] for v in other_review['verdicts'] if v['approved'] and not v['problems']}
+            for pair in relevant.keys() - protected:
+                fragment = cm.source.key(*pair)
+                if (pair[0] == 'source_fragments' and pair in other_pins
+                        and relevant[pair] != other_pins[pair]
+                        and fragment in other_writes & other_approved
+                        and fragment in saved_records and fragment in other_records
+                        and literal_fragment_rebinding(saved_records[fragment]['payload'],
+                                                       other_records[fragment]['payload'])):
+                    relevant[pair] = other_pins[pair]
         observed = store._assert_transaction_read_pins(cursor, relevant)
         assert_current(store, cursor, scoped, observed, include_write_context=False,
                        include_maintenance=False)

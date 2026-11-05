@@ -144,7 +144,8 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
     base_roots = review_roots(request, bounded=bounded) if include_maintenance else targets
     if obligation_only:
         from backend.pipeline.claim_joint_update import required_keys
-        base_roots = targets | {k for k in required_keys(request, strict=False) if not k.startswith('claims/')}
+        base_roots = targets | ({k for k in required_keys(request, strict=False)
+                                 if not k.startswith('claims/')} if include_maintenance else set())
     roots = base_roots | set(writes)
     maintenance = base_roots - targets
     def named(col, oid):
