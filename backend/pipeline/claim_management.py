@@ -806,7 +806,7 @@ def finding_blocks(finding, request=None, candidate=None, *, records=None):
             # Unused capability and reference-private data do not seed scope.
             blocks = finding['target_key'] in scope(request, records, candidate,
                 include_write_context=False, include_owner_context=False,
-                include_impact_evidence=False)['writable_record_keys']
+                include_impact_evidence=False, include_contextual_evidence=False)['writable_record_keys']
             if blocks and unused_source_fragment_context(finding, records, candidate):
                 blocks = False
         return blocks

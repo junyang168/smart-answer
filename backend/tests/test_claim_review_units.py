@@ -175,6 +175,47 @@ def test_nonblocking_leads_do_not_force_a_gpt_round(chain):
     assert context['F']['target_key'] == 'claims/B'  # No fake resolution or deletion.
 
 
+@pytest.mark.parametrize('obligation', [None, 'support', 'direct', 'shared_owner', 'required', 'written', 'impact'])
+def test_contextual_evidence_stays_visible_without_becoming_a_private_repair_obligation(chain, obligation):
+    """A neighbour's background is not our premise; real bindings still block."""
+    _, request, _, root = chain
+    request.policy = cm.source.FileBinding.model_validate(binding(policy_file(root)))
+    rows = {
+        'source_documents/S': {'source_id': 'S'},
+        'claims/A': {'claim_id': 'A', 'occurrences': [{'source_id': 'S', 'anchors': []}], 'evidence_step_ids': ['EA']},
+        'claims/B': {'claim_id': 'B', 'occurrences': [{'source_id': 'S', 'anchors': []}], 'evidence_step_ids': ['EB']},
+        'evidence_steps/EA': {'evidence_step_id': 'EA', 'produced_claim_ids': ['A'], 'source_fragment_ids': ['FA']},
+        'evidence_steps/EB': {'evidence_step_id': 'EB', 'produced_claim_ids': ['B'], 'source_fragment_ids': ['FB']},
+        'source_fragments/FA': {'fragment_id': 'FA', 'source_id': 'S'},
+        'source_fragments/FB': {'fragment_id': 'FB', 'source_id': 'S'},
+        'knowledge_relations/BACKGROUND': {'relation_id': 'BACKGROUND', 'from_id': 'EB', 'to_id': 'EA',
+                                         'relation_type': 'contextualizes'},
+    }
+    if obligation == 'support':
+        # A second path is a real premise, even though a background edge also exists.
+        rows['knowledge_relations/PREMISE'] = dict(rows['knowledge_relations/BACKGROUND'],
+                                                  relation_id='PREMISE', relation_type='supports')
+    if obligation == 'direct':
+        rows['claims/A']['evidence_step_ids'].append('EB')
+    if obligation == 'shared_owner':
+        rows['evidence_steps/EB']['produced_claim_ids'].append('A')
+    if obligation == 'required':
+        authorize(request, {'required_maintenance_keys': ['source_fragments/FB']})
+    before = {k: {'payload': v, 'retired': False} for k, v in rows.items()}
+    candidate = cm.existing_candidate(before)
+    if obligation == 'written':
+        next(d for d in candidate.dispositions if d.record_key == 'source_fragments/FB').action = 'update'
+        candidate.records = [cm.source.Row(collection='source_fragments', object_id='FB', payload=rows['source_fragments/FB'])]
+    finding = {'target_key': 'source_fragments/FB', 'affected_target_keys': ['claims/A'] if obligation == 'impact' else [],
+               'affected_write_keys': [], 'impact_reason': 'Background-only unless explicitly bound, written or impacting the target.'}
+    visible = direct.scope(request, before, candidate)
+    assert 'source_fragments/FB' in visible['record_keys']
+    assert 'source_fragments/FB' in visible['writable_record_keys']  # Existing packet/capabilities stay unchanged.
+    assert cm.finding_blocks(finding, request, candidate, records=before) is (obligation is not None)
+    edge = dict(finding, target_key='knowledge_relations/BACKGROUND', affected_target_keys=[])
+    assert cm.finding_blocks(edge, request, candidate, records=before)  # Our direct relation is still ours.
+
+
 def test_three_member_unit_uses_one_existing_update_and_retains_all_results(claims):
     store, root = claims
     store.apply_plan(store.plan_package({'package_id': 'third-unit-member',

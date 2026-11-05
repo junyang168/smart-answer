@@ -126,7 +126,7 @@ def review_roots(request, *, actual_write_keys=(), bounded=None):
 
 
 def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
-          include_impact_evidence=True):
+          include_impact_evidence=True, include_contextual_evidence=True):
     from backend.pipeline import claim_management as cm
     # A completed readback includes tombstones for reviewed retirements.
     # They are history, not active incident edges in a read-only footprint.
@@ -203,7 +203,14 @@ def scope(request, before, candidate=None, *, include_write_context=True, includ
                 destination = value.get('to_id') or value.get('target_id')
                 for endpoint in ends:
                     if endpoint.split('/', 1)[1] == destination:
-                        incoming.setdefault(endpoint, set()).update(ends | {relation})
+                        # Background remains visible in ordinary packets. For
+                        # mandatory maintenance, the edge itself is still our
+                        # relation, but its contextual source is not a premise.
+                        # A direct/shared binding or another support path still
+                        # reaches that source independently.
+                        upstream = (ends if include_contextual_evidence
+                                    or value.get('relation_type') != 'contextualizes' else set())
+                        incoming.setdefault(endpoint, set()).update(upstream | {relation})
             support_indexes[id(rows)] = incoming
         incoming = support_indexes[id(rows)]
         found = set(); pending = list(seeds)
