@@ -240,7 +240,7 @@ export const visible = (sermon: Sermon, showLeftOut: boolean) =>
   showLeftOut ? sermon.stretches : sermon.stretches.filter((stretch) => !stretch.left_out);
 
 /** 總覽上每段列出幾個題目。 */
-const MOST_TOPICS = 5;
+const MOST_TOPICS = 12;
 
 export const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
@@ -461,23 +461,30 @@ export default function OriginalAudio({
             <li key={section.passage}>
               <Link
                 href={listenHref(section.passage)}
-                className="flex flex-col gap-1.5 px-5 py-4 hover:bg-amber-50/60 sm:flex-row sm:gap-6"
+                className="flex flex-col gap-2 px-4 py-3 hover:bg-amber-50/60 sm:flex-row sm:items-baseline sm:gap-4 sm:px-5"
               >
-                <span className="flex shrink-0 items-baseline gap-3 sm:w-48">
+                <span className="flex shrink-0 items-baseline gap-2 sm:min-w-[7.5rem]">
                   <span className="font-serif text-lg font-bold text-stone-900">{section.label.split(" ").pop()}</span>
-                  <span className="font-mono text-sm text-stone-500">
+                  <span className="font-mono text-xs text-stone-500">
                     {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
                   </span>
                 </span>
-                {/* 一行一個題目，最多五個：一整段連起來的題目是一堵牆，看不出這幾節講了什麼。 */}
-                <span className="flex flex-col text-[0.95rem] leading-7 text-stone-700">
+                {/* 題目排成會換行的小標籤，填滿一行再往下：一行一個，右邊大半是空的。 */}
+                <span className="flex flex-1 flex-wrap gap-1.5">
                   {topics(section)
                     .slice(0, MOST_TOPICS)
                     .map((item) => (
-                      <span key={item.text}>{item.text}</span>
+                      <span
+                        key={item.text}
+                        className="rounded-full bg-stone-100 px-2.5 py-0.5 text-[0.85rem] leading-6 text-stone-700"
+                      >
+                        {item.text}
+                      </span>
                     ))}
                   {topics(section).length > MOST_TOPICS && (
-                    <span className="text-sm text-stone-500">還有 {topics(section).length - MOST_TOPICS} 個題目</span>
+                    <span className="px-1 text-[0.85rem] leading-6 text-stone-500">
+                      +{topics(section).length - MOST_TOPICS}
+                    </span>
                   )}
                 </span>
               </Link>
