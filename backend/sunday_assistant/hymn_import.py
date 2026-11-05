@@ -64,6 +64,17 @@ def source_verse_layout(body):
     return "\n\n".join(verses)
 
 
+def source_line_layout(body):
+    """Unnumbered multi-line stanzas also have authoritative source breaks."""
+    blocks = re.split(r"\n[ \t]*\n", body.strip())
+    lines = [[line.strip() for line in block.splitlines() if line.strip()] for block in blocks]
+    if len(lines) < 2 or any(len(block) < 2 for block in lines):
+        return None
+    if any(re.match(r"^\d{1,2}[.、．:：)）]?\s+", line) for block in lines for line in block):
+        return None  # Numbered verses are handled by the stricter path above.
+    return '\n\n'.join('\n'.join(block) for block in lines)
+
+
 def prepare_lyrics(metadata, raw):
     raw = OpenCC('s2t').convert(raw.strip())
     if not raw or len(raw) > 40000:
@@ -79,6 +90,11 @@ def prepare_lyrics(metadata, raw):
         raise ValueError('歌詞範圍無法對回來源，尚未匯入')
     body = '\n'.join(lines[layout.start_line:layout.end_line + 1])
     preserved = source_verse_layout(body)
+    layout_source = 'source_verses' if preserved is not None else 'model'
+    if preserved is None:
+        preserved = source_line_layout(body)
+        if preserved is not None:
+            layout_source = 'source_lines'
     if preserved is not None:
         # HTML already supplies trustworthy lines and verse breaks. The model
         # selects the lyric range; it cannot change those slide boundaries.
@@ -96,8 +112,8 @@ def prepare_lyrics(metadata, raw):
         raise ValueError('歌詞來源或完整性核對未通過：' + '；'.join(verdict.questions))
     return {'lyrics': layout.lyrics.strip(), 'raw_source': raw, 'source_sha256': sha256(raw.encode()).hexdigest(),
             'lyrics_sha256': sha256(layout.lyrics.strip().encode()).hexdigest(),
-            'source_range': [layout.start_line, layout.end_line], 'format_version': 2,
-            'layout_source': 'source_verses' if preserved is not None else 'model'}
+            'source_range': [layout.start_line, layout.end_line], 'format_version': 3,
+            'layout_source': layout_source}
 
 
 def metadata_for(agent, number):

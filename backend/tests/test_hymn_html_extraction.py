@@ -92,3 +92,73 @@ def test_manual_blank_line_starts_slide_while_single_newline_does_not(separator)
     from backend.api.service import _split_lyrics_sections
     assert _split_lyrics_sections(separator.join(['第一行\n第二行', '下一張', '最後一張\n末行'])) == [
         ['第一行', '第二行'], ['下一張'], ['最後一張', '末行']]
+
+
+def hymn_404_source():
+    from pathlib import Path
+    return (Path(__file__).parent / 'fixtures/hymns/404-word.html').read_text()
+
+
+def test_word_paragraph_lines_do_not_manufacture_stanza_breaks():
+    text = extract(hymn_404_source())
+    from opencc import OpenCC
+    body = OpenCC('s2t').convert(text[text.index('主領我'):])
+    from backend.api.service import _split_lyrics_sections
+    sections = _split_lyrics_sections(body)
+    assert list(map(len, sections)) == [4, 8, 4]
+    assert sections[0] == sections[2]
+    assert sections[1][3] == '有主與我同行(有主與我同行)。'
+    assert sections[1][-1] == '步隨主行(步隨主行)。'
+    assert sections[0][-1] == '我是主的羊。'
+
+
+def test_word_source_wrapping_keeps_english_word_spaces_and_explicit_empty_paragraph():
+    text = extract('<table><tr><td>'
+        '<p class="MsoNormal">Grace\n and <span>peace.</span><br><br>Second line</p>'
+        '<p class="MsoNormal">Third line<br></p>'
+        '<p class="MsoNormal">Fourth line</p>'
+        '<p class="MsoNormal">&nbsp;</p>'
+        '<p class="MsoNormal">Last line</p></td></tr></table>')
+    assert lines(text) == ['Grace and peace.', 'Second line', 'Third line', 'Fourth line', 'Last line']
+    from backend.api.service import _split_lyrics_sections
+    assert _split_lyrics_sections(text) == [['Grace and peace.'], ['Second line', 'Third line', 'Fourth line'], ['Last line']]
+
+
+def test_ordinary_html_paragraphs_keep_stanzas_even_when_br_is_present():
+    from backend.api.service import _split_lyrics_sections
+    text = extract('<table><tr><td><p>第一段<br>第二行<br><br>第三行</p><p>下一段<br>末行</p></td></tr></table>')
+    assert _split_lyrics_sections(text) == [['第一段', '第二行'], ['第三行'], ['下一段', '末行']]
+
+
+def test_hymn_404_import_ignores_model_repagination_and_round_trips_three_ppt_slides(tmp_path, monkeypatch):
+    from backend.api.models import HymnMetadata
+    from backend.sunday_assistant import hymn_import as h
+    from backend.sunday_assistant.grounding import GroundingVerdict
+    from backend.api.service import _split_lyrics_sections
+    from backend.api.ppt_generator import generate_presentation_from_template
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    raw = extract(hymn_404_source())
+    source_lines = raw.splitlines()
+    start = next(i for i, line in enumerate(source_lines) if line.startswith('主領我'))
+    monkeypatch.setattr(h, 'complete', lambda schema, *_: h.LyricLayout(
+        start_line=start, end_line=len(source_lines)-1,
+        lyrics='\n\n'.join(line.strip() for line in source_lines[start:] if line.strip()))
+        if schema == h.LyricLayout else GroundingVerdict(supported=True))
+    saved = h.prepare_lyrics(HymnMetadata(index=404, title='我是主羊'), raw)
+    assert saved['layout_source'] == 'source_lines'
+    assert h.normalize_lyric_words(saved['raw_source'][saved['raw_source'].index('主領我'):]) == h.normalize_lyric_words(saved['lyrics'])
+    sections = _split_lyrics_sections(saved['lyrics'])
+    assert list(map(len, sections)) == [4, 8, 4]
+    template = Presentation()
+    slide = template.slides.add_slide(template.slide_layouts[6])
+    slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(4)).text = '{hymnLyrics}'
+    path = tmp_path / 'template.pptx'
+    template.save(path)
+    output = generate_presentation_from_template(path, {}, tmp_path / 'output.pptx',
+        section_configs={'hymnLyrics': {'sections': sections, 'style': 'lyrics'}})
+    actual = Presentation(output)
+    assert len(actual.slides) == 3
+    assert [[p.text for shape in slide.shapes if shape.has_text_frame for p in shape.text_frame.paragraphs]
+            for slide in actual.slides] == sections
