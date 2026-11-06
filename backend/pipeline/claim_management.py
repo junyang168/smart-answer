@@ -465,8 +465,10 @@ def domain_dependencies(collection, payload, records):
             oid = payload.get(field)
             if not oid:
                 continue
-            matches = [k for k in records if source.split_key(k)[1] == oid
-                       and source.split_key(k)[0] in CLAIM_COLLECTIONS]
+            # Canonical typed keys permit bounded lookups. Scanning the whole
+            # packet here multiplied every graph walk by the packet size.
+            matches = ([source.key(col, oid) for col in CLAIM_COLLECTIONS
+                        if source.key(col, oid) in records] if isinstance(oid, str) else [])
             if len(matches) != 1:
                 raise ValueError('relation endpoint is missing or ambiguous: ' + str(oid))
             refs.update(matches)
