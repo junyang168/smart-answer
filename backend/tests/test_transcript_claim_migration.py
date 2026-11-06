@@ -224,7 +224,7 @@ def test_explicit_rejected_recovery_cannot_touch_an_active_controller(case):
 
 
 def test_rejected_recovery_creates_derived_head_controller_directory(case,monkeypatch):
-    from backend.pipeline import source_reconciliation_runtime as runtime
+    from backend.pipeline import source_execution_locks
     _,_,root,_,_=case;prepare(case)
     unit=root/'units/000'
     migration.immutable(unit/'prepared.json',{'manifest':{'path':'unused'}})
@@ -232,7 +232,7 @@ def test_rejected_recovery_creates_derived_head_controller_directory(case,monkey
     monkeypatch.setattr(migration,'current_unit_prepared',lambda *a:{'manifest':{'path':str(directory/'manifest.json')}})
     class StopAtMaintenance(Exception):pass
     def stopped():raise StopAtMaintenance()
-    monkeypatch.setattr(runtime,'maintenance_lock',stopped)
+    monkeypatch.setattr(source_execution_locks,'shared_maintenance_gates',stopped)
     with pytest.raises(StopAtMaintenance):migration.resume_rejected_unit(None,root,0)
     # A SQL-admitted head has not necessarily run its derived batch yet.
     assert (directory/'batch/controller.lock').is_file()

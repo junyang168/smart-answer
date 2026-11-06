@@ -168,7 +168,17 @@ Evidence 從有效 `source_fragment_ids` 移出它們，另存 `context_fragment
 `deleted_in_source_sha256`；歷史引文與舊定位保留。Evidence 按所有／部分引用刪除標記
 `source_deleted`／`partially_deleted`，同時撤回支持資格。不自動退休整條 Claim。
 
-apply 與既有維護和 Claim 執行者共用鎖，不終止其他任務。寫入前核對完整當前讀集，
+apply 與 Claim 執行者共用來源／實體執行鎖，不終止其他任務。Claim 可以在同一任務中
+讀多篇來源：來源讀鎖可共存，同源 Update 保持原有次序，授權修改的 Claim／Evidence 等實體取寫鎖；逐字稿版本替換
+與定位搬遷則取目標來源寫鎖，以及兩階段可能修改的實體鎖。鎖路徑按正式資料根與實體 ID
+固定，不按 campaign 或模型容量目錄分開。無重疊工作可並行；真正相同的寫入不得重疊。
+
+全域 recovery／CVP 鎖對這些工作只作共享維護閘門，仍排斥需要獨占的舊維護／CVP 流程。
+舊執行中的獨占鎖不降級、不換 inode；它自然結束後才使用新契約。controller、worker 與
+模型 transport 傳遞同一組檔案描述符，controller 結束不會令尚在執行的 child 提早釋鎖。
+未知來源的舊程式呼叫保留原獨占方式，不能靠省略 source ID 取得較寬並行權限。
+
+寫入前仍核對完整當前讀集，
 共同 store 在同一 advisory-locked SQL transaction 再檢查逐項 revision、內容 SHA 與
 退役狀態，然後走既有 ChangeSet、歷史及依賴失效機制。任一並行修改或原件漂移都停止，
 不能覆寫舊對照表後繼續。已提交但回執遺失時，依同一 ChangeSet 回讀恢復，不重複寫入。

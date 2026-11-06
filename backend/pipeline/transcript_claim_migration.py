@@ -429,8 +429,7 @@ def resume_rejected_unit(store, root, index):
     from backend.pipeline.claim_management_batch import load as load_batch
     from backend.pipeline.claim_review_recovery import resume_rejected_output
     from backend.pipeline.source_reconciliation_runner import exclusive
-    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
-    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    from backend.pipeline import source_execution_locks
     root=Path(root).resolve();m=load(root)
     assert_refresh_enabled(root)
     unit=root/'units'/f'{index:03d}'
@@ -441,17 +440,12 @@ def resume_rejected_unit(store, root, index):
     with ExitStack() as stack:
         controller=stack.enter_context((batch_root/'controller.lock').open('a'))
         fcntl.flock(controller,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        stack.enter_context(maintenance_lock())
-        stack.enter_context(exclusive_cvp_run_lock({'global_lock_path':str(Path(os.environ['DATA_BASE_DIR'])/
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
-        capacity=read(root/'capacity.json')
-        lane=Path(capacity['root'])/'sources'/(cm.sha256_json(m['source_id'])+'.lock')
-        handle=stack.enter_context(lane.open('a'))
-        fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        stack.enter_context(source_execution_locks.shared_maintenance_gates())
         _,jobs=load_batch(prepared['manifest']['path'],batch_root,store=store)
         if {key for request,_ in jobs.values() for key in request.target_keys}!={
                 'claims/'+cid for cid in m['groups'][index]}:
             raise ValueError('rejected recovery changed fixed group membership')
+        stack.enter_context(source_execution_locks.claim_scopes_locks([r for r,_ in jobs.values()]))
         for aid,(request,execution) in jobs.items():
             stack.enter_context(exclusive(execution))
             parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
@@ -553,7 +547,10 @@ def main():
         return
     if not args.execute:
         parser.error('mutating/model stages require --execute')
-    if args.command=='register':value=register(store,args.root)
+    if args.command=='register':
+        from backend.pipeline.transcript_evidence_apply import locks
+        source_id=load(args.root)['source_id']
+        with locks(source_id,record_keys=['source_documents/'+source_id]):value=register(store,args.root)
     elif args.command=='prepare-unit':value=prepare_unit(store,args.root,args.unit)
     elif args.command=='run-unit':value=run_unit(store,args.root,args.unit,capacity=read(args.capacity))
     elif args.command=='resume-rejected-unit':value=resume_rejected_unit(store,args.root,args.unit)

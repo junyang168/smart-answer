@@ -402,7 +402,8 @@ def main():
         p=prepare(store,args.root,source_id=args.source_id,evidence_run=args.evidence_run,published=args.published,instruction=args.instruction_file.read_text())
         r=m.read(p['report']['path']);print(json.dumps({'summary':r['summary'],'updated_claims':len(r['updates'])},ensure_ascii=False))
     elif args.command=='apply':
-        with ea.locks():result=apply(store,args.root)
+        plan=m.read(args.root/'plan.json');report=m.read(plan['report']['path'])
+        with ea.locks(plan['intent']['source_id'],record_keys=report['updates']):result=apply(store,args.root)
         print(json.dumps(result,ensure_ascii=False))
     else:print(json.dumps(verify(store,args.root),ensure_ascii=False))
 

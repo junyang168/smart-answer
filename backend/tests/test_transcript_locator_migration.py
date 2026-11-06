@@ -94,6 +94,25 @@ def test_same_run_worker_lock(tmp_path):
                 pass
 
 
+def test_scoped_migration_reserves_claim_stage_before_evidence_commit(relocation,monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import source_execution_locks as locks
+    store,root,args=setup(relocation)
+    monkeypatch.setenv('DATA_BASE_DIR',str(root.parent/'data'))
+    flow.prepare(store,root,**args)
+    before=store.get_record_state('source_fragments','F1')
+    # Another cross-sermon task would write the same Claim in stage two.
+    request=SimpleNamespace(source_bindings={'OTHER':None},target_keys=['claims/C'],permissions=[])
+    with locks.shared_maintenance_gates(),locks.claim_execution_locks(request):
+        with pytest.raises(BlockingIOError):
+            with flow.execution_locks(root):flow.run(store,root)
+    assert store.get_record_state('source_fragments','F1')==before
+    independent=SimpleNamespace(source_bindings={'OTHER':None},target_keys=['claims/OTHER'],permissions=[])
+    with locks.shared_maintenance_gates(),locks.claim_execution_locks(independent):
+        with flow.execution_locks(root):
+            assert flow.run(store,root)['updated_claims']==1
+
+
 def test_post_evidence_edit_is_rejected_at_stage_handoff(relocation):
     store, root, args = setup(relocation)
     flow.prepare(store, root, **args)

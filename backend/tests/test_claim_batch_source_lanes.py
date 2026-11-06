@@ -1,4 +1,4 @@
-"""Actual coordinator admission: only different own sources may overlap."""
+"""Coordinator admission follows writes, including cross-sermon requests."""
 from contextlib import contextmanager
 from pathlib import Path
 import json
@@ -18,7 +18,7 @@ def completed_batch(store, jobs):
 
 
 @pytest.mark.parametrize('same_source', [True, False])
-def test_coordinator_serializes_same_source_and_overlaps_different_sources(tmp_path, monkeypatch, same_source):
+def test_updates_keep_source_order_without_blocking_other_sources(tmp_path, monkeypatch, same_source):
     from backend.api.canonical_repository import postgres_store as pg, viewpoint_production_safety as safety
     from backend.pipeline import source_reconciliation_runtime as runtime
     @contextmanager
@@ -60,7 +60,8 @@ def test_coordinator_serializes_same_source_and_overlaps_different_sources(tmp_p
 
 @pytest.mark.parametrize('same_source',[True,False])
 @pytest.mark.parametrize('as_string',[True,False])
-def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monkeypatch,same_source,as_string):
+@pytest.mark.parametrize('shared_record',[True,False])
+def test_capacity_mode_serializes_shared_writes_not_shared_source_reads(tmp_path,monkeypatch,same_source,as_string,shared_record):
     from backend.api.canonical_repository import postgres_store as pg,viewpoint_production_safety as safety
     from backend.pipeline import source_reconciliation_runtime as runtime
     @contextmanager
@@ -73,7 +74,7 @@ def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monke
     class Request(SimpleNamespace):
         def model_dump(self,**kwargs): return {'target_keys':self.target_keys}
     jobs={key:(Request(policy=POLICY, target_keys=['claims/'+key],source_bindings={'S' if same_source else 'S-'+key:{}},
-        permissions=[SimpleNamespace(key='shared-cross-source-object')]),tmp_path/key) for key in 'abcd'}
+        permissions=[SimpleNamespace(key='evidence_steps/shared' if shared_record else 'evidence_steps/'+key)]),tmp_path/key) for key in 'abcd'}
     manifest=tmp_path/'manifest.json';manifest.write_text('{}')
     monkeypatch.setattr(batch,'load',lambda *a:({'max_workers':2},jobs))
     monkeypatch.setattr(batch,'_paragraph_results',completed_batch)
@@ -96,7 +97,7 @@ def test_capacity_mode_uses_source_only_and_more_than_two_actions(tmp_path,monke
             self.live=False;return 0
     monkeypatch.setattr(batch.subprocess,'Popen',Process)
     batch.run(str(manifest) if as_string else manifest,tmp_path,model_capacity=dict(root=str(tmp_path/'capacity'),action_window=4,spacing_seconds=0,cooldown_seconds=1))
-    assert max(overlaps)==(1 if same_source else 4)
+    assert max(overlaps)==(1 if shared_record or same_source else 4)
 
 
 def test_refill_starts_next_source_without_waiting_for_slow_action(tmp_path,monkeypatch):

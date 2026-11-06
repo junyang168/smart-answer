@@ -159,6 +159,21 @@ def verify(store, root):
         return finish(root, p, er, anchors.verify(store, root / 'anchors'))
 
 
+def execution_locks(root):
+    """Cover both stages' possible writes before committing either stage."""
+    root=Path(root).resolve();p=load(root)
+    er=m.read(root/'evidence/plan.json')
+    records=m.read(er['records']['path']);report=m.read(er['report']['path'])
+    source_id=p['intent']['source_id'];source=records['source_documents/'+source_id]['payload']
+    writes=set(report['updates']) | {'source_documents/'+source_id}
+    # Anchor rows are compiled after the Evidence handoff. Reserve their own
+    # Claims now, including multi-source Claims with an occurrence here.
+    writes.update(key for key,state in records.items() if key.startswith('claims/')
+        and not state['retired'] and state['payload'].get('review_status')!='superseded'
+        and any(anchors.own_occurrence(o,source) for o in state['payload'].get('occurrences',[])))
+    return evidence.locks(source_id,record_keys=writes)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['prepare', 'run', 'verify'])
@@ -178,7 +193,7 @@ def main():
                          published=args.published, instruction_file=args.instruction_file,
                          calibration_path=args.calibration)
     else:
-        with evidence.locks():
+        with execution_locks(args.root):
             result = (run if args.command == 'run' else verify)(store, args.root)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

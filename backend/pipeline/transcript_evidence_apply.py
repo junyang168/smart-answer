@@ -489,8 +489,19 @@ def verify(store, root):
     return result
 
 
-def locks():
+def locks(source_id=None, *, record_keys=()):
     """Cooperate with existing maintenance/Claim workers; never stop them."""
+    if source_id is not None:
+        from backend.pipeline.source_execution_locks import shared_maintenance_gates, source_write_locks
+        stack = ExitStack()
+        try:
+            stack.enter_context(shared_maintenance_gates())
+            stack.enter_context(source_write_locks([source_id], record_keys))
+        except BaseException:
+            stack.close()
+            raise
+        return stack
+    # Unknown/unscoped older callers keep their original exclusive contract.
     import os
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
@@ -522,7 +533,9 @@ def main():
                          published=args.published, instruction=args.instruction_file.read_text(),calibration_path=args.calibration)
         print(json.dumps({'root': str(args.root), 'summary': m.read(result['report']['path'])['summary']}, ensure_ascii=False))
     elif args.command == 'apply':
-        with locks(): result = apply(store, args.root)
+        plan = m.read(args.root/'plan.json')
+        report = m.read(plan['report']['path'])
+        with locks(plan['source_id'], record_keys=report['updates']): result = apply(store, args.root)
         print(json.dumps(result, ensure_ascii=False))
     else:
         print(json.dumps(verify(store, args.root), ensure_ascii=False))
