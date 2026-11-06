@@ -162,6 +162,9 @@ def main():
             "finish": [
                 "full_video_transcript.py",
                 "contextual_transcript_timing.py",
+                "boundary_audio_review.py",
+                "paired_boundary_review.py",
+                "paragraph_audio_coherence.py",
                 "slide_reading_layout.py",
             ],
             "speakers": [
