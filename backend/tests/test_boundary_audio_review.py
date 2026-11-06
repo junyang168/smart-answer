@@ -2,6 +2,24 @@ import pytest
 from backend.pipeline.boundary_audio_review import validate_result
 
 
+def test_flattened_case_rows_regroup_without_changing_verdicts_or_hiding_conflicts():
+    import copy
+    from backend.pipeline.boundary_audio_review import coalesce_case_rows
+    cases=[{'case_id':'p1-start','candidates':[{'id':'c0'},{'id':'c1'}]}]
+    rows=[{'case_id':'p1-start','reference_issue':'none','candidates':[{'id':i,'verdict':v,'heard_target_phrase':'原聲','reason':'原聲核對'}]} for i,v in [('c0','wrong_segment'),('c1','clean_boundary')]]
+    raw={'results':rows};before=copy.deepcopy(raw)
+    normalized=coalesce_case_rows(raw,cases)
+    validate_result(normalized,cases,allow_partial=True)
+    assert raw==before
+    assert normalized['results'][0]['candidates']==[r['candidates'][0] for r in rows]
+    conflicting=copy.deepcopy(raw);conflicting['results'][1]['reference_issue']='unclear'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(conflicting,cases),cases,allow_partial=True)
+    duplicate=copy.deepcopy(raw);duplicate['results'][1]['candidates'][0]['id']='c0'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(duplicate,cases),cases,allow_partial=True)
+    invented=copy.deepcopy(raw);invented['results'][1]['case_id']='invented'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(invented,cases),cases,allow_partial=True)
+
+
 def test_actual_previous_tail_is_not_an_acceptable_boundary():
     cases=[{'case_id':'p10-start','candidates':[{'id':'old'},{'id':'fixed'}]}]
     answer={'results':[{'case_id':'p10-start','reference_issue':'none','candidates':[
