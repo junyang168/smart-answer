@@ -3,13 +3,22 @@
 方案见 `docs/wang-knowledge-platform/30-authoring/matthew_chapter_exposition_page_solution.md`。
 
 哪些段落是这一章的释经，不在这里推——由模型按定义逐片段决定，见
-`chapter_exposition`。这里只放不需要判断的配置：系列与章的对照（负责人
-2026-11-03 确认），以及和合本的分段。
+`chapter_exposition`。这里只放不需要判断的配置：哪一章用哪个系列的哪几堂（负责人
+2026-11-03 确认系列与章的对照），以及和合本的分段——存在
+`DATA_BASE_DIR/chapter_exposition/chapters.json`。
+
+加一章：按逐字稿里念到的章，连同前后一堂，写进这个文件，跑
+`chapter_exposition`；没有片段保留的那一堂从文件里拿掉，再跑 `chapter_slides`
+（加 `--review`）和 `chapter_title`。不用改代码，不用部署。
 """
 
 from __future__ import annotations
 
+import json
+import logging
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from backend.api.scripture import parse_reference
 
@@ -28,70 +37,105 @@ class Chapter:
     source: str = "紐約靈命進深會"
 
 
-_NYSC_2 = "2011 NYSC 專題：馬太福音釋經（二）"
-_NYSC_3 = "2012 NYSC 專題：馬太福音釋經（三）"
+#: 有逐節聆聽页面的章，存在 `DATA_BASE_DIR` 里，不在代码里（负责人 2026-11-05：
+#: 加一章不该要合并、部署）。每章：经文、来源、系列、讲了这一章的那几堂、和合本
+#: 的分段。改了文件，下一个请求就读到新的。
+CHAPTERS_FILE = Path("chapter_exposition") / "chapters.json"
+SCHEMA_VERSION = "chapter_pages_v1"
+
+_log = logging.getLogger(__name__)
 
 
-def _nysc_2(chapter: int, lectures: tuple[int, ...], sections: tuple[str, ...]) -> Chapter:
-    """2011（二）的太 6–7（负责人 2026-11-05：「完成 5-7」）；选堂同 `_nysc_3`。"""
+def chapters_path(data_base_dir: Path | None = None) -> Path:
+    if data_base_dir is None:
+        from backend.api.config import DATA_BASE_PATH
 
-    last = sections[-1].rsplit("-", 1)[1]
-    return Chapter(
-        passage=f"mat-{chapter}-1-{last}",
-        series=_NYSC_2,
-        lectures=tuple(f"{_NYSC_2}{n}" for n in lectures),
-        sections=tuple(f"mat-{chapter}-{span}" for span in sections),
-    )
+        data_base_dir = Path(DATA_BASE_PATH)
+    return Path(data_base_dir) / CHAPTERS_FILE
 
 
-def _nysc_3(chapter: int, lectures: tuple[int, ...], sections: tuple[str, ...]) -> Chapter:
-    """2012（三）讲太 8–15（负责人 2026-11-05：「你做一下 8-15」）。
+def problems(chapter: Chapter) -> list[str]:
+    """一章的配置哪里不对：分段要从第 1 节接到最后一节，至少一堂讲道。"""
 
-    `lectures` 只列真的讲了这一章的几堂：先按逐字稿里念到的章、连同前后一堂跑
-    `chapter_exposition`（2026-11-05，24 次），没有一个片段保留的那一堂从这里拿掉。
-    太 14 没有页面：只有（三）6 里三分钟的一段转场，复述施洗约翰被杀，接着就讲
-    15:21，不是这一章的释经。
-    """
+    out = []
+    try:
+        book, number, start, end = verse_range(chapter.passage)
+        expected = start
+        for section in chapter.sections:
+            s_book, s_number, low, high = verse_range(section)
+            if (s_book, s_number, low) != (book, number, expected) or high < low:
+                out.append(f"{chapter.passage}: 分段 {section} 没有接上 {number}:{expected}")
+                break
+            expected = high + 1
+        else:
+            if expected != end + 1:
+                out.append(f"{chapter.passage}: 分段停在 {number}:{expected - 1}，不到 {number}:{end}")
+    except (ValueError, KeyError, TypeError) as exc:
+        out.append(f"{chapter.passage}: 读不出经文（{exc}）")
+    if not chapter.lectures:
+        out.append(f"{chapter.passage}: 没有讲道")
+    return out
 
-    last = sections[-1].rsplit("-", 1)[1]
-    return Chapter(
-        passage=f"mat-{chapter}-1-{last}",
-        series=_NYSC_3,
-        lectures=tuple(f"{_NYSC_3}{n}" for n in lectures),
-        sections=tuple(f"mat-{chapter}-{span}" for span in sections),
-    )
 
-#: 有按章页面的章。
-CHAPTERS: dict[str, Chapter] = {
-    "mat-5-1-48": Chapter(
-        passage="mat-5-1-48",
-        series=_NYSC_2,
-        lectures=tuple(f"{_NYSC_2}{n}" for n in range(1, 7)),
-        sections=(
-            "mat-5-1-12",
-            "mat-5-13-16",
-            "mat-5-17-20",
-            "mat-5-21-26",
-            "mat-5-27-30",
-            "mat-5-31-32",
-            "mat-5-33-37",
-            "mat-5-38-42",
-            "mat-5-43-48",
-        ),
-    ),
-    # 和合本（修订版）小标题的分段。
-    **{chapter.passage: chapter for chapter in (
-        _nysc_2(6, (5, 6), ("1-4", "5-15", "16-18", "19-24", "25-34")),
-        _nysc_2(7, (1, 5, 6), ("1-6", "7-12", "13-14", "15-20", "21-23", "24-27", "28-29")),
-        _nysc_3(8, (1,), ("1-4", "5-13", "14-17", "18-22", "23-27", "28-34")),
-        _nysc_3(9, (1,), ("1-8", "9-13", "14-17", "18-26", "27-31", "32-34", "35-38")),
-        _nysc_3(10, (1, 2), ("1-4", "5-15", "16-25", "26-33", "34-39", "40-42")),
-        _nysc_3(11, (2, 3), ("1-6", "7-19", "20-24", "25-30")),
-        _nysc_3(12, (3, 4), ("1-8", "9-14", "15-21", "22-32", "33-37", "38-42", "43-45", "46-50")),
-        _nysc_3(13, (4, 5, 6), ("1-9", "10-17", "18-23", "24-30", "31-33", "34-35", "36-43", "44-46", "47-52", "53-58")),
-        _nysc_3(15, (6,), ("1-9", "10-20", "21-28", "29-31", "32-39")),
-    )},
-}
+def load_chapters(path: Path) -> dict[str, Chapter]:
+    """读章的清单。文件不在就是没有章；格式不对的那一章跳过并记日志，不让整站出错。"""
+
+    if not path.is_file():
+        return {}
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if record.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(f"{path}: schema_version 应是 {SCHEMA_VERSION}")
+    out: dict[str, Chapter] = {}
+    for entry in record.get("chapters") or []:
+        chapter = Chapter(
+            passage=str(entry["passage"]),
+            series=str(entry.get("series") or ""),
+            lectures=tuple(entry.get("lectures") or ()),
+            sections=tuple(entry.get("sections") or ()),
+            source=str(entry.get("source") or "紐約靈命進深會"),
+        )
+        found = problems(chapter)
+        if found:
+            _log.warning("chapters.json 跳过一章：%s", "；".join(found))
+            continue
+        out[chapter.passage] = chapter
+    return out
+
+
+class _Chapters(MutableMapping):
+    """`CHAPTERS`：每次用时按文件的修改时间重读；测试可以临时放进一章。"""
+
+    def __init__(self) -> None:
+        self._cache: tuple[tuple[str, int], dict[str, Chapter]] | None = None
+        self._extra: dict[str, Chapter] = {}
+
+    def _loaded(self) -> dict[str, Chapter]:
+        path = chapters_path()
+        try:
+            key = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            key = (str(path), -1)
+        if self._cache is None or self._cache[0] != key:
+            self._cache = (key, load_chapters(path))
+        return {**self._cache[1], **self._extra}
+
+    def __getitem__(self, passage: str) -> Chapter:
+        return self._loaded()[passage]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._loaded())
+
+    def __len__(self) -> int:
+        return len(self._loaded())
+
+    def __setitem__(self, passage: str, chapter: Chapter) -> None:
+        self._extra[passage] = chapter
+
+    def __delitem__(self, passage: str) -> None:
+        del self._extra[passage]
+
+
+CHAPTERS = _Chapters()
 
 
 def verse_range(slug: str) -> tuple[str, int, int, int]:

@@ -1797,13 +1797,24 @@ def _chapter_label(passage: str) -> str:
     return f"太{number}:{start}–{end}"
 
 
-PASSAGES: tuple[tuple[str, str], ...] = (
-    # 按章：哪些片段是释经由 `chapter_exposition` 逐片段决定；`CHAPTERS` 里的每一章。
-    *((passage, _chapter_label(passage)) for passage in chapter_material.CHAPTERS),
+#: 按段落原声的三段（太 16）。按章的页面不在这里，见 `passages()`。
+FIXED_PASSAGES: tuple[tuple[str, str], ...] = (
     ("mat-16-1-12", "太16:1–12"),
     ("mat-16-13-23", "太16:13–23"),
     ("mat-16-24-27", "太16:24–27"),
 )
+
+
+def passages() -> tuple[tuple[str, str], ...]:
+    """有原声页面的经文：`chapter_material.CHAPTERS` 里的每一章，加上太 16 那三段。
+
+    每次请求现读——章的清单在 `DATA_BASE_DIR`，加一章不用部署。
+    """
+
+    return (
+        *((passage, _chapter_label(passage)) for passage in chapter_material.CHAPTERS),
+        *FIXED_PASSAGES,
+    )
 
 #: 原声页面的地址。文库落地页按这个拼链接。
 PASSAGE_URL_PREFIX = "/resources/wang-repository/audio"
@@ -1824,7 +1835,7 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
     """
 
     out: list[dict[str, Any]] = []
-    for slug, label in PASSAGES:
+    for slug, label in passages():
         index = build_index(store, data_base_dir, slug)
         # 按章的页面一行是「某一堂在某一段」，同一堂会在几段里各出现一次。
         rows = [row for section in index.get("sections") or [] for row in section["sermons"]] or index["sermons"]
