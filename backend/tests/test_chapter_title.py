@@ -56,7 +56,7 @@ def test_redone_slides_void_the_title_and_the_page_falls_back(tmp_path, monkeypa
 def test_a_title_too_long_is_rejected_not_saved(tmp_path, monkeypatch):
     monkeypatch.setitem(chapter_material.CHAPTERS, "mat-5-1-48", CHAPTER)
     _slides(tmp_path)
-    report = chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=FakeClient([{"title": "長" * 40}]))
+    report = chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=FakeClient([{"title": "長" * 40}] * 2))
     assert report["status"] == "rejected"
     assert not chapter_title.record_path(tmp_path, "mat-5-1-48").exists()
 
@@ -64,3 +64,12 @@ def test_a_title_too_long_is_rejected_not_saved(tmp_path, monkeypatch):
 def test_no_title_without_slides_for_every_lecture(tmp_path):
     report = chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=FakeClient([]))
     assert report["status"] == "no_slides"
+
+
+def test_a_title_too_long_gets_one_retry_told_what_was_wrong(tmp_path, monkeypatch):
+    monkeypatch.setitem(chapter_material.CHAPTERS, "mat-5-1-48", CHAPTER)
+    _slides(tmp_path)
+    client = FakeClient([{"title": "長" * 40}, {"title": "八福"}])
+    report = chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=client)
+    assert report["status"] == "saved" and report["title"] == "八福"
+    assert "40 字" in client.prompts[1]

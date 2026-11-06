@@ -638,6 +638,21 @@ def verse_texts(data_base_dir: Path, book: str, chapter: int, low: int, high: in
     wanted = [f"{book}-{chapter}-{verse}" for verse in range(low, high + 1)]
     missing = [slug for slug in wanted if not cached.get(slug)]
     if missing:
+        # 先取整章的和合本（`bible/cuv/`，查经也用它，取一次存下）。逐节去问
+        # bible-api 会被限流：太 8–15 的 285 节里 169 节一直取不到，每次请求都重
+        # 问一遍，一页要多等一秒，他念到哪一节也认不出来。
+        from backend.bible_study import cuv
+
+        try:
+            whole = cuv.chapter(book, chapter, root=Path(data_base_dir) / "bible" / "cuv")
+        except (httpx.HTTPError, RuntimeError, OSError, ValueError, KeyError):
+            whole = {}
+        for slug in missing:
+            text = str(whole.get(slug.rsplit("-", 1)[1]) or "").strip()
+            if text:
+                cached[slug] = text
+        missing = [slug for slug in wanted if not cached.get(slug)]
+    if missing:
         with httpx.Client(timeout=10) as client:
             for slug in missing:
                 try:
@@ -1777,9 +1792,14 @@ def passage_title(passage: str, data_base_dir: Path) -> str:
     return chapter_title.load(data_base_dir, passage) or PASSAGE_TITLES.get(passage, "")
 
 
+def _chapter_label(passage: str) -> str:
+    _, number, start, end = chapter_material.verse_range(passage)
+    return f"太{number}:{start}–{end}"
+
+
 PASSAGES: tuple[tuple[str, str], ...] = (
-    # 按章：哪些片段是释经由 `chapter_exposition` 逐片段决定。
-    ("mat-5-1-48", "太5:1–48"),
+    # 按章：哪些片段是释经由 `chapter_exposition` 逐片段决定；`CHAPTERS` 里的每一章。
+    *((passage, _chapter_label(passage)) for passage in chapter_material.CHAPTERS),
     ("mat-16-1-12", "太16:1–12"),
     ("mat-16-13-23", "太16:13–23"),
     ("mat-16-24-27", "太16:24–27"),
