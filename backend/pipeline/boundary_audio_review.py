@@ -194,6 +194,12 @@ def coalesce_case_rows(answer,cases):
             grouped[-1]['candidates'].extend(row['candidates'])
         else:grouped.append({**row,'candidates':list(row['candidates'])})
     if [r['case_id'] for r in grouped]!=[c['case_id'] for c in cases]:return answer
+    # A model may explicitly emit an empty/uncertain placeholder for a clip
+    # that the request never supplied. It cannot witness any acoustic boundary.
+    # Retain it in the immutable raw response; exclude only this non-verdict.
+    for row,case in zip(grouped,cases):
+        known={c['id'] for c in case['candidates']}
+        row['candidates']=[c for c in row['candidates'] if not (c['id'] not in known and c['verdict']=='uncertain' and not c['heard_target_phrase'].strip())]
     return {**answer,'results':grouped}
 
 

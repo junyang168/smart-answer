@@ -18,6 +18,14 @@ def test_flattened_case_rows_regroup_without_changing_verdicts_or_hiding_conflic
     with pytest.raises(ValueError):validate_result(coalesce_case_rows(duplicate,cases),cases,allow_partial=True)
     invented=copy.deepcopy(raw);invented['results'][1]['case_id']='invented'
     with pytest.raises(ValueError):validate_result(coalesce_case_rows(invented,cases),cases,allow_partial=True)
+    placeholder=copy.deepcopy(raw)
+    placeholder['results'][1]['candidates'].append(dict(id='c99',verdict='uncertain',heard_target_phrase='',reason='並無此項目'))
+    projected=coalesce_case_rows(placeholder,cases)
+    validate_result(projected,cases,allow_partial=True)
+    assert [c['id'] for c in projected['results'][0]['candidates']]==['c0','c1']
+    assert len(placeholder['results'][1]['candidates'])==2
+    placeholder['results'][1]['candidates'][-1]['verdict']='clean_boundary'
+    with pytest.raises(ValueError):validate_result(coalesce_case_rows(placeholder,cases),cases,allow_partial=True)
 
 
 def test_actual_previous_tail_is_not_an_acceptable_boundary():
