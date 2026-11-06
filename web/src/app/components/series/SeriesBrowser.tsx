@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SermonSeries } from "@/app/interfaces/article";
+import { MyWork } from "./MyWork";
 import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, seriesName } from "./progress";
 
 /** 同工的系列總覽：每個系列幾篇已發佈、幾篇編輯中、幾篇待認領。 */
@@ -55,6 +56,8 @@ export const SeriesBrowser = () => {
 
   return (
     <div className="flex flex-col gap-6">
+      <MyWork seriesList={seriesList} />
+
       <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 className="text-lg font-bold text-stone-900">全部 {all.length} 篇</h2>
