@@ -215,6 +215,16 @@ class Store:
         ).fetchone()["cap"]
         return max(float(batch["config"]["budget_usd"]), float(override or 0))
 
+    @staticmethod
+    def budget_exposure(c, batch):
+        row = c.execute(
+            """SELECT COALESCE(sum(CASE WHEN state='complete' THEN
+          COALESCE((info->'usage_cost'->>'estimated_usd_upper')::numeric,reserved_usd)
+          ELSE reserved_usd END),0) AS exposure FROM media_ingest.calls WHERE batch=%s""",
+            (batch,),
+        ).fetchone()
+        return float(row["exposure"])
+
     def reconcile(self, batch):
         from .runtime import lock_held
 
@@ -280,8 +290,8 @@ class Store:
 
                 raise WaitingCapacity("Batch paused before dispatch")
             cfg = b["config"]
-            if b["calls"] >= cfg["max_calls"] or float(
-                b["reserved_usd"]
+            if b["calls"] >= cfg["max_calls"] or self.budget_exposure(
+                c, batch
             ) + usd > self.budget_limit(c, b):
                 raise Conflict("Batch call/cost reservation exhausted")
             c.execute(
@@ -307,6 +317,7 @@ class Store:
                 """SELECT b.id,b.created_at,b.revision,b.desired,b.config->>'title' AS title,b.config->>'mode' AS mode,b.calls,b.reserved_usd,
               (SELECT sum((m.info->'usage_cost'->>'estimated_usd_upper')::numeric) FROM media_ingest.calls m WHERE m.batch=b.id) AS estimated_usd,
               (SELECT count(*) FROM media_ingest.calls m WHERE m.batch=b.id AND m.info ? 'usage_cost') AS costed_calls,
+              (SELECT COALESCE(sum(CASE WHEN m.state='complete' THEN COALESCE((m.info->'usage_cost'->>'estimated_usd_upper')::numeric,m.reserved_usd) ELSE m.reserved_usd END),0) FROM media_ingest.calls m WHERE m.batch=b.id) AS budget_exposure_usd,
               GREATEST((b.config->>'budget_usd')::numeric,COALESCE((SELECT max((c.request->>'budget_usd')::numeric) FROM media_ingest.controls c WHERE c.batch=b.id AND c.request->>'action'='raise-budget'),0)) AS budget_limit_usd
               FROM media_ingest.batches b ORDER BY b.created_at DESC LIMIT 100"""
             ).fetchall()

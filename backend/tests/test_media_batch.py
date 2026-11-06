@@ -351,6 +351,22 @@ def test_saved_usage_costs_are_distinct_from_reserves_and_backfill_is_repeatable
         and float(snapshot["reserved_usd"]) == 1
     )
     assert snapshot["costed_calls"] == snapshot["calls"] == 1
+    assert float(snapshot["budget_exposure_usd"]) == 0.0035
+    # Unknown/in-flight calls retain their entire reserve; settled calls use
+    # conservative saved-usage cost, while original reservation history remains.
+    store.reserve(b, tid, "pending-after-settlement", "gemini", 9.99)
+    with pytest.raises(Conflict):
+        store.reserve(b, tid, "over-exposure", "gemini", 0.01)
+    with store.connection() as c:
+        assert store.budget_exposure(c, b) == pytest.approx(9.9935)
+        assert (
+            float(
+                c.execute(
+                    "SELECT reserved_usd FROM media_ingest.batches WHERE id=%s", (b,)
+                ).fetchone()["reserved_usd"]
+            )
+            == 10.99
+        )
 
 
 def test_budget_reservation_atomic_across_workers(store, tmp_path):
