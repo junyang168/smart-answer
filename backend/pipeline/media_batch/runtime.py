@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import time
+import uuid
 
 
 class WaitingCapacity(RuntimeError):
@@ -14,12 +15,15 @@ class WaitingCapacity(RuntimeError):
 
 def atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + f".{os.getpid()}.tmp")
-    with temp.open("w") as f:
-        json.dump(data, f, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temp, path)
+    temp = path.with_name(path.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp.open("w") as f:
+            json.dump(data, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def file_sha(path):

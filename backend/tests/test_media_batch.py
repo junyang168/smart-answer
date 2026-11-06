@@ -369,6 +369,28 @@ def test_router_denies_forged_or_editor_identity_before_read(
     assert response.status_code == 200 and response.json()["batches"] == []
 
 
+def test_progress_atomic_writes_from_same_process_threads_use_distinct_temps(
+    tmp_path, monkeypatch
+):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from backend.pipeline.media_batch import runtime
+
+    barrier = threading.Barrier(2)
+    replace = runtime.os.replace
+
+    def concurrent_replace(source, target):
+        barrier.wait(timeout=5)
+        replace(source, target)
+
+    monkeypatch.setattr(runtime.os, "replace", concurrent_replace)
+    target = tmp_path / "progress.json"
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(lambda n: runtime.atomic(target, dict(completed=n)), [1, 2]))
+    assert json.loads(target.read_text())["completed"] in [1, 2]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_words(
     tmp_path,
 ):
@@ -476,6 +498,22 @@ def test_speaker_labels_keep_text_and_timing_separate_and_reject_source_drift(tm
     labelled, proof = label_rows(tmp_path, record, rows, dict(p1="1"))
     assert labelled[0]["text"] == "**聽眾：**為什麼？\n\n**教授：**因為如此。"
     assert rows[0]["text"] == "為什麼？因為如此。" and proof["spoken_text_unchanged"]
+    marked, _ = label_rows(
+        tmp_path,
+        record,
+        rows,
+        dict(p1="1"),
+        hidden_insertions={
+            "p1": [
+                dict(offset=0, marker="~~現場交代。~~"),
+                dict(offset=4, marker="~~停一下。~~"),
+            ]
+        },
+    )
+    assert (
+        marked[0]["text"]
+        == "**聽眾：**~~現場交代。~~為什麼？\n\n**教授：**~~停一下。~~因為如此。"
+    )
     record["paragraphs"][0]["text"] = "改過了"
     atomic(tmp_path / "full_transcript.json", record)
     with pytest.raises(ValueError, match="changed"):

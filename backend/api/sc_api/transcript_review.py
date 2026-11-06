@@ -1036,7 +1036,12 @@ class ReviewStore:
                     "timeline": read(self.root / "script" / f"{item}.json"),
                 },
             )
-            mapping = {p["id"]: str(i + 1) for i, p in enumerate(record["paragraphs"])}
+            from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
+            try:
+                editorial_paragraphs, hidden_insertions = editor_paragraphs(record)
+            except ValueError as error:
+                raise ReviewError(409, "自動軟刪除與原文不符，拒絕採用") from error
+            mapping = {p["id"]: str(i + 1) for i, p in enumerate(editorial_paragraphs)}
             rows = [
                 {
                     "index": mapping[p["id"]],
@@ -1048,16 +1053,28 @@ class ReviewStore:
             ]
             from backend.pipeline.media_batch.speakers import label_rows
             try:
-                rows, speaker_attribution = label_rows(source, record, rows, mapping)
+                rows, speaker_attribution = label_rows(
+                    source, record, rows, mapping, hidden_insertions=hidden_insertions
+                )
             except (ValueError, KeyError) as error:
                 raise ReviewError(409, '講員候選與來源不符') from error
+            by_index = {r["index"]: r for r in rows}
+            rows = [
+                by_index[mapping[p["id"]]]
+                if mapping[p["id"]] in by_index and speaker_attribution
+                else dict(
+                    index=mapping[p["id"]], end_index=mapping[p["id"]],
+                    type="content", text=p["text"],
+                )
+                for p in editorial_paragraphs
+            ]
             bindings = {
                 mapping[p["id"]]: {
                     "source_paragraph_id": p["id"],
                     "start_ms": p["start_ms"],
                     "end_ms": p["end_ms"],
                 }
-                for p in record["paragraphs"]
+                for p in editorial_paragraphs
             }
             if any(
                 p["start_ms"] is None or p["end_ms"] is None
@@ -1077,7 +1094,7 @@ class ReviewStore:
                         "end": ts(p["end_ms"]),
                         "text": p["text"],
                     }
-                    for p in record["paragraphs"]
+                    for p in editorial_paragraphs
                 ]
             }
             assets = {}
@@ -1118,6 +1135,17 @@ class ReviewStore:
                             "needs_review": rep["needs_review"],
                         }
                     )
+            timing_quality = copy.deepcopy(record.get("timing_quality"))
+            if timing_quality and any(p.get("excluded_only") for p in editorial_paragraphs):
+                timing_quality = {
+                    **timing_quality, "status": "withheld",
+                    "paragraph_states": {
+                        mapping[p["id"]]: {
+                            "status": "withheld" if p.get("excluded_only") else "qualified"
+                        }
+                        for p in editorial_paragraphs
+                    },
+                }
             c = {
                 "schema_version": "transcript-review-context.v1",
                 "revision": 0,
@@ -1128,7 +1156,8 @@ class ReviewStore:
                 "source_input_file_sha256": file_hash(source / "full_transcript.json"),
                 "source_record_path": f"transcript_review/{item}/source-record.json",
                 "paragraph_bindings": bindings,
-                "timing_quality": record.get("timing_quality"),
+                "timing_quality": timing_quality,
+                "editorial_exclusions": record.get('editorial_exclusions', []),
                 "speaker_attribution": speaker_attribution,
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},

@@ -177,6 +177,7 @@ def main():
                 "video_transcript_handoff.py",
                 "media_batch/stages.py",
                 "../api/sc_api/transcript_review.py",
+                "transcript_editorial_soft_deletions.py",
             ],
         }
         cfg["stage_shas"] = {

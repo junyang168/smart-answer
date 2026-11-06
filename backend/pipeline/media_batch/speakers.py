@@ -159,7 +159,7 @@ def assemble(record, evidence):
     return accepted, notices
 
 
-def label_rows(source, record, rows, mapping):
+def label_rows(source, record, rows, mapping, *, hidden_insertions=None):
     path = Path(source) / "speaker-candidate.json"
     if not path.exists():
         return rows, None
@@ -190,7 +190,17 @@ def label_rows(source, record, rows, mapping):
             t["role"] not in ("professor", "audience", "unknown") for t in row["turns"]
         ):
             raise ValueError("Invalid speaker role")
-        texts[mapping[p["id"]]] = insert_labels(p["text"], row["turns"])
+        turns = row["turns"]
+        if hidden_insertions:
+            from backend.pipeline.transcript_editorial_soft_deletions import (
+                turns_with_hidden_spans,
+            )
+
+            turns = turns_with_hidden_spans(
+                p["text"], turns, hidden_insertions.get(p["id"], [])
+            )
+        marked = "".join(t["text"] for t in turns)
+        texts[mapping[p["id"]]] = insert_labels(marked, turns)
     return [{**r, "text": texts[r["index"]]} for r in rows], dict(
         source_sha256=file_sha(path),
         status="unreviewed_model_candidate",
