@@ -75,6 +75,8 @@ export type Sermon = {
   original_language_events: OriginalLanguageEvent[];
   /** 按章页面：模型读逐字稿写的投影片。有它就不用 Claim 拼的幻灯。 */
   slides?: ChapterSlideData[];
+  /** 教授釋經筆記：母本的表格不念，念到那裡停頓，`at`–`until` 之間整張顯示。 */
+  tables?: { at: number; until: number; rows: string[][] }[];
   /** 按章页面：逐字稿一句一行、带时间；`left_out` 的属灰色片段。 */
   transcript?: { at: number; end: number; text: string; left_out?: boolean }[];
   seconds: number;

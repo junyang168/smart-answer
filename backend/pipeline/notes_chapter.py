@@ -88,6 +88,9 @@ def category_of(heading: str) -> str | None:
 _ITALIC = re.compile(r"(?<![*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])")
 
 
+_TABLE_RULE = re.compile(r"^\s*:?-{2,}:?\s*$")
+
+
 def plain(line: str) -> str:
     """一行母本去掉排版符号：引用号、粗体、链接只留文字。内容一个字不动。"""
 
@@ -116,6 +119,7 @@ def parse(text: str) -> list[dict[str, Any]]:
     pieces: list[dict[str, Any]] = []
     category = "釋經"
     current: dict[str, Any] | None = None
+    table: list[list[str]] | None = None
 
     def start(heading: str, level: int) -> dict[str, Any]:
         piece = {
@@ -130,7 +134,23 @@ def parse(text: str) -> list[dict[str, Any]]:
 
     for raw in text.splitlines():
         if not raw.strip():
+            table = None
             continue
+        stripped = raw.strip()
+        if stripped.startswith("|"):
+            # 表格不念（负责人 2026-11-06），整张显示在幻灯上：记下它跟在第几句之后。
+            cells = [plain(cell) for cell in stripped.strip("|").split("|")]
+            if all(_TABLE_RULE.match(cell) for cell in cells):
+                continue
+            if table is None:
+                if current is None:
+                    current = start("", 0)
+                    current["sentences"] = []
+                table = []
+                current.setdefault("tables", []).append({"after": len(current["sentences"]), "rows": table})
+            table.append(cells)
+            continue
+        table = None
         match = _HEADING.match(raw)
         if match:
             level, heading = len(match.group(1)), plain(match.group(2))
@@ -143,9 +163,8 @@ def parse(text: str) -> list[dict[str, Any]]:
                 continue
             current = start(heading, level)
             continue
-        stripped = raw.strip()
-        if stripped.startswith("|") or _IMAGE.match(stripped) or _RULE.match(stripped):
-            continue  # 表格不念（负责人 2026-11-06）；图片没有字可念
+        if _IMAGE.match(stripped) or _RULE.match(stripped):
+            continue  # 图片、分隔线没有字可念
         line = plain(raw)
         if not line:
             continue
@@ -153,7 +172,7 @@ def parse(text: str) -> list[dict[str, Any]]:
             current = start("", 0)
             current["sentences"] = []
         current["sentences"].extend(split_sentences(line))
-    return [piece for piece in pieces if piece["sentences"]]
+    return [piece for piece in pieces if piece["sentences"] or piece.get("tables")]
 
 
 def plain_text(text: str) -> str:
@@ -180,10 +199,18 @@ def check_parse(text: str, pieces: list[dict[str, Any]]) -> list[str]:
 
     joined = re.sub(r"\s+", "", "".join(s for piece in pieces for s in piece["sentences"]))
     expected = plain_text(text)
+    # 表格一行不少：母本里每一行表格（去掉 :--- 那一行）都在某一小节的表里。
+    rows = sum(len(table["rows"]) for piece in pieces for table in piece.get("tables") or [])
+    lines = [line.strip() for line in text.splitlines() if line.strip().startswith("|")]
+    expected_rows = sum(
+        1 for line in lines
+        if not all(_TABLE_RULE.match(plain(cell)) for cell in line.strip("|").split("|"))
+    )
+    problems = [] if rows == expected_rows else [f"表格 {rows} 行，母本 {expected_rows} 行"]
     if joined == expected:
-        return []
+        return problems
     at = next((i for i, (a, b) in enumerate(zip(joined, expected)) if a != b), min(len(joined), len(expected)))
-    return [f"切出的句子與母本不符，第 {at} 字起：{joined[at:at + 30]!r} ≠ {expected[at:at + 30]!r}"]
+    return problems + [f"切出的句子與母本不符，第 {at} 字起：{joined[at:at + 30]!r} ≠ {expected[at:at + 30]!r}"]
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +506,14 @@ def load_verses(data_base_dir: Path, project: str) -> dict[str, Any] | None:
 #: 一次请求合成的字数上限。Azure 一次最多十分钟的音频；按每分钟约 220 字，留余量。
 CHUNK_CHARS = 1500
 PIECE_BREAK_MS = 700
+#: 念到表格的位置停下来，让人看幻灯上的表（负责人 2026-11-06：表格不念，停顿）。
+#: 三秒起，每行加 1.2 秒，最多 20 秒；Azure 一个 `<break>` 最长 5 秒，接几个。
+TABLE_PAUSE_MS = (3000, 1200, 20000)
+
+
+def table_pause_ms(rows: int) -> int:
+    low, per_row, high = TABLE_PAUSE_MS
+    return min(high, low + per_row * max(0, rows - 1))
 
 
 def script_of(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -486,13 +521,17 @@ def script_of(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     out = []
     for piece in pieces:
-        for text in piece["sentences"]:
+        tables = {table["after"]: table for table in piece.get("tables") or []}
+        for index, text in enumerate(piece["sentences"]):
             out.append({
                 "id": f"S{len(out) + 1:04d}",
                 "piece": piece["id"],
                 "text": text,
                 "voice": voice_parts(text),
             })
+            table = tables.get(index + 1)
+            if table:
+                out[-1]["table"] = {"rows": table["rows"], "pause_ms": table_pause_ms(len(table["rows"]))}
     return out
 
 
@@ -514,11 +553,21 @@ def _runs(sentences: list[dict[str, Any]], breaks_after: set[str]) -> list[tuple
                 runs[-1][1] += body
             else:
                 runs.append([lang, body])
+        pause = ""
+        if sentence.get("table"):
+            # 书签记下表格出现的时间，接着停顿。
+            pause += f'<bookmark mark="T{sentence["id"]}"/>'
+            left = sentence["table"]["pause_ms"]
+            while left > 0:
+                pause += f'<break time="{min(left, 5000)}ms"/>'
+                left -= 5000
         if sentence["id"] in breaks_after:
+            pause += f'<break time="{PIECE_BREAK_MS}ms"/>'
+        if pause:
             if runs and runs[-1][0] == "zh":
-                runs[-1][1] += f'<break time="{PIECE_BREAK_MS}ms"/>'
+                runs[-1][1] += pause
             else:
-                runs.append(["zh", f'<break time="{PIECE_BREAK_MS}ms"/>'])
+                runs.append(["zh", pause])
     return [(lang, body) for lang, body in runs]
 
 
@@ -573,7 +622,9 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
     if verses is None:
         return {"project": project, "status": "no_verses"}
     script = script_of(verses["pieces"])
-    script_sha = sha256_text(json.dumps([[s["id"], s["voice"]] for s in script], ensure_ascii=False)
+    # 没有表格的母本，SHA 与加表格之前一样，已合成的不用重做。
+    script_sha = sha256_text(json.dumps([[s["id"], s["voice"]] + ([s["table"]] if s.get("table") else [])
+                                         for s in script], ensure_ascii=False)
                              + VOICE + RATE + PITCH + json.dumps(ORIGINAL_VOICES))
     target = work_path(data_base_dir, project, "audio.json")
     mp3 = audio_path(data_base_dir, project)
@@ -590,6 +641,7 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
         if index + 1 == len(script) or script[index + 1]["piece"] != sentence["piece"]
     }
     starts: dict[str, float] = {}
+    table_starts: dict[str, float] = {}
     pcm = bytearray()
     for chunk in _chunks(script):
         offset = len(pcm) / (sample_rate * bytes_per_sample)
@@ -608,6 +660,8 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
         for sentence in reversed(chunk):
             following = marks.get(sentence["id"], following)
             starts[sentence["id"]] = round(offset + following, 3)
+            if f"T{sentence['id']}" in marks:
+                table_starts[sentence["id"]] = offset + marks[f"T{sentence['id']}"]
         missing = [s["id"] for s in chunk if s["id"] not in marks]
         if len(missing) > max(2, len(chunk) // 20):
             raise RuntimeError(f"{project}: 书签没有回报 {missing[:5]}")
@@ -624,8 +678,13 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
             check=True,
         )
     sentences = []
+    tables = []
     for index, sentence in enumerate(script):
         end = starts[script[index + 1]["id"]] if index + 1 < len(script) else duration
+        if sentence.get("table"):
+            at = table_starts.get(sentence["id"], end - sentence["table"]["pause_ms"] / 1000)
+            tables.append({"piece": sentence["piece"], "after": sentence["id"], "at": round(at, 3),
+                           "until": round(end, 3), "rows": sentence["table"]["rows"]})
         sentences.append({"id": sentence["id"], "piece": sentence["piece"], "start": starts[sentence["id"]],
                           "end": round(end, 3), "text": sentence["text"]})
     _write(target, {
@@ -638,6 +697,7 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
         "duration": round(duration, 3),
         "created_at": _now(),
         "sentences": sentences,
+        **({"tables": tables} if tables else {}),
     })
     return {"project": project, "status": "saved", "seconds": round(duration), "sentences": len(sentences)}
 
@@ -693,6 +753,10 @@ def chapter_record(chapter: Chapter, project: str, data_base_dir: Path) -> dict[
             "end": lines[-1]["end"],
             "text": "\n".join(line["text"] for line in lines),
             "sentences": [{"start": l["start"], "end": l["end"], "text": l["text"]} for l in lines],
+            **({"tables": tables} if (tables := [
+                {"at": t["at"], "until": t["until"], "rows": t["rows"]}
+                for t in audio.get("tables") or [] if t["piece"] == piece["id"]
+            ]) else {}),
         })
         keep, label = CATEGORIES[piece["category"]]
         decisions.append(

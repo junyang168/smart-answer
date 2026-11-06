@@ -152,3 +152,30 @@ def test_review_runs_once_per_slide_version(monkeypatch, tmp_path) -> None:
     assert chapter_slides.review(chapter, "L", data_base_dir=tmp_path, client=Client())["status"] == "reviewed"
     assert chapter_slides.review(chapter, "L", data_base_dir=tmp_path, client=Client())["status"] == "unchanged"
     assert len(calls) == 1
+
+
+def test_tables_are_kept_for_the_slide_and_paused_at_not_read() -> None:
+    pieces = notes.parse(NOTES)
+    assert notes.check_parse(NOTES, pieces) == []
+    assert pieces[1]["tables"] == [{"after": 4, "rows": [["福", "時態"], ["1", "現在"]]}]
+    script = notes.script_of(pieces)
+    paused = [s for s in script if s.get("table")]
+    assert len(paused) == 1 and paused[0]["table"]["pause_ms"] == 4200
+    out = notes.ssml(script, set())
+    assert f'<bookmark mark="T{paused[0]["id"]}"/><break time="4200ms"/>' in out
+    assert "現在</" not in out and "時態" not in out  # 表格不念
+    # 一张大表停顿超过 5 秒，接几个 <break>
+    assert notes.table_pause_ms(30) == 20000
+    big = [{**paused[0], "table": {"rows": [], "pause_ms": 12000}}]
+    assert notes.ssml(big, set()).count("<break ") == 3
+
+
+def test_a_dropped_table_row_fails_the_parse_check() -> None:
+    pieces = notes.parse(NOTES)
+    pieces[1]["tables"][0]["rows"].pop()
+    assert any("表格" in p for p in notes.check_parse(NOTES, pieces))
+
+
+def test_script_sha_input_is_unchanged_for_notes_without_tables() -> None:
+    text = NOTES.replace("| 福 | 時態 |\n| --- | --- |\n| 1 | 現在 |\n", "")
+    assert not any(s.get("table") for s in notes.script_of(notes.parse(text)))
