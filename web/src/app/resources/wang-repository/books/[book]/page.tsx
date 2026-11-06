@@ -15,6 +15,8 @@ type Chapter = {
   chapter: number;
   sources: SourceCount[];
   page: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video" } | null;
+  /** 每個有按章頁面的來源一頁（教授釋經筆記另有 AI 朗讀的一頁）。 */
+  pages?: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video"; ai_voice?: boolean }[];
   articles: { title: string; href: string }[];
 };
 
@@ -29,8 +31,14 @@ export default function BookPage() {
 }
 
 // 標籤寫點進去能做什麼，不寫頁面的內部名稱；錄像叫觀看，錄音叫聆聽（負責人 2026-11-05）。
-const pageLabel = (page: NonNullable<Chapter["page"]>) =>
-  page.kind === "passages" ? "按段落原聲" : page.media === "video" ? "逐節觀看" : "逐節聆聽";
+const pageLabel = (page: NonNullable<Chapter["page"]> & { ai_voice?: boolean }) =>
+  page.kind === "passages"
+    ? "按段落原聲"
+    : page.ai_voice
+      ? "逐節聆聽（AI 朗讀）"
+      : page.media === "video"
+        ? "逐節觀看"
+        : "逐節聆聽";
 
 function BookChapters() {
   const slug = String(useParams()?.book ?? "");
@@ -60,7 +68,10 @@ function BookChapters() {
     .filter((chapter) => chapter.shown.length > 0);
   // 来源选了别的，就不说这一章有按章页面——那一页是另一个来源的。
   const pageFor = (chapter: Chapter) =>
-    chapter.page && (!source || chapter.page.source === source) ? chapter.page : null;
+    source
+      ? (chapter.pages ?? []).find((page) => page.source === source) ??
+        (chapter.page && chapter.page.source === source ? chapter.page : null)
+      : chapter.page;
 
   return (
     <main className="min-h-screen bg-stone-50">

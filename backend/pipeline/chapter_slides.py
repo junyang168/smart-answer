@@ -72,11 +72,33 @@ verses：這一張在解釋第 〈章〉 章的哪幾節，格式「〈章〉:3-
 
 用繁體中文。"""
 
-def system_prompt(chapter: Chapter) -> str:
+#: 母本（教授釋經筆記）在知识库里的 transcript_id 前缀，见 `notes_chapter`。
+NOTES_PREFIX = "notes_manuscript:"
+
+#: 母本是 AI 朗读教授的笔记，不是讲座录音：提示词里讲录音、逐字稿的几处换掉。
+_NOTES_WORDING = (
+    ("為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音", "為王教授馬太福音釋經筆記的 AI 朗讀配投影片。聽眾一邊聽朗讀"),
+    ("使用者給你這一堂課裡解釋馬太福音", "使用者給你教授釋經筆記裡解釋馬太福音"),
+    ("審王教授馬太福音講座錄音的同步投影片。聽眾一邊聽錄音", "審王教授馬太福音釋經筆記 AI 朗讀的同步投影片。聽眾一邊聽朗讀"),
+    ("保留的逐字稿", "保留的筆記原文"),
+    ("逐張對照逐字稿", "逐張對照筆記原文"),
+)
+
+
+def for_lecture(prompt: str, lecture: str) -> str:
+    if not lecture.startswith(NOTES_PREFIX):
+        return prompt
+    for old, new in _NOTES_WORDING:
+        prompt = prompt.replace(old, new)
+    return prompt
+
+
+def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
-    return _SYSTEM_TEMPLATE.replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    prompt = _SYSTEM_TEMPLATE.replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    return for_lecture(prompt, lecture)
 
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -127,6 +149,12 @@ def sentences(kept: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
     for piece in kept:
+        if piece.get("sentences"):
+            # 母本的朗读：每一句的时间是合成时的书签，准的，不用按字数推算。
+            for line in piece["sentences"]:
+                out.append({"id": f"S{len(out) + 1:04d}", "piece": piece["id"],
+                            "start": line["start"], "end": line["end"], "text": line["text"]})
+            continue
         text = piece["text"]
         length = max(len(text), 1)
         span = piece["end"] - piece["start"]
@@ -345,7 +373,7 @@ def decide(
         # 这一堂没有讲这一章（太 8–15 按念到的章连同前后一堂先跑留不留）。
         return {"lecture": lecture, "status": "nothing_kept"}
     prompt = user_prompt(lecture, decisions_record)
-    response = client.generate_json(system_prompt(chapter), prompt, RESPONSE_SCHEMA)
+    response = client.generate_json(system_prompt(chapter, lecture), prompt, RESPONSE_SCHEMA)
     return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""))
 
 
@@ -365,7 +393,7 @@ def save(
         "lecture": lecture,
         "decisions_sha256": decisions_sha(data_base_dir, chapter.passage, lecture),
         "model": model,
-        "prompt_sha256": hashlib.sha256((system_prompt(chapter) + "\n" + prompt).encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "slides": slides,
         "unshown_references": unshown,
@@ -489,7 +517,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
     )
     prompt = user_prompt(lecture, decisions_record) + "\n\n投影片：\n" + show_slides(record["slides"])
-    answer = client.generate_json(REVIEW_PROMPT, prompt, REVIEW_SCHEMA)
+    answer = client.generate_json(for_lecture(REVIEW_PROMPT, lecture), prompt, REVIEW_SCHEMA)
     revision = int(record.get("revision", 0))
     out = {
         "slides_sha256": chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture)),
@@ -532,7 +560,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
         + "\n\n審稿人的意見：\n" + findings
     )
-    response = client.generate_json(system_prompt(chapter) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
+    response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")

@@ -81,6 +81,8 @@ export default function ChapterListener({
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
   const [showLeftOut, setShowLeftOut] = useState(false);
+  // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
+  const [aiVoice, setAiVoice] = useState(false);
   const [position, setPosition] = useState({ clip: 0, time: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -95,11 +97,12 @@ export default function ChapterListener({
     // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
     // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
     let alive = true;
-    fetch(`/api/public/original-audio/${passage}`, { cache: "no-store" })
+    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data) => {
         if (!alive) return;
         const loaded: Section[] = data.sections ?? [];
+        setAiVoice(Boolean(data.ai_voice));
         const list = playlist(loaded, false);
         const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
         const first = Math.max(0, list.findIndex((item) => item.section === wanted));
@@ -380,6 +383,11 @@ export default function ChapterListener({
         <h1 className="font-serif text-lg font-bold">
           {title}
           <span className="ml-2 font-sans text-sm font-normal text-stone-500">{source}</span>
+          {aiVoice && (
+            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
+              AI 朗讀
+            </span>
+          )}
         </h1>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-stone-600">段落</span>
@@ -404,7 +412,7 @@ export default function ChapterListener({
               onChange={(event) => switchLeftOut(event.target.checked)}
               className="h-4 w-4 accent-stone-500"
             />
-            顯示其餘部分（灰色）
+            {aiVoice ? "顯示生活應用與附錄（灰色）" : "顯示其餘部分（灰色）"}
           </label>
         )}
       </header>

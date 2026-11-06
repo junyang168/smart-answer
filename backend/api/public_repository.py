@@ -160,10 +160,32 @@ def chapter_pages() -> dict[tuple[str, int], dict[str, Any]]:
     return pages
 
 
+def notes_pages() -> dict[tuple[str, int], dict[str, Any]]:
+    """教授釋經筆記有按章页面的章（AI 朗读，`notes_chapters.json`）。"""
+
+    from backend.api.config import DATA_BASE_PATH
+    from backend.pipeline import notes_chapter
+    from backend.api.scripture import parse_reference
+
+    pages: dict[tuple[str, int], dict[str, Any]] = {}
+    for chapter in notes_chapter.load_chapters(Path(DATA_BASE_PATH)).values():
+        reference = parse_reference(chapter.passage)
+        pages[(str(reference["slug"]).lower(), int(reference["chapter"]))] = {
+            "kind": "chapter",
+            "source": NOTES,
+            "passage": chapter.passage,
+            "title": "",
+            "media": "audio",
+            "ai_voice": True,
+        }
+    return pages
+
+
 def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
     """第二层：这卷书有讲道的章，各来源各几篇，有什么页面，有没有综合文章。"""
 
     pages = chapter_pages()
+    notes = notes_pages()
     by_chapter: dict[int, list[dict[str, Any]]] = {}
     for item in materials:
         for book, chapter in item["chapters"]:
@@ -180,6 +202,12 @@ def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dic
                 "sources": _count(by_chapter[chapter]),
                 "page": {k: v for k, v in pages[(slug, chapter)].items() if k != "passages"}
                 if (slug, chapter) in pages else None,
+                # 别的来源也有按章页面时（教授釋經筆記的 AI 朗读），书卷页按选的来源找。
+                "pages": [
+                    {k: v for k, v in page.items() if k != "passages"}
+                    for page in (pages.get((slug, chapter)), notes.get((slug, chapter)))
+                    if page
+                ],
                 "articles": [a for a in articles if (slug, chapter) in a["chapters"]],
             }
             for chapter in sorted(by_chapter)
@@ -191,6 +219,7 @@ def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: l
     """第三层：一章，按来源分开；有按章页面的来源给页面，其余列出讲道。"""
 
     page = chapter_pages().get((slug, number))
+    notes = notes_pages()
     here = [item for item in materials if (slug, number) in item["chapters"]]
     sources = []
     for entry in _count(here):
@@ -204,6 +233,8 @@ def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: l
         }
         if page and page["source"] == entry["name"]:
             source["page"] = page
+        elif entry["name"] == NOTES and (slug, number) in notes:
+            source["page"] = notes[(slug, number)]
         sources.append(source)
     if not sources:
         raise HTTPException(status_code=404, detail="這一章還沒有講道。")
