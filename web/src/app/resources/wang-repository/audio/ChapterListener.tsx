@@ -81,6 +81,8 @@ export default function ChapterListener({
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
   const [showLeftOut, setShowLeftOut] = useState(false);
+  // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
+  const [aiVoice, setAiVoice] = useState(false);
   const [position, setPosition] = useState({ clip: 0, time: 0 });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -95,11 +97,12 @@ export default function ChapterListener({
     // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
     // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
     let alive = true;
-    fetch(`/api/public/original-audio/${passage}`, { cache: "no-store" })
+    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data) => {
         if (!alive) return;
         const loaded: Section[] = data.sections ?? [];
+        setAiVoice(Boolean(data.ai_voice));
         const list = playlist(loaded, false);
         const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
         const first = Math.max(0, list.findIndex((item) => item.section === wanted));
@@ -361,6 +364,7 @@ export default function ChapterListener({
   const leftOutPart = clip?.stretch.left_out
     ? clip.stretch.parts?.find((part) => part.start <= time && time < part.end)?.reason ?? clip.stretch.reasons?.[0]
     : null;
+  const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
   const slides = clip?.sermon.slides ?? [];
   const slide = [...slides].reverse().find((item) => item.at <= time) ?? slides[0];
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
@@ -380,6 +384,11 @@ export default function ChapterListener({
         <h1 className="font-serif text-lg font-bold">
           {title}
           <span className="ml-2 font-sans text-sm font-normal text-stone-500">{source}</span>
+          {aiVoice && (
+            <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
+              AI 朗讀
+            </span>
+          )}
         </h1>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-stone-600">段落</span>
@@ -404,16 +413,42 @@ export default function ChapterListener({
               onChange={(event) => switchLeftOut(event.target.checked)}
               className="h-4 w-4 accent-stone-500"
             />
-            顯示其餘部分（灰色）
+            {aiVoice ? "顯示生活應用與附錄（灰色）" : "顯示其餘部分（灰色）"}
           </label>
         )}
       </header>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
         <div className="min-h-0 overflow-auto rounded-xl">
-          {leftOutPart ? (
+          {table ? (
+            <section className="min-h-full overflow-auto rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
+              {slide && <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>}
+              <table className="mt-4 w-full border-collapse text-left text-[0.95rem] leading-relaxed">
+                <thead>
+                  <tr>
+                    {table.rows[0].map((cell, index) => (
+                      <th key={index} className="border-b border-slate-600 px-3 py-2 font-semibold text-amber-200">
+                        {cell}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.slice(1).map((row, index) => (
+                    <tr key={index} className="border-b border-slate-800">
+                      {row.map((cell, column) => (
+                        <td key={column} className="px-3 py-2 align-top">
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : leftOutPart ? (
             <div className="flex h-full flex-col justify-center rounded-xl border border-dashed border-stone-300 bg-stone-200/60 px-6 py-6 text-stone-600">
-              <p className="text-xs font-bold">不屬本章釋經 · 編輯整理</p>
+              <p className="text-xs font-bold">{aiVoice ? "預設收起的部分" : "不屬本章釋經 · 編輯整理"}</p>
               <p className="mt-2 leading-7">{leftOutPart}</p>
             </div>
           ) : slide ? (
@@ -448,7 +483,7 @@ export default function ChapterListener({
                       關心的是經節，不是第幾堂課（負責人 2026-11-04）。 */}
                   {startsClip && index > 0 && <hr className="my-3 border-dashed border-stone-200" />}
                   {startsClip && owner.stretch.left_out && (
-                    <p className="mb-1 text-[0.7rem] text-stone-400">不屬本章釋經</p>
+                    <p className="mb-1 text-[0.7rem] text-stone-400">{aiVoice ? "預設收起的部分" : "不屬本章釋經"}</p>
                   )}
                   <button
                     ref={here ? currentLine : undefined}

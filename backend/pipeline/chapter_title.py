@@ -12,6 +12,10 @@
 用法::
 
     backend/.venv/bin/python -m backend.pipeline.chapter_title mat-5-1-48
+    backend/.venv/bin/python -m backend.pipeline.chapter_title mat-5-1-48 --source 教授釋經筆記
+
+教授釋經筆記的按章页面（AI 朗读）也一样写这一句，跟讲道一致（负责人 2026-11-06），
+另存一份，不跟同一章讲道的那一句互相覆盖。
 """
 
 from __future__ import annotations
@@ -49,8 +53,34 @@ RESPONSE_SCHEMA = {
 }
 
 
-def record_path(data_base_dir: Path, passage: str) -> Path:
-    return Path(data_base_dir) / "chapter_slides" / passage / "chapter-title.json"
+NOTES_WORDING = (("馬太福音講座", "馬太福音釋經筆記"), ("各堂課的投影片", "各篇筆記的投影片"))
+
+
+def _notes(source: str) -> bool:
+    from backend.pipeline import notes_chapter
+
+    return source == notes_chapter.NOTES_SOURCE
+
+
+def system_prompt(source: str = "") -> str:
+    prompt = SYSTEM_PROMPT
+    if _notes(source):
+        for old, new in NOTES_WORDING:
+            prompt = prompt.replace(old, new)
+    return prompt
+
+
+def record_path(data_base_dir: Path, passage: str, source: str = "") -> Path:
+    name = "chapter-title-notes.json" if _notes(source) else "chapter-title.json"
+    return Path(data_base_dir) / "chapter_slides" / passage / name
+
+
+def chapters(data_base_dir: Path, source: str = "") -> dict[str, Chapter]:
+    if _notes(source):
+        from backend.pipeline import notes_chapter
+
+        return notes_chapter.load_chapters(Path(data_base_dir))
+    return chapter_material.CHAPTERS
 
 
 def _slides_shas(chapter: Chapter, data_base_dir: Path) -> dict[str, str] | None:
@@ -68,9 +98,10 @@ def _slides_shas(chapter: Chapter, data_base_dir: Path) -> dict[str, str] | None
 
 def user_prompt(chapter: Chapter, data_base_dir: Path) -> str:
     parts = []
+    unit = "篇" if _notes(chapter.source) else "堂"
     for number, lecture in enumerate(chapter.lectures, 1):
         record = chapter_slides.load_record(data_base_dir, chapter.passage, lecture) or {}
-        lines = [f"第 {number} 堂"]
+        lines = [f"第 {number} {unit}"]
         for slide in record.get("slides") or []:
             lines.append(f"- {slide['title']}")
             lines.extend(f"  · {point['text']}" for point in slide.get("points") or [])
@@ -89,11 +120,11 @@ def check(title: str) -> list[str]:
     return problems
 
 
-def load(data_base_dir: Path, passage: str) -> str | None:
+def load(data_base_dir: Path, passage: str, source: str = "") -> str | None:
     """存档的一句；哪一堂投影片重做过、或没有存档，就是 None。"""
 
-    chapter = chapter_material.CHAPTERS.get(passage)
-    path = record_path(data_base_dir, passage)
+    chapter = chapters(data_base_dir, source).get(passage)
+    path = record_path(data_base_dir, passage, source)
     if chapter is None or not path.exists():
         return None
     record = json.loads(path.read_text(encoding="utf-8"))
@@ -108,15 +139,17 @@ def decide(chapter: Chapter, *, data_base_dir: Path, client: Any, force: bool = 
     shas = _slides_shas(chapter, data_base_dir)
     if shas is None:
         return {"passage": chapter.passage, "status": "no_slides"}
-    if not force and load(data_base_dir, chapter.passage):
+    source = chapter.source if _notes(chapter.source) else ""
+    if not force and load(data_base_dir, chapter.passage, source):
         return {"passage": chapter.passage, "status": "unchanged"}
     prompt = user_prompt(chapter, data_base_dir)
-    title = str(client.generate_json(SYSTEM_PROMPT, prompt, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
+    system = system_prompt(source)
+    title = str(client.generate_json(system, prompt, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
     problems = check(title)
     if problems:
         # 四个主题的章常写过长（太 12 两次 34 字）；告诉它哪里不对，再写一次，只一次。
         retry = f"{prompt}\n\n你先前寫的「{title}」不能用：{'；'.join(problems)}。請重寫，保留最主要的主題。"
-        title = str(client.generate_json(SYSTEM_PROMPT, retry, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
+        title = str(client.generate_json(system, retry, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
         problems = check(title)
     if problems:
         return {"passage": chapter.passage, "status": "rejected", "title": title, "problems": problems}
@@ -126,10 +159,10 @@ def decide(chapter: Chapter, *, data_base_dir: Path, client: Any, force: bool = 
         "title": title,
         "slides_sha256": shas,
         "model": getattr(client, "model", ""),
-        "prompt_sha256": hashlib.sha256((SYSTEM_PROMPT + prompt).encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256((system + prompt).encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    path = record_path(data_base_dir, chapter.passage)
+    path = record_path(data_base_dir, chapter.passage, source)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"passage": chapter.passage, "status": "saved", "title": title}
@@ -137,7 +170,8 @@ def decide(chapter: Chapter, *, data_base_dir: Path, client: Any, force: bool = 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("passage", choices=sorted(chapter_material.CHAPTERS))
+    parser.add_argument("passage")
+    parser.add_argument("--source", default="", help="教授釋經筆記：写 AI 朗读页面那一句")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
@@ -145,8 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     from backend.api.config import DATA_BASE_PATH
     from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 
+    found = chapters(Path(DATA_BASE_PATH), args.source)
+    if args.passage not in found:
+        parser.error(f"没有这一章：{args.passage}（可选：{', '.join(sorted(found))}）")
     report = decide(
-        chapter_material.CHAPTERS[args.passage],
+        found[args.passage],
         data_base_dir=Path(DATA_BASE_PATH),
         client=ClaudeSubscriptionClient(model=args.model),
         force=args.force,
