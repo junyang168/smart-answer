@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer、神學編輯
 > **類型**：規範
 > **狀態**：當前目標規範；首版 CLI、持久佇列、進度 UI、媒體及候選交接已實作。第 12.1 節明列目前範圍與未完成項；尚未部署 production。
-> **與代碼對齊**：2026-11-06（核對到 `d1fe1b73`；第 3–11 節描述完整目標，不表示每項已實作；當前可執行入口以第 12.1 節為準）
+> **與代碼對齊**：2026-11-06（核對到 `8a3af43c`；第 3–11 節描述完整目標，不表示每項已實作；當前可執行入口以第 12.1 節為準）
 > **權威範圍**：資料夾匯入、查重、可續跑轉錄、媒體搬移與壓縮、網站和文庫交接；不取代人工校對、來源准入或 Claim／CVP 規則。
 
 ## 目錄
@@ -319,6 +319,9 @@ backend/.venv/bin/python -m backend.pipeline.media_batch plan \
 backend/.venv/bin/python -m backend.pipeline.media_batch start --batch BATCH_ID --workers 4
 backend/.venv/bin/python -m backend.pipeline.media_batch status --batch BATCH_ID
 
+# 由已保存回覆補算費用，不呼叫模型、不改原預留台帳。
+backend/.venv/bin/python -m backend.pipeline.media_batch reconcile-costs --batch BATCH_ID
+
 # 與 UI 同一控制介面，REVISION 取最新 status，OPERATION_ID 每次指令固定。
 backend/.venv/bin/python -m backend.pipeline.media_batch pause \
   --batch BATCH_ID --revision REVISION --operation OPERATION_ID
@@ -327,6 +330,8 @@ backend/.venv/bin/python -m backend.pipeline.media_batch resume \
 ```
 
 `run` 是前台入口，`--drain` 在無可執行工作時退出；`start` 讓 controller 等待 UI 暫停／繼續／重試，全部工作完成後退出。若完成後另有失敗重試需求，須明示再次 `start`；UI 不會從 GET 偷啟程序。`reconcile` 只在舊工作沒有活躍租約鎖、且心跳過期時將其標為中斷或未知。`retry` 不能重發未知模型呼叫。`stop` 先暫停，待在途 task 排空才卸載本批 supervisor。
+
+費用估算按已保存的 token／音訊時長及明示費率計算，不是供應商帳單。派工預算佔用為「已完成且有可信用量的保守費用估算＋在途／結果不明／缺少用量的完整預留」，同一批次短交易串行檢查；歷次預留及呼叫累計保留、不清零，避免將固定保守預留誤當已花費。獲明示授權後可用 `raise-budget --batch BATCH_ID --revision REVISION --operation OPERATION_ID --budget-usd NEW_CAP --reason AUTHORIZATION` 追加較高上限；控制台帳記錄授權理由、舊版本及新上限，來源設定與原呼叫次數上限不變。費率／用量缺失時顯示待彙整，不把未知費用顯示為零。
 
 進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對管理員身份；前後端共用既有簽名身份。Operation Dashboard 搜尋／篩選涵蓋完整檔案清單；舊診斷批次的講次篩選仍明示只作用於本頁。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。轉錄批次頁可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
 
