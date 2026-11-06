@@ -1075,7 +1075,8 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
         # own evidence, never invent a citation on behalf of the reviewer.
         location_basis = None
         if (not located and role == 'opus'
-                and error == 'own Evidence assessment borrowed non-owned Evidence or a whole paragraph'):
+                and error in {'own Evidence assessment borrowed non-owned Evidence or a whole paragraph',
+                              'professor judgment cannot be supported only by context/ineligible Evidence'}):
             rows = {**materials['before'], **{k: {'payload':v}
                 for k,v in cm.source.index(candidate.records).items()}}
             from backend.pipeline.claim_evidence_review import BindingAssessment
@@ -1083,9 +1084,15 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
                 assessment = BindingAssessment.model_validate(item)
                 owned = packet.get('own_evidence_bindings', {}).get(assessment.claim_key, {})
                 borrowed = set(assessment.evidence_keys) - set(owned)
-                if not borrowed or not borrowed <= set(rows):
+                eligibility_rejection = error == 'professor judgment cannot be supported only by context/ineligible Evidence'
+                cited = set(assessment.evidence_keys) & set(owned)
+                if eligibility_rejection:
+                    if (not assessment.sufficient or assessment.claim_use != 'professor_judgment'
+                            or not cited or any(owned[k]['support_eligibility'] in {'eligible', 'eligible_candidate'} for k in cited)):
+                        continue
+                elif not borrowed or not borrowed <= set(rows):
                     continue
-                for key in sorted(owned):
+                for key in sorted(cited if eligibility_rejection else owned):
                     evidence = rows.get(key, {}).get('payload', {})
                     fragments = evidence.get('source_fragment_ids', []) + ([evidence['source_fragment_id']] if evidence.get('source_fragment_id') else [])
                     for fid in fragments:
@@ -1097,7 +1104,8 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
                         located.append(citation)
                         location_basis = {'kind':'program_bound_own_evidence', 'claim_key':assessment.claim_key,
                             'evidence_key':key, 'fragment_key':'source_fragments/' + fid,
-                            'borrowed_keys':sorted(borrowed)}
+                            **({'ineligible_evidence_keys':sorted(cited)} if eligibility_rejection else
+                               {'borrowed_keys':sorted(borrowed)})}
                         break
                     if located:break
                 if located:break
