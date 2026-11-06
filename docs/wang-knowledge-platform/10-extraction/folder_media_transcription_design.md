@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer、神學編輯
 > **類型**：規範
 > **狀態**：當前目標規範；首版 CLI、持久佇列、進度 UI、媒體及候選交接已實作。第 12.1 節明列目前範圍與未完成項；尚未部署 production。
-> **與代碼對齊**：2026-11-06（核對到 `d8e8f400`；第 3–11 節描述完整目標，不表示每項已實作；當前可執行入口以第 12.1 節為準）
+> **與代碼對齊**：2026-11-06（核對到 `46ed7214`；第 3–11 節描述完整目標，不表示每項已實作；當前可執行入口以第 12.1 節為準）
 > **權威範圍**：資料夾匯入、查重、可續跑轉錄、媒體搬移與壓縮、網站和文庫交接；不取代人工校對、來源准入或 Claim／CVP 規則。
 
 ## 目錄
@@ -230,6 +230,12 @@ slide OCR／SVG 是獨立非口述候選，讀者可參考，不能因網站能�
 
 ### 11.1 頁面與範圍
 
+當前主要入口是 Operation Dashboard：以來源資料夾的完整檔案清單為分母，包含尚未下載、待查重／排程、待組裝、講員待確認、排隊／執行中、失敗、已有逐字稿、重複副本及非影音。檔名、資料夾、已知講道標題、實際階段與等待原因均須可見；未知標題明示尚未辨識，不能讓 `audio-pilot` 等暫存名代替講道來源。診斷節錄須標出原講道與取樣範圍，不計為完整講道處理完成。
+
+已實作的檔案總覽在 SQL 端先搜尋／篩選整個資料夾再分頁；檔案數與講次數分開。它讀取複製工作既有的清單／回執，不接管下載、不修改 OneDrive 或複製目錄。獨立同步程序每 15 秒將狀態寫入台帳；失敗時保留最後確認結果及錯誤，超過 45 秒未同步須明示過期。GET 僅讀取台帳。既有診斷批次／窗口明細保留在各自批次連結，主總覽優先選擇真實資料夾清單。
+
+「已有逐字稿」由正規化原始檔名對照既有 item，再讀取實際非空逐字稿確認，標題來自既有目錄；只看目錄 `status` 或同名檔案不足。此分類不代表原始音訊已完成聲學判同。檔名匹配會阻擋未核實的重新轉錄；付費派工前仍按來源身份核對，不能把檔名匹配寫成 PCM／聲學證明。資料夾內相同 bytes hash 的副本另列，兩類不得混成一個沒有說明的重複數。
+
 在既有 Admin 導覽新增「批次轉錄」，目標路徑 `/admin/media-batches`，點入 `/admin/media-batches/<batch_id>`；CLI 啟動後輸出同一詳情頁連結。桌面用表格，手機用逐講卡片。第一版只用一個總覽與一個批次詳情頁，詳情在頁內展開，不另造圖表儀表板或另一套 editor。
 
 第一版限既有 admin 角色查看與控制，前端及後端都檢查 session／角色；不因 beta tester 有編輯權限就自動授予批次花費、磁碟操作權。候選的「開啟校對」仍依原 editor 權限。worker 回執經既有 backend 讀取，不向瀏覽器開放 SSD、資料庫或 worker 埠。
@@ -292,6 +298,13 @@ UI 不提供「強制解鎖」「忽略 hash」或把未知呼叫當失敗重試
 # 在環境設定 MEDIA_BATCH_DATABASE_URL；不得將連線密碼寫入操作紀錄。
 backend/.venv/bin/python -m backend.pipeline.media_batch install
 
+# 從既有複製回執建立完整 Operation Dashboard，不派轉錄或模型工作。
+backend/.venv/bin/python -m backend.pipeline.media_batch inventory \
+  --manifest INVENTORY_JSON --receipts VERIFIED_JSONL --title TITLE \
+  --catalog-root EXISTING_DATA_ROOT --artifact-root ARTIFACT_ROOT \
+  --media-root MEDIA_ROOT --review-root REVIEW_ROOT --capacity-root CAPACITY_ROOT
+# 對輸出的 batch ID 執行 start，會只啟動清單同步，不啟動 ASR。
+
 # 首次明示建立舊站索引。只讀既有稿件，不搬動或改寫人工稿。
 backend/.venv/bin/python -m backend.pipeline.media_batch index-existing \
   --review-root REVIEW_ROOT --media-root MEDIA_ROOT
@@ -315,7 +328,7 @@ backend/.venv/bin/python -m backend.pipeline.media_batch resume \
 
 `run` 是前台入口，`--drain` 在無可執行工作時退出；`start` 讓 controller 等待 UI 暫停／繼續／重試，全部工作完成後退出。若完成後另有失敗重試需求，須明示再次 `start`；UI 不會從 GET 偷啟程序。`reconcile` 只在舊工作沒有活躍租約鎖、且心跳過期時將其標為中斷或未知。`retry` 不能重發未知模型呼叫。`stop` 先暫停，待在途 task 排空才卸載本批 supervisor。
 
-進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對管理員身份；前後端共用既有簽名身份。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。搜尋和篩選明示只作用於本頁。頁面可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
+進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對管理員身份；前後端共用既有簽名身份。Operation Dashboard 搜尋／篩選涵蓋完整檔案清單；舊診斷批次的講次篩選仍明示只作用於本頁。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。轉錄批次頁可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
 
 | 已實作範圍 | 實際行為 |
 | --- | --- |
