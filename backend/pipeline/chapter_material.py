@@ -32,6 +32,18 @@ _NYSC_2 = "2011 NYSC 專題：馬太福音釋經（二）"
 _NYSC_3 = "2012 NYSC 專題：馬太福音釋經（三）"
 
 
+def _nysc_2(chapter: int, lectures: tuple[int, ...], sections: tuple[str, ...]) -> Chapter:
+    """2011（二）的太 6–7（负责人 2026-11-05：「完成 5-7」）；选堂同 `_nysc_3`。"""
+
+    last = sections[-1].rsplit("-", 1)[1]
+    return Chapter(
+        passage=f"mat-{chapter}-1-{last}",
+        series=_NYSC_2,
+        lectures=tuple(f"{_NYSC_2}{n}" for n in lectures),
+        sections=tuple(f"mat-{chapter}-{span}" for span in sections),
+    )
+
+
 def _nysc_3(chapter: int, lectures: tuple[int, ...], sections: tuple[str, ...]) -> Chapter:
     """2012（三）讲太 8–15（负责人 2026-11-05：「你做一下 8-15」）。
 
@@ -69,6 +81,8 @@ CHAPTERS: dict[str, Chapter] = {
     ),
     # 和合本（修订版）小标题的分段。
     **{chapter.passage: chapter for chapter in (
+        _nysc_2(6, (5, 6), ("1-4", "5-15", "16-18", "19-24", "25-34")),
+        _nysc_2(7, (1, 5, 6), ("1-6", "7-12", "13-14", "15-20", "21-23", "24-27", "28-29")),
         _nysc_3(8, (1,), ("1-4", "5-13", "14-17", "18-22", "23-27", "28-34")),
         _nysc_3(9, (1,), ("1-8", "9-13", "14-17", "18-26", "27-31", "32-34", "35-38")),
         _nysc_3(10, (1, 2), ("1-4", "5-15", "16-25", "26-33", "34-39", "40-42")),
