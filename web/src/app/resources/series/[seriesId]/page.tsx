@@ -1,34 +1,27 @@
 // app/resources/series/[seriesId]/page.tsx
-"use client"; // ✅ 將頁面本身標記為客戶端組件，以便使用 hook
-
-import { useParams } from 'next/navigation';
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
+import { StaffOnly } from '@/app/components/common/StaffOnly';
 import { SeriesPlayerView } from '@/app/components/series/SeriesPlayerView';
 import { Suspense } from 'react';
 
-const SeriesDetailFallback = () => <div className="text-center py-20">正在準備播放列表...</div>;
-
 export default function SeriesDetailPage() {
-  const params = useParams();
-  // 由於我們不知道系列標題，所以麵包屑可以稍微簡化，或在子組件加載後再更新
-  // 這裡採用簡化方案
-  const seriesTitle = typeof params.seriesId === 'string' 
-    ? decodeURIComponent( params.seriesId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) 
-    : '系列詳情';
-
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: 'AI 輔助查經', href: '/resources' },
-    { name: '系列講道', href: '/resources/series' },
-    { name: seriesTitle },
+    { name: '講道中心', href: '/resources/sermons' },
+    { name: '講道系列', href: '/resources/series' },
   ];
 
   return (
-    <div className="container mx-auto px-6 py-12">
-      <Breadcrumb links={breadcrumbLinks} />
-      <Suspense fallback={<SeriesDetailFallback />}>
-        <SeriesPlayerView />
-      </Suspense>
+    <div className="min-h-screen bg-stone-50">
+      <div className="container mx-auto max-w-5xl px-6 py-12">
+        <Breadcrumb links={breadcrumbLinks} />
+        <StaffOnly>
+          <Suspense fallback={null}>
+            <SeriesPlayerView />
+          </Suspense>
+        </StaffOnly>
+      </div>
     </div>
   );
 }
