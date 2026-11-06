@@ -170,3 +170,23 @@ def test_direct_store_apply_requires_exact_read_set(synced_evidence):
     with pytest.raises(ValueError,match='exact plan and read pins'):
         store.apply_plan(plan,metadata={'migration_plan':m.binding(root/'plan.json')})
     assert store.get_record_state('claims','C')==before
+
+
+def test_real_locator_sync_preserves_ai_spot_check_reassessment_admission(synced_evidence):
+    import json
+    from backend.tests.test_claim_metadata_projection import seed_marker
+    from backend.pipeline.claim_metadata_projection import sampling_marker
+    from backend.pipeline import claim_management as cm,claim_management_intake as intake
+    store,root,_,_=synced_evidence
+    seed_marker(store,None)
+    with store.connect()as conn:
+        conn.execute("UPDATE wang_knowledge.review_events SET artifact=artifact||%s::jsonb WHERE collection='claims' AND object_id='C'",(json.dumps({'source_id':'S'}),))
+    prepare(synced_evidence);a.apply(store,root)
+    state=store.get_record_state('claims','C')
+    assert state['payload']['review_status']=='human_review_required'
+    with store.connect()as conn,conn.cursor()as cursor:
+        proof=sampling_marker(cursor,'C',cm.model_state(state))
+    assert proof and proof['before_pin']==[state['revision'],state['content_sha256'],False]
+    prepared=intake.prepare(['C'],root.parent/'content-refresh',instruction='Review current teaching after program-only locator migration',store=store)
+    assert prepared['manifest'] and not prepared['excluded']
+    assert store.get_record_state('claims','C')==state

@@ -70,7 +70,8 @@ def relation_endpoint_instruction():
 
 
 def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None, creation_count=1, groups=None,
-            legacy_ai_findings_direction=None, source_epoch_reassessment=None, include_question_evidence=False):
+            legacy_ai_findings_direction=None, source_epoch_reassessment=None, include_question_evidence=False,
+            disjoint_topic_unit=None):
     """Resolve own sources and content permissions, then bind one action per ID.
 
     The instruction records the actual caller's direction, never a content pass.
@@ -105,6 +106,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             or selected.independent_audit_required):
         raise ValueError('Claim list intake requires the scoped Opus-only content Update policy')
     # Execution artifacts must survive moving/removing the development checkout.
+    if disjoint_topic_unit is not None:
+        if not selected.review_unit_contract:
+            raise ValueError('topic preparation requires the bounded review policy')
+        from backend.pipeline.claim_topic_units import validate_preparation
+        validate_preparation(disjoint_topic_unit, ids, groups or [[cid] for cid in ids], creation_count)
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}
@@ -118,6 +124,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
     if source_epoch_reassessment is not None:
         check_binding(source_epoch_reassessment)
         intent['source_epoch_reassessment'] = source_epoch_reassessment
+    if disjoint_topic_unit is not None:
+        intent['disjoint_topic_unit'] = disjoint_topic_unit
     if include_question_evidence:
         intent['include_question_evidence'] = True
     immutable(root / 'intake.json', intent)
@@ -263,6 +271,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             'request': request.model_dump(mode='json', exclude={'authorization', 'policy'}),
             'policy': policy_binding, 'required_maintenance_keys': required,
             'review_questions': [instruction]}
+        if disjoint_topic_unit is not None:
+            authorization['disjoint_topic_unit'] = disjoint_topic_unit
         reopened = {key: proof for key, proof in legacy_markers.items() if key in request.target_keys}
         if reopened:
             authorization['legacy_ai_findings_refresh'] = {
@@ -275,6 +285,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:
+            from backend.pipeline.claim_source_binding_projection import CONTRACT as BINDING_PROJECTION
+            authorization['source_binding_projection'] = BINDING_PROJECTION
             from backend.pipeline.claim_direct_scope import evidence_owner_references, shared_support_owner_references
             visible = {k: before[k] for k in scope(request, before)['record_keys']}
             owners = evidence_owner_references(request, visible, before)

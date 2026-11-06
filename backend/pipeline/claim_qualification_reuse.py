@@ -304,7 +304,7 @@ def current_pins(store,cursor,value):
             actual_write_keys=[d['record_key'] for d in peer['candidate']['dispositions'] if d['action']!='retain'])
         if 'human_source_decisions' in peer['materials']:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor,peer['materials']['unit_request']['source_bindings'],peer['materials']['human_source_decisions'])
+            assert_current(cursor,peer['materials']['unit_request']['source_bindings'],peer['materials']['human_source_decisions'],request=peer['materials']['unit_request'])
     for key,eid in reuse['event_ids'].items():
         event=cursor.execute('SELECT artifact,decision FROM wang_knowledge.review_events WHERE review_event_id=%s',(eid,)).fetchone()
         if not event or event[0]!=core or event[1]!='review_context_revalidated':raise ValueError('qualification reuse event drift')
@@ -337,7 +337,7 @@ def admit(store,cursor,original_id,peer_id):
         for value in (old,peer):
             if 'human_source_decisions' in value['materials']:
                 from backend.pipeline.claim_human_source import assert_current
-                assert_current(cursor,value['materials']['unit_request']['source_bindings'],value['materials']['human_source_decisions'])
+                assert_current(cursor,value['materials']['unit_request']['source_bindings'],value['materials']['human_source_decisions'],request=value['materials']['unit_request'])
     peer_pins=fresh
     if bounded:
         fresh={k:peer_pins.get(k,pin) for k,pin in original.items()}
