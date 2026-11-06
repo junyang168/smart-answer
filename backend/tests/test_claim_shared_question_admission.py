@@ -133,3 +133,44 @@ def test_only_direct_neighbour_evidence_owner_links_can_be_added(claims,connecte
     assert (result is None)==allowed
     from backend.pipeline.claim_direct_scope import scope
     assert scope(request,before)['content_claim_keys']==['claims/C']
+
+
+@pytest.mark.parametrize('eligibility', ['withheld_unreviewed', 'ineligible', 'context_only'])
+@pytest.mark.parametrize('bad_fragment', [False, True])
+def test_quoteless_ineligible_evidence_pass_resumes_without_changing_eligibility_or_calls(claims, eligibility, bad_fragment):
+    from backend.tests.test_claim_management_intake import pass_review
+    from backend.pipeline.claim_review_recovery import resume_rejected_output
+    from backend.pipeline.source_reconciliation_runner import read, body
+    store, root = claims
+    evidence = store.get_record_state('evidence_steps', 'EC')['payload']
+    evidence['support_eligibility'] = eligibility
+    store.apply_plan(store.plan_package({'package_id':'ineligible-own-evidence', 'evidence_steps':[evidence]}))
+    if bad_fragment:
+        fragment = store.get_record_state('source_fragments', 'FC')['payload']
+        fragment['verbatim_excerpt'] = 'Not in the current original source.'
+        store.apply_plan(store.plan_package({'package_id':'invalid-location', 'source_fragments':[fragment]}))
+    prepared = intake.prepare(['C'], root, instruction='Refresh C and assess its own Evidence',
+        policy=cm.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v1.json', store=store, groups=[['C']])
+    job = json.loads(Path(prepared['manifest']['path']).read_text())['jobs'][0]
+    request = cm.Request.model_validate_json(Path(job['request']['path']).read_text())
+    ports = SyntheticPorts(store, root, opus=pass_review)
+    result = execute_claim_management(store, request, root=job['root'], ports=ports)
+    error = 'professor judgment cannot be supported only by context/ineligible Evidence'
+    assert result['detail'] == error
+    rid = result['returned_rejected_call'].rsplit(':', 1)[0]
+    raw = (Path(job['root'])/rid/'opus.raw.json').read_bytes()
+    if bad_fragment:
+        with pytest.raises(ValueError, match='not an exact quote'):
+            resume_rejected_output(store, rid, role='opus', error=error)
+        assert (Path(job['root'])/rid/'opus.raw.json').read_bytes() == raw
+        assert ports.calls == ['opus']
+        return
+    receipt = resume_rejected_output(store, rid, role='opus', error=error)
+    record = body(read(Path(receipt['path'])))
+    assert record['input']['correction_location_basis']['ineligible_evidence_keys'] == ['evidence_steps/EC']
+    assert record['input']['correction_citation']['exact_quote'] == '甲是假设，不是断言。'
+    assert record['input']['review_not_accepted'] and record['model_calls'] == 0 and not record['new_budget']
+    assert (Path(job['root'])/rid/'opus.raw.json').read_bytes() == raw
+    assert store.get_record_state('evidence_steps','EC')['payload']['support_eligibility'] == eligibility
+    assert ports.calls == ['opus']
+    assert not (store.claim_management_qualification('C') or {}).get('ready')

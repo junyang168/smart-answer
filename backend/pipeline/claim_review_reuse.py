@@ -16,14 +16,14 @@ CONTEXT_CONTRACT = 'claim_complete_review_context_reuse_v2'
 OWN_SCOPE = 'completed_unit_single_claim_scope_v1'
 
 
-def human_evidence_snapshot(cursor, source_ids, frozen, records):
+def human_evidence_snapshot(cursor, source_ids, frozen, records, *, request=None):
     """An unrelated paragraph confirmation does not undo an unchanged review.
 
     Bind the entire current decision snapshot afterwards: a later change must
     be explicitly reconciled again, never silently inherited by this proof.
     """
     from backend.pipeline.claim_human_source import snapshot
-    current = snapshot(cursor, source_ids)
+    current = snapshot(cursor, source_ids, request=request)
     if current == frozen:
         return current
     positions = {sid: set() for sid in source_ids}
@@ -342,7 +342,7 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
                 rejection_basis(own, current, proof['protected_record_keys'], own_only=own_only))
         proof['human_source_decisions'] = human_evidence_snapshot(
             cursor, request.source_bindings, materials.get('human_source_decisions', []),
-            {k: current[k] for k in required})
+            {k: current[k] for k in required}, request=request)
     proof['proof_sha256'] = cm.sha256_json(proof)
     if changed_context:
         with store.connect() as conn, conn.cursor() as cursor:
@@ -409,13 +409,13 @@ def verify(store, cursor, claim_id, proof):
         verify_current_source_binding(bound)
     from backend.pipeline.claim_human_source import assert_current as assert_human_current
     if 'human_source_decisions' in proof:
-        assert_human_current(cursor, proof['source_bindings'], proof['human_source_decisions'])
+        assert_human_current(cursor, proof['source_bindings'], proof['human_source_decisions'], request=proof.get('scope_request'))
     else:
         # Historical proofs did not pin this separate evidence registry.
         # They can only keep their original exact decision snapshot.
         material = cursor.execute('SELECT metadata->\'materials\' FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
                                   (proof['review_run_id'],)).fetchone()[0]
-        assert_human_current(cursor, proof['source_bindings'], material.get('human_source_decisions', []))
+        assert_human_current(cursor, proof['source_bindings'], material.get('human_source_decisions', []), request=proof.get('scope_request'))
     states = store._assert_transaction_read_pins(cursor, decoded_pins(proof['read_pins']))
     snapshots = None
     if locator_rebindings := proof.get('program_locator_rebindings'):
@@ -603,7 +603,7 @@ def verify_context_reviews(store, cursor, proof):
             # an unrelated paragraph is not a reason to repeat its audit.
             human_evidence_snapshot(cursor, request.source_bindings,
                 peer['materials']['human_source_decisions'],
-                {cm.source.key(*k):saved_records[cm.source.key(*k)] for k in relevant})
+                {cm.source.key(*k):saved_records[cm.source.key(*k)] for k in relevant}, request=request)
         # Different records can be certified by different completed peers.
         # Consume only this delta's own basis, while retaining exact current
         # pins for another delta independently checked in this flat proof.

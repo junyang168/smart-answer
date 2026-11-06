@@ -53,7 +53,7 @@ def recover_refused_admission(store, action_id, *, authorization):
         store._assert_transaction_read_pins(cursor, pins(records))
         if 'human_source_decisions' in value:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, value['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, value['human_source_decisions'], request=request)
         destination = Path(value['execution_root']) / 'zero-call-admission-recovery'
         contract = cm.audit_contract(destination, policy)
         record = {'original_parent': deepcopy(value), 'authorization': authorization,
@@ -422,7 +422,7 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in expected.items()}))
             if 'human_source_decisions' in value['materials']:
                 from backend.pipeline.claim_human_source import assert_current
-                assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'])
+                assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'],request=unit)
         elif direction.get('refresh_transaction_context') is True:
             # A broader SQL consumer may change without changing any fact
             # actually read by either model. Prove that separation rather
@@ -823,7 +823,7 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
             raise ValueError('invalid-review input recovery cannot refresh a changed source')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'], request=request)
         original = deepcopy(value); original_parent = deepcopy(parent)
         destination = root/('invalid-review-input-'+sha256_json(direction)[:20])
         contract = cm.audit_contract(destination,policy)
@@ -1075,7 +1075,8 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
         # own evidence, never invent a citation on behalf of the reviewer.
         location_basis = None
         if (not located and role == 'opus'
-                and error == 'own Evidence assessment borrowed non-owned Evidence or a whole paragraph'):
+                and error in {'own Evidence assessment borrowed non-owned Evidence or a whole paragraph',
+                              'professor judgment cannot be supported only by context/ineligible Evidence'}):
             rows = {**materials['before'], **{k: {'payload':v}
                 for k,v in cm.source.index(candidate.records).items()}}
             from backend.pipeline.claim_evidence_review import BindingAssessment
@@ -1083,9 +1084,15 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
                 assessment = BindingAssessment.model_validate(item)
                 owned = packet.get('own_evidence_bindings', {}).get(assessment.claim_key, {})
                 borrowed = set(assessment.evidence_keys) - set(owned)
-                if not borrowed or not borrowed <= set(rows):
+                eligibility_rejection = error == 'professor judgment cannot be supported only by context/ineligible Evidence'
+                cited = set(assessment.evidence_keys) & set(owned)
+                if eligibility_rejection:
+                    if (not assessment.sufficient or assessment.claim_use != 'professor_judgment'
+                            or not cited or any(owned[k]['support_eligibility'] in {'eligible', 'eligible_candidate'} for k in cited)):
+                        continue
+                elif not borrowed or not borrowed <= set(rows):
                     continue
-                for key in sorted(owned):
+                for key in sorted(cited if eligibility_rejection else owned):
                     evidence = rows.get(key, {}).get('payload', {})
                     fragments = evidence.get('source_fragment_ids', []) + ([evidence['source_fragment_id']] if evidence.get('source_fragment_id') else [])
                     for fid in fragments:
@@ -1097,7 +1104,8 @@ def rejected_model_input(value, parent, role, *, error, historical_validation=No
                         located.append(citation)
                         location_basis = {'kind':'program_bound_own_evidence', 'claim_key':assessment.claim_key,
                             'evidence_key':key, 'fragment_key':'source_fragments/' + fid,
-                            'borrowed_keys':sorted(borrowed)}
+                            **({'ineligible_evidence_keys':sorted(cited)} if eligibility_rejection else
+                               {'borrowed_keys':sorted(borrowed)})}
                         break
                     if located:break
                 if located:break
@@ -1189,7 +1197,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         if sources!=materials['sources']:raise ValueError('citation recovery source drift')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor,request.source_bindings,materials['human_source_decisions'])
+            assert_current(cursor,request.source_bindings,materials['human_source_decisions'],request=request)
         destination = Path(parent['execution_root'])/round_id/'rejected-citation-input'
         contract = cm.audit_contract(destination,policy)
         if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
@@ -1252,7 +1260,7 @@ def consumed_rejected_citations(previous,key,slot, *, historical_validation=None
     return observed if return_details else True
 
 
-def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
+def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None, review_capacity_authorization=None):
     """Resume a saved pre-review stage after a verified local fix.
 
     Transaction-only drift may rebind consumers; mixed old/new objections may
@@ -1276,6 +1284,8 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         prior_recovery = value.get('pre_review_saved_recovery')
         if prior_recovery:
             check_binding(prior_recovery)
+            if review_capacity_authorization is not None and value['materials'].get('claim_review_capacity_exception') != review_capacity_authorization:
+                raise ValueError('saved capacity recovery cannot replace its owner authorization')
             cm.require_current_implementation(parent['audit_contract'])
             if parent['result'].get('status') == 'running':
                 return prior_recovery
@@ -1338,7 +1348,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             raise ValueError('transaction recovery is limited to an existing Update')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'], request=request)
         candidate = cm.Candidate.model_validate(body(read(old_root / 'candidate.json')))
         if not unrecorded and candidate.model_dump(mode='json') != value['candidate']:
             raise ValueError('transaction recovery saved candidate drift')
@@ -1420,6 +1430,19 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
                     stream.write(payload); stream.flush(); os.fsync(stream.fileno())
         rebound = deepcopy(materials)
         rebound.update(transaction_before=current_records, audit_contract=current_contract)
+        if review_capacity_authorization is not None:
+            from backend.pipeline.claim_review_units import CAPACITY_EXCEPTION, review_capacity
+            check_binding(review_capacity_authorization)
+            direction = json.loads(cm.source.verify_file(
+                cm.source.FileBinding.model_validate(review_capacity_authorization)).read_text())
+            if (not bounded_capacity or direction.get('prior_metadata_sha256') != sha256_json(original_parent)
+                    or direction.get('materials') != binding(old_root/'materials.json')
+                    or direction.get('candidate') != binding(old_root/'candidate.json')
+                    or direction.get('round_id') != round_id):
+                raise ValueError('capacity authorization requires the exact uninvoked saved round and parent')
+            rebound[CAPACITY_EXCEPTION] = review_capacity_authorization
+            if review_capacity(rebound, candidate, []) != direction['limit']:
+                raise ValueError('capacity authorization must preserve the exact saved group')
         if bounded_capacity:
             from backend.pipeline.claim_evidence_review import freeze_initial_review_reuse
             from backend.pipeline.cvp_sql_actions import claim_management_review_packet
@@ -1469,7 +1492,10 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             **({'initial_source_reuse_invalidated': True} if initial_source_reuse else {}),
             **({'initial_review_reuse': rebound['initial_assessment_reuse'],
                 'support_reference_projection': support_projection} if bounded_capacity else {}),
-            'model_inputs_unchanged': not bounded_guard, 'candidate_sha256': candidate.digest,
+            'model_inputs_unchanged': not bounded_guard and review_capacity_authorization is None,
+            **({'review_capacity_authorization': review_capacity_authorization, 'gpt_input_unchanged': True}
+               if review_capacity_authorization is not None else {}),
+            'candidate_sha256': candidate.digest,
             'readonly_context_added_before_first_call': sorted(set(rebound['before'])-set(materials['before'])),
             'model_calls': 0, 'call_reservations_unchanged': True, 'content_approved': False}
         write(root / 'engineering-recovery.json', record)
@@ -1483,6 +1509,8 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
         if not unrecorded:
             value['stage_results']['candidate'] = binding(root / 'candidate-result.json')
         parent.update(audit_contract=current_contract, result={'status': 'running'})
+        if review_capacity_authorization is not None:
+            parent[CAPACITY_EXCEPTION] = review_capacity_authorization
         for rid, metadata in ((round_id, value), (value['parent_run_id'], parent)):
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s", (canonical_json(metadata), rid))
         return proof

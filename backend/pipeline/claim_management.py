@@ -417,6 +417,8 @@ def audit_contract(root, policy=None):
     files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     if policy is not None and policy.review_unit_contract:
         files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
+                  pipeline/'claim_topic_units.py', pipeline/'source_execution_locks.py',
+                  pipeline/'claim_source_binding_projection.py',
                   pipeline/'prompts/claim_bounded_review_unit_v1.md']
     if policy is not None and policy.retry_context_contract:
         files += [pipeline/'claim_database_retry.py', pipeline/'prompts/claim_database_retry_v1.md']
@@ -522,6 +524,8 @@ def own_source_ids(payload, records):
 
 def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None, metadata_projection=None):
     """Validate a complete candidate, never infer semantic or write approval."""
+    from backend.pipeline.claim_topic_units import assert_records
+    assert_records(request, before, candidate)
     from backend.pipeline.claim_joint_update import enabled, validate_candidate_scope
     joint = enabled(request)
     if joint:
@@ -585,6 +589,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 raise ValueError("new object lacks unique source-scoped creation permission")
             id_field = KNOWLEDGE_COLLECTIONS[collection][1]
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
+            from backend.pipeline.claim_source_binding_projection import canonical_fields
+            binding = canonical_fields(key, payload, provisional, sources)
+            mechanical |= {f for f,v in binding.items() if payload.get(f) == v}
             if set(payload) - set(grants[0].fields) - mechanical - {id_field}:
                 raise ValueError("created fields exceed creation permission")
         else:
@@ -616,6 +623,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 raise ValueError("proposed update cannot manufacture review provenance")
             changed = {k for k in set(old["payload"]) | set(payload) if old["payload"].get(k) != payload.get(k)}
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
+            from backend.pipeline.claim_source_binding_projection import canonical_fields
+            binding = canonical_fields(key, payload, {**post, **proposed}, sources)
+            mechanical |= {f for f,v in binding.items() if payload.get(f) == v}
             if changed - set(permission.fields) - mechanical - ({"review_status"} if sampling_update else set()):
                 raise ValueError("updated fields exceed original field permission")
         if disposition.action != "retire":
@@ -926,6 +936,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     if (policy.review_purpose == 'source_impact') != is_source_impact(request):
         raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    if authority.get('disjoint_topic_unit') is not None and not policy.review_unit_contract:
+        raise ValueError('topic source projection requires the bounded review policy')
     if 'retirement_reference_keys' in authority and request.operation != 'Retire':
         raise ValueError('retirement reference authority belongs only to Retire')
     expected = request.model_dump(mode="json", exclude={"authorization", "policy"})
@@ -1001,6 +1013,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     if human_source_decisions is not None:
         from backend.pipeline.claim_human_source import project
         project(sources, human_source_decisions)
+    from backend.pipeline.claim_topic_units import project_sources
+    project_sources(request, sources)
     return policy, sources
 
 
@@ -1352,6 +1366,16 @@ def goal_packet(goal):
 
 
 def model_packet(materials):
+    from backend.pipeline.claim_topic_units import assert_records, unit as topic_unit
+    topic_request = Request.model_validate(materials.get('unit_request', materials['request']))
+    assert_records(topic_request, materials['before'])
+    topic = topic_unit(topic_request)
+    if topic is not None:
+        if set(materials['sources'][topic['source_id']]['paragraphs']) != set(topic['paragraph_keys']):
+            raise ValueError('model packet violates its topic source boundary')
+        actual = set(materials.get('transaction_before', materials['before']))
+        if {k for k in actual if not k.startswith('source_documents/')} - set(topic['record_keys']):
+            raise ValueError('topic transaction footprint expanded before model dispatch')
     if 'existing_evidence_owner_claims' in materials:
         from backend.pipeline.claim_direct_scope import evidence_owner_references
         expected = evidence_owner_references(Request.model_validate(materials['unit_request']),
@@ -1364,7 +1388,7 @@ def model_packet(materials):
     if expected != materials.get('retirement_reference_claims', {}):
         raise ValueError('retirement reference facts drifted from frozen transaction context')
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse', 'program_source_quote_projection'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse', 'program_source_quote_projection', 'claim_review_capacity_exception'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))
@@ -1596,6 +1620,30 @@ def unaccepted_initial_proposal(previous, key, slot, proof):
         'proposal_not_accepted':True,'generation_consumed':True}
 
 
+def human_source_pause(previous):
+    """A returned review rejection must not hide an existing source question.
+
+    Authenticate the unaccepted answer; it remains spent and never becomes a
+    passing review. Unknown calls, provider failures and other pauses do not
+    acquire source-follow-up authority through this branch.
+    """
+    result = previous['result']
+    if result.get('reason') == 'human_required':
+        return True
+    key = result.get('returned_rejected_call')
+    slot = previous.get('call_reservations', {}).get(key, {})
+    if (result.get('status') != 'paused'
+            or result.get('reason') != 'engineering_required'
+            or result.get('detail') != 'joint Update GPT/Opus impact scope disagreement'
+            or slot.get('role') != 'opus' or slot.get('state') != 'started'
+            or key != slot.get('round_id', '') + ':opus'
+            or slot.get('round_id') not in previous.get('latest_rounds', {}).values()
+            or slot.get('rejection', {}).get('detail') != result['detail']):
+        return False
+    from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    return consumed_rejected_citations(previous, key, slot)
+
+
 def human_source_follow_up(previous, request, authority, prior_findings):
     """New human source evidence authorizes one bounded, linked follow-up.
 
@@ -1615,7 +1663,7 @@ def human_source_follow_up(previous, request, authority, prior_findings):
             or verification.get('predecessor_action_id') != old.action_id
             or verification.get('source_bindings') != old.model_dump(mode='json')['source_bindings']
             or not verification.get('user_confirmation')
-            or previous['result'].get('reason') != 'human_required'
+            or not human_source_pause(previous)
             or request.permissions != old.permissions
             or not ids or len(set(ids)) != len(ids) or set(ids) & used):
         raise ValueError('human source follow-up must bind new source evidence to the paused original scope')
@@ -1686,11 +1734,17 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     from backend.pipeline.claim_stopped_resume import authorize as authorize_stopped_resume
+    from backend.pipeline.claim_topic_units import FIELD as TOPIC_FIELD
+    old_authority = json.loads(source.verify_file(old.authorization).read_text())
+    if authority.get(TOPIC_FIELD) != old_authority.get(TOPIC_FIELD):
+        raise ValueError('continuation cannot remove or change a frozen topic boundary')
     stopped_resume = authorize_stopped_resume(previous, request, authority)
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
     subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
+    from backend.pipeline.claim_quote_projection import saved_highlight_repair
+    quote_repair = saved_highlight_repair(previous, request, policy, authority)
     refusal_retry = authority.get('subscription_refusal_retry')
     refusal_proofs = {}
     if refusal_retry is not None:
@@ -1801,7 +1855,7 @@ def continuation_budget(previous, request, policy):
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
             or extension_basis == 'remaining_findings' and (bool(previous['findings']) or binding_repair is not None)
-                and (previous['result'].get('reason') == 'budget_exhausted' or engineering_repair is not None)
+                and (previous['result'].get('reason') in {'budget_exhausted', 'disagreement'} or engineering_repair is not None)
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
                 and bool(previous['findings'])
@@ -1997,7 +2051,9 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {**({'opus_api_transition':api_transition} if api_transition else {}),
+    return {**({'source_quote_highlight_repair':quote_repair,
+                'previous_candidates':{quote_repair['unit_id']:quote_repair['candidate']}} if quote_repair else {}),
+        **({'opus_api_transition':api_transition} if api_transition else {}),
         **({'codex_quota_resumption': quota_refusals} if quota_refusals else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
         **({'completed_no_write_binding_repair':True} if binding_repair else {}),

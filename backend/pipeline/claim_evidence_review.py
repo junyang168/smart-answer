@@ -381,8 +381,17 @@ def add_packet(packet, candidate=None, *, materials=None):
             packet['claim_scope']['content_claim_keys'] = [k for k in content if k not in reused]
             for key in reused:
                 packet['own_evidence_bindings'].pop(key, None)
-    if packet['policy'].get('review_unit_contract') and len(packet['own_evidence_bindings']) > 10:
-        raise ValueError('active review unit exceeds ten Claims; split the unit before review')
+    if packet['policy'].get('review_unit_contract'):
+        from backend.pipeline.claim_review_units import review_capacity, CAPACITY_EXCEPTION
+        maximum = review_capacity(materials, candidate, packet['own_evidence_bindings'])
+        if len(packet['own_evidence_bindings']) > maximum:
+            raise ValueError('active review unit exceeds ten Claims; split the unit before review')
+        if maximum != 10:
+            packet.setdefault('program_owned_fields', {})[CAPACITY_EXCEPTION] = {
+                'authorization': materials[CAPACITY_EXCEPTION], 'maximum_claims': maximum,
+                'instruction': 'Owner authorized this exact saved group to exceed the default capacity. '
+                    'This approves capacity only, not the statements or modifications. Independently assess every active Claim '
+                    'and its own evidence normally. No extra model calls, permissions or source paragraphs are granted.'}
     return packet
 
 

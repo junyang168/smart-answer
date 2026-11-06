@@ -95,6 +95,40 @@ def test_human_answer_reaches_both_models_and_preserves_history_with_exact_new_b
         execute_claim_management(store,fork,root=root/'fork',ports=SyntheticPorts(store,root))
 
 
+@pytest.mark.parametrize('fault', [None, 'unknown', 'other_error', 'old_round', 'gpt', 'completed'])
+def test_source_answer_after_rejected_impact_review_still_authenticates_spent_call(human_pending, monkeypatch, fault):
+    store, _, parent, request, _, _, _ = human_pending
+    parent = deepcopy(parent)
+    rid = next(iter(parent['latest_rounds'].values()))
+    key = rid + ':opus'
+    slot = {'role': 'opus', 'state': 'started', 'round_id': rid,
+            'rejection': {'detail': 'joint Update GPT/Opus impact scope disagreement'}}
+    parent['call_reservations'][key] = slot
+    parent['result'] = {'status': 'paused', 'reason': 'engineering_required',
+                        'detail': slot['rejection']['detail'], 'returned_rejected_call': key}
+    if fault == 'unknown': parent['result']['reason'] = 'call_uncertain'
+    if fault == 'other_error': parent['result']['detail'] = 'some other error'
+    if fault == 'old_round': parent['latest_rounds'] = {}
+    if fault == 'gpt': slot['role'] = 'gpt'
+    if fault == 'completed': parent['result']['status'] = 'completed'
+    calls = []
+    def authenticate(previous, actual_key, actual_slot):
+        assert previous is parent and actual_key == key and actual_slot is slot
+        calls.append(key)
+        return True
+    monkeypatch.setattr('backend.pipeline.claim_review_recovery.consumed_rejected_citations', authenticate)
+    authority = json.loads(Path(request.authorization.path).read_text())
+    if fault:
+        with pytest.raises(ValueError, match='paused original scope'):
+            cm.human_source_follow_up(parent, request, authority, parent['findings'])
+        assert calls == []
+    else:
+        before = deepcopy(parent)
+        result = cm.human_source_follow_up(parent, request, authority, parent['findings'])
+        assert result['finding_ids'] and calls == [key]
+        assert parent == before  # No status, verdict or budget rewrite.
+
+
 @pytest.mark.parametrize('human_pending', [True], indirect=True)
 @pytest.mark.parametrize('change', [None, 'transaction_consumer', 'target', 'neighbour', 'relation'])
 def test_human_follow_up_compares_the_original_model_scope_not_transaction_consumers(human_pending, change):

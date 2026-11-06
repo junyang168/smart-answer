@@ -84,12 +84,14 @@ class ScriptDelta:
         return f'{h:02}:{m:02}:{s:02}'
 
     def add_timeline(self, paragraphs):
-        paragraphs = [ p for p in paragraphs if p.get('type') != 'comment']
+        # Headings have no timeline entry and cannot anchor the following row.
+        # Filter them before selecting neighbours, as we already do comments.
+        paragraphs = [p for p in paragraphs
+                      if p.get('type') not in ('comment', 'subtitle')
+                      and not (isinstance(p.get('index'), str)
+                               and p['index'].startswith('subtitle-'))]
         for i in range(0, len(paragraphs)):
             para = paragraphs[i]
-            if isinstance(para.get('index'), str) and para['index'].startswith('subtitle-'):
-                continue
-
             if para.get('end_index'):
                 start_item = self.timelineDictionary[  para['index'] ] 
                 if start_item:

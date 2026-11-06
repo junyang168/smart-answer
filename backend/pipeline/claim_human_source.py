@@ -96,14 +96,15 @@ def register(cursor, entries, *, origin):
             cursor.execute('UPDATE wang_knowledge.human_source_decisions SET superseded_by=%s WHERE decision_id=ANY(%s)', (ident, supersedes))
 
 
-def snapshot(cursor, source_ids):
+def snapshot(cursor, source_ids, *, request=None):
     rows = cursor.execute('SELECT entry FROM wang_knowledge.human_source_decisions WHERE source_id=ANY(%s) AND superseded_by IS NULL ORDER BY decision_id',
                           (sorted(source_ids),)).fetchall()
-    return [row[0] for row in rows]
+    from backend.pipeline.claim_topic_units import human_decisions
+    return human_decisions(request, [row[0] for row in rows])
 
 
-def assert_current(cursor, source_ids, frozen):
-    if snapshot(cursor, source_ids) != frozen:
+def assert_current(cursor, source_ids, frozen, *, request=None):
+    if snapshot(cursor, source_ids, request=request) != frozen:
         raise ChangeSetConflict('human source decisions changed; review the new evidence in a new action')
 
 
