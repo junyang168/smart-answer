@@ -1,6 +1,6 @@
 {
   "name": "sunday-presenter",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "private": true,
   "description": "Sunday Presenter pilot: local PPT video and paired slide control",
   "main": "main.cjs",

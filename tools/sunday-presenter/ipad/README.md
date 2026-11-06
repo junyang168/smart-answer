@@ -39,6 +39,13 @@ and retains pairing. The scene manifest enables scene lifecycle support for
 this public API; no forced process exit or private API is used. If iPadOS
 rejects closing, the app explains the system app-switcher gesture.
 The Mac "關於 Sunday Remote" menu also shows version/build.
+On iPadOS 26, the top system menu bar also includes "關於 Sunday Remote" and
+"關閉 Sunday Remote" (Command-Q), using the same handlers as the bottom menu.
+The app configures the main menu at launch and scopes its builder to the main
+menu system. iPadOS shows that bar only with Windowed Apps or Stage Manager
+enabled; swipe down from the middle of the top edge. See
+[Apple's menu-bar instructions](https://support.apple.com/en-ie/guide/ipad/ipadb4ede9db/26/ipados/26).
+The bottom menu remains usable independently of that system setting.
 Install upgrades in place with the same bundle ID,
 Apple team/application identifier and Keychain groups; do not uninstall first.
 Keychain denial/locked-device/entitlement failures are reported as storage

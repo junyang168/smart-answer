@@ -96,7 +96,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
     private func row(_ views: [UIView]) -> UIStackView {
         let stack = UIStackView(arrangedSubviews: views); stack.axis = .horizontal; stack.spacing = 8; stack.alignment = .center; return stack
     }
-    @objc private func showAbout() {
+    @objc func showAbout() {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "未知版本"
         let build = info["CFBundleVersion"] as? String ?? "未知"
@@ -104,7 +104,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         alert.addAction(UIAlertAction(title: "關閉", style: .default))
         present(alert, animated: true)
     }
-    private func closeApp() {
+    @objc func closeApp() {
         guard let scene = view.window?.windowScene else { return }
         // Ask iPadOS to close the window and remove its app-switcher entry.
         // Lifecycle callbacks stop streaming; saved pairing is retained.
