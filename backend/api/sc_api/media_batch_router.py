@@ -48,16 +48,15 @@ def create_media_batch_router(root, store_factory=Store):
                         (result["selected"]["id"],),
                     ).fetchone()["config"]
                 result["capacity"] = capacity_status(config["capacity_root"])
-                import shutil
+                from backend.pipeline.media_batch.disk import status
 
-                result["disk"] = {}
-                for name in ("artifact_root", "media_root"):
-                    path = Path(config[name])
-                    result["disk"][name] = (
-                        dict(available_bytes=shutil.disk_usage(path).free)
-                        if path.exists()
-                        else dict(unavailable=True)
-                    )
+                try:
+                    result["disk"] = status(store, config)
+                except (OSError, ValueError):
+                    result["disk"] = {
+                        name: dict(unavailable=True)
+                        for name in ("artifact_root", "media_root")
+                    }
             return result
         except KeyError:
             raise HTTPException(404, "找不到批次")

@@ -56,7 +56,10 @@ type Snapshot = {
   offset: number;
   limit: number;
   capacity?: Record<string, { active: number; unknown: number; limit: number }>;
-  disk?: Record<string, { available_bytes?: number; unavailable?: boolean }>;
+  disk?: Record<
+    string,
+    { available_bytes?: number; reserved_bytes?: number; unavailable?: boolean }
+  >;
 };
 const names: Record<string, string> = {
   prepare: "準備音訊",
@@ -377,7 +380,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                 Object.entries(data.disk)
                   .map(
                     ([name, d]) =>
-                      `${name === "artifact_root" ? "工作碟" : "媒體碟"}：${d.unavailable ? "未掛載" : `${((d.available_bytes || 0) / 2 ** 30).toFixed(1)} GiB 可用`}`,
+                      `${name === "artifact_root" ? "工作碟" : "媒體碟"}：${d.unavailable ? "未掛載" : `${((d.available_bytes || 0) / 2 ** 30).toFixed(1)} GiB 可用／${((d.reserved_bytes || 0) / 2 ** 30).toFixed(1)} GiB 已預約`}`,
                   )
                   .join(" · ")}
             </p>

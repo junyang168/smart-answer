@@ -39,6 +39,8 @@ def main():
     plan.add_argument("--budget-usd", type=float, required=True)
     plan.add_argument("--max-calls", type=int, required=True)
     plan.add_argument("--ssd-reserve-gib", type=int, default=80)
+    plan.add_argument("--internal-reserve-gib", type=int, default=10)
+    plan.add_argument("--working-set-gib", type=int, default=15)
     index = sub.add_parser("index-existing")
     index.add_argument("--review-root", type=Path, required=True)
     index.add_argument("--media-root", type=Path, required=True)
@@ -79,6 +81,14 @@ def main():
 
         if args.budget_usd <= 0 or args.max_calls <= 0:
             raise ValueError("Positive explicit budgets required")
+        if (
+            args.ssd_reserve_gib < 0
+            or args.internal_reserve_gib < 0
+            or args.working_set_gib <= 0
+        ):
+            raise ValueError(
+                "Disk reserves must be nonnegative and working set positive"
+            )
         cfg = {
             k: str(v.resolve()) if isinstance(v, Path) else v
             for k, v in vars(args).items()

@@ -44,3 +44,11 @@ CREATE INDEX IF NOT EXISTS asset_pcm_lookup ON media_ingest.assets ((info->>'pcm
 CREATE INDEX IF NOT EXISTS legacy_duration_lookup ON media_ingest.recordings (((info->>'duration')::double precision)) WHERE info->>'existing_transcript'='true';
 
 ALTER TABLE media_ingest.tasks ADD COLUMN IF NOT EXISTS not_before timestamptz NOT NULL DEFAULT now();
+
+CREATE TABLE IF NOT EXISTS media_ingest.disk_reservations (
+ task text NOT NULL REFERENCES media_ingest.tasks(id), attempt integer NOT NULL,
+ device text NOT NULL, path text NOT NULL, bytes bigint NOT NULL CHECK (bytes>=0),
+ floor_bytes bigint NOT NULL, limit_bytes bigint NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(task,attempt,device)
+);
+CREATE INDEX IF NOT EXISTS disk_reservation_device ON media_ingest.disk_reservations(device);

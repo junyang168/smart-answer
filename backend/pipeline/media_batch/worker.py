@@ -41,6 +41,7 @@ def child():
 
 def run_task(store, batch, task):
     from .runtime import lock_held
+    from .disk import release
 
     try:
         with ExitStack() as resources:
@@ -56,14 +57,40 @@ def run_task(store, batch, task):
                 "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
                 (task["id"],),
             ).fetchone()
-        state = "unknown_outcome" if unknown else "failed"
+        state = (
+            "unknown_outcome"
+            if unknown
+            else "pending" if isinstance(error, WaitingCapacity) else "failed"
+        )
         store.update(task, state=state, error=type(error).__name__ + ": " + str(error))
         return state
+    finally:
+        lease_path = Path(task["payload"]["out"]) / "leases" / task["id"]
+        if not lock_held(lease_path):
+            release(store, task)
 
 
 def _run_task(store, batch, task, resources):
     started = time.time()
     p = task["payload"]
+    with store.connection() as c:
+        runtime_config = c.execute(
+            "SELECT config FROM media_ingest.batches WHERE id=%s", (batch,)
+        ).fetchone()["config"]
+    runtime_keys = (
+        "capacity_root",
+        "storage_guards",
+        "ssd_reserve_gib",
+        "internal_reserve_gib",
+        "working_set_gib",
+    )
+    p = {
+        **p,
+        "config": {
+            **p["config"],
+            **{k: runtime_config[k] for k in runtime_keys if k in runtime_config},
+        },
+    }
     from .runtime import ensure_storage
 
     ensure_storage(p["config"])
@@ -73,6 +100,9 @@ def _run_task(store, batch, task, resources):
     lease_path.parent.mkdir(parents=True, exist_ok=True)
     lease = resources.enter_context(lease_path.open("a"))
     fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    from .disk import reserve, check_floor
+
+    reserve(store, {**task, "payload": p})
     ctx = dict(
         inherited_fds=[lease.fileno()],
         batch=batch,
@@ -105,6 +135,7 @@ def _run_task(store, batch, task, resources):
         )
         try:
             while process.poll() is None:
+                check_floor(p["config"])
                 path = Path(ctx["progress_path"])
                 progress = (
                     json.loads(path.read_text())

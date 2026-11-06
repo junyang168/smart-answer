@@ -198,7 +198,23 @@ class Store:
                     "UPDATE media_ingest.tasks SET state=%s,error='Previous process stopped; saved output requires reconciliation',updated_at=now() WHERE id=%s",
                     (state, row["id"]),
                 )
+                c.execute(
+                    "DELETE FROM media_ingest.disk_reservations WHERE task=%s AND attempt=%s",
+                    (row["id"], row["attempt"]),
+                )
                 changed.append(dict(task=row["id"], state=state))
+            # A crash after saving completion but before releasing its space
+            # must be recoverable too. Never reclaim a live descendant's lease.
+            finished = c.execute(
+                "SELECT DISTINCT t.id,t.payload,d.attempt FROM media_ingest.disk_reservations d JOIN media_ingest.tasks t ON t.id=d.task JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.state<>'running'",
+                (batch,),
+            ).fetchall()
+            for row in finished:
+                if not lock_held(Path(row["payload"]["out"]) / "leases" / row["id"]):
+                    c.execute(
+                        "DELETE FROM media_ingest.disk_reservations WHERE task=%s AND attempt=%s",
+                        (row["id"], row["attempt"]),
+                    )
         return changed
 
     def reserve(self, batch, task, call, model, usd):

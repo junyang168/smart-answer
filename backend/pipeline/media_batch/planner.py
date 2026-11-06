@@ -150,6 +150,22 @@ def plan(store, folder, config):
                 duration=float(pr["format"]["duration"]),
                 video=video,
                 pcm_sha=pcm,
+                width=next(
+                    (
+                        s.get("width", 0)
+                        for s in pr["streams"]
+                        if s["codec_type"] == "video"
+                    ),
+                    0,
+                ),
+                height=next(
+                    (
+                        s.get("height", 0)
+                        for s in pr["streams"]
+                        if s["codec_type"] == "video"
+                    ),
+                    0,
+                ),
                 needs_resolution=p.suffix.lower() in (".mts", ".m2ts")
                 or video
                 and (

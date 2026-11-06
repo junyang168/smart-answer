@@ -51,7 +51,7 @@ def store():
     s.install()
     with s.connection() as c:
         c.execute(
-            "TRUNCATE media_ingest.controls,media_ingest.calls,media_ingest.batch_tasks,media_ingest.tasks,media_ingest.assets,media_ingest.recordings,media_ingest.batches"
+            "TRUNCATE media_ingest.disk_reservations,media_ingest.controls,media_ingest.calls,media_ingest.batch_tasks,media_ingest.tasks,media_ingest.assets,media_ingest.recordings,media_ingest.batches"
         )
     return s
 
@@ -69,6 +69,7 @@ def config(tmp):
         budget_usd=10,
         max_calls=10,
         ssd_reserve_gib=0,
+        internal_reserve_gib=0,
     )
 
 
@@ -583,3 +584,200 @@ def test_speech_windows_are_separate_resumable_work_and_shared_dependencies(
     with store.connection() as c:
         store.task(c, other, "R", "speech", "all", "binding", payload, [initial])
     assert len(store.snapshot(other)["records"][0]["tasks"]) == 3
+
+
+def test_disk_reservations_are_atomic_across_competing_workers(
+    store, tmp_path, monkeypatch
+):
+    from backend.pipeline.media_batch import disk
+    from types import SimpleNamespace
+
+    cfg = config(tmp_path)
+    batch = store.batch(cfg)
+    with store.connection() as c:
+        for n in range(4):
+            rid = "space-" + str(n)
+            c.execute(
+                "INSERT INTO media_ingest.recordings(id,source_sha,item,info) VALUES (%s,%s,%s,'{}')",
+                (rid, rid, rid),
+            )
+            store.task(
+                c,
+                batch,
+                rid,
+                "prepare",
+                "all",
+                rid,
+                dict(config=cfg, out=str(tmp_path / rid)),
+            )
+    tasks = [store.claim(batch, str(n)) for n in range(4)]
+    monkeypatch.setattr(
+        disk.shutil, "disk_usage", lambda path: SimpleNamespace(free=1000)
+    )
+    request = [
+        dict(
+            device=str(tmp_path.stat().st_dev),
+            path=str(tmp_path),
+            bytes=600,
+            floor_bytes=0,
+            limit_bytes=10000,
+        )
+    ]
+
+    def acquire(task):
+        try:
+            disk.reserve(store, task, request)
+            return task
+        except WaitingCapacity:
+            return None
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(acquire, tasks))
+    winners = [r for r in results if r]
+    assert len(winners) == 1
+    disk.reserve(
+        store, winners[0], request
+    )  # An identical retry does not reserve twice.
+    with store.connection() as c:
+        assert (
+            c.execute(
+                "SELECT sum(bytes) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 600
+        )
+    disk.release(store, winners[0])
+    loser = next(t for t, r in zip(tasks, results) if r is None)
+    disk.reserve(store, loser, request)
+    with store.connection() as c:
+        assert (
+            c.execute(
+                "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 1
+        )
+
+
+def test_disk_reservation_rollback_and_working_limit(store, tmp_path, monkeypatch):
+    from backend.pipeline.media_batch import disk
+    from types import SimpleNamespace
+
+    b, tid = task_fixture(store, tmp_path)
+    t = store.claim(b, "worker")
+    monkeypatch.setattr(
+        disk.shutil, "disk_usage", lambda path: SimpleNamespace(free=10000)
+    )
+    # Two devices must be admitted together; rejection leaves neither reserved.
+    requests = [
+        dict(device="a", path=str(tmp_path), bytes=50, floor_bytes=0, limit_bytes=100),
+        dict(device="b", path=str(tmp_path), bytes=101, floor_bytes=0, limit_bytes=100),
+    ]
+    with pytest.raises(WaitingCapacity):
+        disk.reserve(store, t, requests)
+    with store.connection() as c:
+        assert (
+            c.execute(
+                "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 0
+        )
+    with pytest.raises(Conflict):
+        disk.reserve(store, {**t, "attempt": 999}, requests)
+
+
+def test_disk_reservation_recovery_waits_for_descendant_lease(store, tmp_path):
+    from backend.pipeline.media_batch import disk
+    import fcntl
+
+    b, tid = task_fixture(store, tmp_path)
+    t = store.claim(b, "worker")
+    out = tmp_path / "out"
+    t["payload"]["out"] = str(out)
+    with store.connection() as c:
+        c.execute(
+            "UPDATE media_ingest.tasks SET payload=%s,heartbeat=now()-interval '2 minutes' WHERE id=%s",
+            (Jsonb(t["payload"]), tid),
+        )
+    request = [
+        dict(
+            device=str(tmp_path.stat().st_dev),
+            path=str(tmp_path),
+            bytes=10,
+            floor_bytes=0,
+            limit_bytes=100,
+        )
+    ]
+    disk.reserve(store, t, request)
+    lease = out / "leases" / tid
+    lease.parent.mkdir(parents=True)
+    with lease.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        assert store.reconcile(b) == []
+        with store.connection() as c:
+            assert (
+                c.execute(
+                    "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+                ).fetchone()["n"]
+                == 1
+            )
+    assert store.reconcile(b)[0]["state"] == "interrupted"
+    with store.connection() as c:
+        assert (
+            c.execute(
+                "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 0
+        )
+    # Completion can precede release. Its orphaned reservation is recovered too.
+    with store.connection() as c:
+        c.execute("UPDATE media_ingest.tasks SET state='running' WHERE id=%s", (tid,))
+    disk.reserve(store, t, request)
+    store.update(t, state="complete")
+    store.reconcile(b)
+    with store.connection() as c:
+        assert (
+            c.execute(
+                "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 0
+        )
+
+
+def test_worker_waits_before_starting_child_when_disk_budget_is_too_small(
+    store, tmp_path, monkeypatch
+):
+    from backend.pipeline.media_batch import worker
+
+    source = audio(tmp_path / "source.wav")
+    cfg = {**config(tmp_path), "working_set_gib": 0.000001}
+    b = store.batch(cfg)
+    payload = dict(
+        config=cfg,
+        out=str(tmp_path / "work"),
+        item="disk-wait",
+        info=dict(
+            source=str(source), duration=3, bytes=source.stat().st_size, video=False
+        ),
+    )
+    with store.connection() as c:
+        c.execute(
+            "INSERT INTO media_ingest.recordings(id,source_sha,item,info) VALUES ('disk-wait','sha','disk-wait','{}')"
+        )
+        tid = store.task(c, b, "disk-wait", "prepare", "all", "input", payload)
+    task = store.claim(b, "worker")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Worker spawned before disk admission")
+
+    monkeypatch.setattr(worker.subprocess, "Popen", forbidden)
+    assert worker.run_task(store, b, task) == "pending"
+    with store.connection() as c:
+        row = c.execute(
+            "SELECT state,error FROM media_ingest.tasks WHERE id=%s", (tid,)
+        ).fetchone()
+        assert row["state"] == "pending" and "寫入預算" in row["error"]
+        assert (
+            c.execute(
+                "SELECT count(*) AS n FROM media_ingest.disk_reservations"
+            ).fetchone()["n"]
+            == 0
+        )
