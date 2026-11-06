@@ -704,7 +704,7 @@ def execute_claim_management(store, request, *, root, ports):
                         with store.connect() as conn, conn.cursor() as cursor:
                             if 'human_source_decisions' in materials:
                                 from backend.pipeline.claim_human_source import assert_current
-                                assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
+                                assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'], request=materials['unit_request'])
                             if 'program_metadata_projection' in materials:
                                 from backend.pipeline.claim_metadata_projection import assert_current
                                 assert_current(cursor, cm.Request.model_validate(materials['unit_request']), materials['before'], policy, materials['program_metadata_projection'])

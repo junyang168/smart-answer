@@ -106,6 +106,11 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
             or selected.independent_audit_required):
         raise ValueError('Claim list intake requires the scoped Opus-only content Update policy')
     # Execution artifacts must survive moving/removing the development checkout.
+    if disjoint_topic_unit is not None:
+        if not selected.review_unit_contract:
+            raise ValueError('topic preparation requires the bounded review policy')
+        from backend.pipeline.claim_topic_units import validate_preparation
+        validate_preparation(disjoint_topic_unit, ids, groups or [[cid] for cid in ids], creation_count)
     policy_binding = immutable(root / 'policy.json', selected.model_dump(mode='json'))
     intent = {'claim_ids': ids, 'instruction': instruction, 'max_workers': max_workers,
               'policy': policy_binding}

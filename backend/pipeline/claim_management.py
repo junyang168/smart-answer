@@ -417,6 +417,7 @@ def audit_contract(root, policy=None):
     files += [pipeline/'claim_qualification_refresh.py', pipeline/'claim_model_capacity.py', pipeline/'claim_anthropic_api.py', pipeline/'claim_opus_api_transition.py']
     if policy is not None and policy.review_unit_contract:
         files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
+                  pipeline/'claim_topic_units.py', pipeline/'source_execution_locks.py',
                   pipeline/'prompts/claim_bounded_review_unit_v1.md']
     if policy is not None and policy.retry_context_contract:
         files += [pipeline/'claim_database_retry.py', pipeline/'prompts/claim_database_retry_v1.md']
@@ -928,6 +929,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     if (policy.review_purpose == 'source_impact') != is_source_impact(request):
         raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    if authority.get('disjoint_topic_unit') is not None and not policy.review_unit_contract:
+        raise ValueError('topic source projection requires the bounded review policy')
     if 'retirement_reference_keys' in authority and request.operation != 'Retire':
         raise ValueError('retirement reference authority belongs only to Retire')
     expected = request.model_dump(mode="json", exclude={"authorization", "policy"})

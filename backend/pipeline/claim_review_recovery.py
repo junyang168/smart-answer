@@ -53,7 +53,7 @@ def recover_refused_admission(store, action_id, *, authorization):
         store._assert_transaction_read_pins(cursor, pins(records))
         if 'human_source_decisions' in value:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, value['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, value['human_source_decisions'], request=request)
         destination = Path(value['execution_root']) / 'zero-call-admission-recovery'
         contract = cm.audit_contract(destination, policy)
         record = {'original_parent': deepcopy(value), 'authorization': authorization,
@@ -422,7 +422,7 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in expected.items()}))
             if 'human_source_decisions' in value['materials']:
                 from backend.pipeline.claim_human_source import assert_current
-                assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'])
+                assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'],request=unit)
         elif direction.get('refresh_transaction_context') is True:
             # A broader SQL consumer may change without changing any fact
             # actually read by either model. Prove that separation rather
@@ -823,7 +823,7 @@ def resume_invalid_initial_review(store, round_id, *, authorization):
             raise ValueError('invalid-review input recovery cannot refresh a changed source')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'], request=request)
         original = deepcopy(value); original_parent = deepcopy(parent)
         destination = root/('invalid-review-input-'+sha256_json(direction)[:20])
         contract = cm.audit_contract(destination,policy)
@@ -1189,7 +1189,7 @@ def resume_rejected_output(store, round_id, *, role, error):
         if sources!=materials['sources']:raise ValueError('citation recovery source drift')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor,request.source_bindings,materials['human_source_decisions'])
+            assert_current(cursor,request.source_bindings,materials['human_source_decisions'],request=request)
         destination = Path(parent['execution_root'])/round_id/'rejected-citation-input'
         contract = cm.audit_contract(destination,policy)
         if any(contract['implementation'][k]!=v for k,v in parent['audit_contract']['implementation'].items() if '/prompts/' in k):
@@ -1338,7 +1338,7 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None):
             raise ValueError('transaction recovery is limited to an existing Update')
         if 'human_source_decisions' in materials:
             from backend.pipeline.claim_human_source import assert_current
-            assert_current(cursor, request.source_bindings, materials['human_source_decisions'])
+            assert_current(cursor, request.source_bindings, materials['human_source_decisions'], request=request)
         candidate = cm.Candidate.model_validate(body(read(old_root / 'candidate.json')))
         if not unrecorded and candidate.model_dump(mode='json') != value['candidate']:
             raise ValueError('transaction recovery saved candidate drift')

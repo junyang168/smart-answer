@@ -58,6 +58,20 @@ def validate_plan(plan):
         ids.add(u['unit_id'])
 
 
+def validate_preparation(selection, targets, groups, creation_count):
+    """Reject overfilled or misplaced work before reserving SQL identities."""
+    from backend.pipeline import claim_management as cm
+    if set(selection) != {'plan', 'unit_id'}:
+        raise ValueError('topic preparation requires an exact bound selection')
+    plan = json.loads(cm.source.verify_file(cm.source.FileBinding.model_validate(selection['plan'])).read_text())
+    validate_plan(plan)
+    matches = [u for u in plan['units'] if u['unit_id'] == selection['unit_id']]
+    if len(matches) != 1 or not set(targets) <= set(matches[0]['claim_ids']):
+        raise ValueError('preparation targets exceed the selected topic')
+    if any(len(g) + creation_count > 10 for g in groups):
+        raise ValueError('topic groups must reserve review space for their allowed new Claims: targets + creation_count <= 10')
+
+
 def project_sources(request, sources):
     selected = unit(request)
     if selected is None:
@@ -71,6 +85,11 @@ def project_sources(request, sources):
     # Keep the real physical source binding and paragraph identities. Never
     # fabricate a split sermon or renumber its source paragraphs.
     snapshot['paragraphs'] = {key: snapshot['paragraphs'][key] for key in paragraphs}
+    if 'human_source_decisions' in snapshot:
+        snapshot['human_source_decisions'] = human_decisions(request, snapshot['human_source_decisions'])
+    verification = snapshot.get('human_source_verification', {}).get('record', {})
+    if any(answer['citation']['paragraph_key'] not in paragraphs for answer in verification.get('answers', [])):
+        raise ValueError('human clarification crosses a topic source boundary')
     snapshot['topic_boundary'] = {'contract': CONTRACT, 'unit_id': selected['unit_id'],
         'title': selected['title'], 'complete_topic_context': True,
         'whole_sermon_context': False}
@@ -126,3 +145,18 @@ def resources(request):
     return (set(selected['record_keys'])
             | {'claim_source_paragraph/' + sid + '/' + key for key in selected['paragraph_keys']}
             | {'claim_topic_execution/' + sid + '/' + selected['unit_id']})
+
+
+def human_decisions(request, decisions):
+    """An independent topic neither reads nor inherits another topic's facts."""
+    if request is None:
+        return decisions
+    if isinstance(request, dict):
+        from backend.pipeline import claim_management as cm
+        request = cm.Request.model_validate(request)
+    selected = unit(request)
+    if selected is None:
+        return decisions
+    paragraphs = set(selected['paragraph_keys'])
+    return [value for value in decisions if value['source_id'] == selected['source_id']
+            and set(value['paragraph_sha256']) <= paragraphs]

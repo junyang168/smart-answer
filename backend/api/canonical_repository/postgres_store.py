@@ -3339,7 +3339,7 @@ class PostgresKnowledgeStore:
                     if goal['original_objects'] != prior['original_goal']['original_objects']:
                         raise ChangeSetConflict('same-task refusal retry input changed')
                     from backend.pipeline.claim_human_source import assert_current as assert_human_current
-                    assert_human_current(cursor, request.source_bindings, prior.get('human_source_decisions', []))
+                    assert_human_current(cursor, request.source_bindings, prior.get('human_source_decisions', []), request=request)
                 opus_handoff = continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')
                 # Human answers bind the original review scope. The locked
                 # transaction readset also contains downstream consumers that
@@ -3565,10 +3565,10 @@ class PostgresKnowledgeStore:
                 entries = human.confirmation_entries(authority['human_source_verification'],
                     request.model_dump(mode='json')['source_bindings'], sources)
                 human.register(cursor, entries, origin=run_id)
-                active_ids = {d['decision_id'] for d in human.snapshot(cursor, request.source_bindings)}
+                active_ids = {d['decision_id'] for d in human.snapshot(cursor, request.source_bindings, request=request)}
                 if any(d['decision_id'] not in active_ids for d in entries):
                     raise ChangeSetConflict('new action explicitly supplied a replaced human source decision')
-            value['human_source_decisions'] = human.snapshot(cursor, request.source_bindings)
+            value['human_source_decisions'] = human.snapshot(cursor, request.source_bindings, request=request)
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
                               (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
                               VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
@@ -4061,7 +4061,7 @@ class PostgresKnowledgeStore:
                     from backend.pipeline.claim_qualification_reuse import current_pins
                     if 'human_source_decisions' in child['materials']:
                         from backend.pipeline.claim_human_source import assert_current
-                        assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'])
+                        assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'], request=child['materials']['unit_request'])
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'],
@@ -4210,7 +4210,7 @@ class PostgresKnowledgeStore:
                     if 'human_source_decisions' in value['materials']:
                         from backend.pipeline.claim_human_source import assert_current
                         try:
-                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'], request=value['materials']['unit_request'])
                         except ChangeSetConflict:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     if not revalidation:
@@ -4247,7 +4247,7 @@ class PostgresKnowledgeStore:
                     if 'human_source_decisions' in value['materials']:
                         from backend.pipeline.claim_human_source import assert_current
                         try:
-                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'], request=value['materials']['unit_request'])
                         except ChangeSetConflict:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     applicable = current_pins(self, cursor, value)

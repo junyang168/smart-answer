@@ -105,3 +105,52 @@ except BlockingIOError: print('blocked')
         result = subprocess.run([sys.executable, '-c', code, json.dumps(wire)], text=True,
                                 capture_output=True, check=True, timeout=10)
     assert result.stdout.strip() == 'blocked'
+
+
+def test_new_claim_headroom_is_checked_before_sql_identity_reservation(prepared, tmp_path):
+    from backend.pipeline import claim_management_intake as intake
+    _, requests = prepared
+    selected = json.loads(cm.source.verify_file(requests[0].authorization).read_text())[topics.FIELD]
+    topics.validate_preparation(selected, ['C1'], [['C1']], 4)
+    with pytest.raises(ValueError, match='exceed the selected topic'):
+        topics.validate_preparation(selected, ['C2'], [['C2']], 4)
+    class NoSQL:
+        def __getattr__(self, name):
+            pytest.fail('headroom validation reached SQL: ' + name)
+    with pytest.raises(ValueError, match='reserve review space'):
+        intake.prepare(['C1'], tmp_path/'oversized', instruction='try disjoint topics',
+            groups=[['C1']], creation_count=10, store=NoSQL(), disjoint_topic_unit=selected,
+            policy=cm.DEFAULT_POLICY.parent/'wang_claim_management_bounded_unit_v3.json')
+
+
+def test_human_clarification_never_crosses_an_independent_topic(prepared):
+    from backend.pipeline import claim_human_source as human
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    _, requests = prepared
+    first = dict(decision_id='first', source_id='S', paragraph_sha256={'S0001':'a'})
+    second = dict(decision_id='second', source_id='S', paragraph_sha256={'S0002':'b'})
+    class Cursor:
+        def execute(self, *args): return self
+        def fetchall(self): return [(first,), (second,)]
+    cursor = Cursor()
+    assert human.snapshot(cursor, ['S'], request=requests[0]) == [first]
+    assert human.snapshot(cursor, ['S'], request=requests[1]) == [second]
+    assert human.snapshot(cursor, ['S']) == [first, second]
+    human.assert_current(cursor, ['S'], [first], request=requests[0])
+    with pytest.raises(ChangeSetConflict):
+        human.assert_current(cursor, ['S'], [first])  # Old actions retain whole-source pins.
+    with pytest.raises(ChangeSetConflict):
+        human.assert_current(cursor, ['S'], [], request=requests[0])
+    sources = {'S': dict(body_sha256='body', paragraphs={
+        'S0001': {'text':'first'}, 'S0002': {'text':'second'}}, human_source_decisions=[first, second])}
+    topics.project_sources(requests[0], sources)
+    assert sources['S']['human_source_decisions'] == [first]
+
+
+def test_combined_human_answer_artifact_cannot_leak_another_topic(prepared):
+    _, requests = prepared
+    sources = {'S': dict(body_sha256='body', paragraphs={
+        'S0001': {'text':'first'}, 'S0002': {'text':'second'}},
+        human_source_verification={'record':{'answers':[{'citation':{'paragraph_key':'S0002'}}]}})}
+    with pytest.raises(ValueError, match='clarification crosses'):
+        topics.project_sources(requests[0], sources)
