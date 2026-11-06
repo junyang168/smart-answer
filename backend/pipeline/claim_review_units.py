@@ -33,13 +33,14 @@ def review_capacity(materials, candidate, claim_keys):
     if (direction.get('schema_version') != 'wang_claim_review_capacity_exception_v1'
             or direction.get('authorized_by') != 'owner' or not direction.get('authorization_quote')
             or direction.get('human_content_approval') is not False
-            or direction.get('default_limit') != MAX_CLAIMS or direction.get('limit') != 12
+            or direction.get('default_limit') != MAX_CLAIMS
+            or (len(targets), len(new), direction.get('limit')) not in {(8, 4, 12), (7, 4, 11)}
             or direction.get('action_id') != request['action_id']
             or direction.get('round_id') != original['round_id']
             or original['request'] != request or original['unit_request'] != materials['unit_request']
             or original['before'] != materials['before'] or original['sources'] != materials['sources']
             or saved.digest != direction.get('candidate_sha256')
-            or targets != set(direction.get('original_target_keys', [])) or len(targets) != 8
+            or targets != set(direction.get('original_target_keys', []))
             or new != set(direction.get('proposed_claim_keys', [])) or len(new) != 4
             or not current_new <= new or not set(claim_keys) <= targets | new):
         raise ValueError('review capacity exception changed its exact owner-authorized scope or source')

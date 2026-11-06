@@ -20,7 +20,7 @@ def authorize(root, parent, materials_path, candidate_path):
     candidate = cm.Candidate.model_validate(body(read(candidate_path)))
     value = dict(schema_version='wang_claim_review_capacity_exception_v1', authorized_by='owner',
         authorization_quote='Accept these four proposals and the original-eight/proposed-four review group',
-        human_content_approval=False, default_limit=10, limit=12,
+        human_content_approval=False, default_limit=10, limit=len(parent['request']['target_keys'])+4,
         action_id=parent['request']['action_id'], round_id=materials['round_id'],
         prior_metadata_sha256=cm.sha256_json({k:v for k,v in parent.items() if k not in {'run_id','status','error'}}),
         materials=binding(materials_path), candidate=binding(candidate_path),
@@ -35,11 +35,12 @@ def test_default_is_still_ten():
     assert units.review_capacity(None, None, []) == 10
 
 
-def test_original_eight_and_proposed_four_resume_with_only_unspent_opus(claims):
+@pytest.mark.parametrize('original_count', [7, 8])
+def test_owner_bound_group_and_proposed_four_resume_with_only_unspent_opus(claims, original_count):
     from backend.api.canonical_repository.claim_identity_allocation import allocated_ids
     from backend.pipeline.claim_review_recovery import resume_saved_pre_review
     store, root = claims
-    members=['C','D','E','F','G','H','I','J']
+    members=['C','D','E','F','G','H','I','J'][:original_count]
     store.apply_plan(store.plan_package({'package_id':'eight-originals',
         'claims':[{'claim_id':cid,'statement':'甲是假设。','claim_type':'exegesis',
             'occurrences':[{'source_id':'S','anchors':[]}],'evidence_step_ids':['E'+cid]}for cid in members[2:]],
@@ -61,8 +62,8 @@ def test_original_eight_and_proposed_four_resume_with_only_unspent_opus(claims):
                 acceptance_condition='create four',citations=[citation],affected_target_keys=['claims/C'],
                 affected_write_keys=[],impact_reason='own evidence')]
         else:
-            assert len(packet['own_evidence_bindings'])==12
-            assert packet['program_owned_fields'][units.CAPACITY_EXCEPTION]['maximum_claims']==12
+            assert len(packet['own_evidence_bindings'])==original_count+4
+            assert packet['program_owned_fields'][units.CAPACITY_EXCEPTION]['maximum_claims']==original_count+4
             result['prior_findings']=[dict(finding_id=fid,disposition='resolved',reason='all four present',
                 citations=[citation],affected_target_keys=['claims/C'],affected_write_keys=['evidence_steps/EC'],
                 impact_reason='owners complete')for fid in packet['unresolved']]
@@ -92,7 +93,7 @@ def test_original_eight_and_proposed_four_resume_with_only_unspent_opus(claims):
     bound=authorize(root,parent,execution/rid/'materials.json',execution/rid/'candidate.json')
     materials=deepcopy(saved['materials']);materials[units.CAPACITY_EXCEPTION]=bound
     candidate=cm.Candidate.model_validate(saved['candidate'])
-    assert units.review_capacity(materials,candidate,request.target_keys+['claims/'+i for i in ids])==12
+    assert units.review_capacity(materials,candidate,request.target_keys+['claims/'+i for i in ids])==original_count+4
     for field in ('request','sources','before'):
         changed=deepcopy(materials)
         if field=='request':changed[field]['action_id']='foreign-action'

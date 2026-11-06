@@ -1433,8 +1433,8 @@ def resume_saved_pre_review(store, round_id, *, stopped_capacity_proof=None, rev
                     or direction.get('round_id') != round_id):
                 raise ValueError('capacity authorization requires the exact uninvoked saved round and parent')
             rebound[CAPACITY_EXCEPTION] = review_capacity_authorization
-            if review_capacity(rebound, candidate, []) != 12:
-                raise ValueError('capacity authorization must preserve the saved original-eight/proposed-four candidate')
+            if review_capacity(rebound, candidate, []) != direction['limit']:
+                raise ValueError('capacity authorization must preserve the exact saved group')
         if bounded_capacity:
             from backend.pipeline.claim_evidence_review import freeze_initial_review_reuse
             from backend.pipeline.cvp_sql_actions import claim_management_review_packet

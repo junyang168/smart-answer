@@ -389,7 +389,7 @@ def add_packet(packet, candidate=None, *, materials=None):
         if maximum != 10:
             packet.setdefault('program_owned_fields', {})[CAPACITY_EXCEPTION] = {
                 'authorization': materials[CAPACITY_EXCEPTION], 'maximum_claims': maximum,
-                'instruction': 'Owner authorized this exact original-eight/proposed-four group to exceed the default capacity. '
+                'instruction': 'Owner authorized this exact saved group to exceed the default capacity. '
                     'This approves capacity only, not the statements or modifications. Independently assess every active Claim '
                     'and its own evidence normally. No extra model calls, permissions or source paragraphs are granted.'}
     return packet
