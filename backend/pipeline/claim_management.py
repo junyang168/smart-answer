@@ -1381,7 +1381,7 @@ def model_packet(materials):
     if expected != materials.get('retirement_reference_claims', {}):
         raise ValueError('retirement reference facts drifted from frozen transaction context')
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse', 'program_source_quote_projection'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions', 'program_metadata_projection', 'initial_assessment_reuse', 'program_source_quote_projection', 'claim_review_capacity_exception'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     from backend.pipeline.claim_direct_scope import enabled, scope
     request = Request.model_validate(materials.get('unit_request', materials['request']))
