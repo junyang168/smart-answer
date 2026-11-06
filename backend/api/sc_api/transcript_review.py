@@ -867,9 +867,17 @@ class ReviewStore:
                 "expected_script_sha256": expected_script_sha256,
                 "source_video_sha256": record["source_sha256"],
             }
+            if (source / 'speaker-candidate.json').is_file():
+                value['speaker_candidate_sha256'] = file_hash(source / 'speaker-candidate.json')
             path = self.candidate_path(item)
             if path.exists() and read(path) != value:
-                raise ReviewError(409, "已有不同候選，請先解決版本差異")
+                previous = read(path)
+                # Only enrich an unadopted, otherwise identical candidate with source-bound speaker attribution.
+                before = {k: v for k, v in previous.items() if k != 'speaker_candidate_sha256'}
+                after = {k: v for k, v in value.items() if k != 'speaker_candidate_sha256'}
+                if before != after or previous.get('speaker_candidate_sha256') or not value.get('speaker_candidate_sha256'):
+                    raise ReviewError(409, "已有不同候選，請先解決版本差異")
+                atomic(self.folder(item) / 'candidate-history' / (digest(previous) + '.json'), previous)
             atomic(path, value)
 
     def candidate(self, actor, item):
@@ -1002,6 +1010,8 @@ class ReviewStore:
                     != candidate["layout_sha256"]
                 ):
                     raise ReviewError(409, "候選已變更，拒絕採用")
+                if candidate.get('speaker_candidate_sha256') != file_hash(source / 'speaker-candidate.json'):
+                    raise ReviewError(409, '講員候選已變更，拒絕採用')
             if self.enabled(item):
                 raise ReviewError(409, "候選已採用，不覆寫人工審核稿")
             _, meta = self.meta(item)
@@ -1035,6 +1045,11 @@ class ReviewStore:
                 }
                 for p in record["paragraphs"]
             ]
+            from backend.pipeline.media_batch.speakers import label_rows
+            try:
+                rows, speaker_attribution = label_rows(source, record, rows, mapping)
+            except (ValueError, KeyError) as error:
+                raise ReviewError(409, '講員候選與來源不符') from error
             bindings = {
                 mapping[p["id"]]: {
                     "source_paragraph_id": p["id"],
@@ -1113,6 +1128,7 @@ class ReviewStore:
                 "source_record_path": f"transcript_review/{item}/source-record.json",
                 "paragraph_bindings": bindings,
                 "timing_quality": record.get("timing_quality"),
+                "speaker_attribution": speaker_attribution,
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},
                     "core_bible_verse": meta.get("core_bible_verse") or [],

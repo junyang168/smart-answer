@@ -335,7 +335,9 @@ export const SermonDetailView = () => {
           </nav>
         ) : null}
 
-        {status === "authenticated" ? (
+        {!sermon.markdownContent?.trim() ? (
+          <p role="status" className="rounded-xl border border-slate-200 bg-white p-5 text-slate-600">逐字稿整理中，可先收聽或觀看上方影音。</p>
+        ) : status === "authenticated" ? (
           <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">
             <summary className="cursor-pointer select-none font-semibold text-slate-700">
               展開完整逐字稿（核對用）

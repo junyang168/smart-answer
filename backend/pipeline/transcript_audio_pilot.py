@@ -21,9 +21,11 @@ ASR_CONFIG = {"model": "gpt-transcribe", "prompt": ASR_PROMPT,
 
 
 def read_audio(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as audio:
+    with Path(path).open('rb') as handle, wave.open(handle) as audio:
         if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth()) != (SAMPLE_RATE, 1, 2):
             raise ValueError("Audio must be 16kHz mono PCM16")
+        if os.getenv('MEDIA_BATCH_CONTEXT'):
+            return np.memmap(path, dtype='<i2', mode='r', offset=handle.tell(), shape=(audio.getnframes(),))
         return np.frombuffer(audio.readframes(audio.getnframes()), dtype='<i2').copy()
 
 
@@ -121,7 +123,7 @@ def prepare(video: Path, out: Path, duration_ms: int = 900000) -> dict:
     return result
 
 
-def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
+def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
                budget_usd: float = 3.0) -> dict:
     folder = out / 'calls' / object_sha(request)
     state_path = folder / 'state.json'
@@ -159,6 +161,13 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
     return result
 
 
+def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
+               budget_usd: float = 3.0) -> dict:
+    from backend.pipeline.media_batch.runtime import batch_call
+    with batch_call(out, request, reserved_usd):
+        return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd)
+
+
 def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
     config = asr_vocabulary_config(ASR_CONFIG, vocabulary)
     binding = {'vocabulary_hint': vocabulary_binding(vocabulary)} if vocabulary is not None else {}
@@ -186,6 +195,8 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
             raise ValueError('ASR response has no transcript')
         chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(request),
                        'response_sha256': object_sha(response)})
+        from backend.pipeline.media_batch.runtime import progress
+        progress('asr', len(chunks), len(manifest['chunks']), 'chunks')
         print(f'Transcribed {chunk["id"]}: {len(response["text"])} characters', flush=True)
     result = {'schema_version': 'audio-asr-pilot.v1', 'config': config, **binding,
               'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunks': chunks,

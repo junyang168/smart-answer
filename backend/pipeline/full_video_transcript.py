@@ -64,9 +64,11 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
         'format=start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
     video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
     v = video_stream or next(s for s in probe['streams'] if s['codec_type'] == 'audio')
-    if abs(float(v.get('start_time', 0))) > .001:
+    origin = float(probe['format'].get('start_time', v.get('start_time', 0)))
+    if video_stream and (abs(origin) > .001 or abs(float(v.get('start_time', 0))) > .001):
         raise ValueError('Nonzero movie origin needs an explicit source-clock mapping')
-    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-copyts', '-i', str(video),
+    decode_flags = ['-copyts'] + (['-start_at_zero'] if not video_stream and abs(origin) > .001 else [])
+    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', *decode_flags, '-i', str(video),
         '-map', '0:a:0', '-af', 'aresample=16000:async=1:first_pts=0', '-ac', '1', '-ar', str(SR),
         '-c:a', 'pcm_s16le', str(out / 'master.wav')], check=True)
     audio = read_audio(out / 'master.wav')
@@ -77,6 +79,8 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     result = {'schema_version': 'source-sample-clock.v1', 'lecture_id':video.stem, 'source_sha256': sha(video),
         'audio_sha256': sha(out / 'master.wav'), 'source_path': str(video.resolve()),
         'media_type': 'video' if video_stream else 'audio',
+        'source_clock_mapping': {'policy': 'source-presentation-clock.v1', 'container_start_s': origin,
+                                 'presentation_origin_ms': 0, 'rebased_audio': not video_stream and abs(origin) > .001},
         'media_mime_type': mimetypes.guess_type(str(video))[0] or 'application/octet-stream',
         'samples': len(audio), 'covered_samples': usable, 'discarded_tail_samples': len(audio) - usable,
         'sample_rate': SR, 'duration_ms': sample_ms(usable), 'probe': probe, 'windows': []}
@@ -250,9 +254,10 @@ def join_window_visuals(out: Path, window: dict, slide_folder: Path, collection:
 
 
 def align(folder: Path, python: Path) -> None:
+    from backend.pipeline.media_batch.runtime import inherited_fds
     subprocess.run([str(python.absolute()), '-m', 'backend.pipeline.transcript_alignment_worker',
         '--out', str(folder.resolve()), '--device', 'mps'], check=True,
-        env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1'), cwd=Path(__file__).resolve().parents[2])
+        env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1'), cwd=Path(__file__).resolve().parents[2],pass_fds=inherited_fds())
 
 
 CLEAN_PROMPT = """你為講道逐字稿製作清理閱讀稿，只標出可刪除的非講道內容，不重寫文字。
@@ -440,6 +445,8 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
             assemble(audio, slide_folder)
             join_window_visuals(out, w, slide_folder)
             correct(folder / 'joined', audio, correction, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
+        from backend.pipeline.media_batch.runtime import progress
+        progress('speech', master['windows'].index(w)+1, len(master['windows']), 'windows')
         print(f'Corrected {w["id"]}', flush=True)
     clean_full_transcript(out)
 

@@ -97,5 +97,20 @@ def main():
         print(f'Aligned {chunk["id"]}: {len(items)} units in {time.perf_counter()-started:.1f}s', flush=True)
 
 
+def bounded_main():
+    context = os.getenv('MEDIA_BATCH_CONTEXT')
+    if not context:
+        return main()
+    from backend.pipeline.media_batch.runtime import slot, WaitingCapacity
+    import time
+    root = json.loads(context)['capacity_root']
+    while True:
+        try:
+            with slot(root, 'mps', 1):
+                return main()
+        except WaitingCapacity:
+            time.sleep(2)
+
+
 if __name__ == '__main__':
-    main()
+    bounded_main()

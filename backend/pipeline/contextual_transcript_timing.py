@@ -356,12 +356,12 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
     if any(not (evidence/'alignment'/f'{c["id"]}.json').exists() for c in plan['chunks']):
         if aligner_python is None:
             raise ValueError('Timing quality gate: finish requires --aligner-python for contextual verification')
-        subprocess.run([str(aligner_python.resolve()),'-m','backend.pipeline.transcript_alignment_worker',
-                        '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True)
+        subprocess.run([str(aligner_python.absolute()),'-m','backend.pipeline.transcript_alignment_worker',
+                        '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True,**({'pass_fds': __import__('backend.pipeline.media_batch.runtime',fromlist=['inherited_fds']).inherited_fds()} if __import__('backend.pipeline.media_batch.runtime',fromlist=['inherited_fds']).inherited_fds() else {}))
     detail=analyse(evidence,detail=True)
     if not detail['all_qualified'] and aligner_python is not None and add_recovery_contexts(evidence):
-        subprocess.run([str(aligner_python.resolve()),'-m','backend.pipeline.transcript_alignment_worker',
-                        '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True)
+        subprocess.run([str(aligner_python.absolute()),'-m','backend.pipeline.transcript_alignment_worker',
+                        '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True,**({'pass_fds': __import__('backend.pipeline.media_batch.runtime',fromlist=['inherited_fds']).inherited_fds()} if __import__('backend.pipeline.media_batch.runtime',fromlist=['inherited_fds']).inherited_fds() else {}))
         detail=analyse(evidence,detail=True)
     if not detail['all_qualified']:
         from backend.pipeline.boundary_audio_review import run as review_boundaries
