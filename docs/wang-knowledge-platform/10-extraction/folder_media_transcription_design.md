@@ -2,8 +2,8 @@
 
 > **讀者**：Solution architect、Developer、神學編輯
 > **類型**：規範
-> **狀態**：提案；#685 的實作與驗收依據，批次入口尚未實作
-> **與代碼對齊**：2026-11-06（現有接點核對到 `9caa823c`；新增核對既有進度頁、窗口執行與 prepare 限制；新資料表、CLI、UI 與排程均為提案）
+> **狀態**：當前目標規範；首版 CLI、持久佇列、進度 UI、媒體及候選交接已實作。第 12.1 節明列目前範圍與未完成項；尚未部署 production。
+> **與代碼對齊**：2026-11-06（核對到 `110759fa`；第 3–11 節描述完整目標，不表示每項已實作；當前可執行入口以第 12.1 節為準）
 > **權威範圍**：資料夾匯入、查重、可續跑轉錄、媒體搬移與壓縮、網站和文庫交接；不取代人工校對、來源准入或 Claim／CVP 規則。
 
 ## 目錄
@@ -21,6 +21,8 @@
 - [10 網站編輯與文庫接入](#10-網站編輯與文庫接入)
 - [11 批次進度 UI](#11-批次進度-ui)
 - [12 操作入口與驗收](#12-操作入口與驗收)
+  - [12.1 首版實作與操作](#121-首版實作與操作)
+  - [12.2 完整目標的驗收](#122-完整目標的驗收)
 - [13 設計自查](#13-設計自查)
 
 ## 1 目標與邊界
@@ -58,7 +60,7 @@
 | [ClaimModelCapacity](../../../backend/pipeline/claim_model_capacity.py) | 跨本機程序 slot、子程序繼承鎖、未知結果隔離 | 通用 Sol 呼叫接入，包括 API；不能原樣繼承 Claim 的 Opus 依賴 |
 | [網站播放器](../../../web/src/app/components/sermons/SermonMediaPlayer.tsx)／[原聲定位](../../../backend/pipeline/original_audio_index.py) | 主要按 item 找 MP4／MP3，支援既有網站播放 | WAV／AAC 播放相容、可信 media metadata、統一解析，保留舊 URL |
 
-既有 [Claim 維護進度頁](../../../web/src/app/admin/wang/claim-refresh/ClaimRefreshProgress.tsx)已有定時讀取、隱藏分頁暫停輪詢、資料過期提示及待辦呈現。本卡沿用這些 UI 模式，不複製 Claim 狀態機。`full_video_transcript.prepare` 現在會拒絕非零起點，且一次解碼並載入全講 WAV；非零 PTS 支援、受控記憶體及結構化進度事件仍須實作，不能列成既有能力。
+既有 [Claim 維護進度頁](../../../web/src/app/admin/wang/claim-refresh/ClaimRefreshProgress.tsx)已有定時讀取、隱藏分頁暫停輪詢、資料過期提示及待辦呈現。本卡沿用這些 UI 模式，不複製 Claim 狀態機。批次模式已為全講 WAV 加 mmap 讀取及結構化進度；純音訊的 encoder 起點已有明示映射。非零影片起點與 MTS 有序組裝仍暫緩，不猜接。
 
 舊站實體 `/opt/homebrew/var/www/church/reduce_video.sh` 對當前目錄的 `*.mp4` 執行 `scale=854:480`、`libx264`、`aac`，加 `-y` 寫入網站 `/web/video/` 對應目錄。它未明定 CRF／bitrate／preset／faststart，未保護比例，沒有輸出檢查或批次回執。其 SHA256 為 `1ae2a1311b9c106d3ebe2013e72d8637fa40de138bf3b5b73ec590e83612227b`。
 
@@ -282,17 +284,58 @@ UI 不提供「強制解鎖」「忽略 hash」或把未知呼叫當失敗重試
 
 ## 12 操作入口與驗收
 
-擬新增一個可續跑入口，以下是目標介面，不是現在能執行的命令：
+### 12.1 首版實作與操作
 
-```text
-media-batch plan --folder FOLDER --profile wang-sermon-v1
-media-batch run --batch BATCH_ID --workers 4
-media-batch status --batch BATCH_ID
-media-batch resume --batch BATCH_ID
-media-batch pause --batch BATCH_ID
+首版位於 [media_batch](../../../backend/pipeline/media_batch/__main__.py)，使用既有 PostgreSQL 中的獨立 `media_ingest` schema。以下命令在本卡 worktree 執行；來源、產物及網站目錄必須先指定到正確環境。試跑用獨立資料庫與資料根目錄，不能借 production 測試。
+
+```bash
+# 在環境設定 MEDIA_BATCH_DATABASE_URL；不得將連線密碼寫入操作紀錄。
+backend/.venv/bin/python -m backend.pipeline.media_batch install
+
+# 首次明示建立舊站索引。只讀既有稿件，不搬動或改寫人工稿。
+backend/.venv/bin/python -m backend.pipeline.media_batch index-existing \
+  --review-root REVIEW_ROOT --media-root MEDIA_ROOT
+
+# plan 不呼叫模型；FOLDER 必須已完整下載，輸出不得放進來源資料夾。
+backend/.venv/bin/python -m backend.pipeline.media_batch plan \
+  --folder FOLDER --title TITLE --artifact-root ARTIFACT_ROOT \
+  --media-root MEDIA_ROOT --review-root REVIEW_ROOT --capacity-root CAPACITY_ROOT \
+  --aligner-python ALIGNER_VENV/bin/python --budget-usd BUDGET --max-calls MAX_CALLS
+
+# macOS launchd 管理；關閉 terminal 或瀏覽器不會結束 controller。
+backend/.venv/bin/python -m backend.pipeline.media_batch start --batch BATCH_ID --workers 4
+backend/.venv/bin/python -m backend.pipeline.media_batch status --batch BATCH_ID
+
+# 與 UI 同一控制介面，REVISION 取最新 status，OPERATION_ID 每次指令固定。
+backend/.venv/bin/python -m backend.pipeline.media_batch pause \
+  --batch BATCH_ID --revision REVISION --operation OPERATION_ID
+backend/.venv/bin/python -m backend.pipeline.media_batch resume \
+  --batch BATCH_ID --revision REVISION --operation OPERATION_ID
 ```
 
-`plan` 產生按檔案／講次的對照表：新建、已完成跳過、階段復用、待核實、其他講員、錯誤；同時列出容量、預估呼叫量與預算需求。run 保存完成與未完成的兩種狀態，僅在所有必做階段及交接回執通過時標為相應完成，不用單一綠色標籤掩蓋未發表／未准入。
+`run` 是前台入口，`--drain` 在無可執行工作時退出；`start` 讓 controller 等待 UI 暫停／繼續／重試，全部工作完成後退出。若完成後另有失敗重試需求，須明示再次 `start`；UI 不會從 GET 偷啟程序。`reconcile` 只在舊工作沒有活躍租約鎖、且心跳過期時將其標為中斷或未知。`retry` 不能重發未知模型呼叫。`stop` 先暫停，待在途 task 排空才卸載本批 supervisor。
+
+進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對管理員身份；前後端共用既有簽名身份。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。搜尋和篩選明示只作用於本頁。頁面可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
+
+| 已實作範圍 | 實際行為 |
+| --- | --- |
+| 身份與防重 | bytes SHA、固定 16 kHz mono PCM 身份、舊站索引；同時長的舊壓縮版經逐秒全長聲學比對後才自動沿用；改名／搬家仍能接續排隊任務 |
+| 續跑與版本 | PostgreSQL 唯一 task、短交易派工、attempt CAS、子程序繼承租約鎖；同一 recording 的可變工作目錄串行，跨講並行；speech 各窗口獨立 task，原模型回覆依 exact request 重用 |
+| 版本界線 | 固定來源、詞表、實作及目的地的再次計畫共用 task。與本流程無關的 git commit 不使其失效；相關 stage 實作或目的地變更則建立新工作版本及隔離目錄，目前不做跨 pipeline 版本的自動產物移植 |
+| 模型與資源 | 批次內所有實際 saved-call 共用 Sol 2、ASR 2、Gemini 2；MPS 1、壓縮 1；同一台帳強制相同 capacity 根目錄，累計原子保留預算。未接入的其他應用程序不在此全域承諾內 |
+| 未知結果 | 本機檢查通過、實際發送前才保留預算；遠端結果不明時保留 request 與隔離 slot，不以超時自動重發 |
+| 影音 | 音訊 MP3 原 bytes 同碟 hardlink，避免重複大檔並保留來源路徑；WAV／AAC 另產相容 MP3。影片固定等比、不放大、最高 720p 的 H.264／AAC、CRF 23、medium、faststart；完整解碼、時長及多處音訊錨點驗證後安裝，不覆寫同名不同媒體 |
+| 新轉錄模組 | ASR、標點分段、slide／OCR、Gemini 原聲校字、最終 forced alignment、contextual timing 及講員辨識；不使用舊 Excel 批次。不改動教授的內容立場 |
+| 候選與網站 | 媒體驗證後登記目錄；未發布時公開 API 只投影媒體 metadata，不洩露草稿，也不造假空白 script。候選交 ReviewStore，人工認領／採用／自存／歷史／發布仍由既有 editor 處理 |
+| 講員與下游 | 講員標籤在採用候選時加入，精確驗證所有口述字元未改；原文與時間證書保留。既有人工或發布稿不覆寫；不自動發布逐字稿、不更新 Claim、不繞過文庫來源准入 |
+
+尚未完成的完整目標不能當作首版能力：MTS 有序組裝、非零影片時鐘映射、任意裁切／變速來源的聲學候選召回、同音訊新增不同影片的視覺補件，均不自動採用不明來源。目前會阻擋已辨識的 MTS、非零影片起點、不同影片同聲音及其他講員候選。任意裁切的未知舊版尚不能完整識別，因此還不能宣稱整個 Ruxin corpus 絕無重複。
+
+磁碟已有掛載／device 身份核對、轉碼前的可用空間下限；**尚無跨 worker 的磁碟 bytes 預約、15 GiB 全批工作集限制及自動回收**。OneDrive 下載／快取釋放由獨立複製工作負責，批次不刪雲端檔、不刪尚被證書引用的原檔。以上限制解除前，只能對已盤點並確認容量的本機來源作受控批次，不能直接無人值守地啟動整庫。
+
+### 12.2 完整目標的驗收
+
+以下是完整系統仍須滿足的驗收表，不能將首版短片測試視作全表已通過。具體測試結果保存為獨立記錄／測試產物，不嵌入本規範。
 
 | 驗收案例 | 必須成立 |
 | --- | --- |
@@ -333,4 +376,4 @@ media-batch pause --batch BATCH_ID
 | 已上網站就被當成完成校對／視覺准入 | 媒體、review、發布、來源與 Claim 各自回執 |
 | 清中間檔破壞已保存引用 | 引用檢查、穩定媒體位置、版本證書與回收清單 |
 
-本稿是已核對接點的設計，不是批次能力、壓縮品質或零重複端到端測試已完成的聲明。剩餘工程與上述驗收均留在同一張 #685 卡及同一 PR 推進。
+首版實作邊界以第 12.1 節為準，完整目標的剩餘工程與驗收仍在同一張 #685 卡及同一 PR 推進；未完成項不得以 UI「已完成」取代來源核實、人工發布或文庫准入。
