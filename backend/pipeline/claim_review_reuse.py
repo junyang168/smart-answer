@@ -101,6 +101,46 @@ def literal_fragment_rebinding(before, after):
             == {k:v for k,v in after.items() if k not in locator_fields})
 
 
+def _program_locator_rebinding(store, record, before, after, sources, records, *, cursor=None):
+    """Preserve an old vote only across provably content-neutral locator work."""
+    if before['retired'] or after['retired']:return None
+    a,b=before['payload'],after['payload']
+    common={'before_pin':[before['revision'],before['content_sha256'],False]}
+    if record.startswith('claims/'):
+        if {k:v for k,v in a.items() if k not in {'revision','occurrences'}} != {
+                k:v for k,v in b.items() if k not in {'revision','occurrences'}}:return None
+        payloads={k:v['payload'] for k,v in records.items()}
+        own=cm.own_source_ids(a,payloads)
+        if len(own)!=1 or own!=cm.own_source_ids(b,payloads) or not own<=sources.keys():return None
+        sid=next(iter(own))
+        if cursor is None:
+            with store.connect() as conn,conn.cursor() as cursor:
+                return _program_locator_rebinding(store,record,before,after,sources,records,cursor=cursor)
+        from backend.pipeline.claim_source_epoch_reassessment import _locator_lineage
+        history=_locator_lineage(cursor,record.split('/',1)[1],before['revision'],
+            (a,before['content_sha256'],'applied'),after,sid)
+        if history:return {**common,'kind':'verified_claim_anchor_sync','source_id':sid,
+                           'lineage_sha256':cm.sha256_json(history)}
+    elif record.startswith('source_fragments/'):
+        # Same paragraph, same words and same timing: only an index's scalar
+        # type and stale hash/status metadata are normalized. A relocation,
+        # changed quotation or new source still needs independent review.
+        fields={'revision','source_segment_index','source_sha256','source_binding_status'}
+        sid=a.get('source_id');snapshot=sources.get(sid,{})
+        old_index,new_index=a.get('source_segment_index'),b.get('source_segment_index')
+        same_index=(type(old_index) is type(new_index) and old_index==new_index
+            or type(old_index) is int and isinstance(new_index,str) and new_index==str(old_index))
+        quote=a.get('verbatim_excerpt');paragraph=snapshot.get('paragraphs',{}).get(str(a.get('paragraph_key')),{}).get('text','')
+        if (not sid or not isinstance(quote,str) or not quote.strip() or quote not in paragraph
+                or {k:v for k,v in a.items() if k not in fields}!={k:v for k,v in b.items() if k not in fields}
+                or not same_index
+                or a.get('source_binding_status') not in (None,'source_version_bound')
+                or b.get('source_binding_status')!='source_version_bound'
+                or not snapshot.get('body_sha256') or b.get('source_sha256')!=snapshot['body_sha256']):return None
+        return {**common,'kind':'same_position_fragment_metadata','source_id':sid}
+    return None
+
+
 def retired_incident_relation(key, before, after, claim_key):
     """Only the approved retirement of an existing Claim incident edge."""
     fields = ('from_id', 'to_id', 'source_id', 'target_id', 'from_claim_id', 'to_claim_id')
@@ -185,6 +225,7 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
     required = set(left['record_keys']) | set(right['record_keys'])
     neighbours = set(left['neighbour_claim_keys']) | set(right['neighbour_claim_keys'])
     changed_context = set()
+    locator_rebindings = {}
     sources = {}
     for sid, bound in materials['request']['source_bindings'].items():
         sources[sid] = verify_current_source_binding(bound)
@@ -217,6 +258,9 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
         editorial = (record.startswith('source_documents/') and record.split('/', 1)[1] in sources
                      and changes <= {'source_file_sha256', 'editorial_structure_sha256', 'editorial_topology_sha256'})
         if (changes and not editorial) or a['retired'] != b['retired']:
+            if locator := _program_locator_rebinding(store,record,a,b,materials['sources'],current):
+                locator_rebindings[record]=locator
+                continue
             extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb)
                          or record.startswith('questions/') and answer_extension(pa, pb)
                          or record.startswith('source_fragments/') and literal_fragment_rebinding(pa, pb)
@@ -239,6 +283,8 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
              'source_bindings': sources, 'scope_request': own.model_dump(mode='json'),
              'protected_record_keys': sorted(required - neighbours),
              'read_pins': pin_rows(pins({k:v for k,v in current_states.items() if cm.source.key(*k) in required}))}
+    if locator_rebindings:
+        proof['program_locator_rebindings']=locator_rebindings
     if own_only:
         # The unit operation has already completed. Reuse this Claim's own
         # full basis, not every disconnected maintenance root of the group.
@@ -341,6 +387,16 @@ def verify(store, cursor, claim_id, proof):
                                   (proof['review_run_id'],)).fetchone()[0]
         assert_human_current(cursor, proof['source_bindings'], material.get('human_source_decisions', []))
     states = store._assert_transaction_read_pins(cursor, decoded_pins(proof['read_pins']))
+    snapshots = None
+    if locator_rebindings := proof.get('program_locator_rebindings'):
+        snapshots=cursor.execute("SELECT metadata->'materials'->'sources' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",
+            (proof['review_run_id'],)).fetchone()[0]
+        old=json.loads(Path(proof['readback']['path']).read_text())['actual_records']
+        current={cm.source.key(*k):cm.model_state(v) for k,v in states.items()}
+        for record,expected in locator_rebindings.items():
+            if (record not in old or record not in current or
+                    _program_locator_rebinding(store,record,old[record],current[record],snapshots,current,cursor=cursor)!=expected):
+                raise ValueError('program locator qualification proof drift')
     resolved = {}
     if proof['contract'] == CONTEXT_CONTRACT:
         resolved = verify_context_reviews(store, cursor, proof)
@@ -356,10 +412,11 @@ def verify(store, cursor, claim_id, proof):
                    include_write_context=False, include_maintenance=not own_only)
     from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
     if own_evidence_enabled(cm.Request.model_validate(proof['scope_request'])):
-        material = cursor.execute('SELECT metadata->\'materials\' FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
-                                  (proof['review_run_id'],)).fetchone()[0]
+        if snapshots is None:
+            snapshots = cursor.execute("SELECT metadata->'materials'->'sources' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",
+                                      (proof['review_run_id'],)).fetchone()[0]
         assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in states.items()
-                                  if s['retired_at'] is None}, material['sources'], ['claims/'+claim_id])
+                                  if s['retired_at'] is None}, snapshots, ['claims/'+claim_id])
     state = states[('claims', claim_id)]
     if state['retired_at'] is not None:
         raise ValueError('review reuse cannot release retired or held content')

@@ -629,3 +629,75 @@ def test_peer_handoff_scopes_later_human_confirmation_to_relevant_basis(claims,m
         with pytest.raises(ValueError,match='human source evidence changed'):
             reuse.admit(store,'D',old,peer_run_id=peer)
     assert ports.calls==calls
+
+
+@pytest.mark.parametrize('defect',[None,'words','paragraph','segment','hash','speaker'])
+def test_same_position_fragment_metadata_preserves_vote_but_not_content_changes(claims,defect):
+    store,root=claims
+    fragment=store.get_record_state('source_fragments','FD')['payload']
+    fragment['source_segment_index']=0
+    store.apply_plan(store.plan_package({'package_id':'typed-locator-preimage','source_fragments':[fragment]}))
+    old=original_pass(store,root)
+    snapshot=store.get_cvp_group(old)['materials']['sources']['S']
+    current=store.get_record_state('source_fragments','FD')['payload']
+    current.update(source_segment_index='0',source_sha256=snapshot['body_sha256'],source_binding_status='source_version_bound')
+    if defect=='words':current['verbatim_excerpt']='甲是假设'
+    if defect=='paragraph':current['paragraph_key']='S0002'
+    if defect=='segment':current['source_segment_index']='1'
+    if defect=='hash':current['source_sha256']='wrong'
+    if defect=='speaker':current['speaker']='audience'
+    store.apply_plan(store.plan_package({'package_id':'metadata-locator-postimage','source_fragments':[current]}))
+    if defect:
+        with pytest.raises(ValueError):reuse.admit(store,'D',old)
+        q=store.claim_management_qualification('D');assert not q or not q.get('ready')
+    else:
+        proof=reuse.admit(store,'D',old)
+        assert proof['program_locator_rebindings']['source_fragments/FD']['kind']=='same_position_fragment_metadata'
+        assert store.claim_management_qualification('D')['ready']
+
+
+@pytest.mark.parametrize('defect',[None,'manual','content','plan_drift'])
+def test_verified_program_anchor_sync_reuses_exact_review_without_new_vote(claims,defect):
+    store,root=claims;old=original_pass(store,root)
+    claim=store.get_record_state('claims','D')['payload']
+    claim['occurrences'][0]['anchor_migration_notes']=[{'state':'source_version_bound','model_calls':0}]
+    if defect=='content':claim['statement']='A different professor judgment.'
+    package={'package_id':'archived-locator-fixture','claims':[claim]}
+    plan=store.plan_package(package);store.apply_plan(plan)
+    # Disposable historical fixture. The real locator writer's package/owner
+    # checks are exercised independently in test_transcript_claim_anchor_sync.
+    path=root.parent/'saved-anchor-plan.json'
+    path.write_text(json.dumps({'schema_version':'wang_transcript_claim_anchor_sync_v1',
+        'change_set_id':plan.change_set_id,'intent':{'source_id':'S'},'package':package}))
+    from backend.pipeline.cvp_sql_commit import binding
+    metadata={'actor':'owner_authorized_locator_sync','model_calls':0,
+        'claim_prose_changed':False,'new_qualification_granted':False,'migration_plan':binding(path)}
+    if defect!='manual':
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.change_sets SET source_kind='wang_transcript_claim_anchor_sync_v1',metadata=%s::jsonb WHERE change_set_id=%s",(json.dumps(metadata),plan.change_set_id))
+    if defect=='plan_drift':path.write_text(path.read_text()+' ')
+    if defect:
+        with pytest.raises(ValueError):reuse.admit(store,'D',old)
+        q=store.claim_management_qualification('D');assert not q or not q.get('ready')
+        return
+    proof=reuse.admit(store,'D',old)
+    assert proof['program_locator_rebindings']['claims/D']['kind']=='verified_claim_anchor_sync'
+    assert store.claim_management_qualification('D')['ready']
+    from copy import deepcopy
+    forged=deepcopy(proof);forged['program_locator_rebindings']['claims/D']['before_pin'][0]+=1
+    forged['proof_sha256']=cm.sha256_json({k:v for k,v in forged.items()if k!='proof_sha256'})
+    with store.connect() as conn,conn.cursor() as cursor:
+        with pytest.raises(ValueError,match='program locator qualification proof drift'):
+            reuse.verify(store,cursor,'D',forged)
+
+
+@pytest.mark.parametrize('old_index,new_index,allowed',[(7,'7',True),(None,None,True),
+    (None,'None',False),(True,'True',False),(7,'07',False)])
+def test_fragment_locator_index_normalization_is_not_arbitrary_string_coercion(old_index,new_index,allowed):
+    payload={'fragment_id':'F','source_id':'S','paragraph_key':'S0001',
+        'verbatim_excerpt':'same original words','source_segment_index':old_index}
+    before={'revision':1,'content_sha256':'old','retired':False,'payload':payload}
+    after={'revision':2,'content_sha256':'new','retired':False,'payload':{
+        **payload,'source_segment_index':new_index,'source_sha256':'body','source_binding_status':'source_version_bound'}}
+    sources={'S':{'body_sha256':'body','paragraphs':{'S0001':{'text':'same original words'}}}}
+    assert bool(reuse._program_locator_rebinding(None,'source_fragments/F',before,after,sources,{})) is allowed
