@@ -125,14 +125,17 @@ function BookChapters() {
                       <Link
                         key={row.key}
                         href={`/resources/wang-repository/books/${data.slug}/${chapter.chapter}${row.source ? `?source=${encodeURIComponent(row.source)}` : ""}`}
-                        className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-2 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
+                        className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-2 text-stone-900 sm:grid-cols-[6rem_minmax(0,1fr)_auto] hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
                       >
-                        <span className="w-24 font-serif text-xl font-bold">{index === 0 ? `第 ${chapter.chapter} 章` : ""}</span>
-                        <span className="flex-[1_1_320px] text-[15px] text-stone-700">
+                        {/* 手機上章號自成一行；第二個來源那一行不再空出章號的位置。 */}
+                        <span className={`col-span-2 font-serif text-xl font-bold sm:col-span-1 ${index === 0 ? "" : "hidden sm:block"}`}>
+                          {index === 0 ? `第 ${chapter.chapter} 章` : ""}
+                        </span>
+                        <span className="min-w-0 text-[15px] text-stone-700">
                           {/* 這一句是某個來源的講道講了什麼；沒選來源時寫出是哪個來源。 */}
                           {row.page?.title ? (source ? row.page.title : `${row.page.source}：${row.page.title}`) : ""}
                         </span>
-                        <span className="flex flex-wrap gap-2">
+                        <span className="flex flex-wrap justify-end gap-2">
                           {index === 0 && chapter.articles.length > 0 && (
                             <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
                           )}

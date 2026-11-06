@@ -1,9 +1,21 @@
+import { networkInterfaces } from 'node:os';
+
+// Development only: Next blocks its dev scripts for pages opened from any host
+// but localhost, so a phone on the home network gets HTML that never loads its
+// data. Allow this machine's own private IPv4 addresses.
+const lanAddresses = () =>
+  Object.values(networkInterfaces())
+    .flat()
+    .filter((item) => item && item.family === 'IPv4' && !item.internal)
+    .map((item) => item.address);
+
 export default (phase, { defaultConfig }) => {
   const env = process.env.NODE_ENV;
   /**
    * @type {import("next").NextConfig}
    */
   return {
+    allowedDevOrigins: env === 'production' ? [] : lanAddresses(),
     turbopack: {
       root: process.cwd(),
     },
