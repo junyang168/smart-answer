@@ -8,7 +8,10 @@ import { Check, Clipboard } from "lucide-react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
 import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName } from "./progress";
 
-/** 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。 */
+/**
+ * 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。
+ * 點講道進編輯器（在那裡認領、校對、發佈），不進給讀者的講道頁。
+ */
 
 type Row = Sermon & { deliver_date?: string | null };
 
@@ -122,7 +125,7 @@ export const SeriesPlayerView = () => {
                 <td className="px-4 py-3 font-mono text-stone-500">{order}</td>
                 <td className="px-4 py-3">
                   <Link
-                    href={`/resources/sermons/${encodeURIComponent(sermon.item || sermon.id)}`}
+                    href={`/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`}
                     className="font-medium text-stone-900 hover:text-amber-800 hover:underline"
                   >
                     {sermon.title}
