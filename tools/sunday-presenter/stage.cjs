@@ -12,7 +12,7 @@ class Stage {
 
   get(id) {
     const page = this.pages.get(Number(id));
-    if (!page || page.view.webContents.isDestroyed()) throw Error('頁面已關閉，請重新載入。');
+    if (!page?.view.webContents || page.view.webContents.isDestroyed()) throw Error('頁面已關閉，請重新載入。');
     return page;
   }
 
@@ -91,7 +91,8 @@ class Stage {
 
   black(emit = true, hideOutput = true) {
     for (const page of this.pages.values()) {
-      if (!page.view.webContents.isDestroyed()) page.view.webContents.setAudioMuted(true);
+      const wc = page.view.webContents;
+      if (wc && !wc.isDestroyed()) wc.setAudioMuted(true);
       if (page.host === this.output) page.view.setVisible(false);
     }
     this.active = null;
@@ -111,10 +112,14 @@ class Stage {
   remove(id) {
     const page = this.pages.get(id);
     if (!page) return;
-    this.invalidate(id);
-    if (this.preview === id) { this.preview = null; this.preparation.hide(); }
-    page.host.contentView.removeChildView(page.view);
+    // Electron can clear view.webContents before emitting its destroyed event.
+    // Remove it before any changed callback takes a snapshot, and make a
+    // reentrant destroyed event a no-op.
     this.pages.delete(id);
+    page.ready = false;
+    if (this.active === id) this.black(false);
+    if (this.preview === id) { this.preview = null; this.preparation.hide(); }
+    page.host?.contentView?.removeChildView(page.view);
     if (this.selected[page.deck] === id) this.selected[page.deck] = null;
     this.changed();
   }
@@ -123,7 +128,7 @@ class Stage {
     return { active: this.active, preview: this.preview, selected: this.selected,
       pages: [...this.pages.values()].map(({ id, deck, title, ready, loaded, error, view }) =>
         ({ id, deck, title, ready, loaded, error,
-          muted: view.webContents.isDestroyed() || view.webContents.isAudioMuted() })) };
+          muted: !view.webContents || view.webContents.isDestroyed() || view.webContents.isAudioMuted() })) };
   }
 }
 

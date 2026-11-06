@@ -1,4 +1,26 @@
-if CommandLine.arguments.contains("--video-probe") {
+if CommandLine.arguments.contains("--scope-probe") {
+    _ = NSApplication.shared
+    NSApp.setActivationPolicy(.prohibited)
+    let remote = RemoteApp()
+    remote.endpoint = URL(string:"https://127.0.0.1:43123")
+    remote.fingerprint = String(repeating:"a",count:64)
+    remote.token = String(repeating:"A",count:43)
+    remote.live = true; remote.binding = "synthetic-stage"
+    remote.observing.state = .on
+    let observerBlocked = !remote.canFlip
+    remote.forward() // Must not emit a request, even via the keyboard action.
+    let observerDidNotSend = !remote.busy
+    remote.observing.state = .off
+    let controlEnabled = remote.canFlip
+    remote.flip("Escape")
+    let unsupportedKeyBlocked = !remote.busy
+    remote.live = false
+    let inactiveBlocked = !remote.canFlip
+    remote.live = true; remote.token = nil
+    emitJSON(["observerBlocked":observerBlocked,"observerDidNotSend":observerDidNotSend,
+              "controlEnabled":controlEnabled,"inactiveBlocked":inactiveBlocked,
+              "unpairedBlocked":!remote.canFlip,"unsupportedKeyBlocked":unsupportedKeyBlocked])
+} else if CommandLine.arguments.contains("--video-probe") {
     let app = NSApplication.shared
     guard let line = readLine(), let data = line.data(using: .utf8),
           let value = try? JSONSerialization.jsonObject(with: data) as? [String: String],

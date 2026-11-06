@@ -1,6 +1,6 @@
 # Sunday Presenter Phase 2 設計：先用 Google Meet 穩定 PPT 與 Remote，再接 YouTube
 
-> 狀態：設計草案 v4，依 owner 指示分三步上線，待原型驗證；不是已實作或已驗收的功能。
+> 狀態：設計草案 v5，以 iPad 為 Remote 主目標，依 owner 指示分三步上線，待原型驗證；不是已實作或已驗收的功能。
 > 日期：2026-11-04。
 > 追蹤：[主卡 #643](https://github.com/junyang168/smart-answer/issues/643)。
 > 基線：Phase 1 v0.4.0、已合併的 [PR #611](https://github.com/junyang168/smart-answer/pull/611)，程式檢視基線 `2b93ae7007ca4de60d267062a2ff2e8007b6ee5d`。
@@ -29,6 +29,31 @@ Owner 於 2026-11-04 確認以下三步上線順序。**本主日只進第一步
 
 後續 YouTube 設計保留 owner 已確認的三項簡化：YouTube 使用可重用的固定 stream key，網站提供固定頻道觀看入口；收音使用 owner 現有、接在主電腦的無線麥克風；不收 PPT 內嵌音樂／影片聲音。Remote 麥克風傳輸延後，本版移除 Google OAuth、每週場次 API、網路音訊及 PPT 音訊擷取。
 
+### 1.1 iPad 是目標裝置，Mac 是過渡
+
+Owner 明確指定 iPad 才是 Sunday Remote 的主要目標；講員使用 Mac 是既有崇拜流程的限制。新增 [iPad pilot #652](https://github.com/junyang168/smart-answer/issues/652)，依賴 #643 的 Presenter 與 video 協議。第一版 iPad 提供 PPT 畫面、觸控翻頁、配對、全螢幕與前景恢復，預設只看畫面、停用翻頁，供第一步旁路監看；第二步才由講員啟用控制。Mac Remote 保留供目前流程過渡，不把另一台 Mac 當成未來講員的必要設備。
+
+現有 WebRTC `remote.html/js/css` 與 `RemoteVideoView.swift` 共用；iPad 以 UIKit 實作版面與生命週期，重用既有 TLS／Bonjour／配對及翻頁協議。只接收 video，不移動 PPT／Office 登入到 iPad。App 進入非作用狀態即停止本機 viewer、取消請求並禁用按鍵；回到前景重新探索與協商，不承諾背景串流。詳細建置／安裝及證據界線見 [iPad 說明](../tools/sunday-presenter/ipad/README.md)。
+
+2026-11-04 已安裝 Xcode，iOS 模擬器與未簽章真機架構建置通過；iPad 模擬器已驗證真實 PPT video、觸控雙向翻頁、只看模式、橫向全螢幕，以及重開 App／返回前景後保留配對並恢復影像。真機簽章、目標 iPadOS、實際 Wi-Fi／熱點與整場驗收仍待完成；模擬器成功不代表真機已通過。
+
+### 1.2 長期願景：主日流程 PPT 自動化；現在建立 Foundation
+
+Owner 確認：目前的 Presenter、iPad Remote、穩定畫面傳輸與人工翻頁，是整個系統的 **Foundation（基礎）**。當前先把這些能力與現有 Google Meet 崇拜流程測穩；以下願景只作方向記錄，不新增本輪實作、排程或驗收要求，也不改變上述三步上線順序。
+
+長期目標是讓系統結合 **PPT 內容、主日崇拜日程，以及主持人與講員的現場語音**，理解崇拜正在進行的環節，協助主日流程 PPT 在適當時機切換與翻頁。日程提供流程脈絡，現場進度決定時機；不能只按預定時間機械翻頁。
+
+兩份 PPT 的控制權明確分開：
+
+| 範圍 | 長期方向 |
+| --- | --- |
+| 主日崇拜流程 PPT | 未來可依流程與現場內容自動切換／翻頁，例如宣召、讀經、報告與回應；歌詞跟隨須另行研究重唱、副歌與間奏 |
+| 講道 PPT | 翻頁始終由講員自行控制，使用 iPad Remote；自動化不接管講道頁面。理解講員語音可作流程脈絡，不等於取得翻頁權 |
+
+未來探索可從「旁路判斷目前應在何頁」開始，再到「提出下一頁建議、人工確認」，最後才評估指定主日環節的自動操作。這是探索方向，尚非承諾的實作方案；語音辨識、內容比對、模型、收音方式與處理位置都未選定。人工需能隨時暫停、接管及修正；進入講道時交回講員，恢復主日自動模式的交接方式另行設計。
+
+Foundation 階段保留可靠的人工操作與明確的控制權，讓未來有可比較的實際流程與翻頁行為。現在不新增語音監聽、AI 自動翻頁或額外資料蒐集，也不以這個願景延後 iPad 真機及現場穩定性驗證。
+
 ## 2. 架構決定
 
 | 決定 | 本設計的選擇 | 理由與驗證邊界 |
@@ -37,7 +62,7 @@ Owner 於 2026-11-04 確認以下三步上線順序。**本主日只進第一步
 | 主電腦與 Remote 間的媒體 | 本地 WebRTC，單向 video、一對一 | Remote 只看畫面；不協商 audio、不傳麥克風音訊 |
 | 控制與配對 | 沿用 Bonjour、憑證釘選 TLS、Keychain 與 bearer token | 翻頁不依賴影音通道健康；既有配對不是任意瀏覽器可用的網站登入 |
 | Presenter 媒體執行環境 | 獨立、可信任的本地 Electron renderer／session | 使用現有 Chromium WebRTC，權限不給 Office 頁面 |
-| Remote 媒體執行環境 | 優先保留 Swift AppKit，新增只載入內附程式的 `WKWebView` | 重用系統 WebRTC，保留原生配對與按鍵；實際 OS、可信來源與權限相容性先做原型 |
+| Remote 媒體執行環境 | iPad UIKit 為主；Mac AppKit 作過渡，兩者共用只載入內附接收程式的 `WKWebView` | 重用 WebRTC 與配對／翻頁協議；iPad 真機、觸控與背景恢復需獨立驗收 |
 | 對外會議的兩步遷移 | 第一步主／講員 laptop 都加入 Meet、沿用現有收音；第二步只有主 laptop 加入，改接現有無線麥克風 | 第一步 Remote 僅旁路監看，第二步才供講員正式使用；均不要求本機錄影 |
 | YouTube 出口（延後） | 主電腦本地橋接 → 內附 FFmpeg → 固定 stream key 的 RTMPS | 不使用 YouTube API／Google OAuth；Studio 預先設定 auto-start／auto-stop |
 | 音訊來源 | 只有接在主電腦的指定無線麥克風 | 不擷取 Remote、PPT、內建麥克風或系統音效 |

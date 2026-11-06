@@ -30,7 +30,17 @@ class RemoteControl {
   constructor({ state, key, changed = () => {}, advertise = publish, now = Date.now, identity, video } = {}) {
     this.getState = state; this.key = key; this.changed = changed; this.advertise = advertise; this.now = now;
     this.server = null; this.error = ''; this.observe(null); this.queue = Promise.resolve();
-    this.video = video; this.identity = identity; this.peerHash = identity?.peerHash;
+    this.video = video; this.identity = identity;
+    this.peerHashes = [...(identity?.peerHashes ?? (identity?.peerHash ? [identity.peerHash] : []))];
+  }
+  get peerHash() { return this.peerHashes.at(-1) ?? null; }
+  set peerHash(value) { this.peerHashes = value ? [value] : []; }
+  isPaired(digest) { return !!digest && this.peerHashes.some(hash => equal(digest, hash)); }
+  openPairing() {
+    if (!this.server) throw Error('請先開啟講員翻頁。');
+    if (this.peerHashes.length >= 8) throw Error('最多記住八台 Remote。');
+    this.code = String(crypto.randomInt(100000, 1000000));
+    this.codeUntil = this.now() + 5 * 60000; this.changed();
   }
   observe(active) {
     if (this.active !== active) { this.active = active; this.binding = crypto.randomBytes(16).toString('hex'); }
@@ -43,7 +53,7 @@ class RemoteControl {
   }
   snapshot() {
     return { enabled: !!this.server, code: this.code || '', paired: !!this.lastSeen && this.now() - this.lastSeen < 10000,
-      remembered: !!this.peerHash,
+      remembered: !!this.peerHash, rememberedCount: this.peerHashes.length,
       error: this.error, expiresAt: this.codeUntil || null };
   }
   async start({ host = '0.0.0.0' } = {}) {
@@ -80,7 +90,7 @@ class RemoteControl {
       const authorization = req.headers.authorization || '';
       const digest = /^Bearer [a-zA-Z0-9_-]{43}$/.test(authorization) ?
         crypto.createHash('sha256').update(authorization.slice(7)).digest('hex') : '';
-      const paired = !!this.peerHash && equal(digest, this.peerHash);
+      const paired = this.isPaired(digest);
       const generation = this.generation;
       if (paired) { this.lastSeen = this.now(); this.changed(); }
       if (req.method === 'GET' && req.url === '/state') {
@@ -104,19 +114,21 @@ class RemoteControl {
         }
         const token = crypto.randomBytes(32).toString('base64url');
         const digest = crypto.createHash('sha256').update(token).digest('hex');
-        this.identity?.remember(digest); this.peerHash = digest;
+        if (this.peerHashes.length >= 8) { send(409, { error: '最多記住八台 Remote。' }); return; }
+        this.identity?.remember(digest); this.peerHashes.push(digest);
         this.lastSeen = this.now(); this.code = null; this.changed();
         send(200, { token, ...this.publicState() }); return;
       }
       if (req.url === '/video') {
-        if (generation !== this.generation || !equal(digest, this.peerHash)) { send(401, { error: '請重新連線。' }); return; }
+        if (generation !== this.generation || !this.isPaired(digest)) { send(401, { error: '請重新連線。' }); return; }
         try { send(200, this.video.request(data)); }
         catch (error) { send(409, { error: error.message }); }
         return;
       }
       if (!['Left', 'Right'].includes(data.key) || typeof data.id !== 'string' ||
           !/^[a-zA-Z0-9-]{16,80}$/.test(data.id) || typeof data.binding !== 'string') { send(400, { error: 'Invalid command' }); return; }
-      const previous = this.seen.get(data.id);
+      const commandID = digest + ':' + data.id;
+      const previous = this.seen.get(commandID);
       const fingerprint = data.key + ':' + data.binding;
       if (previous && previous.fingerprint !== fingerprint) { send(409, { error: 'Command identifier conflict' }); return; }
       if (this.seen.size >= 2000 && !previous) { send(429, { error: '請在主電腦重新開啟講員翻頁。' }); return; }
@@ -124,13 +136,13 @@ class RemoteControl {
       if (!result) {
         const task = this.queue.then(async () => {
           const state = this.publicState();
-          if (this.generation !== generation || !equal(digest, this.peerHash) || !state.live || state.binding !== data.binding) throw Error('畫面已切換，請再按一次。');
+          if (this.generation !== generation || !this.isPaired(digest) || !state.live || state.binding !== data.binding) throw Error('畫面已切換，請再按一次。');
           const active = this.active;
-          await this.key(data.key, active, () => this.generation === generation && equal(digest, this.peerHash) && this.publicState().binding === data.binding);
+          await this.key(data.key, active, () => this.generation === generation && this.isPaired(digest) && this.publicState().binding === data.binding);
           return this.publicState();
         });
         result = task.then(value => ({ status: 200, value }), error => ({ status: 409, value: { error: error.message } }));
-        this.seen.set(data.id, { fingerprint, result }); this.queue = result.then(() => {});
+        this.seen.set(commandID, { fingerprint, result }); this.queue = result.then(() => {});
       }
       const response = await result; send(response.status, response.value);
     } catch { send(400, { error: 'Invalid request' }); }

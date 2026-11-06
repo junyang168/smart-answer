@@ -39,6 +39,23 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     } else if (request.url === '/embedded') {
       response.setHeader('Content-Type', 'text/html');
       response.end('<!doctype html><title>Embedded.pptx</title><iframe sandbox="allow-scripts" src="/frame" style="border:0;width:100vw;height:100vh"></iframe>');
+    } else if (request.url === '/ending') {
+      response.setHeader('Content-Type', 'text/html');
+      // A sandbox without allow-same-origin gives the frame an opaque origin.
+      response.end(`<iframe sandbox="allow-scripts" style="width:100vw;height:100vh" src="http://127.0.0.1:${server.address().port}/ending-frame"></iframe>`);
+    } else if (request.url === '/ending-frame') {
+      response.setHeader('Content-Type', 'text/html');
+      response.end(`<!doctype html><body style="background:#123;color:white"><p id="slide">Last slide</p>
+        <p hidden>End of slide show, click to exit.</p>
+        <div style="opacity:0"><p>End of slide show, click to exit.</p></div>
+        <p style="position:absolute;left:-9999px">End of slide show, click to exit.</p><script>
+        window.steps=0; window.exited=false;
+        const forward=()=>{ if(steps>=1){exited=true;document.querySelector('#slide').textContent='Editor';}
+          else {steps++;document.querySelector('#slide').textContent='End of slide show, click to exit.';} };
+        document.addEventListener('keydown',e=>{if(['ArrowRight',' ','Enter'].includes(e.key))forward();
+          if(e.key==='ArrowLeft'){steps=0;document.querySelector('#slide').textContent='Last slide';}});
+        document.addEventListener('click',forward);
+        </script>`);
     } else if (request.url === '/post') {
       postedBody = '';
       request.on('data', data => { postedBody += data; });
@@ -279,6 +296,28 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     wc(worship).forcefullyCrashRenderer();
     await until(() => !worship.ready, 'crash disarms');
     assert.equal(stage.active, null);
+    // An extra forward key/click on Office's end notice must never dismiss
+    // the show. Hidden end text must not interfere with ordinary slide input.
+    await act('open', { deck: 'sermon', url: `${origin}/ending` });
+    const ending = stage.get(stage.preview);
+    await until(() => wc(ending).mainFrame.frames.length === 1, 'cross-origin frame');
+    const endFrame = wc(ending).mainFrame.frames[0];
+    await until(async () => await endFrame.executeJavaScript('!!window.__sundayEndProtected'), 'end guard installed in frame');
+    await act('arm', {id:ending.id}); await act('take', {deck:'sermon'});
+    await until(async () => await endFrame.executeJavaScript('typeof steps') === 'number', 'end fixture loaded');
+    const endKey = key => endFrame.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', {key:${JSON.stringify(key)}, bubbles:true, cancelable:true}))`);
+    await endKey('ArrowRight');
+    assert.equal(await endFrame.executeJavaScript('steps'), 1, 'hidden notice allows advance');
+    for (const key of ['ArrowRight','ArrowRight',' ','Enter']) await endKey(key);
+    await endFrame.executeJavaScript("document.querySelector('#slide').click()");
+    assert.equal(await endFrame.executeJavaScript('exited'), false);
+    assert.equal(output.isVisible(), true); assert.equal(stage.active, ending.id);
+    await endKey('ArrowLeft');
+    assert.equal(await endFrame.executeJavaScript('steps'), 0, 'back from end to last slide');
+    await endKey('ArrowRight');
+    assert.equal(await endFrame.executeJavaScript('steps'), 1, 'advance after returning');
+    assert.equal(await endFrame.executeJavaScript('exited'), false);
+    stage.remove(ending.id); wc(ending).close();
     const result = { platform: process.platform, versions: process.versions,
       switches: 20, steps: [10, 10], stableOutput: true, popupOpener: true,
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,
@@ -287,7 +326,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
       presentationCommandPIntercepted: true, coveredControlsRaisedWithOneToggle: true, noBlankStartupWindow: true, controllerCannotFullscreen: true, playbackHidesSettings: true, noFlipPanel: true, closePreservesPresentation: true, dockActivationRestoresPanel: true, formalDeckShortcuts: true,
       websiteFolderFetch: true, failedRefreshPreservesLivePresentation: true,
       remoteAndOperatorFlipSamePage: true, remoteDuplicateIdAppliedOnce: true,
-      phase1ManualMeet: true, removedMeetActionsRejected: true, microsoftAuthentication: 'NOT TESTED' };
+      endOfShowPreservesPresentation: true, crossOriginEndGuard: true, backFromEnd: true, phase1ManualMeet: true, removedMeetActionsRejected: true, microsoftAuthentication: 'NOT TESTED' };
     fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));
   } finally { server.close(); }

@@ -24,6 +24,19 @@ link. PPT audio capture, Google OAuth and Remote microphone relay are outside th
 design; only the selected wireless microphone on the host supplies audio. It is
 a design draft, not an implemented capability of the Phase 1 release below.
 
+## iPad-first Remote pilot (#652)
+
+The owner identified iPad as the actual speaker-device goal; Mac use is a
+constraint of the current service workflow. [The iPad target](ipad/README.md)
+adds a UIKit viewer/controller using the same bundled WebRTC receiver and pinned
+Presenter protocol. It defaults to observe-only mode. Pairing, host isolation,
+touch navigation, expanded viewing and foreground reconnect are implemented as
+a pilot. Xcode simulator and unsigned device builds now pass. An iPad simulator
+has received real PPT video, controlled both slide directions, displayed the
+expanded landscape viewer, and restored video/pairing after app restart and
+foreground return. Physical-device signing and hardware/full-service acceptance
+remain outstanding. Keep the first Sunday's two-laptop Meet workflow.
+
 ## Local video pilot — 0.5.1 (#643)
 
 The worktree pilot adds a resizable PPT viewer to the native Remote. When paired
@@ -207,3 +220,16 @@ Published installers are immutable files outside Git. scripts/publish-sunday-pre
 uses --status released for Phase 1; the website accepts released and older pilot
 manifests. Build verification and real user observations are in acceptance.md.
 Website/storage API: ../../docs/sunday-presenter.md.
+
+## Shared release version and Mac/iPad Remote behavior
+
+Presenter, Mac Remote and iPad Remote use the same release version from
+`package.json`. Run `ipad/generate-project.cjs` after a version change; both Xcode
+configurations obtain `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` from that
+value. Do not manually version the generated project separately.
+
+Both Remote apps start in observer mode. Disable **只看畫面** explicitly to enable
+slide buttons and keyboard navigation. Pairings are stored separately for each
+pinned Presenter identity; **重新配對** removes only the selected host. Mac upgrades
+can read the previous single-host Keychain item only for its exact fingerprint.
+Both clients use the same endpoint/certificate checks and reject HTTP redirects.

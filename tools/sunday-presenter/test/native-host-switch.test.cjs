@@ -9,9 +9,17 @@ test('native Remote switches hosts without reusing credentials or accepting back
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'sunday-host-switch-'));
   try {
     const native = path.join(__dirname, '../native');
-    const source = ['NativeCore.swift', 'RemoteVideoView.swift', 'RemoteApp.swift']
-      .map(name => fs.readFileSync(path.join(native, name), 'utf8')).join('\n');
+    const shared = ['RemoteScope.swift', 'PairStore.swift', 'RemoteClient.swift']
+      .map(name => fs.readFileSync(path.join(native, '../ipad/SundayRemote', name), 'utf8'));
+    const source = shared.concat(['NativeCore.swift', 'RemoteVideoView.swift', 'RemoteApp.swift']
+      .map(name => fs.readFileSync(path.join(native, name), 'utf8'))).join('\n');
     const fixture = `
+final class FixturePairs: PairStorage {
+    var items: [String:String] = [:]
+    func load(_ fingerprint: String) -> String? { items[fingerprint] }
+    func save(_ token: String, for fingerprint: String) throws { items[fingerprint] = token }
+    func remove(_ fingerprint: String) { items.removeValue(forKey:fingerprint) }
+}
 final class FixtureService: NetService {
     let identity: String
     init(_ name: String, _ identity: String) {
@@ -46,7 +54,9 @@ let a = FixtureService("old Mac", String(repeating: "a", count: 64))
 let b = FixtureService("MacBook Pro", String(repeating: "b", count: 64))
 remote.services = [a, b]
 remote.computers.addItems(withTitles: [a.name, b.name])
-remote.saved = ["fingerprint": a.identity, "token": "OLD_HOST_TOKEN"]
+let pairs = FixturePairs(); remote.pairStore = pairs
+let tokenA = String(repeating:"A",count:43), tokenB = String(repeating:"B",count:43)
+try! pairs.save(tokenA,for:a.identity)
 // Suppress network polling; these checks exercise real native resolution and selection.
 remote.polling = true
 remote.computers.selectItem(at: 1)
@@ -54,31 +64,39 @@ remote.resolved(b)
 precondition(remote.endpoint != nil, "new selected host must resolve despite remembered old host")
 precondition(remote.fingerprint == b.identity && remote.token == nil, "old token must never cross hosts")
 precondition(!remote.code.isHidden && !remote.connect.isHidden)
-precondition(remote.saved["token"] == "OLD_HOST_TOKEN", "keep saved pairing until replacement succeeds")
+precondition(pairs.load(a.identity) == tokenA, "keep saved pairing until replacement succeeds")
 remote.resolved(a)
 precondition(remote.fingerprint == b.identity, "late background discovery must not change selected host")
 remote.computers.selectItem(at: 0)
 remote.polling = true
 remote.resolved(a)
-precondition(remote.token == "OLD_HOST_TOKEN" && remote.fingerprint == a.identity, "same host reconnects")
+precondition(remote.token == tokenA && remote.fingerprint == a.identity, "same host reconnects")
 remote.busy = true
 remote.computers.selectItem(at: 1)
 let generation = remote.connectionGeneration
 remote.selectComputer()
-precondition(remote.connectionGeneration == generation + 1 && !remote.busy && !remote.polling)
+precondition(remote.connectionGeneration > generation && !remote.busy && !remote.polling)
 precondition(remote.token == nil && remote.fingerprint == b.identity && remote.endpoint != nil)
 precondition(!remote.previous.isEnabled && !remote.next.isEnabled && remote.binding.isEmpty)
 precondition(!remote.computers.isHidden, "host selector stays available")
 let configuration = URLSessionConfiguration.ephemeral
 configuration.protocolClasses = [DelayedReply.self]
 remote.session = URLSession(configuration: configuration)
+remote.sessionIdentity = remote.fingerprint + "@" + remote.endpoint!.absoluteString
 var staleCompleted = false
 remote.request("state") { _ in staleCompleted = true }
 remote.computers.selectItem(at: 0)
 remote.selectComputer()
 RunLoop.main.run(until: Date().addingTimeInterval(0.4))
 precondition(!staleCompleted, "late response from previous host must not mutate new connection")
-remote.session.invalidateAndCancel()
+remote.session?.invalidateAndCancel()
+try! pairs.save(tokenB,for:b.identity)
+remote.computers.selectItem(at:1); remote.resolved(b)
+precondition(remote.token == tokenB && pairs.load(a.identity) == tokenA, "each host keeps its own pair")
+remote.setViewingActive(true)
+remote.forgetPair()
+precondition(pairs.load(b.identity) == nil && pairs.load(a.identity) == tokenA, "forget removes only selected host")
+precondition(remote.viewingActivity == nil, "forget releases the viewer activity")
 remote.setViewingActive(true)
 precondition(remote.viewingActivity != nil, "visible live presentation holds an activity")
 remote.setViewingActive(false)

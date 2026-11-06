@@ -12,6 +12,10 @@ final class RemoteVideoView: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        #if os(iOS)
+        configuration.allowsInlineMediaPlayback = true
+        configuration.allowsPictureInPictureMediaPlayback = false
+        #endif
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.configuration.userContentController.add(self, name: "video")
@@ -44,7 +48,7 @@ final class RemoteVideoView: NSObject, WKScriptMessageHandler, WKNavigationDeleg
               ["answer", "failed", "stats"].contains(op) else { return }
         onMessage?(value)
     }
-    @available(macOS 12.0, *)
+    @available(macOS 12.0, iOS 15.0, *)
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) { decisionHandler(.deny) }
