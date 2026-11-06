@@ -189,3 +189,12 @@ def test_a_piece_goes_to_the_chapter_of_its_main_passage() -> None:
     assert notes._in_chapter([[5, 1, 7, 29]], 5) == "mat-5-1-48"
     assert notes._in_chapter([[5, 1, 7, 29]], 6) is None
     assert notes._in_chapter([[1, 1, 28, 20]], 14) is None
+
+
+def test_the_bookmark_sits_on_the_first_part_with_words() -> None:
+    sentence = {"id": "S0001", "piece": "N001", "text": "（λόγος.）", "voice": [("zh", "（"), ("el", "λόγος"), ("zh", ".）")]}
+    out = notes.ssml([sentence], set())
+    assert 'xml:lang="zh-CN"><voice name="zh-CN-YunzeNeural"><prosody rate="-10%" pitch="-2%">（</prosody>' in out
+    assert '<bookmark mark="S0001"/>λόγος' in out
+    long = [{"id": f"S{i:04d}", "piece": "N001", "text": "字" * 100, "voice": [("zh", "字" * 100)]} for i in range(1, 60)]
+    assert max(sum(len(s["text"]) for s in chunk) for chunk in notes._chunks(long)) <= notes.HARD_CHUNK_CHARS

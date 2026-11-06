@@ -505,6 +505,7 @@ def load_verses(data_base_dir: Path, project: str) -> dict[str, Any] | None:
 
 #: 一次请求合成的字数上限。Azure 一次最多十分钟的音频；按每分钟约 220 字，留余量。
 CHUNK_CHARS = 1500
+HARD_CHUNK_CHARS = 2000
 PIECE_BREAK_MS = 700
 #: 念到表格的位置停下来，让人看幻灯上的表（负责人 2026-11-06：表格不念，停顿）。
 #: 三秒起，每行加 1.2 秒，最多 20 秒；Azure 一个 `<break>` 最长 5 秒，接几个。
@@ -547,8 +548,11 @@ def _runs(sentences: list[dict[str, Any]], breaks_after: set[str]) -> list[tuple
     for sentence in sentences:
         mark = f'<bookmark mark="{sentence["id"]}"/>'
         for lang, chunk in sentence["voice"]:
-            body = mark + html.escape(chunk)
-            mark = ""
+            # 书签打在第一段有字可念的前面：只有「（」的一段 Azure 不报书签（「16_章_-_生命」）。
+            speakable = bool(re.search(r"\w", chunk))
+            body = (mark if speakable else "") + html.escape(chunk)
+            if speakable:
+                mark = ""
             if runs and runs[-1][0] == lang:
                 runs[-1][1] += body
             else:
@@ -599,7 +603,8 @@ def _chunks(script: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         new_piece = index == 0 or script[index - 1]["piece"] != sentence["piece"]
         more = _switches(sentence)
         full = size >= CHUNK_CHARS or voices + more > MOST_VOICES // 2
-        hard = size >= CHUNK_CHARS * 2 or voices + more > MOST_VOICES
+        # 一节很长时在节中间切：2,800 字一次的请求超过十分钟，Azure 报 1013（「_12章」）。
+        hard = size >= HARD_CHUNK_CHARS or voices + more > MOST_VOICES
         if current and ((new_piece and full) or hard):
             out.append(current)
             current, size, voices = [], 0, 0
