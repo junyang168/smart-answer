@@ -78,6 +78,7 @@ type Context = {
       audio_quote: string;
       reason: string;
       kind: string;
+      timing_precision?: string;
     }[];
   } | null;
   media_mime_type?: string;
@@ -2009,6 +2010,9 @@ function TranscriptProofreader({
                     >
                       <strong>原聲複核提示（模型候選）</strong>
                       <p>
+                        {n.timing_precision === "context_window_only"
+                          ? "時間未能精確定位；上下文範圍 "
+                          : "約 "}
                         {stamp(n.start_ms)}–{stamp(n.end_ms)}
                         {n.audio_quote ? `：「${n.audio_quote}」` : ""}
                       </p>

@@ -428,6 +428,12 @@ def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_wo
     assert rows[0]["text"] == "**說話者未明：**各位平安。"
     assert proof["notices"][1]["paragraph_id"] == "1"
     assert proof["notices"][1]["start_ms"] == 3100
+    value["missing_speech"][0]["clip_end_s"] = 10.2
+    atomic(evidence / "w000/candidate.json", value)
+    _, notices = assemble(record, evidence)
+    assert notices[1]["timing_precision"] == "context_window_only"
+    assert notices[1]["reported_clip_range_s"] == [3.1, 10.2]
+    assert (notices[1]["start_ms"], notices[1]["end_ms"]) == (0, 10000)
     value["rejected"] = []
     atomic(evidence / "w000/candidate.json", value)
     with pytest.raises(ValueError, match="coverage"):

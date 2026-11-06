@@ -40,6 +40,7 @@ def generate(out):
         evidence_root=str(evidence),
         review_status="unreviewed_model_candidate",
         notices=notices,
+        assembly_policy="preserve-source-and-disclose.v1",
     )
     atomic(out / "speaker-candidate.json", candidate)
     return dict(
@@ -114,20 +115,27 @@ def assemble(record, evidence):
                 )
         for gap in value["missing_speech"]:
             start, end = gap["clip_start_s"], gap["clip_end_s"]
-            if (
-                not all(
-                    type(n) in (int, float) and math.isfinite(n) for n in (start, end)
-                )
-                or not 0 <= start < end <= (hi - lo) / 1000
-            ):
-                raise ValueError("Missing-speech candidate has invalid audio bounds")
-            absolute_start, absolute_end = lo + round(start * 1000), lo + round(
-                end * 1000
+            valid_time = (
+                all(type(n) in (int, float) and math.isfinite(n) for n in (start, end))
+                and 0 <= start < end <= (hi - lo) / 1000
             )
+            absolute_start, absolute_end = (
+                (lo + round(start * 1000), lo + round(end * 1000))
+                if valid_time
+                else (lo, hi)
+            )
+            association_start = (
+                lo + round(start * 1000)
+                if type(start) in (int, float)
+                and math.isfinite(start)
+                and 0 <= start < (hi - lo) / 1000
+                else absolute_start
+            )
+            association_end = absolute_end if valid_time else association_start
             nearest = min(
                 paragraphs.values(),
                 key=lambda p: max(
-                    p["start_ms"] - absolute_end, absolute_start - p["end_ms"], 0
+                    p["start_ms"] - association_end, association_start - p["end_ms"], 0
                 ),
             )
             notices.append(
@@ -140,6 +148,10 @@ def assemble(record, evidence):
                     reason=gap["reason"],
                     evidence_sha256=file_sha(path),
                     status="unreviewed_model_candidate",
+                    timing_precision=(
+                        "model_estimate" if valid_time else "context_window_only"
+                    ),
+                    reported_clip_range_s=[start, end],
                 )
             )
     if [p["paragraph_id"] for p in accepted] != list(paragraphs):
