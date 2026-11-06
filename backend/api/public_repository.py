@@ -146,7 +146,7 @@ def chapter_pages() -> dict[tuple[str, int], dict[str, Any]]:
                 for lecture in chapter.lectures
             ) else "audio",
         }
-    for passage, label in original_audio_index.PASSAGES:
+    for passage, label in original_audio_index.passages():
         reference = parse_reference(passage)
         key = (str(reference["slug"]).lower(), int(reference["chapter"]))
         if key in pages and pages[key]["kind"] == "chapter":

@@ -14,14 +14,50 @@ CHAPTER = Chapter(
 )
 
 
-def test_matthew_5_is_configured_for_all_six_lectures_of_its_series():
-    chapter = chapter_material.CHAPTERS["mat-5-1-48"]
-    assert len(chapter.lectures) == 6
-    assert all(lecture.startswith(chapter.series) for lecture in chapter.lectures)
+FIVE = Chapter(
+    passage="mat-5-1-48",
+    series="2011 NYSC 專題：馬太福音釋經（二）",
+    lectures=tuple(f"2011 NYSC 專題：馬太福音釋經（二）{n}" for n in range(1, 7)),
+    sections=("mat-5-1-12", "mat-5-13-16", "mat-5-17-20", "mat-5-21-26", "mat-5-27-30",
+              "mat-5-31-32", "mat-5-33-37", "mat-5-38-42", "mat-5-43-48"),
+)
+
+
+def _write(path, chapters):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": chapter_material.SCHEMA_VERSION, "chapters": [
+        {"passage": c.passage, "series": c.series, "source": c.source,
+         "lectures": list(c.lectures), "sections": list(c.sections)} for c in chapters
+    ]}, ensure_ascii=False))
+
+
+def test_the_chapter_list_is_read_from_the_data_folder_and_reread_when_it_changes(tmp_path, monkeypatch):
+    path = chapter_material.chapters_path(tmp_path)
+    monkeypatch.setattr(chapter_material, "chapters_path", lambda data_base_dir=None: path)
+    chapters = chapter_material._Chapters()
+    assert dict(chapters) == {}
+    _write(path, [FIVE])
+    assert chapters["mat-5-1-48"] == FIVE
+    seven = Chapter(passage="mat-7-1-29", series="S", lectures=("L",),
+                    sections=("mat-7-1-6", "mat-7-7-29"))
+    _write(path, [FIVE, seven])
+    import os
+    os.utime(path, ns=(1, path.stat().st_mtime_ns + 1_000_000))
+    assert list(chapters) == ["mat-5-1-48", "mat-7-1-29"]
+
+
+def test_a_chapter_whose_sections_do_not_cover_it_is_skipped_not_served(tmp_path):
+    gap = Chapter(passage="mat-7-1-29", series="S", lectures=("L",), sections=("mat-7-1-6", "mat-7-13-29"))
+    no_lecture = Chapter(passage="mat-6-1-34", series="S", lectures=(), sections=("mat-6-1-34",))
+    path = chapter_material.chapters_path(tmp_path)
+    _write(path, [FIVE, gap, no_lecture])
+    assert list(chapter_material.load_chapters(path)) == ["mat-5-1-48"]
+    assert chapter_material.problems(gap) and chapter_material.problems(no_lecture)
+    assert chapter_material.problems(FIVE) == []
 
 
 def test_a_verse_belongs_to_the_section_where_it_starts():
-    chapter = chapter_material.CHAPTERS["mat-5-1-48"]
+    chapter = FIVE
     assert chapter_material.section_of(chapter, "mat-5-28") == "mat-5-27-30"
     assert chapter_material.section_of(chapter, "mat-5-39-44") == "mat-5-38-42"
     assert chapter_material.section_of(chapter, "mat-5-17-48") == "mat-5-17-20"
@@ -175,23 +211,10 @@ def test_a_sentence_long_kept_piece_stays_with_the_argument_around_it():
     assert rows["mat-5-38-42"]["stretches"] == [{"start": 0.0, "end": 200.0}]
 
 
-def test_every_chapter_page_is_split_into_sections_that_cover_it_end_to_end():
-    from backend.pipeline import chapter_material
-
-    for passage, chapter in chapter_material.CHAPTERS.items():
-        book, number, start, end = chapter_material.verse_range(passage)
-        expected = start
-        for section in chapter.sections:
-            s_book, s_number, low, high = chapter_material.verse_range(section)
-            assert (s_book, s_number, low) == (book, number, expected), section
-            expected = high + 1
-        assert expected == end + 1, passage
-        assert chapter.lectures
-
-
 def test_the_slide_prompt_names_the_chapter_it_is_for():
     from backend.pipeline import chapter_material, chapter_slides
 
-    prompt = chapter_slides.system_prompt(chapter_material.CHAPTERS["mat-13-1-58"])
+    thirteen = Chapter(passage="mat-13-1-58", series="S", lectures=("L",), sections=("mat-13-1-58",))
+    prompt = chapter_slides.system_prompt(thirteen)
     assert "第 13 章" in prompt and "13:1-58" in prompt
     assert "第五章" not in prompt and "5:1-48" not in prompt

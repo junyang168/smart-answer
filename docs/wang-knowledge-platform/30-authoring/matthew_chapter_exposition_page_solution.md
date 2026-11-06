@@ -2,8 +2,8 @@
 
 > **读者**：Solution architect、神学编辑
 > **类型**：规范
-> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15）
-> **与代码对齐**：2026-11-05（核对到 #637 太 8–15 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
+> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15、太 6–7）
+> **与代码对齐**：2026-11-05（核对到 #637 太 6–7 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`、`backend/api/original_audio.py`、`backend/api/public_repository.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
 > **权威范围**：马太福音按章释经页由哪几部分组成；一章的材料从哪几篇讲道取、哪些段落算释经；神学、个人经历、生活应用与问答怎样取舍；同步幻灯上放什么。只管 NYSC 马太福音系列讲座这一个来源；母本与文章都不在本文范围。
 
 **目标：让听的人专心在释经上。读者打开马太福音某一章，按经节次序从头到尾听教授在 NYSC 系列讲座里对这一章的释经，同时看幻灯上他此刻在讲什么、读到哪些经文。**
@@ -25,6 +25,7 @@
 - [五、观点层](#五观点层)
 - [六、试点：太 5](#六试点太-5)
 - [6.1 太 8–15](#61-太-815)
+- [6.2 太 6–7](#62-太-67)
 - [七、不在本文范围](#七不在本文范围)
 
 ## 一、问题
@@ -45,7 +46,7 @@ NYSC 马太福音释经是一组系列讲座，每个系列讲一段章节。教
 | 同步幻灯 | 单篇讲道从 0:00 播到结束，幻灯跟着播放位置换：标题是此刻占主导的主张，配上它讲的经文和他讲到的原文字词（#259、#263） | `original_audio_index.build_sermon_slides`；`SermonPptSlide.tsx` |
 | 系列页 | 每个系列列出讲题、摘要、重点与各堂讲道 | `resources/series/[seriesId]`；`config/sermon_series.json` |
 
-三段的段落列表、标题现在写死在 `original_audio_index.PASSAGES` 里，只服务太 16。
+三段的段落列表、标题现在写死在 `original_audio_index.FIXED_PASSAGES` 里，只服务太 16。
 
 ## 三、负责人已定
 
@@ -122,6 +123,14 @@ flowchart LR
 | 2022（九） | 26（约与律法） | 4 |
 
 引用不等于讲解：太 5:32 的离婚在 2017（六）讲太 19 时、在 2020–21 年几篇主日讲道里也讲过，那些不属于太 5 这一章的系列，不纳入。
+
+**哪一章用哪几堂、怎样分段，存在 `DATA_BASE_DIR/chapter_exposition/chapters.json`**，不在代码里（负责人 2026-11-05：加一章不该要合并、部署）。每章写经文、来源、系列、讲了这一章的那几堂、和合本的分段；程序按文件的修改时间重读，分段没有从第 1 节接到最后一节、或一堂都没有的那一章跳过，不上页面。加一章：
+
+1. 按逐字稿里念到的马太福音章号，连同前后一堂，把这一章写进文件；
+2. 跑 `chapter_exposition`，没有片段保留的那一堂从文件里拿掉；
+3. 跑 `chapter_slides`、`chapter_slides --review`、`chapter_title`。
+
+页面下一个请求就有这一章，不用改代码，不用部署。
 
 **系列之内，哪些段落是这一章的释经，由模型按定义判断**（4.2）。先前的做法是从数据推：经文引用落在这一章的主张为起点，再沿主张关系往外走一步、限 10 分钟以内。量下来推不全，原因在数据本身：
 
@@ -281,7 +290,7 @@ flowchart LR
 
 负责人 2026-11-05：「你做一下 8-15」。前提是这一系列的主张都已 refresh：2012（三）六堂 177 条有效主张，`claim_management_qualification` 全部 ready。
 
-**选堂。** 一章不再跑整个系列的六堂：按逐字稿里念到的马太福音章号，连同前后一堂，共 24 次 `chapter_exposition`。只加进来作为前后一堂的，一个片段都没保留，与念到的章号一致；没保留的那一堂从 `CHAPTERS` 拿掉。
+**选堂。** 一章不再跑整个系列的六堂：按逐字稿里念到的马太福音章号，连同前后一堂，共 24 次 `chapter_exposition`。只加进来作为前后一堂的，一个片段都没保留，与念到的章号一致；没保留的那一堂从章的清单里拿掉（4.1）。
 
 | 章 | 讲道 | 保留 | 幻灯 | 初审 → 终审 | 留给负责人的意见 |
 | --- | --- | ---: | ---: | --- | ---: |
@@ -299,6 +308,17 @@ flowchart LR
 - **太 12（三）4 第一次被程序拒收**：模型照他念的写「約翰壹書 1:9」，书名表只认「約翰一書」。补了旧版和合本的「壹／貳／參」写法后，用存下的同一份回答重新核对（提示词和留不留决定的 SHA 都与原来相同），没有再调用模型。
 
 **修的两处代码。** 写幻灯的提示词原来写死第五章，改为按章填写。经文全文原来逐节问 bible-api，被限流，太 8–15 的 285 节里 169 节一直取不到；每次请求都重问一遍，一页多等一秒，他念到哪一节也认不出来。现在先读 `bible/cuv/` 里存下的整章和合本。
+
+### 6.2 太 6–7
+
+负责人 2026-11-05：「完成 5-7」；（二）的主张都已 refresh。选堂同 6.1：按念到的章连同前后一堂跑留不留，（二）4 两章都一个片段没保留。
+
+| 章 | 讲道 | 保留 | 幻灯 | 初审 → 终审 | 留给负责人的意见 |
+| --- | --- | ---: | ---: | --- | ---: |
+| 6 | （二）5、6 | 9.7 + 33.4 分 | 6 + 15 | B、B → A、B | 0 + 2 |
+| 7 | （二）1、5、6 | 3.4 + 6.1 + 15.8 分 | 2 + 3 + 9 | B、A、B → A、A、B | 0 + 0 + 3 |
+
+没有剩下经文或忠实方面的意见。两章有交叉，是他讲法本身：他把 6:8 到 7:11 当作一个首尾呼应的单元，「免债」（6:12）和「不论断」（7:1）放在一起讲，所以同一段在两章都出现，同 6.1 的太 8、9。（二）1 归太 7 的 3.4 分是他讲登山宝训第二段的结构。
 
 ## 七、不在本文范围
 
