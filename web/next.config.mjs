@@ -27,7 +27,13 @@ export default (phase, { defaultConfig }) => {
       const devBackendOrigin = process.env.DEV_BACKEND_ORIGIN ?? 'http://127.0.0.1:8222';
       const backendOrigin = isProd ? 'http://127.0.0.1:8555' : devBackendOrigin;
       const destination = `${backendOrigin}/:path*`;
+      // Development only: sermon audio and the AI 朗讀 mp3s live under /web/video,
+      // which production nginx serves; locally the same nginx answers on 8888.
+      const devMedia = isProd
+        ? []
+        : [{ source: '/web/video/:path*', destination: `${process.env.DEV_MEDIA_ORIGIN ?? 'http://127.0.0.1:8888'}/web/video/:path*` }];
       return [
+        ...devMedia,
         {
           source: '/api/auth/:path*',
           destination: '/api/auth/:path*',
