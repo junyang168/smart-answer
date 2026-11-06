@@ -513,20 +513,27 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
         return {"lecture": lecture, "status": "no_slides"}
+    revision = int(record.get("revision", 0))
+    slides_sha = chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture))
+    target = review_path(data_base_dir, chapter.passage, lecture, revision)
+    if target.exists():
+        done = json.loads(target.read_text(encoding="utf-8"))
+        if done.get("slides_sha256") == slides_sha:
+            # 每一版只审一次：修订被程序退回时投影片没变，不再审第二次。
+            return {"lecture": lecture, "status": "unchanged", "revision": revision, "grade": done.get("grade"),
+                    "blocking": done.get("blocking"), "findings": len(done.get("findings") or []), "file": str(target)}
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
     )
     prompt = user_prompt(lecture, decisions_record) + "\n\n投影片：\n" + show_slides(record["slides"])
     answer = client.generate_json(for_lecture(REVIEW_PROMPT, lecture), prompt, REVIEW_SCHEMA)
-    revision = int(record.get("revision", 0))
     out = {
-        "slides_sha256": chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture)),
+        "slides_sha256": slides_sha,
         "revision": revision,
         "model": getattr(client, "model", ""),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **answer,
     }
-    target = review_path(data_base_dir, chapter.passage, lecture, revision)
     target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
             "blocking": answer["blocking"], "findings": len(answer["findings"]), "file": str(target)}

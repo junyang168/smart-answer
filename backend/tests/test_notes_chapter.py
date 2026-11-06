@@ -130,3 +130,25 @@ def test_slide_prompts_say_ai_reading_for_notes() -> None:
 def test_plain_drops_single_asterisk_italics_but_not_list_markers() -> None:
     assert notes.plain("成全（*fulfill*）律法") == "成全（fulfill）律法"
     assert notes.plain("* 第一點") == "* 第一點"
+
+
+def test_review_runs_once_per_slide_version(monkeypatch, tmp_path) -> None:
+    chapter = Chapter(passage="mat-5-1-48", series="", lectures=(), sections=("mat-5-1-48",))
+    path = chapter_slides.record_path(tmp_path, chapter.passage, "L")
+    path.parent.mkdir(parents=True)
+    path.write_text('{"slides": [], "revision": 1}', encoding="utf-8")
+    decisions = chapter_exposition.record_path(tmp_path, chapter.passage, "L")
+    decisions.parent.mkdir(parents=True, exist_ok=True)
+    decisions.write_text('{"pieces": [], "decisions": []}', encoding="utf-8")
+    monkeypatch.setattr(chapter_slides, "user_prompt", lambda *_: "")
+    monkeypatch.setattr(chapter_slides, "load_record", lambda *_: {"slides": [], "revision": 1})
+    calls = []
+
+    class Client:
+        def generate_json(self, *_):
+            calls.append(1)
+            return {"grade": "A", "blocking": False, "findings": []}
+
+    assert chapter_slides.review(chapter, "L", data_base_dir=tmp_path, client=Client())["status"] == "reviewed"
+    assert chapter_slides.review(chapter, "L", data_base_dir=tmp_path, client=Client())["status"] == "unchanged"
+    assert len(calls) == 1
