@@ -720,14 +720,21 @@ def load_audio(data_base_dir: Path, project: str) -> dict[str, Any] | None:
 
 
 def _in_chapter(ranges: list[list[int]], number: int) -> str | None:
-    """第一处落在这一章的经节，截到这一章里：16:28-17:8 在第 17 章是 17:1-8。"""
+    """这一小节在第 number 章出现时的经节；不在这一章就是 None。
 
-    for c1, v1, c2, v2 in ranges:
-        if c1 <= number <= c2:
-            low = v1 if c1 == number else 1
-            high = v2 if c2 == number else MATTHEW_VERSES[number - 1]
-            return f"mat-{number}-{low}" + (f"-{high}" if high != low else "")
-    return None
+    只看最主要的一处（模型把它放在第一个），后面几处是交叉参照：讲 5:32 时提到
+    19:9，不因此进太 19。跨两章的（16:28-17:8）两章都出现，截到各章里；跨更多章的
+    是讲整段结构（5:1-7:29、4:23-9:35），归这一段的第一章（方案 4.2）。
+    """
+
+    if not ranges:
+        return None
+    c1, v1, c2, v2 = ranges[0]
+    if number != c1 and not (c2 - c1 == 1 and number == c2):
+        return None
+    low = v1 if c1 == number else 1
+    high = v2 if c2 == number else MATTHEW_VERSES[number - 1]
+    return f"mat-{number}-{low}" + (f"-{high}" if high != low else "")
 
 
 def chapter_record(chapter: Chapter, project: str, data_base_dir: Path) -> dict[str, Any] | None:

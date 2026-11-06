@@ -179,3 +179,13 @@ def test_a_dropped_table_row_fails_the_parse_check() -> None:
 def test_script_sha_input_is_unchanged_for_notes_without_tables() -> None:
     text = NOTES.replace("| 福 | 時態 |\n| --- | --- |\n| 1 | 現在 |\n", "")
     assert not any(s.get("table") for s in notes.script_of(notes.parse(text)))
+
+
+def test_a_piece_goes_to_the_chapter_of_its_main_passage() -> None:
+    # 交叉参照不拉进别章
+    assert notes._in_chapter([[5, 31, 5, 32], [19, 3, 19, 9]], 19) is None
+    assert notes._in_chapter([[5, 31, 5, 32], [19, 3, 19, 9]], 5) == "mat-5-31-32"
+    # 整段结构归第一章，不铺到每一章
+    assert notes._in_chapter([[5, 1, 7, 29]], 5) == "mat-5-1-48"
+    assert notes._in_chapter([[5, 1, 7, 29]], 6) is None
+    assert notes._in_chapter([[1, 1, 28, 20]], 14) is None
