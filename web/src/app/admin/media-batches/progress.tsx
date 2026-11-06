@@ -227,6 +227,8 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
   );
   const run = data?.selected;
   const summary = data?.summary;
+  const completed =
+    !!summary && summary.complete + (summary.reused || 0) === summary.total;
   const rows =
     data?.records.filter(
       (r) =>
@@ -288,19 +290,21 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
           <section className="rounded-2xl border bg-white p-5">
             <div className="flex flex-wrap justify-between gap-3">
               <p className="font-semibold">
-                {run.desired === "paused"
-                  ? summary.running
-                    ? "暫停中，等待在途工作結束"
-                    : "已暫停排程"
-                  : summary.running
-                    ? "正在處理"
-                    : summary.complete + (summary.reused || 0) === summary.total
-                      ? "批次處理完成，逐字稿待同工校對"
+                {completed
+                  ? summary.total
+                    ? "批次處理完成"
+                    : "沒有需要處理的錄音"
+                  : run.desired === "paused"
+                    ? summary.running
+                      ? "暫停中，等待在途工作結束"
+                      : "已暫停排程"
+                    : summary.running
+                      ? "正在處理"
                       : "目前無已確認的執行中工作"}
               </p>
               <div className="flex gap-2">
                 <button
-                  disabled={busy || !!error}
+                  disabled={busy || !!error || completed}
                   onClick={() =>
                     void control(run.desired === "paused" ? "resume" : "pause")
                   }
@@ -314,7 +318,9 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                   {run.desired === "paused" ? "繼續" : "暫停排程"}
                 </button>
                 <button
-                  disabled={busy || !!error}
+                  disabled={
+                    busy || !!error || !(summary.failed || summary.interrupted)
+                  }
                   onClick={() => void control("retry")}
                   className="flex items-center gap-1 rounded-lg border px-3 py-2 text-sm disabled:opacity-40"
                 >
@@ -332,7 +338,10 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
               {[
                 ["轉錄與交接完成", `${summary.complete} / ${summary.total} 講`],
                 ["處理中", summary.running],
-                ["排隊／保留舊稿", `${summary.pending} / ${summary.reused || 0}`],
+                [
+                  "排隊／保留舊稿",
+                  `${summary.pending} / ${summary.reused || 0}`,
+                ],
                 [
                   "失敗／待核實",
                   summary.failed +
