@@ -79,7 +79,9 @@ def capacity_status(root):
                 continue
             with p.open("a") as f:
                 try:
-                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # Observers may overlap each other; only an exclusive worker
+                    # lease should appear as active model work.
+                    fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
                 except BlockingIOError:
                     active += 1
                     continue

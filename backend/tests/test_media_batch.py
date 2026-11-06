@@ -27,6 +27,18 @@ from backend.pipeline.media_batch.planner import plan
 from backend.pipeline.media_batch.stages import media
 
 
+def test_capacity_observers_do_not_count_each_other_as_model_calls(tmp_path):
+    import fcntl
+
+    root = tmp_path / "gemini"
+    root.mkdir()
+    with (root / "0.lock").open("a") as observer:
+        fcntl.flock(observer, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        assert capacity_status(tmp_path)["gemini"]["active"] == 0
+        with slot(tmp_path, "gemini", 2):
+            assert capacity_status(tmp_path)["gemini"]["active"] == 1
+
+
 def test_isolated_alignment_entrypoint_starts_without_loading_model():
     result = subprocess.run(
         [
