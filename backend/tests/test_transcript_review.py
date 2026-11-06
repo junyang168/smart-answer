@@ -125,7 +125,10 @@ def setup(tmp_path):
     }
     from backend.pipeline.slide_change_pilot import object_sha
 
-    atomic(source / "full_transcript.json", record)
+    # The real producer adds a trailing newline. Canonical JSON identity and
+    # exact input-file identity must both be checked without confusing them.
+    from backend.pipeline.slide_change_pilot import save_json
+    save_json(source / "full_transcript.json", record)
     atomic(
         source / "reading-layout/layout.json",
         {

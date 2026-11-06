@@ -425,7 +425,7 @@ def configure_vocabulary(out: Path, path: Path | None) -> None:
         save(out / 'master.json', master)
 
 
-def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, window_ids: set[str] | None = None) -> None:
+def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, window_ids: set[str] | None = None, *, clean_after: bool = True) -> None:
     master = read(out / 'master.json')
     vocabulary = vocabulary_from_manifest(master)
     if vocabulary is not None and pilot_correction is not None:
@@ -446,9 +446,10 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
             join_window_visuals(out, w, slide_folder)
             correct(folder / 'joined', audio, correction, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
         from backend.pipeline.media_batch.runtime import progress
-        progress('speech', master['windows'].index(w)+1, len(master['windows']), 'windows')
+        progress('speech', len(window_ids) if window_ids is not None else master['windows'].index(w)+1, len(window_ids) if window_ids is not None else len(master['windows']), 'windows')
         print(f'Corrected {w["id"]}', flush=True)
-    clean_full_transcript(out)
+    if clean_after:
+        clean_full_transcript(out)
 
 
 def prepare_final_alignment(out: Path, window_ids: set[str] | None = None) -> None:

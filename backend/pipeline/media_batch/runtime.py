@@ -90,7 +90,7 @@ def capacity_status(root):
 def batch_call(out, request, reserved):
     context = os.getenv("MEDIA_BATCH_CONTEXT")
     if not context:
-        yield
+        yield lambda: None
         return
     ctx = json.loads(context)
     out = Path(out)
@@ -99,7 +99,7 @@ def batch_call(out, request, reserved):
 
     folder = out / "calls" / object_sha(request)
     if (folder / "state.json").exists():
-        yield
+        yield lambda: None
         return
     model = request.get("model") or request.get("config", {}).get("model") or "gemini"
     resource = (
@@ -112,24 +112,30 @@ def batch_call(out, request, reserved):
     store = Store()
     call = key([ctx["task"], str(out.resolve()), request])
     with slot(ctx["capacity_root"], resource, 2) as journal:
-        store.reserve(ctx["batch"], ctx["task"], call, model, reserved)
-        atomic(
-            journal,
-            dict(
-                state="unknown",
-                call=call,
-                batch=ctx["batch"],
-                task=ctx["task"],
-                model=model,
-            ),
-        )
+        admitted = False
+
+        def admit():
+            nonlocal admitted
+            store.reserve(ctx["batch"], ctx["task"], call, model, reserved)
+            admitted = True
+            atomic(
+                journal,
+                dict(
+                    state="unknown",
+                    call=call,
+                    batch=ctx["batch"],
+                    task=ctx["task"],
+                    model=model,
+                ),
+            )
+
         try:
             progress(request.get("stage", model))
-            yield
+            yield admit
         finally:
             path = folder / "state.json"
             state = json.loads(path.read_text()) if path.exists() else {}
-            if state.get("status") in ("complete", "rejected"):
+            if admitted and state.get("status") in ("complete", "rejected"):
                 store.call_complete(call, state)
                 atomic(journal, dict(state=state["status"], call=call))
             # No response proof: journal remains unknown even after the OS lock is released.

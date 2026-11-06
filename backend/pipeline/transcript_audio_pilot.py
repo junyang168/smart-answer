@@ -124,7 +124,7 @@ def prepare(video: Path, out: Path, duration_ms: int = 900000) -> dict:
 
 
 def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
-               budget_usd: float = 3.0) -> dict:
+               budget_usd: float = 3.0, admit=lambda: None) -> dict:
     folder = out / 'calls' / object_sha(request)
     state_path = folder / 'state.json'
     if state_path.exists():
@@ -141,6 +141,7 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
         raise ValueError('Previous call outcome unknown; reconcile before another model call')
     if len(states) >= max_calls or sum(s['reserved_usd'] for s in states) + reserved_usd > budget_usd:
         raise ValueError('Pilot call or cost reservation limit exhausted')
+    admit()
     save_json(folder / 'request.json', request)
     state = {'status': 'sent_outcome_unknown', 'reserved_usd': reserved_usd}
     save_json(state_path, state)
@@ -164,8 +165,8 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
 def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
                budget_usd: float = 3.0) -> dict:
     from backend.pipeline.media_batch.runtime import batch_call
-    with batch_call(out, request, reserved_usd):
-        return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd)
+    with batch_call(out, request, reserved_usd) as admit:
+        return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd, admit=admit)
 
 
 def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:

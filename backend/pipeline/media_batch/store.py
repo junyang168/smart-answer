@@ -69,6 +69,12 @@ class Store:
             "INSERT INTO media_ingest.batch_tasks VALUES (%s,%s) ON CONFLICT DO NOTHING",
             (batch, tid),
         )
+        c.execute(
+            """WITH RECURSIVE needed(id) AS (
+          SELECT %s::text UNION SELECT unnest(t.dependencies) FROM media_ingest.tasks t JOIN needed n ON n.id=t.id)
+          INSERT INTO media_ingest.batch_tasks SELECT %s,id FROM needed ON CONFLICT DO NOTHING""",
+            (tid, batch),
+        )
         return tid
 
     def claim(self, batch, worker):
@@ -291,7 +297,7 @@ class Store:
               extract(epoch FROM (now()-t.heartbeat)) AS heartbeat_age
               FROM media_ingest.tasks t JOIN media_ingest.batch_tasks bt ON bt.task=t.id
               JOIN media_ingest.recordings r ON r.id=t.recording WHERE bt.batch=%s AND t.recording=ANY(%s)
-              ORDER BY r.item,t.updated_at,t.id""",
+              ORDER BY r.item,array_position(ARRAY['existing','prepare','visuals','speech','final-align','finish','speakers','media','handoff'],t.stage),t.unit,t.id""",
                     (batch, ids),
                 ).fetchall()
                 if batch

@@ -76,6 +76,89 @@ def audio(path):
     return path
 
 
+def test_media_only_publication_hides_draft_without_creating_scripts(tmp_path):
+    from backend.pipeline.media_batch.publication import media_only_payload
+
+    (tmp_path / "config").mkdir()
+    catalog = tmp_path / "config/sermon.json"
+    catalog.write_text(
+        json.dumps(
+            [
+                dict(
+                    item="new",
+                    title="講道",
+                    type="audio",
+                    status="ready",
+                    media_ingest_source_sha256="abc",
+                    private_note="not public",
+                ),
+                dict(item="legacy", title="舊稿"),
+            ]
+        )
+    )
+    result = media_only_payload(tmp_path, "new")
+    assert result["script"] == []
+    assert result["transcript_status"] == "pending_review"
+    assert result["metadata"]["type"] == "audio"
+    assert "private_note" not in result["metadata"]
+    assert not (tmp_path / "script").exists()
+    assert media_only_payload(tmp_path, "legacy") is None
+    assert media_only_payload(tmp_path, "absent") is None
+    (tmp_path / "script_review").mkdir()
+    (tmp_path / "script_review/new.json").write_text('[{"text":"private draft"}]')
+    assert media_only_payload(tmp_path, "new")["script"] == []
+    (tmp_path / "script_published").mkdir()
+    (tmp_path / "script_published/new.json").write_text('{"script":[]}')
+    assert media_only_payload(tmp_path, "new") is None
+
+
+def test_pipeline_version_and_destination_do_not_reuse_stale_tasks(store, tmp_path):
+    source = audio(tmp_path / "input/a.wav")
+    cfg = config(tmp_path)
+    first = plan(store, source.parent, cfg)
+    revised = plan(store, source.parent, {**cfg, "stage_shas": {"speech": "new"}})
+    elsewhere = plan(
+        store, source.parent, {**cfg, "review_root": str(tmp_path / "other")}
+    )
+    with store.connection() as c:
+        task_sets = [
+            {
+                r["task"]
+                for r in c.execute(
+                    "SELECT task FROM media_ingest.batch_tasks WHERE batch=%s", (batch,)
+                )
+            }
+            for batch in (first, revised, elsewhere)
+        ]
+        assert not (task_sets[0] & task_sets[1])
+        assert not (task_sets[0] & task_sets[2])
+        assert (
+            c.execute("SELECT count(*) AS n FROM media_ingest.recordings").fetchone()[
+                "n"
+            ]
+            == 1
+        )
+
+
+def test_renamed_source_resumes_queued_work_without_new_tasks(store, tmp_path):
+    from backend.pipeline.media_batch.stages import resolve_source
+
+    source = audio(tmp_path / "input/original.wav")
+    cfg = config(tmp_path)
+    batch = plan(store, source.parent, cfg)
+    task = store.claim(batch, "before-rename")
+    renamed = source.with_name("renamed.wav")
+    source.rename(renamed)
+    next_batch = plan(store, renamed.parent, cfg)
+    assert next_batch != batch  # Inventory path changed, content task identity did not.
+    assert resolve_source(task["payload"], store=store) == renamed
+    with store.connection() as c:
+        assert (
+            c.execute("SELECT count(*) AS n FROM media_ingest.tasks").fetchone()["n"]
+            == 8
+        )
+
+
 def test_rename_cross_folder_and_container_reuse_no_duplicate_tasks(store, tmp_path):
     a = audio(tmp_path / "first/a.wav")
     cfg = config(tmp_path)
@@ -408,3 +491,79 @@ def test_mp3_encoder_origin_has_explicit_presentation_mapping(tmp_path, monkeypa
     result = prepare(mp3, tmp_path / "out")
     assert result["source_clock_mapping"]["presentation_origin_ms"] == 0
     assert result["duration_ms"] == 3000
+
+
+def test_local_budget_rejection_does_not_quarantine_or_reserve_remote_call(
+    store, tmp_path, monkeypatch
+):
+    from backend.pipeline.transcript_audio_pilot import saved_call
+
+    b, tid = task_fixture(store, tmp_path)
+    ctx = dict(
+        batch=b,
+        task=tid,
+        capacity_root=str(tmp_path / "capacity"),
+        progress_path=str(tmp_path / "progress.json"),
+    )
+    monkeypatch.setenv("MEDIA_BATCH_CONTEXT", json.dumps(ctx))
+    monkeypatch.setenv("MEDIA_BATCH_DATABASE_URL", store.dsn)
+    with pytest.raises(ValueError, match="reservation limit"):
+        saved_call(
+            tmp_path / "calls",
+            dict(stage="test", model="gpt-6.1-sol"),
+            1,
+            lambda: pytest.fail("Must not send"),
+            max_calls=0,
+        )
+    with store.connection() as c:
+        assert (
+            c.execute("SELECT count(*) n FROM media_ingest.calls").fetchone()["n"] == 0
+        )
+    assert capacity_status(tmp_path / "capacity")["sol"]["unknown"] == 0
+
+
+def test_speech_windows_are_separate_resumable_work_and_shared_dependencies(
+    store, tmp_path, monkeypatch
+):
+    from backend.pipeline.media_batch.window_tasks import prepare
+
+    b, initial = task_fixture(store, tmp_path)
+    first = store.claim(b, "worker")
+    store.update(first, state="complete")
+    payload = dict(out=str(tmp_path / "out"), config=config(tmp_path))
+    atomic(tmp_path / "out/master.json", dict(windows=[dict(id="w00")]))
+    with store.connection() as c:
+        parent_id = store.task(
+            c, b, "R", "speech", "all", "binding", payload, [initial]
+        )
+    parent = store.claim(b, "worker")
+    monkeypatch.setenv("MEDIA_BATCH_DATABASE_URL", store.dsn)
+    monkeypatch.setenv(
+        "MEDIA_BATCH_CONTEXT",
+        json.dumps(
+            dict(task=parent_id, batch=b, unit="all", attempt=parent["attempt"])
+        ),
+    )
+    with pytest.raises(WaitingCapacity):
+        prepare(payload)
+    store.update(parent, state="pending")
+    window = store.claim(b, "worker")
+    assert window["unit"] == "w00" and window["id"] != parent_id
+    store.update(window, state="complete")
+    with store.connection() as c:
+        c.execute(
+            "UPDATE media_ingest.tasks SET not_before=now() WHERE id=%s", (parent_id,)
+        )
+    parent = store.claim(b, "worker")
+    monkeypatch.setenv(
+        "MEDIA_BATCH_CONTEXT",
+        json.dumps(
+            dict(task=parent_id, batch=b, unit="all", attempt=parent["attempt"])
+        ),
+    )
+    assert prepare(payload) is None
+    store.update(parent, state="complete")
+    other = store.batch({**config(tmp_path), "title": "Another batch"})
+    with store.connection() as c:
+        store.task(c, other, "R", "speech", "all", "binding", payload, [initial])
+    assert len(store.snapshot(other)["records"][0]["tasks"]) == 3

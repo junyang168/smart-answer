@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import argparse
 import fcntl
 import json
@@ -39,6 +40,28 @@ def child():
 
 
 def run_task(store, batch, task):
+    from .runtime import lock_held
+
+    try:
+        with ExitStack() as resources:
+            return _run_task(store, batch, task, resources)
+    except Exception as error:
+        lease_path = Path(task["payload"]["out"]) / "leases" / task["id"]
+        # A descendant still owns the lease: leave it running for reconciliation,
+        # rather than permit another worker to write into the same workspace.
+        if lock_held(lease_path):
+            raise
+        with store.connection() as c:
+            unknown = c.execute(
+                "SELECT 1 FROM media_ingest.calls WHERE task=%s AND state='unknown' LIMIT 1",
+                (task["id"],),
+            ).fetchone()
+        state = "unknown_outcome" if unknown else "failed"
+        store.update(task, state=state, error=type(error).__name__ + ": " + str(error))
+        return state
+
+
+def _run_task(store, batch, task, resources):
     started = time.time()
     p = task["payload"]
     from .runtime import ensure_storage
@@ -48,13 +71,15 @@ def run_task(store, batch, task):
     folder.mkdir(parents=True, exist_ok=True)
     lease_path = Path(p["out"]) / "leases" / task["id"]
     lease_path.parent.mkdir(parents=True, exist_ok=True)
-    lease = lease_path.open("a")
+    lease = resources.enter_context(lease_path.open("a"))
     fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
     ctx = dict(
         inherited_fds=[lease.fileno()],
         batch=batch,
         task=task["id"],
         stage=task["stage"],
+        unit=task["unit"],
+        attempt=task["attempt"],
         capacity_root=p["config"]["capacity_root"],
         payload_path=str(folder / "payload.json"),
         result_path=str(folder / "result.json"),
@@ -116,7 +141,6 @@ def run_task(store, batch, task):
     store.update(
         task, state=state, result=result.get("result"), error=result.get("error")
     )
-    lease.close()
     return state
 
 

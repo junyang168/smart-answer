@@ -110,6 +110,7 @@ def main():
                 "slide_pilot_models.py",
             ],
             "speech": [
+                "media_batch/window_tasks.py",
                 "full_video_transcript.py",
                 "transcript_audio_pilot.py",
                 "transcript_text_layout.py",

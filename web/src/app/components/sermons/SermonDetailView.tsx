@@ -109,6 +109,7 @@ export const SermonDetailView = () => {
           title: data.metadata.title,
           summary: data.metadata.summary,
           status: data.metadata.status,
+          transcriptPending: data.transcript_status === 'pending_review',
           date: data.metadata.deliver_date,
           assigned_to_name: data.metadata.assigned_to_name,
           speaker: data.metadata.speaker || '王守仁',
@@ -335,7 +336,7 @@ export const SermonDetailView = () => {
           </nav>
         ) : null}
 
-        {!sermon.markdownContent?.trim() ? (
+        {sermon.transcriptPending ? (
           <p role="status" className="rounded-xl border border-slate-200 bg-white p-5 text-slate-600">逐字稿整理中，可先收聽或觀看上方影音。</p>
         ) : status === "authenticated" ? (
           <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">

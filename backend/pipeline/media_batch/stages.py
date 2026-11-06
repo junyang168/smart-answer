@@ -251,15 +251,32 @@ def handoff(payload):
     return result
 
 
+def resolve_source(payload, store=None):
+    source = Path(payload["info"]["source"])
+    if not source.is_file():
+        from .store import Store
+
+        store = store or Store()
+        with store.connection() as c:
+            row = c.execute(
+                "SELECT info FROM media_ingest.recordings WHERE item=%s AND source_sha=%s",
+                (payload["item"], payload["info"]["source_sha"]),
+            ).fetchone()
+        if row:
+            source = Path(row["info"]["source"])
+    if file_sha(source) != payload["info"]["source_sha"]:
+        raise ValueError("Source drift before stage")
+    return source
+
+
 def execute(stage, payload):
     out = Path(payload["out"])
-    source = Path(payload["info"]["source"])
     cfg = payload["config"]
     from .runtime import ensure_storage
 
     ensure_storage(cfg)
-    if file_sha(source) != payload["info"]["source_sha"]:
-        raise ValueError("Source drift before stage")
+    source = resolve_source(payload)
+    payload = {**payload, "info": {**payload["info"], "source": str(source)}}
     root = Path(cfg["review_root"])
     item = payload["item"]
     if stage not in ("media", "handoff") and any(
@@ -318,7 +335,13 @@ def execute(stage, payload):
             full.extract_slides(out, None)
         return dict(report_sha=file_sha(out / "slides/report.json"))
     if stage == "speech":
-        full.process_windows(out, aligner, None)
+        from .window_tasks import prepare as window_work
+
+        unit = window_work(payload)
+        if unit is None:
+            full.clean_full_transcript(out)
+        else:
+            full.process_windows(out, aligner, None, {unit}, clean_after=False)
     elif stage == "final-align":
         full.prepare_final_alignment(out)
         for w in full.read(out / "master.json")["windows"]:

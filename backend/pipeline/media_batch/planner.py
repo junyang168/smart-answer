@@ -120,6 +120,22 @@ def plan(store, folder, config):
         if asset:
             info = asset["info"]
             rid = asset["recording"]
+            # A verified rename/move must keep queued work usable, without
+            # manufacturing a new recording or rerunning completed tasks.
+            with store.connection() as c:
+                row = c.execute(
+                    "SELECT source_sha,info FROM media_ingest.recordings WHERE id=%s FOR UPDATE",
+                    (rid,),
+                ).fetchone()
+                if (
+                    row["source_sha"] == sha
+                    and not Path(row["info"]["source"]).is_file()
+                ):
+                    canonical = {**row["info"], "source": str(p)}
+                    c.execute(
+                        "UPDATE media_ingest.recordings SET info=%s WHERE id=%s",
+                        (Jsonb(canonical), rid),
+                    )
         else:
             pr = probe(p)
             pcm = pcm_identity(p)
@@ -225,7 +241,21 @@ def plan(store, folder, config):
             ).fetchone()
             info = r["info"]
             binding = key(
-                [r["source_sha"], config["profile"], config.get("vocabulary_sha")]
+                [
+                    r["source_sha"],
+                    config["profile"],
+                    config.get("vocabulary_sha"),
+                    config.get("stage_shas", {}),
+                    {
+                        name: config.get(name)
+                        for name in (
+                            "artifact_root",
+                            "media_root",
+                            "review_root",
+                            "aligner_python",
+                        )
+                    },
+                ]
             )
             payload = dict(
                 info=info,
@@ -283,7 +313,9 @@ def plan(store, folder, config):
                     r["id"],
                     stage,
                     "all",
-                    key([binding, stage, config.get("stage_shas", {}).get(stage)]),
+                    key(
+                        [binding, stage, config.get("stage_shas", {}).get(stage), deps]
+                    ),
                     payload,
                     deps,
                 )

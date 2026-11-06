@@ -1004,8 +1004,9 @@ class ReviewStore:
                 ):
                     raise ReviewError(412, "候選或認領狀態已改變")
                 if (
-                    file_hash(source / "full_transcript.json")
-                    != candidate["source_record_sha256"]
+                    digest(record) != candidate["source_record_sha256"]
+                    or file_hash(source / "full_transcript.json")
+                    != candidate.get("source_input_file_sha256", candidate["source_record_sha256"])
                     or file_hash(source / "reading-layout/layout.json")
                     != candidate["layout_sha256"]
                 ):
