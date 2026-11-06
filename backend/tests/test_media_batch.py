@@ -888,6 +888,7 @@ def test_operation_file_tracks_its_actual_transcription_task(store, tmp_path):
     p = audio(tmp_path / "input/sermon.wav")
     batch = plan(store, p.parent, config(tmp_path))
     assert snapshot(store, batch)["files"][0]["state"] == "pending"
+    assert snapshot(store, batch)["files"][0]["job_batch"] == batch
     task = store.claim(batch, "worker")
     assert snapshot(store, batch)["files"][0]["state"] == "running"
     store.update(task, state="failed", error="Known test failure")

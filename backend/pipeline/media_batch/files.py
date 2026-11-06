@@ -28,6 +28,7 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           FROM jobs GROUP BY recording), r AS (
           SELECT f.path,f.sha,f.bytes,f.duplicate_of,f.updated_at,COALESCE(rec.item,f.catalog_match->>'item') AS item,
           COALESCE(rec.info->>'sermon_title',f.catalog_match->>'title') AS title,rec.info->'provenance' AS provenance,
+          rec.info->>'duration' AS duration_seconds,l.batch AS job_batch,
           f.catalog_match->>'manuscript' AS existing_manuscript,
           CASE WHEN g.ready THEN CASE WHEN g.reused THEN 'existing' ELSE 'handoff' END ELSE g.stage END AS stage,
           CASE WHEN f.state NOT IN ('pending','ready_to_plan','needs_assembly','needs_scope_review') THEN f.state
@@ -40,7 +41,8 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           WHEN g.recording IS NOT NULL THEN 'pending'
           WHEN rec.info->>'existing_transcript'='true' THEN 'reused' ELSE f.state END AS state,
           COALESCE(g.error,f.reason) AS reason
-          FROM f LEFT JOIN g ON g.recording=f.linked_recording LEFT JOIN media_ingest.recordings rec ON rec.id=f.linked_recording)
+          FROM f LEFT JOIN g ON g.recording=f.linked_recording LEFT JOIN latest l ON l.recording=f.linked_recording
+          LEFT JOIN media_ingest.recordings rec ON rec.id=f.linked_recording)
         """
         counts = {
             r["state"]: r["n"]

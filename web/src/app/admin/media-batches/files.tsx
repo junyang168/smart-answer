@@ -1,5 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+const clock = (seconds: number) =>
+  [
+    Math.floor(seconds / 3600),
+    Math.floor((seconds % 3600) / 60),
+    Math.floor(seconds % 60),
+  ]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
 
 const labels: Record<string, string> = {
   all: "全部檔案",
@@ -41,6 +50,13 @@ type File = {
   item: string | null;
   stage: string | null;
   title?: string | null;
+  duration_seconds?: string | null;
+  job_batch?: string | null;
+  provenance?: {
+    scope: string;
+    range_start_ms: number;
+    range_end_ms: number;
+  } | null;
 };
 type Data = {
   files: File[];
@@ -220,6 +236,23 @@ export function MediaBatchFiles({
                     <p className="mt-1 text-sm text-slate-600">
                       講道名稱：{file.title || "尚未辨識"}
                     </p>
+                    {file.duration_seconds && (
+                      <p className="mt-1 text-sm text-slate-600">
+                        處理範圍：
+                        {file.provenance?.scope === "excerpt"
+                          ? `${clock(file.provenance.range_start_ms / 1000)}–${clock(file.provenance.range_end_ms / 1000)} 節錄`
+                          : "完整影音"}{" "}
+                        · {clock(Number(file.duration_seconds))}
+                      </p>
+                    )}
+                    {file.job_batch && (
+                      <Link
+                        className="mt-2 inline-block text-sm font-semibold text-indigo-700 underline"
+                        href={`/admin/media-batches/${file.job_batch}`}
+                      >
+                        查看階段進度
+                      </Link>
+                    )}
                     <p className="mt-1 break-all text-xs text-slate-500">
                       {file.path.includes("/")
                         ? file.path.slice(0, file.path.lastIndexOf("/"))
