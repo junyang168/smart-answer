@@ -8159,7 +8159,8 @@ class PostgresKnowledgeStore:
                         human_scope = sql_group.get('reviewed', {}).get('evidence', {}).get('claim_management_scope', {})
                         if 'human_source_decisions' in human_scope:
                             from backend.pipeline.claim_human_source import assert_current
-                            assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'])
+                            assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'],
+                                           request=human_scope.get('claim_scope_request'))
                         if sql_group['checkpoint']!='reviewed':
                             raise ChangeSetConflict('no-content completion requires exact reviewed state')
                         if plan.source_kind=='wang_cvp_management_v2':
@@ -8240,7 +8241,8 @@ class PostgresKnowledgeStore:
                                 cm.Policy.model_validate(projection['policy']), projection['projection'])
                         if 'human_source_decisions' in scope:
                             from backend.pipeline.claim_human_source import assert_current
-                            assert_current(cursor, scope['source_ids'], scope['human_source_decisions'])
+                            assert_current(cursor, scope['source_ids'], scope['human_source_decisions'],
+                                           request=scope.get('claim_scope_request'))
                         if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1' or scope.get('claim_scope_request'):
                             audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
                             scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}
