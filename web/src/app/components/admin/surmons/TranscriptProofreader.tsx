@@ -70,6 +70,16 @@ type Metadata = {
   core_bible_verse?: Verse[];
 };
 type Context = {
+  speaker_attribution?: {
+    notices?: {
+      paragraph_id: string;
+      start_ms: number;
+      end_ms: number;
+      audio_quote: string;
+      reason: string;
+      kind: string;
+    }[];
+  } | null;
   media_mime_type?: string;
   timing_quality?: {
     status: string;
@@ -957,9 +967,14 @@ function TranscriptProofreader({
   const spokenRows = doc.script.filter((p) => p.type !== "subtitle");
   const confirmed = spokenRows.filter((p) => paragraphReviewed(p.index)).length;
   const pendingParagraph = spokenRows.find((p) => !paragraphReviewed(p.index));
-  const pendingTiming = pendingTimingIds(doc.script, doc.context.timing_quality);
+  const pendingTiming = pendingTimingIds(
+    doc.script,
+    doc.context.timing_quality,
+  );
   const timingBlocked = pendingTiming.length > 0;
-  const timingPending = doc.script.filter((p) => pendingTiming.includes(p.index));
+  const timingPending = doc.script.filter((p) =>
+    pendingTiming.includes(p.index),
+  );
   useEffect(() => {
     if (!navigationTarget) return;
     // Wait until React has opened the destination editor, including re-clicks.
@@ -1242,7 +1257,10 @@ function TranscriptProofreader({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <a className={button} href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}>
+            <a
+              className={button}
+              href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}
+            >
               舊版 Editor
             </a>
             <button className={button} onClick={() => void openHistory()}>
@@ -1982,6 +2000,22 @@ function TranscriptProofreader({
                       />
                     </details>
                   )}
+                {doc.context.speaker_attribution?.notices
+                  ?.filter((n) => n.paragraph_id === p.index)
+                  .map((n, index) => (
+                    <div
+                      key={index}
+                      className="mb-3 rounded bg-amber-50 p-3 text-sm text-amber-900"
+                    >
+                      <strong>原聲複核提示（模型候選）</strong>
+                      <p>
+                        {stamp(n.start_ms)}–{stamp(n.end_ms)}
+                        {n.audio_quote ? `：「${n.audio_quote}」` : ""}
+                      </p>
+                      <p>{n.reason}</p>
+                      <p>請連同本段核對。提示文字不會自動加入逐字稿。</p>
+                    </div>
+                  ))}
                 {active && doc.can_edit ? (
                   <div
                     onCompositionStart={() => {

@@ -369,6 +369,71 @@ def test_router_denies_forged_or_editor_identity_before_read(
     assert response.status_code == 200 and response.json()["batches"] == []
 
 
+def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_words(
+    tmp_path,
+):
+    from backend.pipeline.media_batch.speakers import assemble, label_rows
+
+    record = dict(
+        duration_ms=10000,
+        paragraphs=[dict(id="p1", text="各位平安。", start_ms=100, end_ms=3000)],
+    )
+    atomic(tmp_path / "full_transcript.json", record)
+    evidence = tmp_path / "evidence"
+    atomic(
+        evidence / "plan.json",
+        dict(
+            windows=[
+                dict(
+                    id="w000",
+                    clip_start_ms=0,
+                    clip_end_ms=10000,
+                    paragraphs=record["paragraphs"],
+                )
+            ]
+        ),
+    )
+    value = dict(
+        window_id="w000",
+        accepted=[],
+        rejected=[dict(paragraph_id="p1", reason="Source text changed")],
+        missing_speech=[
+            dict(
+                audio_quote="平安",
+                clip_start_s=3.1,
+                clip_end_s=4,
+                reason="聽眾回應未單列",
+            )
+        ],
+    )
+    atomic(evidence / "w000/candidate.json", value)
+    results, notices = assemble(record, evidence)
+    assert results[0]["turns"][0]["text"] == "各位平安。"
+    assert results[0]["turns"][0]["role"] == "unknown"
+    assert [n["kind"] for n in notices] == [
+        "speaker_uncertain",
+        "possible_missing_speech",
+    ]
+    atomic(
+        tmp_path / "speaker-candidate.json",
+        dict(
+            source_record_sha256=file_sha(tmp_path / "full_transcript.json"),
+            results=results,
+            notices=notices,
+        ),
+    )
+    rows, proof = label_rows(
+        tmp_path, record, [dict(index="1", text="各位平安。")], dict(p1="1")
+    )
+    assert rows[0]["text"] == "**說話者未明：**各位平安。"
+    assert proof["notices"][1]["paragraph_id"] == "1"
+    assert proof["notices"][1]["start_ms"] == 3100
+    value["rejected"] = []
+    atomic(evidence / "w000/candidate.json", value)
+    with pytest.raises(ValueError, match="coverage"):
+        assemble(record, evidence)
+
+
 def test_speaker_labels_keep_text_and_timing_separate_and_reject_source_drift(tmp_path):
     from backend.pipeline.media_batch.speakers import label_rows
 
