@@ -1855,7 +1855,7 @@ def continuation_budget(previous, request, policy):
                 and not previous.get('continuation',{}).get('api_output_limit_recovery')
             or permission_follow_up
             or extension_basis == 'remaining_findings' and (bool(previous['findings']) or binding_repair is not None)
-                and (previous['result'].get('reason') == 'budget_exhausted' or engineering_repair is not None)
+                and (previous['result'].get('reason') in {'budget_exhausted', 'disagreement'} or engineering_repair is not None)
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
                 and bool(previous['findings'])

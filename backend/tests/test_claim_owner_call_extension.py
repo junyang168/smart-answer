@@ -308,6 +308,28 @@ def test_owner_follow_up_carries_final_findings_and_never_replays_old_writes(own
     assert store.get_cvp_group(parent['run_id'])['continued_by']=='CMA-'+cm.sha256_json(successor.action_id)
 
 
+@pytest.mark.parametrize('reason', ['disagreement', 'human_required', 'call_uncertain', 'model_failed'])
+def test_bound_remaining_findings_extension_can_resolve_disagreement_without_reclassifying_it(owner_review_follow_up, reason):
+    _, _, parent, successor, _, policy, extension, path, basis = owner_review_follow_up
+    if basis != 'remaining_findings':
+        pytest.skip('paused remaining-findings contract only')
+    previous = {k: deepcopy(v) for k, v in parent.items() if k not in {'run_id', 'status', 'error'}}
+    previous['result']['reason'] = reason
+    extension['prior_metadata_sha256'] = cm.sha256_json(previous)
+    authorize(successor, policy, path, extension)
+    original = deepcopy(previous)
+    if reason == 'disagreement':
+        proof = cm.continuation_budget(previous, successor, policy)
+        assert proof['budget_basis'] == 'explicit_owner_call_extension'
+        assert proof['prior_call_reservations'] == previous['call_reservations']
+        assert proof['prior_findings'] == previous['findings']
+        assert sum(proof['spent_generations'].values()) > 0
+    else:
+        with pytest.raises(ValueError, match='owner call extension'):
+            cm.continuation_budget(previous, successor, policy)
+    assert previous == original
+
+
 @pytest.mark.parametrize('change',['scope_binding','metadata','basis','peer'])
 def test_explicit_follow_up_refuses_unbound_history_and_current_scope(owner_review_follow_up,change):
     store,old,parent,successor,root,policy,extension,path,basis=owner_review_follow_up
