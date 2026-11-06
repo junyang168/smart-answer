@@ -152,6 +152,15 @@ backend/.venv/bin/python -m backend.pipeline.transcript_evidence_apply verify --
 決定檔；每條綁定原片段 revision／SHA、目標正文 SHA、實際逐字切片與具體理由。
 程序再獨立核查切片、唯一性及時間，不因技術定位而授予內容批准。
 
+舊 SourceFragment 的音訊起訖若為空值，校準規則可附 `legacy_clock`，綁定 `item`、
+`source_file`、`timeline_file`、`backup_manifest` 四項。後三項均為含檔案路徑及 SHA 的
+檔案綁定；時間軸必須是該講道已驗證搬遷備份中的 `production/script/<item>.json`。
+程式先驗證備份清單及時間軸 SHA、舊來源正文、段落身份、段落文字 SHA 和實際引文，再用
+原 editor 的時間換算方法恢復舊段落區間。不覆蓋既有時間、不以新版時間推算舊時間，
+也不把此步標成重新聽音訊。恢復出的時間仍只作上下文定位的附加依據。
+這些原件會去重後加入搬遷計畫的檔案綁定，在正式寫入與回讀時再次核對；原件改動即拒絕。
+
+
 跨段或同一舊片段被不同問題共用時，以確定的來源切片新建有決定性 ID 的 atomic
 SourceFragment，各有真實段落時間；原片段保留歷史並標為已由精確片段替代。
 Evidence、Question、Observation、Position 的來源引用完整重綁；需要依使用者區分

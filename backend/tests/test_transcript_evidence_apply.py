@@ -234,7 +234,7 @@ def test_legacy_clock_witness_is_bound_through_sql_apply(relocation):
     assert store.get_record_state('source_fragments', 'F1') == before
 
 
-@pytest.mark.parametrize('text', ['什麼？', '是什麼？', '還有什麼？', '問題在哪裡？', '問題在哪？'])
+@pytest.mark.parametrize('text', ['什麼？', '是什麼？', '還有什麼？', '問題在哪裡？', '問題在哪？', '還有其他的……還有什麼？'])
 def test_standalone_conversational_questions_are_context_only(text):
     assert a.context_only(text)
 
