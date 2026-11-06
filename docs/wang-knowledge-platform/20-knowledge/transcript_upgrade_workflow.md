@@ -176,6 +176,13 @@ backend/.venv/bin/python -m backend.pipeline.transcript_claim_migration register
 只改同一 SourceDocument 的版本及不可變快照位置，保留 source ID。來源檔、已核實的
 revision／SHA 或發布內容漂移就停止；不覆寫原公開稿、不建立重複來源或 Claim。
 
+舊來源若登記在會被發布覆寫的 `script_published` 路徑，發布後不能再從該路徑讀取舊稿。
+先從已保存的歷史原件找出與 SQL `source_file_sha256` **完全相同**的檔案，並核對舊正文 SHA，
+在 `prepare` 加 `--old-source-snapshot EXACT_OLD_FILE`。此模式同時要求被覆寫的路徑正是
+本次 editor 的新版發布稿，逐字、物理 ID 和時間全部一致；凍結歷史檔與目前發布檔的 SHA，
+提交前兩者均再核對。只有正文相同而檔案 SHA 不同的備份不能代替精確舊檔；此選項不忽略
+來源漂移、不改 SQL 舊版本，也不繞過原有 CAS。
+
 ## 6. 搬遷 Evidence 和 Claim 定位
 
 ```bash
