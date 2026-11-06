@@ -21,7 +21,11 @@ def speaker_annotation(segments,new):
         text=new['paragraphs'][segment['paragraph_key']]['text']
         start=segment.get('live_start');end=segment.get('live_end')
         if start is None or end is None:continue
-        labels=[speaker_at(text,start),*[m.group(1) for m in SPEAKER.finditer(text,start,end)]]
+        explicit=list(SPEAKER.finditer(text,start,end))
+        # A quotation beginning with its own Markdown speaker label belongs
+        # to that speaker, not the preceding turn outside the quotation.
+        starts_with_label=bool(explicit and not text[start:explicit[0].start()].strip(' *\n\t\r'))
+        labels=([speaker_at(text,start)] if not starts_with_label else [])+[m.group(1) for m in explicit]
         if not any(labels):unknown=True
         for label in labels:
             if label in {'聽眾','听众','學生','学生'}:roles.add('audience')

@@ -296,7 +296,10 @@ def validate_claim_management_package(package):
     if enabled(request, policy):
         if unit_request.model_dump(mode='json') != original:
             raise ValueError('joint Update package cannot narrow its complete original unit')
-        if refusal := admission_error(request, policy, materials['before'], {**materials['original_goal'],
+        # Authority was admitted against the complete frozen transaction view.
+        # The model projection can omit unused historic grants, including an
+        # old fragment whose replacement slices are the active own Evidence.
+        if refusal := admission_error(request, policy, materials.get('transaction_before', materials['before']), {**materials['original_goal'],
                 'units': {materials['unit_id']: request.target_keys}}):
             raise ValueError('joint Update package admission: ' + refusal)
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
@@ -682,6 +685,9 @@ def execute_claim_management(store, request, *, root, ports):
                             materials['existing_evidence_owner_claims'] = evidence_owner_references(
                                 unit_request, before, transaction_before)
                             materials['program_owned_fields']['existing_evidence_owner_claims'] = EVIDENCE_OWNER_NOTE
+                        from backend.pipeline.claim_database_retry import unresolved_for_retry
+                        materials['unresolved'] = unresolved_for_retry(
+                            materials['policy'], materials['unresolved'], prior)
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)

@@ -20,6 +20,7 @@ import traceback
 
 from backend.pipeline.source_reconciliation_runner import binding, body, read, write
 from backend.pipeline.cvp_sql_commit import check_binding
+from backend.pipeline import source_execution_locks as execution_locks
 
 MODULE = 'backend.pipeline.claim_management_batch'
 REFILL_POLL_SECONDS = 5
@@ -115,23 +116,12 @@ def worker(manifest, root, key):
     descriptors = [int(v) for v in os.environ.get('WKP_CLAIM_BATCH_LOCK_FDS', '').split(',') if v]
     if len(descriptors) != 3:
         raise ValueError('worker requires inherited coordinator locks')
-    data = Path(os.environ['DATA_BASE_DIR'])
-    paths = [Path(root) / 'controller.lock',
-        Path(os.environ.get('WANG_CVP_RECOVERY_ROOT', str(data / 'wang-knowledge-platform/staging/cvp-production-357/immediate-recovery-20261002-v1'))) / 'recovery.lock',
-        data / 'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock']
-    for fd, path in zip(descriptors, paths):
-        info = os.fstat(fd)
-        # A separately opened descriptor must be unable to acquire this lock.
-        with path.open('a') as probe:
-            if (os.fstat(probe.fileno()).st_dev, os.fstat(probe.fileno()).st_ino) != (info.st_dev, info.st_ino):
-                raise ValueError('inherited lock identity drift')
-            try:
-                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                continue
-            raise ValueError('worker inherited an unlocked descriptor')
+    execution_locks.verify_inherited(descriptors[:1], [Path(root) / 'controller.lock'], exclusive=True)
+    execution_locks.verify_inherited(descriptors[1:], execution_locks.gate_paths(), exclusive=False)
     _, jobs = worker_jobs(manifest, root)
     request, action_root = jobs[key]
+    scoped = [int(v) for v in os.environ.get('WKP_CLAIM_SOURCE_LOCK_FDS', '').split(',') if v]
+    execution_locks.verify_claim_locks(scoped, request)
     store = PostgresKnowledgeStore()
     ports = ProductionPorts(store)
     ports._environment_guard(require_backup=False)
@@ -154,17 +144,13 @@ def worker(manifest, root, key):
 
 def run(manifest, root, *, model_capacity=None, refill=None):
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
-    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline import claim_management as cm
     manifest = Path(manifest).resolve()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         lock = stack.enter_context((root / 'controller.lock').open('a'))
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        maintenance = stack.enter_context(maintenance_lock())
-        registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path': str(Path(os.environ['DATA_BASE_DIR']) /
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
+        maintenance, registry = stack.enter_context(execution_locks.shared_maintenance_gates())
         plan, jobs = load(manifest, root)
         job_manifests = {key: manifest for key in jobs}
         store = PostgresKnowledgeStore()
@@ -227,12 +213,13 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                     for key in pending:
                         request, _ = jobs[key]
                         sources = {'claim_source_execution/' + sid for sid in request.source_bindings}
+                        writes = execution_locks.request_write_keys(request)
                         if capacity:
-                            scopes[key] = (sources, sources)
+                            scopes[key] = (sources | writes, writes)
                         else:
                             records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
                             scopes[key] = ({cm.source.key(*k) for k in records} | sources,
-                                           {p.key for p in request.permissions} | sources)
+                                           writes)
                     stale = False
                 blocked = {role: capacity.block_reason(json.loads((capacity.root / role / 'state.json').read_text()),
                                                      opus_api=opus_api and role == 'opus')
@@ -261,23 +248,18 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                 ready = [] if blocked else selection(pending, active, scopes,
                     model_capacity['action_window'] if capacity else plan['max_workers'])
                 for key in ready:
-                    held = []
-                    if capacity:
-                        lane_root = capacity.root / 'sources'
-                        lane_root.mkdir(exist_ok=True)
-                        for sid in sorted(jobs[key][0].source_bindings):
-                            handle = (lane_root / (cm.sha256_json(sid) + '.lock')).open('a')
-                            try:
-                                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                            except BlockingIOError:
-                                handle.close()
-                                for prior in held: prior.close()
-                                held = None
-                                break
-                            held.append(handle)
-                        if held is None:
-                            continue
-                        source_locks[key] = held
+                    job_scope = ExitStack()
+                    request = jobs[key][0]
+                    try:
+                        held = job_scope.enter_context(execution_locks.claim_execution_locks(request))
+                    except BlockingIOError:
+                        job_scope.close()
+                        continue
+                    except BaseException:
+                        job_scope.close()
+                        raise
+                    stack.callback(job_scope.close)
+                    source_locks[key] = job_scope
                     token = cm.sha256_json(key)
                     output = root / (token + '.result.json')
                     output.unlink(missing_ok=True)  # derived worker receipt, never model/action artifacts
@@ -285,9 +267,9 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                     err = (root / (token + '.stderr.log')).open('a')
                     command = [sys.executable, '-m', MODULE, '--manifest', str(job_manifests[key]), '--root', str(root), '--job', key]
                     environment = dict(os.environ, WKP_CLAIM_BATCH_LOCK_FDS=','.join(str(h.fileno()) for h in (lock, maintenance, registry)))
+                    environment['WKP_CLAIM_SOURCE_LOCK_FDS'] = ','.join(str(h.fileno()) for h in held)
                     if capacity:
                         environment['WKP_CLAIM_CAPACITY_CONFIG'] = str(capacity.root / 'configuration.json')
-                        environment['WKP_CLAIM_SOURCE_LOCK_FDS'] = ','.join(str(h.fileno()) for h in held)
                     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=environment,
                         pass_fds=(lock.fileno(), maintenance.fileno(), registry.fileno(), *(h.fileno() for h in held)))
                     active[key] = (process, out, err, output)
@@ -301,7 +283,7 @@ def run(manifest, root, *, model_capacity=None, refill=None):
                         {'action_id': key, 'result': {'status': 'paused', 'reason': 'worker_exited', 'returncode': code}})
                     event(stage='job_finished', action_id=key, result=results[key]['result'])
                     del active[key]
-                    for handle in source_locks.pop(key, []): handle.close()
+                    source_locks.pop(key).close()
                     stale = True
                     refill_ready = True
                 progress(root / 'status.json', {'controller_pid': os.getpid(), 'active': {k: p[0].pid for k,p in active.items()},
@@ -418,6 +400,53 @@ def _paragraph_guard(plan, store):
         raise ValueError('paragraph source registration changed during sequence')
 
 
+def completed_results(store, jobs):
+    """Reconcile recorded group completions, without replaying qualification.
+
+    Each action already passed its own review, commit and readback boundary.
+    This summary neither grants current qualification nor closes a live action.
+    """
+    from backend.pipeline import claim_management as cm
+    results, processed, created, retired = {}, set(), set(), set()
+    for action_id, (request, action_root) in jobs.items():
+        parent = store.get_cvp_group('CMA-' + cm.sha256_json(action_id))
+        if parent and (parent['request'] != request.model_dump(mode='json')
+                       or parent['execution_root'] != str(action_root)):
+            raise ValueError('completion summary cannot change the original action/root/budget')
+        result = (parent or {}).get('result', {'status': 'not_started'})
+        results[action_id] = result
+        new = {k for k in (parent or {}).get('created_keys', []) if k.startswith('claims/')}
+        created.update(new)
+        if result.get('status') != 'completed':continue
+        keys = set(request.target_keys) | new
+        covered, action_retired = set(), set()
+        rounds = parent.get('latest_rounds', {})
+        for rid in rounds.values():
+            child = store.get_cvp_group(rid)
+            if (not child or child.get('parent_run_id') != parent['run_id']
+                    or child.get('outcome') != 'completed' or not child.get('opus_approved')
+                    or not child.get('program_readback_complete') or child.get('revisit_required')):
+                results[action_id] = {'status': 'paused', 'reason': 'incomplete_group_completion', 'round_id': rid}
+                break
+            covered.update(child['materials']['unit_request']['target_keys'])
+            covered.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'create')
+            action_retired.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'retire')
+        else:
+            if rounds and keys <= covered:
+                processed.update(keys);created.update(keys - set(request.target_keys))
+                retired.update(keys & action_retired)
+                continue
+            results[action_id] = {'status': 'paused', 'reason': 'missing_group_completion_coverage',
+                                  'missing_keys': sorted(keys - covered)}
+    expected = {k for request, _ in jobs.values() for k in request.target_keys} | created
+    return {'results': results, 'completion_basis': 'recorded_group_completions',
+            'processed_claim_keys': sorted(processed), 'created_keys': sorted(created),
+            'retired_keys': sorted(retired),
+            'unfinished_claims': {k: {'reason': 'group_not_completed'} for k in sorted(expected - processed)},
+            'unfinished_actions': {k: v for k, v in results.items() if v.get('status') != 'completed'},
+            'all_actions_completed': all(v.get('status') == 'completed' for v in results.values())}
+
+
 def _paragraph_results(store, jobs):
     """SQL is the completion authority, including new Claims, not a saved flag."""
     from backend.pipeline import claim_management as cm
@@ -492,10 +521,10 @@ def run_paragraphs(manifest, root, *, store=None):
                 checkpoint(passed,identity,current,store=store,jobs=all_jobs)
                 completed.append(paragraph)
             _paragraph_guard(plan, store)
-            result = _paragraph_results(store, all_jobs)
+            result = completed_results(store, all_jobs)
             result.update(status='claims_completed' if result['all_actions_completed'] else 'paused',
                           completed_paragraphs=completed,
-                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['current_qualifications']),
+                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['processed_claim_keys']),
                                               'action_ids': list(all_jobs), 'status': 'not_executed'})
             if result.get('retired_keys'):
                 result['downstream_handoff']['retired_claim_ids'] = [key.split('/', 1)[1] for key in result['retired_keys']]

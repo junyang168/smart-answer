@@ -61,6 +61,32 @@ def recover_refused_admission(store, action_id, *, authorization):
                   'content_approved': False}
         write(destination / 'engineering-recovery.json', record)
         value.setdefault('admission_recoveries', []).append(binding(destination / 'engineering-recovery.json'))
+        if request.predecessor_action_id and not value.get('continuation'):
+            # Admission was refused before the original successor handoff.
+            # Finish that handoff under the same transaction, never manufacture
+            # a fresh action whose apparent empty ledger loses the old spend.
+            predecessor_id = 'CMA-' + sha256_json(request.predecessor_action_id)
+            prior = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
+                                   (predecessor_id,)).fetchone()[0]
+            continuation = cm.continuation_budget(prior, request, policy)
+            proof = continuation.get('owner_stopped_resume')
+            if not proof or prior.get('continued_by'):
+                raise ValueError('linked admission recovery requires its uncontinued stopped-call predecessor')
+            from backend.pipeline.claim_stopped_resume import verify_migrations
+            verify_migrations(prior, before, proof,
+                {cid: store.get_change_history(cid) for cid in proof['migrations']})
+            for rid in prior.get('latest_rounds', {}).values():
+                child = store.get_cvp_group(rid)
+                if child.get('change_set_ids') or child.get('checkpoint') in {'reviewed', 'applied', 'audited'}:
+                    raise ValueError('stopped admission recovery cannot replay a reviewed or committed write')
+            value['continuation'] = continuation
+            value['findings'] = continuation['prior_findings']
+            prior['continued_by'] = parent_id
+            for slot in prior['call_reservations'].values():
+                if slot['state'] == 'planned':
+                    slot.update(state='cancelled', transferred_to=parent_id)
+            cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
+                           (canonical_json(prior), predecessor_id))
         value.pop('admission_refusal')
         value.update(audit_contract=contract, result={'status': 'prepared'})
         cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
@@ -1177,6 +1203,14 @@ def resume_rejected_output(store, round_id, *, role, error):
             citations=[cm.Citation(source_id=first['source_id'],paragraph_key=first['paragraph_key'],exact_quote=exact)],
             affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='the rejected answer cannot be used as approval')
         parent['findings'][finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
+        from backend.pipeline.claim_database_retry import rejected_findings
+        carried = []
+        candidate = cm.Candidate.model_validate(value['candidate']) if role == 'opus' else None
+        for issue, blocking in rejected_findings(entry, materials, candidate):
+            fid = issue.identity(parent['action_id'])
+            parent.setdefault('findings' if blocking else 'context_findings', {}).setdefault(
+                fid, issue.model_dump(mode='json'))
+            carried.append(fid)
         parent['original_goal'].setdefault('unaccepted_model_inputs',[]).append(entry)
         for key,s in parent['call_reservations'].items():
             if s['round_id']==round_id and s['state']=='planned':
@@ -1184,6 +1218,8 @@ def resume_rejected_output(store, round_id, *, role, error):
         record = {'original_round':original,'original_parent':original_parent,'input':entry,
             'authorization':request.authorization.model_dump(mode='json'),'new_budget':False,'model_calls':0,
             'content_approved':False,'current_contract':contract}
+        if carried:
+            record['unaccepted_findings_carried_for_reassessment'] = carried
         if current_context:
             record['transaction_context_refresh'] = current_context
         write(destination/'engineering-recovery.json',record)

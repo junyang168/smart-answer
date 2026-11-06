@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
 
 
 def calibrate(row, state, rule, new, document):
@@ -82,22 +82,38 @@ def calibrate(row, state, rule, new, document):
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
                 'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'}}
+    from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     return {**row, 'status':'calibrated_rebind', 'reason':rule['reason'],
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
         'target_paragraphs':[s['paragraph_key'] for s in segments], 'calibration_decision':rule,
-        'speaker_annotation':None, 'content_approval_granted':False}
+        'speaker_annotation':speaker_annotation(segments,new), 'content_approval_granted':False}
 
 
 def segment_fields(segment, new):
+    from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     p = new['paragraphs'][segment['paragraph_key']]; quote = segment['verbatim_excerpt']
+    annotation=speaker_annotation([segment],new) or {}
     return {k:segment[k] for k in ('paragraph_key','source_segment_index','verbatim_excerpt','media_time','media_end_time')} | {
         'source_sha256':new['body_sha256'], 'paragraph_text_sha256':m.sha(p['text'].encode()),
         'verbatim_excerpt_sha256':m.sha(quote.encode()), 'anchor_state':'source_version_bound',
-        'source_binding_status':'needs_claim_refresh'}
+        'source_binding_status':'needs_claim_refresh'} | annotation.get('proposed_fields',{})
 
 
 def snap(path):
-    return cm.source.source_snapshot(m.binding(Path(path)))
+    bound = m.binding(Path(path))
+    from backend.pipeline.transcript_publication_projection import spoken_document
+    document, stripped = spoken_document(m.read(path))
+    if not stripped:
+        return cm.source.source_snapshot(bound)
+    from backend.pipeline.source_projection import project_script
+    projection = project_script(document.get('script') if isinstance(document, dict) else document)
+    if projection.visual_blocks:
+        raise ValueError('visual source changes require a separately scoped visual adapter')
+    cm.source.verify_file(bound)
+    return {'file': bound, 'body_sha256': projection.body_sha256,
+            'spoken_text_sha256': projection.spoken_text_sha256,
+            'editorial_structure_sha256': projection.editorial_structure_sha256,
+            'paragraphs': {f'S{i:04d}': row for i, row in enumerate(projection.spoken_rows, 1)}}
 
 
 def fields_for(row, fragment, new):
@@ -429,6 +445,11 @@ def apply(store, root):
     pins = {cm.source.split_key(k): (v['revision'], v['content_sha256'], v['retired'])
             for k, v in records.items()}
     pins.update({cm.source.split_key(k):None for k in report.get('created_keys',[])})
+    if not plan.operations:
+        result = {'status': 'already_synchronized', 'change_set_id': None, 'model_calls': 0}
+        m.immutable(root/'apply.json', result)
+        verify(store, root)
+        return result
     result = store.apply_plan(plan, metadata={'actor': 'owner_authorized_code_migration',
         'reason': p['instruction'], 'migration_plan': m.binding(root/'plan.json'),
         'content_approval_granted': False, 'model_calls': 0}, expected_current_record_pins=pins)
@@ -440,7 +461,9 @@ def apply(store, root):
 def verify(store, root):
     root = Path(root); p = m.read(root/'plan.json'); report = m.read(p['report']['path'])
     before = m.read(p['records']['path']); history = store.get_change_history(p['change_set_id'])
-    if not history or history['status'] != 'applied': raise ValueError('missing committed history')
+    if report['updates'] and (not history or history['status'] != 'applied'):
+        raise ValueError('missing committed history')
+    for bound in [p['implementation'], p['records'], p['report']]: cm.source.verify_file(bound)
     current = store.read_current_records([cm.source.split_key(k) for k in set(before)|set(report.get('created_keys',[]))])
     mismatches = []
     for key, state in before.items():
@@ -457,7 +480,7 @@ def verify(store, root):
         if not actual or actual['revision'] != 1 or actual['payload'] != report['updates'][key]:
             raise ValueError('created atomic source fragment readback differs: '+key)
     source_files_current(p)
-    result = {'status': 'verified', 'change_set_id': p['change_set_id'],
+    result = {'status': 'verified', 'change_set_id': p['change_set_id'] if report['updates'] else None,
               'summary': report['summary'], 'updated_records': len(report['updates']),
               'model_calls': 0, 'claim_prose_changed': False,
               'content_approval_granted': False, 'downstream_requalification_complete': False}
@@ -466,8 +489,19 @@ def verify(store, root):
     return result
 
 
-def locks():
+def locks(source_id=None, *, record_keys=()):
     """Cooperate with existing maintenance/Claim workers; never stop them."""
+    if source_id is not None:
+        from backend.pipeline.source_execution_locks import shared_maintenance_gates, source_write_locks
+        stack = ExitStack()
+        try:
+            stack.enter_context(shared_maintenance_gates())
+            stack.enter_context(source_write_locks([source_id], record_keys))
+        except BaseException:
+            stack.close()
+            raise
+        return stack
+    # Unknown/unscoped older callers keep their original exclusive contract.
     import os
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
@@ -499,7 +533,9 @@ def main():
                          published=args.published, instruction=args.instruction_file.read_text(),calibration_path=args.calibration)
         print(json.dumps({'root': str(args.root), 'summary': m.read(result['report']['path'])['summary']}, ensure_ascii=False))
     elif args.command == 'apply':
-        with locks(): result = apply(store, args.root)
+        plan = m.read(args.root/'plan.json')
+        report = m.read(plan['report']['path'])
+        with locks(plan['source_id'], record_keys=report['updates']): result = apply(store, args.root)
         print(json.dumps(result, ensure_ascii=False))
     else:
         print(json.dumps(verify(store, args.root), ensure_ascii=False))

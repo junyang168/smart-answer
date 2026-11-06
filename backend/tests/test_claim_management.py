@@ -380,7 +380,7 @@ def test_single_record_table_packet_preserves_current_and_original_facts(case):
     request,before,_,sources=case
     goal={'operation':'Update','target_keys':request.target_keys,'required_questions':['own_source'],'original_objects':deepcopy(before)}
     older=deepcopy(goal);older['original_objects']['claims/C']['payload']['statement']='原来旧的假设。'
-    materials={'packet_profile':'claim_single_record_table_v1','before':before,'request':request.model_dump(mode='json'),
+    materials={'policy':{},'packet_profile':'claim_single_record_table_v1','before':before,'request':request.model_dump(mode='json'),
         'original_goal':goal,'sources':sources,'continuation':{'original_goal':older,'prior_call_reservations':{
             'old:opus':{'role':'opus','round_id':'old','state':'completed','intent':{'large_execution_proof':'not a content fact'}}}}}
     packet=m.model_packet(materials)
@@ -491,7 +491,7 @@ def test_request_reference_preserves_exact_unit_authority_and_historical_packet(
     elif difference == 'source_bindings': unit[difference]['S']['file_sha256']='b'*64
     elif difference in {'authorization','policy'}: unit[difference]['file_sha256']='b'*64
     goal={'operation':'Update','target_keys':request.target_keys,'required_questions':['own_source'],'original_objects':deepcopy(before)}
-    materials={'packet_profile':profile,'request':full,'unit_request':unit,'before':before,'sources':sources,'original_goal':goal}
+    materials={'policy':{},'packet_profile':profile,'request':full,'unit_request':unit,'before':before,'sources':sources,'original_goal':goal}
     frozen=deepcopy(materials);packet=m.model_packet(materials)
     alias=packet['unit_request']=={'__claim_request_ref__':'request'}
     assert alias == (profile.endswith('_v2') and difference is None)
@@ -519,7 +519,7 @@ def test_explicit_maintenance_questions_reach_models_without_implying_approval(c
     request.authorization=m.source.FileBinding.model_validate(binding(path))
     goal=m.original_goal(request,before)
     assert goal['review_questions']==[question]
-    packet=m.model_packet({'request':request.model_dump(mode='json'),'before':before,'sources':sources,'original_goal':goal})
+    packet=m.model_packet({'policy':{},'request':request.model_dump(mode='json'),'before':before,'sources':sources,'original_goal':goal})
     assert packet['original_goal']['review_questions']==[question]
     assert not any('approved' in q for q in goal)
     path.write_text(json.dumps({}));request.authorization=m.source.FileBinding.model_validate(binding(path))
@@ -572,3 +572,28 @@ def test_unused_audio_fragment_is_context_only_after_all_current_uses_removed(ca
     assert m.finding_blocks(finding,request,candidate,records=before)==(remaining!='none')
     # The original preimage remains protected until a candidate removes use.
     assert m.finding_blocks(finding,request,None,records=before)
+
+
+@pytest.mark.parametrize('collection',sorted(m.RELATION_COLLECTIONS))
+@pytest.mark.parametrize('field',['from_id','to_id','source_id','target_id','from_claim_id','to_claim_id'])
+def test_relation_endpoint_resolution_uses_typed_ids_with_slashes(collection,field):
+    records={'claims/owned/name':{},'source_documents/owned/name':{},'claims/unrelated':{}}
+    assert m.domain_dependencies(collection,{field:'owned/name'},records)=={'claims/owned/name'}
+    records['observations/owned/name']={}
+    with pytest.raises(ValueError,match='missing or ambiguous'):
+        m.domain_dependencies(collection,{field:'owned/name'},records)
+    del records['observations/owned/name'];del records['claims/owned/name']
+    with pytest.raises(ValueError,match='missing or ambiguous'):
+        m.domain_dependencies(collection,{field:'owned/name'},records)
+
+
+def test_relation_endpoint_work_does_not_grow_with_unrelated_packet_rows(monkeypatch):
+    records={f'source_fragments/unrelated-{i}':{} for i in range(10000)}
+    records.update({'claims/C':{},'evidence_steps/E':{}})
+    split=m.source.split_key;calls=[]
+    def counted(value):
+        calls.append(value)
+        return split(value)
+    monkeypatch.setattr(m.source,'split_key',counted)
+    assert m.domain_dependencies('knowledge_relations',{'from_id':'E','to_id':'C'},records)=={'claims/C','evidence_steps/E'}
+    assert len(calls)<=2*len(m.CLAIM_COLLECTIONS)

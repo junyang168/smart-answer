@@ -213,6 +213,8 @@ def admission_error(request, policy, before, goal):
                 and p.key in read and p.key in before and not before[p.key]['retired']
                 and cm.own_source_ids(payloads[p.key], payloads) == set(request.source_bindings))
         permissions = {p.key for p in request.permissions}
+        from backend.pipeline.claim_stopped_resume import historical_replacement_keys
+        reachable.update(historical_replacement_keys(request, before, reachable))
         if (permissions | set(required)) - reachable:
             raise ValueError('joint Update permission/required maintenance item is unreachable from its target closure')
         if (permissions | set(required)) & {k for k in before if k.startswith('claims/')} - set(request.target_keys):

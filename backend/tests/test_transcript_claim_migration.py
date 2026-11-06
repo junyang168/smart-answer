@@ -99,6 +99,51 @@ def test_registration_only_writes_source_and_native_receipt_is_idempotent(case):
     assert migration.register(store,root)==result and store.writes==1
 
 
+def published_replacement(case):
+    store,beta,root,rows,context=case
+    live=Path(store.rows['source_documents','S']['payload']['source_path'])
+    snapshot=live.with_name('historical-exact.json')
+    snapshot.write_bytes(live.read_bytes())
+    new=migration.beta_source(rows,context,item='lecture')
+    new['metadata']['item']='lecture'
+    live.write_text(json.dumps(new,ensure_ascii=False))
+    return live,snapshot
+
+
+def test_exact_historical_snapshot_hands_off_an_already_published_source(case):
+    store,_,root,_,_=case
+    live,snapshot=published_replacement(case)
+    with pytest.raises(ValueError,match='registered old source file drift'):
+        migration.prepare(store,beta_root=case[1],item='lecture',source_id='S',
+                          root=root/'default-preflight',instruction='Check unchanged strict default')
+    m=prepare(case,old_source_snapshot=snapshot)
+    assert m['before']['file_sha256']==migration.sha(snapshot.read_bytes())
+    assert m['historical_inputs']['live']['file_sha256']==migration.sha(live.read_bytes())
+    assert migration.register(store,root)['status']=='applied'
+    assert store.writes==1
+    assert migration.register(store,root)['status']=='applied' and store.writes==1
+
+
+@pytest.mark.parametrize('drift',['snapshot','foreign_item','incoming_text','clock','live_after_prepare','snapshot_after_prepare'])
+def test_historical_snapshot_never_bypasses_source_or_publication_guards(case,drift):
+    store,_,_,_,_=case
+    live,snapshot=published_replacement(case)
+    if drift.endswith('_after_prepare'):
+        prepare(case,old_source_snapshot=snapshot)
+        (live if drift.startswith('live') else snapshot).write_text('changed')
+        with pytest.raises(ValueError):migration.register(store,case[2])
+    else:
+        if drift=='snapshot':snapshot.write_text('wrong historical bytes')
+        else:
+            d=migration.read(live)
+            if drift=='foreign_item':d['metadata']['item']='foreign'
+            elif drift=='incoming_text':d['script'][1]['text']='another text'
+            else:d['script'][1]['start_time']=50
+            live.write_text(json.dumps(d,ensure_ascii=False))
+        with pytest.raises(ValueError):prepare(case,old_source_snapshot=snapshot)
+    assert store.writes==0
+
+
 @pytest.mark.parametrize('drift',['old_file','live_old_file','beta_file','source_record'])
 def test_registration_fails_before_writes_on_drift(case,drift):
     store,beta,root,_,_=case;prepare(case)
@@ -179,7 +224,7 @@ def test_explicit_rejected_recovery_cannot_touch_an_active_controller(case):
 
 
 def test_rejected_recovery_creates_derived_head_controller_directory(case,monkeypatch):
-    from backend.pipeline import source_reconciliation_runtime as runtime
+    from backend.pipeline import source_execution_locks
     _,_,root,_,_=case;prepare(case)
     unit=root/'units/000'
     migration.immutable(unit/'prepared.json',{'manifest':{'path':'unused'}})
@@ -187,7 +232,7 @@ def test_rejected_recovery_creates_derived_head_controller_directory(case,monkey
     monkeypatch.setattr(migration,'current_unit_prepared',lambda *a:{'manifest':{'path':str(directory/'manifest.json')}})
     class StopAtMaintenance(Exception):pass
     def stopped():raise StopAtMaintenance()
-    monkeypatch.setattr(runtime,'maintenance_lock',stopped)
+    monkeypatch.setattr(source_execution_locks,'shared_maintenance_gates',stopped)
     with pytest.raises(StopAtMaintenance):migration.resume_rejected_unit(None,root,0)
     # A SQL-admitted head has not necessarily run its derived batch yet.
     assert (directory/'batch/controller.lock').is_file()
@@ -436,3 +481,34 @@ def test_source_epoch_reassesses_only_ai_questions_on_actual_new_source(case,pos
         else:
             projection=compile_projection(cursor,request,before,policy)
             assert 'claims/D' in projection['legacy_ai_findings_markers']
+
+
+@pytest.mark.parametrize('fault',[None,'twice','content','manual','bad_plan','human_actor','missing_revision','bad_hash','wrong_operation'])
+def test_source_epoch_locator_lineage_is_only_mechanical(tmp_path,fault):
+    from backend.pipeline.claim_source_epoch_reassessment import _locator_lineage
+    before={'claim_id':'D','revision':1,'statement':'unchanged judgment',
+        'review_status':'human_review_required','occurrences':[{'source_id':'S'}]}
+    previous=before;rows=[];operations={}
+    for rev in range(2,4 if fault=='twice' else 3):
+        payload=deepcopy(previous);payload['revision']=rev
+        payload['occurrences'][0]['anchors']=[{'paragraph_key':f'S{rev:04d}'}]
+        if fault=='content':payload['statement']='changed judgment'
+        kind='knowledge_package' if fault=='manual' else 'wang_transcript_claim_anchor_sync_v1'
+        cs=f'KCS-locator-{rev}'
+        bound=migration.immutable(tmp_path/f'{rev}.json',{'schema_version':kind,'change_set_id':cs,
+            'intent':{'source_id':'wrong' if fault=='bad_plan' else 'S'},
+            'package':{'claims':[{**payload,'revision':rev-1}]}})
+        digest=record_content_sha(payload)
+        rows.append((rev,payload,'bad' if fault=='bad_hash' else digest,cs,kind,'applied',
+            {'actor':'human' if fault=='human_actor' else 'owner_authorized_locator_sync',
+             'model_calls':0,'claim_prose_changed':False,'new_qualification_granted':False,'migration_plan':bound}))
+        operations[cs]=[(record_content_sha(previous),digest,rev)]
+        if fault=='wrong_operation':operations[cs]=[]
+        previous=payload
+    class Cursor:
+        def execute(self,sql,args):
+            self.result=([] if fault=='missing_revision' else rows) if 'object_versions' in sql else operations[args[0]]
+            return self
+        def fetchall(self):return self.result
+    result=_locator_lineage(Cursor(),'D',1,(before,record_content_sha(before),'applied'),state(previous,previous['revision']),'S')
+    assert bool(result)==(fault in (None,'twice'))

@@ -96,3 +96,17 @@ def test_every_cvp_factory_preserves_shared_text_contract(factory):
     from backend.pipeline import viewpoint_batch_resolution_runner as r
     a=getattr(r,factory)('claude-opus-5-5','high')
     assert a._compact_payload and a._shared_text_payload
+
+
+@pytest.mark.parametrize('shared',[True,False])
+def test_wire_measurements_preserve_bytes_proof_and_recompute_changed_input(shared,monkeypatch):
+    a,_=adapter(shared);p=payload()
+    expected_bytes=a.request_bytes(p);expected_proof=a.request_encoding_proof(p)
+    if shared:
+        monkeypatch.setattr(a,'request_bytes',lambda p:pytest.fail('encoded wire was serialized twice'))
+    assert a.request_measurements(p)==(expected_bytes,expected_proof)
+    changed=deepcopy(p);changed['distinct']='changed literal input'
+    fresh,calls=adapter(shared)
+    assert a.request_measurements(changed)==(fresh.request_bytes(changed),fresh.request_encoding_proof(changed))
+    assert a.request_measurements(changed)!=(expected_bytes,expected_proof)
+    assert not calls

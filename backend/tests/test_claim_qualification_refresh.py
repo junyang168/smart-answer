@@ -194,7 +194,8 @@ def test_source_second_paragraph_requalifies_first_before_reporting_complete(act
     result=source_updates.run(store,'S',old,cid,root,'complete ordered source Updates')
     assert result['status']=='claims_completed',result
     assert events==[('claims/A',False),('claims/B',False),('claims/C',False),('claims/D',False),('claims/A',True)]
-    assert all(q['ready'] for q in result['current_qualifications'].values())
+    assert result['completion_basis']=='recorded_group_completions'
+    assert result['processed_claim_keys']==['claims/A','claims/B','claims/C','claims/D']
     assert result['completed_paragraphs']==['S0001','S0002']
     assert [p.calls for p in clients.values()]==[['opus','gpt','opus'],['opus'],['opus'],['opus','gpt','opus'],['opus']]
     result_bytes=(root/'result.json').read_bytes()

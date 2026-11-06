@@ -3330,6 +3330,11 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
+                stopped_resume = continuation.get('owner_stopped_resume')
+                if stopped_resume:
+                    from backend.pipeline.claim_stopped_resume import verify_migrations
+                    verify_migrations(prior, before, stopped_resume,
+                        {cid: self.get_change_history(cid) for cid in stopped_resume['migrations']})
                 if continuation.get('subscription_refusal_retry'):
                     if goal['original_objects'] != prior['original_goal']['original_objects']:
                         raise ChangeSetConflict('same-task refusal retry input changed')
@@ -3459,7 +3464,7 @@ class PostgresKnowledgeStore:
                         raise ChangeSetConflict('owner target follow-up requires one saved joint candidate')
                     continuation['previous_candidates'] = {
                         next(iter(goal['units'])): next(iter(candidates.values()))}
-                if any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
+                if not stopped_resume and any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
                 if prior.get('continued_by'):
                     raise ChangeSetConflict('original Claim action already has a continuation; no budget fork')
@@ -3644,6 +3649,15 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('owner follow-up revision must retain its immediate preceding candidate')
             elif round_number != 0:
                 raise ChangeSetConflict("first Claim round must have ordinal zero")
+            if policy.retry_context_contract:
+                from backend.pipeline.claim_database_retry import unresolved_for_retry
+                pending = {**parent.get('context_findings', {}), **parent['findings']}
+                pending = {k: v for k, v in pending.items()
+                           if v['target_key'] in frozen['before'] or k in parent['findings']}
+                expected = unresolved_for_retry(parent['policy'], pending,
+                    previous if previous_id else None)
+                if frozen.get('unresolved') != expected:
+                    raise ChangeSetConflict('database retry omitted an unwritten repair obligation')
             used_revisions = sum(bool(v) for v in parent["revision_rounds"].values())
             if round_number and used_revisions >= policy.budget.max_revisions:
                 raise ChangeSetConflict("original Claim action revision budget exhausted")

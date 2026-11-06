@@ -136,10 +136,10 @@ def run(store, source_id, before, change_set_id, root, instruction):
             checkpoint(passed,identity,current,store=store,jobs=jobs)
             completed.append(paragraph)
         guard(store,plan)
-        final = batch._paragraph_results(store,jobs)
+        final = batch.completed_results(store,jobs)
         final.update(status='claims_completed' if final['all_actions_completed'] and not plan['unowned_paragraphs'] else 'paused',
             completed_paragraphs=completed,unowned_paragraphs=plan['unowned_paragraphs'],
-            downstream_handoff={'status':'not_executed','claim_ids':sorted(k.split('/',1)[1] for k,q in final['current_qualifications'].items() if q and q.get('ready') and k not in final.get('retired_keys',[])),
+            downstream_handoff={'status':'not_executed','claim_ids':sorted(k.split('/',1)[1] for k in final['processed_claim_keys'] if k not in final.get('retired_keys',[])),
                 'retired_claim_ids':[k.split('/',1)[1] for k in final.get('retired_keys',[])]})
         # Result bindings already consumed as historical evidence survive an
         # unchanged, zero-call resume (including different dict key order).

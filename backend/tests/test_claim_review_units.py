@@ -525,6 +525,13 @@ def test_unstarted_scope_guard_failure_recovers_same_unit_without_spending_or_re
                               policy=policy_file(root.parent), store=store)
     _, jobs = batch.load(prepared['manifest']['path'], root/'batch', store=store)
     request, execution = next(iter(jobs.values()))
+    # This recovery fixture represents an authorization frozen before the
+    # shared-support owner prefetch. Do not apply the new intake to its past.
+    legacy = json.loads(cm.source.verify_file(request.authorization).read_text())
+    legacy['evidence_owner_context_keys'] = []
+    legacy_path = root.parent/'legacy-shared-scope-authorization.json'
+    legacy_path.write_text(json.dumps(legacy))
+    request.authorization = cm.source.FileBinding.model_validate(binding(legacy_path))
     ports = SyntheticPorts(store, execution, opus=pass_review)
     original_scope = direct.scope
     def old_projection(*args, **kwargs):

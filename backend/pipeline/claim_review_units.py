@@ -60,7 +60,7 @@ def prepare(members, root, *, instruction, prior_reviews=None, policy=None, stor
     root.mkdir(parents=True, exist_ok=True)
     store = store or PostgresKnowledgeStore()
     policy = Path(policy or (root/'unit-policy.json' if (root/'unit-policy.json').exists()
-                            else Path(__file__).parent/'policies/wang_claim_management_bounded_unit_v2.json'))
+                            else Path(__file__).parent/'policies/wang_claim_management_bounded_unit_v3.json'))
     selected = cm.Policy.model_validate_json(policy.read_text())
     if not enabled(None, selected) or len(members) > selected.joint_update_max_targets:
         raise ValueError('unit requires an explicit bounded policy with sufficient capacity')

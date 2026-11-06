@@ -476,3 +476,40 @@ def test_human_clarification_resumes_saved_gpt_with_full_unused_review(claims,mo
     assert result['status']=='completed',result
     assert ports.calls==['gpt','opus']
     assert store.claim_management_qualification('C')['ready'] and store.claim_management_qualification('D')['ready']
+
+
+def test_initial_reuse_authenticates_original_prompts_after_current_prompt_changes(interrupted_unit, monkeypatch):
+    store, _, request, _, _, _, _, _ = interrupted_unit
+    proof = evidence.freeze_initial_review_reuse(store, request)
+    old, candidate, review = evidence._initial_review(proof)
+    root=Path(proof['materials']['path']).parent
+    from backend.pipeline import source_reconciliation_runtime as runtime
+    saved={}
+    for key,digest in old['audit_contract']['implementation'].items():
+        if '/prompts/' not in key:continue
+        path=root/'original-role-prompts'/Path(key).name
+        path.parent.mkdir(exist_ok=True);path.write_bytes((runtime.PROMPTS/Path(key).name).read_bytes())
+        saved[path.name]=binding(path)
+        assert saved[path.name]['file_sha256']==digest
+    changed=root/'new-prompts';changed.mkdir()
+    for path in runtime.PROMPTS.glob('*.md'):
+        (changed/path.name).write_bytes(path.read_bytes())
+    p=changed/'claim_own_evidence_v1.md';p.write_text(p.read_text()+'\nA new semantic instruction.\n')
+    monkeypatch.setattr(runtime,'PROMPTS',changed)
+    with pytest.raises(ValueError,match='binding drift'):evidence._initial_review(proof)
+    sidecar={'contract':'claim_historical_role_prompts_v1','round_id':old['round_id'],
+             'raw':proof['raw'],'prompts':saved}
+    receipt=root/'historical-role-prompts.json';receipt.write_text(json.dumps(sidecar))
+    restored=evidence._initial_review(proof)
+    assert restored==(old,candidate,review)
+    policy=cm.Policy.model_validate(old['policy'])
+    with pytest.raises(ValueError,match='never new calls'):
+        runtime.claim_management_model_adapter('opus',policy,live=True,saved_prompts={})
+    for defect in ['prompt','raw','round','bytes']:
+        wrong=deepcopy(sidecar)
+        if defect=='prompt':wrong['prompts']['claim_own_evidence_v1.md']=binding(p)
+        elif defect=='raw':wrong['raw']['file_sha256']='0'*64
+        elif defect=='round':wrong['round_id']='other'
+        else:Path(saved['claim_own_evidence_v1.md']['path']).write_text('tampered')
+        receipt.write_text(json.dumps(wrong))
+        with pytest.raises(ValueError):evidence._initial_review(proof)
