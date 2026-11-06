@@ -173,7 +173,7 @@ def test_rhetorical_fillers_are_context_and_not_evidence():
     assert report['updates']['source_fragments/F']['anchor_state'] == 'context_only'
     assert not a.context_only('這段經文很重要，因為它說明悔改的原因。')
     assert not a.context_only('不是因為每個人都得救。')
-    for text in ['什麼意思？','要怎麼樣？','小小問題。','就是這樣。']:
+    for text in ['什麼意思？','要怎麼樣？','小小問題。','就是這樣。','Yeah，就是這樣。']:
         assert a.context_only(text)
     assert not a.context_only('你們。')
     assert not a.context_only('你們要將該撒的物歸給該撒。')

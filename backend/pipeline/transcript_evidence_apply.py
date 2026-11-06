@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
 
 
 def calibrate(row, state, rule, new, document):
