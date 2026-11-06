@@ -82,6 +82,14 @@ def load(manifest, root, *, store=None):
                 raise ValueError('batch source metadata is missing or retired: ' + sid)
             documents[sid] = state['payload']
         cm.load_authority(request, source_documents=documents)
+        from backend.pipeline.claim_topic_units import unit
+        topic = unit(request)
+        if topic is not None:
+            from backend.pipeline.claim_joint_update import context_roots
+            records = store.read_claim_context(context_roots(request))
+            actual = {cm.source.key(*k) for k in records if k[0] != 'source_documents'}
+            if not actual <= set(topic['record_keys']):
+                raise ValueError('topic transaction dependencies expanded; replan before dispatch')
         jobs[request.action_id] = (request, action_root.resolve())
         roots.add(str(action_root.resolve())); targets.update(request.target_keys)
     write(Path(root) / 'plan.json', {'manifest': binding(manifest), 'jobs': plan['jobs'],

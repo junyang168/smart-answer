@@ -522,6 +522,8 @@ def own_source_ids(payload, records):
 
 def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None, metadata_projection=None):
     """Validate a complete candidate, never infer semantic or write approval."""
+    from backend.pipeline.claim_topic_units import assert_records
+    assert_records(request, before, candidate)
     from backend.pipeline.claim_joint_update import enabled, validate_candidate_scope
     joint = enabled(request)
     if joint:
@@ -1001,6 +1003,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     if human_source_decisions is not None:
         from backend.pipeline.claim_human_source import project
         project(sources, human_source_decisions)
+    from backend.pipeline.claim_topic_units import project_sources
+    project_sources(request, sources)
     return policy, sources
 
 
@@ -1352,6 +1356,16 @@ def goal_packet(goal):
 
 
 def model_packet(materials):
+    from backend.pipeline.claim_topic_units import assert_records, unit as topic_unit
+    topic_request = Request.model_validate(materials.get('unit_request', materials['request']))
+    assert_records(topic_request, materials['before'])
+    topic = topic_unit(topic_request)
+    if topic is not None:
+        if set(materials['sources'][topic['source_id']]['paragraphs']) != set(topic['paragraph_keys']):
+            raise ValueError('model packet violates its topic source boundary')
+        actual = set(materials.get('transaction_before', materials['before']))
+        if {k for k in actual if not k.startswith('source_documents/')} - set(topic['record_keys']):
+            raise ValueError('topic transaction footprint expanded before model dispatch')
     if 'existing_evidence_owner_claims' in materials:
         from backend.pipeline.claim_direct_scope import evidence_owner_references
         expected = evidence_owner_references(Request.model_validate(materials['unit_request']),
@@ -1686,6 +1700,10 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     from backend.pipeline.claim_stopped_resume import authorize as authorize_stopped_resume
+    from backend.pipeline.claim_topic_units import FIELD as TOPIC_FIELD
+    old_authority = json.loads(source.verify_file(old.authorization).read_text())
+    if authority.get(TOPIC_FIELD) != old_authority.get(TOPIC_FIELD):
+        raise ValueError('continuation cannot remove or change a frozen topic boundary')
     stopped_resume = authorize_stopped_resume(previous, request, authority)
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)

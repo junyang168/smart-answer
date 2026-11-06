@@ -76,23 +76,48 @@ def claim_scopes_locks(requests):
     with ExitStack() as stack:
         source_ids = {sid for request in requests for sid in request.source_bindings}
         sources = stack.enter_context(_hold(resource_paths(source_ids), fcntl.LOCK_SH))
-        writes = {key for request in requests for key in request_write_keys(request)}
-        paths = resource_paths(source_ids, writes)
-        source_paths = set(resource_paths(source_ids))
-        records = stack.enter_context(_hold([p for p in paths if p not in source_paths], fcntl.LOCK_EX))
-        yield sources + records
+        specs = claim_record_lock_spec(requests)
+        handles = tuple(handle for path, exclusive in specs for handle in
+                        stack.enter_context(_hold([path], fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)))
+        yield sources + handles
 
 
 def verify_claim_locks(descriptors, request):
     source_paths = resource_paths(request.source_bindings)
-    records = [p for p in resource_paths(request.source_bindings, request_write_keys(request)) if p not in set(source_paths)]
+    records = claim_record_lock_spec([request])
     if len(descriptors) != len(source_paths) + len(records):
         raise ValueError('worker inherited an incomplete Claim scope')
     verify_inherited(descriptors[:len(source_paths)], source_paths, exclusive=False)
-    verify_inherited(descriptors[len(source_paths):], records, exclusive=True)
+    for fd, (path, exclusive) in zip(descriptors[len(source_paths):], records):
+        verify_inherited([fd], [path], exclusive=exclusive)
+
+
+def claim_record_lock_spec(requests):
+    """Legacy source lane is EX; proven topic units share it but own all context."""
+    from backend.pipeline.claim_topic_units import resources
+    modes = {}
+    for request in requests:
+        scoped = resources(request)
+        keys = request_write_keys(request)
+        for key in keys:
+            modes[key] = True
+        for sid in request.source_bindings if getattr(request, 'operation', 'Update') == 'Update' else ():
+            key = 'claim_source_execution/' + sid
+            modes[key] = modes.get(key, False) or scoped is None
+    sources = {sid for request in requests for sid in request.source_bindings}
+    source_paths = set(resource_paths(sources))
+    result = []
+    for key in sorted(modes):
+        paths = set(resource_paths(sources, [key])) - source_paths
+        result.extend((path, modes[key]) for path in sorted(paths))
+    return result
 
 
 def request_write_keys(request):
+    from backend.pipeline.claim_topic_units import resources
+    scoped = resources(request)
+    if scoped is not None:
+        return scoped
     writes = set(request.target_keys) | {p.key for p in request.permissions}
     if getattr(request, 'operation', 'Update') == 'Update':
         # Preserve existing same-own-source Update ordering, including scoped
