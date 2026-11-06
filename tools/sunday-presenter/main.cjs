@@ -4,8 +4,10 @@ const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
 const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('./folder-wizard.js');
 const { Website } = require('./website.cjs');
+const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
+const { installOfficeView, viewDocumentURL } = require('./office-view.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -70,7 +72,7 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
     // Repeated GET clicks reuse the existing private document; never replace a
     // POST popup or destroy its opener/body. Authentication popups stay parked.
     if (!postBody && isDocumentURL(url)) {
-      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === url);
+      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === viewDocumentURL(url));
       if (existing) {
         if (stage.preview === page.id && !existing.ready) {
           stage.prepare(existing.id); controller.moveTop();
@@ -108,6 +110,14 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
       stage.prepare(page.id); controller.moveTop();
     }
     changed();
+  });
+  // Office renders the show inside a cross-origin iframe. Protect its own
+  // document as well as the outer page, without replacing/reloading either.
+  wc.on('did-frame-finish-load', (_event, _mainFrame, processId, routingId) => {
+    try {
+      const frame = require('electron').webFrameMain.fromId(processId, routingId);
+      frame?.executeJavaScript(`(${protectSlideshowEnd.toString()})()`).catch(() => {});
+    } catch { /* A frame may detach while its load event is being delivered. */ }
   });
   wc.on('did-stop-loading', changed);
   wc.on('page-title-updated', (_event, title) => { page.title = title.slice(0, 180); changed(); });
@@ -168,7 +178,7 @@ async function act(action, args = {}) {
           args.url === 'about:blank' || !allowedURL(args.url, testOrigin)) throw Error('請貼上 HTTPS 的 Microsoft 365 / OneDrive 簡報連結。');
       const page = createPage(args.deck);
       // Failure details are surfaced by did-fail-load; never log private URLs.
-      page.view.webContents.loadURL(args.url).catch(() => {});
+      page.view.webContents.loadURL(viewDocumentURL(args.url)).catch(() => {});
       break;
     }
     case 'prepare': stage.prepare(args.id); controller.moveTop(); break;
@@ -232,6 +242,7 @@ app.whenReady().then(async () => {
     ] }, { role: 'windowMenu' }
   ]));
   officeSession = session.fromPartition(smoke ? 'smoke-office' : 'persist:office');
+  installOfficeView(officeSession);
   const permissionAllowed = (wc, permission) => permission === 'fullscreen' && wc &&
     (stage?.preview === wc.id || stage?.active === wc.id);
   officeSession.setPermissionRequestHandler((wc, permission, callback) => callback(!!permissionAllowed(wc, permission)));

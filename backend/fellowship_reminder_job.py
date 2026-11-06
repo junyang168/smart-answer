@@ -81,6 +81,7 @@ class FellowshipEvent:
     title: Optional[str] = None
     series: Optional[str] = None
     sequence: Optional[int] = None
+    source_links: list | None = None
     email_subject: Optional[str] = None
     email_body_html: Optional[str] = None
 
@@ -125,6 +126,7 @@ def load_fellowship_events(path: str) -> list[FellowshipEvent]:
                 title=_clean_optional_str("title"),
                 series=_clean_optional_str("series"),
                 sequence=_clean_optional_int("sequence"),
+                source_links=entry.get("sourceLinks") or [],
                 email_subject=_clean_optional_str("emailSubject") or _clean_optional_str("email_subject"),
                 email_body_html=_clean_optional_str("emailBodyHtml") or _clean_optional_str("email_body_html"),
             )
@@ -197,7 +199,7 @@ def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
     total_sent = 0
 
     try:
-        with smtplib.SMTP(host, port) as smtp:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
             smtp.ehlo()
             if use_tls:
                 smtp.starttls()
@@ -237,12 +239,10 @@ def compute_send_timestamp(events: list[FellowshipEvent]) -> tuple[FellowshipEve
     # Sort events by date to ensure correctness regardless of JSON order
     sorted_events = sorted(events, key=lambda e: e.date)
 
-    # Find the next event that is strictly in the future relative to "today".
-    # Logic: We send the reminder 1 day before the event.
-    # If today is (event.date - 1), then event.date > today.
-    # If today is event.date, the window has passed (now.date() > send_at.date()).
+    # Include today so a late completion can still use --catch-up before 19:30.
+    # The normal daily invocation retains its day-before send window.
     now_date = datetime.now(TIMEZONE).date()
-    future_events = [e for e in sorted_events if e.date > now_date]
+    future_events = [e for e in sorted_events if e.date >= now_date]
 
     if future_events:
         target_event = future_events[0]
@@ -267,6 +267,7 @@ def main() -> None:
         action="store_true",
         help="Print the email details without sending.",
     )
+    parser.add_argument("--catch-up", action="store_true", help="Check again after details are completed; stop before the fellowship begins.")
     args = parser.parse_args()
 
     events = load_fellowship_events(FELLOWSHIP_FILE)
@@ -305,14 +306,29 @@ def main() -> None:
         if now < send_at:
             print(f"Not time yet. Scheduled for {send_at}. Exiting without sending.")
             return
-        if now.date() > send_at.date():
+        end_at = datetime.combine(event.date, time(19, 30), tzinfo=TIMEZONE)
+        if (args.catch_up and now >= end_at) or (not args.catch_up and now.date() > send_at.date()):
             print("Send window has passed; exiting without sending.")
             return
 
     if args.dry_run:
         print("Dry run only. Would send to:", ", ".join(recipients))
         return
-    send_email(recipients, event)
+    try:
+        from .fellowship_delivery import send_once, ready_for_email, catch_up_allowed
+    except ImportError:
+        from fellowship_delivery import send_once, ready_for_email, catch_up_allowed
+    if args.catch_up and not catch_up_allowed(Path(BASE_DIR)):
+        print("Fellowship assistant is paused; no catch-up send.")
+        return
+    if not ready_for_email(event, Path(BASE_DIR)):
+        print("Fellowship details are incomplete; waiting without sending.")
+        return
+    if not os.getenv("SMTP_HOST"):
+        raise RuntimeError("SMTP_HOST environment variable is required")
+    if not recipients:
+        raise RuntimeError("No fellowship notification recipients configured")
+    send_once(event.date, lambda: send_email(recipients,event), status_file=Path(STATUS_FILE), force=args.force)
 
 
 if __name__ == "__main__":

@@ -68,13 +68,22 @@ function Verse({ slug, label, latest }: { slug: string; label: string; latest: b
   );
 }
 
-export default function ChapterSlide({ slide, seconds }: { slide: ChapterSlideData; seconds: number }) {
+export default function ChapterSlide({
+  slide,
+  seconds,
+  className = "min-h-[20rem]",
+}: {
+  slide: ChapterSlideData;
+  seconds: number;
+  /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
+  className?: string;
+}) {
   // 要点和经文都是他讲到、读到了才出现。新读的经文放在最上面、亮着。
   const points = slide.points.filter((item) => item.at <= seconds + 1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
   const shown = [...read].reverse();
   return (
-    <section className="flex min-h-[20rem] flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
+    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6`}>
       <header>
         <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
         {points.length > 0 && (

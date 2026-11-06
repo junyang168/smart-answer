@@ -9,6 +9,7 @@
 > **失效 AI 审核字段对齐**：2026-11-02，精确旧版本与审核事件核验、`claim_metadata_projection_v2` 及完整候选的程序投影核对到 `65930b78`；有界工程补轮复用既有 `remaining_findings` 接续，核对本工作树的 `repair_extension` 和 `continuation_budget`，不新增恢复流程或改写原调用记录。
 > **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **段落顺序接续与代码对齐**：2026-10-27，第 9.2 节核对到 `claim_management_batch.load_paragraphs`／`run_paragraphs`，隔离 SQL 验证来源排序、原 Update 多轮、当前资格、去重和同 action／root 恢复；未宣称真实来源修订或 CVP 维护已经运行。
+> **执行锁与代码对齐**：2026-11-05，第 11.1／11.7 节核对本工作树的 `source_execution_locks`、`claim_management_batch` 与 transcript 定位入口：全域维护共享闸门、跨来源读锁和实质写入对象独占锁；短 SQL 交易、原权限、预算及当前资格检查不变。旧运行中的独占锁不降级；未宣称已部署。
 > **Claim ID 清单入口与代码对齐**：2026-10-27，第 11.1 节核对到 `claim_management_intake.prepare`／`run`、`claim_qualification_refresh.run`、`claim_changes_v4`、SQL 身份预留与 batch 的 `--claim-ids` 入口；同源任务串行，v8 起支持明确授权的同源新建与目标退休。批内共用数据更新后的失效资格自动作一次冻结的只读核对，仍使用现有 Update 执行器；隔离模型回答不作为真实内容验收。完整 source change 接续仍由 [#464](https://github.com/junyang168/smart-answer/issues/464) 跟踪。
 > **無進展工程接續對齊**：2026-10-29，第 8.1 節核對本工作樹的 `returned_no_progress_input`、`continuation_budget` 與 `finding_permission_extension`；完整返回不等於內容通過，補齊原非 Claim 物件的普通欄位也不增加原調用及修訂預算。
 > **分区 refresh 排程设计**：2026-10-29，第 11.7 节另行规定按来源串行、GPT／Opus 各两个全局 session、持续补位及供应商限流控制。该编排待实施，不能把旧 batch 的两个 action 上限视为已满足新需求。
@@ -544,7 +545,7 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 
 独立单元可完成，整批仍未完成；只读依赖和写权限分别管理。Split 子对象数不替换原项，第 5.2 节统一约束最终验收。Review 报告完成、内容维护完成和来源覆盖完成分别报告。
 
-以下为已实现清单入口的合同，不是第 11.7 节的新排程能力。指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；同一 own source 的不同 action 必须排队，即使可写对象不相交；不同来源且通过现有读写冲突检查时，才允许显式选择的 `max_workers=2` 并行。不把清单自动变成联合内容修改或 Merge，也不新增 scheduler 或每来源锁服务。
+以下为已实现清单入口的合同，不是第 11.7 节的新排程能力。指定清单的普通 Update 提供直接入口，不要求调用者手工准备每条 request：`claim_management_intake.run(claim_ids, root, instruction=..., max_workers=1)`。`claim_ids` 为非空 Claim ID 数组，按首次出现去重；`instruction` 保存实际执行方向并进入模型的明确审阅问题，不冒充人工内容批准。入口自动查询每条 Claim 的完整自身来源及必要当前依赖，在原权限边界内生成精确授权与字段许可，交给既有 `claim_management_batch.run`。每个 ID 对应一个 Update action；执行范围按请求实际绑定的全部来源及授权修改的对象确定，不能假设一个 action 只属于一篇讲道。同源 Update 保持既有串行次序，包括新建及资格核查；跨来源任务只对重叠的授权写入对象排队，读取来源的锁可以共存，来源版本替换排斥正在读取它的任务。通过现有读写冲突检查后，才在显式选择的 `max_workers` 范围内并行。不把清单自动变成联合内容修改或 Merge；锁复用共同执行接点，不新增服务。
 
 CLI 沿用同一 batch 模块：
 
@@ -668,7 +669,7 @@ backend/.venv/bin/python -m backend.pipeline.claim_management_batch \
 
 负责人指定分区的全量 refresh 按 [Claim 分区 refresh 与模型容量排程设计](./claim_refresh_campaign_design.md) 实施：同源一次一条、原文顺序；不同来源并行，GPT 与 Opus 各最多两个实际 session，按供应商限流、冷却与下游积压持续补位。该设计只扩展编排，不改变完整自身来源、内容权限、短交易、原预算和当前资格边界。旧 batch 的 action 数量限制、联合组预检和冻结任务保持原合同，不能直接扩大 `max_workers` 冒充实现。
 
-此路径不按跨源 W／R 传递冲突重新合组或加入排程互斥；真实版本冲突仍由共同交易拒绝并保留受影响任务。当前资格、分区原始分母及 CVP 待维护分别清账。新增容量控制与后台恢复须通过该文验收，再按正式授权进入真实执行。
+此路径不按跨源 W／R 传递冲突重新合组。共用来源读取不要求互斥；授权的直接写入对象重叠时，复用执行锁等待，不重组 action、增加调用预算或改变原输入。原已冻结批次保持其来源顺序与容量。真实版本冲突仍由共同交易拒绝并保留受影响任务。当前资格、分区原始分母及 CVP 待维护分别清账。新增容量控制与后台恢复须通过该文验收，再按正式授权进入真实执行。
 
 ## 12 实施与阶段交付
 

@@ -235,7 +235,8 @@ export const SermonDetailView = () => {
   const nextSermon = currentSeriesIndex >= 0 && currentSeriesIndex < seriesSermons.length - 1
     ? seriesSermons[currentSeriesIndex + 1]
     : null;
-  const seriesHref = sermon.series_id
+  // 系列的排列只給同工看（負責人 2026-11-06）；信眾從講論文庫按書卷、章節來。
+  const seriesHref = isEditor && sermon.series_id
     ? `/resources/series/${encodeURIComponent(sermon.series_id)}?sermon=${encodeURIComponent(sermon.id)}`
     : undefined;
 
@@ -352,6 +353,7 @@ export const SermonDetailView = () => {
       {/* 右側邊欄 */}
       <SermonDetailSidebar
         sermon={sermon}
+        showSeries={isEditor}
         authenticated={status === "authenticated"}
         canReviewRepository={isEditor}
       />

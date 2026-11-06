@@ -1,34 +1,31 @@
 // app/resources/series/page.tsx
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
+import { StaffOnly } from '@/app/components/common/StaffOnly';
 import { SeriesBrowser } from '@/app/components/series/SeriesBrowser';
 import { Suspense } from 'react';
 
-// Suspense 的回退 UI
-const SeriesPageFallback = () => <div className="text-center py-20">正在準備系列列表...</div>;
-
+// 同工的編輯入口：每個系列的校對進度（負責人 2026-11-06）。普通信眾從講論文庫找講道。
 export default function AllSeriesPage() {
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: 'AI 輔助查經', href: '/resources' },
-    { name: '系列講道' },
+    { name: '講道中心', href: '/resources/sermons' },
+    { name: '講道系列' },
   ];
 
   return (
-    <div className="bg-gray-50">
-      <div className="container mx-auto px-6 py-12">
+    <div className="min-h-screen bg-stone-50">
+      <div className="container mx-auto max-w-5xl px-6 py-12">
         <Breadcrumb links={breadcrumbLinks} />
-        
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold font-display text-gray-800">系列講道</h1>
-          <p className="mt-4 text-lg text-gray-600 max-w-3xl mx-auto">
-            系統性地學習聖經真理。以下是我們所有的講道系列，每個系列都包含詳細的介紹、學習要點和完整的講道列表。
-          </p>
-        </div>
-        
-        {/* 使用 Suspense 包裹客戶端組件，以獲得更好的加載體驗 */}
-        <Suspense fallback={<SeriesPageFallback />}>
-          <SeriesBrowser />
-        </Suspense>
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-stone-950">講道系列</h1>
+          <p className="mt-2 text-stone-600">各系列的編輯進度。點一個系列，看每篇講道的認領人與發佈情況。</p>
+        </header>
+        <StaffOnly>
+          <Suspense fallback={null}>
+            <SeriesBrowser />
+          </Suspense>
+        </StaffOnly>
       </div>
     </div>
   );

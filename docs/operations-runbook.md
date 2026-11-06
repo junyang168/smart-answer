@@ -649,3 +649,25 @@ worker reads messages. Internal errors join existing admin incident monitoring;
 missing consent and ambiguous mail remain setup/review states. Saturday 22:00
 Dallas speaker-PPT follow-up has an independent admin-group-only switch and does
 not enable source-group questions or Friday reminders.
+
+### Fellowship preparation in the Sunday assistant
+
+The `fellowship_enabled` setting adds the dedicated administrator group to
+`ingest_groups`, while leaving the three source-group roster/audit unchanged.
+Activation records `fellowship_since` and `fellowship_start_date`; only new
+administrator messages are eligible. The Sunday 15:00 request and the following
+Thursday 09:00 missing-information reminder use Dallas time and a separate
+admin-only `fellowship:` envelope. See [fellowship workflow](sunday-assistant.md#雙週讀經團契).
+
+A separate bounded thread runs the existing release-bound fellowship reminder
+script with `--catch-up`, borrowing only its current LaunchAgent's mail/data
+configuration and checking that data roots agree. There is no new LaunchAgent
+and the existing daily reminder schedule is retained. Catch-up stops before
+Friday 19:30. The per-event delivery ledger under
+`DATA_BASE_DIR/notification/fellowship-delivery/` is private and outside releases;
+retain it with `last_sent.json` across deploys. Do not delete a `sending` or
+`unknown` reservation to make a retry happen: SMTP may already have accepted
+mail. Verify provider-side delivery first. Administrator incident monitoring
+reports unresolved delivery failures; ordinary missing inputs are business
+pending states. Normal deploys must not interrupt an in-flight old reminder
+process before its legacy sent marker is recorded.

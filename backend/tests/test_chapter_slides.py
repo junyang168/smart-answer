@@ -178,3 +178,60 @@ def test_a_slide_shows_in_every_section_its_time_reaches():
     out = _chapter_slides(rows, timed)
     assert out["mat-5-17-20"][0]["at"] == 50.0
     assert out["mat-5-1-12"][0]["at"] == 100.0 and out["mat-5-1-12"][0]["seconds"] == 70.0
+
+
+def test_each_row_gets_its_own_timed_transcript_with_grey_lines_marked():
+    from backend.pipeline.original_audio_index import _transcript
+
+    pieces = [
+        {"id": "U001", "start": 0.0, "end": 10.0, "text": "第一句。第二句。"},
+        {"id": "U002", "start": 10.0, "end": 20.0, "text": "見證一句。"},
+        {"id": "U003", "start": 30.0, "end": 40.0, "text": "別的段。"},
+    ]
+    lines = chapter_slides.sentences(pieces)
+    stretches = [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 20.0, "left_out": True}]
+
+    rows = _transcript(lines, stretches)
+
+    assert [row["text"] for row in rows] == ["第一句。", "第二句。", "見證一句。"]
+    assert [row["at"] for row in rows] == [0.0, 5.0, 10.0]
+    assert [row.get("left_out", False) for row in rows] == [False, False, True]
+
+
+def test_times_follow_the_speech_recognition_not_an_even_pace_through_the_paragraph(tmp_path):
+    """段落只有段首有时间；他前半段讲得慢，按字数平均会把后半段的句子放早了。"""
+
+    from backend.pipeline.original_audio_index import retimer
+
+    (tmp_path / "script").mkdir()
+    (tmp_path / "script" / "L1.json").write_text(json.dumps({"entries": [
+        {"index": 1, "start_ms": 0, "end_ms": 30000, "text": "甲乙丙丁戊己"},
+        {"index": 2, "start_ms": 30000, "end_ms": 36000, "text": "庚辛壬癸子丑"},
+        {"index": 3, "start_ms": 100000, "end_ms": 106000, "text": "寅卯辰巳"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+    sermon = {"transcript_id": "L1", "segments": [
+        {"text": "甲乙丙丁戊己，庚辛壬癸子丑。", "start_index": 1, "end_index": 2, "start_time": 0},
+        {"text": "寅卯辰巳。", "start_index": 3, "end_index": 3, "start_time": 100},
+    ]}
+
+    convert = retimer(sermon, tmp_path)
+
+    # 「庚」是第 7 个字：平均语速算出来约 50 秒，录音里是 30 秒。
+    coarse = 100 * 7 / 14
+    assert abs(convert(coarse) - 30.0) < 0.5
+    assert abs(convert(100.0) - 100.0) < 0.5
+
+
+def test_without_speech_recognition_times_stay_as_they_were(tmp_path):
+    from backend.pipeline.original_audio_index import retimer
+
+    convert = retimer({"transcript_id": "none", "segments": []}, tmp_path)
+    assert convert(42.0) == 42.0
+
+
+def test_the_older_cuv_spelling_of_the_johannine_letters_is_read():
+    from backend.api.scripture import reference_slugs
+
+    assert reference_slugs("約翰壹書 1:9") == ["1jn-1-9"]
+    assert reference_slugs("約翰貳書 1:3") == ["2jn-1-3"]
+    assert reference_slugs("約翰參書 1:2") == ["3jn-1-2"]

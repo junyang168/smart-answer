@@ -21,6 +21,8 @@ def main():
     if not args.once:
         from backend.sunday_assistant.gmail_job import start_mail_worker
         start_mail_worker(agent)
+        from backend.sunday_assistant.fellowship_mail import start_fellowship_mail_worker
+        start_fellowship_mail_worker(agent)
     while True:
         try:
             agent.tick()

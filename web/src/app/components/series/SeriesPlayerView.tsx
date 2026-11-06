@@ -1,294 +1,148 @@
-
 // components/series/SeriesPlayerView.tsx
 "use client";
-import { hasEditorAccess } from "@/app/utils/roles";
 
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useSearchParams, notFound } from 'next/navigation';
-import Link from 'next/link';
-import { useSession } from 'next-auth/react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { PlayCircle, ListMusic, Clipboard, Check } from 'lucide-react';
-import { SermonSeries } from '@/app/interfaces/article';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/app/components/hover-card';
+import Link from "next/link";
+import { notFound, useParams, useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { Check, Clipboard } from "lucide-react";
+import { Sermon, SermonSeries } from "@/app/interfaces/article";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName } from "./progress";
 
+/** 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。 */
+
+type Row = Sermon & { deliver_date?: string | null };
 
 export const SeriesPlayerView = () => {
-  // --- State Management ---
-  const [series, setSeries] = useState<SermonSeries | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isCopying, setIsCopying] = useState(false);
-  const [hasCopied, setHasCopied] = useState(false);
-
-  const { data: session } = useSession();
-
-
-
-  // --- Get IDs from URL ---
   const params = useParams();
   const searchParams = useSearchParams();
-  const seriesId = decodeURIComponent(params.seriesId as string);
-  const sermonParam = searchParams.get('sermon');
-  const currentSermonId = sermonParam ? decodeURIComponent(sermonParam) : '';
+  const router = useRouter();
+  const pathname = usePathname();
+  const seriesId = decodeURIComponent(String(params.seriesId ?? ""));
+  const filter = searchParams.get("status") ?? "";
+  const [series, setSeries] = useState<SermonSeries | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [error, setError] = useState("");
+  const [copy, setCopy] = useState<"idle" | "busy" | "done">("idle");
 
-
-
-
-
-
-  // --- Data Fetching ---
   useEffect(() => {
-    if (!seriesId) return;
+    fetch("/api/sc_api/sermon_series", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((all: SermonSeries[]) => {
+        const found = all.find((item) => item.id === seriesId);
+        if (found) setSeries(found);
+        else setMissing(true);
+      })
+      .catch((status) => setError(`讀取失敗（${status}）`));
+  }, [seriesId]);
 
-    const fetchSeriesData = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/sc_api/sermon_series');
-        if (!res.ok) {
-          throw new Error(`API request failed with status ${res.status}`);
-        }
-        const allSeries: SermonSeries[] = await res.json();
+  if (missing) notFound();
+  if (error) return <p className="py-20 text-center text-rose-800">{error}</p>;
+  if (!series) return <p className="py-20 text-center text-stone-600" role="status">正在讀取…</p>;
 
-        let foundSeries = allSeries.find(s => s.id === seriesId) || null;
+  const counts = countByStatus(series.sermons);
+  const { name, subtitle } = seriesName(series);
+  const rows = series.sermons
+    .map((sermon, index) => ({ sermon: sermon as Row, order: index + 1 }))
+    .filter(({ sermon }) => !filter || sermon.status === filter);
 
+  const choose = (status: string) =>
+    router.replace(status ? `${pathname}?status=${status}` : pathname, { scroll: false });
 
-        if (foundSeries) {
-          setSeries(foundSeries);
-        } else {
-          // 如果循環結束都沒找到，拋出 404 錯誤
-          throw new Error('404');
-        }
-
-      } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchSeriesData();
-  }, [seriesId]); // 依賴 seriesId，如果 URL 的 seriesId 變化，會重新獲取數據
-
-  // --- Derived State (計算當前播放的講道) ---
-  const activeSermon = useMemo(() => {
-    if (!series) return null;
-    return series.sermons.find(s => s.item === currentSermonId) || series.sermons[0];
-  }, [currentSermonId, series]);
-
-  const topics = useMemo(() => {
-    if (!series || !series.topics) {
-      return [] as string[];
-    }
-    if (Array.isArray(series.topics)) {
-      return series.topics;
-    }
-    return series.topics
-      .split(',')
-      .map((topic) => topic.trim())
-      .filter(Boolean);
-  }, [series]);
-
-  const handleCopyMarkdown = async () => {
-    if (!series) return;
-    setIsCopying(true);
+  const copyMarkdown = async () => {
+    setCopy("busy");
     try {
       const res = await fetch(`/api/sc_api/series/${encodeURIComponent(series.id)}/markdown`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ user_id: '' }), // Send empty user_id for public access
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "" }),
       });
-
-      if (!res.ok) {
-        throw new Error('Failed to fetch markdown');
-      }
-
-      const data = await res.json();
-      if (data.markdownContent) {
-        await navigator.clipboard.writeText(data.markdownContent);
-        setHasCopied(true);
-        setTimeout(() => setHasCopied(false), 2000);
-      } else {
-        alert("未找到 Markdown 內容");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("複製失敗，請稍後再試");
-    } finally {
-      setIsCopying(false);
+      const data = res.ok ? await res.json() : null;
+      if (!data?.markdownContent) throw new Error("empty");
+      await navigator.clipboard.writeText(data.markdownContent);
+      setCopy("done");
+      setTimeout(() => setCopy("idle"), 2000);
+    } catch {
+      setCopy("idle");
+      console.error("複製系列 Markdown 失敗");
     }
   };
 
-
-  // --- Render Logic ---
-  if (isLoading) {
-    return <div className="text-center py-20">正在加載系列數據...</div>;
-  }
-
-  if (error === '404') {
-    notFound();
-    return null;
-  }
-
-  if (error) {
-    return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;
-  }
-
-  if (!series || !activeSermon) {
-    return <div className="text-center py-20">系列或講道數據不存在。</div>;
-  }
-
-  const activeIndex = series.sermons.findIndex(sermon => sermon.item === activeSermon.item);
-  const previousSermon = activeIndex > 0 ? series.sermons[activeIndex - 1] : null;
-  const nextSermon = activeIndex >= 0 && activeIndex < series.sermons.length - 1
-    ? series.sermons[activeIndex + 1]
-    : null;
+  const chip = (status: string, label: string) => (
+    <button
+      key={status || "all"}
+      type="button"
+      onClick={() => choose(status)}
+      aria-pressed={filter === status}
+      className={`rounded-full border px-3 py-1 text-sm ${
+        filter === status ? "border-stone-900 bg-stone-900 text-white" : "border-stone-300 text-stone-700 hover:bg-stone-100"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
-    <>
-      <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-4">
-            <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
-            {hasEditorAccess(session?.user?.role) && (
-              <button
-                onClick={handleCopyMarkdown}
-                disabled={isCopying}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
-                title="複製系列 Markdown"
-              >
-                {hasCopied ? (
-                  <>
-                    <Check className="w-4 h-4 text-green-600" />
-                    <span className="text-green-600">已複製</span>
-                  </>
-                ) : (
-                  <>
-                    <Clipboard className="w-4 h-4 text-gray-500" />
-                    <span>{isCopying ? '處理中...' : '複製 Markdown'}</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-          <p className="mt-2 text-lg text-gray-600">{series.summary}</p>
-          {series.keypoints && (
-            <div className="mt-2">
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <button className="text-blue-600 hover:text-blue-800 underline text-sm font-medium cursor-pointer">
-                    系列要點
-                  </button>
-                </HoverCardTrigger>
-                <HoverCardContent className="w-96 max-h-[400px] overflow-y-auto">
-                  <div className="prose prose-sm prose-slate max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{series.keypoints}</ReactMarkdown>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            </div>
-          )}
-          {topics.length ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {topics.map((topic) => (
-                <span
-                  key={topic}
-                  className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
-                >
-                  #{topic}
-                </span>
-              ))}
-            </div>
-          ) : null}
+    <div className="flex flex-col gap-5">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-stone-950">{name}</h1>
+          {subtitle ? <p className="mt-1 text-stone-600">{subtitle}</p> : null}
         </div>
+        <button
+          type="button"
+          onClick={copyMarkdown}
+          disabled={copy === "busy"}
+          className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+        >
+          {copy === "done" ? <Check className="h-4 w-4 text-emerald-600" /> : <Clipboard className="h-4 w-4 text-stone-500" />}
+          {copy === "done" ? "已複製" : copy === "busy" ? "處理中…" : "複製 Markdown"}
+        </button>
+      </header>
 
+      <div className="flex flex-wrap gap-2" role="group" aria-label="按狀態篩選">
+        {chip("", `全部 ${series.sermons.length}`)}
+        {STATUS_ORDER.map((status) => chip(status, `${STATUS_LABEL[status]} ${counts[status] ?? 0}`))}
       </div>
 
-
-      <div className="flex flex-col lg:flex-row gap-8">
-
-        {/* 右側播放列表 */}
-        <aside className="lg:w-1/3">
-          <div className="bg-gray-50 rounded-lg p-4 sticky top-24">
-            <div className="flex items-center mb-4">
-              <ListMusic className="w-6 h-6 mr-3 text-gray-700" />
-              <div>
-                <p className="text-xs text-gray-500">系列</p>
-                <h3 className="font-bold text-lg">{series.title}</h3>
-              </div>
-            </div>
-            <ul className="space-y-2 max-h-[70vh] overflow-y-auto">
-              {series.sermons.map((sermon, index) => {
-                const isActive = sermon.item === activeSermon.item;
-                return (
-                  <li key={sermon.id}>
-                    <Link href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(sermon.item || sermon.id)}`} className={`flex items-start gap-3 p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100' : 'hover:bg-gray-200'}`}>
-                      <div className="text-gray-500 mt-1">{isActive ? <PlayCircle className="w-5 h-5 text-blue-600" /> : `${index + 1}`}</div>
-                      <div>
-                        <p className={`font-semibold ${isActive ? 'text-blue-800' : 'text-gray-800'}`}>{sermon.title}</p>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </aside>
-
-        {/* 左側主內容區 */}
-        <div className="lg:w-2/3">
-
-          <nav className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4" aria-label="系列前後講導航">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                {previousSermon ? (
+      <div className="overflow-x-auto rounded-2xl border border-stone-200 bg-white">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-stone-50 text-stone-600">
+            <tr>
+              <th className="px-4 py-3 font-medium">#</th>
+              <th className="px-4 py-3 font-medium">講道</th>
+              <th className="px-4 py-3 font-medium">講道日期</th>
+              <th className="px-4 py-3 font-medium">狀態</th>
+              <th className="px-4 py-3 font-medium">認領人</th>
+              <th className="px-4 py-3 font-medium">發佈日期</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ sermon, order }) => (
+              <tr key={sermon.item || sermon.id} className="border-t border-stone-100">
+                <td className="px-4 py-3 font-mono text-stone-500">{order}</td>
+                <td className="px-4 py-3">
                   <Link
-                    href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(previousSermon.item || previousSermon.id)}`}
-                    className="block truncate font-semibold text-blue-700 hover:underline"
+                    href={`/resources/sermons/${encodeURIComponent(sermon.item || sermon.id)}`}
+                    className="font-medium text-stone-900 hover:text-amber-800 hover:underline"
                   >
-                    ← 上一講：{previousSermon.title}
+                    {sermon.title}
                   </Link>
-                ) : <span className="text-sm text-gray-400">已是第一講</span>}
-              </div>
-              <div className="shrink-0 text-sm font-bold text-slate-600">第 {activeIndex + 1}／{series.sermons.length} 講</div>
-              <div className="min-w-0 flex-1 text-right">
-                {nextSermon ? (
-                  <Link
-                    href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(nextSermon.item || nextSermon.id)}`}
-                    className="block truncate font-semibold text-blue-700 hover:underline"
-                  >
-                    下一講：{nextSermon.title} →
-                  </Link>
-                ) : <span className="text-sm text-gray-400">已是最後一講</span>}
-              </div>
-            </div>
-          </nav>
-
-          <article className="prose lg:prose-lg max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSermon.summary}</ReactMarkdown>
-          </article>
-          <div className="mt-8 pt-8 border-t border-gray-100">
-            <h3 className="font-semibold text-lg text-gray-900 mb-4">講道要點</h3>
-            <div className="prose prose-slate max-w-none text-gray-600">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSermon.keypoints}</ReactMarkdown>
-            </div>
-          </div>
-          {/* ✅ 新增：導航到詳情頁的按鈕 */}
-          <div className="my-6">
-            <Link
-              href={`/resources/sermons/${activeSermon.item}`}
-              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 transition-colors"
-            >
-              <span>觀看講道 →</span>
-            </Link>
-          </div>
-
-        </div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 font-mono text-stone-700">{deliveredOn(sermon)}</td>
+                <td className="px-4 py-3">
+                  <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 ${STATUS_CLASS[sermon.status] ?? "bg-stone-100 text-stone-700"}`}>
+                    {STATUS_LABEL[sermon.status] ?? sermon.status}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.assigned_to_name || "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 font-mono text-stone-700">
+                  {sermon.status === "published" ? day(sermon.published_date) || "—" : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </>
+    </div>
   );
 };

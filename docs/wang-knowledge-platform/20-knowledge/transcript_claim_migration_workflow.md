@@ -3,8 +3,11 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`、`backend.pipeline.transcript_claim_anchor_sync`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`、`backend.pipeline.transcript_claim_anchor_sync`、`backend.pipeline.transcript_locator_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
+
+完整的新稿三方合併、正式 editor 採用、發布及 Claim 交接見
+[新逐字稿升級流程](./transcript_upgrade_workflow.md)。本文是其中來源／Claim 階段，不能代替前面的舊校對保留。
 
 ## 目錄
 
@@ -83,6 +86,47 @@ CVP／論證層接續須在真正 apply 前完成驗證；本 dry-run 不宣稱�
 
 ## 2. 已發布版本的程式搬遷
 
+日常執行使用統一入口 `transcript_locator_migration`。每一篇／每次真實來源改版固定一個
+RUN，不以新 RUN 規避失敗或重置舊模型任務。前提是新來源已按第 4 節正式登記，且與
+已發布逐字稿的正文、段落及時間一致。此入口只搬遷定位；不發布逐字稿、不登記來源，
+也不啟動 Claim refresh、CVP／Route 維護或模型。
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration prepare --root RUN --source-id SOURCE --old-source OLD_FILE --old-source PREVIOUS_BETA --published PUBLISHED_FILE --instruction-file DIRECTION
+backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration run --root RUN
+backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration verify --root RUN
+```
+
+1. `prepare` 只讀 SQL，凍結來源、原始指示、程式及 Evidence 寫集，產生 `preview.json`、
+   `evidence/comparison.html` 和 CSV。已可靠定位、軟刪除、僅語境及已完成項分開列出。
+   無法可靠定位的項目列入 `exceptions`，`run` 在任何寫入前停止。先由執行者核對新舊
+   上下文、既有時間碼、經文及直接使用者，不把整批例外交給負責人。
+2. 例外的技術定位結論沿用下述 `--calibration FILE` 契約；加此選項重新準備一份有明確
+   版本關係的計畫，保留原 preview。不得重用其他講道的逐項定位決定，也不得修改原計畫
+   使它看起來從未失敗。真正來源意思無法判定才交內容裁決。
+3. `run` 先提交 Evidence，再從實際已提交結果準備 Claim anchors 並提交；兩次各有
+   獨立 transaction、ChangeSet、歷史、版本比較及回讀。**不是跨兩階段的原子交易**。
+   Claim 對照表在 Evidence 成功提交後產生，不能把第一份 dry-run 說成兩階段的完整預覽。
+4. 若中途失敗，同一 `run --root RUN` 接續。若 Evidence 已提交但 Claim 尚未開始，先回讀
+   Evidence，再準備 Claim；若已有 Claim 計畫，直接核對交易歷史及精確階段交接，不再拿
+   Evidence 的舊 Claim 快照核對已同步的 Claim。若另有合法修改造成版本衝突，保留舊計畫，
+   查明差異後再凍結新計畫，不覆蓋別人的修改。已提交而回執遺失也沿原 ChangeSet 恢復。
+5. `result.json`／`result.html` 彙總兩次寫入、待內容 refresh 的 Evidence，並連結兩份
+   詳細對照表。最終回讀包括當前 Claim 及 Evidence 階段之後所有未改依賴；來源、Claim
+   論點及原有審核 provenance 保持原樣。`verify` 是顯式的當前再核查，不授予內容資格。
+
+效率：只在首次準備做歷史版本與整篇順序對齊；相同 RUN 重跑復用固定計畫，不再搜尋位置。
+使用共同批量 SQL reader，而非逐個物件／逐條 evidence 查詢。各階段 `apply` 內已有回讀，
+統一入口不再立即額外跑一次相同 `verify`；Claim 階段的回讀同時覆蓋未改 Evidence。
+兩階段交接一次比較保存 preimage 和精確交易後像，報告用連結復用大表，不複製全部引文。
+`prepare-metrics.json`、`run-metrics.json` 保存首次階段耗時；重跑零寫入仍須檢查當前版本，
+不能只信一個完成旗標。沿用現有完整讀集驗證，成本仍隨同源依賴數增長；尚未宣稱固定時間
+或已消除底層所有重複讀取。不同 RUN 可處理不同講道，正式寫入仍使用共同維護鎖，
+不可為追求並行速度跳過交易／來源門檻。
+
+下列為兩個底層接點的獨立操作與資料契約；統一入口直接調用它們，不另寫儲存或批准流程。
+
+
 負責人明確授權只搬遷引文與定位時，使用 `transcript_evidence_apply`，不啟動模型或恢復
 已停止的 refresh。它讀取當前 SourceDocument、所有同源片段及反向依賴，逐一識別舊來源
 版本。新來源必須與指定公開發布檔的有效正文、物理段落及時間完全相符；舊 preview 不直接
@@ -114,6 +158,8 @@ Evidence、Question、Observation、Position 的來源引用完整重綁；需�
 出現位置時逐一保存選擇，不任取一次。CVP／Route 的舊引用不在此獲得新資格。
 
 「很重要」「有沒有聽懂？」「對不對？」等獨立強調或確認語，標 `anchor_state=context_only`。
+完整片段只有「什麼意思？」「要怎麼樣？」「就是這樣。」等無獨立論斷的提示語時，同樣只保留語境；
+含實質問題的句子不套用此規則。「你們」可能是所引經文的對象用詞，不當作通用口頭語排除。
 Evidence 從有效 `source_fragment_ids` 移出它們，另存 `context_fragment_ids`，並撤回
 支持資格；Question 的課堂語境仍保留。只做有限的完整字面規則，不因一段實質論述
 含有「很重要」就移除整段。整條 Evidence 只剩這些話時標 `source_binding_status=context_only`。
@@ -122,7 +168,17 @@ Evidence 從有效 `source_fragment_ids` 移出它們，另存 `context_fragment
 `deleted_in_source_sha256`；歷史引文與舊定位保留。Evidence 按所有／部分引用刪除標記
 `source_deleted`／`partially_deleted`，同時撤回支持資格。不自動退休整條 Claim。
 
-apply 與既有維護和 Claim 執行者共用鎖，不終止其他任務。寫入前核對完整當前讀集，
+apply 與 Claim 執行者共用來源／實體執行鎖，不終止其他任務。Claim 可以在同一任務中
+讀多篇來源：來源讀鎖可共存，同源 Update 保持原有次序，授權修改的 Claim／Evidence 等實體取寫鎖；逐字稿版本替換
+與定位搬遷則取目標來源寫鎖，以及兩階段可能修改的實體鎖。鎖路徑按正式資料根與實體 ID
+固定，不按 campaign 或模型容量目錄分開。無重疊工作可並行；真正相同的寫入不得重疊。
+
+全域 recovery／CVP 鎖對這些工作只作共享維護閘門，仍排斥需要獨占的舊維護／CVP 流程。
+舊執行中的獨占鎖不降級、不換 inode；它自然結束後才使用新契約。controller、worker 與
+模型 transport 傳遞同一組檔案描述符，controller 結束不會令尚在執行的 child 提早釋鎖。
+未知來源的舊程式呼叫保留原獨占方式，不能靠省略 source ID 取得較寬並行權限。
+
+寫入前仍核對完整當前讀集，
 共同 store 在同一 advisory-locked SQL transaction 再檢查逐項 revision、內容 SHA 與
 退役狀態，然後走既有 ChangeSet、歷史及依賴失效機制。任一並行修改或原件漂移都停止，
 不能覆寫舊對照表後繼續。已提交但回執遺失時，依同一 ChangeSet 回讀恢復，不重複寫入。
@@ -147,6 +203,10 @@ backend/.venv/bin/python -m backend.pipeline.transcript_claim_anchor_sync verify
 新用字的 highlight 維持 proposed，Claim 的判斷、講者／論據角色及舊審核 provenance
 不改，也不新增審核事件或資格。已刪除或僅語境的引用移出有效 anchors，舊引文只在
 SQL 歷史與私有對照表保留，不放回目前 Claim 供下游當證據使用。
+
+技術校準後仍從實際來源切片計算講者，包含拆出的 atomic 片段；片段以自己的
+`**聽眾：**` 標記開頭時，不繼承片段外上一個教授回合的身份。多個回合混合則保留多人對話，
+不把同段教授重複聽眾的短答當作同一位講者。此標記不授予聽眾話語作教授主張證據的資格。
 
 儲存層以 `wang_transcript_claim_anchor_sync_v1` 的精確 adapter 重新計算整份定位投影，
 拒絕額外集合、Claim 文字或 annotation 變更、偽造 preimage、來源漂移及新的內容批准。

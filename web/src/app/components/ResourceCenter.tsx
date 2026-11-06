@@ -17,6 +17,7 @@ import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useStaffAccess } from '@/app/utils/useStaffAccess';
 
 // --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
 
@@ -40,9 +41,10 @@ const resourceCardsData = [
   {
     icon: Mic,
     title: '講道中心',
-    description: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,
-    link: '/resources/sermons',
+    description: `同工利用 AI 整理、校對教授的音頻、視頻與筆記轉成的文字。`,
+    link: '/resources/series',
     linkLabel: '進入講道中心',
+    staffOnly: true, // 講道中心是同工的編輯入口（負責人 2026-11-06）
   },
   {
     icon: Video,
@@ -68,6 +70,7 @@ export const ResourceCenter = () => {
   const [topSermons, setTopSermons] = useState<Sermon[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { isStaff } = useStaffAccess();
 
 
 
@@ -127,7 +130,7 @@ export const ResourceCenter = () => {
       <section className="bg-gray-50 py-8 md:py-12">
         <div className="container mx-auto px-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
-            {resourceCardsData.map((card) => (
+            {resourceCardsData.filter((card) => !card.staffOnly || isStaff).map((card) => (
               <ResourceCard
                 key={card.title}
                 icon={card.icon}

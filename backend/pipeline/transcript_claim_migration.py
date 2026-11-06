@@ -126,12 +126,15 @@ def _ordered_claims(records, source_id, ids):
     return sorted(ids, key=lambda cid: (rank[cid], cid)), rank
 
 
-def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=5):
+def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=5,
+            old_source_snapshot=None):
     if not instruction.strip() or not 1 <= group_size <= 10:
         raise ValueError('owner direction and group size 1..10 required')
     root, beta_root = Path(root).resolve(), Path(beta_root).resolve()
     intent = {'schema_version': VERSION, 'source_id': source_id, 'item': item,
               'beta_root': str(beta_root), 'instruction': instruction, 'group_size': group_size}
+    if old_source_snapshot is not None:
+        intent['old_source_snapshot'] = str(Path(old_source_snapshot).resolve())
     root.mkdir(parents=True, exist_ok=True)
     immutable(root/'intent.json', intent)
     if (root/'manifest.json').exists():
@@ -146,11 +149,24 @@ def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=
     rows, context = json.loads(rowraw), json.loads(contextraw)
     candidate = beta_source(rows, context, item=item)
     projection = project_script(candidate['script'])
-    oldraw = Path(source['payload']['source_path']).read_bytes()
+    live_path = Path(source['payload']['source_path'])
+    oldpath = Path(old_source_snapshot).resolve() if old_source_snapshot is not None else live_path
+    oldraw = oldpath.read_bytes()
     if sha(oldraw) != source['payload'].get('source_file_sha256'):
         raise ValueError('registered old source file drift')
     if project_script(json.loads(oldraw)['script']).body_sha256 != source['payload']['source_body_sha256']:
         raise ValueError('registered old body drift')
+    historical_inputs = None
+    if old_source_snapshot is not None:
+        # Publishing replaces the legacy mutable path. An explicit historical
+        # snapshot must match the SQL-pinned bytes, and the replaced live file
+        # must be exactly this editor's new publication, never arbitrary drift.
+        historical_inputs = {'snapshot': binding(oldpath), 'live': binding(live_path)}
+        if historical_inputs['live']['file_sha256'] != source['payload']['source_file_sha256']:
+            from backend.pipeline.transcript_publication_projection import spoken_document
+            live, _ = spoken_document(read(live_path))
+            if live.get('metadata', {}).get('item') != item or live['script'] != candidate['script']:
+                raise ValueError('replaced live source is not the exact incoming publication')
     if projection.body_sha256 == source['payload']['source_body_sha256']:
         raise ValueError('no source epoch change; reuse existing Claim authority')
     records = store.read_affected_context([('source_documents', source_id)])
@@ -186,9 +202,13 @@ def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=
                 'groups': [ids[i:i+group_size] for i in range(0, len(ids), group_size)],
                 'scheduling_old_paragraphs': rank, 'policy': pb,
                 'claim_approval_granted': False, 'public_transcript_changed': False}
+    if historical_inputs:
+        manifest['historical_inputs'] = historical_inputs
     for path, expected in manifest['beta_files'].items():
         if sha(Path(path).read_bytes()) != expected:
             raise ValueError('beta changed during source freeze')
+    for bound in (historical_inputs or {}).values():
+        check_binding(bound)
     immutable(root/'manifest.json', manifest)
     return manifest
 
@@ -200,6 +220,8 @@ def load(root):
         raise ValueError('unsupported migration contract')
     for key in ('before', 'after', 'records', 'policy'):
         check_binding(m[key])
+    for bound in m.get('historical_inputs', {}).values():
+        check_binding(bound)
     flat = [cid for group in m['groups'] for cid in group]
     if flat != m['claim_ids'] or len(set(flat)) != len(flat):
         raise ValueError('migration Claim population has a gap/duplicate')
@@ -242,7 +264,8 @@ def register(store, root):
         return value
     if cm.model_state(current) != m['before_source_record']:
         raise ValueError('source registration CAS changed')
-    if sha(Path(current['payload']['source_path']).read_bytes()) != m['before']['file_sha256']:
+    expected_live = m.get('historical_inputs', {}).get('live', m['before'])
+    if sha(Path(current['payload']['source_path']).read_bytes()) != expected_live['file_sha256']:
         raise ValueError('registered old source file drift before handoff')
     for path, expected in m['beta_files'].items():
         if sha(Path(path).read_bytes()) != expected:
@@ -406,8 +429,7 @@ def resume_rejected_unit(store, root, index):
     from backend.pipeline.claim_management_batch import load as load_batch
     from backend.pipeline.claim_review_recovery import resume_rejected_output
     from backend.pipeline.source_reconciliation_runner import exclusive
-    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
-    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    from backend.pipeline import source_execution_locks
     root=Path(root).resolve();m=load(root)
     assert_refresh_enabled(root)
     unit=root/'units'/f'{index:03d}'
@@ -418,17 +440,12 @@ def resume_rejected_unit(store, root, index):
     with ExitStack() as stack:
         controller=stack.enter_context((batch_root/'controller.lock').open('a'))
         fcntl.flock(controller,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        stack.enter_context(maintenance_lock())
-        stack.enter_context(exclusive_cvp_run_lock({'global_lock_path':str(Path(os.environ['DATA_BASE_DIR'])/
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
-        capacity=read(root/'capacity.json')
-        lane=Path(capacity['root'])/'sources'/(cm.sha256_json(m['source_id'])+'.lock')
-        handle=stack.enter_context(lane.open('a'))
-        fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        stack.enter_context(source_execution_locks.shared_maintenance_gates())
         _,jobs=load_batch(prepared['manifest']['path'],batch_root,store=store)
         if {key for request,_ in jobs.values() for key in request.target_keys}!={
                 'claims/'+cid for cid in m['groups'][index]}:
             raise ValueError('rejected recovery changed fixed group membership')
+        stack.enter_context(source_execution_locks.claim_scopes_locks([r for r,_ in jobs.values()]))
         for aid,(request,execution) in jobs.items():
             stack.enter_context(exclusive(execution))
             parent=store.get_cvp_group('CMA-'+cm.sha256_json(aid))
@@ -516,6 +533,7 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id');parser.add_argument('--item')
     parser.add_argument('--beta-root', type=Path);parser.add_argument('--instruction-file', type=Path)
+    parser.add_argument('--old-source-snapshot', type=Path)
     parser.add_argument('--group-size', type=int, default=5);parser.add_argument('--unit', type=int)
     parser.add_argument('--capacity', type=Path);parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
@@ -523,12 +541,16 @@ def main():
     store = PostgresKnowledgeStore()
     if args.command=='prepare':
         value=prepare(store,beta_root=args.beta_root,item=args.item,source_id=args.source_id,
-                      root=args.root,instruction=args.instruction_file.read_text(),group_size=args.group_size)
+                      root=args.root,instruction=args.instruction_file.read_text(),group_size=args.group_size,
+                      old_source_snapshot=args.old_source_snapshot)
         print(json.dumps({'claim_count':len(value['claim_ids']),'groups':len(value['groups'])}))
         return
     if not args.execute:
         parser.error('mutating/model stages require --execute')
-    if args.command=='register':value=register(store,args.root)
+    if args.command=='register':
+        from backend.pipeline.transcript_evidence_apply import locks
+        source_id=load(args.root)['source_id']
+        with locks(source_id,record_keys=['source_documents/'+source_id]):value=register(store,args.root)
     elif args.command=='prepare-unit':value=prepare_unit(store,args.root,args.unit)
     elif args.command=='run-unit':value=run_unit(store,args.root,args.unit,capacity=read(args.capacity))
     elif args.command=='resume-rejected-unit':value=resume_rejected_unit(store,args.root,args.unit)

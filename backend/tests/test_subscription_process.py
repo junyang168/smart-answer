@@ -190,7 +190,7 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path))
     bound=SimpleNamespace(model_dump=lambda: {})
     policy=source.FileBinding.model_validate(binding(DEFAULT_POLICY))
-    requests={k:(SimpleNamespace(target_keys=['claims/'+k],permissions=[],source_bindings={},
+    requests={k:(SimpleNamespace(target_keys=['claims/'+k],permissions=[],source_bindings={'S':bound},
         authorization=bound,policy=policy),tmp_path/k) for k in ['a','b']}
     monkeypatch.setattr(batch,'load',lambda *a: ({'max_workers':2},requests))
     monkeypatch.setattr(batch,'check_binding',lambda binding: None)
@@ -203,7 +203,7 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     class Process:
         def __init__(self,cmd,**kwargs):
             key=cmd[-1];self.key=key;self.pid=123;started.append(key)
-            assert len(kwargs['pass_fds'])==3
+            assert len(kwargs['pass_fds'])==6  # Gates, source reader, source Update lane, Claim writer.
             if not (key=='a' and failed_first):
                 (tmp_path/(sha256_json(key)+'.result.json')).write_text(json.dumps({'result':{'status':'completed'}}))
         def poll(self): return 3 if self.key=='a' and failed_first else 0
@@ -214,3 +214,23 @@ def test_batch_records_each_exit_and_rechecks_current_qualification(tmp_path,mon
     assert report['results']['b']['result']['status']=='completed'
     assert report['all_actions_completed'] is False  # current qualification, never old success alone
     assert report['current_qualifications']['a']['claims/a']['ready'] is False
+
+
+def test_source_leases_reach_transport_without_model_capacity_wrapper(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import source_execution_locks as locks,claim_model_capacity
+    monkeypatch.setenv('DATA_BASE_DIR',str(tmp_path/'data'))
+    monkeypatch.setattr(claim_model_capacity,'inherited_fds',lambda:())
+    request=SimpleNamespace(source_bindings={'S1':None,'S2':None},target_keys=['claims/C'],permissions=[])
+    with locks.claim_execution_locks(request) as handles:
+        env=dict(os.environ,WKP_CLAIM_SOURCE_LOCK_FDS=','.join(str(h.fileno()) for h in handles),
+                 WKP_CLAIM_BATCH_LOCK_FDS='')
+        code='''import os
+from types import SimpleNamespace
+from backend.pipeline import source_execution_locks as l
+fds=[int(x) for x in os.environ['WKP_CLAIM_SOURCE_LOCK_FDS'].split(',')]
+l.verify_claim_locks(fds,SimpleNamespace(source_bindings={'S1':None,'S2':None},target_keys=['claims/C'],permissions=[]))
+print('all inherited leases held')
+'''
+        result=run(command(code),input='',env=env,timeout=10,directory=tmp_path/'transport')
+        assert result.returncode==0 and result.stdout.strip()=='all inherited leases held'

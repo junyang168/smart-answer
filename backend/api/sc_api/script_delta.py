@@ -234,6 +234,10 @@ class ScriptDelta:
             ent = { 'text':p.text }
             if p.type:
                 ent['type'] = p.type
+            # Body paragraphs often have no type. Preserve their existing
+            # attribution independently; the current login is not proof that
+            # it authored every submitted row, so never fill missing authors.
+            if p.user_id:
                 ent['user_id'] = p.user_id
             if p.index:
                 ent['index'] = p.index

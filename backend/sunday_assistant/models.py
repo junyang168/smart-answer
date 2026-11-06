@@ -29,6 +29,9 @@ class Settings(BaseModel):
     offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
     group_questions_enabled: bool = False
     reminders_enabled: bool = False
+    fellowship_enabled: bool = False
+    fellowship_start_date: date | None = None
+    fellowship_since: datetime | None = None
     admin_help_enabled: bool = False
     admin_group: str = ""
     admin_group_name: str = "網站管理員"
@@ -42,6 +45,13 @@ class Settings(BaseModel):
     # Retained for old settings files; collection is authorized by selected group.
     trusted_senders: list[str] = Field(default_factory=list)
 
+    @field_validator('fellowship_since')
+    @classmethod
+    def fellowship_activation_timezone(cls,value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError('團契啟用時間需包含時區')
+        return value
+
     @model_validator(mode="after")
     def groups(self):
         import re
@@ -49,7 +59,7 @@ class Settings(BaseModel):
             if group and not re.fullmatch(r"[0-9]+(?:-[0-9]+)?@g\.us", group):
                 raise ValueError("請選擇有效的 WhatsApp 群 ID")
         groups = [g for g in (self.availability_group, self.service_group, self.songs_group) if g]
-        if self.admin_help_enabled and not self.admin_group:
+        if (self.admin_help_enabled or self.fellowship_enabled) and not self.admin_group:
             raise ValueError("請先指定網站管理員求助群")
         if self.admin_group and self.admin_group in groups:
             raise ValueError("系統求助群需與三個資料來源群分開")
@@ -100,6 +110,10 @@ class Settings(BaseModel):
                 if field == "responseHymn":
                     result["responseHymnYoutubeUrl"] = group
         return {field: group for field, group in result.items() if group}
+
+    @property
+    def ingest_group_ids(self):
+        return self.source_group_ids | ({self.admin_group} if self.fellowship_enabled and self.admin_group else set())
 
     def fields_for_group(self, group_id):
         if self.collect_cross_group and group_id in self.source_group_ids:

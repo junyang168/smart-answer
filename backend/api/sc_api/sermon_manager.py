@@ -1,3 +1,4 @@
+from backend.sunday_data_lock import sunday_write
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -112,6 +113,7 @@ class SermonManager:
             observer.schedule(event_handler, catalog_dir, recursive=False)
         observer.start()
 
+    @sunday_write
     def get_next_fellowship(self):
         entries = load_fellowship_entries(self.fellowship_file)
         next_date, updated_entries, changed = compute_next_fellowship(entries)
