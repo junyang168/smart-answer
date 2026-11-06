@@ -155,7 +155,7 @@ function Chapter() {
                 )}
                 <section className="flex flex-col gap-2">
                   <h2 className="text-sm font-bold text-stone-600">
-                    {current.items[0]?.kind === "notes" ? "釋經筆記" : "講道"}（這一章還沒有按章頁面）
+                    {current.items[0]?.kind === "notes" ? "釋經筆記" : "講道"}（這一章還沒有逐節聆聽）
                   </h2>
                   <ul className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
                     {current.items.map((item) => (

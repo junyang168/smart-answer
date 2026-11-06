@@ -104,6 +104,19 @@ TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
 #: `…/church/web/data`，而 mp3／mp4 在 `…/church/web/video`。拼成 `data/video`
 #: 会让 35 篇来源全部「没有媒体」，而目录里其实有 350 个 mp4、125 个 mp3。
 MEDIA_DIR_NAME = "video"
+
+
+def media_file(data_base_dir: Path, transcript_id: str) -> tuple[Path, str] | None:
+    """一堂讲道的录像或录音：先找 .mp4（视频），再找 .mp3（音频）。"""
+
+    directory = Path(data_base_dir).parent / MEDIA_DIR_NAME
+    for suffix, kind in ((".mp4", "video"), (".mp3", "audio")):
+        candidate = directory / f"{transcript_id}{suffix}"
+        if candidate.is_file():
+            return candidate, kind
+    return None
+
+
 MEDIA_URL_PREFIX = "/web/video"
 
 
@@ -165,27 +178,26 @@ class Sermons:
         return entry
 
     def _media_for(self, transcript_id: str) -> dict[str, Any]:
-        directory = self.root.parent / MEDIA_DIR_NAME
-        for suffix, kind in ((".mp4", "video"), (".mp3", "audio")):
-            candidate = directory / f"{transcript_id}{suffix}"
-            if candidate.is_file():
-                # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
-                # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
-                # 錯誤——產生 URL 的一方負責編碼。
-                duration: float | None = None
-                try:
-                    parsed = MP4(candidate) if suffix == ".mp4" else MP3(candidate)
-                    duration = float(parsed.info.length)
-                # 一只坏档不能让整段经文的公开接口一起 500。没有读到时前端仍可
-                # 播放，只是不在后端宣称已经验证过时长边界。
-                except Exception:
-                    pass
-                return {
-                    "media_kind": kind,
-                    "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + suffix)}",
-                    "media_duration": duration,
-                }
-        return {"media_kind": None, "media_url": None, "media_duration": None}
+        found = media_file(self.root, transcript_id)
+        if not found:
+            return {"media_kind": None, "media_url": None, "media_duration": None}
+        candidate, kind = found
+        # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
+        # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
+        # 錯誤——產生 URL 的一方負責編碼。
+        duration: float | None = None
+        try:
+            parsed = MP4(candidate) if candidate.suffix == ".mp4" else MP3(candidate)
+            duration = float(parsed.info.length)
+        # 一只坏档不能让整段经文的公开接口一起 500。没有读到时前端仍可
+        # 播放，只是不在后端宣称已经验证过时长边界。
+        except Exception:
+            pass
+        return {
+            "media_kind": kind,
+            "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + candidate.suffix)}",
+            "media_duration": duration,
+        }
 
 
 #: 教授给经文里的字作注解时的写法：中文词后面跟着括号，括号里是原文。
@@ -1385,7 +1397,7 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
         # 页面地址，用的都是这一个 slug。
         "passage": passage,
         "label": format_chinese_reference(passage),
-        "title": PASSAGE_TITLES.get(passage, ""),
+        "title": passage_title(passage, data_base_dir),
         "sermons": rows(chosen.items()),
     }
     if whole_chapter is not None:
@@ -1757,6 +1769,14 @@ PASSAGE_TITLES: dict[str, str] = {
     "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
 }
 
+def passage_title(passage: str, data_base_dir: Path) -> str:
+    """页面的一句话标题：按章页面用程序生成的存档（`chapter_title`），没有才用手写的。"""
+
+    from backend.pipeline import chapter_title
+
+    return chapter_title.load(data_base_dir, passage) or PASSAGE_TITLES.get(passage, "")
+
+
 PASSAGES: tuple[tuple[str, str], ...] = (
     # 按章：哪些片段是释经由 `chapter_exposition` 逐片段决定。
     ("mat-5-1-48", "太5:1–48"),
@@ -1794,7 +1814,7 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
         out.append({
             "passage": slug,
             "label": label,
-            "title": PASSAGE_TITLES.get(slug, ""),
+            "title": passage_title(slug, data_base_dir),
             "scripture": {
                 "book": reference["osis_book"],
                 "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),
