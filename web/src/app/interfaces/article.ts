@@ -42,6 +42,7 @@ export interface Sermon {
   topic: string[];      // 主題/系列
   status: string;
   source: string;
+  assigned_to?: string;       // 認領人 email
   assigned_to_name: string;   // 認領人
   markdownContent?: string;   // 可選的 Markdown 內容
   keypoints?: string; // 可選的要點列表
