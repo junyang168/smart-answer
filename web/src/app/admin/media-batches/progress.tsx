@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { MediaBatchFiles } from "./files";
 import {
   RefreshCw,
   Pause,
@@ -44,6 +45,7 @@ type Batch = {
   title: string;
   revision: number;
   desired: string;
+  mode?: string;
   calls: number;
   reserved_usd: string;
 };
@@ -246,10 +248,14 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
             批次影音轉錄
           </Link>
           <h1 className="mt-2 text-2xl font-bold">
-            {run?.title || "批次進度"}
+            {run?.mode === "inventory"
+              ? "影音作業總覽 · Operation Dashboard"
+              : run?.title || "影音作業總覽"}
           </h1>
           <p className="mt-2 text-sm text-slate-300">
-            自動更新 · 關閉頁面後任務繼續執行
+            {run?.mode === "inventory"
+              ? `${run.title} · 全部檔案的處理狀態與等待原因`
+              : "自動更新 · 關閉頁面後任務繼續執行"}
           </p>
         </div>
         <button
@@ -275,7 +281,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
           尚無批次。請先在影音所在的電腦建立資料夾處理計畫。
         </div>
       )}
-      {data && (
+      {data && run?.mode !== "inventory" && (
         <nav className="flex flex-wrap gap-2" aria-label="批次選擇">
           {data.batches.map((b) => (
             <Link
@@ -288,7 +294,10 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
           ))}
         </nav>
       )}
-      {run && summary && (
+      {run?.mode === "inventory" && (
+        <MediaBatchFiles key={run.id} batch={run.id} refreshToken={refresh} />
+      )}
+      {run && summary && run.mode !== "inventory" && (
         <>
           <section className="rounded-2xl border bg-white p-5">
             <div className="flex flex-wrap justify-between gap-3">

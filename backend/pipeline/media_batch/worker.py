@@ -187,6 +187,15 @@ def run(store, batch, workers=4, drain=False):
         ).fetchone()["ok"]:
             raise ValueError("This batch already has a controller")
         connection.commit()
+        mode = connection.execute(
+            "SELECT config->>'mode' AS mode FROM media_ingest.batches WHERE id=%s",
+            (batch,),
+        ).fetchone()["mode"]
+        connection.commit()
+        if mode == "inventory":
+            from .inventory import watch
+
+            return watch(store, batch, drain)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = set()
             idle = 0

@@ -83,4 +83,29 @@ def create_media_batch_router(root, store_factory=Store):
         except Exception:
             raise HTTPException(503, "控制指令未確認，請重新讀取狀態")
 
+    @router.get("/{batch}/files")
+    def files(
+        batch: str,
+        response: Response,
+        offset: int = Query(0, ge=0),
+        limit: int = Query(30, ge=1, le=100),
+        search: str = Query("", max_length=200),
+        state: str = Query(
+            "all",
+            pattern=r"^(all|actionable|waiting_download|ready_to_plan|needs_assembly|needs_scope_review|pending|running|complete|existing_transcript|reused|duplicate|excluded|failed|needs_resolution|unknown_outcome|unverified|interrupted)$",
+        ),
+    ):
+        from backend.pipeline.media_batch.files import snapshot
+
+        response.headers["Cache-Control"] = "private, no-store"
+        try:
+            return snapshot(store_factory(), batch, offset, limit, search, state)
+        except KeyError:
+            raise HTTPException(404, "找不到批次")
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("Media file inventory read failed")
+            raise HTTPException(503, "暫時無法讀取檔案清單")
+
     return router

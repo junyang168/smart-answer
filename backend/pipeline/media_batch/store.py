@@ -257,11 +257,14 @@ class Store:
         with self.connection() as c:
             c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             batches = c.execute(
-                """SELECT id,created_at,revision,desired,config->>'title' AS title,calls,reserved_usd
+                """SELECT id,created_at,revision,desired,config->>'title' AS title,config->>'mode' AS mode,calls,reserved_usd
               FROM media_ingest.batches ORDER BY created_at DESC LIMIT 100"""
             ).fetchall()
             if batch is None and batches:
-                batch = batches[0]["id"]
+                batch = next(
+                    (b["id"] for b in batches if b.get("mode") == "inventory"),
+                    batches[0]["id"],
+                )
             selected = next((b for b in batches if b["id"] == batch), None)
             if batch and selected is None:
                 raise KeyError(batch)

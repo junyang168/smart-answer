@@ -51,7 +51,7 @@ def store():
     s.install()
     with s.connection() as c:
         c.execute(
-            "TRUNCATE media_ingest.disk_reservations,media_ingest.controls,media_ingest.calls,media_ingest.batch_tasks,media_ingest.tasks,media_ingest.assets,media_ingest.recordings,media_ingest.batches"
+            "TRUNCATE media_ingest.batch_files,media_ingest.disk_reservations,media_ingest.controls,media_ingest.calls,media_ingest.batch_tasks,media_ingest.tasks,media_ingest.assets,media_ingest.recordings,media_ingest.batches"
         )
     return s
 
@@ -347,6 +347,7 @@ def test_router_denies_forged_or_editor_identity_before_read(
     app.include_router(create_media_batch_router(root, lambda: store))
     client = TestClient(app)
     assert client.get("/media_batches").status_code == 401
+    assert client.get("/media_batches/any/files").status_code == 401
     import hashlib, hmac
 
     ts = str(int(time.time()))
@@ -779,5 +780,176 @@ def test_worker_waits_before_starting_child_when_disk_budget_is_too_small(
             c.execute(
                 "SELECT count(*) AS n FROM media_ingest.disk_reservations"
             ).fetchone()["n"]
+            == 0
+        )
+
+
+def test_operation_inventory_lists_missing_and_copied_files_without_model_jobs(
+    store, tmp_path
+):
+    from backend.pipeline.media_batch.inventory import create, refresh
+    from backend.pipeline.media_batch.files import snapshot
+
+    dst = tmp_path / "copied"
+    dst.mkdir()
+    paths = [
+        "a.wav",
+        "b.wav",
+        "camera.MTS",
+        "Andrew Wang Prayer.wav",
+        "notes.txt",
+        "not-downloaded.wav",
+    ]
+    for name in paths[:-1]:
+        (dst / name).write_bytes(b"source-" + name.encode())
+    (dst / "b.wav").write_bytes((dst / "a.wav").read_bytes())
+    manifest = tmp_path / "inventory.json"
+    receipts = tmp_path / "receipts.jsonl"
+    entries = [
+        dict(
+            path=name, bytes=(dst / name).stat().st_size if (dst / name).exists() else 3
+        )
+        for name in paths
+    ]
+    manifest.write_text(json.dumps(dict(destination=str(dst), files=entries)))
+    lines = [
+        dict(path=name, bytes=(dst / name).stat().st_size, sha256=file_sha(dst / name))
+        for name in paths[:-1]
+    ]
+    receipts.write_text("".join(json.dumps(row) + "\n" for row in lines) + '{"path":')
+    batch = create(store, manifest, receipts, config(tmp_path))
+    assert create(store, manifest, receipts, config(tmp_path)) == batch
+    data = snapshot(store, batch, limit=100)
+    assert data["total"] == 6 and data["counts"] == dict(
+        ready_to_plan=1,
+        duplicate=1,
+        needs_assembly=1,
+        needs_scope_review=1,
+        excluded=1,
+        waiting_download=1,
+    )
+    assert snapshot(store, batch, state="actionable")["filtered_total"] == 4
+    (dst / "not-downloaded.wav").write_bytes(b"abc")
+    receipts.write_text(
+        "".join(
+            json.dumps(row) + "\n"
+            for row in lines
+            + [
+                dict(
+                    path="not-downloaded.wav",
+                    bytes=3,
+                    sha256=file_sha(dst / "not-downloaded.wav"),
+                )
+            ]
+        )
+    )
+    refresh(store, batch)
+    assert snapshot(store, batch, state="waiting_download")["filtered_total"] == 0
+    with store.connection() as c:
+        assert (
+            c.execute("SELECT count(*) AS n FROM media_ingest.tasks").fetchone()["n"]
+            == 0
+        )
+        assert (
+            c.execute("SELECT count(*) AS n FROM media_ingest.calls").fetchone()["n"]
+            == 0
+        )
+
+
+def test_operation_file_search_filters_entire_folder_before_pagination(store, tmp_path):
+    from backend.pipeline.media_batch.files import snapshot
+
+    b = store.batch(config(tmp_path))
+    with store.connection() as c:
+        for n in range(65):
+            c.execute(
+                "INSERT INTO media_ingest.batch_files(batch,path,bytes,state) VALUES (%s,%s,100,%s)",
+                (
+                    b,
+                    f"folder/{n:03d}-講道.wav",
+                    "waiting_download" if n == 64 else "ready_to_plan",
+                ),
+            )
+    first = snapshot(store, b, limit=30)
+    assert first["total"] == 65 and len(first["files"]) == 30
+    found = snapshot(store, b, limit=30, search="064-講道")
+    assert (
+        found["filtered_total"] == 1
+        and found["files"][0]["path"] == "folder/064-講道.wav"
+    )
+    assert snapshot(store, b, state="waiting_download")["filtered_total"] == 1
+    assert snapshot(store, b, search="%")["filtered_total"] == 0
+    assert snapshot(store, b, offset=60, limit=30)["filtered_total"] == 65
+
+
+def test_operation_file_tracks_its_actual_transcription_task(store, tmp_path):
+    from backend.pipeline.media_batch.files import snapshot
+
+    p = audio(tmp_path / "input/sermon.wav")
+    batch = plan(store, p.parent, config(tmp_path))
+    assert snapshot(store, batch)["files"][0]["state"] == "pending"
+    task = store.claim(batch, "worker")
+    assert snapshot(store, batch)["files"][0]["state"] == "running"
+    store.update(task, state="failed", error="Known test failure")
+    failed = snapshot(store, batch)["files"][0]
+    assert failed["state"] == "failed" and failed["reason"] == "Known test failure"
+    with store.connection() as c:
+        c.execute(
+            "UPDATE media_ingest.tasks SET state='complete',error=NULL WHERE recording=%s",
+            (task["recording"],),
+        )
+    assert snapshot(store, batch)["files"][0]["state"] == "complete"
+
+
+def test_existing_manuscript_names_enrich_inventory_and_block_unverified_retranscription(
+    store, tmp_path
+):
+    from backend.pipeline.media_batch.inventory import create
+    from backend.pipeline.media_batch.files import snapshot
+
+    root = tmp_path / "catalog"
+    (root / "config").mkdir(parents=True)
+    (root / "script_review").mkdir()
+    (root / "config/sermon.json").write_text(
+        json.dumps(
+            [dict(item="Rev Wang-Friday Mar 16 2007", title="警醒預備", status="ready")]
+        )
+    )
+    (root / "script_review/Rev Wang-Friday Mar 16 2007.json").write_text(
+        '[{"text":"已有逐字稿"}]'
+    )
+    source = audio(tmp_path / "input/Rev Wang-Friday Mar 16 2007.wav")
+    manifest = tmp_path / "manifest.json"
+    receipts = tmp_path / "receipt.jsonl"
+    manifest.write_text(
+        json.dumps(
+            dict(
+                destination=str(source.parent),
+                files=[dict(path=source.name, bytes=source.stat().st_size)],
+            )
+        )
+    )
+    receipts.write_text(
+        json.dumps(
+            dict(path=source.name, bytes=source.stat().st_size, sha256=file_sha(source))
+        )
+        + "\n"
+    )
+    cfg = config(tmp_path)
+    batch = create(store, manifest, receipts, cfg)
+    assert snapshot(store, batch)["counts"] == {"ready_to_plan": 1}
+    # Enrich the same stable dashboard; no need to lose the operation URL.
+    assert (
+        create(store, manifest, receipts, {**cfg, "catalog_root": str(root)}) == batch
+    )
+    row = snapshot(store, batch)["files"][0]
+    assert row["state"] == "existing_transcript" and row["title"] == "警醒預備"
+    assert snapshot(store, batch, search="警醒")["filtered_total"] == 1
+    planned = plan(store, source.parent, {**cfg, "review_root": str(root)})
+    assert store.claim(planned, "worker") is None
+    assert store.snapshot(planned)["summary"]["needs_resolution"] == 1
+    with store.connection() as c:
+        assert (
+            c.execute("SELECT count(*) AS n FROM media_ingest.calls").fetchone()["n"]
             == 0
         )

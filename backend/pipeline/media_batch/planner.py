@@ -98,6 +98,12 @@ def plan(store, folder, config):
         and not any(x.startswith(".") for x in p.relative_to(folder).parts)
     )
     config = {**config, "folder": str(folder), "scope": []}
+    from .existing import find as find_existing
+
+    manuscript_matches = find_existing(
+        config.get("catalog_root") or config["review_root"],
+        [str(p.relative_to(folder)) for p in files],
+    )
     for p in files:
         if folder not in p.resolve().parents:
             raise ValueError("Source escaped folder")
@@ -256,6 +262,24 @@ def plan(store, folder, config):
                 "SELECT * FROM media_ingest.recordings WHERE id=%s", (row["recording"],)
             ).fetchone()
             info = r["info"]
+            matched = manuscript_matches.get(row["path"])
+            if matched and not info.get("existing_transcript"):
+                info = {
+                    **info,
+                    "needs_resolution": True,
+                    "reason": "網站已有逐字稿 "
+                    + matched["item"]
+                    + "；先核對媒體身份，不自動重轉錄",
+                }
+                c.execute(
+                    "UPDATE media_ingest.recordings SET info=%s WHERE id=%s",
+                    (Jsonb(info), r["id"]),
+                )
+            c.execute(
+                """INSERT INTO media_ingest.batch_files(batch,path,sha,bytes,recording,state,reason)
+              VALUES (%s,%s,%s,%s,%s,'pending','已建立轉錄計畫') ON CONFLICT DO NOTHING""",
+                (batch, row["path"], row["sha"], info["bytes"], r["id"]),
+            )
             binding = key(
                 [
                     r["source_sha"],
@@ -400,6 +424,7 @@ def index_existing(store, review_root, media_root):
             rid = "LEGACY-" + key(item)[:24]
             info = dict(
                 name=row.get("title") or item,
+                sermon_title=row.get("title") or None,
                 source=str(path.resolve()),
                 source_sha=sha,
                 bytes=path.stat().st_size,

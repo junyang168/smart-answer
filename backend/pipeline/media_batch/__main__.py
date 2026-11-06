@@ -41,6 +41,20 @@ def main():
     plan.add_argument("--ssd-reserve-gib", type=int, default=80)
     plan.add_argument("--internal-reserve-gib", type=int, default=10)
     plan.add_argument("--working-set-gib", type=int, default=15)
+    inventory = sub.add_parser(
+        "inventory",
+        help="Watch an existing copy inventory without dispatching transcription",
+    )
+    inventory.add_argument("--manifest", type=Path, required=True)
+    inventory.add_argument("--receipts", type=Path, required=True)
+    inventory.add_argument("--title", default="全部影音檔案")
+    inventory.add_argument(
+        "--catalog-root",
+        type=Path,
+        help="Read-only existing website catalog and manuscripts",
+    )
+    for name in ("artifact-root", "media-root", "review-root", "capacity-root"):
+        inventory.add_argument("--" + name, type=Path, required=True)
     index = sub.add_parser("index-existing")
     index.add_argument("--review-root", type=Path, required=True)
     index.add_argument("--media-root", type=Path, required=True)
@@ -70,6 +84,20 @@ def main():
     store = Store()
     if args.command == "install":
         store.install()
+        return
+    if args.command == "inventory":
+        from .inventory import create
+
+        cfg = {
+            k: str(v.resolve()) if isinstance(v, Path) else v
+            for k, v in vars(args).items()
+            if k not in ("command", "manifest", "receipts")
+        }
+        cfg.update(max_calls=0, budget_usd=0)
+        batch = create(store, args.manifest, args.receipts, cfg)
+        print(
+            json.dumps(dict(batch=batch, progress_href="/admin/media-batches/" + batch))
+        )
         return
     if args.command == "index-existing":
         from .planner import index_existing

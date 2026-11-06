@@ -52,3 +52,22 @@ CREATE TABLE IF NOT EXISTS media_ingest.disk_reservations (
  created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(task,attempt,device)
 );
 CREATE INDEX IF NOT EXISTS disk_reservation_device ON media_ingest.disk_reservations(device);
+
+CREATE TABLE IF NOT EXISTS media_ingest.batch_files (
+ batch text NOT NULL REFERENCES media_ingest.batches(id), path text NOT NULL,
+ sha text, bytes bigint NOT NULL, recording text REFERENCES media_ingest.recordings(id),
+ state text NOT NULL, reason text, duplicate_of text,
+ updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(batch,path)
+);
+CREATE INDEX IF NOT EXISTS batch_file_sha ON media_ingest.batch_files(sha);
+ALTER TABLE media_ingest.batches ADD COLUMN IF NOT EXISTS inventory_at timestamptz;
+ALTER TABLE media_ingest.batches ADD COLUMN IF NOT EXISTS inventory_catalog_root text;
+ALTER TABLE media_ingest.batches ADD COLUMN IF NOT EXISTS inventory_error text;
+ALTER TABLE media_ingest.batch_files ADD COLUMN IF NOT EXISTS catalog_match jsonb NOT NULL DEFAULT '{}';
+
+INSERT INTO media_ingest.batch_files(batch,path,sha,bytes,recording,state,reason)
+ SELECT b.id,f->>'path',f->>'sha',COALESCE((a.info->>'bytes')::bigint,0),f->>'recording','pending','已建立轉錄計畫'
+ FROM media_ingest.batches b CROSS JOIN LATERAL jsonb_array_elements(COALESCE(b.config->'scope','[]')) f
+ JOIN media_ingest.recordings r ON r.id=f->>'recording'
+ LEFT JOIN media_ingest.assets a ON a.sha=f->>'sha'
+ ON CONFLICT DO NOTHING;
