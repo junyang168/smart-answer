@@ -50,10 +50,12 @@ def requirements(task):
     if stage == "handoff":
         # Cross-volume source installation needs a real copy. Same-volume
         # imports use a hardlink; selected assets still need their own bytes.
-        source = anchor(info["source"])
+        source = Path(info["source"])
         review = anchor(cfg["review_root"])
         source_copy = (
-            info["bytes"] if source.stat().st_dev != review.stat().st_dev else 0
+            0
+            if source.is_file() and source.stat().st_dev == review.stat().st_dev
+            else info["bytes"]
         )
         requests.append((cfg["review_root"], source_copy + pcm + overhead))
     grouped = {}
