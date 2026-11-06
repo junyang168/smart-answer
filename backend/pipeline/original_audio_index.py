@@ -1923,8 +1923,10 @@ def build_notes_index(data_base_dir: Path, passage: str) -> dict[str, Any] | Non
                 ],
                 "slides": slides,
                 # 母本的表格不念，念到那里停顿，幻灯位置整张显示（负责人 2026-11-06）。
+                # Azure 把停顿后的书签报在停顿开始处，表格的结束以停顿长度为准。
                 "tables": [
-                    table
+                    {**table, "until": max(table["until"],
+                                           table["at"] + notes_chapter.table_pause_ms(len(table["rows"])) / 1000)}
                     for piece in record.get("pieces") or []
                     for table in piece.get("tables") or []
                     if any(item["start"] <= table["at"] < item["end"] for item in value["stretches"])

@@ -682,6 +682,13 @@ def synthesize(data_base_dir: Path, project: str, *, force: bool = False) -> dic
              "-i", raw.name, "-codec:a", "libmp3lame", "-b:a", "64k", str(mp3)],
             check=True,
         )
+    # Azure 把 `<break>` 后面那个书签报在停顿开始处（「13_章」S0054 与表格同在 358.725，
+    # 静音其实到 370.2）：表格后面那一句从停顿结束算起。
+    for index, sentence in enumerate(script[:-1]):
+        if sentence.get("table") and sentence["id"] in table_starts:
+            after = table_starts[sentence["id"]] + sentence["table"]["pause_ms"] / 1000
+            following = script[index + 1]["id"]
+            starts[following] = round(max(starts[following], after), 3)
     sentences = []
     tables = []
     for index, sentence in enumerate(script):
