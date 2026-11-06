@@ -1,4 +1,4 @@
-import hashlib
+import json
 from pathlib import Path
 from urllib.parse import quote
 
@@ -87,4 +87,8 @@ def test_legacy_endpoint_requires_current_signed_reader_and_no_store(setup, monk
     assert response.json()['read_only'] is True
     assert client.get(path, headers=signed("GET", path, actor="b")).status_code == 403
     assert response.headers['cache-control'] == 'private, no-store'
-    assert client.post(path, headers=signed('POST', path, actor='a')).status_code == 405
+    body = json.dumps({"version": "unused", "operation_id": "not-a-write"}).encode()
+    before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert client.post(path, content=body, headers={**signed("POST", path, body, actor="a"),
+        "if-match": "unused"}).status_code == 404
+    assert {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
