@@ -220,7 +220,7 @@ final class RemoteClient: NSObject, NetServiceBrowserDelegate, NetServiceDelegat
             guard self.videoGeneration == generation else { return }; self.videoBusy = false
             switch result {
             case .success(let value): self.videoSession = value["sessionId"] as? String ?? ""; self.applyVideo?(value)
-            case .failure: self.resetVideo("畫面連線未完成，正在重試…"); self.videoRetry = Date().addingTimeInterval(3)
+            case .failure(let error): self.resetVideo(error.localizedDescription); self.videoRetry = Date().addingTimeInterval(3)
             }
         }
     }
@@ -228,7 +228,9 @@ final class RemoteClient: NSObject, NetServiceBrowserDelegate, NetServiceDelegat
         guard active else { return }
         if let id = value["sessionId"] as? String, id != videoSession { return }
         switch value["op"] as? String {
-        case "failed": resetVideo("畫面已停止，正在重連…"); videoRetry = Date().addingTimeInterval(5); changed()
+        case "failed":
+            resetVideo(value["error"] as? String ?? "畫面已停止，正在重連…")
+            videoRetry = Date().addingTimeInterval(5); changed()
         case "stats":
             videoReceiving = (value["frames"] as? Int ?? 0) > 0; changed()
         case "answer":
