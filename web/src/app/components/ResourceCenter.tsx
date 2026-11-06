@@ -41,8 +41,8 @@ const resourceCardsData = [
   {
     icon: Mic,
     title: '講道中心',
-    description: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,
-    link: '/resources/sermons',
+    description: `同工的編輯入口：各講道系列的認領、校對與發佈進度。`,
+    link: '/resources/series',
     linkLabel: '進入講道中心',
     staffOnly: true, // 講道中心是同工的編輯入口（負責人 2026-11-06）
   },
