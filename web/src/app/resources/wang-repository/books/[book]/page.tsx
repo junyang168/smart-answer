@@ -113,39 +113,42 @@ function BookChapters() {
 
             <ol className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
               {chapters.map((chapter) => {
+                // 一個來源一行：這一章有兩個來源的按章頁面（講道、教授釋經筆記的 AI 朗讀），就分兩行，
+                // 各寫各的一句、各有各的按鈕，點哪一行就進哪個來源（負責人 2026-11-06）。
                 const pages = pagesFor(chapter);
+                const rows: { key: string; source: string; page: (typeof pages)[number] | null }[] = pages.length
+                  ? pages.map((page) => ({ key: page.source, source: source || page.source, page }))
+                  : [{ key: "", source, page: null }];
                 return (
-                  <li key={chapter.chapter} className="border-t border-stone-100 first:border-t-0">
-                    <Link
-                      href={`/resources/wang-repository/books/${data.slug}/${chapter.chapter}${source ? `?source=${encodeURIComponent(source)}` : ""}`}
-                      className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
-                    >
-                      <span className="w-24 font-serif text-xl font-bold">第 {chapter.chapter} 章</span>
-                      <span className="flex flex-[1_1_320px] flex-col gap-1 text-[15px] text-stone-700">
-                        {/* 這一句是某個來源的講道講了什麼；沒選來源時寫出是哪個來源。 */}
-                        {pages
-                          .filter((page) => page.title)
-                          .map((page) => (
-                            <span key={page.source}>{source ? page.title : `${page.source}：${page.title}`}</span>
-                          ))}
-                      </span>
-                      <span className="flex flex-wrap gap-2">
-                        {chapter.articles.length > 0 && (
-                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
-                        )}
-                        {/* 沒有逐節聆聽的章不加標籤：「講道列表」什麼也沒告訴讀者（負責人 2026-11-05）。 */}
-                        {pages.map((page) => (
-                          <span
-                            key={page.source}
-                            className={`rounded-full px-2.5 py-1 text-[13px] ${
-                              page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
-                            }`}
-                          >
-                            {pageLabel(page)}
-                          </span>
-                        ))}
-                      </span>
-                    </Link>
+                  <li key={chapter.chapter} className="border-t border-stone-100 py-2 first:border-t-0">
+                    {rows.map((row, index) => (
+                      <Link
+                        key={row.key}
+                        href={`/resources/wang-repository/books/${data.slug}/${chapter.chapter}${row.source ? `?source=${encodeURIComponent(row.source)}` : ""}`}
+                        className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-2 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
+                      >
+                        <span className="w-24 font-serif text-xl font-bold">{index === 0 ? `第 ${chapter.chapter} 章` : ""}</span>
+                        <span className="flex-[1_1_320px] text-[15px] text-stone-700">
+                          {/* 這一句是某個來源的講道講了什麼；沒選來源時寫出是哪個來源。 */}
+                          {row.page?.title ? (source ? row.page.title : `${row.page.source}：${row.page.title}`) : ""}
+                        </span>
+                        <span className="flex flex-wrap gap-2">
+                          {index === 0 && chapter.articles.length > 0 && (
+                            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
+                          )}
+                          {/* 沒有逐節聆聽的章不加標籤：「講道列表」什麼也沒告訴讀者（負責人 2026-11-05）。 */}
+                          {row.page && (
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-[13px] ${
+                                row.page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
+                              }`}
+                            >
+                              {pageLabel(row.page)}
+                            </span>
+                          )}
+                        </span>
+                      </Link>
+                    ))}
                   </li>
                 );
               })}
