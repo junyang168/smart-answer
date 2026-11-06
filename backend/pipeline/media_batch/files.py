@@ -41,9 +41,9 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           WHEN g.recording IS NOT NULL THEN 'pending'
           WHEN rec.info->>'existing_transcript'='true' THEN 'reused' ELSE f.state END AS state,
           CASE WHEN g.recording IS NOT NULL AND f.state IN ('pending','ready_to_plan','needs_assembly','needs_scope_review')
-          THEN COALESCE(g.error,CASE WHEN g.ready THEN '處理與交接已完成，內容校對及發布狀態請至編輯器查看'
+          THEN CASE WHEN g.ready THEN '處理與交接已完成，內容校對及發布狀態請至編輯器查看'
           WHEN g.running THEN '工作程序正在執行，請查看階段進度'
-          ELSE '已建立處理計畫，等待前置階段或共用資源' END) ELSE f.reason END AS reason
+          ELSE COALESCE(g.error,'已建立處理計畫，等待前置階段或共用資源') END ELSE f.reason END AS reason
           FROM f LEFT JOIN g ON g.recording=f.linked_recording LEFT JOIN latest l ON l.recording=f.linked_recording
           LEFT JOIN media_ingest.recordings rec ON rec.id=f.linked_recording)
         """

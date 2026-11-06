@@ -891,6 +891,12 @@ def test_operation_file_tracks_its_actual_transcription_task(store, tmp_path):
     assert snapshot(store, batch)["files"][0]["job_batch"] == batch
     task = store.claim(batch, "worker")
     assert snapshot(store, batch)["files"][0]["state"] == "running"
+    with store.connection() as c:
+        c.execute(
+            "UPDATE media_ingest.tasks SET error='stale resource wait' WHERE recording=%s AND state='pending'",
+            (task["recording"],),
+        )
+    assert "stale resource wait" not in snapshot(store, batch)["files"][0]["reason"]
     store.update(task, state="failed", error="Known test failure")
     failed = snapshot(store, batch)["files"][0]
     assert failed["state"] == "failed" and failed["reason"] == "Known test failure"
