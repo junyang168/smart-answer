@@ -1620,6 +1620,30 @@ def unaccepted_initial_proposal(previous, key, slot, proof):
         'proposal_not_accepted':True,'generation_consumed':True}
 
 
+def human_source_pause(previous):
+    """A returned review rejection must not hide an existing source question.
+
+    Authenticate the unaccepted answer; it remains spent and never becomes a
+    passing review. Unknown calls, provider failures and other pauses do not
+    acquire source-follow-up authority through this branch.
+    """
+    result = previous['result']
+    if result.get('reason') == 'human_required':
+        return True
+    key = result.get('returned_rejected_call')
+    slot = previous.get('call_reservations', {}).get(key, {})
+    if (result.get('status') != 'paused'
+            or result.get('reason') != 'engineering_required'
+            or result.get('detail') != 'joint Update GPT/Opus impact scope disagreement'
+            or slot.get('role') != 'opus' or slot.get('state') != 'started'
+            or key != slot.get('round_id', '') + ':opus'
+            or slot.get('round_id') not in previous.get('latest_rounds', {}).values()
+            or slot.get('rejection', {}).get('detail') != result['detail']):
+        return False
+    from backend.pipeline.claim_review_recovery import consumed_rejected_citations
+    return consumed_rejected_citations(previous, key, slot)
+
+
 def human_source_follow_up(previous, request, authority, prior_findings):
     """New human source evidence authorizes one bounded, linked follow-up.
 
@@ -1639,7 +1663,7 @@ def human_source_follow_up(previous, request, authority, prior_findings):
             or verification.get('predecessor_action_id') != old.action_id
             or verification.get('source_bindings') != old.model_dump(mode='json')['source_bindings']
             or not verification.get('user_confirmation')
-            or previous['result'].get('reason') != 'human_required'
+            or not human_source_pause(previous)
             or request.permissions != old.permissions
             or not ids or len(set(ids)) != len(ids) or set(ids) & used):
         raise ValueError('human source follow-up must bind new source evidence to the paused original scope')
