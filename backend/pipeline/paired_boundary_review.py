@@ -69,6 +69,7 @@ def prepare(out:Path):
         candidates.append({'id':c['id'],'time_ms':c['time_ms'],'left':left,'left_sha256':c['left_sha256'],'right':right,'right_sha256':c['sha256']})
     context=copy_asset(control['pair_context_file'],control['pair_context_sha256'],'control-context.wav')
     pairs.append({'id':'control','lecture':'control','left_id':'left','right_id':'right','left_reference':control['left_target_text'],'right_reference':control['target_text'],'context':context,'context_sha256':control['pair_context_sha256'],'candidates':candidates})
+    deferred=[]
     for lecture,record in source['records'].items():
         results=assessment['lectures'][lecture]['paragraphs'];by_id={p['id']:p for p in results};original=record['paragraphs'];samples=read_audio(Path(record['source'])/'master.wav');needed=set()
         for i,p in enumerate(results):
@@ -86,6 +87,10 @@ def prepare(out:Path):
                     if v.get(edge+'_ms') is not None:values.add(v[edge+'_ms'])
             values=sorted(v for v in values if type(v) is int and 0<v<record['duration_ms'])
             if not values:continue
+            context_start=max(0,min(values)-4500);context_end=min(record['duration_ms'],max(values)+4500)
+            if context_end-context_start>45000:
+                deferred.append({'lecture':lecture,'left_id':a['id'],'right_id':b['id'],'reason':'source_range_exceeds_paired_context; requires complete-paragraph check'})
+                continue
             # Real waveform minima propose finer shared cuts, never interpolation.
             extras=low_energy_candidates(samples,min(values)-300,max(values)+300)
             clustered=[]
@@ -93,7 +98,6 @@ def prepare(out:Path):
                 if all(abs(value-v)>=60 for v in clustered):clustered.append(value)
             if len(clustered)>14:raise ValueError('Pair ambiguity exceeds bounded candidate count')
             key=f'L{lecture}-{a["id"]}-{b["id"]}';context_start=max(0,min(values)-4500);context_end=min(record['duration_ms'],max(values)+4500)
-            if context_end-context_start>45000:raise ValueError('Pair source range needs separate source reconciliation')
             path=out/'paired-clips'/f'{key}-context.wav';write_audio(path,samples[context_start*16:context_end*16]);candidates=[]
             for j,value in enumerate(sorted(clustered)):
                 paths=[]
@@ -102,6 +106,7 @@ def prepare(out:Path):
                 candidates.append({'id':f'c{j}','time_ms':value,'left':paths[0][0],'left_sha256':paths[0][1],'right':paths[1][0],'right_sha256':paths[1][1]})
             pairs.append({'id':key,'lecture':lecture,'left_id':a['id'],'right_id':b['id'],'left_reference':a['text'],'right_reference':b['text'],'context':str(path.relative_to(out)),'context_sha256':file_sha(path),'candidates':candidates})
     plan={'schema_version':'paired-boundary-review.v1','parent_plan_sha256':file_sha(out/'plan.json'),'assessment_sha256':file_sha(out/'assessment.json'),'max_calls':len(pairs),'pairs':pairs,'policy':'one paired source-context check per residual adjacent boundary; no repeated identical clips'}
+    if deferred:plan['deferred_pairs']=deferred
     path=out/'paired-boundary-plan.json'
     if path.exists() and read_json(path)!=plan:raise ValueError('Paired review plan changed')
     save_json(path,plan);return plan
