@@ -72,6 +72,14 @@ function BookChapters() {
       ? (chapter.pages ?? []).find((page) => page.source === source) ??
         (chapter.page && chapter.page.source === source ? chapter.page : null)
       : chapter.page;
+  // 沒選來源時，這一章每個來源的按章頁面都列出來（講道、教授釋經筆記的 AI 朗讀；負責人 2026-11-06）。
+  const pagesFor = (chapter: Chapter) => {
+    if (source) {
+      const page = pageFor(chapter);
+      return page ? [page] : [];
+    }
+    return chapter.pages?.length ? chapter.pages : chapter.page ? [chapter.page] : [];
+  };
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -105,7 +113,7 @@ function BookChapters() {
 
             <ol className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
               {chapters.map((chapter) => {
-                const page = pageFor(chapter);
+                const pages = pagesFor(chapter);
                 return (
                   <li key={chapter.chapter} className="border-t border-stone-100 first:border-t-0">
                     <Link
@@ -113,24 +121,29 @@ function BookChapters() {
                       className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
                     >
                       <span className="w-24 font-serif text-xl font-bold">第 {chapter.chapter} 章</span>
-                      <span className="flex-[1_1_320px] text-[15px] text-stone-700">
+                      <span className="flex flex-[1_1_320px] flex-col gap-1 text-[15px] text-stone-700">
                         {/* 這一句是某個來源的講道講了什麼；沒選來源時寫出是哪個來源。 */}
-                        {page?.title ? (source ? page.title : `${page.source}：${page.title}`) : ""}
+                        {pages
+                          .filter((page) => page.title)
+                          .map((page) => (
+                            <span key={page.source}>{source ? page.title : `${page.source}：${page.title}`}</span>
+                          ))}
                       </span>
                       <span className="flex flex-wrap gap-2">
                         {chapter.articles.length > 0 && (
                           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
                         )}
                         {/* 沒有逐節聆聽的章不加標籤：「講道列表」什麼也沒告訴讀者（負責人 2026-11-05）。 */}
-                        {page && (
+                        {pages.map((page) => (
                           <span
+                            key={page.source}
                             className={`rounded-full px-2.5 py-1 text-[13px] ${
                               page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
                             }`}
                           >
                             {pageLabel(page)}
                           </span>
-                        )}
+                        ))}
                       </span>
                     </Link>
                   </li>
