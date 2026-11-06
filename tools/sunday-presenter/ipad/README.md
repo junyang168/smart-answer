@@ -31,8 +31,15 @@ after local suspension; PPT/Meet output continues.
 
 ## Build and local checks
 
-The iPad "關於" button and Mac "關於 Sunday Remote" menu show the installed
-bundle version and build. Install upgrades in place with the same bundle ID,
+The iPad's always-visible "選單" contains "關於 Sunday Remote", "重新配對"
+and "關閉 Sunday Remote". About shows the installed bundle version and build;
+the menu remains available when fullscreen hides the connection controls.
+Close uses UIKit scene-session destruction, returns to the iPad home screen
+and retains pairing. The scene manifest enables scene lifecycle support for
+this public API; no forced process exit or private API is used. If iPadOS
+rejects closing, the app explains the system app-switcher gesture.
+The Mac "關於 Sunday Remote" menu also shows version/build.
+Install upgrades in place with the same bundle ID,
 Apple team/application identifier and Keychain groups; do not uninstall first.
 Keychain denial/locked-device/entitlement failures are reported as storage
 access errors and do not delete saved pairing. A pair already revoked by an

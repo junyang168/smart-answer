@@ -11,8 +11,7 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
     private let previous = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
     private let fullscreen = UIButton(type: .system)
-    private let forget = UIButton(type: .system)
-    private let about = UIButton(type: .system)
+    private let appMenu = UIButton(type: .system)
     private let observing = UISwitch()
     private let connection = UIStackView()
     private let pairing = UIStackView()
@@ -47,20 +46,30 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         configure(previous, "← 上一頁", #selector(back))
         configure(nextButton, "下一頁 →", #selector(forward))
         configure(fullscreen, "全螢幕", #selector(toggleFullscreen))
-        configure(forget, "重新配對", #selector(resetPair))
-        configure(about, "關於", #selector(showAbout))
-        about.accessibilityIdentifier = "remote-about"
+        var menuConfig = UIButton.Configuration.tinted()
+        menuConfig.title = "選單"; menuConfig.image = UIImage(systemName: "ellipsis.circle")
+        menuConfig.imagePadding = 6; menuConfig.baseForegroundColor = .white
+        menuConfig.baseBackgroundColor = .systemBlue; appMenu.configuration = menuConfig
+        appMenu.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        appMenu.accessibilityIdentifier = "remote-menu"
+        appMenu.showsMenuAsPrimaryAction = true
+        appMenu.menu = UIMenu(children: [
+            UIAction(title: "關於 Sunday Remote", image: UIImage(systemName: "info.circle")) { [weak self] _ in self?.showAbout() },
+            UIAction(title: "重新配對", image: UIImage(systemName: "link")) { [weak self] _ in self?.resetPair() },
+            UIAction(title: "關閉 Sunday Remote", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in self?.closeApp() }
+        ])
         observing.isOn = true; observing.accessibilityLabel = "只看畫面，停用翻頁"
         observing.addTarget(self, action: #selector(observeChanged), for: .valueChanged)
         let observeLabel = UILabel(); observeLabel.text = "只看畫面"; observeLabel.textColor = .white
         observeLabel.font = .preferredFont(forTextStyle: .footnote)
-        let options = row([observeLabel, observing, UIView(), about, forget])
+        let options = row([observeLabel, observing, UIView()])
         connection.axis = .vertical; connection.spacing = 4
         connection.addArrangedSubview(computers); connection.addArrangedSubview(status)
         connection.addArrangedSubview(options)
         pairing.axis = .horizontal; pairing.spacing = 8
         pairing.addArrangedSubview(code); pairing.addArrangedSubview(pair)
-        let buttons = row([previous, nextButton, fullscreen]); buttons.distribution = .fillEqually
+        // The menu remains available when fullscreen hides connection controls.
+        let buttons = row([previous, nextButton, fullscreen, appMenu]); buttons.distribution = .fillEqually
         let footer = UIStackView(arrangedSubviews: [connection, pairing, buttons])
         footer.axis = .vertical; footer.spacing = 6; footer.isLayoutMarginsRelativeArrangement = true
         footer.layoutMargins = UIEdgeInsets(top: 6, left: 12, bottom: 8, right: 12)
@@ -94,6 +103,17 @@ final class RemoteViewController: UIViewController, UITextFieldDelegate {
         let alert = UIAlertController(title: "Sunday Remote", message: "版本 \(version)\nBuild \(build)\niPadOS", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "關閉", style: .default))
         present(alert, animated: true)
+    }
+    private func closeApp() {
+        guard let scene = view.window?.windowScene else { return }
+        // Ask iPadOS to close the window and remove its app-switcher entry.
+        // Lifecycle callbacks stop streaming; saved pairing is retained.
+        UIApplication.shared.requestSceneSessionDestruction(scene.session, options: nil) { [weak self] error in
+            NSLog("SundayRemote window close failed: %@", error.localizedDescription)
+            let alert = UIAlertController(title: "無法自動關閉", message: "請從螢幕底部向上滑並停頓，再將 Sunday Remote 向上滑動關閉。", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "知道了", style: .default))
+            self?.present(alert, animated: true)
+        }
     }
     private func configure(_ button: UIButton, _ title: String, _ action: Selector) {
         var config = UIButton.Configuration.tinted(); config.title = title
