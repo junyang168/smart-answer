@@ -3380,6 +3380,11 @@ class PostgresKnowledgeStore:
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (prior_rounds,)).fetchall():
+                    quote_repair = continuation.get('source_quote_highlight_repair')
+                    if quote_repair and child['materials']['round_id'] == quote_repair['round_id']:
+                        if (sha256_json(child) != quote_repair['round_metadata_sha256']
+                                or sha256_json(before) != quote_repair['before_sha256']):
+                            raise ChangeSetConflict('saved highlight repair round or full current input drift')
                     if (continuation.get('human_source_verification')
                             and child['materials']['round_id'] in prior['latest_rounds'].values()):
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
@@ -3632,7 +3637,7 @@ class PostgresKnowledgeStore:
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
                 continuation = parent.get('continuation', {})
-                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')):
+                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption') or continuation.get('source_quote_highlight_repair')):
                     candidate = continuation.get('previous_candidates', {}).get(unit_id)
                     rejected_proposal = (continuation.get('owner_call_extension', {}).get('basis') == 'remaining_findings'
                         and bool(continuation.get('unaccepted_returned_proposals')) and candidate is None)

@@ -177,7 +177,8 @@ def initial_claim_candidate(materials):
     """One deterministic initial candidate for execution and origin validation."""
     from backend.pipeline import claim_management as cm
     if (materials.get('continuation',{}).get('opus_api_transition')
-            or materials.get('continuation',{}).get('opus_subscription_resumption')):
+            or materials.get('continuation',{}).get('opus_subscription_resumption')
+            or materials.get('continuation',{}).get('source_quote_highlight_repair')):
         original = materials['continuation']['previous_candidates'][materials['unit_id']]
         if original != materials['previous_candidate']:
             raise ValueError('Opus transport handoff altered the saved candidate')

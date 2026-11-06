@@ -1691,6 +1691,8 @@ def continuation_budget(previous, request, policy):
     api_transition = api_authorize(previous, request, policy, authority)
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
     subscription_resumption = authorize_subscription_resumption(previous, request, policy, authority)
+    from backend.pipeline.claim_quote_projection import saved_highlight_repair
+    quote_repair = saved_highlight_repair(previous, request, policy, authority)
     refusal_retry = authority.get('subscription_refusal_retry')
     refusal_proofs = {}
     if refusal_retry is not None:
@@ -1997,7 +1999,9 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {**({'opus_api_transition':api_transition} if api_transition else {}),
+    return {**({'source_quote_highlight_repair':quote_repair,
+                'previous_candidates':{quote_repair['unit_id']:quote_repair['candidate']}} if quote_repair else {}),
+        **({'opus_api_transition':api_transition} if api_transition else {}),
         **({'codex_quota_resumption': quota_refusals} if quota_refusals else {}),
         **({'engineering_repair':engineering_repair} if engineering_repair else {}),
         **({'completed_no_write_binding_repair':True} if binding_repair else {}),

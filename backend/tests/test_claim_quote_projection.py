@@ -216,3 +216,38 @@ def test_unaccepted_opus_near_quote_keeps_findings_and_reuses_original_review(cl
  assert len(reviewed['source_quote_corrections']['opus']['corrections'])==1
  assert store.get_record_state('source_fragments','FC')['payload']['verbatim_excerpt']==text
  assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('mismatch', [None, 'fragment', 'paragraph', 'highlight', 'retained', 'legacy'])
+def test_corrected_fragment_only_propagates_to_identical_proposed_bound_highlight(case, mismatch):
+ import hashlib
+ from backend.pipeline.claim_quote_projection import SPAN_CONTRACT
+ _,before,candidate,sources=deepcopy(case)
+ old='禱告說求神拯救我們。後來啊，變成祝福的禱告。後來呢，又成爲歡呼，歡呼他們所要歡迎進來的這些人。'
+ new=old.replace('又成爲歡呼','又成爲他們所說的歡呼')
+ sources['S']['paragraphs']['S0001']['text']=new
+ fragment={**before['source_fragments/F']['payload'],'verbatim_excerpt':old}
+ anchor={'source_fragment_id':'F','evidence_id':'E','paragraph_key':'S0001',
+         'speaker':'professor','stance':'asserted','proposed_highlight':{'status':'proposed','text':old},
+         'verbatim_excerpt_sha256':hashlib.sha256(old.encode()).hexdigest()}
+ if mismatch=='fragment':anchor['source_fragment_id']='OTHER'
+ if mismatch=='paragraph':anchor['paragraph_key']='S0002'
+ if mismatch=='highlight':anchor['proposed_highlight']['text']='不同的原文高亮'
+ claim={**before['claims/C']['payload'],'occurrences':[{'source_id':'S','anchors':[anchor]}]}
+ candidate.records=[cm.source.Row(collection='source_fragments',object_id='F',payload=fragment),
+                    cm.source.Row(collection='claims',object_id='C',payload=claim)]
+ for d in candidate.dispositions:
+  if d.record_key in {'claims/C','source_fragments/F'}:d.action='update'
+ if mismatch=='retained':next(d for d in candidate.dispositions if d.record_key=='claims/C').action='retain'
+ original=candidate.model_dump(mode='json')
+ fixed,changes=project(candidate,sources,contract=CONTRACT if mismatch=='legacy' else SPAN_CONTRACT)
+ assert candidate.model_dump(mode='json')==original
+ updated=fixed.records[1].payload['occurrences'][0]['anchors'][0]
+ expected=deepcopy(anchor)
+ if mismatch is None:
+  expected['proposed_highlight']['text']=new
+  expected['verbatim_excerpt_sha256']=hashlib.sha256(new.encode()).hexdigest()
+  assert len([c for c in changes if c['path'][1]==1])==2
+ assert updated==expected
+ assert fixed.records[1].payload['statement']==claim['statement']
+ assert fixed.records[1].payload['evidence_step_ids']==claim['evidence_step_ids']
