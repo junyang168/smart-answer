@@ -1,4 +1,4 @@
-// Select Office's viewer before it starts an editing/coauthoring session.
+// Select Office's chromeless viewer before it starts an editing/coauthoring session.
 // This is a playback default, not a change to the owner's sharing permissions.
 function isOfficeDocument(value) {
   try {
@@ -13,9 +13,12 @@ function viewDocumentURL(value) {
   if (!isOfficeDocument(value)) return value;
   const url = new URL(value);
   const actions = [...url.searchParams].filter(([key]) => key.toLowerCase() === 'action');
-  if (actions.length === 1 && ['view', 'embedview', 'present'].includes(actions[0][1].toLowerCase())) return value;
+  if (actions.length === 1 && ['embedview', 'present'].includes(actions[0][1].toLowerCase())) return value;
   for (const [key] of actions) url.searchParams.delete(key);
-  url.searchParams.set('action', 'view');
+  // ReadingView retains Office's title/status bars in the transmitted output.
+  // embedview lets Office render its own chromeless viewer, without cropping
+  // slides or injecting CSS into the document's cross-origin frame.
+  url.searchParams.set('action', 'embedview');
   return url.href;
 }
 
