@@ -1077,11 +1077,15 @@ def validate_bound_call(root, stage, packet, adapter):
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)
     reservation = body(read(root / (stage + ".reservation.json")))
-    proof = adapter.request_encoding_proof(packet)
+    if callable(measure := getattr(adapter, 'request_measurements', None)):
+        request_bytes, proof = measure(packet)
+    else:
+        proof = adapter.request_encoding_proof(packet)
+        request_bytes = adapter.request_bytes(packet)
     expected = {"model_id": adapter.model_id, "backend": adapter.backend,
         "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
         "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
-        "request_bytes": adapter.request_bytes(packet), "stage": stage, "automatic_retry": False}
+        "request_bytes": request_bytes, "stage": stage, "automatic_retry": False}
     limit,budget=request_limit(adapter,root/(stage+'.raw.json'),saved=raw)
     if budget is not None:expected['request_budget']=budget
     if expected["request_bytes"] > limit or expected != reservation or any(raw.get(k) != v for k, v in expected.items()) or raw["response_sha256"] != sha256_json(raw["response"]):

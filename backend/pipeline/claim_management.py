@@ -85,6 +85,7 @@ class Policy(source.Contract):
     legacy_ai_supersession_restore: Literal[True] | None = None
     proposal_empty_arrays: Literal['program_validated_v1'] | None = None
     source_quote_projection: Literal['source_literal_punctuation_v1','source_literal_near_match_v1','source_literal_span_v2'] | None = None
+    retry_context_contract: Literal['claim_database_retry_v1'] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -96,7 +97,7 @@ class Policy(source.Contract):
             value.pop('request_encoding_contract', None)
         if self.api_spend is None:
             value.pop('api_spend', None)
-        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays', 'source_quote_projection'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract', 'review_unit_contract', 'proposal_empty_arrays', 'source_quote_projection', 'retry_context_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -113,6 +114,8 @@ class Policy(source.Contract):
 
     @model_validator(mode="after")
     def exact_roles(self):
+        if self.retry_context_contract and self.model_output_contract != 'claim_changes_v4':
+            raise ValueError('database retry context requires managed content Update')
         if set(self.models) != set(MODELS):
             raise ValueError("all three independent model roles must be bound")
         for role, (model, backend) in MODELS.items():
@@ -405,7 +408,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_historical_stage.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_metadata_projection.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'claim_evidence_review.py', pipeline/'claim_quote_projection.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_evidence_review.py', pipeline/'claim_stopped_resume.py', pipeline/'claim_quote_projection.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     if policy is not None and policy.model_output_contract == 'claim_changes_v4':
@@ -415,6 +418,8 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.review_unit_contract:
         files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
                   pipeline/'prompts/claim_bounded_review_unit_v1.md']
+    if policy is not None and policy.retry_context_contract:
+        files += [pipeline/'claim_database_retry.py', pipeline/'prompts/claim_database_retry_v1.md']
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
@@ -460,8 +465,10 @@ def domain_dependencies(collection, payload, records):
             oid = payload.get(field)
             if not oid:
                 continue
-            matches = [k for k in records if source.split_key(k)[1] == oid
-                       and source.split_key(k)[0] in CLAIM_COLLECTIONS]
+            # Canonical typed keys permit bounded lookups. Scanning the whole
+            # packet here multiplied every graph walk by the packet size.
+            matches = ([source.key(col, oid) for col in CLAIM_COLLECTIONS
+                        if source.key(col, oid) in records] if isinstance(oid, str) else [])
             if len(matches) != 1:
                 raise ValueError('relation endpoint is missing or ambiguous: ' + str(oid))
             refs.update(matches)
@@ -1415,6 +1422,8 @@ def model_packet(materials):
                 if restored != materials[name]:
                     raise ValueError('Claim request reference changed authority')
     from backend.pipeline.claim_evidence_review import add_packet
+    from backend.pipeline.claim_database_retry import project
+    packet = project(packet, materials)
     return add_packet(packet)
 
 
@@ -1676,6 +1685,8 @@ def continuation_budget(previous, request, policy):
     original = Policy.model_validate(previous['policy'])
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension, owner_target_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    from backend.pipeline.claim_stopped_resume import authorize as authorize_stopped_resume
+    stopped_resume = authorize_stopped_resume(previous, request, authority)
     from backend.pipeline.claim_opus_api_transition import authorize as api_authorize
     api_transition = api_authorize(previous, request, policy, authority)
     from backend.pipeline.claim_opus_api_transition import authorize_subscription_resumption
@@ -1839,6 +1850,9 @@ def continuation_budget(previous, request, policy):
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
             continue
+        if stopped_resume and key == stopped_resume['slot']:
+            spent[slot['role']] += 1
+            continue
         from backend.pipeline.claim_review_recovery import closed_codex_quota_refusal
         quota_refusal = closed_codex_quota_refusal(previous, key, slot, authority)
         if quota_refusal is not None:
@@ -1994,6 +2008,7 @@ def continuation_budget(previous, request, policy):
         **({'subscription_refusal_retry': {'direction': refusal_retry, 'failures': refusal_proofs}} if refusal_retry is not None else {}),
         **({'source_support_creation':True} if support_creation else {}),
         **({'related_owner_target_extension':True} if target_extension else {}),
+        **({'owner_stopped_resume': stopped_resume} if stopped_resume else {}),
         'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':continued_goal,
         **({'historical_rejected_stages':historical_stages} if historical_stages else {}),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),

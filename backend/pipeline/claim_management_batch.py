@@ -418,6 +418,53 @@ def _paragraph_guard(plan, store):
         raise ValueError('paragraph source registration changed during sequence')
 
 
+def completed_results(store, jobs):
+    """Reconcile recorded group completions, without replaying qualification.
+
+    Each action already passed its own review, commit and readback boundary.
+    This summary neither grants current qualification nor closes a live action.
+    """
+    from backend.pipeline import claim_management as cm
+    results, processed, created, retired = {}, set(), set(), set()
+    for action_id, (request, action_root) in jobs.items():
+        parent = store.get_cvp_group('CMA-' + cm.sha256_json(action_id))
+        if parent and (parent['request'] != request.model_dump(mode='json')
+                       or parent['execution_root'] != str(action_root)):
+            raise ValueError('completion summary cannot change the original action/root/budget')
+        result = (parent or {}).get('result', {'status': 'not_started'})
+        results[action_id] = result
+        new = {k for k in (parent or {}).get('created_keys', []) if k.startswith('claims/')}
+        created.update(new)
+        if result.get('status') != 'completed':continue
+        keys = set(request.target_keys) | new
+        covered, action_retired = set(), set()
+        rounds = parent.get('latest_rounds', {})
+        for rid in rounds.values():
+            child = store.get_cvp_group(rid)
+            if (not child or child.get('parent_run_id') != parent['run_id']
+                    or child.get('outcome') != 'completed' or not child.get('opus_approved')
+                    or not child.get('program_readback_complete') or child.get('revisit_required')):
+                results[action_id] = {'status': 'paused', 'reason': 'incomplete_group_completion', 'round_id': rid}
+                break
+            covered.update(child['materials']['unit_request']['target_keys'])
+            covered.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'create')
+            action_retired.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'retire')
+        else:
+            if rounds and keys <= covered:
+                processed.update(keys);created.update(keys - set(request.target_keys))
+                retired.update(keys & action_retired)
+                continue
+            results[action_id] = {'status': 'paused', 'reason': 'missing_group_completion_coverage',
+                                  'missing_keys': sorted(keys - covered)}
+    expected = {k for request, _ in jobs.values() for k in request.target_keys} | created
+    return {'results': results, 'completion_basis': 'recorded_group_completions',
+            'processed_claim_keys': sorted(processed), 'created_keys': sorted(created),
+            'retired_keys': sorted(retired),
+            'unfinished_claims': {k: {'reason': 'group_not_completed'} for k in sorted(expected - processed)},
+            'unfinished_actions': {k: v for k, v in results.items() if v.get('status') != 'completed'},
+            'all_actions_completed': all(v.get('status') == 'completed' for v in results.values())}
+
+
 def _paragraph_results(store, jobs):
     """SQL is the completion authority, including new Claims, not a saved flag."""
     from backend.pipeline import claim_management as cm
@@ -492,10 +539,10 @@ def run_paragraphs(manifest, root, *, store=None):
                 checkpoint(passed,identity,current,store=store,jobs=all_jobs)
                 completed.append(paragraph)
             _paragraph_guard(plan, store)
-            result = _paragraph_results(store, all_jobs)
+            result = completed_results(store, all_jobs)
             result.update(status='claims_completed' if result['all_actions_completed'] else 'paused',
                           completed_paragraphs=completed,
-                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['current_qualifications']),
+                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['processed_claim_keys']),
                                               'action_ids': list(all_jobs), 'status': 'not_executed'})
             if result.get('retired_keys'):
                 result['downstream_handoff']['retired_claim_ids'] = [key.split('/', 1)[1] for key in result['retired_keys']]

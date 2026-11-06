@@ -183,3 +183,44 @@ def test_inspect_cli_rejects_new_authority_or_execution_options(monkeypatch,extr
     monkeypatch.setattr(sys,'argv',['claim-batch','--inspect','--root','/existing/batch',*extra])
     with pytest.raises(SystemExit)as error:batch.main()
     assert error.value.code==2
+
+
+@pytest.mark.parametrize('defect',[None,'not_started','paused','missing_round','unreviewed','unread','revisit','missing_creation','wrong_root'])
+def test_completion_summary_uses_saved_group_boundary_without_qualification_replay(defect):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    frozen={'target_keys':['claims/C','claims/OLD'],'action_id':'A'}
+    request=SimpleNamespace(target_keys=frozen['target_keys'],model_dump=lambda **_:deepcopy(frozen))
+    parent_id='CMA-'+cm.sha256_json('A')
+    parent={'run_id':parent_id,'request':frozen,'execution_root':'/saved/action',
+            'result':{'status':'completed'},'created_keys':['claims/NEW'],'latest_rounds':{'unit':'R'}}
+    child={'parent_run_id':parent_id,'outcome':'completed','opus_approved':True,
+           'program_readback_complete':True,'materials':{'unit_request':{'target_keys':frozen['target_keys']}},
+           'candidate':{'dispositions':[{'record_key':'claims/NEW','action':'create'},
+                                        {'record_key':'claims/OLD','action':'retire'}]}}
+    rows={parent_id:parent,'R':child}
+    if defect=='not_started':rows.pop(parent_id)
+    elif defect=='paused':parent['result']={'status':'paused','reason':'unresolved_finding'}
+    elif defect=='missing_round':rows.pop('R')
+    elif defect=='unreviewed':child['opus_approved']=False
+    elif defect=='unread':child['program_readback_complete']=False
+    elif defect=='revisit':child['revisit_required']=True
+    elif defect=='missing_creation':child['candidate']['dispositions']=[]
+    elif defect=='wrong_root':parent['execution_root']='/other/action'
+    forbidden=Mock(side_effect=AssertionError('summary must not requalify or reclose groups'))
+    store=SimpleNamespace(get_cvp_group=rows.get,claim_management_qualification=forbidden,
+                          finish_claim_management_action=forbidden)
+    jobs={'A':(request,Path('/saved/action'))}
+    if defect=='wrong_root':
+        with pytest.raises(ValueError,match='original action/root/budget'):batch.completed_results(store,jobs)
+    else:
+        result=batch.completed_results(store,jobs)
+        assert result['all_actions_completed']==(defect is None)
+        assert result['completion_basis']=='recorded_group_completions'
+        assert 'current_qualifications' not in result
+        if defect is None:
+            assert result['processed_claim_keys']==['claims/C','claims/NEW','claims/OLD']
+            assert result['created_keys']==['claims/NEW'] and result['retired_keys']==['claims/OLD']
+            assert not result['unfinished_claims'] and not result['unfinished_actions']
+        else:assert result['unfinished_actions'] and result['unfinished_claims']
+    forbidden.assert_not_called()

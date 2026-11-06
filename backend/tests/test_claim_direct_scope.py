@@ -707,3 +707,27 @@ def test_accepted_review_before_package_plan_recovers_without_repeating_calls(ch
     assert ports.calls==['gpt','opus'] and (execution/rid/'opus.raw.json').read_bytes()==raw
     assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
     assert store.claim_management_qualification('A')['ready']
+
+
+def test_package_authority_keeps_transaction_snapshot_while_model_stays_one_hop(chain, monkeypatch):
+    # A pruned runtime frame is not a second, smaller authority snapshot.
+    # Historical/unused grants can be validated from the full pinned snapshot
+    # without sending neighbours' private evidence back to the model.
+    from backend.pipeline import claim_joint_update as joint
+    store, request, output, root = chain
+    admissions = []
+    original = joint.admission_error
+    def observe(request, policy, before, goal):
+        admissions.append(deepcopy(before))
+        return original(request, policy, before, goal)
+    monkeypatch.setattr(joint, 'admission_error', observe)
+    def opus(packet):
+        assert 'evidence_steps/EB' not in packet['before']
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert len(admissions) >= 2
+    assert 'evidence_steps/EB' in admissions[0]
+    assert all(frame == admissions[0] for frame in admissions)
+    assert ports.calls == ['opus']

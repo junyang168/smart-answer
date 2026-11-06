@@ -183,6 +183,35 @@ def reusable_initial_candidate(materials, candidate):
     return bool(receipt.get('initial_quote_preflight') and expected == candidate)
 
 
+def _saved_initial_stage(root, material, packet):
+    """Authenticate a historical call with its own frozen prompt bytes.
+
+    The sidecar restores SHA-bound resources only. It cannot change a packet,
+    schema, reservation, answer, budget or vote; ordinary wire validation and
+    all present-day content checks still run.
+    """
+    from backend.pipeline.cvp_sql_actions import validate_claim_stage
+    policy=cm.Policy.model_validate(material['policy'])
+    path=root/'historical-role-prompts.json'
+    if not path.exists():return validate_claim_stage(root,'opus',policy,packet)
+    from backend.pipeline.cvp_sql_commit import binding,check_binding
+    from backend.pipeline.source_reconciliation_runner import validate_bound_call
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    value=json.loads(path.read_text());prompts={}
+    if (set(value)!={'contract','round_id','raw','prompts'}
+            or value['contract']!='claim_historical_role_prompts_v1'
+            or value['round_id']!=material['round_id']
+            or value['raw']!=binding(root/'opus.raw.json')):
+        raise ValueError('historical initial prompt restoration identity drift')
+    for name,bound in value['prompts'].items():
+        expected=material['audit_contract']['implementation'].get('backend/pipeline/prompts/'+name)
+        if not expected or '/' in name or bound['file_sha256']!=expected:
+            raise ValueError('historical prompt differs from the original frozen contract')
+        check_binding(bound);prompts[name]=Path(bound['path']).read_text()
+    return validate_bound_call(root,'opus',packet,
+        claim_management_model_adapter('opus',policy,saved_prompts=prompts))
+
+
 def _initial_review(proof):
     from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.source_reconciliation_runner import body, read
@@ -206,7 +235,7 @@ def _initial_review(proof):
     if Path(proof['raw']['path']) != root / 'opus.raw.json':
         raise ValueError('initial assessment raw belongs to a different review')
     packet = claim_management_review_packet(material, candidate)
-    raw = validate_claim_stage(root, 'opus', cm.Policy.model_validate(material['policy']), packet)
+    raw = _saved_initial_stage(root, material, packet)
     review = expand_review(raw['response'], material, candidate)
     cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                        material['unresolved'], material['sources'],

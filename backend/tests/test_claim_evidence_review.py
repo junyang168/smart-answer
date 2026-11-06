@@ -250,3 +250,30 @@ def test_insufficient_binding_accepts_only_its_claim_steps_or_bound_excerpts(mat
     else:
         with pytest.raises(ValueError,match='insufficient own Evidence'):
             er.validate_assessments(parsed,m,candidate)
+
+
+@pytest.mark.parametrize('role', ['gpt', 'opus'])
+@pytest.mark.parametrize('policy_name', [
+    'wang_claim_management_joint_update_v6.json',
+    'wang_claim_management_joint_update_v9.json',
+    'wang_claim_management_bounded_unit_v2.json',
+])
+def test_spoken_emphasis_rule_reaches_both_roles_without_losing_substantive_evidence(role, policy_name):
+    # Exercise the real prompt composer: compact mode replaces the base prompt,
+    # so a rule added only to proposal/review templates would silently disappear.
+    # These are prompt-contract checks, not a claim of live model calibration.
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent / policy_name).read_text())
+    prompt = claim_management_model_adapter(role, policy)._base_prompt
+    assert '本身不能作为支持实质主张的论据' in prompt
+    assert '重视不等于证明' in prompt
+    assert '提议者须检查并修正' in prompt
+    assert '审阅者须核对' in prompt
+    assert '「這很重要，因為保羅這裡用了……」' in prompt
+    assert '须保留后面的经文、解释或具体理由' in prompt
+    assert '「愛是最大的誡命」' in prompt
+    assert '不能因含程度词便排除' in prompt
+    assert '逐字引文保持原文' in prompt
+    assert '不使该片段整体失去支持资格' in prompt
+    # Preserve the existing positive rule: professor-adopted Scripture is evidence.
+    assert '经文若被教授用来建立或解释主张，本身就是承重证据' in prompt

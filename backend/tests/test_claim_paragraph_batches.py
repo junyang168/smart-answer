@@ -262,3 +262,17 @@ def test_changed_file_cannot_skip_registered_source_version_handoff(paragraphs):
         batch.load_paragraphs(manifest, root, store=store)
     assert store.get_cvp_group('CMA-' + cm.sha256_json(first.action_id)) is None
     assert store.get_cvp_group('CMA-' + cm.sha256_json(second.action_id)) is None
+
+
+def test_completed_sequence_resume_only_reconciles_saved_groups(paragraphs,monkeypatch):
+    store,_,_,sequence,_,_,_,_=paragraphs
+    manifest,root=sequence()
+    calls,ports,_=execute_batches(monkeypatch,store)
+    result=batch.run_paragraphs(manifest,root,store=store)
+    assert result['all_actions_completed']
+    def forbidden(*args,**kwargs):raise AssertionError('completed sequence must not rerun qualifications or readback')
+    monkeypatch.setattr(store,'claim_management_qualification',forbidden)
+    monkeypatch.setattr(store,'finish_claim_management_action',forbidden)
+    assert batch.run_paragraphs(manifest,root,store=store)==result
+    assert len(calls)==2
+    assert result['processed_claim_keys']==['claims/C','claims/D']

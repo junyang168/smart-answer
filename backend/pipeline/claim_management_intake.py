@@ -9,7 +9,7 @@ import json
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_commit import binding, check_binding
 
-DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v9.json'
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_joint_update_v10.json'
 
 # Ordinary content maintenance cannot alter identity, human holds or approval.
 FIELDS = {
@@ -275,9 +275,12 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:
-            from backend.pipeline.claim_direct_scope import evidence_owner_references
+            from backend.pipeline.claim_direct_scope import evidence_owner_references, shared_support_owner_references
             visible = {k: before[k] for k in scope(request, before)['record_keys']}
             owners = evidence_owner_references(request, visible, before)
+            natural = set(scope(request, before, include_write_context=False)['writable_record_keys']) | set(required)
+            owners.update(shared_support_owner_references(request, before,
+                {p.key for p in request.permissions} & natural))
             authorization.update(reuse_initial_claim_assessments=True, include_existing_evidence_owners=True,
                                  include_evidence_owner_context=True,
                                  evidence_owner_context_keys=sorted(owners))
