@@ -35,7 +35,7 @@ const pageLabel = (page: NonNullable<Chapter["page"]> & { ai_voice?: boolean }) 
   page.kind === "passages"
     ? "按段落原聲"
     : page.ai_voice
-      ? "逐節聆聽（AI 朗讀）"
+      ? "AI 朗讀"
       : page.media === "video"
         ? "逐節觀看"
         : "逐節聆聽";
