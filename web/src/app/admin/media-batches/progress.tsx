@@ -48,6 +48,9 @@ type Batch = {
   mode?: string;
   calls: number;
   reserved_usd: string;
+  estimated_usd?: string | null;
+  costed_calls?: number;
+  budget_limit_usd?: string;
 };
 type Snapshot = {
   batches: Batch[];
@@ -380,9 +383,17 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                 ))}
             </div>
             <p className="mt-3 text-xs leading-6 text-slate-500">
-              呼叫 {run.calls} 次 · 已預留費用上限 $
-              {Number(run.reserved_usd).toFixed(2)}（非實際帳單） · 最後讀取{" "}
-              {when(data.generated_at)}
+              呼叫 {run.calls} 次 · 用量費用估算：
+              {run.estimated_usd != null
+                ? `$${Number(run.estimated_usd).toFixed(2)}`
+                : run.calls
+                  ? "待彙整"
+                  : "$0.00"}
+              （已核算 {run.costed_calls || 0}/{run.calls} 次，非供應商帳單）
+              <br />
+              預留額度 ${Number(run.reserved_usd).toFixed(2)} / 上限 $
+              {Number(run.budget_limit_usd || 0).toFixed(2)}（排程用途） ·
+              最後讀取 {when(data.generated_at)}
             </p>
             <p className="text-xs text-slate-500">
               {data.disk &&

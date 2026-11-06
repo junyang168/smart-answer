@@ -297,6 +297,62 @@ def test_budget_increase_is_audited_idempotent_and_keeps_original_usage(
         )
 
 
+def test_saved_usage_costs_are_distinct_from_reserves_and_backfill_is_repeatable(
+    store, tmp_path
+):
+    from datetime import date
+    from backend.pipeline.media_batch.costs import estimate, reconcile
+    from backend.pipeline.media_batch.store import key
+    from backend.pipeline.slide_change_pilot import object_sha
+
+    request = dict(model="gpt-6.1-sol", stage="test")
+    raw = dict(usage=dict(input_tokens=1000, output_tokens=100))
+    assert estimate(request, raw)["estimated_usd_upper"] == 0.0035
+    gemini = dict(
+        usage_metadata=dict(
+            prompt_token_count=1000,
+            candidates_token_count=100,
+            thoughts_token_count=100,
+        )
+    )
+    assert (
+        estimate(dict(model="gemini"), gemini, at=date(2027, 1, 1))[
+            "estimated_usd_upper"
+        ]
+        == 2
+        * estimate(dict(model="gemini"), gemini, at=date(2026, 11, 6))[
+            "estimated_usd_upper"
+        ]
+    )
+    b, tid = task_fixture(store, tmp_path)
+    out = tmp_path / "saved"
+    folder = out / "calls" / object_sha(request)
+    atomic(folder / "request.json", request)
+    atomic(folder / "response.json", raw)
+    state = dict(
+        status="complete",
+        response_sha256=file_sha(folder / "response.json"),
+        reserved_usd=1,
+    )
+    atomic(folder / "state.json", state)
+    with store.connection() as c:
+        c.execute(
+            "UPDATE media_ingest.tasks SET payload=payload || %s WHERE id=%s",
+            (Jsonb(dict(out=str(out))), tid),
+        )
+    call = key([tid, str(out.resolve()), request])
+    store.reserve(b, tid, call, "gpt-6.1-sol", 1)
+    store.call_complete(call, state)
+    assert reconcile(store, b) == dict(updated=1, unmatched=[], model_calls=0)
+    assert reconcile(store, b) == dict(updated=0, unmatched=[], model_calls=0)
+    snapshot = store.snapshot(b)["selected"]
+    assert (
+        float(snapshot["estimated_usd"]) == 0.0035
+        and float(snapshot["reserved_usd"]) == 1
+    )
+    assert snapshot["costed_calls"] == snapshot["calls"] == 1
+
+
 def test_budget_reservation_atomic_across_workers(store, tmp_path):
     b, tid = task_fixture(store, tmp_path)
     with store.connection() as c:

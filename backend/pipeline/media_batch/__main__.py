@@ -68,6 +68,7 @@ def main():
         "retry",
         "reconcile",
         "raise-budget",
+        "reconcile-costs",
     ):
         cmd = sub.add_parser(name)
         cmd.add_argument("--batch", required=name != "status")
@@ -215,6 +216,11 @@ def main():
                 args.batch, args.operation, args.revision, args.budget_usd, args.reason
             )
         )
+        return
+    if args.command == "reconcile-costs":
+        from .costs import reconcile
+
+        print(json.dumps(reconcile(store, args.batch)))
         return
     if args.command in ("pause", "resume", "retry"):
         print(store.control(args.batch, args.operation, args.revision, args.command))

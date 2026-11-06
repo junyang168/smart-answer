@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS media_ingest.controls (
  batch text REFERENCES media_ingest.batches(id), operation text NOT NULL,
  request jsonb NOT NULL, revision integer NOT NULL, PRIMARY KEY(batch,operation)
 );
+CREATE INDEX IF NOT EXISTS batch_call_cost_lookup ON media_ingest.calls(batch);
 
 CREATE INDEX IF NOT EXISTS asset_pcm_lookup ON media_ingest.assets ((info->>'pcm_sha'));
 CREATE INDEX IF NOT EXISTS legacy_duration_lookup ON media_ingest.recordings (((info->>'duration')::double precision)) WHERE info->>'existing_transcript'='true';

@@ -140,6 +140,15 @@ def batch_call(out, request, reserved):
             path = folder / "state.json"
             state = json.loads(path.read_text()) if path.exists() else {}
             if admitted and state.get("status") in ("complete", "rejected"):
+                if state["status"] == "complete":
+                    try:
+                        from .costs import estimate
+
+                        state["usage_cost"] = estimate(
+                            request, json.loads((folder / "response.json").read_text())
+                        )
+                    except (ValueError, KeyError, TypeError, OSError) as error:
+                        state["usage_cost_error"] = str(error)
                 store.call_complete(call, state)
                 atomic(journal, dict(state=state["status"], call=call))
             # No response proof: journal remains unknown even after the OS lock is released.

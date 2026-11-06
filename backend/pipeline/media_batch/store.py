@@ -304,8 +304,11 @@ class Store:
         with self.connection() as c:
             c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             batches = c.execute(
-                """SELECT id,created_at,revision,desired,config->>'title' AS title,config->>'mode' AS mode,calls,reserved_usd
-              FROM media_ingest.batches ORDER BY created_at DESC LIMIT 100"""
+                """SELECT b.id,b.created_at,b.revision,b.desired,b.config->>'title' AS title,b.config->>'mode' AS mode,b.calls,b.reserved_usd,
+              (SELECT sum((m.info->'usage_cost'->>'estimated_usd_upper')::numeric) FROM media_ingest.calls m WHERE m.batch=b.id) AS estimated_usd,
+              (SELECT count(*) FROM media_ingest.calls m WHERE m.batch=b.id AND m.info ? 'usage_cost') AS costed_calls,
+              GREATEST((b.config->>'budget_usd')::numeric,COALESCE((SELECT max((c.request->>'budget_usd')::numeric) FROM media_ingest.controls c WHERE c.batch=b.id AND c.request->>'action'='raise-budget'),0)) AS budget_limit_usd
+              FROM media_ingest.batches b ORDER BY b.created_at DESC LIMIT 100"""
             ).fetchall()
             if batch is None and batches:
                 batch = next(
