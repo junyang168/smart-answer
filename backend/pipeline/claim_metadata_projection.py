@@ -284,7 +284,8 @@ def project_candidate(candidate,receipt,materials):
                       'stale_review_reset_status':'candidate_not_approved_history_preserved'}
     if changed:receipt={**receipt,'candidate_sha256':result.digest,'legacy_ai_sampling_reset':sorted(changed),
                          'sampling_reset_status':'candidate_not_human_approved'}
-    return result,receipt
+    from backend.pipeline.claim_source_binding_projection import project
+    return project(result,receipt,materials)
 
 
 def project_support_aliases(raw,materials):

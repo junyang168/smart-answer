@@ -3595,6 +3595,14 @@ class PostgresKnowledgeStore:
             policy = Policy.model_validate(parent["policy"])
             request = parent["request"]
             needed = set(required_roles(Request.model_validate(request), round_number, policy))
+            from backend.pipeline.claim_source_binding_projection import FIELD as BINDING_REPAIR, round_repair
+            binding_repair = round_repair(parent, round_number)
+            if binding_repair:
+                if frozen.get(BINDING_REPAIR) != binding_repair:
+                    raise ChangeSetConflict('source-binding repair omitted its saved-candidate proof')
+                from backend.pipeline.claim_source_binding_projection import initial_candidate
+                initial_candidate(frozen)
+                needed = {'opus'}
             if request["operation"] == "Read" or set(roles) != needed:
                 raise ChangeSetConflict("Claim round must reserve every required role; Read has no model round")
             identity = {"kind": "claim_management_round", "schema_version": VERSION,
@@ -3615,7 +3623,7 @@ class PostgresKnowledgeStore:
                     expected_decisions = [d for d in parent['human_source_decisions'] if d['source_id'] in frozen['unit_request']['source_bindings']]
                     if frozen.get('human_source_decisions') != expected_decisions:
                         raise ChangeSetConflict('Claim round omitted its frozen human source decisions')
-                    assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions)
+                    assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions, request=frozen['unit_request'])
                 if 'program_metadata_projection' in frozen:
                     from backend.pipeline.claim_metadata_projection import assert_current
                     assert_current(cursor, Request.model_validate(frozen['unit_request']), frozen['before'], policy, frozen['program_metadata_projection'])

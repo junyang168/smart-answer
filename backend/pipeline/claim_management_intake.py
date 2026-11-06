@@ -285,6 +285,8 @@ def prepare(values, root, *, instruction, max_workers=1, store=None, policy=None
         if any(p.collection == 'knowledge_relations' for p in request.permissions + request.creation_permissions):
             authorization['review_questions'].append(relation_endpoint_instruction())
         if selected.review_unit_contract:
+            from backend.pipeline.claim_source_binding_projection import CONTRACT as BINDING_PROJECTION
+            authorization['source_binding_projection'] = BINDING_PROJECTION
             from backend.pipeline.claim_direct_scope import evidence_owner_references, shared_support_owner_references
             visible = {k: before[k] for k in scope(request, before)['record_keys']}
             owners = evidence_owner_references(request, visible, before)

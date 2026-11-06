@@ -418,6 +418,7 @@ def audit_contract(root, policy=None):
     if policy is not None and policy.review_unit_contract:
         files += [pipeline/'claim_review_units.py', pipeline/'claim_review_reuse.py',
                   pipeline/'claim_topic_units.py', pipeline/'source_execution_locks.py',
+                  pipeline/'claim_source_binding_projection.py',
                   pipeline/'prompts/claim_bounded_review_unit_v1.md']
     if policy is not None and policy.retry_context_contract:
         files += [pipeline/'claim_database_retry.py', pipeline/'prompts/claim_database_retry_v1.md']
@@ -588,6 +589,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 raise ValueError("new object lacks unique source-scoped creation permission")
             id_field = KNOWLEDGE_COLLECTIONS[collection][1]
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
+            from backend.pipeline.claim_source_binding_projection import canonical_fields
+            binding = canonical_fields(key, payload, provisional, sources)
+            mechanical |= {f for f,v in binding.items() if payload.get(f) == v}
             if set(payload) - set(grants[0].fields) - mechanical - {id_field}:
                 raise ValueError("created fields exceed creation permission")
         else:
@@ -619,6 +623,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 raise ValueError("proposed update cannot manufacture review provenance")
             changed = {k for k in set(old["payload"]) | set(payload) if old["payload"].get(k) != payload.get(k)}
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
+            from backend.pipeline.claim_source_binding_projection import canonical_fields
+            binding = canonical_fields(key, payload, {**post, **proposed}, sources)
+            mechanical |= {f for f,v in binding.items() if payload.get(f) == v}
             if changed - set(permission.fields) - mechanical - ({"review_status"} if sampling_update else set()):
                 raise ValueError("updated fields exceed original field permission")
         if disposition.action != "retire":
