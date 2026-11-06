@@ -173,3 +173,25 @@ def test_a_sentence_long_kept_piece_stays_with_the_argument_around_it():
     rows = lecture_rows(chapter, {"pieces": pieces, "decisions": decisions})
     assert list(rows) == ["mat-5-38-42"]
     assert rows["mat-5-38-42"]["stretches"] == [{"start": 0.0, "end": 200.0}]
+
+
+def test_every_chapter_page_is_split_into_sections_that_cover_it_end_to_end():
+    from backend.pipeline import chapter_material
+
+    for passage, chapter in chapter_material.CHAPTERS.items():
+        book, number, start, end = chapter_material.verse_range(passage)
+        expected = start
+        for section in chapter.sections:
+            s_book, s_number, low, high = chapter_material.verse_range(section)
+            assert (s_book, s_number, low) == (book, number, expected), section
+            expected = high + 1
+        assert expected == end + 1, passage
+        assert chapter.lectures
+
+
+def test_the_slide_prompt_names_the_chapter_it_is_for():
+    from backend.pipeline import chapter_material, chapter_slides
+
+    prompt = chapter_slides.system_prompt(chapter_material.CHAPTERS["mat-13-1-58"])
+    assert "第 13 章" in prompt and "13:1-58" in prompt
+    assert "第五章" not in prompt and "5:1-48" not in prompt

@@ -114,6 +114,11 @@ def decide(chapter: Chapter, *, data_base_dir: Path, client: Any, force: bool = 
     title = str(client.generate_json(SYSTEM_PROMPT, prompt, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
     problems = check(title)
     if problems:
+        # 四个主题的章常写过长（太 12 两次 34 字）；告诉它哪里不对，再写一次，只一次。
+        retry = f"{prompt}\n\n你先前寫的「{title}」不能用：{'；'.join(problems)}。請重寫，保留最主要的主題。"
+        title = str(client.generate_json(SYSTEM_PROMPT, retry, RESPONSE_SCHEMA).get("title") or "").strip().rstrip("。")
+        problems = check(title)
+    if problems:
         return {"passage": chapter.passage, "status": "rejected", "title": title, "problems": problems}
     record = {
         "schema_version": SCHEMA_VERSION,

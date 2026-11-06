@@ -227,3 +227,11 @@ def test_without_speech_recognition_times_stay_as_they_were(tmp_path):
 
     convert = retimer({"transcript_id": "none", "segments": []}, tmp_path)
     assert convert(42.0) == 42.0
+
+
+def test_the_older_cuv_spelling_of_the_johannine_letters_is_read():
+    from backend.api.scripture import reference_slugs
+
+    assert reference_slugs("約翰壹書 1:9") == ["1jn-1-9"]
+    assert reference_slugs("約翰貳書 1:3") == ["2jn-1-3"]
+    assert reference_slugs("約翰參書 1:2") == ["3jn-1-2"]

@@ -2,8 +2,8 @@
 
 > **读者**：Solution architect、神学编辑
 > **类型**：规范
-> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式）
-> **与代码对齐**：2026-11-04（核对到 #637 聆听模式分支）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
+> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15）
+> **与代码对齐**：2026-11-05（核对到 #637 太 8–15 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
 > **权威范围**：马太福音按章释经页由哪几部分组成；一章的材料从哪几篇讲道取、哪些段落算释经；神学、个人经历、生活应用与问答怎样取舍；同步幻灯上放什么。只管 NYSC 马太福音系列讲座这一个来源；母本与文章都不在本文范围。
 
 **目标：让听的人专心在释经上。读者打开马太福音某一章，按经节次序从头到尾听教授在 NYSC 系列讲座里对这一章的释经，同时看幻灯上他此刻在讲什么、读到哪些经文。**
@@ -24,6 +24,7 @@
   - [4.8 聆听模式](#48-聆听模式)
 - [五、观点层](#五观点层)
 - [六、试点：太 5](#六试点太-5)
+- [6.1 太 8–15](#61-太-815)
 - [七、不在本文范围](#七不在本文范围)
 
 ## 一、问题
@@ -275,6 +276,29 @@ flowchart LR
 每轮修正都处理了上一轮的意见，新一轮审阅又提出新的、更小的意见，等级停在 B。（二）5 终审标的阻断经核对不成立：审稿人说「耶稣也起誓」是替他加的，逐字稿 S0007 他自己说「其實啊，耶穌自己啊、神，也起誓」。剩下的意见多是要点出现得晚（一分钟以上只有标题）、故事的前因后果没写全。
 
 另外修了两处页面：一张幻灯从一段的片段开始、讲进另一段的片段时，原来只在开始那一段出现，（二）6 在 5:1-12 的一行因此没有幻灯；现在它在时间跨到的每一段都出现。
+
+### 6.1 太 8–15
+
+负责人 2026-11-05：「你做一下 8-15」。前提是这一系列的主张都已 refresh：2012（三）六堂 177 条有效主张，`claim_management_qualification` 全部 ready。
+
+**选堂。** 一章不再跑整个系列的六堂：按逐字稿里念到的马太福音章号，连同前后一堂，共 24 次 `chapter_exposition`。只加进来作为前后一堂的，一个片段都没保留，与念到的章号一致；没保留的那一堂从 `CHAPTERS` 拿掉。
+
+| 章 | 讲道 | 保留 | 幻灯 | 初审 → 终审 | 留给负责人的意见 |
+| --- | --- | ---: | ---: | --- | ---: |
+| 8 | （三）1 | 26.7 分 | 9 | C（有阻断）→ B | 5 |
+| 9 | （三）1 | 36.0 分 | 14 | B → B（标阻断） | 7 |
+| 10 | （三）1、2 | 4.1 + 31.4 分 | 1 + 12 | A、B → B、B | 1 + 4 |
+| 11 | （三）2、3 | 28.3 + 25.6 分 | 10 + 9 | B、B（有阻断）→ B、B | 3 + 5 |
+| 12 | （三）3、4 | 19.5 + 32.4 分 | 10 + 14 | B、B（有阻断）→ B、B | 3 + 3 |
+| 13 | （三）4、5、6 | 21.0 + 54.9 + 42.0 分 | 9 + 21 + 17 | 都是 B（（三）5 有阻断）→ 都是 B | 2 + 3 + 4 |
+| 15 | （三）6 | 12.1 分 | 5 | B → B | 2 |
+
+- **太 14 没有页面**：只有（三）6 里三分钟的一段转场，复述施洗约翰被杀，接着就讲 15:21。
+- **（三）1 有 11 个片段同时归太 8 和太 9**：他把 8:4 和 9:30 的「不要告诉人」放在一起讲。两页都放，不去重（4.5）。
+- **太 9 终审标的阻断成立**：S0226 他几乎逐字念了 4:23，幻灯只显示 9:35。两轮修正已用完，交负责人。另有两处经文显示范围偏宽：太 12（三）4 的可 3:28-30 在念到 30 节之前就整段出现；太 15 的 15:28 他只念了前半节，幻灯显示整节。
+- **太 12（三）4 第一次被程序拒收**：模型照他念的写「約翰壹書 1:9」，书名表只认「約翰一書」。补了旧版和合本的「壹／貳／參」写法后，用存下的同一份回答重新核对（提示词和留不留决定的 SHA 都与原来相同），没有再调用模型。
+
+**修的两处代码。** 写幻灯的提示词原来写死第五章，改为按章填写。经文全文原来逐节问 bible-api，被限流，太 8–15 的 285 节里 169 节一直取不到；每次请求都重问一遍，一页多等一秒，他念到哪一节也认不出来。现在先读 `bible/cuv/` 里存下的整章和合本。
 
 ## 七、不在本文范围
 

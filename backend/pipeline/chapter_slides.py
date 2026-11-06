@@ -4,7 +4,7 @@
 的呈现，（二）1 开头三分半讲登山宝训的结构，幻灯只剩一条。投影片要像查经 PPT
 那样，由模型读逐字稿写要点；**教授讲到、读到的经文必须显示在投影片上。**
 
-模型只给：每张投影片从哪一句开始、标题、要点、讲第五章哪几节、读到了哪些经文
+模型只给：每张投影片从哪一句开始、标题、要点、讲这一章哪几节、读到了哪些经文
 （在哪一句）。时间由程序按字的位置推算；经文全文由页面按出处去取，模型不抄经
 文。
 
@@ -40,9 +40,9 @@ DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 MOST_POINTS = 4
 FEWEST_POINTS = 2
 
-SYSTEM_PROMPT = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
+_SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
-使用者給你這一堂課裡解釋馬太福音第五章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
+使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
 
 分張：
 - 每張投影片從某一句開始（first），到下一張的第一句之前為止。第一張從第一句開始。
@@ -62,15 +62,22 @@ SYSTEM_PROMPT = """你在為王教授馬太福音講座的錄音配投影片。�
 
 title：這一張在講什麼，不超過 14 字，不加引號。
 
-scriptures：這一張裡教授（或會眾）讀出來、或幾乎逐字引用的每一處經文，一處都不能少——包括馬太福音第五章本身和別卷書，按出現順序。
+scriptures：這一張裡教授（或會眾）讀出來、或幾乎逐字引用的每一處經文，一處都不能少——包括馬太福音第 〈章〉 章本身和別卷書，按出現順序。
 - sentence 寫開始讀它的那一句；ref 寫書卷全名加章節，寫他實際讀的那幾節，如「以賽亞書 61:1-2」。
 - 只提到書卷、章節而沒有讀出經文的不列（例如「如果你去看二十三章」）。
 - 同一段經文在同一張裡讀了幾次，只列第一次。
 - 經文全文由程序顯示，要點裡不必抄經文。
 
-verses：這一張在解釋第五章的哪幾節，格式「5:3-10」，幾處用逗號分開。講整篇登山寶訓結構的，寫「5:1-48」。
+verses：這一張在解釋第 〈章〉 章的哪幾節，格式「〈章〉:3-10」，幾處用逗號分開。講整章結構的，寫「〈整章〉」。
 
 用繁體中文。"""
+
+def system_prompt(chapter: Chapter) -> str:
+    """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
+
+    _, number, start, end = chapter_material.verse_range(chapter.passage)
+    return _SYSTEM_TEMPLATE.replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -334,8 +341,11 @@ def decide(
         return {"lecture": lecture, "status": "unchanged"}
     decisions_record = json.loads(decisions_path.read_text(encoding="utf-8"))
     kept = kept_pieces(decisions_record)
+    if not kept:
+        # 这一堂没有讲这一章（太 8–15 按念到的章连同前后一堂先跑留不留）。
+        return {"lecture": lecture, "status": "nothing_kept"}
     prompt = user_prompt(lecture, decisions_record)
-    response = client.generate_json(SYSTEM_PROMPT, prompt, RESPONSE_SCHEMA)
+    response = client.generate_json(system_prompt(chapter), prompt, RESPONSE_SCHEMA)
     return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""))
 
 
@@ -355,7 +365,7 @@ def save(
         "lecture": lecture,
         "decisions_sha256": decisions_sha(data_base_dir, chapter.passage, lecture),
         "model": model,
-        "prompt_sha256": hashlib.sha256((SYSTEM_PROMPT + "\n" + prompt).encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256((system_prompt(chapter) + "\n" + prompt).encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "slides": slides,
         "unshown_references": unshown,
@@ -425,7 +435,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
     "required": ["grade", "blocking", "findings"],
 }
 
-REVISE_PROMPT = SYSTEM_PROMPT + """
+_REVISE_TAIL = """
 
 這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。交回完整的一份投影片（不是只交改動的）。"""
 
@@ -522,7 +532,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
         + "\n\n審稿人的意見：\n" + findings
     )
-    response = client.generate_json(REVISE_PROMPT, prompt, RESPONSE_SCHEMA)
+    response = client.generate_json(system_prompt(chapter) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
