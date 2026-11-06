@@ -6,14 +6,15 @@ import { Suspense, useEffect, useState } from "react";
 import { SourceChips, type SourceCount } from "../navigation";
 
 /**
- * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写各来源各几篇，以及
- * 点进去是什么：按章页面、按段落原声，或讲道列表。
+ * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写这一章讲什么（有按章
+ * 页面的用那一页的标题），以及点进去是什么：逐节聆听、按段落原声；只有讲道的章不加标签。
+ * 不写各来源几篇——听的人不在乎（负责人 2026-11-05）。
  */
 
 type Chapter = {
   chapter: number;
   sources: SourceCount[];
-  page: { kind: "chapter" | "passages"; source: string } | null;
+  page: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video" } | null;
   articles: { title: string; href: string }[];
 };
 
@@ -27,7 +28,9 @@ export default function BookPage() {
   );
 }
 
-const PAGE_LABEL = { chapter: "按章頁面", passages: "按段落原聲" } as const;
+// 標籤寫點進去能做什麼，不寫頁面的內部名稱；錄像叫觀看，錄音叫聆聽（負責人 2026-11-05）。
+const pageLabel = (page: NonNullable<Chapter["page"]>) =>
+  page.kind === "passages" ? "按段落原聲" : page.media === "video" ? "逐節觀看" : "逐節聆聽";
 
 function BookChapters() {
   const slug = String(useParams()?.book ?? "");
@@ -99,27 +102,24 @@ function BookChapters() {
                       className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-5 py-4 text-stone-900 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
                     >
                       <span className="w-24 font-serif text-xl font-bold">第 {chapter.chapter} 章</span>
-                      <span className="flex flex-[1_1_320px] flex-wrap gap-x-3.5 gap-y-1.5 text-sm text-stone-700">
-                        {chapter.shown.map((item) => (
-                          <span key={item.name}>
-                            {item.name}{" "}
-                            <span className="font-mono text-stone-600">
-                              {item.count} {item.unit}
-                            </span>
-                          </span>
-                        ))}
+                      <span className="flex-[1_1_320px] text-[15px] text-stone-700">
+                        {/* 這一句是某個來源的講道講了什麼；沒選來源時寫出是哪個來源。 */}
+                        {page?.title ? (source ? page.title : `${page.source}：${page.title}`) : ""}
                       </span>
                       <span className="flex flex-wrap gap-2">
                         {chapter.articles.length > 0 && (
                           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[13px] font-medium text-amber-900">綜合文章</span>
                         )}
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[13px] ${
-                            page?.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
-                          }`}
-                        >
-                          {page ? PAGE_LABEL[page.kind] : "講道列表"}
-                        </span>
+                        {/* 沒有逐節聆聽的章不加標籤：「講道列表」什麼也沒告訴讀者（負責人 2026-11-05）。 */}
+                        {page && (
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[13px] ${
+                              page.kind === "chapter" ? "bg-stone-900 font-medium text-white" : "border border-stone-300 text-stone-700"
+                            }`}
+                          >
+                            {pageLabel(page)}
+                          </span>
+                        )}
                       </span>
                     </Link>
                   </li>
