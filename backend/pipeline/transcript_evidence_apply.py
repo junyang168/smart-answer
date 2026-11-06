@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|什麼|是什麼|還有什麼|問題在哪裡|問題在哪|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
 
 
 def calibrate(row, state, rule, new, document):
@@ -77,7 +77,11 @@ def calibrate(row, state, rule, new, document):
             'source_segment_index':p['index'], 'media_time':p.get('start_time'), 'media_end_time':p.get('end_time')})
     clock_segments = segments or [dict(media_time=new['paragraphs'][t['paragraph_key']].get('start_time'),
         media_end_time=new['paragraphs'][t['paragraph_key']].get('end_time')) for t in rule['segments']]
-    if not audio_position(f, clock_segments)['consistent']:
+    clock_fragment = f
+    if rule.get('legacy_clock') is not None:
+        from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+        clock_fragment = verified_legacy_interval(f, rule['legacy_clock'])
+    if not audio_position(clock_fragment, clock_segments)['consistent']:
         raise ValueError('calibrated location is outside the saved audio interval')
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
@@ -372,7 +376,21 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
     bounds = [m.binding(p) for p in paths]
     epochs = {snap(p)['body_sha256']: snap(p) for p in paths}
     calibration = m.read(calibration_path) if calibration_path else None
-    if calibration_path: bounds.append(m.binding(Path(calibration_path)))
+    if calibration_path:
+        bounds.append(m.binding(Path(calibration_path)))
+        witnesses = {}
+        for rule in calibration.get('fragments', {}).values():
+            proof = rule.get('legacy_clock')
+            if proof is None:
+                continue
+            for name in ('source_file', 'timeline_file', 'backup_manifest'):
+                bound = proof[name]
+                prior = witnesses.setdefault(bound['path'], bound)
+                if prior != bound:
+                    raise ValueError('legacy clock witness has conflicting file pins')
+        # Pin the material used by calibration through apply and readback, not
+        # just the JSON that happens to name it. Deduplicate shared witnesses.
+        bounds.extend(witnesses.values())
     report = compare(records, source_id=source_id, old_sources=list(epochs.values()),
                      new=new, document=m.read(path),calibration=calibration)
     records_binding = m.immutable(root/'records-before.json', records)

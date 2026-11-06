@@ -116,3 +116,86 @@ def test_bounded_local_fallback_requires_unique_time_and_context_supported_match
     assert result['alignment']['method']=='unique_context_time_bounded_short_match_v1'
     assert result['matched_deleted_character_count']==3
     verify_preview({'fragments':[{**result,'quote':quote,'old_media_time':10,'old_media_end_time':100}]},old,new,{'script':rows})
+
+
+@pytest.fixture
+def legacy_clock(tmp_path):
+    import json
+    from hashlib import sha256
+    from backend.pipeline import transcript_claim_migration as m
+    from backend.pipeline.transcript_evidence_apply import snap
+    item = 'lecture'
+    source = tmp_path / 'old.json'
+    source.write_text(json.dumps({'metadata': {'item': item}, 'script': [
+        {'index': '1', 'text': '這是有上下文的教授原話。', 'start_time': None, 'end_time': None}]}))
+    backup = tmp_path / 'backup'
+    timeline = backup / 'production/script' / (item + '.json')
+    timeline.parent.mkdir(parents=True)
+    timeline.write_text(json.dumps({'entries': [{'index': '1', 'start': '00:00:01,000', 'end': '00:00:05,000'}]}))
+    manifest = backup / 'backup.json'
+    manifest.write_text(json.dumps({'schema_version': 'transcript-promotion-backup.v1',
+        'intent': {'item': item}, 'files': {'production': {
+            'script/' + item + '.json': {'sha256': m.sha(timeline.read_bytes())}}}}))
+    old = snap(source)
+    f = {'source_sha256': old['body_sha256'], 'paragraph_key': 'S0001',
+         'source_segment_index': '1', 'paragraph_text_sha256': sha256('這是有上下文的教授原話。'.encode()).hexdigest(),
+         'verbatim_excerpt': '教授原話', 'media_time': None, 'media_end_time': None}
+    proof = {'item': item, 'source_file': m.binding(source), 'timeline_file': m.binding(timeline),
+             'backup_manifest': m.binding(manifest)}
+    return f, proof
+
+
+def test_verified_legacy_clock_is_recovered_without_editing_fragment(legacy_clock):
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    f, proof = legacy_clock
+    result = verified_legacy_interval(f, proof)
+    assert result['media_time'] == 0 and result['media_end_time'] == 5
+    assert f['media_time'] is None and f['media_end_time'] is None
+
+
+@pytest.mark.parametrize('field,value', [('source_sha256', 'wrong'), ('paragraph_key', 'S0002'),
+    ('source_segment_index', '9'), ('paragraph_text_sha256', 'wrong'),
+    ('verbatim_excerpt', '另一篇的內容'), ('media_time', 300)])
+def test_legacy_clock_never_changes_source_or_contradicts_existing_time(legacy_clock, field, value):
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    f, proof = legacy_clock
+    with pytest.raises(ValueError): verified_legacy_interval({**f, field: value}, proof)
+
+
+@pytest.mark.parametrize('name', ['source_file', 'timeline_file', 'backup_manifest'])
+def test_legacy_clock_requires_all_original_checksums(legacy_clock, name):
+    from pathlib import Path
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    f, proof = legacy_clock
+    Path(proof[name]['path']).write_text('{}')
+    with pytest.raises(ValueError): verified_legacy_interval(f, proof)
+
+
+def test_legacy_clock_cannot_use_another_timeline_even_with_matching_bytes(legacy_clock, tmp_path):
+    from pathlib import Path
+    from backend.pipeline import transcript_claim_migration as m
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    f, proof = legacy_clock
+    outside = tmp_path / 'another-timeline.json'
+    outside.write_bytes(Path(proof['timeline_file']['path']).read_bytes())
+    with pytest.raises(ValueError): verified_legacy_interval(f, {**proof, 'timeline_file': m.binding(outside)})
+
+
+def test_saved_locator_calibration_uses_verified_legacy_clock_and_keeps_bounds(legacy_clock):
+    from backend.pipeline import transcript_evidence_apply as a
+    f, proof = legacy_clock
+    new = snapshot([row('這是教授的原話。', 10, start_time=1, end_time=4)])
+    document = {'script': [row('這是教授的原話。', 10, start_time=1, end_time=4)]}
+    state = {'payload': f, 'revision': 2, 'content_sha256': 'before'}
+    rule = {'before_pin': [2, 'before'], 'target_source_sha256': new['body_sha256'],
+        'mode': 'relocate', 'reason': '精確原文與原始時間軸定位，尚未批准內容',
+        'legacy_clock': proof, 'segments': [{'paragraph_key': 'S0001', 'verbatim_excerpt': '教授的原話'}]}
+    original = {'record_key': 'source_fragments/F', 'status': 'located_review'}
+    result = a.calibrate(original, state, rule, new, document)
+    assert result['status'] == 'calibrated_rebind' and not result['content_approval_granted']
+    assert result['candidate_segments'][0]['media_time'] == 1
+    no_proof = {k: v for k, v in rule.items() if k != 'legacy_clock'}
+    with pytest.raises(ValueError, match='audio interval'): a.calibrate(original, state, no_proof, new, document)
+    outside = snapshot([row('這是教授的原話。', 10, start_time=300, end_time=310)])
+    with pytest.raises(ValueError, match='audio interval'):
+        a.calibrate(original, state, {**rule, 'target_source_sha256': outside['body_sha256']}, outside, document)

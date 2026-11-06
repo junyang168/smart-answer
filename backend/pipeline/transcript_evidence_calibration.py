@@ -28,6 +28,62 @@ def audio_position(fragment,segments):
         'new_intervals':[list(i) for i in intervals],'tolerance_seconds':TIME_TOLERANCE_SECONDS,'consistent':consistent}
 
 
+def verified_legacy_interval(fragment, proof):
+    """Recover absent legacy clocks from an exact source and verified backup.
+
+    This is a locator witness, not new recognition or content approval. Existing
+    clocks are never replaced; a changed source, timeline, paragraph or backup
+    is rejected before a technical relocation can use the recovered interval.
+    """
+    import copy
+    import hashlib
+    import json
+    from pathlib import Path
+    from backend.pipeline import source_reconciliation as source
+    from backend.api.sc_api.script_delta import ScriptDelta
+
+    for name in ('source_file', 'timeline_file', 'backup_manifest'):
+        source.verify_file(proof[name])
+    item = proof['item']
+    if not item or any(ch in item for ch in '/\\\x00'):
+        raise ValueError('invalid legacy clock item')
+    manifest_path = Path(proof['backup_manifest']['path'])
+    manifest = json.loads(manifest_path.read_bytes())
+    relative = 'script/' + item + '.json'
+    if (manifest.get('schema_version') != 'transcript-promotion-backup.v1'
+            or manifest['intent']['item'] != item
+            or manifest['files']['production'][relative]['sha256'] != proof['timeline_file']['file_sha256']
+            or Path(proof['timeline_file']['path']).resolve() != (manifest_path.parent / 'production' / relative).resolve()):
+        raise ValueError('legacy timeline is not the exact backed-up item')
+    old = source.source_snapshot(proof['source_file'])
+    paragraph = old['paragraphs'].get(fragment.get('paragraph_key'))
+    if (old['body_sha256'] != fragment.get('source_sha256') or not paragraph
+            or str(paragraph.get('index')) != str(fragment.get('source_segment_index'))
+            or hashlib.sha256(paragraph['text'].encode()).hexdigest() != fragment.get('paragraph_text_sha256')
+            or fragment.get('verbatim_excerpt') not in paragraph['text']):
+        raise ValueError('legacy clock source or fragment binding differs')
+    rows = copy.deepcopy(json.loads(Path(proof['source_file']['path']).read_bytes())['script'])
+    entries = json.loads(Path(proof['timeline_file']['path']).read_bytes())['entries']
+    entries = copy.deepcopy(entries)
+    for i, entry in enumerate(entries):
+        entry['next_item'] = entries[i + 1]['index'] if i + 1 < len(entries) else None
+    delta = ScriptDelta.__new__(ScriptDelta)
+    delta.timelineDictionary = {entry['index']: entry for entry in entries}
+    delta.add_timeline(rows)
+    matches = [row for row in rows if str(row['index']) == str(paragraph['index'])]
+    if len(matches) != 1:
+        raise ValueError('ambiguous legacy physical paragraph')
+    start, end = matches[0].get('start_time'), matches[0].get('end_time')
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or not 0 <= start < end:
+        raise ValueError('invalid recovered legacy interval')
+    for name in ('source_file', 'timeline_file', 'backup_manifest'):
+        source.verify_file(proof[name])
+    for name, value in [('media_time', start), ('media_end_time', end)]:
+        if fragment.get(name) is not None and fragment[name] != value:
+            raise ValueError('recovered legacy clock contradicts an existing clock')
+    return {**fragment, 'media_time': start, 'media_end_time': end}
+
+
 def source_references(text):
     return sorted(set(reference_slugs(text))|{ref for _,ref in spoken_references(text)})
 
