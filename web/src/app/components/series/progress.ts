@@ -34,3 +34,15 @@ export function deliveredOn(sermon: Sermon & { deliver_date?: string | null }): 
 export function day(value?: string | null): string {
   return value ? value.slice(0, 10) : "";
 }
+
+/**
+ * 同工認得的系列名稱。系列 id 是來源名（如「2011 NYSC 專題：馬太福音釋經（二）」），
+ * 同工按它找講道；title 多是給讀者的題目。只有當 title 本身就是更正過的來源名
+ * （以年份開頭）時用 title：（四）的 id 寫成 2016，實為 2014（負責人 2026-11-06），
+ * 而 id 也是講道錄音、Claim 來源的識別碼，不能改。
+ */
+export function seriesName(series: { id: string; title?: string | null }): { name: string; subtitle: string } {
+  const title = series.title ?? "";
+  if (title && title !== series.id && /^\d{4}/.test(title)) return { name: title, subtitle: "" };
+  return { name: series.id, subtitle: title && title !== series.id ? title : "" };
+}

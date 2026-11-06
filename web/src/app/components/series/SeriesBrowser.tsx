@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SermonSeries } from "@/app/interfaces/article";
-import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus } from "./progress";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, seriesName } from "./progress";
 
 /** 同工的系列總覽：每個系列幾篇已發佈、幾篇編輯中、幾篇待認領。 */
 
@@ -66,6 +66,7 @@ export const SeriesBrowser = () => {
       <ol className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
         {seriesList.map((series) => {
           const counts = countByStatus(series.sermons);
+          const { name, subtitle } = seriesName(series);
           return (
             <li key={series.id} className="border-t border-stone-100 first:border-t-0">
               <Link
@@ -75,10 +76,10 @@ export const SeriesBrowser = () => {
                 <span className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                   <span className="flex flex-col">
                     <span className="font-semibold text-stone-900">
-                      {series.id}
+                      {name}
                       <span className="ml-2 font-mono text-sm font-normal text-stone-500">{series.sermons.length} 篇</span>
                     </span>
-                    {series.title && series.title !== series.id ? <span className="text-sm text-stone-500">{series.title}</span> : null}
+                    {subtitle ? <span className="text-sm text-stone-500">{subtitle}</span> : null}
                   </span>
                   <Counts counts={counts} />
                 </span>

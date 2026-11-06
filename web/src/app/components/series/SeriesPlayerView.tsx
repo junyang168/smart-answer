@@ -6,7 +6,7 @@ import { notFound, useParams, useRouter, useSearchParams, usePathname } from "ne
 import { useEffect, useState } from "react";
 import { Check, Clipboard } from "lucide-react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
-import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn } from "./progress";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName } from "./progress";
 
 /** 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。 */
 
@@ -40,6 +40,7 @@ export const SeriesPlayerView = () => {
   if (!series) return <p className="py-20 text-center text-stone-600" role="status">正在讀取…</p>;
 
   const counts = countByStatus(series.sermons);
+  const { name, subtitle } = seriesName(series);
   const rows = series.sermons
     .map((sermon, index) => ({ sermon: sermon as Row, order: index + 1 }))
     .filter(({ sermon }) => !filter || sermon.status === filter);
@@ -84,8 +85,8 @@ export const SeriesPlayerView = () => {
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-stone-950">{series.id}</h1>
-          {series.title && series.title !== series.id ? <p className="mt-1 text-stone-600">{series.title}</p> : null}
+          <h1 className="text-3xl font-bold text-stone-950">{name}</h1>
+          {subtitle ? <p className="mt-1 text-stone-600">{subtitle}</p> : null}
         </div>
         <button
           type="button"
