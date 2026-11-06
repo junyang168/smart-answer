@@ -920,3 +920,33 @@ def test_publication_cannot_bypass_pending_time_quality_even_with_confirmed_text
     with pytest.raises(ReviewError,match='時間邊界'):
         store.publish('a','講道 test',op(doc))
     assert not (root/'script_published/講道 test.json').exists()
+
+
+def test_batch_new_draft_opens_unclaimed_and_retry_preserves_edits(setup):
+    from backend.pipeline.media_batch.stages import prepare_new_review_draft
+
+    store, root, source = setup
+    item = 'INGEST-test'
+    metadata = read(root / 'config/sermon.json')
+    metadata.append(dict(item=item, title='新講道', status='ready', assigned_to=None,
+                         media_ingest_source_sha256=read(source / 'full_transcript.json')['source_sha256']))
+    atomic(root / 'config/sermon.json', metadata)
+    prepare_new_review_draft(store, item, source)
+    doc = store.document('a', item)
+    assert doc['script'] and doc['can_claim'] and not doc['can_edit']
+    assert not doc['published'] and not doc['context']['reviews']
+    store.claim('a', item, op(doc, action='claim'))
+    doc = store.document('a', item)
+    store.mutate('a', item, op(doc, operations=[dict(kind='text', id='1', text='人工校對。', content_sha256=doc['paragraph_shas']['1'])]))
+    before = store.document('a', item)
+    prepare_new_review_draft(store, item, source)
+    assert store.document('a', item) == before
+
+
+def test_batch_cannot_initialize_existing_sermon(setup):
+    from backend.pipeline.media_batch.stages import prepare_new_review_draft
+
+    store, root, source = setup
+    with pytest.raises(ReviewError, match='全新講道'):
+        prepare_new_review_draft(store, '講道 test', source)
+    assert not store.enabled('講道 test')

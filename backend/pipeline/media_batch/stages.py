@@ -241,7 +241,7 @@ def handoff(payload):
     result = export_handoff(out)
     register_catalog(payload)
     store = ReviewStore(root)
-    store.register_candidate(item, out, expected_script_sha256=None)
+    prepare_new_review_draft(store, item, out)
     result.update(
         item=item,
         editor_href="/admin/surmons/" + item,
@@ -249,6 +249,33 @@ def handoff(payload):
     )
     atomic(out / "review-receipt.json", result)
     return result
+
+
+def prepare_new_review_draft(store, item, out):
+    """Prepare only a batch-created empty draft; opening its editor needs no writes.
+
+    Retry after a successful import must preserve all subsequent human edits and
+    ownership. Existing sermons still use their separate explicit adoption flow.
+    """
+    from backend.api.sc_api.transcript_review import ReviewError, digest, read
+
+    _, meta = store.meta(item)
+    record = read(Path(out) / "full_transcript.json", {})
+    if (
+        not item.startswith("INGEST-")
+        or not record.get("source_sha256")
+        or meta.get("media_ingest_source_sha256") != record["source_sha256"]
+    ):
+        raise ReviewError(409, "僅可為本批次建立的全新講道準備草稿")
+    if store.enabled(item):
+        _, context = store.load(item)
+        if context.get("source_record_sha256") != digest(record):
+            raise ReviewError(409, "現有草稿與批次來源不同，拒絕取代")
+        return
+    # The existing importer checks empty baseline, human edits, ownership,
+    # publication, timing and source hashes, and records a recoverable revision.
+    store.register_candidate(item, out, expected_script_sha256=None)
+    store.import_candidate(item, Path(out), expected_script_sha256=None)
 
 
 def resolve_source(payload, store=None):
