@@ -846,6 +846,7 @@ const SlidePickerModal = ({
 interface SurmonEditorProps {
   item: string;
   viewChanges: boolean;
+  legacyView?: boolean;
 }
 
 interface UserProfile {
@@ -929,7 +930,7 @@ const getParagraphStartTime = (paragraph: SurmonScriptParagraph): number | null 
   return parseTimelineToSeconds(paragraph.start_timeline);
 };
 
-export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
+export const SurmonEditor = ({ item, viewChanges, legacyView = false }: SurmonEditorProps) => {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
 
@@ -1001,7 +1002,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const resolvedUserEmail = useMemo(() => sessionEmail ?? FALLBACK_USER_ID, [sessionEmail]);
 
-  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
+  const canEdit = Boolean(permissions?.canWrite && !viewChanges && !legacyView);
 
   const handleMediaRef = useCallback((element: HTMLVideoElement | HTMLAudioElement | null) => {
     mediaRef.current = element;
@@ -1225,13 +1226,16 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [openSlidePickerIndex, paragraphTimingData, timedParagraphs]);
 
   const fetchJSON = useCallback(async <T,>(url: string, init?: RequestInit) => {
+    if (legacyView && init?.method && init.method !== "GET" && init.method !== "HEAD") {
+      throw new Error("舊版稿件為唯讀");
+    }
     const response = await fetch(url, init);
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(`${response.status} ${response.statusText}${text ? `: ${text}` : ""}`);
     }
     return (await response.json()) as T;
-  }, []);
+  }, [legacyView]);
 
   const formatHistoryTimestamp = useCallback((value: string) => {
     if (!value) {
@@ -1535,8 +1539,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           `${API_PREFIX}/permissions/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}`
         ),
         fetchJSON<SurmonScriptResponse>(
-          `${API_PREFIX}/sermon/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}/${viewChanges ? "changes" : "no_changes"
-          }`
+          legacyView
+            ? `${API_PREFIX}/review_document/${encodeURIComponent(item)}/legacy?changes=${viewChanges}`
+            : `${API_PREFIX}/sermon/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}/${viewChanges ? "changes" : "no_changes"}`
         ),
       ]);
 
@@ -1565,7 +1570,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       const message = error instanceof Error ? error.message : "未知錯誤";
       setState({ status: "error", error: message, paragraphs: [] });
     }
-  }, [fetchJSON, item, refreshBookmark, resolvedUserEmail, viewChanges]);
+  }, [fetchJSON, item, refreshBookmark, resolvedUserEmail, viewChanges, legacyView]);
 
   const loadSlides = useCallback(async () => {
     if (slidesStatus === "loading" || slidesLoadedRef.current) {
@@ -3008,13 +3013,17 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   return (
     <>
       <div className="space-y-6">
+        {legacyView && <div className="flex items-center justify-between rounded-lg bg-amber-50 p-3 text-amber-900">
+          <span>舊版 Editor · 舊版資料（唯讀）</span>
+          <a className="text-blue-700 underline" href={`/admin/surmons/${encodeURIComponent(item)}`}>返回新版 Editor</a>
+        </div>}
         <div className="relative">
           <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-lg text-gray-600">{metadataDraft.title}</span>
             </div>
             <div className="flex-1" />
-            {resolvedUserEmail ? (
+            {resolvedUserEmail && !legacyView ? (
               <button
                 ref={historyButtonRef}
                 onClick={handleToggleHistory}
@@ -3030,7 +3039,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
             <button
               onClick={() =>
                 router.push(
-                  `/admin/surmons/${encodeURIComponent(item)}?view=${viewChanges ? "draft" : "changes"}`
+                  `/admin/surmons/${encodeURIComponent(item)}?view=${viewChanges ? "draft" : "changes"}${legacyView ? "&redirect=false" : ""}`
                 )
               }
               className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
@@ -3038,7 +3047,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
             >
               <RotateCcw className="w-4 h-4 mr-2" /> {viewChanges ? "返回編輯" : "查看差異"}
             </button>
-            {permissions?.canAssign || permissions?.canUnassign ? (
+            {!legacyView && (permissions?.canAssign || permissions?.canUnassign) ? (
               <button
                 onClick={handleAssignToggle}
                 className="inline-flex items-center px-2.5 py-1.5 font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
@@ -3047,7 +3056,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                 <UserPlus className="w-4 h-4 mr-2" /> {permissions.canAssign ? "認領" : "取消認領"}
               </button>
             ) : null}
-            {permissions?.canPublish ? (
+            {!legacyView && permissions?.canPublish ? (
               <button
                 onClick={handlePublish}
                 className="inline-flex items-center px-2.5 py-1.5 font-medium text-green-700 bg-green-100 border border-green-200 rounded-md hover:bg-green-200"

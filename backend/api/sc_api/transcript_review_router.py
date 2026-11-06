@@ -257,6 +257,18 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             return call(lambda: store.publish(actor, item, payload))
         raise HTTPException(404, "不支援的操作")
 
+    @router.get("/review_document/{item}/legacy")
+    def legacy_document(item: str, request: Request, changes: bool = False):
+        selected = call(lambda: store_for(item))
+        def result():
+            from .legacy_editor_snapshot import legacy_editor_document
+            selected.require(authenticated_actor(request), item)
+            try:
+                return legacy_editor_document(selected.root, item, changes=changes)
+            except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+                raise ReviewError(409, "舊稿備份無法讀取或校驗失敗；不會顯示新版稿件") from exc
+        return call(result)
+
     @router.get("/review_document/{item}/baseline")
     def baseline(item: str, request: Request):
         store = call(lambda: store_for(item))
