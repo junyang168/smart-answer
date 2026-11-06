@@ -257,6 +257,46 @@ def test_pause_cas_idempotency_and_unknown_call_not_retried(store, tmp_path):
     assert store.claim(b, "W") is None
 
 
+def test_budget_increase_is_audited_idempotent_and_keeps_original_usage(
+    store, tmp_path
+):
+    b, tid = task_fixture(store, tmp_path)
+    store.reserve(b, tid, "old", "gpt-6.1-sol", 9)
+    assert (
+        store.raise_budget(b, "owner-approved", 1, 12, "Owner approved completion") == 2
+    )
+    assert (
+        store.raise_budget(b, "owner-approved", 1, 12, "Owner approved completion") == 2
+    )
+    with pytest.raises(Conflict):
+        store.raise_budget(b, "other", 2, 11, "not an increase")
+    with pytest.raises(Conflict):
+        store.raise_budget(b, "stale", 1, 13, "stale revision")
+    store.reserve(b, tid, "new", "gemini", 3)
+    with pytest.raises(Conflict):
+        store.reserve(b, tid, "over", "gemini", 0.01)
+    with store.connection() as c:
+        row = c.execute(
+            "SELECT * FROM media_ingest.batches WHERE id=%s", (b,)
+        ).fetchone()
+        assert (
+            row["config"]["budget_usd"] == 10
+            and row["calls"] == 2
+            and row["reserved_usd"] == 12
+        )
+        assert row["config"]["max_calls"] == 10
+        assert (
+            len(
+                list(
+                    c.execute(
+                        "SELECT * FROM media_ingest.controls WHERE batch=%s", (b,)
+                    )
+                )
+            )
+            == 1
+        )
+
+
 def test_budget_reservation_atomic_across_workers(store, tmp_path):
     b, tid = task_fixture(store, tmp_path)
     with store.connection() as c:

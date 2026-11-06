@@ -67,6 +67,7 @@ def main():
         "resume",
         "retry",
         "reconcile",
+        "raise-budget",
     ):
         cmd = sub.add_parser(name)
         cmd.add_argument("--batch", required=name != "status")
@@ -77,9 +78,12 @@ def main():
                 action="store_true",
                 help="Exit when no more work is runnable; omit for a persistent UI-controlled controller",
             )
-        if name in ("pause", "resume", "retry", "stop"):
+        if name in ("pause", "resume", "retry", "stop", "raise-budget"):
             cmd.add_argument("--revision", type=int, required=True)
             cmd.add_argument("--operation", required=True)
+        if name == "raise-budget":
+            cmd.add_argument("--budget-usd", type=float, required=True)
+            cmd.add_argument("--reason", required=True)
     args = p.parse_args()
     store = Store()
     if args.command == "install":
@@ -204,6 +208,13 @@ def main():
         return
     if args.command == "reconcile":
         print(json.dumps(store.reconcile(args.batch)))
+        return
+    if args.command == "raise-budget":
+        print(
+            store.raise_budget(
+                args.batch, args.operation, args.revision, args.budget_usd, args.reason
+            )
+        )
         return
     if args.command in ("pause", "resume", "retry"):
         print(store.control(args.batch, args.operation, args.revision, args.command))

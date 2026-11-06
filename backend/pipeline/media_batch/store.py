@@ -167,6 +167,54 @@ class Store:
             )
             return revision + 1
 
+    def raise_budget(self, batch, operation, revision, budget_usd, reason):
+        """Append an authorized cap increase; never reset usage or source identity."""
+        import math
+
+        if not math.isfinite(budget_usd) or budget_usd <= 0 or not reason.strip():
+            raise ValueError("A positive budget and authorization reason are required")
+        request = dict(
+            action="raise-budget",
+            revision=revision,
+            budget_usd=budget_usd,
+            reason=reason,
+        )
+        with self.connection() as c:
+            b = c.execute(
+                "SELECT * FROM media_ingest.batches WHERE id=%s FOR UPDATE", (batch,)
+            ).fetchone()
+            if not b:
+                raise KeyError(batch)
+            prior = c.execute(
+                "SELECT * FROM media_ingest.controls WHERE batch=%s AND operation=%s",
+                (batch, operation),
+            ).fetchone()
+            if prior:
+                if prior["request"] != request:
+                    raise Conflict("Operation ID reused with different input")
+                return prior["revision"]
+            if b["revision"] != revision:
+                raise Conflict("Batch version changed; reload")
+            if budget_usd <= self.budget_limit(c, b):
+                raise Conflict("Budget adjustment must increase the current cap")
+            c.execute(
+                "INSERT INTO media_ingest.controls VALUES (%s,%s,%s,%s)",
+                (batch, operation, Jsonb(request), revision + 1),
+            )
+            c.execute(
+                "UPDATE media_ingest.batches SET revision=revision+1 WHERE id=%s",
+                (batch,),
+            )
+            return revision + 1
+
+    @staticmethod
+    def budget_limit(c, batch):
+        override = c.execute(
+            "SELECT max((request->>'budget_usd')::numeric) AS cap FROM media_ingest.controls WHERE batch=%s AND request->>'action'='raise-budget'",
+            (batch["id"],),
+        ).fetchone()["cap"]
+        return max(float(batch["config"]["budget_usd"]), float(override or 0))
+
     def reconcile(self, batch):
         from .runtime import lock_held
 
@@ -232,10 +280,9 @@ class Store:
 
                 raise WaitingCapacity("Batch paused before dispatch")
             cfg = b["config"]
-            if (
-                b["calls"] >= cfg["max_calls"]
-                or float(b["reserved_usd"]) + usd > cfg["budget_usd"]
-            ):
+            if b["calls"] >= cfg["max_calls"] or float(
+                b["reserved_usd"]
+            ) + usd > self.budget_limit(c, b):
                 raise Conflict("Batch call/cost reservation exhausted")
             c.execute(
                 "INSERT INTO media_ingest.calls(id,batch,task,model,reserved_usd,state) VALUES (%s,%s,%s,%s,%s,'unknown')",
