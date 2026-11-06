@@ -126,13 +126,16 @@ final class RemoteClient: NSObject, NetServiceBrowserDelegate, NetServiceDelegat
             disconnect("正在驗證主電腦…")
             let savedToken: String?
             do { savedToken = try store.load(fingerprint) }
-            catch { status = error.localizedDescription; changed(); return }
+            catch { status = error.localizedDescription; resetVideo(status); changed(); return }
             guard scope.select(endpoint: endpoint, fingerprint: fingerprint, savedToken: savedToken) else { return }
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 5; config.timeoutIntervalForResource = 10
             config.httpShouldSetCookies = false; config.urlCache = nil
             session = URLSession(configuration: config, delegate: PinnedSessionDelegate(scope: scope), delegateQueue: .main)
             status = paired ? "正在重連已配對主電腦…" : "請輸入主電腦的六位數配對碼。"
+            // Discovery/pin selection is complete. Do not leave the central
+            // viewer saying it is verifying while the footer requests pairing.
+            resetVideo(status)
             changed(); poll(); return
         }
     }
