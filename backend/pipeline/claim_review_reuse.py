@@ -101,7 +101,7 @@ def literal_fragment_rebinding(before, after):
             == {k:v for k,v in after.items() if k not in locator_fields})
 
 
-def _program_locator_rebinding(store, record, before, after, sources, records, *, cursor=None):
+def _program_locator_rebinding(store, record, before, after, sources, records, *, cursor=None, reviewed_records=None):
     """Preserve an old vote only across provably content-neutral locator work."""
     if before['retired'] or after['retired']:return None
     a,b=before['payload'],after['payload']
@@ -110,34 +110,64 @@ def _program_locator_rebinding(store, record, before, after, sources, records, *
         if {k:v for k,v in a.items() if k not in {'revision','occurrences'}} != {
                 k:v for k,v in b.items() if k not in {'revision','occurrences'}}:return None
         payloads={k:v['payload'] for k,v in records.items()}
-        own=cm.own_source_ids(a,payloads)
-        if len(own)!=1 or own!=cm.own_source_ids(b,payloads) or not own<=sources.keys():return None
+        # Reference Claims are leaves: their private Evidence is deliberately
+        # absent. Ownership here comes only from unchanged declared occurrences.
+        def declared(value):
+            return cm.own_source_ids({'claim_id':value['claim_id'],
+                'source_id':value.get('source_id'),'occurrences':value.get('occurrences',[])},payloads)
+        own=declared(a)
+        if len(own)!=1 or own!=declared(b) or not own<=sources.keys():return None
         sid=next(iter(own))
         if cursor is None:
             with store.connect() as conn,conn.cursor() as cursor:
-                return _program_locator_rebinding(store,record,before,after,sources,records,cursor=cursor)
+                return _program_locator_rebinding(store,record,before,after,sources,records,cursor=cursor,reviewed_records=reviewed_records)
         from backend.pipeline.claim_source_epoch_reassessment import _locator_lineage
         history=_locator_lineage(cursor,record.split('/',1)[1],before['revision'],
             (a,before['content_sha256'],'applied'),after,sid)
         if history:return {**common,'kind':'verified_claim_anchor_sync','source_id':sid,
                            'lineage_sha256':cm.sha256_json(history)}
     elif record.startswith('source_fragments/'):
-        # Same paragraph, same words and same timing: only an index's scalar
-        # type and stale hash/status metadata are normalized. A relocation,
-        # changed quotation or new source still needs independent review.
-        fields={'revision','source_segment_index','source_sha256','source_binding_status'}
+        # Paragraph, timing and every substantive field stay exact. Literal
+        # calibration may remove only a trailing full stop/closing CJK quote;
+        # question/exclamation marks and every word remain untouched.
+        fields={'revision','source_segment_index','source_sha256','source_binding_status',
+                'verbatim_excerpt','verbatim_excerpt_sha256','paragraph_text_sha256','speaker'}
         sid=a.get('source_id');snapshot=sources.get(sid,{})
+        paragraph=snapshot.get('paragraphs',{}).get(str(a.get('paragraph_key')),{});text=paragraph.get('text','')
+        old_quote,quote=a.get('verbatim_excerpt'),b.get('verbatim_excerpt')
+        if not all(isinstance(q,str) and q.strip() and q in text for q in (old_quote,quote)):return None
+        punctuation=old_quote!=quote
+        if punctuation:
+            core=old_quote.rstrip(' \t\r\n。.」')
+            if not core or core!=quote.rstrip(' \t\r\n。.」') or text.count(core)!=1:return None
         old_index,new_index=a.get('source_segment_index'),b.get('source_segment_index')
         same_index=(type(old_index) is type(new_index) and old_index==new_index
-            or type(old_index) is int and isinstance(new_index,str) and new_index==str(old_index))
-        quote=a.get('verbatim_excerpt');paragraph=snapshot.get('paragraphs',{}).get(str(a.get('paragraph_key')),{}).get('text','')
-        if (not sid or not isinstance(quote,str) or not quote.strip() or quote not in paragraph
+            or type(old_index) is int and isinstance(new_index,str) and new_index==str(old_index)
+            or paragraph.get('index') is not None and type(new_index) in (int,str)
+               and str(new_index)==str(paragraph['index']))
+        if (not sid or not same_index
                 or {k:v for k,v in a.items() if k not in fields}!={k:v for k,v in b.items() if k not in fields}
-                or not same_index
                 or a.get('source_binding_status') not in (None,'source_version_bound')
                 or b.get('source_binding_status')!='source_version_bound'
                 or not snapshot.get('body_sha256') or b.get('source_sha256')!=snapshot['body_sha256']):return None
-        return {**common,'kind':'same_position_fragment_metadata','source_id':sid}
+        for field,value in [('verbatim_excerpt_sha256',quote),('paragraph_text_sha256',text)]:
+            if b.get(field)!=a.get(field) and b.get(field)!=hashlib.sha256(value.encode()).hexdigest():return None
+        inherited=[]
+        if a.get('speaker')!=b.get('speaker'):
+            speaker=b.get('speaker');stance={'professor':'asserted','quoted_source':'quoted'}.get(speaker)
+            if a.get('speaker') is not None or stance is None or reviewed_records is None:return None
+            fid=record.split('/',1)[1]
+            for key,row in records.items():
+                if not key.startswith('evidence_steps/') or key not in reviewed_records:continue
+                old_step=reviewed_records[key]['payload'];step=row['payload']
+                refs=set(old_step.get('source_fragment_ids',[]))|{old_step.get('source_fragment_id')}
+                if (fid in refs and step.get('speaker')==speaker and step.get('stance')==stance
+                        and {k:v for k,v in old_step.items() if k!='revision'}=={k:v for k,v in step.items() if k!='revision'}):
+                    inherited.append(key)
+            if not inherited:return None
+        return {**common,'kind':'same_position_fragment_metadata','source_id':sid,
+                **({'literal_punctuation_projection':True} if punctuation else {}),
+                **({'speaker_inherited_from':sorted(inherited)} if inherited else {})}
     return None
 
 
@@ -258,7 +288,7 @@ def build(store, claim_id, run_id, *, peer_run_id=None):
         editorial = (record.startswith('source_documents/') and record.split('/', 1)[1] in sources
                      and changes <= {'source_file_sha256', 'editorial_structure_sha256', 'editorial_topology_sha256'})
         if (changes and not editorial) or a['retired'] != b['retired']:
-            if locator := _program_locator_rebinding(store,record,a,b,materials['sources'],current):
+            if locator := _program_locator_rebinding(store,record,a,b,materials['sources'],current,reviewed_records=old):
                 locator_rebindings[record]=locator
                 continue
             extension = (record.startswith('evidence_steps/') and owner_extension(pa, pb)
@@ -395,7 +425,7 @@ def verify(store, cursor, claim_id, proof):
         current={cm.source.key(*k):cm.model_state(v) for k,v in states.items()}
         for record,expected in locator_rebindings.items():
             if (record not in old or record not in current or
-                    _program_locator_rebinding(store,record,old[record],current[record],snapshots,current,cursor=cursor)!=expected):
+                    _program_locator_rebinding(store,record,old[record],current[record],snapshots,current,cursor=cursor,reviewed_records=old)!=expected):
                 raise ValueError('program locator qualification proof drift')
     resolved = {}
     if proof['contract'] == CONTEXT_CONTRACT:

@@ -701,3 +701,46 @@ def test_fragment_locator_index_normalization_is_not_arbitrary_string_coercion(o
         **payload,'source_segment_index':new_index,'source_sha256':'body','source_binding_status':'source_version_bound'}}
     sources={'S':{'body_sha256':'body','paragraphs':{'S0001':{'text':'same original words'}}}}
     assert bool(reuse._program_locator_rebinding(None,'source_fragments/F',before,after,sources,{})) is allowed
+
+
+@pytest.mark.parametrize('old_quote,new_quote,repeated,allowed',[
+    ('原話。','原話',False,True),('為何？」','為何？',False,True),
+    ('原話？','原話',False,False),('原話！','原話',False,False),
+    ('原話。','新話',False,False),('原話。','原話',True,False)])
+def test_program_quote_metadata_preserves_words_and_question_force(old_quote,new_quote,repeated,allowed):
+    import hashlib
+    text=old_quote+(' '+old_quote if repeated else '')
+    if new_quote not in text:text+=' '+new_quote
+    a={'fragment_id':'F','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':old_quote}
+    b={**a,'verbatim_excerpt':new_quote,'verbatim_excerpt_sha256':hashlib.sha256(new_quote.encode()).hexdigest(),
+       'source_sha256':'body','source_binding_status':'source_version_bound'}
+    source={'S':{'body_sha256':'body','paragraphs':{'S0001':{'text':text}}}}
+    states=lambda p,n:{'payload':p,'revision':n,'content_sha256':str(n),'retired':False}
+    result=reuse._program_locator_rebinding(None,'source_fragments/F',states(a,1),states(b,2),source,{})
+    assert bool(result) is allowed
+
+
+@pytest.mark.parametrize('defect',[None,'missing_old','changed_words','wrong_old_speaker'])
+def test_fragment_speaker_fill_comes_only_from_unchanged_reviewed_evidence(defect):
+    a={'fragment_id':'F','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'原話。'}
+    b={**a,'speaker':'professor','source_sha256':'body','source_binding_status':'source_version_bound'}
+    state=lambda p,n:{'payload':p,'revision':n,'content_sha256':str(n),'retired':False}
+    step={'evidence_step_id':'E','statement':'原論證','speaker':'professor','stance':'asserted','source_fragment_ids':['F']}
+    current={'evidence_steps/E':state(step,1)}
+    old={} if defect=='missing_old' else {'evidence_steps/E':state(dict(step),1)}
+    if defect=='changed_words':old['evidence_steps/E']['payload']['statement']='另一個論證'
+    if defect=='wrong_old_speaker':old['evidence_steps/E']['payload']['speaker']='audience'
+    source={'S':{'body_sha256':'body','paragraphs':{'S0001':{'text':'原話。'}}}}
+    result=reuse._program_locator_rebinding(None,'source_fragments/F',state(a,1),state(b,2),source,current,reviewed_records=old)
+    assert bool(result) is (defect is None)
+
+
+def test_locator_history_does_not_expand_reference_claim_private_evidence(monkeypatch):
+    from backend.pipeline import claim_source_epoch_reassessment as epoch
+    calls=[]
+    monkeypatch.setattr(epoch,'_locator_lineage',lambda *args:calls.append(args) or ['verified-fixture-history'])
+    a={'claim_id':'REF','statement':'原判斷','occurrences':[{'source_id':'S'}],'evidence_step_ids':['PRIVATE_NOT_LOADED']}
+    b={**a,'occurrences':[{'source_id':'S','anchor_migration_notes':[]}]}
+    state=lambda p,n:{'payload':p,'revision':n,'content_sha256':str(n),'retired':False}
+    result=reuse._program_locator_rebinding(None,'claims/REF',state(a,1),state(b,2),{'S':{}},{},cursor=object())
+    assert result['kind']=='verified_claim_anchor_sync' and len(calls)==1
