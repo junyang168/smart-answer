@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing as mp
 import time
@@ -24,6 +25,21 @@ from backend.pipeline.media_batch.runtime import (
 )
 from backend.pipeline.media_batch.planner import plan
 from backend.pipeline.media_batch.stages import media
+
+
+def test_isolated_alignment_entrypoint_starts_without_loading_model():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "backend.pipeline.transcript_alignment_worker",
+            "--help",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--decode-profile" in result.stdout
 
 
 @pytest.fixture
