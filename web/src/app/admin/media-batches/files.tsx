@@ -245,14 +245,28 @@ export function MediaBatchFiles({
                         · {clock(Number(file.duration_seconds))}
                       </p>
                     )}
-                    {file.job_batch && (
-                      <Link
-                        className="mt-2 inline-block text-sm font-semibold text-indigo-700 underline"
-                        href={`/admin/media-batches/${file.job_batch}`}
-                      >
-                        查看階段進度
-                      </Link>
-                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-4">
+                      {file.item &&
+                        ["complete", "reused", "existing_transcript"].includes(
+                          file.state,
+                        ) && (
+                          <Link
+                            className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                            href={`/admin/surmons/${encodeURIComponent(file.item)}`}
+                            aria-label={`開啟校對：${file.title || file.item}`}
+                          >
+                            開啟校對
+                          </Link>
+                        )}
+                      {file.job_batch && (
+                        <Link
+                          className="text-sm font-semibold text-indigo-700 underline"
+                          href={`/admin/media-batches/${file.job_batch}`}
+                        >
+                          查看階段進度
+                        </Link>
+                      )}
+                    </div>
                     <p className="mt-1 break-all text-xs text-slate-500">
                       {file.path.includes("/")
                         ? file.path.slice(0, file.path.lastIndexOf("/"))
