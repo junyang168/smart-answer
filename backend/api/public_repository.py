@@ -164,7 +164,7 @@ def notes_pages() -> dict[tuple[str, int], dict[str, Any]]:
     """教授釋經筆記有按章页面的章（AI 朗读，`notes_chapters.json`）。"""
 
     from backend.api.config import DATA_BASE_PATH
-    from backend.pipeline import notes_chapter
+    from backend.pipeline import chapter_title, notes_chapter
     from backend.api.scripture import parse_reference
 
     pages: dict[tuple[str, int], dict[str, Any]] = {}
@@ -174,7 +174,8 @@ def notes_pages() -> dict[tuple[str, int], dict[str, Any]]:
             "kind": "chapter",
             "source": NOTES,
             "passage": chapter.passage,
-            "title": "",
+            # 跟讲道的按章页面一样，书卷页这一行写这一章讲什么（负责人 2026-11-06）。
+            "title": chapter_title.load(Path(DATA_BASE_PATH), chapter.passage, NOTES) or "",
             "media": "audio",
             "ai_voice": True,
         }
