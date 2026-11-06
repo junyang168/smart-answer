@@ -41,7 +41,7 @@ const resourceCardsData = [
   {
     icon: Mic,
     title: '講道中心',
-    description: `同工的編輯入口：各講道系列的認領、校對與發佈進度。`,
+    description: `同工利用 AI 整理、校對教授的音頻、視頻與筆記轉成的文字。`,
     link: '/resources/series',
     linkLabel: '進入講道中心',
     staffOnly: true, // 講道中心是同工的編輯入口（負責人 2026-11-06）
