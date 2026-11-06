@@ -322,7 +322,11 @@ def prepare(store,root,*,source_id,evidence_run,published,instruction):
         return saved
     if not instruction.strip():raise ValueError('owner direction required')
     er=m.read(evidence_run/'plan.json');history=store.get_change_history(er['change_set_id'])
-    if er['source_id']!=source_id or not history or history['status']!='applied':raise ValueError('missing applied Evidence handoff')
+    if er['source_id']!=source_id:raise ValueError('Evidence handoff source differs')
+    if not history or history['status']!='applied':
+        cm.source.verify_file(er['report'])
+        if m.read(er['report']['path'])['updates']:raise ValueError('missing applied Evidence handoff')
+        ea.verify(store,evidence_run)  # A fresh, exact no-op has no transaction history.
     cm.source.verify_file(er['records']);prior=m.read(er['records']['path'])
     records={cm.source.key(*k):cm.model_state(v) for k,v in store.read_affected_context([('source_documents',source_id)]).items()}
     source=records['source_documents/'+source_id]['payload'];current=m.binding(Path(source['source_path']));pub=m.binding(Path(published))
@@ -398,7 +402,8 @@ def main():
         p=prepare(store,args.root,source_id=args.source_id,evidence_run=args.evidence_run,published=args.published,instruction=args.instruction_file.read_text())
         r=m.read(p['report']['path']);print(json.dumps({'summary':r['summary'],'updated_claims':len(r['updates'])},ensure_ascii=False))
     elif args.command=='apply':
-        with ea.locks():result=apply(store,args.root)
+        plan=m.read(args.root/'plan.json');report=m.read(plan['report']['path'])
+        with ea.locks(plan['intent']['source_id'],record_keys=report['updates']):result=apply(store,args.root)
         print(json.dumps(result,ensure_ascii=False))
     else:print(json.dumps(verify(store,args.root),ensure_ascii=False))
 
