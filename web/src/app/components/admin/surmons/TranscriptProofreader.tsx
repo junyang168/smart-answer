@@ -1242,6 +1242,9 @@ function TranscriptProofreader({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a className={button} href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}>
+              舊版 Editor
+            </a>
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
             </button>

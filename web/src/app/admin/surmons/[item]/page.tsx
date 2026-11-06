@@ -35,11 +35,12 @@ export default async function SurmonEditorPage(props: PageProps) {
   const beta =
     process.env.NODE_ENV === "development" ||
     hasTranscriptBetaAccess(session?.user?.email, session?.user?.role);
-  const legacy = <SurmonEditor item={item} viewChanges={viewChanges} />;
+  const legacyView = query.redirect === "false";
+  const legacy = <SurmonEditor item={item} viewChanges={viewChanges} legacyView={legacyView} />;
 
   return (
     <Suspense fallback={<EditorFallback />}>
-      {beta ? (
+      {beta && !legacyView ? (
         <TranscriptReviewEntry
           item={item}
           legacy={legacy}
