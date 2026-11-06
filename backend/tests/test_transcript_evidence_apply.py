@@ -173,3 +173,27 @@ def test_rhetorical_fillers_are_context_and_not_evidence():
     assert report['updates']['source_fragments/F']['anchor_state'] == 'context_only'
     assert not a.context_only('這段經文很重要，因為它說明悔改的原因。')
     assert not a.context_only('不是因為每個人都得救。')
+    for text in ['什麼意思？','要怎麼樣？','小小問題。','就是這樣。']:
+        assert a.context_only(text)
+    assert not a.context_only('你們。')
+    assert not a.context_only('你們要將該撒的物歸給該撒。')
+    assert not a.context_only('撒都該人不相信復活，是什麼意思？')
+
+
+def test_calibrated_audience_turn_keeps_speaker_through_fragment_and_evidence():
+    from backend.tests.test_transcript_claim_migration import state
+    from backend.tests.test_transcript_evidence_migration import snapshot,row
+    rows=[row('**教授：**問題。\n\n**聽眾：**這是聽眾的回答。',start_time=1,end_time=5)]
+    new=snapshot(rows)
+    f={'fragment_id':'F','source_id':'S','source_sha256':'old','paragraph_key':'S0001',
+       'verbatim_excerpt':'舊辨識回答','media_time':1,'media_end_time':5}
+    before=state(f)
+    report=a.compare({'source_fragments/F':before,'evidence_steps/E':state({
+        'evidence_step_id':'E','source_fragment_ids':['F'],'statement':'既有陳述'})},
+        source_id='S',old_sources=[],new=new,document={'script':rows},calibration={'fragments':{
+            'source_fragments/F':{'before_pin':[before['revision'],before['content_sha256']],
+                'target_source_sha256':new['body_sha256'],'mode':'relocate','reason':'已核對相同回答位置',
+                'segments':[{'paragraph_key':'S0001','verbatim_excerpt':'**聽眾：**這是聽眾的回答。'}]}}})
+    assert report['updates']['source_fragments/F']['speaker']=='audience'
+    assert report['updates']['evidence_steps/E']['speaker']=='audience'
+    assert report['updates']['evidence_steps/E']['support_eligibility']=='withheld_unreviewed'

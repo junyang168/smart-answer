@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣)+',text))
 
 
 def calibrate(row, state, rule, new, document):
@@ -82,18 +82,21 @@ def calibrate(row, state, rule, new, document):
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
                 'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'}}
+    from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     return {**row, 'status':'calibrated_rebind', 'reason':rule['reason'],
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
         'target_paragraphs':[s['paragraph_key'] for s in segments], 'calibration_decision':rule,
-        'speaker_annotation':None, 'content_approval_granted':False}
+        'speaker_annotation':speaker_annotation(segments,new), 'content_approval_granted':False}
 
 
 def segment_fields(segment, new):
+    from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     p = new['paragraphs'][segment['paragraph_key']]; quote = segment['verbatim_excerpt']
+    annotation=speaker_annotation([segment],new) or {}
     return {k:segment[k] for k in ('paragraph_key','source_segment_index','verbatim_excerpt','media_time','media_end_time')} | {
         'source_sha256':new['body_sha256'], 'paragraph_text_sha256':m.sha(p['text'].encode()),
         'verbatim_excerpt_sha256':m.sha(quote.encode()), 'anchor_state':'source_version_bound',
-        'source_binding_status':'needs_claim_refresh'}
+        'source_binding_status':'needs_claim_refresh'} | annotation.get('proposed_fields',{})
 
 
 def snap(path):

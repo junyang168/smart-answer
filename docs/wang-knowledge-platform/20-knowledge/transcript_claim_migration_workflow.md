@@ -158,6 +158,8 @@ Evidence、Question、Observation、Position 的來源引用完整重綁；需�
 出現位置時逐一保存選擇，不任取一次。CVP／Route 的舊引用不在此獲得新資格。
 
 「很重要」「有沒有聽懂？」「對不對？」等獨立強調或確認語，標 `anchor_state=context_only`。
+完整片段只有「什麼意思？」「要怎麼樣？」「就是這樣。」等無獨立論斷的提示語時，同樣只保留語境；
+含實質問題的句子不套用此規則。「你們」可能是所引經文的對象用詞，不當作通用口頭語排除。
 Evidence 從有效 `source_fragment_ids` 移出它們，另存 `context_fragment_ids`，並撤回
 支持資格；Question 的課堂語境仍保留。只做有限的完整字面規則，不因一段實質論述
 含有「很重要」就移除整段。整條 Evidence 只剩這些話時標 `source_binding_status=context_only`。
@@ -191,6 +193,10 @@ backend/.venv/bin/python -m backend.pipeline.transcript_claim_anchor_sync verify
 新用字的 highlight 維持 proposed，Claim 的判斷、講者／論據角色及舊審核 provenance
 不改，也不新增審核事件或資格。已刪除或僅語境的引用移出有效 anchors，舊引文只在
 SQL 歷史與私有對照表保留，不放回目前 Claim 供下游當證據使用。
+
+技術校準後仍從實際來源切片計算講者，包含拆出的 atomic 片段；片段以自己的
+`**聽眾：**` 標記開頭時，不繼承片段外上一個教授回合的身份。多個回合混合則保留多人對話，
+不把同段教授重複聽眾的短答當作同一位講者。此標記不授予聽眾話語作教授主張證據的資格。
 
 儲存層以 `wang_transcript_claim_anchor_sync_v1` 的精確 adapter 重新計算整份定位投影，
 拒絕額外集合、Claim 文字或 annotation 變更、偽造 preimage、來源漂移及新的內容批准。
