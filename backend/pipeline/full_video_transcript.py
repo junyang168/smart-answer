@@ -68,7 +68,7 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
     v = video_stream or next(s for s in probe['streams'] if s['codec_type'] == 'audio')
     origin = float(probe['format'].get('start_time', v.get('start_time', 0)))
-    if video_stream and (abs(origin) > .001 or abs(float(v.get('start_time', 0))) > .001):
+    if video_stream and (abs(origin) > .001 or float(v.get('start_time', 0)) < -.001):
         raise ValueError('Nonzero movie origin needs an explicit source-clock mapping')
     decode_flags = ['-copyts'] + (['-start_at_zero'] if not video_stream and abs(origin) > .001 else [])
     subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', *decode_flags, '-i', str(video),
@@ -79,13 +79,21 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     usable = len(audio) // 16 * 16
     # Raw ADTS AAC has only an estimated container duration; decoded samples
     # establish the clock. Timestamped video still requires the strict check.
-    if probe['format'].get('format_name') != 'aac' and abs(usable / SR - float(probe['format']['duration'])) > .1:
+    audio_stream = next(s for s in probe['streams'] if s['codec_type'] == 'audio')
+    expected_audio_end = float(probe['format']['duration'])
+    if audio_stream.get('duration') is not None:
+        # A movie may legitimately retain a final silent picture after its
+        # audio track ends. Check the audio timeline, not the longest track.
+        expected_audio_end = float(audio_stream.get('start_time', 0)) + float(audio_stream['duration'])
+        if not video_stream and abs(origin) > .001:
+            expected_audio_end -= origin
+    if probe['format'].get('format_name') != 'aac' and abs(usable / SR - expected_audio_end) > .1:
         raise ValueError('Decoded sample clock differs from the media duration')
     result = {'schema_version': 'source-sample-clock.v1', 'lecture_id':video.stem, 'source_sha256': sha(video),
         'audio_sha256': sha(out / 'master.wav'), 'source_path': str(video.resolve()),
         'media_type': 'video' if video_stream else 'audio',
         'source_clock_mapping': {'policy': 'source-presentation-clock.v1', 'container_start_s': origin,
-                                 'presentation_origin_ms': 0, 'rebased_audio': not video_stream and abs(origin) > .001},
+                                 'presentation_origin_ms': 0, 'video_start_s': float(v.get('start_time', 0)) if video_stream else None, 'rebased_audio': not video_stream and abs(origin) > .001},
         'media_mime_type': mimetypes.guess_type(str(video))[0] or 'application/octet-stream',
         'samples': len(audio), 'covered_samples': usable, 'discarded_tail_samples': len(audio) - usable,
         'sample_rate': SR, 'duration_ms': sample_ms(usable), 'probe': probe, 'windows': []}
