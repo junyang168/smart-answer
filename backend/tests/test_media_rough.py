@@ -96,3 +96,13 @@ def test_raw_aac_uses_decoded_samples_not_estimated_container_duration(tmp_path)
     master = full.prepare(aac, tmp_path / "prepared")
     assert master["probe"]["format"]["format_name"] == "aac"
     assert 9900 < master["duration_ms"] < 10300
+
+
+def test_movie_picture_tail_does_not_reject_complete_audio_track(tmp_path):
+    import subprocess
+    source=tmp_path/'speech.wav';audio.write_audio(source,np.zeros(16000,dtype='<i2'))
+    movie=tmp_path/'movie.mp4'
+    subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=s=64x64:r=25:d=1.5','-i',str(source),'-c:v','libx264','-c:a','aac',str(movie)],check=True)
+    master=full.prepare(movie,tmp_path/'prepared')
+    assert 900<master['duration_ms']<1200
+    assert float(master['probe']['format']['duration'])>1.4
