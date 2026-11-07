@@ -52,7 +52,7 @@ def recorded_call(root, role, request, function, *, preflight=None):
     return response
 
 
-def load(store, evidence_ids):
+def load(store, evidence_ids, *, for_update=True):
     """Only requested Evidence, own fragments/documents, and direct consumers."""
     records = {}
     with store.connect() as conn, conn.cursor() as cursor:
@@ -74,7 +74,7 @@ def load(store, evidence_ids):
             row = records.get('evidence_steps/' + eid)
             if not row or row['retired']:
                 raise ValueError('missing or retired Evidence: ' + eid)
-            if row['payload'].get('review_status') in {'human_hold', 'approved', 'human_approved', 'rejected'}:
+            if for_update and row['payload'].get('review_status') in {'human_hold', 'approved', 'human_approved', 'rejected'}:
                 raise ValueError('protected Evidence decision: ' + eid)
         fetch('source_fragments', [fid for eid in evidence_ids
               for fid in evidence_fragment_ids(records['evidence_steps/' + eid]['payload'])])
@@ -330,7 +330,9 @@ def commit_verified(store, root):
     frozen = json.loads((root / 'before.json').read_text())
     records, sources = frozen['records'], frozen['sources']
     updates, fragments = result['updates'], result['new_fragments']
-    if result['status'] == 'verified' and updates:
+    retiring = result.get('retiring_keys', [])
+    source_kind = result['version']
+    if result['status'] == 'verified' and (updates or retiring):
         if (root / 'commit.json').exists():
             readback(store, result)
             result.update(applied=True, status='applied', commit=json.loads((root / 'commit.json').read_text()))
@@ -339,7 +341,7 @@ def commit_verified(store, root):
             intent = json.loads((root / 'commit-intent.json').read_text())
             history = store.get_change_history(intent['change_set_id'])
             if history and history['status'] == 'applied':
-                if history['source_kind'] != VERSION or history['fingerprint_sha256'] != intent['fingerprint_sha256']:
+                if history['source_kind'] != source_kind or history['fingerprint_sha256'] != intent['fingerprint_sha256']:
                     raise ValueError('saved SQL commit identity differs')
                 readback(store, result)
                 receipt = {'change_set_id': history['change_set_id'], 'summary': history['summary']}
@@ -351,16 +353,20 @@ def commit_verified(store, root):
             bound = source['file']
             if hashlib.sha256(Path(bound['path']).read_bytes()).hexdigest() != bound['file_sha256']:
                 raise ValueError('source changed before commit')
-        package = {'package_id': 'BU-' + digest([str(root), updates]),
-                   'evidence_steps': list(updates.values()), 'source_fragments': list(fragments.values())}
+        package = {'package_id': 'BU-' + digest([str(root), updates, retiring])}
+        for key, payload in {**updates, **fragments}.items():
+            package.setdefault(key.split('/', 1)[0], []).append(payload)
         pins = {tuple(k.split('/', 1)): (r['revision'], r['content_sha256'], r['retired'])
                 for k, r in records.items()}
         pins.update({tuple(k.split('/', 1)): None for k in fragments})
-        plan = store.plan_package(package, source_kind=VERSION)
+        pins.update({tuple(k.split('/', 1)): None for k in updates if k not in records})
+        plan = store.plan_package(package, source_kind=source_kind,
+                                  retiring_keys=[tuple(k.split('/', 1)) for k in retiring])
         save(root / 'commit-intent.json', {'change_set_id': plan.change_set_id,
              'fingerprint_sha256': plan.fingerprint_sha256})
         receipt = store.apply_plan(plan, expected_current_record_pins=pins,
-            metadata={'actor': 'evidence_refresh', 'reason': 'GPT disposed Jev findings; program verified source bindings',
+            expected_current_source_claims=result.get('source_claim_index'),
+            metadata={'actor': source_kind, 'reason': 'Bottom-up semantic decisions and program-verified postimages',
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)
         readback(store, result)
@@ -373,7 +379,11 @@ def readback(store, result):
         state = store.get_record_state(*key.split('/', 1))
         if (not state or state['retired'] or any(state['payload'].get(k) != v
                 for k, v in expected.items() if k != 'revision')):
-            raise ValueError('committed Evidence postimage differs: ' + key)
+            raise ValueError('committed content postimage differs: ' + key)
+    for key in result.get('retiring_keys', []):
+        state = store.get_record_state(*key.split('/', 1))
+        if not state or not state['retired']:
+            raise ValueError('relation retirement was not saved: ' + key)
 
 
 class Models:

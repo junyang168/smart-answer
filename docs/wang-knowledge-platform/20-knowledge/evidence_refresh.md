@@ -64,4 +64,5 @@ SQL 回執丟失時，先查該 ChangeSet 和實際後像，不再寫一次；�
 `needs_attention` 保留未解決原因，本清單不會部分提交。
 
 目前 Jev 的通用問題仍有已知漏判，沒有宣稱能取代所有內容審閱，也沒有隱藏的
-0.75 機率門檻。這個新步驟未接成整套 Claim refresh 或新建 Claim 流程。
+0.75 機率門檻。[新 Claim 入口](./claim_bottom_up_refresh.md) 接續本層處理主張、新建及關係；
+它仍是獨立的新流程，未授予舊 Claim Management 資格或正式啟用。

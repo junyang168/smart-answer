@@ -7994,6 +7994,7 @@ class PostgresKnowledgeStore:
         expected_current_claim_related_records: Optional[
             Mapping[str, Sequence[tuple[str, str, int, str]]]
         ] = None,
+        expected_current_source_claims: Optional[Mapping[str, Mapping[str, dict[str, Any]]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
         transaction_context: Any = None,
         _claim_evidence_source_queue_context: Optional[
@@ -8296,6 +8297,19 @@ class PostgresKnowledgeStore:
                         raise ChangeSetConflict(
                             f"Source generation changed before apply: {source_id}"
                         )
+                if expected_current_source_claims is not None:
+                    if plan.source_kind != 'claim_bottom_up_refresh_v1':
+                        raise ValueError('source Claim identity guard requires bottom-up Claim refresh')
+                    for source_id, expected in expected_current_source_claims.items():
+                        cursor.execute('''SELECT object_id,payload FROM wang_knowledge.objects
+                            WHERE collection='claims' AND retired_at IS NULL AND payload @> %s::jsonb''',
+                            (canonical_json({'occurrences': [{'source_id': source_id}]}),))
+                        actual = {oid: {'statement': p['statement'], 'attribution': p.get('attribution')}
+                                  for oid, p in cursor.fetchall()
+                                  if p.get('review_status') not in {'superseded', 'retired'}
+                                  and not p.get('superseded_by')}
+                        if actual != expected:
+                            raise ChangeSetConflict('source Claim identities or statements changed: ' + source_id)
                 if expected_current_claim_related_records is not None:
                     if plan.source_kind not in {
                         "legacy_adjudicated_withdrawn_review_reconciliation_v1",
