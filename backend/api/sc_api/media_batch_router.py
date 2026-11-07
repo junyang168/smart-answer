@@ -24,7 +24,9 @@ def create_media_batch_router(root, store_factory=Store):
             config = json.loads((Path(root) / "config/config.json").read_text())
         except (OSError, ValueError):
             raise HTTPException(503, "無法讀取角色設定")
-        if not user_roles(config, actor).intersection({"admin", "editor", "beta_tester"}):
+        if not user_roles(config, actor).intersection(
+            {"admin", "editor", "beta_tester"}
+        ):
             raise HTTPException(403, "需要編輯權限")
         return actor
 
@@ -57,6 +59,12 @@ def create_media_batch_router(root, store_factory=Store):
                         name: dict(unavailable=True)
                         for name in ("artifact_root", "media_root")
                     }
+            if result["selected"]:
+                from backend.pipeline.media_batch.preflight_report import load
+
+                report = load(root, result["selected"]["id"])
+                if report:
+                    result["preflight"] = report["summary"]
             return result
         except KeyError:
             raise HTTPException(404, "找不到批次")
@@ -67,6 +75,26 @@ def create_media_batch_router(root, store_factory=Store):
 
             logging.getLogger(__name__).exception("Media batch read failed")
             raise HTTPException(503, "暫時無法讀取批次台帳")
+
+    @router.get("/{batch}/preflight")
+    def preflight(batch: str):
+        from backend.pipeline.media_batch.preflight_report import load
+
+        try:
+            report = load(root, batch)
+        except (OSError, ValueError, KeyError):
+            raise HTTPException(409, "查重對照表版本不一致，請重新產生")
+        if not report:
+            raise HTTPException(404, "此批次尚無查重對照表")
+        return Response(
+            report["html"],
+            media_type="text/html",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.post("/{batch}/control")
     def control(batch: str, body: Control):
