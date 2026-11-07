@@ -9044,7 +9044,8 @@ class PostgresKnowledgeStore:
                 )
             allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
             if collection == 'knowledge_relations':
-                allowed_from, allowed_to = knowledge_relation_endpoints(relation_type)
+                allowed_from, allowed_to = knowledge_relation_endpoints(
+                    relation_type, flash=payload.get('record_namespace') == 'claim_update_flash_v1')
             if owners[from_id] not in allowed_from:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "

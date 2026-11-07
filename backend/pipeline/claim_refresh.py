@@ -458,6 +458,21 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
         return commit(store, root) if apply else e.publish(root, draft)
 
 
+def candidate_occurrences(candidate, records, sid):
+    result=anchors(candidate['evidence_step_ids'],records,sid)
+    for oid in candidate.get('_observation_ids',[]):
+        observation=records['observations/'+oid]['payload']
+        for fid in e.evidence_fragment_ids(observation):
+            fragment=records['source_fragments/'+fid]['payload']
+            if fragment['source_id']!=sid:
+                raise ValueError('Claim Observation crosses a source boundary')
+            result[0]['anchors'].append({'observation_id':oid,'source_fragment_id':fid,
+                'paragraph_key':fragment['paragraph_key'],'media_time':fragment.get('media_time'),
+                'media_end_time':fragment.get('media_end_time'),
+                'proposed_highlight':{'text':fragment['verbatim_excerpt'],'status':'proposed'}})
+    return result
+
+
 def commit(store, root):
     if (root / 'verification.json').exists():
         return e.commit_verified(store, root)
@@ -476,7 +491,7 @@ def commit(store, root):
         updates['claims/' + cid] = {'claim_id': cid, 'statement': candidate['statement'],
             'claim_type': 'interpretive_judgment', 'attribution': 'professor',
             'evidence_step_ids': candidate['evidence_step_ids'], 'scripture_refs': candidate['scripture_refs'],
-            'occurrences': anchors(candidate['evidence_step_ids'], records, sid),
+            'occurrences': candidate_occurrences(candidate, records, sid),
             'review_status': 'candidate', 'maturity': 'candidate', 'visibility': 'internal', 'revision': 1}
     for relation in draft['new_relation_specs']:
         payload = deepcopy(relation)
@@ -487,6 +502,8 @@ def commit(store, root):
         updates['claim_relations/' + rid] = payload
     for relation in draft.get('new_knowledge_relation_specs',[]):
         payload=deepcopy(relation)
+        payload['from_id']=aliases.get(payload['from_id'],payload['from_id'])
+        payload['to_id']=aliases.get(payload['to_id'],payload['to_id'])
         rid='ER-BU-'+e.digest([sid,payload['from_id'],payload['to_id'],payload['relation_type']])[:32]
         payload.update(relation_id=rid,review_status='candidate',visibility='internal',revision=1)
         updates['knowledge_relations/'+rid]=payload

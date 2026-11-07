@@ -7,8 +7,8 @@
 > **權威範圍**：新自下而上流程的 Evidence 修復步驟；不取代 Claim 資格、CVP 或來源校訂規範。
 
 
-下一階段目標見 [Claim Update Flash](./claim_update_flash.md)。本文記錄現有試驗入口；
-全來源下層檢查、分項 Jev 問題及新分工尚未完整實作。
+新的獨立入口見 [Claim Update Flash](./claim_update_flash.md)。本文仍記錄原試驗入口；
+不會自動啟用 Flash 的全來源下層檢查、分項 Jev 問題及新分工。
 
 ## 目標
 

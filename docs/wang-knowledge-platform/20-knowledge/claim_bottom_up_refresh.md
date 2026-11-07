@@ -7,8 +7,8 @@
 > **權威範圍**：新入口的材料、模型分工與保存方式；不授予舊 Claim Management 審閱資格，不維護 CVP。
 
 
-下一階段目標見 [Claim Update Flash](./claim_update_flash.md)。本文記錄現有試驗入口；
-全來源下層檢查、分項 Jev 問題及新分工尚未完整實作。
+新的獨立入口見 [Claim Update Flash](./claim_update_flash.md)。本文仍記錄原試驗入口；
+不會自動啟用 Flash 的全來源下層檢查、分項 Jev 問題及新分工。
 
 ## Claim 層
 

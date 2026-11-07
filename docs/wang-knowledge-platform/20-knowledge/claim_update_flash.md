@@ -2,8 +2,8 @@
 
 > **讀者**：Developer、流程設計者
 > **類型**：流程
-> **狀態**：當前目標設計；尚未完整實作，不是正式執行入口
-> **與代碼對齊**：2026-11-07 核對至 `be1916b8`；下列目標與現有實作差距見末節。
+> **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
+> **與代碼對齊**：2026-11-07，核對 #702 工作樹的 `claim_update_flash.py`、`claim_flash_lower.py`、`claim_flash_pairs.py` 與測試。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -28,7 +28,7 @@ Claim 層消費已完成結果，分開檢查 statement、下層連接及 Claim 
 
 成效以實際輸入量、模型調用、耗時、重複檢查及人工處置量比較，並用已知錯誤與安全反例
 驗證主張、經文、論據與關係沒有遺失；不能只以速度、卡片數量或模型判定一致作成功標準。
-具體流程與尚未實作的差距分列如下。
+具體流程、執行方式與尚待真實模型驗證的範圍分列如下。
 
 ## 目錄
 
@@ -40,7 +40,7 @@ Claim 層消費已完成結果，分開檢查 statement、下層連接及 Claim 
 - [4. Claim 層](#4-claim-層)
 - [5. Claim ↔ Claim 關係：獨立 Jev call](#5-claim--claim-關係獨立-jev-call)
 - [6. Payload、並行與完成](#6-payload並行與完成)
-- [7. 與現有實作的差距](#7-與現有實作的差距)
+- [7. 實作與使用](#7-實作與使用)
 
 ## 1. 目標與分工
 
@@ -195,7 +195,10 @@ Jev 判定是否成立、類型、方向及既有理由是否有效，允許無�
 
 所有層均按實際序列化請求大小與完整支持單元分批，不按 Claim 數估算大小，
 不截斷一項的支持清單。共用材料在一請求中只提供一次，多問題共享；
-第 2 節之外各層的具體 byte 上限與批量仍須按實作及測試確定，不借用舊值宣稱已完成。
+Flash 的 Jev task packet 上限沿用 40,000 bytes；GPT 完整 task packet 預設最多
+60,000 bytes、四項工作，兩個條件共同限制。查漏材料另外按最多四項候選切分，
+不是四條 Claim 就能任意塞入整篇材料。這些是保守的本地限制，不是供應商上限，
+仍須用真實模型耗時與漏判情況校準。
 原文覆蓋檢查按自然論述段落，跨段依賴須完整帶入並記錄覆蓋，不能因分批漏查。
 
 GPT 同時按輸入大小與任務負擔分批；Claim 數少不代表問題少。
@@ -227,17 +230,59 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 結果未知不自動重發，工程修復不等於內容通過。受影響項明確退回，不循環重審整篇。
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
-## 7. 與現有實作的差距
+## 7. 實作與使用
 
-現有試驗入口見 [Evidence 層的獨立修復](./evidence_refresh.md) 與
-[自下而上的 Claim 與關係更新](./claim_bottom_up_refresh.md)。兩份文件記錄既有入口，
-本文描述下一步目標，不能用本文宣稱程式已具備全部能力。
+追蹤：[#702](https://github.com/junyang168/smart-answer/issues/702)。前置來源 migration 及試驗入口
+來自 #546／PR #683。Flash 復用其來源綁定、引文投影、訂閱客戶端、容量限制、
+Claim 身分配置及 guarded transaction，不呼叫舊 Update executor。
+[Evidence 清單入口](./evidence_refresh.md) 和[先前 Claim 試驗入口](./claim_bottom_up_refresh.md)
+仍保留原行為，不自動切換到 Flash。
 
-- 原文 migration 已有機械校準與批量 Jev 變更影響判定，應復用。
-- Evidence 清單入口已能 Jev 預檢、GPT 處置及交易回讀；尚缺全來源 Evidence／Observation
-  清點、原文反向覆蓋檢查及完整獨立下層流程。
-- Claim 入口仍可按 Claim 組呼叫 Evidence 預檢，並在組內檢查附屬 Observation 等來源忠實性；
-  需搬至下層，讓上層只消費已完成結果。Question 原文忠實性屬下層，答案 Claim 連接屬上層。
-- Claim statement 分項問題、獨立下層配對檢查、全篇孤立記錄查漏、非孤立漏連檢查
-  及下層結論候選交接、GPT 缺失 Claim 關係發現與任務負擔分批，尚未完整落實。
-  現有關係模組仍列舉候選對交 Jev，不能冒稱已是本文分工。
+| 元件 | 責任 |
+| --- | --- |
+| `claim_flash_common.py` | 來源內清點、共享材料、大小與任務分批、保存及復用調用 |
+| `claim_flash_lower.py` | 全篇下層忠實性、原文反向覆蓋、下層連接、結論候選交接及完整結果核對 |
+| `claim_flash_pairs.py` | 獨立配對判定、GPT 最終處置、端點類型與既有禁止關係校驗 |
+| `claim_update_flash.py` | Claim 分項檢查、候選承載、孤立路由、非孤立漏接、問題答案及順序執行入口 |
+
+輸入是現有 `source_id` 與 Agent／負責人已選定的主題小組清單；程式不代替 Agent
+做新的語義分組，也不是跨來源的 scheduler。每組最多十條，預留最多兩個未使用位置供必要新建。
+清單內原 Claim 不可重複；同篇預設按清單順序，跨來源並行可由 Agent 使用不同 root，
+共享既有 GPT 容量設定。獨立同源單元可單獨調 `run_group`，呼叫者仍須先證明第 6 節的不重合條件。
+組交易只 pin 實際使用的物件，不因全篇清點就鎖定無關物件；新建 Claim 另沿用來源內身分核對。
+
+來源必須已登記為當前版本，片段必須已通過機械定位。原文改動時先沿既有 migration
+取得新舊來源及影響處置，再進 Flash；缺少舊版材料時不猜測 migration，也不偽稱已完成原文影響判定。
+Flash 的下層入口會在任何模型調用前核對現有綁定，有錯就明示需要機械校準。
+Question 的來源忠實性在下層；答案 Claim 連接在上層，避免每組重審提問。
+
+Claim–Observation 及其他跨層的直接關係使用既有 `knowledge_relations` 多型記錄，
+明示 `record_namespace=claim_update_flash_v1`，限定該 namespace 的合法端點擴展。
+其他 namespace 保持舊端點規則；沒有新增資料表或以 Observation 冒充 Evidence。
+新 Claim 的 Observation 來源也保存為實際來源錨點，不能只留一條沒有原文的關係。
+
+例如 `groups.json` 是 `[["第一組 Claim ID", "同組另一 ID"], ["第二組 ID"]]`：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
+  --source-id ACTUAL_SOURCE_ID \
+  --groups /absolute/path/groups.json \
+  --root /absolute/path/flash-run \
+  --capacity-file /absolute/path/shared-capacity.json \
+  --database-url ISOLATED_TEST_DATABASE_URL
+```
+
+預設不寫內容：預覽第一個有變更的下層階段；下層不需修改時，預覽第一組。
+不把未提交修改假裝成後組已讀到的資料。`--apply` 才依序提交下層與各組。
+同 root 接續復用已保存模型答覆及完成組；SQL 已提交但回執遺失時核對 ChangeSet，
+只補回執／回讀。未知模型調用仍不自動重發，輸入漂移不強交舊候選。
+
+收尾只按原清單與各組結果對帳，另對仍孤立的下層記錄作明確處置，不重審整篇 Claims。
+可獨立保留者記理由；GPT 判定仍需新 Claim 或材料不足者如實列為未解決，
+不為了宣稱完成越過新建上限或擅自補來源。`completed` 是這份清單的 Flash 流程完成，
+不是舊 Claim Management 審閱資格、人工批准或 CVP 已更新。
+
+目前以實際臨時 PostgreSQL、保存答覆的測試 provider 和歷史故障模式驗證機械流程，
+沒有在此實作工作中調用真實 Jev／GPT，也未更新正式內容。
+仍需真實模型小批試驗確認語義漏判、候選查重與 payload 設定；不能以 fake provider 測試
+通過宣稱模型審閱品質已證實。沒有實作以後台 Agent 自動修復所有內容歧義或無界追加模型。
