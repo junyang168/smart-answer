@@ -475,9 +475,9 @@ def test_far_orphan_candidates_are_routed_without_dumping_private_claim_graphs(s
     # Candidate planning needs only paragraph hints; source text is still in this same frozen source.
     records['evidence_steps/FAR']=p
     def choose(req):
-        if req['input']['task']=='orphan_candidates':
+        if req['input']['task']=='orphan_candidates_batched':
             jobs=req['input']['jobs']
-            assert all('evidence' not in c for j in jobs for c in j['target_claims'].values())
+            assert all('evidence' not in c for c in req['input']['candidate_claims'].values())
             return {'items':[{'job_id':j['job_id'],'pairs':[{'a':'evidence_steps/FAR','b':'claims/C','reason':'同篇相關結論。'}],
                 'unresolved_keys':[],'reason':'候選不是通過。'} for j in jobs]}
     # Provide the actual record material but remove its paragraph routing hint to force the fallback.
@@ -809,3 +809,37 @@ def test_candidate_quote_uses_existing_mechanical_newline_projection(sample):
     assert result['status']=='verified'
     assert '\n' in result['conclusion_candidates'][0]['quotes'][0]['quote']
     assert list((root/'lower/candidate-quote-projection/S0001').glob('*.json'))
+
+
+def test_orphan_routing_shares_source_summaries_for_four_records(sample):
+    store,root,_=complete(sample);records,sources=f.load_source(store,'S')
+    for i in range(5):
+        key='evidence_steps/FAR'+str(i);records[key]=deepcopy(records['evidence_steps/E'])
+        records[key]['payload']['evidence_step_id']='FAR'+str(i)
+    def reply(req):
+        assert req['input']['task']=='orphan_candidates_batched'
+        assert list(req['input']['candidate_claims'])==['claims/C']
+        return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[],'reason':'無合適候選。'} for j in req['input']['jobs']]}
+    ports=Ports(reply=reply)
+    from unittest.mock import patch
+    fn=flash.paragraph_keys
+    with patch.object(flash,'paragraph_keys',side_effect=lambda k,rs:set() if 'FAR' in k else fn(k,rs)):
+        flash.orphan_plan(records,sources,root/'orphans',ports)
+    calls=[q for role,q in ports.calls if role=='gpt']
+    assert len(calls)==2 and [len(q['input']['jobs']) for q in calls]==[4,1]
+
+
+def test_orphan_routing_reuses_complete_legacy_reference_chunks(sample):
+    store,root,_=complete(sample);records,sources=f.load_source(store,'S')
+    records['evidence_steps/FAR']=deepcopy(records['evidence_steps/E']);records['evidence_steps/FAR']['payload']['evidence_step_id']='FAR'
+    def reply(req):
+        return {'items':[{'job_id':j['job_id'],'pairs':[{'a':'evidence_steps/FAR','b':'claims/C','reason':'已找到候選。'}],
+            'unresolved_keys':[],'reason':'已完整考慮所列來源 Claim。'} for j in req['input']['jobs']]}
+    ports=Ports(reply=reply)
+    flash.discover(records,sources,['claims/C'],{'evidence_steps/FAR'},root/'orphans',ports,task='orphan_candidates')
+    count=len(ports.calls)
+    from unittest.mock import patch
+    fn=flash.paragraph_keys
+    with patch.object(flash,'paragraph_keys',side_effect=lambda k,rs:set() if 'FAR' in k else fn(k,rs)):
+        result=flash.orphan_plan(records,sources,root/'orphans',ports)
+    assert len(ports.calls)==count and result['pairs'] and result['reused_request_sha256']
