@@ -137,8 +137,10 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
             raise ValueError('Saved model response changed')
         return read_json(folder / 'response.json')
     states = [read_json(p) for p in (out / 'calls').glob('*/state.json')]
-    if any(s['status'] == 'sent_outcome_unknown' for s in states):
-        raise ValueError('Previous call outcome unknown; reconcile before another model call')
+    from backend.pipeline.media_batch.timeout_recovery import covered
+    for p in (out / 'calls').glob('*/state.json'):
+        if read_json(p)['status'] == 'sent_outcome_unknown' and not covered(out, p.parent, request):
+            raise ValueError('Previous call outcome unknown; reconcile before another model call')
     if len(states) >= max_calls or sum(s['reserved_usd'] for s in states) + reserved_usd > budget_usd:
         raise ValueError('Pilot call or cost reservation limit exhausted')
     admit()

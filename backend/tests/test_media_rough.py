@@ -241,3 +241,54 @@ def test_summary_locator_padding_is_exact_and_preserves_prose():
     value["passages"][0]["chunks"] = ["w03/chunk-99"]
     with pytest.raises(ValueError, match="unsupported"):
         rough.normalize_summary_locators(value, {"w03/chunk-003"})
+
+
+def test_timeout_retry_is_bounded_and_preserves_original_unknown(tmp_path, monkeypatch):
+    from backend.pipeline.media_batch.timeout_recovery import effective
+    from backend.pipeline.slide_change_pilot import object_sha
+
+    request = dict(model="gpt-transcribe", chunk="first")
+    folder = tmp_path / "calls" / object_sha(request)
+    atomic(folder / "request.json", request)
+    atomic(
+        folder / "state.json", dict(status="sent_outcome_unknown", reserved_usd=0.01)
+    )
+    before = (folder / "state.json").read_bytes()
+    with pytest.raises(ValueError, match="outcome unknown"):
+        audio._saved_call(tmp_path, dict(chunk="next"), 0.01, lambda: {})
+    atomic(
+        folder / "timeout-recovery.json",
+        dict(
+            schema_version="media-timeout-recovery.v1",
+            max_attempts=1,
+            original_request_sha256=object_sha(request),
+            unknown_state_sha256=file_sha(folder / "state.json"),
+            batch="B",
+            task="T",
+        ),
+    )
+    with pytest.raises(ValueError, match="original task"):
+        effective(tmp_path, request)
+    monkeypatch.setenv("MEDIA_BATCH_CONTEXT", json.dumps(dict(batch="B", task="T")))
+    retry = effective(tmp_path, request)
+    calls = []
+
+    def invoke():
+        calls.append(1)
+        return dict(text="recorded answer")
+
+    assert audio._saved_call(tmp_path, retry, 0.01, invoke)["text"] == "recorded answer"
+    assert audio._saved_call(tmp_path, retry, 0.01, invoke)["text"] == "recorded answer"
+    audio._saved_call(tmp_path, dict(chunk="next"), 0.01, invoke)
+    assert len(calls) == 2
+    assert (folder / "state.json").read_bytes() == before
+    # A failed retry cannot produce a third dispatch under the same authority.
+    target = tmp_path / "calls" / object_sha(retry)
+    atomic(
+        target / "state.json", dict(status="sent_outcome_unknown", reserved_usd=0.01)
+    )
+    with pytest.raises(ValueError, match="never resend"):
+        audio._saved_call(tmp_path, retry, 0.01, invoke)
+    with pytest.raises(ValueError, match="outcome unknown"):
+        audio._saved_call(tmp_path, dict(chunk="third"), 0.01, invoke)
+    assert len(calls) == 2
