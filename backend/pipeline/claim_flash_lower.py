@@ -259,12 +259,15 @@ def run(store, source_id, root, ports, *, apply=False):
                     support=[temp.get(k,k) for k in candidate.support_keys]
                     if len(set(support))!=len(support) or not set(support)<=local_keys|set(temp.values()):
                         raise ValueError('conclusion has unprovided or duplicate support')
+                    quote_projection=[]
                     for q in candidate.quotes:
                         if q.paragraph_key not in available:
                             raise ValueError('conclusion quoted an unprovided paragraph')
-                        if q.quote not in available[q.paragraph_key]['text']:
-                            raise ValueError('conclusion quote must be literal')
+                        supplied=q.quote
+                        q.quote=e.source_excerpt(supplied,available[q.paragraph_key]['text'],contract=e.SPAN_CONTRACT)
+                        quote_projection.append({'paragraph_key':q.paragraph_key,'supplied':supplied,'exact':q.quote})
                     value={**candidate.model_dump(),'support_keys':support,'source_id':source_id}
+                    e.save(root/'candidate-quote-projection'/item.job_id/(e.digest(value)+'.json'),quote_projection)
                     value['candidate_id']='J-'+e.digest(value)[:24]
                     if not any(x['candidate_id']==value['candidate_id'] for x in conclusions):
                         conclusions.append(value)

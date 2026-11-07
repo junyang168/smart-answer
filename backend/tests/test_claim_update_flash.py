@@ -786,3 +786,26 @@ def test_coverage_expands_bound_support_once_without_sending_old_draft(sample,fi
     assert result['status']==('verified' if final_action=='resolved' else 'needs_attention')
     tasks=[req['input']['task'] for role,req in ports.calls if role=='gpt']
     assert tasks==['lower_coverage','lower_coverage_context']
+
+
+def test_candidate_quote_uses_existing_mechanical_newline_projection(sample):
+    store,root,path=sample
+    import hashlib
+    raw=json.loads(path.read_text());raw['script'][0]['text']=raw['script'][0]['text'].replace('沒有聽從','沒有\n聽從')
+    path.write_text(json.dumps(raw,ensure_ascii=False))
+    doc=deepcopy(store.get_record_state('source_documents','S')['payload']);doc['source_file_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    snap=e.source_snapshot({'path':str(path),'file_sha256':doc['source_file_sha256']},source=doc);paragraph=snap['paragraphs']['S0001']
+    frag=deepcopy(store.get_record_state('source_fragments','F')['payload']);frag.update(source_sha256=snap['body_sha256'],
+        verbatim_excerpt=paragraph['text'],paragraph_text_sha256=hashlib.sha256(paragraph['text'].encode()).hexdigest(),
+        verbatim_excerpt_sha256=hashlib.sha256(paragraph['text'].encode()).hexdigest())
+    store.apply_plan(store.plan_package({'package_id':'newline-source','source_documents':[doc],'source_fragments':[frag]}))
+    def reply(req):
+        if req['input']['task']=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
+                'conclusions':[{'statement':'候選判斷。','support_keys':['evidence_steps/E'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],
+                    'reason':'交上層判斷。'}],'reason':'候選引文僅有換行差異。'} for j in req['input']['jobs']]}
+    result=lower.run(store,'S',root/'lower',Ports(choices={'conclusion_candidate':'yes'},reply=reply),apply=True)
+    assert result['status']=='verified'
+    assert '\n' in result['conclusion_candidates'][0]['quotes'][0]['quote']
+    assert list((root/'lower/candidate-quote-projection/S0001').glob('*.json'))
