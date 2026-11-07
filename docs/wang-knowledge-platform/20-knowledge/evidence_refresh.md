@@ -6,6 +6,10 @@
 > **與代碼對齊**：2026-11-07，核對同工作樹的 `backend/pipeline/evidence_refresh.py`；實測結果另存執行目錄，不代表正式資料已更新。
 > **權威範圍**：新自下而上流程的 Evidence 修復步驟；不取代 Claim 資格、CVP 或來源校訂規範。
 
+
+下一階段目標見 [Claim Update Flash](./claim_update_flash.md)。本文記錄現有試驗入口；
+全來源下層檢查、分項 Jev 問題及新分工尚未完整實作。
+
 ## 目標
 
 直接接收 Evidence ID 清單，完成「Jev 檢查 → GPT 修正 → 校驗與保存」。

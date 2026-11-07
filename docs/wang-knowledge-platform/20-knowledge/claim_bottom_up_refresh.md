@@ -6,6 +6,10 @@
 > **與代碼對齊**：2026-11-07，核對同工作樹 `claim_refresh.py` 與 `claim_relation_refresh.py`；尚未正式啟用。
 > **權威範圍**：新入口的材料、模型分工與保存方式；不授予舊 Claim Management 審閱資格，不維護 CVP。
 
+
+下一階段目標見 [Claim Update Flash](./claim_update_flash.md)。本文記錄現有試驗入口；
+全來源下層檢查、分項 Jev 問題及新分工尚未完整實作。
+
 ## Claim 層
 
 先完成 [Evidence 層](./evidence_refresh.md)，再讀取更新後的 Evidence。
