@@ -238,6 +238,77 @@ def task_fixture(store, tmp_path):
     return b, tid
 
 
+def test_unknown_phase_deferral_keeps_unknown_and_recording_dependencies(
+    store, tmp_path
+):
+    from backend.pipeline.media_batch.phase_recovery import defer_unknown_barrier
+    from backend.pipeline.media_batch.store import key
+
+    cfg = config(tmp_path)
+    cfg["mode"] = "rough"
+    b = store.batch(cfg)
+    out = tmp_path / "held"
+    with store.connection() as c:
+        for rid in ("held", "mts", "dw"):
+            c.execute(
+                "INSERT INTO media_ingest.recordings VALUES (%s,NULL,%s,%s,'{}')",
+                (rid, rid, rid),
+            )
+        held = store.task(
+            c, b, "held", "rough_asr", "all", "a", dict(out=str(out), phase=1)
+        )
+        summary = store.task(c, b, "held", "rough_summary", "all", "s", {}, [held])
+        mts = store.task(
+            c, b, "mts", "rough_prepare", "all", "p", dict(phase=2), [summary]
+        )
+        mts_summary = store.task(c, b, "mts", "rough_summary", "all", "s", {}, [mts])
+        dw = store.task(
+            c,
+            b,
+            "dw",
+            "rough_prepare",
+            "all",
+            "p",
+            dict(phase=3),
+            [summary, mts_summary],
+        )
+        c.execute(
+            "UPDATE media_ingest.tasks SET state='unknown_outcome' WHERE id=%s", (held,)
+        )
+        request = dict(model="asr", audio_sha="original")
+        call_root = out / "window" / "calls" / "saved"
+        atomic(call_root / "request.json", request)
+        atomic(call_root / "state.json", dict(status="sent_outcome_unknown"))
+        call = key([held, str(call_root.parent.parent.resolve()), request])
+        c.execute(
+            "INSERT INTO media_ingest.calls VALUES (%s,%s,%s,'asr',1,'unknown','{}',now())",
+            (call, b, held),
+        )
+    # A saved reply must be reconciled instead of bypassed.
+    atomic(call_root / "response.json", dict(text="saved"))
+    with pytest.raises(Conflict, match="reconciliation"):
+        defer_unknown_barrier(store, b, held, "defer-1")
+    (call_root / "response.json").unlink()
+    receipt = defer_unknown_barrier(store, b, held, "defer-1")
+    assert len(receipt["changes"]) == 2
+    assert defer_unknown_barrier(store, b, held, "defer-1") == receipt
+    with store.connection() as c:
+        tasks = {
+            r["id"]: r for r in c.execute("SELECT * FROM media_ingest.tasks").fetchall()
+        }
+        assert tasks[held]["state"] == "unknown_outcome"
+        assert tasks[summary]["dependencies"] == [held]
+        assert tasks[mts]["dependencies"] == []
+        assert tasks[dw]["dependencies"] == [mts_summary]
+        assert (
+            c.execute(
+                "SELECT state FROM media_ingest.calls WHERE id=%s", (call,)
+            ).fetchone()["state"]
+            == "unknown"
+        )
+    assert store.claim(b, "worker")["id"] == mts
+
+
 def test_claim_is_exclusive_versioned_and_progress_cannot_be_forged(store, tmp_path):
     b, tid = task_fixture(store, tmp_path)
     with ThreadPoolExecutor(4) as pool:
