@@ -298,6 +298,7 @@ def plan(store, folder, config):
                 ]
             )
             payload = dict(
+                recording=r["id"],
                 info=info,
                 item=r["item"],
                 out=str(artifact / r["id"] / binding[:16]),

@@ -169,7 +169,7 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
         return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd, admit=admit)
 
 
-def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
+def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | None = None) -> dict:
     config = asr_vocabulary_config(ASR_CONFIG, vocabulary)
     binding = {'vocabulary_hint': vocabulary_binding(vocabulary)} if vocabulary is not None else {}
     if (out / 'asr.json').exists():
@@ -181,6 +181,10 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
     load_dotenv(Path(__file__).resolve().parents[2] / '.env')
     client = OpenAI(timeout=180, max_retries=0)
     manifest = read_json(out / 'audio_manifest.json')
+    # A rough-stage cache retains its transport when the full pipeline reuses it.
+    previous = read_json(out / 'asr.json') if (out / 'asr.json').exists() else {}
+    transport = transport or previous.get('transport', 'wav')
+    if transport not in ('wav', 'mp3'): raise ValueError('Unknown ASR audio transport')
     chunks = []
     for chunk in manifest['chunks']:
         path = out / chunk['audio']
@@ -188,8 +192,24 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
             raise ValueError('Chunk changed since preparation')
         request = {'stage': 'asr', 'config': config, **binding, 'audio_sha256': chunk['audio_sha256'],
                    'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunk': chunk}
+        upload = path
+        if transport == 'mp3':
+            import subprocess
+            upload = path.with_suffix('.mp3')
+            transport_receipt=upload.with_suffix('.mp3.json')
+            if upload.exists():
+                saved_transport=read_json(transport_receipt)
+                if saved_transport != {'pcm_sha256':chunk['audio_sha256'],'mp3_sha256':file_sha(upload),'recipe':'mono-16000-lame-64k-v1'}:
+                    raise ValueError('Saved MP3 transport changed; do not resend ASR')
+            else:
+                subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-i',str(path),'-ac','1','-ar','16000','-c:a','libmp3lame','-b:a','64k',str(upload)],check=True)
+                save_json(transport_receipt,{'pcm_sha256':chunk['audio_sha256'],'mp3_sha256':file_sha(upload),'recipe':'mono-16000-lame-64k-v1'})
+            request['transport'] = {'format': 'mp3', 'sha256': file_sha(upload), 'recipe': 'mono-16000-lame-64k-v1'}
+        old_chunk=next((c for c in previous.get('chunks',[]) if c['id']==chunk['id']),None)
+        if old_chunk and old_chunk['request_sha256'] != object_sha(request):
+            raise ValueError('Saved ASR chunk input changed; do not resend')
         def invoke():
-            with path.open('rb') as stream:
+            with upload.open('rb') as stream:
                 return client.audio.transcriptions.create(file=stream, **config).model_dump(mode='json')
         response = saved_call(out, request, (chunk['end_ms'] - chunk['start_ms']) / 60000 * .01, invoke)
         if not isinstance(response.get('text'), str):
@@ -202,6 +222,7 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
     result = {'schema_version': 'audio-asr-pilot.v1', 'config': config, **binding,
               'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunks': chunks,
               'estimated_usd': sum(c['end_ms'] - c['start_ms'] for c in chunks) / 60000 * .0045,
+              'transport': transport,
               'pricing_as_of': '2026-10-27', 'pricing_source': 'https://developers.openai.com/api/docs/pricing'}
     save_json(out / 'asr.json', result)
     return result

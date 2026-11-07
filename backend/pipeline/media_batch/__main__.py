@@ -18,6 +18,11 @@ def main():
     )
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("install", help="Install isolated media_ingest schema")
+    rough = sub.add_parser(
+        "rough-plan", help="Freeze ASR-first preflight groups; never call models"
+    )
+    for name in ("report", "assembly", "source-root", "config"):
+        rough.add_argument("--" + name, type=Path, required=True)
     plan = sub.add_parser("plan")
     plan.add_argument("--folder", type=Path, required=True)
     plan.add_argument("--title")
@@ -87,6 +92,21 @@ def main():
             cmd.add_argument("--reason", required=True)
     args = p.parse_args()
     store = Store()
+    if args.command == "rough-plan":
+        from .rough_plan import create
+
+        print(
+            json.dumps(
+                create(
+                    store,
+                    args.report,
+                    args.assembly,
+                    args.source_root,
+                    json.loads(args.config.read_text()),
+                )
+            )
+        )
+        return
     if args.command == "install":
         store.install()
         return

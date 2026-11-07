@@ -86,7 +86,7 @@ class Store:
               WHERE bt.batch=%s AND b.desired='running' AND t.state='pending' AND t.not_before<=now()
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks d WHERE d.id=ANY(t.dependencies) AND d.state<>'complete')
                 AND NOT EXISTS (SELECT 1 FROM media_ingest.tasks a WHERE a.recording=t.recording AND a.state='running')
-              ORDER BY t.updated_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1""",
+              ORDER BY COALESCE((t.payload->>'queue_order')::int,2147483647),t.updated_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1""",
                 (batch,),
             ).fetchone()
             if row is None:

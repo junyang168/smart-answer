@@ -29,7 +29,7 @@ type Task = {
     at?: number;
     attempt_started_at?: number;
   };
-  result?: { editor_href?: string };
+  result?: { editor_href?: string; rough_href?: string };
 };
 type Recording = {
   id: string;
@@ -75,6 +75,9 @@ type Snapshot = {
   >;
 };
 const names: Record<string, string> = {
+  rough_prepare: "準備粗轉錄音訊",
+  rough_asr: "粗轉錄",
+  rough_summary: "整理內容概要",
   prepare: "準備音訊",
   visuals: "投影片與 OCR",
   speech: "轉錄與校字",
@@ -266,7 +269,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
           <p className="mt-2 text-sm text-slate-300">
             {run?.mode === "inventory"
               ? `${run.title} · 全部檔案的處理狀態與等待原因`
-              : "自動更新 · 關閉頁面後任務繼續執行"}
+              : run?.mode === "rough" ? "粗逐字稿與內容概要 · 未校對、未發布 · 關閉頁面後任務繼續執行" : "自動更新 · 關閉頁面後任務繼續執行"}
           </p>
         </div>
         <button
@@ -374,7 +377,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
             )}
             <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
               {[
-                ["轉錄與交接完成", `${summary.complete} / ${summary.total} 講`],
+                [run?.mode === "rough" ? "粗轉錄與概要完成" : "轉錄與交接完成", `${summary.complete} / ${summary.total} 講`],
                 ["處理中", summary.running],
                 [
                   "排隊／保留舊稿",
@@ -485,6 +488,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                   r.tasks[r.tasks.length - 1];
                 const link = r.tasks.find((t) => t.result?.editor_href)?.result
                   ?.editor_href;
+                const roughLink=r.tasks.find((t)=>t.result?.rough_href)?.result?.rough_href;
                 return (
                   <article
                     key={r.id}
@@ -499,6 +503,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                       </div>
                       <Work task={current} />
                       <div>
+                        {roughLink && (<a className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-indigo-700" href={roughLink} target="_blank" rel="noreferrer">查看粗逐字稿與概要</a>)}
                         {link && (
                           <Link
                             href={link}

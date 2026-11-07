@@ -20,6 +20,7 @@ const labels: Record<string, string> = {
   pending: "排隊",
   running: "處理中",
   complete: "已完成",
+  rough_complete: "粗轉錄完成",
   reused: "已沿用逐字稿",
   existing_transcript: "已有逐字稿",
   duplicate: "重複檔案",
@@ -31,6 +32,9 @@ const labels: Record<string, string> = {
   interrupted: "中斷待接續",
 };
 const stages: Record<string, string> = {
+  rough_prepare: "準備粗轉錄音訊",
+  rough_asr: "粗轉錄",
+  rough_summary: "整理內容概要",
   prepare: "準備音訊",
   visuals: "投影片與 OCR",
   speech: "轉錄與校字",
@@ -52,6 +56,7 @@ type File = {
   title?: string | null;
   duration_seconds?: string | null;
   job_batch?: string | null;
+  rough_href?: string | null;
   provenance?: {
     scope: string;
     range_start_ms: number;
@@ -258,6 +263,7 @@ export function MediaBatchFiles({
                             開啟校對
                           </Link>
                         )}
+                      {file.rough_href && (<a className="text-sm font-semibold text-indigo-700 underline" href={file.rough_href} target="_blank" rel="noreferrer">查看粗逐字稿與概要</a>)}
                       {file.job_batch && (
                         <Link
                           className="text-sm font-semibold text-indigo-700 underline"
