@@ -148,9 +148,12 @@ class SourceAlignment:
         result={**original,**candidate,'previous_reason':original['reason']}
         if not candidate['localized']:
             return {**result,'reason':'alignment_candidate_not_verified'}
-        if candidate['matched_deleted_character_count']:
+        if candidate['matched_deleted_character_count'] and not any(ch.isalnum() for ch in candidate['candidate_quote']):
             return {**result,'status':'source_deleted','reason':'aligned_bound_occurrence_soft_deleted',
                 'preserve_historical_quote':True,'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'}}
+        # Removing/replacing a word does not delete the entire occurrence.
+        if candidate['matched_deleted_character_count']:
+            return {**result,'status':'located_review','reason':'partial_deletion_has_live_candidate'}
         if candidate['change_flags']:
             return {**result,'status':'located_review','reason':'source_located_requires_refresh'}
         # An unchanged lexical sequence, exact boundaries and unique local
@@ -206,7 +209,9 @@ def verify_preview(report,old,new,document):
             counts['unique_anchor_bindings']+=1
         if row['status']=='auto_rebind':
             fields=row['proposed_fields'];paragraph=new['paragraphs'][fields['paragraph_key']]
-            unchanged=literal_layout(fields['verbatim_excerpt'])[0]==literal_layout(row['quote'])[0]
+            from backend.pipeline.transcript_evidence_migration import script_layout
+            layout = script_layout if str(row.get('match_basis','')).startswith('script_variant_only_') else literal_layout
+            unchanged=layout(fields['verbatim_excerpt'])[0]==layout(row['quote'])[0]
             projection=row.get('metadata_projection')
             if projection:
                 from backend.pipeline.transcript_evidence_calibration import content_quote

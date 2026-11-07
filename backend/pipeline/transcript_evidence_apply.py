@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|什麼|是什麼|還有什麼|還有其他的|問題在哪裡|問題在哪|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
 
 
 def calibrate(row, state, rule, new, document):
@@ -77,7 +77,11 @@ def calibrate(row, state, rule, new, document):
             'source_segment_index':p['index'], 'media_time':p.get('start_time'), 'media_end_time':p.get('end_time')})
     clock_segments = segments or [dict(media_time=new['paragraphs'][t['paragraph_key']].get('start_time'),
         media_end_time=new['paragraphs'][t['paragraph_key']].get('end_time')) for t in rule['segments']]
-    if not audio_position(f, clock_segments)['consistent']:
+    clock_fragment = f
+    if rule.get('legacy_clock') is not None:
+        from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+        clock_fragment = verified_legacy_interval(f, rule['legacy_clock'])
+    if not audio_position(clock_fragment, clock_segments)['consistent']:
         raise ValueError('calibrated location is outside the saved audio interval')
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
@@ -156,7 +160,7 @@ def fields_for(row, fragment, new):
     return fields, True
 
 
-def compare(records, *, source_id, old_sources, new, document, calibration=None):
+def compare(records, *, source_id, old_sources, new, document, calibration=None, live_candidates=False):
     """Combine historical epochs; retain all latest records, including new IDs."""
     reports = {}; audits = {}
     for old in old_sources:
@@ -184,6 +188,24 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None)
         row = deepcopy(row)
         if key in rules and not state.get('retired'):
             row = calibrate(row,state,rules[key],new,document)
+        if (live_candidates and row.get('reason') == 'partial_deletion_has_live_candidate'
+                and row.get('localized') and row.get('alignment', {}).get('left_anchor')
+                and row.get('alignment', {}).get('right_anchor')
+                and 0 < len(row.get('candidate_segments', [])) <= 4):
+            # Unique source-order flanks locate the passage, not its meaning.
+            # Bind its complete physical paragraphs provisionally; the optional
+            # whole-Evidence judgment below must still decide semantic impact.
+            segments = deepcopy(row['candidate_segments'])
+            if not row['alignment'].get('both_endpoints_matched'):
+                segments = []
+                for pk in dict.fromkeys(s['paragraph_key'] for s in row['candidate_segments']):
+                    p = new['paragraphs'][pk]
+                    segments.append({'paragraph_key':pk,'source_segment_index':p['index'],
+                        'verbatim_excerpt':p['text'],'live_start':0,'live_end':len(p['text']),
+                        'media_time':p.get('start_time'),'media_end_time':p.get('end_time')})
+            row.update(status='calibrated_rebind', candidate_segments=segments,
+                candidate_quote='\n'.join(s['verbatim_excerpt'] for s in segments),
+                recovery_basis='verified_unique_source_order_flanks', content_approval_granted=False)
         if state.get('retired'):
             row.update(status='retired', reason='history_only')
         elif (f.get('anchor_state') == 'source_deleted'
@@ -242,7 +264,7 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None)
             fk = 'source_fragments/'+fid
             if fk not in replacements:
                 result_ids.append(fid); continue
-            touched = True; rule = rules[fk]
+            touched = True; rule = rules.get(fk, {})
             indexes = rule.get('consumer_segments',{}).get(key,list(range(len(replacements[fk]))))
             if not indexes or any(i < 0 or i >= len(replacements[fk]) for i in indexes):
                 raise ValueError('consumer split selection is invalid')
@@ -326,7 +348,7 @@ def source_files_current(plan):
 
 def render_report(report, *, applied=False):
     labels = {'auto_rebind':'引文與定位搬遷','already_current':'已完成，保留',
-        'relocate_changed_quote':'新版原話／分段定位，待Claim更新',
+        'relocate_changed_quote':'新版原話／分段定位，資格按影響判定',
         'source_deleted':'已刪除，不可作證據','already_deleted':'已標記刪除，保留',
         'context_only':'僅語境，不可作證據','source_text_missing':'新版未保留，不作證據',
         'located_review':'尚待可靠定位','exception':'尚待可靠定位','retired':'歷史保留'}
@@ -343,10 +365,12 @@ def render_report(report, *, applied=False):
         cells.append('<tr>'+''.join('<td>'+escape(str(v or ''))+'</td>' for v in values)+'</tr>')
     title = '證據搬遷已正式套用' if applied else '證據搬遷寫入前對照表'
     summary = '；'.join(labels[k]+' '+str(v) for k,v in report['summary'].items())
-    return '<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>'+title+'</title><style>body{font:16px system-ui;margin:2rem;color:#172033}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccd3df;padding:.6rem;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}td:nth-child(5),td:nth-child(6){min-width:20rem}thead{position:sticky;top:0;background:#eef3f9}</style><h1>'+title+'</h1><p>'+escape(summary)+'</p><p>零模型呼叫；沒有改寫 Claim 或 Evidence 論點。新版引文用字改變、跨段拆分或失去有效來源時，撤回相關 Evidence 支持資格，待 Claim 更新。口頭強調語和確認反應只保留作語境。時間為逐字稿段落邊界，不宣稱逐字對齊。原件、原來引文與全部編輯歷史保留。</p><p><input id="q" placeholder="搜尋引文、段落或ID" oninput="document.querySelectorAll(\'tbody tr\').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(this.value.toLowerCase()))"></p><table><thead><tr>'+''.join('<th>'+s+'</th>' for s in ['處理結果','片段ID','舊段落','新段落','舊引文','新版引文','時間（秒）','定位依據／說明'])+'</tr></thead><tbody>'+''.join(cells)+'</tbody></table></html>'
+    model_note = ('已保存 Jev 來源影響判定，共 '+str(report.get('model_calls',0))+' 次呼叫') if report.get('impact_review') else '零模型呼叫'
+    return '<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>'+title+'</title><style>body{font:16px system-ui;margin:2rem;color:#172033}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccd3df;padding:.6rem;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}td:nth-child(5),td:nth-child(6){min-width:20rem}thead{position:sticky;top:0;background:#eef3f9}</style><h1>'+title+'</h1><p>'+escape(summary)+'</p><p>'+escape(model_note)+'；沒有改寫 Claim 或 Evidence 論點。新版來源的實質影響或不確定項交 Claim 更新；明示影響判定確認未受影響且實際綁定完整時保留原資格。口頭強調語和確認反應只保留作語境。時間為逐字稿段落邊界，不宣稱逐字對齊。原件、原來引文與全部編輯歷史保留。</p><p><input id="q" placeholder="搜尋引文、段落或ID" oninput="document.querySelectorAll(\'tbody tr\').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(this.value.toLowerCase()))"></p><table><thead><tr>'+''.join('<th>'+s+'</th>' for s in ['處理結果','片段ID','舊段落','新段落','舊引文','新版引文','時間（秒）','定位依據／說明'])+'</tr></thead><tbody>'+''.join(cells)+'</tbody></table></html>'
 
 
-def prepare(store, root, *, source_id, old_paths, published, instruction, calibration_path=None):
+def prepare(store, root, *, source_id, old_paths, published, instruction, calibration_path=None,
+            jev_impact=False):
     root = Path(root).resolve()
     if not instruction.strip():
         raise ValueError('exact owner direction required')
@@ -355,6 +379,7 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
         if (saved['source_id'] != source_id or saved['instruction'] != instruction
                 or saved['published_path'] != str(Path(published).resolve())
                 or saved.get('calibration_path') != (str(Path(calibration_path).resolve()) if calibration_path else None)
+                or saved.get('jev_impact', False) != jev_impact
                 or saved['old_paths'] != [str(Path(p).resolve()) for p in old_paths]):
             raise ValueError('existing migration intent differs')
         return saved
@@ -372,9 +397,28 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
     bounds = [m.binding(p) for p in paths]
     epochs = {snap(p)['body_sha256']: snap(p) for p in paths}
     calibration = m.read(calibration_path) if calibration_path else None
-    if calibration_path: bounds.append(m.binding(Path(calibration_path)))
+    if calibration_path:
+        bounds.append(m.binding(Path(calibration_path)))
+        witnesses = {}
+        for rule in calibration.get('fragments', {}).values():
+            proof = rule.get('legacy_clock')
+            if proof is None:
+                continue
+            for name in ('source_file', 'timeline_file', 'backup_manifest'):
+                bound = proof[name]
+                prior = witnesses.setdefault(bound['path'], bound)
+                if prior != bound:
+                    raise ValueError('legacy clock witness has conflicting file pins')
+        # Pin the material used by calibration through apply and readback, not
+        # just the JSON that happens to name it. Deduplicate shared witnesses.
+        bounds.extend(witnesses.values())
     report = compare(records, source_id=source_id, old_sources=list(epochs.values()),
-                     new=new, document=m.read(path),calibration=calibration)
+                     new=new, document=m.read(path),calibration=calibration, live_candidates=jev_impact)
+    if jev_impact:
+        from backend.pipeline import transcript_migration_impact as impact
+        proof = impact.review(report, records, new, root / 'impact')
+        report = impact.preserve(report, records, new, proof)
+        bounds.extend([m.binding(Path(impact.__file__)), *proof['files']])
     records_binding = m.immutable(root/'records-before.json', records)
     report_binding = m.immutable(root/'comparison.json', report)
     package = package_for(report, records)
@@ -387,7 +431,8 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
               'records': records_binding, 'report': report_binding,
               'source_files': bounds, 'package': package,
               'change_set_id': plan.change_set_id, 'fingerprint_sha256': plan.fingerprint_sha256,
-              'implementation': m.binding(Path(__file__)), 'model_calls': 0}
+              'implementation': m.binding(Path(__file__)),
+              'jev_impact': jev_impact, 'model_calls': report.get('model_calls', 0)}
     source_files_current(result)
     m.immutable(root/'plan.json', result)
     m._write_bytes(root/'comparison.html', render_report(report).encode())
@@ -432,6 +477,9 @@ def apply(store, root):
         verify(store, root)
         return {'status': 'already_applied', 'change_set_id': p['change_set_id']}
     source_files_current(p)
+    if report.get('impact_review'):
+        from backend.pipeline.transcript_migration_impact import verified_preserved
+        verified_preserved(report, records, snap(p['published_path']))
     observed = {cm.source.key(*k): cm.model_state(v)
         for k, v in store.read_affected_context([('source_documents', p['source_id'])]).items()}
     if observed != records:
@@ -452,7 +500,7 @@ def apply(store, root):
         return result
     result = store.apply_plan(plan, metadata={'actor': 'owner_authorized_code_migration',
         'reason': p['instruction'], 'migration_plan': m.binding(root/'plan.json'),
-        'content_approval_granted': False, 'model_calls': 0}, expected_current_record_pins=pins)
+        'content_approval_granted': False, 'model_calls': p.get('model_calls', 0)}, expected_current_record_pins=pins)
     m.immutable(root/'apply.json', result)
     verify(store, root)
     return result
@@ -482,7 +530,7 @@ def verify(store, root):
     source_files_current(p)
     result = {'status': 'verified', 'change_set_id': p['change_set_id'] if report['updates'] else None,
               'summary': report['summary'], 'updated_records': len(report['updates']),
-              'model_calls': 0, 'claim_prose_changed': False,
+              'model_calls': p.get('model_calls', 0), 'claim_prose_changed': False,
               'content_approval_granted': False, 'downstream_requalification_complete': False}
     m.immutable(root/'verification.json', result)
     m._write_bytes(root/'result.html',render_report(report,applied=True).encode())
@@ -522,6 +570,7 @@ def main():
     parser.add_argument('--source-id'); parser.add_argument('--old-source', type=Path, action='append', default=[])
     parser.add_argument('--published', type=Path); parser.add_argument('--instruction-file', type=Path)
     parser.add_argument('--calibration',type=Path)
+    parser.add_argument('--jev-impact', action='store_true', help='Explicit Jev source-impact review; requires TYPESAFE_API_KEY')
     args = parser.parse_args()
     from dotenv import load_dotenv
     load_dotenv()
@@ -530,7 +579,8 @@ def main():
     if args.command == 'prepare':
         if not args.source_id or not args.published or not args.instruction_file: parser.error('prepare needs source, published and instruction')
         result = prepare(store, args.root, source_id=args.source_id, old_paths=args.old_source,
-                         published=args.published, instruction=args.instruction_file.read_text(),calibration_path=args.calibration)
+                         published=args.published, instruction=args.instruction_file.read_text(),calibration_path=args.calibration,
+                         jev_impact=args.jev_impact)
         print(json.dumps({'root': str(args.root), 'summary': m.read(result['report']['path'])['summary']}, ensure_ascii=False))
     elif args.command == 'apply':
         plan = m.read(args.root/'plan.json')
