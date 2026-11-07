@@ -454,43 +454,45 @@ def test_media_installs_valid_playback_and_does_not_overwrite(tmp_path):
     assert source.exists()
 
 
-def test_router_denies_forged_or_editor_identity_before_read(
-    store, tmp_path, monkeypatch
-):
+def test_router_editor_beta_admin_access_and_live_revocation(store, tmp_path, monkeypatch):
     from backend.api.sc_api.media_batch_router import create_media_batch_router
+    import hashlib, hmac
 
     root = tmp_path / "review"
     (root / "config").mkdir(parents=True)
-    (root / "config/config.json").write_text(
-        json.dumps(
-            dict(users=[{"id": "a"}], user_roles=[dict(user="a", role="editor")])
-        )
-    )
+    config_path = root / "config/config.json"
+    config_path.write_text(json.dumps(dict(users=[{"id": "a"}], user_roles=[])))
     monkeypatch.setenv("TRANSCRIPT_REVIEW_ACTION_SECRET", "test-secret")
     app = FastAPI()
     app.include_router(create_media_batch_router(root, lambda: store))
     client = TestClient(app)
+    bid = store.batch(config(tmp_path))
     assert client.get("/media_batches").status_code == 401
-    assert client.get("/media_batches/any/files").status_code == 401
-    import hashlib, hmac
+    assert client.get(f"/media_batches/{bid}/files").status_code == 401
 
-    ts = str(int(time.time()))
-    message = "\n".join(
-        ("GET", "/media_batches", "a", ts, hashlib.sha256(b"").hexdigest())
-    )
-    headers = {
-        "x-review-actor": "a",
-        "x-review-time": ts,
-        "x-review-signature": hmac.new(
-            b"test-secret", message.encode(), hashlib.sha256
-        ).hexdigest(),
-    }
-    assert client.get("/media_batches", headers=headers).status_code == 403
-    (root / "config/config.json").write_text(
-        json.dumps(dict(users=[{"id": "a"}], user_roles=[dict(user="a", role="admin")]))
-    )
-    response = client.get("/media_batches", headers=headers)
-    assert response.status_code == 200 and response.json()["batches"] == []
+    def signed(method, path, packet=None):
+        body = json.dumps(packet).encode() if packet is not None else b""
+        ts = str(int(time.time()))
+        message = "\n".join((method, path, "a", ts, hashlib.sha256(body).hexdigest()))
+        headers = {"x-review-actor": "a", "x-review-time": ts,
+                   "x-review-signature": hmac.new(b"test-secret", message.encode(), hashlib.sha256).hexdigest(),
+                   "Content-Type": "application/json"}
+        return client.request(method, path, headers=headers, content=body)
+
+    revision = 1
+    # The same signed identity is checked against the current config each time.
+    for role in ("reader", "editor", "beta_tester", "admin", "reviewer", "reader"):
+        config_path.write_text(json.dumps(dict(users=[{"id":"a"}],user_roles=[dict(user="a",role=role)])))
+        allowed = role in ("editor", "beta_tester", "admin")
+        for path in ("/media_batches", f"/media_batches/{bid}/files"):
+            assert signed("GET", path).status_code == (200 if allowed else 403)
+        response = signed("POST", f"/media_batches/{bid}/control", dict(
+            revision=revision,operation_id=uuid.uuid4().hex,action="pause"))
+        assert response.status_code == (200 if allowed else 403)
+        if allowed:
+            revision = response.json()["revision"]
+    config_path.write_text(json.dumps(dict(users=[],user_roles=[dict(user="a",role="admin")])))
+    assert signed("GET", "/media_batches").status_code == 403
 
 
 def test_progress_atomic_writes_from_same_process_threads_use_distinct_temps(
