@@ -167,6 +167,8 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
 def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
                budget_usd: float = 3.0) -> dict:
     from backend.pipeline.media_batch.runtime import batch_call
+    from backend.pipeline.media_batch.credit_recovery import request_for
+    request = request_for(out, request)
     with batch_call(out, request, reserved_usd) as admit:
         return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd, admit=admit)
 
@@ -207,8 +209,10 @@ def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | No
                 subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-i',str(path),'-ac','1','-ar','16000','-c:a','libmp3lame','-b:a','64k',str(upload)],check=True)
                 save_json(transport_receipt,{'pcm_sha256':chunk['audio_sha256'],'mp3_sha256':file_sha(upload),'recipe':'mono-16000-lame-64k-v1'})
             request['transport'] = {'format': 'mp3', 'sha256': file_sha(upload), 'recipe': 'mono-16000-lame-64k-v1'}
+        from backend.pipeline.media_batch.credit_recovery import request_for
+        effective_request = request_for(out, request)
         old_chunk=next((c for c in previous.get('chunks',[]) if c['id']==chunk['id']),None)
-        if old_chunk and old_chunk['request_sha256'] != object_sha(request):
+        if old_chunk and old_chunk['request_sha256'] != object_sha(effective_request):
             raise ValueError('Saved ASR chunk input changed; do not resend')
         def invoke():
             with upload.open('rb') as stream:
@@ -216,7 +220,7 @@ def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | No
         response = saved_call(out, request, (chunk['end_ms'] - chunk['start_ms']) / 60000 * .01, invoke)
         if not isinstance(response.get('text'), str):
             raise ValueError('ASR response has no transcript')
-        chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(request),
+        chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(effective_request),
                        'response_sha256': object_sha(response)})
         from backend.pipeline.media_batch.runtime import progress
         progress('asr', len(chunks), len(manifest['chunks']), 'chunks')
