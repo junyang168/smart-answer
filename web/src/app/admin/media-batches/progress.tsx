@@ -54,6 +54,13 @@ type Batch = {
   budget_exposure_usd?: string;
 };
 type Snapshot = {
+  preflight?: {
+    href: string;
+    source_files: number;
+    counts: Record<string, number>;
+    model_calls: number;
+  };
+
   batches: Batch[];
   selected: Batch | null;
   records: Recording[];
@@ -270,6 +277,21 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
           立即更新
         </button>
       </header>
+      {data?.preflight && (
+        <section className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm">
+          <a
+            href={data.preflight.href}
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold text-indigo-700 underline"
+          >
+            查重與講次對照表 · {data.preflight.source_files} 個檔案
+          </a>
+          <p className="mt-1 text-slate-600">
+            已完成網站影音比對；逐檔查看沿用依據、待排程及待組裝項目。
+          </p>
+        </section>
+      )}
       {error && (
         <div role="alert" className="rounded-xl bg-amber-50 p-4 text-amber-900">
           <AlertCircle className="mr-2 inline" size={18} />

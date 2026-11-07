@@ -1215,3 +1215,65 @@ def test_ledger_cutover_is_repeatable_and_refuses_overwriting_target(store,tmp_p
         restore_ledger(store,snapshot)
     with store.connection() as c:
         assert c.execute('SELECT bytes FROM media_ingest.batch_files WHERE batch=%s',(bid,)).fetchone()['bytes']==456
+
+
+def test_preflight_report_uses_signed_editor_access_and_rejects_modified_bytes(
+    tmp_path, monkeypatch
+):
+    import hashlib, hmac
+    from backend.api.sc_api.media_batch_router import create_media_batch_router
+
+    root = tmp_path / "review"
+    (root / "config").mkdir(parents=True)
+    roles = root / "config/config.json"
+    roles.write_text(
+        json.dumps(
+            dict(users=[dict(id="a")], user_roles=[dict(user="a", role="beta_tester")])
+        )
+    )
+    report = tmp_path / "report.json"
+    page = tmp_path / "report.html"
+    report.write_text(
+        json.dumps(
+            dict(
+                schema_version="media-preflight-report.v1",
+                source_files=210,
+                counts={},
+                model_calls=0,
+            )
+        )
+    )
+    page.write_text("<!doctype html><h1>verified report</h1>")
+    binding = {
+        kind: dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        for kind, path in [("json", report), ("html", page)]
+    }
+    (root / "config/media-batch-preflight.json").write_text(
+        json.dumps({"B-test": binding})
+    )
+    monkeypatch.setenv("TRANSCRIPT_REVIEW_ACTION_SECRET", "report-secret")
+    app = FastAPI()
+    app.include_router(create_media_batch_router(root))
+    client = TestClient(app)
+    path = "/media_batches/B-test/preflight"
+    stamp = str(int(time.time()))
+    message = "\n".join(("GET", path, "a", stamp, hashlib.sha256(b"").hexdigest()))
+    headers = {
+        "x-review-actor": "a",
+        "x-review-time": stamp,
+        "x-review-signature": hmac.new(
+            b"report-secret", message.encode(), hashlib.sha256
+        ).hexdigest(),
+    }
+    assert client.get(path).status_code == 401
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200 and "verified report" in response.text
+    assert response.headers["cache-control"] == "private, no-store"
+    page.write_text("changed")
+    assert client.get(path, headers=headers).status_code == 409
+    roles.write_text(
+        json.dumps(
+            dict(users=[dict(id="a")], user_roles=[dict(user="a", role="reader")])
+        )
+    )
+    assert client.get(path, headers=headers).status_code == 403
