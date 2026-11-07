@@ -183,6 +183,35 @@ def test_concurrent_source_claim_creation_is_detected_inside_apply(group):
     assert store.get_record_state('claims', 'C') == original
 
 
+def test_explicit_transcript_alias_is_used_for_dedup_and_anchor_refresh(group):
+    store, root, _ = group
+    document = deepcopy(store.get_record_state('source_documents', 'S')['payload'])
+    document.update(source_id='S2', transcript_id='講道舊ID')
+    fragment = deepcopy(store.get_record_state('source_fragments', 'F')['payload'])
+    fragment.update(fragment_id='F2', source_id='S2')
+    evidence = deepcopy(store.get_record_state('evidence_steps', 'E')['payload'])
+    evidence.update(source_fragment_id=None, source_fragment_ids=['F2'])
+    claim = deepcopy(store.get_record_state('claims', 'C')['payload'])
+    claim['occurrences'][0]['source_id'] = '講道舊ID'
+    peer = deepcopy(claim)
+    peer.update(claim_id='D', statement='不知道神的旨意，就無法遵行神的旨意。')
+    store.apply_plan(store.plan_package({'package_id': 'alias', 'source_documents': [document],
+        'source_fragments': [fragment], 'evidence_steps': [evidence], 'claims': [claim, peer]}))
+    result = c.run(store, ['C'], root, Ports(create=True), apply=True)
+    assert result['applied'] and not result['new_claim_ids']
+    assert store.get_record_state('claims', 'C')['payload']['occurrences'][0]['source_id'] == 'S2'
+    assert store.get_record_state('questions', 'Q')['payload']['answer_claim_ids'] == ['C', 'D']
+
+
+def test_unknown_source_name_is_not_guessed_as_an_alias(group):
+    store, root, _ = group
+    claim = deepcopy(store.get_record_state('claims', 'C')['payload'])
+    claim['occurrences'][0]['source_id'] = '另一篇'
+    store.apply_plan(store.plan_package({'package_id': 'foreign', 'claims': [claim]}))
+    with pytest.raises(ValueError, match='cross-source'):
+        c.run(store, ['C'], root, Ports(), max_new_claims=0, apply=True)
+
+
 def test_oral_emphasis_is_not_generated_as_a_claim_anchor(group):
     store, _, _ = group
     states, sources = e.load(store, ['E'])
@@ -208,10 +237,26 @@ class RelationPorts(Ports):
         name = next(iter(request['questions']))
         if name in {'relation', 'reason_valid'}:
             self.calls.append('jev:' + name)
+            self.judgments.append(request)
             if name == 'relation' and self.during_relation:
                 self.during_relation()
             return answer(request, self.kind if name == 'relation' else self.reason)
         return super().judge(request)
+
+
+def test_relation_reference_uses_document_transcript_alias_without_false_cross_source(tmp_path):
+    records = {
+        'source_documents/S': {'payload': {'source_id': 'S', 'transcript_id': '舊講道ID'}},
+        'claims/C': {'payload': {'statement': '前提。', 'occurrences': [{'source_id': 'S'}]}},
+        'claims/D': {'payload': {'statement': '結論。', 'occurrences': [{'source_id': '舊講道ID'}]}},
+        'claim_relations/R': {'payload': {'from_id': 'C', 'to_id': 'D',
+            'relation_type': 'supports', 'reason': '前提支持結論。'}},
+    }
+    ports = RelationPorts('a_to_b_supports')
+    result = c.relations.review(records, {}, [], tmp_path, ports, ['C'])
+    request = next(q for q in ports.judgments if 'relation' in q['questions'])
+    assert request['state']['A']['source_ids'] == request['state']['B']['source_ids'] == ['S']
+    assert not result['updates'] and 'gpt' not in ports.calls
 
 
 def seed_relation(store):

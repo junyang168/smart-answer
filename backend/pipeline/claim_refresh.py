@@ -45,6 +45,11 @@ def fetch_claims(store, claim_ids):
     return records
 
 
+def source_aliases(records, sid):
+    document = records['source_documents/' + sid]['payload']
+    return sorted({sid} | ({document['transcript_id']} if document.get('transcript_id') else set()))
+
+
 def context(store, claims, evidence_ids, *, include_peers=True):
     records, sources = e.load(store, evidence_ids, for_update=False)
     records.update(claims)
@@ -58,8 +63,8 @@ def context(store, claims, evidence_ids, *, include_peers=True):
         cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         cursor.execute('SET LOCAL statement_timeout=5000')
         cursor.execute('''SELECT object_id,revision,content_sha256,payload FROM wang_knowledge.objects
-            WHERE collection='claims' AND retired_at IS NULL AND payload @> %s::jsonb''',
-            (json.dumps({'occurrences': [{'source_id': sid}]}),))
+            WHERE collection='claims' AND retired_at IS NULL AND payload @> ANY(%s::jsonb[])''',
+            ([json.dumps({'occurrences': [{'source_id': alias}]}) for alias in source_aliases(records, sid)],))
         peers = {}
         for oid, rev, sha, payload in cursor.fetchall():
             if payload.get('review_status') in {'superseded', 'retired'} or payload.get('superseded_by'):
@@ -202,11 +207,12 @@ def anchors(eids, records, sid):
 def refresh_occurrences(claim, eids, records, sid):
     current = anchors(eids, records, sid)
     old = claim.get('occurrences', [])
-    if any(o.get('source_id') != sid for o in old):
+    if any(o.get('source_id') not in source_aliases(records, sid) for o in old):
         raise ValueError('legacy cross-source Claim requires explicit reconciliation')
     available = current[0]['anchors']
     updated, count = deepcopy(old), 0
     for occurrence in updated:
+        occurrence['source_id'] = sid
         for anchor in occurrence.get('anchors', []):
             highlight = anchor.get('proposed_highlight', {})
             text = highlight.get('text', '') if isinstance(highlight, dict) else str(highlight)

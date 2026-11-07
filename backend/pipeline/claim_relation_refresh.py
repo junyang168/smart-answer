@@ -53,6 +53,13 @@ def review(records, claim_updates, candidates, root, ports, target_ids):
     claims = {k.split('/', 1)[1]: r['payload'] for k, r in records.items() if k.startswith('claims/')}
     claims.update({k.split('/', 1)[1]: p for k, p in claim_updates.items() if k.startswith('claims/')})
     claims.update({'new:' + str(i): p for i, p in enumerate(candidates)})
+    aliases = {}
+    for key, row in records.items():
+        if key.startswith('source_documents/'):
+            sid = row['payload']['source_id']
+            aliases[sid] = sid
+            if row['payload'].get('transcript_id'):
+                aliases[row['payload']['transcript_id']] = sid
     updates, retiring, additions, pending = {}, [], [], []
     cases, reason_jobs = [], []
     for key, row in records.items():
@@ -80,7 +87,7 @@ def review(records, claim_updates, candidates, root, ports, target_ids):
                  'existing_relation': original}
         # Only source identities, not duplicated occurrence/highlight bodies.
         for node in ['A', 'B']:
-            state[node]['source_ids'] = sorted({o['source_id'] for o in state[node].pop('occurrences') or []})
+            state[node]['source_ids'] = sorted({aliases.get(o['source_id'], o['source_id']) for o in state[node].pop('occurrences') or []})
             if not state[node]['source_ids']:
                 state[node]['source_ids'] = sorted({records['source_fragments/' + fid]['payload']['source_id']
                     for eid in claims[state[node]['claim_id']].get('evidence_step_ids', [])

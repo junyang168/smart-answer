@@ -8301,9 +8301,16 @@ class PostgresKnowledgeStore:
                     if plan.source_kind != 'claim_bottom_up_refresh_v1':
                         raise ValueError('source Claim identity guard requires bottom-up Claim refresh')
                     for source_id, expected in expected_current_source_claims.items():
+                        cursor.execute("""SELECT payload FROM wang_knowledge.objects
+                            WHERE collection='source_documents' AND object_id=%s AND retired_at IS NULL""",
+                            (source_id,))
+                        source_row = cursor.fetchone()
+                        aliases = {source_id}
+                        if source_row and source_row[0].get('transcript_id'):
+                            aliases.add(source_row[0]['transcript_id'])
                         cursor.execute('''SELECT object_id,payload FROM wang_knowledge.objects
-                            WHERE collection='claims' AND retired_at IS NULL AND payload @> %s::jsonb''',
-                            (canonical_json({'occurrences': [{'source_id': source_id}]}),))
+                            WHERE collection='claims' AND retired_at IS NULL AND payload @> ANY(%s::jsonb[])''',
+                            ([canonical_json({'occurrences': [{'source_id': alias}]}) for alias in sorted(aliases)],))
                         actual = {oid: {'statement': p['statement'], 'attribution': p.get('attribution')}
                                   for oid, p in cursor.fetchall()
                                   if p.get('review_status') not in {'superseded', 'retired'}
