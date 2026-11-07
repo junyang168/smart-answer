@@ -884,6 +884,7 @@ def test_semantic_review_contract_reaches_runtime_and_keeps_layer_scope(tmp_path
     assert request['system'].count(f.SEMANTIC_REVIEW)==1
     assert '不審閱下一層內容' in request['system']
     assert 'keep 也須解釋' in request['system']
+    assert '不因局部片段未重述就刪除' in request['system']
     assert request['input']['jobs']==[job]
     if task=='claim_statement':
         assert '不審 CVP' in request['system']

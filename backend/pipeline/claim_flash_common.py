@@ -13,7 +13,7 @@ PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded
 GPT_BYTES = 60000
 GPT_JOBS = 4
 JEV_BYTES = 40000
-REVIEW_CONTRACT = 'claim_flash_semantic_review_v1'
+REVIEW_CONTRACT = 'claim_flash_semantic_review_v2'
 SEMANTIC_REVIEW = (
     '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'
     '不替參考物件作完整審閱，不因發現一句判斷便要求建立下一層記錄。'
@@ -29,6 +29,8 @@ SEMANTIC_REVIEW = (
     '但不能以大意相近或多數部分正確掩蓋某個無據成分。'
     '只在本次授權層內核對同一判斷的相關表述；關係類型成立不代表理由的每項斷言、'
     '支持方向或來源歸屬都成立。保留教授實際使用的聖經證據、推理、限定與反方角色。'
+    '經文引用的規範化章節定位不等於教授逐字念出章節；上下文清楚對應的既有經卷、節次，'
+    '不因局部片段未重述就刪除。無法核實時先明示所缺上下文，不能以刪去已有論據代替查證。'
     '沿用現有 reason 欄位，簡短指出實際影響判斷的限定和來源短句或位置；'
     'keep 也須解釋為何現有表述保留了該意思，不能只說整體有支持。'
     '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。')
