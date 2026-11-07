@@ -20,7 +20,7 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           SELECT t.* FROM media_ingest.tasks t JOIN latest l ON l.recording=t.recording
           JOIN media_ingest.batch_tasks bt ON bt.task=t.id AND bt.batch=l.batch), g AS (
           SELECT recording,bool_and(state='complete') AS ready,bool_and(stage='existing') AS reused,
-          bool_or(state='running') AS running,bool_or(state='running' AND heartbeat>now()-interval '30 seconds') AS live,
+          bool_or(stage='rough_summary') AS rough,bool_or(state='running') AS running,bool_or(state='running' AND heartbeat>now()-interval '30 seconds') AS live,
           array_agg(state) AS states,
           (array_agg(stage ORDER BY CASE WHEN state='running' THEN 0 WHEN state IN ('failed','unknown_outcome','needs_resolution','interrupted') THEN 1 WHEN state='pending' THEN 2 ELSE 3 END,
           array_position(ARRAY['existing','prepare','visuals','speech','final-align','finish','speakers','media','handoff'],stage)))[1] AS stage,
@@ -30,9 +30,10 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           COALESCE(rec.info->>'sermon_title',f.catalog_match->>'title') AS title,rec.info->'provenance' AS provenance,
           rec.info->>'duration' AS duration_seconds,l.batch AS job_batch,
           f.catalog_match->>'manuscript' AS existing_manuscript,
-          CASE WHEN g.ready THEN CASE WHEN g.reused THEN 'existing' ELSE 'handoff' END ELSE g.stage END AS stage,
+          CASE WHEN g.ready THEN CASE WHEN g.reused THEN 'existing' WHEN g.rough THEN 'rough_summary' ELSE 'handoff' END ELSE g.stage END AS stage,
+          (SELECT t.result->>'rough_href' FROM jobs t WHERE t.recording=f.linked_recording AND t.stage='rough_asr' AND t.state='complete' LIMIT 1) AS rough_href,
           CASE WHEN f.state NOT IN ('pending','ready_to_plan','needs_assembly','needs_scope_review') THEN f.state
-          WHEN g.ready AND g.reused THEN 'reused' WHEN g.ready THEN 'complete'
+          WHEN g.ready AND g.reused THEN 'reused' WHEN g.ready AND g.rough THEN 'rough_complete' WHEN g.ready THEN 'complete'
           WHEN g.running THEN CASE WHEN g.live THEN 'running' ELSE 'unverified' END
           WHEN 'unknown_outcome'=ANY(g.states) THEN 'unknown_outcome'
           WHEN 'needs_resolution'=ANY(g.states) THEN 'needs_resolution'
@@ -41,7 +42,7 @@ def snapshot(store, batch, offset=0, limit=30, search="", state="all"):
           WHEN g.recording IS NOT NULL THEN 'pending'
           WHEN rec.info->>'existing_transcript'='true' THEN 'reused' ELSE f.state END AS state,
           CASE WHEN g.recording IS NOT NULL AND f.state IN ('pending','ready_to_plan','needs_assembly','needs_scope_review')
-          THEN CASE WHEN g.ready THEN '處理與交接已完成，內容校對及發布狀態請至編輯器查看'
+          THEN CASE WHEN g.ready AND g.rough THEN '粗逐字稿與內容概要已完成；未校對、未發布' WHEN g.ready THEN '處理與交接已完成，內容校對及發布狀態請至編輯器查看'
           WHEN g.running THEN '工作程序正在執行，請查看階段進度'
           ELSE COALESCE(g.error,'已建立處理計畫，等待前置階段或共用資源') END ELSE f.reason END AS reason
           FROM f LEFT JOIN g ON g.recording=f.linked_recording LEFT JOIN latest l ON l.recording=f.linked_recording

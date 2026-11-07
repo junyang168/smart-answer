@@ -96,6 +96,31 @@ def create_media_batch_router(root, store_factory=Store):
             },
         )
 
+    @router.get("/{batch}/rough/{recording}")
+    def rough_text(batch: str, recording: str):
+        from backend.pipeline.media_batch.rough import render
+        from backend.pipeline.media_batch.runtime import file_sha
+
+        with store_factory().connection() as c:
+            task = c.execute(
+                "SELECT t.payload,t.result FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.recording=%s AND t.stage='rough_asr' AND t.state='complete'",
+                (batch, recording),
+            ).fetchone()
+        if not task:
+            raise HTTPException(404, "粗逐字稿尚未完成")
+        out = Path(task["payload"]["out"])
+        if file_sha(out / "rough.json") != task["result"]["rough_sha256"]:
+            raise HTTPException(409, "粗逐字稿版本不一致")
+        return Response(
+            render(out),
+            media_type="text/html",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     @router.post("/{batch}/control")
     def control(batch: str, body: Control):
         try:
@@ -120,7 +145,7 @@ def create_media_batch_router(root, store_factory=Store):
         search: str = Query("", max_length=200),
         state: str = Query(
             "all",
-            pattern=r"^(all|actionable|waiting_download|ready_to_plan|needs_assembly|needs_scope_review|pending|running|complete|existing_transcript|reused|duplicate|excluded|failed|needs_resolution|unknown_outcome|unverified|interrupted)$",
+            pattern=r"^(all|actionable|rough_complete|waiting_download|ready_to_plan|needs_assembly|needs_scope_review|pending|running|complete|existing_transcript|reused|duplicate|excluded|failed|needs_resolution|unknown_outcome|unverified|interrupted)$",
         ),
     ):
         from backend.pipeline.media_batch.files import snapshot

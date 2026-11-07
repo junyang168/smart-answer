@@ -293,6 +293,10 @@ def resolve_source(payload, store=None):
             source = Path(row["info"]["source"])
     if file_sha(source) != payload["info"]["source_sha"]:
         raise ValueError("Source drift before stage")
+    if payload["info"].get("source_parts"):
+        from .rough import materialize
+
+        return materialize(payload)
     return source
 
 
@@ -317,6 +321,10 @@ def execute(stage, payload):
         raise ValueError(
             "Existing editable or published transcript is protected; use the migration workflow"
         )
+    if stage.startswith("rough_"):
+        from .rough import execute as rough_execute
+
+        return rough_execute(stage, payload, source)
     if stage == "media":
         return media(payload)
     if stage == "handoff":
@@ -340,6 +348,10 @@ def execute(stage, payload):
 
     aligner = Path(cfg["aligner_python"])
     if stage == "prepare":
+        from .rough import reuse_for_full
+        from .store import Store
+
+        reuse_for_full(payload, Store())
         result = full.prepare(source, out)
         if cfg.get("vocabulary"):
             full.configure_vocabulary(out, Path(cfg["vocabulary"]))

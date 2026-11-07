@@ -29,6 +29,8 @@ def requirements(task):
     overhead = 64 * MIB
     work = {
         "prepare": pcm * 4,
+        "rough_prepare": pcm * 4,
+        "rough_asr": pcm * 4,
         "speech": int(min(seconds, 900) * 32000) * 12,
         "final-align": pcm * 4,
         "finish": pcm * 10,

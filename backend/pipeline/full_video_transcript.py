@@ -57,11 +57,14 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     proof = out / 'master.json'
     if proof.exists():
         result = read(proof)
+        if (out / 'rough-audio-cleanup.json').exists():
+            from backend.pipeline.media_batch.rough import restore_audio
+            restore_audio(video, out, result)
         if result['source_sha256'] != sha(video) or result['audio_sha256'] != sha(out / 'master.wav'):
             raise ValueError('Master source changed')
         return result
     probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
-        'format=start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
+        'format=format_name,start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
     video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
     v = video_stream or next(s for s in probe['streams'] if s['codec_type'] == 'audio')
     origin = float(probe['format'].get('start_time', v.get('start_time', 0)))
@@ -74,7 +77,9 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     audio = read_audio(out / 'master.wav')
     # Sub-millisecond tail only. No voiced interval or silence is removed.
     usable = len(audio) // 16 * 16
-    if abs(usable / SR - float(probe['format']['duration'])) > .1:
+    # Raw ADTS AAC has only an estimated container duration; decoded samples
+    # establish the clock. Timestamped video still requires the strict check.
+    if probe['format'].get('format_name') != 'aac' and abs(usable / SR - float(probe['format']['duration'])) > .1:
         raise ValueError('Decoded sample clock differs from the media duration')
     result = {'schema_version': 'source-sample-clock.v1', 'lecture_id':video.stem, 'source_sha256': sha(video),
         'audio_sha256': sha(out / 'master.wav'), 'source_path': str(video.resolve()),

@@ -1277,3 +1277,180 @@ def test_preflight_report_uses_signed_editor_access_and_rejects_modified_bytes(
         )
     )
     assert client.get(path, headers=headers).status_code == 403
+
+
+def test_rough_plan_is_repeatable_orders_phases_and_does_not_queue_full_pipeline(
+    store, tmp_path
+):
+    from backend.pipeline.media_batch.rough_plan import create
+    from backend.pipeline.media_batch.runtime import file_sha
+
+    source = tmp_path / "source"
+    source.mkdir()
+    fingerprints = tmp_path / "fingerprints"
+    fingerprints.mkdir()
+    files = []
+    for name, status in [
+        ("first.wav", "待排程：未找到既有同錄音"),
+        ("last.wav", "待確認講次"),
+        ("duplicate.wav", "檔案重複"),
+    ]:
+        p = source / name
+        p.write_bytes(name.encode())
+        sha = file_sha(p)
+        atomic(fingerprints / (sha + ".json"), dict(decoded_seconds=10))
+        files.append(dict(path=name, sha256=sha, status=status))
+    report = tmp_path / "report.json"
+    assembly = tmp_path / "assembly.json"
+    atomic(
+        report,
+        dict(files=files, groups=[dict(ordered_paths=[r["path"] for r in files])]),
+    )
+    atomic(assembly, dict(source_folder=str(source), groups=[]))
+    cfg = config(tmp_path)
+    cfg.update(
+        fingerprint_root=str(fingerprints), vocabulary_sha=None, rough_code_sha="test"
+    )
+    result = create(store, report, assembly, source, cfg)
+    assert result["recordings"] == 2 and result["phases"] == {1: 1, 2: 0, 3: 1}
+    assert create(store, report, assembly, source, cfg) == result
+    with store.connection() as c:
+        tasks = c.execute(
+            "SELECT * FROM media_ingest.tasks ORDER BY (payload->>'queue_order')::int,stage"
+        ).fetchall()
+    assert len(tasks) == 6 and {t["stage"] for t in tasks} == {
+        "rough_prepare",
+        "rough_asr",
+        "rough_summary",
+    }
+    first_summary = next(
+        t["id"]
+        for t in tasks
+        if t["payload"]["phase"] == 1 and t["stage"] == "rough_summary"
+    )
+    last_prepare = next(
+        t for t in tasks if t["payload"]["phase"] == 3 and t["stage"] == "rough_prepare"
+    )
+    assert first_summary in last_prepare["dependencies"]
+    assert store.claim(result["batch"], "tester")["payload"]["queue_order"] == 0
+    # The private reader never treats raw ASR as an editable/published manuscript.
+    from backend.pipeline.media_batch.files import snapshot
+
+    assert len(snapshot(store, result["batch"])["files"]) == 2
+
+
+def test_rough_reader_is_private_bound_and_not_an_editor(store, tmp_path, monkeypatch):
+    import hashlib, hmac
+    from backend.api.sc_api.media_batch_router import create_media_batch_router
+
+    root = tmp_path / "review"
+    (root / "config").mkdir(parents=True)
+    (root / "config/config.json").write_text(
+        json.dumps(
+            dict(users=[dict(id="a")], user_roles=[dict(user="a", role="editor")])
+        )
+    )
+    cfg = config(tmp_path)
+    bid = store.batch(cfg)
+    out = tmp_path / "raw"
+    atomic(
+        out / "rough.json",
+        dict(
+            chunks=[
+                dict(
+                    chunk_id="w00/chunk-000",
+                    start_ms=0,
+                    end_ms=1000,
+                    text="<script>untrusted</script>",
+                )
+            ]
+        ),
+    )
+    with store.connection() as c:
+        c.execute(
+            "INSERT INTO media_ingest.recordings(id,source_sha,item,info) VALUES (%s,%s,%s,%s)",
+            ("R-test", "sha", "item", Jsonb({})),
+        )
+        tid = store.task(
+            c, bid, "R-test", "rough_asr", "all", "binding", dict(out=str(out))
+        )
+        c.execute(
+            "UPDATE media_ingest.tasks SET state='complete',result=%s WHERE id=%s",
+            (Jsonb(dict(rough_sha256=file_sha(out / "rough.json"))), tid),
+        )
+    monkeypatch.setenv("TRANSCRIPT_REVIEW_ACTION_SECRET", "secret")
+    app = FastAPI()
+    app.include_router(create_media_batch_router(root, lambda: store))
+    client = TestClient(app)
+    path = f"/media_batches/{bid}/rough/R-test"
+    stamp = str(int(time.time()))
+    msg = "\n".join(("GET", path, "a", stamp, hashlib.sha256(b"").hexdigest()))
+    headers = {
+        "x-review-actor": "a",
+        "x-review-time": stamp,
+        "x-review-signature": hmac.new(
+            b"secret", msg.encode(), hashlib.sha256
+        ).hexdigest(),
+    }
+    assert client.get(path).status_code == 401
+    r = client.get(path, headers=headers)
+    assert (
+        r.status_code == 200 and "&lt;script&gt;" in r.text and "<script>" not in r.text
+    )
+    assert r.headers["cache-control"] == "private, no-store"
+    (out / "rough.json").write_text("{}")
+    assert client.get(path, headers=headers).status_code == 409
+
+
+def test_full_pipeline_imports_rough_saved_asr_into_new_workspace(
+    store, tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    import numpy as np
+    from backend.pipeline import (
+        full_video_transcript as full,
+        transcript_audio_pilot as audio,
+    )
+    from backend.pipeline.media_batch import rough
+
+    source = tmp_path / "source.wav"
+    audio.write_audio(source, np.zeros(16000 * 2, dtype="<i2"))
+    old = tmp_path / "rough"
+    master = full.prepare(source, old)
+    w = old / master["windows"][0]["audio"]
+    calls = []
+
+    def invoke(**kwargs):
+        calls.append(1)
+        return SimpleNamespace(model_dump=lambda **kw: dict(text="只用一次轉錄。"))
+
+    monkeypatch.setattr(
+        "openai.OpenAI",
+        lambda **kw: SimpleNamespace(
+            audio=SimpleNamespace(transcriptions=SimpleNamespace(create=invoke))
+        ),
+    )
+    audio.transcribe(w, transport="mp3")
+    atomic(old / "rough.json", dict(chunks=[]))
+    rough.cleanup_audio(old)
+    bid = store.batch(config(tmp_path))
+    payload = dict(
+        out=str(old),
+        info=dict(source_sha=file_sha(source)),
+        config=dict(vocabulary_sha=None),
+    )
+    with store.connection() as c:
+        c.execute(
+            "INSERT INTO media_ingest.recordings(id,source_sha,item,info) VALUES (%s,%s,%s,%s)",
+            ("rid", file_sha(source), "item", Jsonb({})),
+        )
+        tid = store.task(c, bid, "rid", "rough_asr", "all", "test", payload)
+        c.execute(
+            "UPDATE media_ingest.tasks SET state='complete',result=%s WHERE id=%s",
+            (Jsonb(dict(rough_sha256=file_sha(old / "rough.json"))), tid),
+        )
+    new = tmp_path / "full"
+    rough.reuse_for_full(dict(payload, recording="rid", out=str(new)), store)
+    imported = full.prepare(source, new)
+    audio.transcribe(new / imported["windows"][0]["audio"])
+    assert calls == [1] and (old / "rough.json").is_file()

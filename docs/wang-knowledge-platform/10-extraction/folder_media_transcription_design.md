@@ -351,6 +351,10 @@ backend/.venv/bin/python -m backend.pipeline.media_batch resume \
 
 本機可用 [聲紋盤點工具](../../../backend/pipeline/media_batch/acoustic_inventory.py) 對完整來源建立 SHA 綁定的 Chromaprint 快取，召回改名、壓縮及部分截段候選，再以獨立原聲連續波形檢查確認可沿用的錄音。查重本身不呼叫轉錄模型。Chromaprint 原生函式庫是此盤點工具的可選本機依賴；不是轉錄模型。指紋或相同講題都不足以自動沿用；未召回匹配也不代表其他網站／離線資料從未轉錄。ADPCM／壓縮錄音的核對片段必須按解碼樣本裁切，不以快速 seek 的時間戳作證。實際查重結果及講次暫排以 SHA 綁定的私人對照表提供；Dashboard 只向既有 editor／beta tester／admin 開放報表，不公開本機路徑入口。
 
+粗轉錄優先模式使用同一 PostgreSQL 台帳及 worker：先按凍結的對照表順序處理一般檔案，再處理有封包連續性證明的 MTS 組，最後處理待辨識講次的錄音機檔。只建立 `rough_prepare`、`rough_asr`、`rough_summary`，不建立對齊、投影片、媒體發布或稿件交接任務。ASR 仍用現有轉錄模組，傳輸及保留的快取為 16 kHz mono／64 kbps MP3；原始影音保留。粗稿保留區塊時間與重疊標記，不能當作已校對證據。內容概要綁定粗稿 SHA 與區塊 ID。
+
+完成 ASR 後清理可重建的 PCM WAV，保留 master、窗口及音訊清單、MP3、完整請求與回答。完整 pipeline 只在來源及詞彙版本一致時匯入此快取，重新生成 PCM 並驗證每個原始 WAV SHA，沿用 MP3 傳輸和保存回答；輸入、快取或重建結果不同時拒絕自動重送。Dashboard 將「粗轉錄完成」與「已完成」分開，粗稿透過相同 editor／beta tester／admin 認證的私人端點查看。
+
 尚未完成的完整目標不能當作首版能力：MTS 有序組裝、非零影片時鐘映射、任意裁切／變速來源的聲學候選召回、同音訊新增不同影片的視覺補件，均不自動採用不明來源。目前會阻擋已辨識的 MTS、非零影片起點、不同影片同聲音及其他講員候選。任意裁切的未知舊版尚不能完整識別，因此還不能宣稱整個 Ruxin corpus 絕無重複。
 
 磁碟已有掛載／device 身份核對及跨 worker 預約。預設 SSD 保留 80 GiB、內置碟 10 GiB，同 device 的在途估計寫入預算 15 GiB；可由 `--ssd-reserve-gib`、`--internal-reserve-gib`、`--working-set-gib` 明示設定。單一工作超過預算時列明原因，不能靠重試偷偷擴大上限。worker 執行期間每次心跳也核對實際可用空間，低於下限則停止本機工作、保留原稿與未知模型狀態。UI 顯示可用及已預約 GiB。
