@@ -238,7 +238,7 @@ slide OCR／SVG 是獨立非口述候選，讀者可參考，不能因網站能�
 
 在既有 Admin 導覽新增「批次轉錄」，目標路徑 `/admin/media-batches`，點入 `/admin/media-batches/<batch_id>`；CLI 啟動後輸出同一詳情頁連結。桌面用表格，手機用逐講卡片。第一版只用一個總覽與一個批次詳情頁，詳情在頁內展開，不另造圖表儀表板或另一套 editor。
 
-第一版限既有 admin 角色查看與控制，前端及後端都檢查 session／角色；不因 beta tester 有編輯權限就自動授予批次花費、磁碟操作權。候選的「開啟校對」仍依原 editor 權限。worker 回執經既有 backend 讀取，不向瀏覽器開放 SSD、資料庫或 worker 埠。
+既有 admin、editor、beta_tester 角色均可查看與控制；beta_tester 與 editor 權限一致。前端及後端都檢查 session／角色，後端每次請求重新讀取現有角色設定，reader、reviewer、未註冊及未登入者不能存取。候選的「開啟校對」仍依原 editor 權限。worker 回執經既有 backend 讀取，不向瀏覽器開放 SSD、資料庫或 worker 埠。
 
 第一個 UI 版本即提供實際進度；建立批次先用 CLI 指定伺服器已掛載資料夾。瀏覽器不能選取遠端 Mac 任意路徑；首版不做大量上傳或任意路徑檔案瀏覽器。日後若加建立入口，只能選已配置且服務端驗證的來源根目錄。
 
@@ -333,7 +333,7 @@ backend/.venv/bin/python -m backend.pipeline.media_batch resume \
 
 費用估算按已保存的 token／音訊時長及明示費率計算，不是供應商帳單。派工預算佔用為「已完成且有可信用量的保守費用估算＋在途／結果不明／缺少用量的完整預留」，同一批次短交易串行檢查；歷次預留及呼叫累計保留、不清零，避免將固定保守預留誤當已花費。獲明示授權後可用 `raise-budget --batch BATCH_ID --revision REVISION --operation OPERATION_ID --budget-usd NEW_CAP --reason AUTHORIZATION` 追加較高上限；控制台帳記錄授權理由、舊版本及新上限，來源設定與原呼叫次數上限不變。費率／用量缺失時顯示待彙整，不把未知費用顯示為零。
 
-進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對管理員身份；前後端共用既有簽名身份。Operation Dashboard 搜尋／篩選涵蓋完整檔案清單；舊診斷批次的講次篩選仍明示只作用於本頁。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。轉錄批次頁可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
+進度頁為 `/admin/media-batches` 及 `/admin/media-batches/<batch_id>`。頁面、代理 API 及後端均核對 admin／editor／beta_tester 身份；前後端共用既有簽名身份。Operation Dashboard 搜尋／篩選涵蓋完整檔案清單；舊診斷批次的講次篩選仍明示只作用於本頁。摘要與分頁列表由 SQL 一致快照產生，包含實際階段／窗口、心跳、錯誤、共用資源、磁碟、已保留費用上限；該金額不是供應商帳單。轉錄批次頁可暫停、繼續、重試可恢復失敗及開啟既有校對入口；關閉頁面不停止任務。
 
 | 已實作範圍 | 實際行為 |
 | --- | --- |

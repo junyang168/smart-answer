@@ -1,4 +1,4 @@
-"""Admin-only read/control plane. GET never starts or resumes processing."""
+"""Editor-accessible read/control plane. GET never starts or resumes processing."""
 
 import json
 import os
@@ -18,17 +18,17 @@ class Control(BaseModel):
 
 
 def create_media_batch_router(root, store_factory=Store):
-    async def admin(request: Request):
+    async def editor(request: Request):
         actor = authenticated_actor(request, await request.body())
         try:
             config = json.loads((Path(root) / "config/config.json").read_text())
         except (OSError, ValueError):
             raise HTTPException(503, "無法讀取角色設定")
-        if "admin" not in user_roles(config, actor):
-            raise HTTPException(403, "需要管理員權限")
+        if not user_roles(config, actor).intersection({"admin", "editor", "beta_tester"}):
+            raise HTTPException(403, "需要編輯權限")
         return actor
 
-    router = APIRouter(prefix="/media_batches", dependencies=[Depends(admin)])
+    router = APIRouter(prefix="/media_batches", dependencies=[Depends(editor)])
 
     @router.get("")
     def get(

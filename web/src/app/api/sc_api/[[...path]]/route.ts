@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, createHmac } from "node:crypto";
 import { getServerSession } from "next-auth";
-import { hasTranscriptBetaAccess } from "@/app/utils/roles";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import { authConfig } from "@/app/utils/auth";
 
 const RAW_BASE =
@@ -97,7 +97,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     guarded &&
     process.env.NODE_ENV === "production" &&
     (reviewEndpoint === "media_batches"
-      ? session?.user?.role !== "admin"
+      ? !hasEditorAccess(session?.user?.role)
       : !hasTranscriptBetaAccess(actor, session?.user?.role))
   )
     return NextResponse.json(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { hasTranscriptBetaAccess } from "@/app/utils/roles";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,7 +28,7 @@ export const AdminHeader = () => {
     : navItems;
 
   const visibleItems =
-    session?.user?.role === "admin"
+    hasEditorAccess(session?.user?.role)
       ? [
           ...items.slice(0, 1),
           { href: "/admin/media-batches", label: "批次轉錄", exact: false },
