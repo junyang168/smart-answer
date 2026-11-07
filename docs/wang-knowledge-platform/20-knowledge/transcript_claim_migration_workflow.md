@@ -3,7 +3,7 @@
 > **讀者**：維護執行者、Developer。
 > **類型**：流程。
 > **狀態**：當前。
-> **與代碼對齊**：2026-11-05，核對 `backend.pipeline.transcript_claim_migration`、`backend.pipeline.transcript_evidence_migration`、`backend.pipeline.transcript_evidence_alignment`、`backend.pipeline.transcript_evidence_calibration`、`backend.pipeline.transcript_evidence_apply`、`backend.pipeline.transcript_claim_anchor_sync`、`backend.pipeline.transcript_locator_migration`；隔離 SQL 驗證與真實內容審閱分開記錄。
+> **與代碼對齊**：2026-11-07，核對既有來源／定位入口及 `transcript_migration_impact` 的明示 Jev 選項；隔離 SQL 驗證與真實內容審閱分開記錄。
 > **權威範圍**：已獲授權的 Beta 來源凍結、來源版本交接及既有 Claim Update 接續；不授予內容批准、公開發布或 CVP／論證層批准。
 
 完整的新稿三方合併、正式 editor 採用、發布及 Claim 交接見
@@ -89,13 +89,30 @@ CVP／論證層接續須在真正 apply 前完成驗證；本 dry-run 不宣稱�
 日常執行使用統一入口 `transcript_locator_migration`。每一篇／每次真實來源改版固定一個
 RUN，不以新 RUN 規避失敗或重置舊模型任務。前提是新來源已按第 4 節正式登記，且與
 已發布逐字稿的正文、段落及時間一致。此入口只搬遷定位；不發布逐字稿、不登記來源，
-也不啟動 Claim refresh、CVP／Route 維護或模型。
+也不啟動 Claim refresh、CVP／Route 維護；預設不調模型。
 
 ```bash
 backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration prepare --root RUN --source-id SOURCE --old-source OLD_FILE --old-source PREVIOUS_BETA --published PUBLISHED_FILE --instruction-file DIRECTION
 backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration run --root RUN
 backend/.venv/bin/python -m backend.pipeline.transcript_locator_migration verify --root RUN
 ```
+
+新遷移可在 `prepare` 明示 `--jev-impact`，從環境讀取 `TYPESAFE_API_KEY`。
+此選項在 SQL 寫入前，以每條 Evidence 的完整新舊自身片段、直接使用的 Claims 與新版
+必要上下文判斷來源變動是否改變支持作用及摘要忠實度；不全面重審 Claim，也不裁定神學。
+兩項均判未改變，且所有新版有效引用已由程式驗證段落、逐字切片及來源 SHA 時，才保留
+原有 Evidence 資格；任何實質變動或不確定仍交現有 Update。原本未審定、拒絕或人工
+hold 不藉遷移升級。這是來源影響判定，不是新的 Claim 全面通過證明。
+
+定位、空白、保守標點及簡繁字形差異由程式處理，不以 embedding 相似度定位。
+舊引用只有部分字被刪除而新版仍有內容時，保留候選，不能把整段教導標刪除。
+啟用 Jev 時，可由已驗證的唯一前後文與來源順序綁定完整新版段落，再作完整 Evidence
+影響判定；找不到、重複位置無法消歧或真正全刪除的引用不能由語意投票恢復。
+
+請求固定 `jev-1.14.0`，每批最多六條且受輸入大小限制，不截斷片段。保存精確請求、
+原答覆、來源／記錄 pins 及判定；提交與 Claim 定位交接重新驗證保存依據。已保存答覆
+直接復用；已發送卻無答覆的 intent 不自動重發。模型信心值保留作診斷，不假稱已經過
+本語料準確率校準。舊凍結 run 不追加此選項，不重寫原裁決或歷史。
 
 1. `prepare` 只讀 SQL，凍結來源、原始指示、程式及 Evidence 寫集，產生 `preview.json`、
    `evidence/comparison.html` 和 CSV。已可靠定位、軟刪除、僅語境及已完成項分開列出。

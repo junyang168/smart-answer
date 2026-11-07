@@ -180,7 +180,7 @@ class ContextCalibration:
             engine.new['paragraphs'][key]['text'] for key in candidate['target_paragraphs']))
         candidate['calibration']['shared_references']=sorted(set(candidate['calibration']['old_source_references'])&set(candidate['calibration']['new_source_references']))
         result={**previous,**candidate}
-        if candidate['matched_deleted_character_count']:
+        if candidate['matched_deleted_character_count'] and not any(ch.isalnum() for ch in candidate['candidate_quote']):
             return {**result,'status':'source_deleted','reason':'context_time_bound_soft_deletion',
                 'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'},'preserve_historical_quote':True}
         body_equal=literal_layout(core)[0]==literal_layout(content_quote(candidate['candidate_quote'])[0])[0]

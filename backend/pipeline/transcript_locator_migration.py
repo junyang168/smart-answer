@@ -47,12 +47,14 @@ def load(root):
 
 
 def prepare(store, root, *, source_id, old_paths, published, instruction_file,
-            calibration_path=None):
+            calibration_path=None, jev_impact=False):
     with run_lock(root) as root:
         intent = {'source_id': source_id, 'old_paths': [str(Path(p).resolve()) for p in old_paths],
                   'published': str(Path(published).resolve()),
                   'instruction_file': str(Path(instruction_file).resolve()),
                   'calibration': str(Path(calibration_path).resolve()) if calibration_path else None}
+        if jev_impact:
+            intent['jev_impact'] = True
         if (root / 'migration.json').exists():
             p = load(root)
             if p['intent'] != intent:
@@ -63,12 +65,13 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
                   [*old_paths, published, instruction_file, *([calibration_path] if calibration_path else [])]]
         evidence.prepare(store, root / 'evidence', source_id=source_id,
                          old_paths=old_paths, published=published,
-                         instruction=Path(instruction_file).read_text(), calibration_path=calibration_path)
+                         instruction=Path(instruction_file).read_text(), calibration_path=calibration_path,
+                         jev_impact=jev_impact)
         report = m.read(root / 'evidence/comparison.json')
         exceptions = [row for row in report['fragments'] if row['status'] not in RESOLVED]
         preview = {'source_id': source_id, 'phase': 'evidence_preview',
                    'evidence_updates': len(report['updates']), 'exceptions': exceptions,
-                   'claim_preview': 'prepared_after_verified_evidence_commit', 'model_calls': 0}
+                   'claim_preview': 'prepared_after_verified_evidence_commit', 'model_calls': report.get('model_calls', 0)}
         m.immutable(root / 'preview.json', preview)
         m.immutable(root / 'migration.json', {'schema_version': VERSION, 'intent': intent,
                     'inputs': inputs, 'preview': m.binding(root / 'preview.json'), 'implementation': m.binding(Path(__file__)),
@@ -122,7 +125,7 @@ def finish(root, p, er, verification):
               'updated_claims': verification['updated_claims'], 'exceptions': [],
               'needs_content_refresh': sorted(k for k, v in ev['updates'].items()
                   if k.startswith('evidence_steps/') and v.get('support_eligibility') == 'withheld_unreviewed'),
-              'model_calls': 0, 'claim_prose_changed': False,
+              'model_calls': er.get('model_calls', 0), 'claim_prose_changed': False,
               'content_requalification_complete': False, 'cvp_route_migration_complete': False}
     m.immutable(root / 'result.json', result)
     # Link to detailed stage comparisons rather than copying large quotation tables.
@@ -181,6 +184,7 @@ def main():
     parser.add_argument('--source-id'); parser.add_argument('--published', type=Path)
     parser.add_argument('--old-source', type=Path, action='append', default=[])
     parser.add_argument('--instruction-file', type=Path); parser.add_argument('--calibration', type=Path)
+    parser.add_argument('--jev-impact', action='store_true')
     args = parser.parse_args()
     from dotenv import load_dotenv
     load_dotenv()
@@ -191,7 +195,7 @@ def main():
             parser.error('prepare requires source-id, published and instruction-file')
         result = prepare(store, args.root, source_id=args.source_id, old_paths=args.old_source,
                          published=args.published, instruction_file=args.instruction_file,
-                         calibration_path=args.calibration)
+                         calibration_path=args.calibration, jev_impact=args.jev_impact)
     else:
         with execution_locks(args.root):
             result = (run if args.command == 'run' else verify)(store, args.root)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict, deque
 from copy import deepcopy
+from functools import lru_cache
 import csv
 import hashlib
 from html import escape
@@ -23,6 +24,26 @@ from backend.pipeline.source_projection import SOFT_DELETION, project_script
 VERSION = 'wang_transcript_evidence_dry_run_v1'
 SPEAKERS = re.compile(r'(?:教授|聽眾|听众|學生|学生|問|问|答|講者|讲者|speaker\s*\d*)\s*[:：]', re.I)
 LAYOUT_PUNCTUATION = frozenset('，。、「」『』“”‘’,')
+
+
+@lru_cache(maxsize=128)
+def script_layout(text):
+    """Chinese character forms with original offsets; no word substitution."""
+    value, offsets = literal_layout(text)
+    return ''.join(_script_character(ch) for ch in value), offsets
+
+
+@lru_cache(maxsize=8192)
+def _script_character(ch):
+    converted = _script_converter().convert(ch)
+    return converted if len(converted) == 1 else ch
+
+
+def _script_converter():
+    from opencc import OpenCC
+    if not hasattr(_script_converter, 'instance'):
+        _script_converter.instance = OpenCC('t2s')
+    return _script_converter.instance
 
 
 def literal_layout(text):
@@ -46,11 +67,12 @@ def literal_layout(text):
 
 
 def locate(text, quote, expanded, old_full):
-    for normalized in (False,True):
-        source,offsets=literal_layout(expanded) if normalized else (expanded,list(range(len(expanded))))
-        paragraph,_=literal_layout(text) if normalized else (text,[])
-        needle,_=literal_layout(quote) if normalized else (quote,[])
-        old_global=literal_layout(old_full)[0] if normalized else old_full
+    for normalized in (False,True,'script'):
+        layout = script_layout if normalized == 'script' else literal_layout
+        source,offsets=layout(expanded) if normalized else (expanded,list(range(len(expanded))))
+        paragraph,_=layout(text) if normalized else (text,[])
+        needle,_=layout(quote) if normalized else (quote,[])
+        old_global=layout(old_full)[0] if normalized else old_full
         origins=positions(paragraph,needle)
         if len(origins)!=1:continue
         origin=origins[0];windows=[(0,len(paragraph),'complete_old_paragraph')]
@@ -63,7 +85,8 @@ def locate(text, quote, expanded, old_full):
             matches=positions(source,paragraph[left:right])
             if len(matches)==1:
                 start=matches[0]+origin-left;end=start+len(needle)
-                return offsets[start],offsets[end-1]+1,('layout_only_' if normalized else '')+label
+                prefix = 'script_variant_only_' if normalized == 'script' else 'layout_only_' if normalized else ''
+                return offsets[start],offsets[end-1]+1,prefix+label
     return None
 
 
@@ -139,7 +162,8 @@ def classify(fragment, old, new, expanded, rows):
     target=new['paragraphs'].get(row['key'],{});target_text=str(target.get('text') or '')
     mapped_live=row['live_positions'][start]
     new_quote=target_text[mapped_live:row['live_positions'][end-1]+1]
-    if literal_layout(new_quote)[0]!=literal_layout(quote)[0]:
+    layout = script_layout if basis.startswith('script_variant_only_') else literal_layout
+    if layout(new_quote)[0]!=layout(quote)[0]:
         return outcome('exception','live_projection_does_not_match_exact_occurrence')
     if SPEAKERS.findall(text)!=SPEAKERS.findall(target_text):
         return outcome('exception','speaker_labels_changed',target_paragraph=row['key'],match_basis=basis)
@@ -190,6 +214,9 @@ def preview(records, *, source_id, old, new, document, align_sequence=False, cal
             candidate=alignment.candidate(f)
             if candidate and candidate['localized'] and candidate['matched_deleted_character_count']:
                 result={**result,**candidate}
+                if any(ch.isalnum() for ch in candidate['candidate_quote']):
+                    result.pop('proposed_fields', None)
+                    result.update(status='located_review', reason='partial_deletion_has_live_candidate')
         if alignment and result['status'] in {'auto_rebind','already_current'} and 'candidate_quote' not in result:
             from backend.pipeline.transcript_evidence_alignment import changes,speaker_annotation
             target_quote=result.get('proposed_fields',{}).get('verbatim_excerpt',f.get('verbatim_excerpt',''))

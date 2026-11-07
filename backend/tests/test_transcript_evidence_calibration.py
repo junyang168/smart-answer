@@ -45,6 +45,16 @@ def test_deleted_question_uses_original_characters_and_time_not_bible_inference(
     verify_preview({'fragments':[{**result,'quote':quote,'old_media_time':10,'old_media_end_time':100}]},old,new,doc)
 
 
+def test_partial_strikethrough_does_not_delete_the_live_teaching():
+    quote='教授說這是一個非常重要的判斷，要留意經文的理由。'
+    result,old,new,doc=calibrate(quote,PREFIX+quote.replace('非常重要的','~~非常~~重要的')+SUFFIX)
+    assert result['status']=='located_review'
+    assert result['matched_deleted_character_count']>0
+    assert '重要的判斷' in result['candidate_quote']
+    assert 'proposed_fields' not in result
+    verify_preview({'fragments':[{**result,'quote':quote,'old_media_time':10,'old_media_end_time':100}]},old,new,doc)
+
+
 def test_repeated_words_can_collapse_only_if_all_locate_to_same_paragraph():
     quote='問題很大。';old=PREFIX+quote+'這是中間一段具有獨特上下文的解釋。'+quote+SUFFIX
     result,*_=calibrate(quote,old,oldtext=old)
