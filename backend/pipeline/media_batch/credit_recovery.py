@@ -8,6 +8,8 @@ from backend.pipeline.slide_change_pilot import object_sha
 
 
 def request_for(out, request):
+    from .timeout_recovery import effective
+    request = effective(out, request)
     folder = Path(out) / "calls" / object_sha(request)
     state_path = folder / "state.json"
     authority = folder / "credit-recovery.json"
