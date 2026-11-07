@@ -637,3 +637,51 @@ def test_existing_direct_observation_support_is_in_claim_level_material(sample):
     req=next(q for role,q in ports.calls if role=='jev' and 'statement_fidelity' in q['questions'])
     assert req['state']['evidence'][0]['record_type']=='observations'
     assert req['state']['evidence'][0]['relation_type']=='supports'
+
+
+def test_jev_candidate_filter_is_broad_and_gpt_can_retain_leaf_evidence(sample):
+    store,root,_=sample
+    def reply(req):
+        if req['input']['task']=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
+                'conclusions':[{'statement':'這是教授的一項實質判斷。','support_keys':['evidence_steps/E'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],
+                    'reason':'交上層判斷粒度，未判定獨立支持。'}],'reason':'保留候選。'} for j in req['input']['jobs']]}
+        if req['input']['task']=='conclusion_disposition':
+            return {'items':[{'job_id':j['job_id'],'action':'retain_evidence','claim_id':'',
+                'statement':'','evidence_step_ids':[],'scripture_refs':[],'answer_question_ids':[],
+                'reason':'只作上層論據，沒有另外支持，保留 Evidence。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'conclusion_candidate':'yes'},reply=reply)
+    result=lower.run(store,'S',root/'lower',ports,apply=True)
+    assert len(result['conclusion_candidates'])==1
+    q=next(req for role,req in ports.calls if role=='jev' and 'conclusion_candidate' in req['questions'])
+    assert '不判斷有無獨立支持' in q['questions']['conclusion_candidate']['instructions']
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    assert result['applied'] and not result['new_claim_ids']
+    assert result['conclusion_dispositions'][0]['action']=='retain_evidence'
+
+
+def test_gpt_can_select_other_verified_evidence_for_candidate_support(sample):
+    store,root,_=sample
+    ev=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    ev.update(evidence_step_id='E2',statement='教授以知道旨意作為遵行的前提。',produced_claim_ids=[])
+    store.apply_plan(store.plan_package({'package_id':'other-support','evidence_steps':[ev]}))
+    def reply(req):
+        if req['input']['task']=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
+                'conclusions':[{'statement':'不知道神旨意就無法遵行。','support_keys':['evidence_steps/E'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你不知道神的旨意，怎麼遵行？'}],
+                    'reason':'只提候選，交 GPT 判斷。'}],'reason':'交接。'} for j in req['input']['jobs']]}
+        if req['input']['task']=='conclusion_disposition':
+            assert 'evidence_steps/E2' in req['input']['jobs'][0]['related_evidence']
+            return {'items':[{'job_id':j['job_id'],'action':'new_claim','claim_id':'',
+                'statement':'知道神的旨意是遵行祂旨意的前提。','evidence_step_ids':['E2'],
+                'scripture_refs':[],'answer_question_ids':[],'reason':'另一條已驗證論據支持這項判斷。'} for j in req['input']['jobs']]}
+        if req['input']['task']=='pair_attachment':
+            return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b',
+                'reason':'教授的前提支持結論。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'conclusion_candidate':'yes'},reply=reply)
+    lower.run(store,'S',root/'lower',ports,apply=True)
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    assert result['applied'] and len(result['new_claim_ids'])==1
+    assert store.get_record_state('claims',result['new_claim_ids'][0])['payload']['evidence_step_ids']==['E2']

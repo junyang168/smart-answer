@@ -376,6 +376,9 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             if not any(k in pool for k in item['support_keys']):continue
             conclusion_jobs.append({'job_id':item['candidate_id'],'candidate':item,
                 'support':{k:pairs.node(k,records,sources) for k in item['support_keys']},
+                'related_evidence':{k:{field:records[k]['payload'].get(field) for field in
+                    ['statement','speaker','stance','scripture_refs']} for k in pool
+                    if k.startswith('evidence_steps/') and k not in item['support_keys']},
                 'existing_claims':peer_summary(sorted(relevant_peers),records),
                 'writable_claim_ids':claim_ids,'remaining_creation_space':max_new_claims-len(candidates),
                 'questions':{k.split('/',1)[1]:{'text':r['payload'].get('text')} for k,r in records.items()
@@ -388,8 +391,10 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             return batch
         for batch,raw in f.gpt(root,ports,'conclusion_disposition',conclusion_jobs,CandidateDecisions.model_json_schema(),PROMPT+
                 '核對候選是否已被 Claim 明確承載，可 represented、補入本組 Claim repair、必要 new_claim、'
-                'retain_evidence 或 needs_source。只有教授另給獨立論據且需要獨立引用才新建。'
-                '新 Claim claim_id 留空；只有已有 ID 可 represented／repair。只選本項 support 的 Evidence。'
+                'retain_evidence 或 needs_source。由 GPT 判斷教授是否另有支持該判斷的論據，並核對是否需要獨立引用才新建。'
+                'Jev 及下層只提供粗篩候選，沒有判定它應成為 Claim。只有重述本句、沒有另外支持，應留 Evidence。'
+                '檢查 candidate、support 原文及已驗證 related_evidence；不以記錄數量或必須兩條 Evidence 當機械門檻。'
+                '新 Claim claim_id 留空；只有已有 ID 可 represented／repair。Evidence ID 只選本項 support 或 related_evidence 已提供的記錄。'
                 'answer_question_ids 僅選同項已提供的 Question；沒有則留空。同批候選彼此查重。',prepare=refresh_candidates):
             items=CandidateDecisions.model_validate(raw).items
             f.exactly([x.model_dump() for x in items],[j['job_id'] for j in batch],'job_id')
@@ -398,7 +403,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                 job=next(j for j in batch if j['job_id']==item.job_id);decisions.append(item.model_dump())
                 if len(item.answer_question_ids)!=len(set(item.answer_question_ids)) or not set(item.answer_question_ids)<=set(job['questions']):
                     raise ValueError('candidate answered an unprovided Question')
-                allowed=[k.split('/',1)[1] for k in job['support'] if k.startswith('evidence_steps/')]
+                allowed=[k.split('/',1)[1] for k in set(job['support'])|set(job['related_evidence']) if k.startswith('evidence_steps/')]
                 c.validate_eids(item.evidence_step_ids,allowed)
                 if item.action=='needs_source':pending.append({'candidate_id':item.job_id,'reason':item.reason});continue
                 if item.action=='retain_evidence':continue

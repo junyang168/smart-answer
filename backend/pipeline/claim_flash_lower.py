@@ -178,8 +178,9 @@ def run(store, source_id, root, ports, *, apply=False):
             answers=f.jev(root,ports,{'paragraph_key':pk,'text':paragraph['text'],'records':bound}, {
                 'missing_lower':f.yn('教授在這段提出的實質論據、經文觀察或解釋依據，是否有任何部分未被 records 表達？'
                     '只查下層內容覆蓋，口頭強調與重複不算，已有忠實概括不算漏抽。'),
-                'conclusion_candidate':f.yn('這段是否有教授另給實質論據支持、值得交 Claim 層核對承載的結論？'
-                    '已連到其他 Claim 不表示結論已承載；只作上層論據且未另給支持的斷言不算。')})
+                'conclusion_candidate':f.yn('這段是否有值得交 GPT 核對保存方式的實質判斷候選？'
+                    '只作寬鬆候選篩選，不判斷有無獨立支持，也不判斷是否應成為 Claim。'
+                    '單純故事細節、例子、設問或口頭強調不算。已有連接不排除候選。')})
             coverage.append({'paragraph_key':pk,'precheck':answers})
             if any(v!='no' for v in answers.values()):
                 # Complete support can span paragraphs: offer adjacent context, not a hard heading boundary.
@@ -189,10 +190,11 @@ def run(store, source_id, root, ports, *, apply=False):
                 coverage_jobs.append({'job_id':pk,'source_paragraphs':context,'records':bound,'precheck':answers})
         for batch,raw in f.gpt(root,ports,'lower_coverage',coverage_jobs,Coverage.model_json_schema(),PROMPT+
                 '只補現有 records 未表達的實質 Evidence 或 Observation；已有承載不重建。'
-                'conclusions 是待核對候選，不是新 Claim；給 statement、已提供支持記錄 key 及不同於重述本句的支持理由。'
+                'conclusions 只保存待核對的實質判斷，不決定新建 Claim；給 statement、候選所在的記錄 key、原文及簡短候選理由。'
+                '此處不以有無其他論據為候選門檻，獨立支持與論證角色交 Claim 層 GPT 判斷。'
                 'new_records 新增記錄在同項中以 new:0 等暫名供 conclusions.support_keys 引用。'
                 'connections 可提出本項所提供下層記錄間必要的漏連，new:0 等暫名沿用；只提候選，稍後獨立判定。'
-                '證據已連到別的 Claim 不能排除另一結論；無缺漏／無獨立支持則清單留空並說明。'
+                '證據已連到別的 Claim 不能排除另一判斷；只有沒有實質候選時 conclusions 才留空，不因未見獨立支持而丟掉。'
                 '若跨段論證在提供材料中不完整，needs_source 明示，不猜測或截斷。'):
             items=Coverage.model_validate(raw).items
             f.exactly([x.model_dump() for x in items],[j['job_id'] for j in batch],'job_id')
