@@ -84,7 +84,14 @@ def test_pre_review_restoration_survives_two_revisions_and_saved_candidate_resum
     wrong = [literal.replace('原文的證據', '原文證據'), literal.replace('表面的說法', '表面說法')]
     fragment = dict(store.get_record_state('source_fragments', 'FC')['payload'], verbatim_excerpt=wrong[0])
     store.apply_plan(store.plan_package({'package_id': 'existing-quote-needs-preflight', 'source_fragments': [fragment]}))
-    prepared = intake.prepare(['C'], root, instruction='Refresh C with its own complete evidence.', store=store)
+    # This test explicitly exercises previous-candidate propagation. The newer
+    # database-retry contract intentionally omits that field and is tested separately.
+    policy = json.loads(intake.DEFAULT_POLICY.read_text())
+    policy.pop('retry_context_contract', None)
+    policy_file = root/'previous-candidate-policy.json'
+    policy_file.parent.mkdir(parents=True, exist_ok=True)
+    policy_file.write_text(json.dumps(policy))
+    prepared = intake.prepare(['C'], root, instruction='Refresh C with its own complete evidence.', store=store, policy=policy_file)
     request, execution = next(iter(batch.load(prepared['manifest']['path'], root/'batch', store=store)[1].values()))
     assert cm.Policy.model_validate_json(Path(request.policy.path).read_text()).source_quote_projection == SPAN_CONTRACT
     untouched = store.get_record_state('claims', 'D')

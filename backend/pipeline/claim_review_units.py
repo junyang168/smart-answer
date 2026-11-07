@@ -8,6 +8,43 @@ from pathlib import Path
 
 CONTRACT = 'claim_bounded_review_unit_v1'
 MAX_CLAIMS = 10
+CAPACITY_EXCEPTION = 'claim_review_capacity_exception'
+
+
+def review_capacity(materials, candidate, claim_keys):
+    """One owner-bound saved candidate may exceed the default by four proposals.
+
+    This changes capacity alone, never target authority, spent calls, candidate
+    acceptance or individual evidence assessment. Ordinary units stay at ten.
+    """
+    from backend.pipeline import claim_management as cm
+    from backend.pipeline.source_reconciliation_runner import body, read
+    bound = (materials or {}).get(CAPACITY_EXCEPTION)
+    if bound is None:
+        return MAX_CLAIMS
+    direction = json.loads(cm.source.verify_file(cm.source.FileBinding.model_validate(bound)).read_text())
+    original = body(read(cm.source.verify_file(cm.source.FileBinding.model_validate(direction['materials']))))
+    saved = cm.Candidate.model_validate(body(read(cm.source.verify_file(
+        cm.source.FileBinding.model_validate(direction['candidate'])))))
+    request = materials['request']
+    targets = set(request['target_keys'])
+    new = {d.record_key for d in saved.dispositions if d.action == 'create' and d.record_key.startswith('claims/')}
+    current_new = {d.record_key for d in candidate.dispositions if d.action == 'create' and d.record_key.startswith('claims/')}
+    if (direction.get('schema_version') != 'wang_claim_review_capacity_exception_v1'
+            or direction.get('authorized_by') != 'owner' or not direction.get('authorization_quote')
+            or direction.get('human_content_approval') is not False
+            or direction.get('default_limit') != MAX_CLAIMS
+            or (len(targets), len(new), direction.get('limit')) not in {(8, 4, 12), (7, 4, 11)}
+            or direction.get('action_id') != request['action_id']
+            or direction.get('round_id') != original['round_id']
+            or original['request'] != request or original['unit_request'] != materials['unit_request']
+            or original['before'] != materials['before'] or original['sources'] != materials['sources']
+            or saved.digest != direction.get('candidate_sha256')
+            or targets != set(direction.get('original_target_keys', []))
+            or new != set(direction.get('proposed_claim_keys', [])) or len(new) != 4
+            or not current_new <= new or not set(claim_keys) <= targets | new):
+        raise ValueError('review capacity exception changed its exact owner-authorized scope or source')
+    return direction['limit']
 
 
 def enabled(request, policy=None):

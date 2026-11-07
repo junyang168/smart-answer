@@ -73,3 +73,19 @@ def test_a_title_too_long_gets_one_retry_told_what_was_wrong(tmp_path, monkeypat
     report = chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=client)
     assert report["status"] == "saved" and report["title"] == "八福"
     assert "40 字" in client.prompts[1]
+
+
+def test_the_notes_page_gets_its_own_title_beside_the_lectures(tmp_path, monkeypatch):
+    from backend.pipeline import notes_chapter
+
+    notes = Chapter(passage="mat-5-1-48", series="S", lectures=("L",), source=notes_chapter.NOTES_SOURCE)
+    monkeypatch.setitem(chapter_material.CHAPTERS, "mat-5-1-48", CHAPTER)
+    monkeypatch.setattr(notes_chapter, "load_chapters", lambda *_: {"mat-5-1-48": notes})
+    _slides(tmp_path)
+    chapter_title.decide(CHAPTER, data_base_dir=tmp_path, client=FakeClient([{"title": "講座那一句"}]))
+    client = FakeClient([{"title": "筆記那一句"}])
+    assert chapter_title.decide(notes, data_base_dir=tmp_path, client=client)["title"] == "筆記那一句"
+    assert "第 1 篇" in client.prompts[0]
+    assert "釋經筆記" in chapter_title.system_prompt(notes_chapter.NOTES_SOURCE)
+    assert chapter_title.load(tmp_path, "mat-5-1-48") == "講座那一句"
+    assert chapter_title.load(tmp_path, "mat-5-1-48", notes_chapter.NOTES_SOURCE) == "筆記那一句"

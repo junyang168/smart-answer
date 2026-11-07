@@ -130,8 +130,9 @@ function Chapter() {
 
             {current.page?.kind === "chapter" ? (
               <OriginalAudio
-                key={current.page.passage}
+                key={`${current.name}-${current.page.passage}`}
                 passage={current.page.passage}
+                source={current.name}
                 embedded
                 listenHref={(section) =>
                   `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}`

@@ -67,12 +67,25 @@ def sampling_marker(cursor,cid,state):
     decisions = [event for event in events if not context_receipt(event)]
     if not decisions:return None
     rev,kind,decision,artifact=decisions[0];r=(artifact or {}).get('resolution',{})
-    if not (rev==state['revision'] and kind=='ai' and decision=='human_review_required'
+    if not (rev<=state['revision'] and kind=='ai' and decision=='human_review_required'
         and r.get('schema_version')=='wang_legacy_ai_review_reconciliation_v1'
         and r.get('claim_id')==cid and r.get('approval_status')=='not_human_approved'
         and r.get('independent_review_decision')=='pass' and r.get('adjudication_status')=='human_spot_check'
         and r.get('target_review_status')=='human_review_required'):return None
-    return {'before_pin':[state['revision'],state['content_sha256'],False],'events_sha256':sha256_json(events)}
+    facts=events
+    if rev<state['revision']:
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        from backend.pipeline.claim_source_epoch_reassessment import _locator_lineage
+        sid=artifact.get('source_id')
+        if not isinstance(sid,str) or not sid:return None
+        reviewed=cursor.execute('''SELECT v.payload,v.content_sha256,c.status
+            FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id)
+            WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s''',(cid,rev)).fetchone()
+        if not reviewed or reviewed[2]!='applied' or record_content_sha(reviewed[0])!=reviewed[1]:return None
+        lineage=_locator_lineage(cursor,cid,rev,reviewed,state,sid)
+        if not lineage:return None
+        facts={'events':events,'locator_lineage':lineage}
+    return {'before_pin':[state['revision'],state['content_sha256'],False],'events_sha256':sha256_json(facts)}
 
 
 def compile_projection(cursor,request,before,policy):
@@ -271,7 +284,8 @@ def project_candidate(candidate,receipt,materials):
                       'stale_review_reset_status':'candidate_not_approved_history_preserved'}
     if changed:receipt={**receipt,'candidate_sha256':result.digest,'legacy_ai_sampling_reset':sorted(changed),
                          'sampling_reset_status':'candidate_not_human_approved'}
-    return result,receipt
+    from backend.pipeline.claim_source_binding_projection import project
+    return project(result,receipt,materials)
 
 
 def project_support_aliases(raw,materials):

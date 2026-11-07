@@ -39,6 +39,15 @@ def claim_management_review_packet(materials, candidate):
         if refs:
             packet['existing_evidence_owner_claims'] = refs
             packet['program_owned_fields']['existing_evidence_owner_claims'] = direct.EVIDENCE_OWNER_NOTE
+    from backend.pipeline.claim_source_binding_projection import enabled as binding_projection_enabled
+    if binding_projection_enabled(materials):
+        packet['program_owned_fields']['canonical_source_binding_metadata'] = {
+            'source_fragments':['source_binding_status','deleted_in_source_sha256'],
+            'evidence_steps':['source_binding_status'],
+            'rule':'Program derives only physical binding status from the exact current source, paragraph and verbatim hashes. '
+                'A successfully rebound fragment has source_version_bound and no deletion marker. '
+                'Evidence is physically bound only when all its own supporting fragments are current. '
+                'This does not grant support eligibility, human approval, or a content verdict. Independently review the full candidate.'}
     return add_packet(packet, candidate, materials=materials)
 
 
@@ -176,8 +185,12 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
 def initial_claim_candidate(materials):
     """One deterministic initial candidate for execution and origin validation."""
     from backend.pipeline import claim_management as cm
+    from backend.pipeline.claim_source_binding_projection import FIELD as BINDING_REPAIR, initial_candidate as repaired_binding_candidate
+    if BINDING_REPAIR in materials:
+        return repaired_binding_candidate(materials)
     if (materials.get('continuation',{}).get('opus_api_transition')
-            or materials.get('continuation',{}).get('opus_subscription_resumption')):
+            or materials.get('continuation',{}).get('opus_subscription_resumption')
+            or materials.get('continuation',{}).get('source_quote_highlight_repair')):
         original = materials['continuation']['previous_candidates'][materials['unit_id']]
         if original != materials['previous_candidate']:
             raise ValueError('Opus transport handoff altered the saved candidate')
@@ -618,6 +631,10 @@ def execute_claim_management(store, request, *, root, ports):
                             human_source_decisions=unit_decisions if 'human_source_decisions' in parent else None)
                         unit_goal = cm.unit_goal(parent['original_goal'], unit_request)
                         roles = cm.required_roles(request, ordinal, policy)
+                        from backend.pipeline.claim_source_binding_projection import FIELD as BINDING_REPAIR, round_repair
+                        binding_repair = round_repair(parent, ordinal)
+                        if binding_repair:
+                            roles = ['opus']
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
                         # A withdrawn draft has no current SQL object, but its
                         # blocking finding still belongs to this sole unit.
@@ -655,6 +672,11 @@ def execute_claim_management(store, request, *, root, ports):
                         from backend.pipeline.claim_quote_projection import FIELD as QUOTE_FIELD
                         if parent.get(QUOTE_FIELD):
                             materials[QUOTE_FIELD] = parent[QUOTE_FIELD]
+                        from backend.pipeline.claim_review_units import CAPACITY_EXCEPTION
+                        if parent.get(CAPACITY_EXCEPTION):
+                            materials[CAPACITY_EXCEPTION] = parent[CAPACITY_EXCEPTION]
+                        if binding_repair:
+                            materials[BINDING_REPAIR] = binding_repair
                         if policy.legacy_ai_supersession_restore:
                             materials['program_owned_fields']['legacy_ai_supersession_restore'] = (
                                 'Explicit Restore may restore an old AI-superseded Claim even when its SQL retired flag is false. '
@@ -703,7 +725,7 @@ def execute_claim_management(store, request, *, root, ports):
                         with store.connect() as conn, conn.cursor() as cursor:
                             if 'human_source_decisions' in materials:
                                 from backend.pipeline.claim_human_source import assert_current
-                                assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
+                                assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'], request=materials['unit_request'])
                             if 'program_metadata_projection' in materials:
                                 from backend.pipeline.claim_metadata_projection import assert_current
                                 assert_current(cursor, cm.Request.model_validate(materials['unit_request']), materials['before'], policy, materials['program_metadata_projection'])
