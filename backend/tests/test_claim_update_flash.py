@@ -705,3 +705,31 @@ def test_keep_justification_can_quote_a_subset_without_replacing_any_binding(sam
     result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=keep),apply=True)
     assert result['status']=='verified' and result['updates']=={} and result['new_fragments']=={}
     assert store.get_record_state('evidence_steps','E')==before
+
+
+def test_keep_never_applies_rephrased_echo_fields(sample):
+    store,root,_=sample
+    before=store.get_record_state('evidence_steps','E')
+    def keep(req):
+        if req['input']['task']=='lower_repair':
+            return {'items':[{'job_id':j['job_id'],'action':'keep',
+                'statement':j['record']['statement']+'成立於教授的解讀。','speaker':'audience','stance':'quoted',
+                'scripture_refs':['回顯不是修改'], 'quotes':[{'paragraph_key':'S0001','quote':'附帶回顯不作新原文。'}],
+                'reason':'原記錄成立，保留。'} for j in req['input']['jobs']]}
+    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=keep),apply=True)
+    assert result['updates']=={} and result['new_fragments']=={}
+    assert store.get_record_state('evidence_steps','E')==before
+    assert result['outcomes'][0]['quote_projection'][0]['ignored_echo_fields']
+
+
+def test_claim_keep_never_applies_echo_rewording_or_ids(sample):
+    store,root,_=complete(sample)
+    before=store.get_record_state('claims','C')['payload']
+    def keep(req):
+        if req['input']['task']=='claim_statement':
+            return {'items':[{'claim_id':'C','action':'keep','statement':'回顯中的附加說明。',
+                'evidence_step_ids':['UNUSED_ECHO'],'scripture_refs':['UNUSED_ECHO'],'reason':'原主張成立，保留。'}]}
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'yes'},reply=keep),apply=True)
+    actual=store.get_record_state('claims','C')['payload']
+    assert result['applied'] and actual['statement']==before['statement']
+    assert actual['evidence_step_ids']==before['evidence_step_ids']

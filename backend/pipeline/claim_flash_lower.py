@@ -80,6 +80,14 @@ PROMPT=('這是 Claim Update Flash 全來源下層，只處置指定工作，不
 def record_postimage(key, record, edit, material, records, sources):
     col=key.split('/')[0]
     text_field='text' if col=='questions' else 'title' if col=='position_nodes' else 'statement'
+    if edit.action=='keep':
+        # Action is authoritative. Echo fields and selected excerpts are not patches;
+        # the complete original material was already physically checked before review.
+        fields={'statement':record.get(text_field),'speaker':record.get('speaker'),
+                'stance':record.get('stance'),'scripture_refs':record.get('scripture_refs',[]),
+                'attribution':record.get('attribution'),'questioner':record.get('questioner')}
+        ignored=[name for name,old in fields.items() if getattr(edit,name) is not None and getattr(edit,name)!=old]
+        return record,{},[{'action':'keep','ignored_echo_fields':ignored,'original_bindings_retained':True}]
     # Reuse the existing exact quote projection, fragment identity and physical binding builder.
     synthetic={**record, 'evidence_step_id':key, 'statement':record.get(text_field, ''),
                'speaker':record.get('speaker') or 'professor', 'stance':record.get('stance') or 'asserted'}
@@ -98,14 +106,6 @@ def record_postimage(key, record, edit, material, records, sources):
         result['attribution']=edit.attribution
     if col=='questions' and edit.questioner is not None:
         result['questioner']=edit.questioner
-    if edit.action=='keep':
-        fields=[text_field,'attribution','questioner']+(['speaker','stance'] if col=='evidence_steps' else [])
-        if any(result.get(k)!=record.get(k) for k in fields) or (
-                col in {'evidence_steps','observations'} and edit.scripture_refs!=record.get('scripture_refs',[])):
-            raise ValueError('keep cannot silently rewrite lower content')
-        # Supplied excerpts justify the decision; keep is not a request to replace
-        # the complete existing source list. Projection above still validates every quote.
-        return record,{},projection
     from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
     result=KNOWLEDGE_COLLECTIONS[col][0].model_validate(result).model_dump(mode='json')
     return result,fragments,projection

@@ -259,6 +259,7 @@ def final_candidate_checks(records,sources,keys,root,ports,pending):
         items=ClaimItems.model_validate(raw).items
         f.exactly([{'job_id':x.claim_id} for x in items],[j['job_id'] for j in batch],'job_id')
         for item in items:
+            if item.action=='keep':continue  # Keep does not apply echoed content as a patch.
             if not item.statement.strip() or not item.reason.strip():raise ValueError('empty Claim statement or reason')
             key='claims/'+item.claim_id;p=records[key]['payload']
             c.validate_eids(item.evidence_step_ids,p.get('evidence_step_ids',[]))
@@ -358,6 +359,9 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             items=ClaimItems.model_validate(raw).items
             f.exactly([{'job_id':x.claim_id} for x in items],[j['job_id'] for j in batch],'job_id')
             for item in items:
+                if item.action=='keep':
+                    outcomes.append({'claim_id':item.claim_id,'basis':'gpt_disposition','action':'keep','reason':item.reason})
+                    continue
                 if not item.statement.strip() or not item.reason.strip():raise ValueError('empty Claim statement or reason')
                 key='claims/'+item.claim_id;p=records[key]['payload']
                 allowed={x.split('/',1)[1] for x in pool if x.startswith('evidence_steps/')}|set(p.get('evidence_step_ids',[]))
