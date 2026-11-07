@@ -35,7 +35,7 @@ class Ports:
                     if name == 'identity' and self.equivalent and request['state']['candidate'] != '沒有聽從祂的話，顯明沒有真正相信祂。' else
                     'NONE' if name == 'identity' else
                     'none' if name == 'relation' else
-                    'yes' if name == 'covered' else 'no')
+                    'yes' if name in {'covered','promotion_support'} else 'no')
         return answer(request, selected)
 
     def repair(self, request):
@@ -56,7 +56,9 @@ class Ports:
         new = [{'statement': '不知道神的旨意，就無法遵行神的旨意。',
             'evidence_step_ids': ['E'], 'scripture_refs': [], 'answer_question_ids': ['Q'],
             'reason': '原文直接回答如何能遵行，不把後續相信的結論當成這項判斷。'}] if self.create else []
-        return {'updates': updates, 'new_claims': new, 'needs_more_creation_space': False}
+        return {'updates': updates, 'new_claims': new, 'needs_more_creation_space': False,
+                'judgment_dispositions': [{'evidence_id':f['evidence_id'],'action':'new_claim' if self.create else 'retain_evidence',
+                    'claim_ids':[],'reason':'保留論證角色，必要才獨立保存。'} for f in request['input']['missing_judgment_findings']]}
 
 
 @pytest.fixture
@@ -101,6 +103,79 @@ def test_preview_and_apply_reuse_the_same_answers(group):
     n = len(ports.calls)
     assert c.run(store, ['C'], root, ports, apply=True)['applied']
     assert len(ports.calls) == n
+
+
+def test_independent_judgment_can_remain_evidence_without_a_new_claim(group):
+    store, root, _ = group
+    def retain(request):
+        raw = Ports(create=False).repair(request)
+        assert raw['judgment_dispositions'][0]['action'] == 'retain_evidence'
+        return raw
+    ports = Ports(create=True, repair=False, proposal=retain)
+    result = c.run(store, ['C'], root, ports, apply=True)
+    assert result['applied'] and result['new_claim_ids'] == []
+    assert result['judgment_dispositions'][0]['action'] == 'retain_evidence'
+    assert ports.calls.count('gpt') == 1 and 'jev:identity' not in ports.calls
+
+
+def test_judgment_can_be_merged_into_an_authorized_existing_claim(group):
+    store, root, _ = group
+    def merge(request):
+        return {'updates': [{'claim_id': 'C', 'action': 'repair',
+                    'statement': '沒有聽從祂的話，顯明沒有真正相信祂。',
+                    'evidence_step_ids': ['E'], 'scripture_refs': [], 'reason': '完整保存同一論點。'}],
+                'new_claims': [], 'needs_more_creation_space': False,
+                'judgment_dispositions': [{'evidence_id': 'E', 'action': 'represented_by_claims',
+                    'claim_ids': ['C'], 'reason': '補入本組既有主張，不必另建卡。'}]}
+    result = c.run(store, ['C'], root, Ports(create=True, repair=False, proposal=merge), apply=True)
+    assert result['applied'] and not result['new_claim_ids']
+    assert store.get_record_state('claims', 'C')['payload']['statement'] == '沒有聽從祂的話，顯明沒有真正相信祂。'
+
+
+def test_judgment_candidate_cannot_silently_disappear(group):
+    store, root, _ = group
+    def omit(request):
+        raw = Ports(create=False).repair(request)
+        raw['judgment_dispositions'] = []
+        return raw
+    original = store.get_record_state('claims', 'C')
+    with pytest.raises(ValueError, match='every judgment candidate'):
+        c.run(store, ['C'], root, Ports(create=True, repair=False, proposal=omit), apply=True)
+    assert store.get_record_state('claims', 'C') == original
+
+
+def test_supporting_assertion_without_further_evidence_is_not_promoted(group):
+    store, root, _ = group
+    class NoFurtherSupport(Ports):
+        def judge(self, request):
+            if 'promotion_support' in request['questions']:
+                self.calls.append('jev:promotion_support')
+                return answer(request, 'no')
+            return super().judge(request)
+    ports = NoFurtherSupport(create=True)
+    result = c.run(store, ['C'], root, ports, apply=True)
+    assert result['applied'] and result['new_claim_ids'] == []
+    assert result['candidate_dispositions'][0]['action'] == 'retain_evidence'
+    assert store.get_record_state('questions', 'Q')['payload']['answer_claim_ids'] == ['C']
+    assert ports.calls.count('gpt') == 1
+
+
+def test_leaf_evidence_can_answer_question_without_becoming_a_claim(group):
+    store, root, _ = group
+    class LeafAnswer(Ports):
+        def judge(self, request):
+            if 'promotion_support' in request['questions']:
+                return answer(request, 'no')
+            if 'relation' in request['questions']:
+                criteria = request['questions']['relation']['criteria']
+                assert 'a_to_b_answers' in criteria and 'b_to_a_supports' not in criteria
+                return answer(request, 'a_to_b_answers')
+            return super().judge(request)
+    result = c.run(store, ['C'], root, LeafAnswer(create=True), apply=True)
+    assert result['applied'] and not result['new_claim_ids']
+    relation = next(p for k,p in result['updates'].items() if k.startswith('knowledge_relations/'))
+    assert (relation['from_id'], relation['to_id'], relation['relation_type']) == ('E','Q','answers')
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids'] == ['C']
 
 
 def test_exact_duplicate_links_existing_question_answer_without_new_identity(group):
@@ -195,7 +270,9 @@ def test_explicit_transcript_alias_is_used_for_dedup_and_anchor_refresh(group):
     claim['occurrences'][0]['source_id'] = '講道舊ID'
     peer = deepcopy(claim)
     peer.update(claim_id='D', statement='不知道神的旨意，就無法遵行神的旨意。')
-    store.apply_plan(store.plan_package({'package_id': 'alias', 'source_documents': [document],
+    question = deepcopy(store.get_record_state('questions', 'Q')['payload'])
+    question.update(source_fragment_id='F2')
+    store.apply_plan(store.plan_package({'package_id': 'alias', 'questions': [question], 'source_documents': [document],
         'source_fragments': [fragment], 'evidence_steps': [evidence], 'claims': [claim, peer]}))
     result = c.run(store, ['C'], root, Ports(create=True), apply=True)
     assert result['applied'] and not result['new_claim_ids']

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_relation_refresh as relations
+from backend.pipeline import claim_context_refresh as attached
 from backend.api.canonical_repository.claim_identity_allocation import reserve
 
 VERSION = 'claim_bottom_up_refresh_v1'
@@ -166,21 +167,36 @@ class NewClaim(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class JudgmentDisposition(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    evidence_id: str
+    action: Literal['retain_evidence', 'represented_by_claims', 'new_claim', 'needs_source']
+    claim_ids: list[str]
+    reason: str = Field(min_length=1)
+
+
 class Proposal(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     updates: list[ClaimEdit]
     new_claims: list[NewClaim]
     needs_more_creation_space: bool
+    judgment_dispositions: list[JudgmentDisposition]
 
 
 PROMPT = (
     '這是新自下而上流程的 Claim 層。Evidence 已完成來源忠實度檢查。'
     '處置 claim_findings 的每個 Claim，恰好一次；Jev 只是預檢，可以修正或有據保留，'
     '來源不能解答才 needs_source。沒有列為目標的既有 Claim 只作查重參考，不得修改。'
-    'Claim 保存教授的一個最小實質判斷；Evidence 保存經文、觀察、例子和推理的支持角色。'
+    'Claim 保存值得單獨引用或連接的教授主張；Evidence 保存支持、限定、反駁或解釋主張的論證步驟。'
+    '二者是論證角色，不是互斥內容分類：同一判斷可兼任兩者，但不是每個獨立斷言都必須另建 Claim。'
     '中間判斷也可成 Claim，但不要把整段 Evidence 摘要、每個例子細節、提問或口頭強調升成 Claim。'
-    '對 missing_judgment_findings 判定是否真的漏存；只提議教授明確提出、現有 Claim 未承載的最小判斷。'
-    '每個新候選須由 evidence 清單支持，候選之間也查重；如它直接回答所列 Question，填 answer_question_ids。'
+    '每個 missing_judgment_findings 恰好給一項 judgment_dispositions：可保留為 Evidence、由既有 Claim 承載、必要新建，或來源不足。'
+    '保留論證步驟或有據選擇粒度不是漏抽；不要為避免漏抽而碎片化建卡。'
+    '若一個新說明可連貫補入本組既有 Claim，優先必要補充；只有確需獨立保存且未被承載，才新建。'
+    '這些候選來自支持上層 Claim 的 Evidence：只有教授另給經文、觀察、例子或推理支持這個下層判斷，才考慮升為 Claim。'
+    '如果只說這句話來支持上層 Claim，卻沒有另給它論據，就留為 Evidence。原文直接說了這句話只證明歸屬，不算另一層支持。'
+    '每個新候選須由 evidence 清單支持，reason 要指出不同於重述本句的教授論據；候選之間也查重。'
+    '如它直接回答所列 Question，填 answer_question_ids。'
     '保留教授使用的經文、條件、範圍、程度及歸屬，不補他沒有教的答案、不判神學對錯。'
     '若缺少判斷的數量超過 max_new_claims，needs_more_creation_space=true，不把其餘漏項當成已覆蓋。'
     '只輸出必要修正或新候選；ID 和雙向連結由程式處理。')
@@ -289,6 +305,7 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
             raise ValueError('Claim dependencies changed while refreshing Evidence')
         records, sources, sid, peers = context(store, targets, eids, include_peers=bool(max_new_claims))
         relations.load(store, records, claim_ids)
+        attached.load(store, records, claim_ids, eids)
         check_evidence_proof(eroot, eids, records, sources)
         e.save(root / 'before.json', {'records': records, 'sources': sources})
         index = {**peers, **{cid: records['claims/' + cid]['payload'] for cid in claim_ids}}
@@ -305,16 +322,17 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
                     ['statement', 'evidence_step_ids', 'scripture_refs', 'attribution']}})
         if max_new_claims:
             for value in evidence:
-                v = ask(root, ports, {'evidence': value}, 'missing',
-                    '先不考慮是否已建立 Claim：這個 Evidence 是否包含教授明確提出、可獨立支持或反駁的實質判斷？'
-                    '中間判斷也可以；單純故事細節、例子、設問或口頭強調不算。', YES_NO)
-                matched = deduplicate({'statement': value['statement']}, index, root, ports) if v == 'yes' else None
-                if v == 'uncertain' or v == 'yes' and (matched is None or matched == UNCERTAIN_IDENTITY):
+                v = ask(root, ports, {'evidence': value, 'original_text_excerpts': e.material(
+                    records['evidence_steps/'+value['evidence_step_id']]['payload'],records,sources)['original_text_excerpts']}, 'missing',
+                    '這份 Evidence 的完整原文中，是否有值得檢查如何保存的實質判斷候選？'
+                    '肯定只表示交給 GPT 決定論證角色與粒度，不表示缺少 Claim；中間步驟可留在 Evidence。'
+                    '單純故事細節、例子、設問或口頭強調不算。', YES_NO)
+                if v != 'no':
                     missing.append({'evidence_id': value['evidence_step_id'], 'verdict': v})
         questions = {k.split('/', 1)[1]: {'text': r['payload'].get('text'),
             'answer_claim_ids': r['payload'].get('answer_claim_ids', [])} for k, r in records.items()
             if k.startswith('questions/')}
-        proposal = Proposal(updates=[], new_claims=[], needs_more_creation_space=False)
+        proposal = Proposal(updates=[], new_claims=[], needs_more_creation_space=False, judgment_dispositions=[])
         if findings or missing:
             full, paragraphs = [], {}
             for eid in eids:
@@ -326,8 +344,7 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
                     paragraphs[p['paragraph_key']] = {'paragraph_key': p['paragraph_key'], 'text': p['text']}
             schema = Proposal.model_json_schema()
             # Avoid zero-length-array wire constraints; exact sets are checked below.
-            if findings:
-                schema['$defs']['ClaimEdit']['properties']['claim_id']['enum'] = [f['claim_id'] for f in findings]
+            schema['$defs']['ClaimEdit']['properties']['claim_id']['enum'] = claim_ids
             if max_new_claims:
                 schema['properties']['new_claims']['maxItems'] = max_new_claims
             request = {'identity': ports.identity['gpt'], 'system': PROMPT, 'schema': schema,
@@ -335,14 +352,29 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
                           'evidence': full, 'source_context': list(paragraphs.values()),
                           'existing_claims': {cid: {'statement': p['statement'], 'attribution': p.get('attribution')}
                                               for cid, p in index.items()}, 'questions': questions,
-                          'max_new_claims': max_new_claims}}
+                          'max_new_claims': max_new_claims,
+                          'target_claims': {cid: {k: records['claims/'+cid]['payload'].get(k) for k in
+                              ['statement','evidence_step_ids','scripture_refs','attribution']} for cid in claim_ids}}}
             raw = e.recorded_call(root, 'gpt', request, ports.repair, preflight=getattr(ports, 'preflight', None))
             proposal = Proposal.model_validate(raw)
-        if (len(proposal.updates) != len(findings)
-                or {p.claim_id for p in proposal.updates} != {f['claim_id'] for f in findings}
+        if (len(proposal.updates) != len({p.claim_id for p in proposal.updates})
+                or not {f['claim_id'] for f in findings} <= {p.claim_id for p in proposal.updates} <= set(claim_ids)
                 or len(proposal.new_claims) > max_new_claims):
             raise ValueError('GPT changed the frozen Claim denominator or creation bound')
-        updates, pending, candidates, links = {}, [], [], []
+        if (len(proposal.judgment_dispositions) != len(missing)
+                or {d.evidence_id for d in proposal.judgment_dispositions} != {m['evidence_id'] for m in missing}):
+            raise ValueError('GPT must dispose every judgment candidate without forcing a new Claim')
+        updates, pending, candidates, links, candidate_dispositions = {}, [], [], [], []
+        evidence_answers=[]
+        for decision in proposal.judgment_dispositions:
+            if len(set(decision.claim_ids)) != len(decision.claim_ids) or not set(decision.claim_ids) <= set(index):
+                raise ValueError('judgment disposition referenced unprovided Claims')
+            if decision.action == 'represented_by_claims' and not decision.claim_ids:
+                raise ValueError('represented judgment must identify its existing Claims')
+            if decision.action == 'new_claim' and not any(decision.evidence_id in x.evidence_step_ids for x in proposal.new_claims):
+                raise ValueError('new-Claim disposition has no candidate')
+            if decision.action == 'needs_source':
+                pending.append({'evidence_id':decision.evidence_id,'reason':decision.reason})
         if proposal.needs_more_creation_space:
             pending.append({'reason': 'more_creation_space_required', 'limit': max_new_claims})
         for p in proposal.updates:
@@ -368,6 +400,25 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
                 pending.append({'new_claim': candidate['statement'], 'reason': 'identity_uncertain'})
                 continue
             if match is None:
+                support = ask(root,ports,{'candidate':candidate['statement'],
+                    'proposed_reason':candidate['reason'],
+                    'evidence':[{**{k:v for k,v in e.material(records['evidence_steps/'+eid]['payload'],records,sources).items()
+                                     if k in {'evidence_id','statement','speaker','stance','original_text_excerpts'}},
+                                  'scripture_refs':records['evidence_steps/'+eid]['payload'].get('scripture_refs',[])}
+                                for eid in candidate['evidence_step_ids']]},'promotion_support',
+                    '這句原本支持上層 Claim 的話，教授是否另給了支持它的實質論據？'
+                    '經文、觀察、例子或推理可以；直接說出或重複本句只證明教授說過，不算另一層論據。'
+                    '只看完整原文，不用提案理由或外部知識自行補前提。',
+                    {'yes':'教授另有支持這個判斷的實質論據。','no':'只是作為上層論據的斷言，沒有另給支持。','uncertain':'無法確定是否另有實質論據。'})
+                candidate_dispositions.append({'statement':candidate['statement'],'evidence_step_ids':candidate['evidence_step_ids'],
+                    'action':'new_claim' if support=='yes' else 'retain_evidence' if support=='no' else 'needs_source',
+                    'basis':'distinct_professor_support_'+support})
+                if support=='no':
+                    evidence_answers.extend((eid,qid) for eid in candidate['evidence_step_ids'] for qid in item.answer_question_ids)
+                    continue
+                if support=='uncertain':
+                    pending.append({'new_claim':candidate['statement'],'reason':'distinct_support_uncertain'})
+                    continue
                 match = 'new:' + str(len(candidates))
                 candidates.append(candidate)
                 index[match] = candidate
@@ -383,13 +434,22 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
             post['occurrences'] = refresh_occurrences(post, post['evidence_step_ids'], records, sid)
             if post != records[key]['payload']:
                 updates[key] = post
+        context_result = attached.review(records,sources,updates,candidates,eroot/'context-checks',ports)
+        updates.update(context_result['updates'])
+        pending.extend(context_result['pending'])
+        evidence_relations = relations.review(records,updates,[],eroot/'context-checks',ports,[],collection='knowledge_relations',proposed_pairs=evidence_answers)
+        updates.update(evidence_relations['updates'])
+        pending.extend(evidence_relations['pending'])
         relationship = relations.review(records, updates, candidates, root, ports, claim_ids)
         updates.update(relationship['updates'])
         pending.extend(relationship['pending'])
         draft = {'version': VERSION, 'status': 'needs_attention' if pending else 'verified',
             'claim_ids': claim_ids, 'source_id': sid, 'updates': updates, 'new_claim_candidates': candidates,
             'question_links': links, 'pending': pending, 'applied': False,
-            'new_relation_specs': relationship['new_relations'], 'retiring_keys': relationship['retiring_keys'],
+            'judgment_dispositions': [d.model_dump() for d in proposal.judgment_dispositions],
+            'attached_records': context_result['outcomes'], 'candidate_dispositions':candidate_dispositions,
+            'new_relation_specs': relationship['new_relations'],
+            'new_knowledge_relation_specs':evidence_relations['new_relations'], 'retiring_keys': relationship['retiring_keys']+evidence_relations['retiring_keys'],
             'evidence_root': str(eroot), 'legacy_qualification': 'not_granted'}
         if candidates or links:
             draft['source_claim_index'] = {sid: {cid: {'statement': p['statement'], 'attribution': p.get('attribution')}
@@ -425,6 +485,11 @@ def commit(store, root):
         rid = 'CR-BU-' + e.digest([sid, payload['from_id'], payload['to_id'], payload['relation_type']])[:32]
         payload.update(claim_relation_id=rid, review_status='candidate', visibility='internal', revision=1)
         updates['claim_relations/' + rid] = payload
+    for relation in draft.get('new_knowledge_relation_specs',[]):
+        payload=deepcopy(relation)
+        rid='ER-BU-'+e.digest([sid,payload['from_id'],payload['to_id'],payload['relation_type']])[:32]
+        payload.update(relation_id=rid,review_status='candidate',visibility='internal',revision=1)
+        updates['knowledge_relations/'+rid]=payload
     changed_claims = {k.split('/', 1)[1]: p for k, p in updates.items() if k.startswith('claims/')}
     for key, row in records.items():
         if not key.startswith('evidence_steps/'):
@@ -438,6 +503,9 @@ def commit(store, root):
         post['produced_claim_ids'] = list(dict.fromkeys(owners))
         if post != row['payload']:
             updates[key] = post
+    for key,post in updates.items():
+        if key.startswith('questions/'):
+            post['answer_claim_ids']=[aliases.get(cid,cid) for cid in post.get('answer_claim_ids',[])]
     for link in draft['question_links']:
         cid = aliases.get(link['claim'], link['claim'])
         for qid in link['question_ids']:
