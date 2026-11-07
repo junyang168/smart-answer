@@ -208,6 +208,9 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
         try:
             return one(window)
         except Exception as error:
+            from backend.pipeline.media_batch.runtime import WaitingCapacity
+            if isinstance(error, WaitingCapacity):
+                raise
             return {'window':window['id'],'status':'stopped','error_type':type(error).__name__,'reason':str(error)}
 
     progress=[]

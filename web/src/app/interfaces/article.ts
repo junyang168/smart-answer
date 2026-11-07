@@ -45,6 +45,7 @@ export interface Sermon {
   assigned_to?: string;       // 認領人 email
   assigned_to_name: string;   // 認領人
   markdownContent?: string;   // 可選的 Markdown 內容
+  transcriptPending?: boolean;
   keypoints?: string; // 可選的要點列表
   theme: string; // 主題
   core_bible_verses?: { [key: string]: string }; // 可選的核心經文列表

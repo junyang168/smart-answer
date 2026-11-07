@@ -178,6 +178,31 @@ def build_plan(out:Path,*,phase=None):
     save_json(path,result);return result
 
 
+def coalesce_case_rows(answer,cases):
+    """Join consecutive per-candidate rows without changing any verdict or quote.
+
+    Some saved replies flatten a case into several rows. Only an identical
+    reference verdict and the exact expected case order permit regrouping.
+    Duplicate/unknown candidates remain errors in validate_result.
+    """
+    from backend.pipeline.slide_visual_evidence import check_schema
+    check_schema(answer,SCHEMA)
+    grouped=[]
+    for row in answer['results']:
+        if grouped and grouped[-1]['case_id']==row['case_id']:
+            if grouped[-1]['reference_issue']!=row['reference_issue']:return answer
+            grouped[-1]['candidates'].extend(row['candidates'])
+        else:grouped.append({**row,'candidates':list(row['candidates'])})
+    if [r['case_id'] for r in grouped]!=[c['case_id'] for c in cases]:return answer
+    # A model may explicitly emit an empty/uncertain placeholder for a clip
+    # that the request never supplied. It cannot witness any acoustic boundary.
+    # Retain it in the immutable raw response; exclude only this non-verdict.
+    for row,case in zip(grouped,cases):
+        known={c['id'] for c in case['candidates']}
+        row['candidates']=[c for c in row['candidates'] if not (c['id'] not in known and c['verdict']=='uncertain' and not c['heard_target_phrase'].strip())]
+    return {**answer,'results':grouped}
+
+
 def validate_result(answer,cases,*,strict_quotes=True,allow_partial=False):
     from backend.pipeline.slide_visual_evidence import check_schema
     check_schema(answer,SCHEMA)
@@ -213,7 +238,7 @@ def run(out:Path,workers=2,*,phase=None):
                  'model':reviewer.model,'prompt':prompt,'schema':SCHEMA,'config':reviewer.config,'cases':material}
         folder=destination/'boundary-calls'/f'b{index:04d}'
         raw=saved_call(folder,request,1,lambda:reviewer.generate(parts),max_calls=1,budget_usd=1)
-        answer=json.loads(reviewer.text(raw));validate_result(answer,cases,strict_quotes=False,allow_partial=True)
+        answer=coalesce_case_rows(json.loads(reviewer.text(raw)),cases);validate_result(answer,cases,strict_quotes=False,allow_partial=True)
         save_json(folder/'validated.json',{'answer':answer,'request_sha256':object_sha(request),
                                          'raw_response_sha256':object_sha(raw),'model':reviewer.model,
                                          'missing_candidate_verdicts':[{'case_id':case['case_id'],'candidate_id':c['id']} for case,row in zip(cases,answer['results']) for c in case['candidates'] if c['id'] not in {x['id'] for x in row['candidates']}],
@@ -246,7 +271,7 @@ def _saved_verdicts_one(out:Path,destination:Path):
         if (object_sha(request)!=value['request_sha256'] or request.get('parent_plan_sha256')!=file_sha(plan_path)
                 or request.get('cases')!=expected_cases or request.get('prompt')!=plan.get('prompt',PROMPT) or request.get('schema')!=SCHEMA):
             raise ValueError('Audio witness saved input changed')
-        raw=read_json(calls[0]);answer=json.loads(parser.text(raw));validate_result(answer,cases,strict_quotes=False,allow_partial=True)
+        raw=read_json(calls[0]);answer=coalesce_case_rows(json.loads(parser.text(raw)),cases);validate_result(answer,cases,strict_quotes=False,allow_partial=True)
         if answer!=value['answer']:raise ValueError('Audio witness interpretation changed')
         if index==0:assert_control(answer)
         for case,row in zip(cases,answer['results']):

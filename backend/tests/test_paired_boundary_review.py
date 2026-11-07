@@ -5,6 +5,22 @@ from backend.pipeline.contextual_transcript_timing import verified_overlap
 import numpy as np
 
 
+def test_wide_pair_is_deferred_to_whole_paragraph_without_approval(tmp_path,monkeypatch):
+    import backend.pipeline.paired_boundary_review as pair
+    import backend.pipeline.contextual_transcript_timing as timing
+    from backend.pipeline.slide_change_pilot import save_json
+    rows=[dict(id='a',text='前句',start_ms=0,end_ms=1000),dict(id='b',text='保留句',start_ms=60000,end_ms=61000)]
+    save_json(tmp_path/'plan.json',dict(records={'source':dict(source=str(tmp_path),duration_ms=70000,paragraphs=rows)}))
+    assessment=dict(lectures={'source':dict(paragraphs=[dict(id='a',status='qualified',end_ms=1000,observations=[]),dict(id='b',status='withheld',start_status='withheld',end_status='qualified',observations=[])])})
+    save_json(tmp_path/'assessment.json',assessment)
+    monkeypatch.setattr(timing,'analyse',lambda *args,**kwargs:assessment)
+    monkeypatch.setattr(pair,'read_audio',lambda path:np.zeros(16,dtype=np.int16))
+    plan=pair.prepare(tmp_path)
+    assert len(plan['pairs'])==1 and plan['pairs'][0]['id']=='control'
+    assert plan['deferred_pairs'][0]['right_id']=='b'
+    assert plan['max_calls']==1
+
+
 def example():
     pair={'candidates':[{'id':'c0','time_ms':1000},{'id':'c1','time_ms':1500}]}
     answer={'relationship':'sequential','left_end_id':'c1','right_start_id':'c1',

@@ -46,9 +46,7 @@ def main():
               'decode': 'raw argmax timestamp classes; no interpolation', 'language': 'Chinese'}
     if args.decode_profile=='monotonic':
         config['decode_profile']='monotonic-logit-path.v1'
-    processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
-    model = AutoModelForTokenClassification.from_pretrained(MODEL, revision=REVISION,
-        dtype=torch.float16 if args.device == 'mps' else torch.float32, attn_implementation='sdpa').to(args.device).eval()
+    processor = model = None
     for chunk in asr['chunks']:
         audio_path = out / chunk['audio']
         if digest(audio_path) != chunk['audio_sha256']:
@@ -62,6 +60,10 @@ def main():
                 raise ValueError('Alignment output belongs to another text/audio/config')
             print(f'Reused {chunk["id"]}', flush=True)
             continue
+        if model is None:
+            processor = AutoProcessor.from_pretrained(MODEL, revision=REVISION)
+            model = AutoModelForTokenClassification.from_pretrained(MODEL, revision=REVISION,
+                dtype=torch.float16 if args.device == 'mps' else torch.float32, attn_implementation='sdpa').to(args.device).eval()
         with wave.open(str(audio_path)) as audio:
             if audio.getframerate() != 16000:
                 raise ValueError('Expected 16kHz audio')
@@ -97,5 +99,20 @@ def main():
         print(f'Aligned {chunk["id"]}: {len(items)} units in {time.perf_counter()-started:.1f}s', flush=True)
 
 
+def bounded_main():
+    context = os.getenv('MEDIA_BATCH_CONTEXT')
+    if not context:
+        return main()
+    from backend.pipeline.media_batch.runtime import slot, WaitingCapacity
+    import time
+    root = json.loads(context)['capacity_root']
+    while True:
+        try:
+            with slot(root, 'mps', 1):
+                return main()
+        except WaitingCapacity:
+            time.sleep(2)
+
+
 if __name__ == '__main__':
-    main()
+    bounded_main()
