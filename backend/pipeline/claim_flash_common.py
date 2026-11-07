@@ -1,6 +1,7 @@
 """Bounded calls and source-local input loading for Claim Update Flash."""
 from copy import deepcopy
 import json
+import math
 from pathlib import Path
 
 from backend.pipeline import evidence_refresh as e
@@ -11,6 +12,7 @@ LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
 PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded'}
 GPT_BYTES = 60000
 GPT_JOBS = 4
+JEV_BYTES = 40000
 
 
 def bind_source(store,sid,root):
@@ -83,8 +85,20 @@ def jev(root, ports, state, questions):
     reply = e.recorded_call(root, 'jev', request, ports.judge)
     if set(reply.get('answers', {})) != set(questions):
         raise ValueError('Jev question set differs')
-    choices = {name: c.choice({'model': reply.get('model'), 'answers': {name: reply['answers'][name]}},
-                             name, spec['criteria']) for name, spec in questions.items()}
+    choices = {}
+    if reply.get('model') != e.MODEL:
+        raise ValueError('Jev returned a different model')
+    for name, spec in questions.items():
+        answer = reply['answers'][name]
+        if spec['type'] == 'noul':
+            probability = answer.get('noul')
+            if (answer.get('type') != 'noul' or type(probability) not in {int, float}
+                    or not math.isfinite(probability) or not 0 <= probability <= 1):
+                raise ValueError('invalid Jev Noul probability')
+            choices[name] = probability
+        else:
+            choices[name] = c.choice({'model': reply.get('model'), 'answers': {name: answer}},
+                                    name, spec['criteria'])
     e.save(Path(root)/'jev'/e.digest(request)/'metrics.json', {
         'request_bytes': len(json.dumps(request, ensure_ascii=False).encode()),
         'questions': len(questions)})

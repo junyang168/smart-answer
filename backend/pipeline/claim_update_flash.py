@@ -161,60 +161,12 @@ def orphan_plan(records,sources,root,ports):
         if plan['source_id']!=sid or plan['source_sha256']!=sources[sid]['body_sha256']:
             raise ValueError('orphan plan belongs to another source version')
         return plan
-    isolated=sorted(orphans(records));claims=sorted(active_claims(records));proposed=[];pending=[];dispositions=[]
-    claims_set=set(claims);covered={};reused=[]
-    # Reuse only completed old routing jobs with the same record and reference statements.
-    # This retains paid answers when replacing the old per-record x reference-chunk loop.
-    for file in sorted((root/'gpt').glob('*/response.json')):
-        request=json.loads((file.parent/'request.json').read_text())
-        if request.get('input',{}).get('task')!='orphan_candidates' or request.get('identity')!=ports.identity['gpt']:
-            continue
-        items=Discoveries.model_validate(json.loads(file.read_text())).items
-        jobs=request['input']['jobs']
-        f.exactly([x.model_dump() for x in items],[j['job_id'] for j in jobs],'job_id')
-        for job,item in zip(jobs,[next(x for x in items if x.job_id==j['job_id']) for j in jobs]):
-            keys=set(job.get('candidate_records',{}))&set(isolated)
-            if len(keys)!=1:continue
-            key=next(iter(keys));refs=job['target_claims']
-            if not set(refs)<=claims_set or refs!=peer_summary(sorted(refs),records):continue
-            if job['candidate_records'][key]!=pairs.node(key,records,sources):continue
-            covered.setdefault(key,set()).update(refs);reused.append(e.digest(request))
-            proposed.extend(x.model_dump() for x in item.pairs
-                            if key in {x.a,x.b} and ({x.a,x.b}-{key})<=set(refs))
-            pending.extend({'object_key':x,'reason':item.reason} for x in item.unresolved_keys)
-            dispositions.append(item.model_dump())
-    fallback=[]
-    for key in isolated:
-        nearby=[k for k in claims if paragraph_keys(k,records)&paragraph_keys(key,records)]
-        if nearby:
-            proposed.extend({'a':key,'b':k,'reason':'同段論述候選，尚待 Jev 判定。'} for k in nearby)
-        elif covered.get(key,set())>=claims_set:
-            continue
-        elif claims:
-            fallback.append({'job_id':key,'record':pairs.node(key,records,sources)})
-        else:
-            pending.append({'object_key':key,'reason':'no_existing_claim_for_orphan'})
-    # Four records share ONE source-local reference table, instead of each repeatedly
-    # sending every four-Claim chunk. These are summaries, not 38 full Claim reviews.
-    for batch,raw in f.gpt(root,ports,'orphan_candidates_batched',fallback,Discoveries.model_json_schema(),PROMPT+
-            '只替每個孤立記錄選擇 candidate_claims 中可能有直接關係的 Claim，不審閱這些 Claim。'
-            '每個 job_id 恰好一次；pairs.a 是本項記錄的完整 key，pairs.b 是候選 Claim key。'
-            '無合適候選可空，不強迫連接，不建立 Claim。不能判定只列本項 job_id 為 unresolved_keys。'
-            '每對候選仍會由後續獨立 pair 檢查，不把同主題直接當成支持。',
-            shared={'candidate_claims':peer_summary(claims,records)}):
-        items=Discoveries.model_validate(raw).items
-        f.exactly([x.model_dump() for x in items],[j['job_id'] for j in batch],'job_id')
-        for item in items:
-            if not set(item.unresolved_keys)<={item.job_id}:raise ValueError('orphan unresolved scope differs')
-            for pair in item.pairs:
-                if pair.a!=item.job_id or pair.b not in claims_set:
-                    raise ValueError('orphan routing exceeded provided endpoints')
-                proposed.append(pair.model_dump())
-            pending.extend({'object_key':key,'reason':item.reason} for key in item.unresolved_keys)
-            dispositions.append(item.model_dump())
-    plan={'source_id':sid,'source_sha256':sources[sid]['body_sha256'],'orphan_keys':isolated,
-          'pairs':proposed,'pending':pending,'dispositions':dispositions,'reused_request_sha256':sorted(set(reused))}
-    e.save(path,plan)
+    from backend.pipeline import claim_flash_lookup as lookup
+    aliases = {sid, records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
+    claims = [k for k, p in active_claims(records).items() if not records[k].get('retired')
+              and any(o.get('source_id') in aliases for o in p.get('occurrences', []))]
+    plan = lookup.run(records, sources, sorted(orphans(records)), claims, root, ports)
+    e.save(path, plan)
     return plan
 
 
@@ -594,8 +546,11 @@ def finish_orphans(store,source_id,root,ports):
     remaining=sorted(orphans(records));jobs=[];dispositions=[];pending=[]
     plan=json.loads((root/'orphan-plan/plan.json').read_text()) if (root/'orphan-plan/plan.json').exists() else {'pairs':[]}
     for key in remaining:
+        uncertain = [p for p in plan.get('pending', []) if p.get('object_key') == key]
+        unchecked = {k for p in uncertain for k in p.get('remaining_claim_keys', []) if k in records}
         jobs.append({'job_id':key,'record':pairs.node(key,records,sources),
-            'checked_claim_candidates':[p['b'] if p['a']==key else p['a'] for p in plan['pairs'] if key in {p['a'],p['b']}]})
+            'checked_claim_candidates':[p['b'] if p['a']==key else p['a'] for p in plan['pairs'] if key in {p['a'],p['b']}],
+            'lookup_uncertainty': uncertain, 'unresolved_claim_candidates': peer_summary(sorted(unchecked),records)})
     for batch,raw in f.gpt(root/'closeout',ports,'remaining_orphans',jobs,OrphanDispositions.model_json_schema(),PROMPT+
             '這些下層記錄完成來源檢查，但候選配對後仍未連至 Claim。'
             '明確決定保留為獨立 Evidence／Observation retain_evidence、確需新增主張 needs_claim、'

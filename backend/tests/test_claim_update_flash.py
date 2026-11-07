@@ -19,9 +19,13 @@ class Ports:
         self.calls.append(('jev',request))
         answers={}
         for name,spec in request['questions'].items():
-            default='a_to_b_supports' if name=='relation' else 'no'
+            default=(0. if spec['type']=='noul' else 'none' if name.endswith('_claim')
+                     else 'a_to_b_supports' if name=='relation' else 'no')
             chosen=self.choices.get(name,default)
             if callable(chosen):chosen=chosen(request)
+            if spec['type']=='noul':
+                answers[name]={'type':'noul','noul':chosen}
+                continue
             answers[name]={'type':'choice','choice':chosen,'probabilities':{k:float(k==chosen) for k in spec['criteria']}}
         return {'model':e.MODEL,'answers':answers}
     def repair(self,request):
@@ -474,19 +478,17 @@ def test_far_orphan_candidates_are_routed_without_dumping_private_claim_graphs(s
     p=deepcopy(records['evidence_steps/E']);p['payload'].update(evidence_step_id='FAR',source_fragment_ids=[])
     # Candidate planning needs only paragraph hints; source text is still in this same frozen source.
     records['evidence_steps/FAR']=p
-    def choose(req):
-        if req['input']['task']=='orphan_candidates_batched':
-            jobs=req['input']['jobs']
-            assert all('evidence' not in c for c in req['input']['candidate_claims'].values())
-            return {'items':[{'job_id':j['job_id'],'pairs':[{'a':'evidence_steps/FAR','b':'claims/C','reason':'同篇相關結論。'}],
-                'unresolved_keys':[],'reason':'候選不是通過。'} for j in jobs]}
     # Provide the actual record material but remove its paragraph routing hint to force the fallback.
     from unittest.mock import patch
     original=flash.paragraph_keys
     with patch.object(flash,'paragraph_keys',side_effect=lambda key,rs:set() if key=='evidence_steps/FAR' else original(key,rs)):
         records['evidence_steps/FAR']['payload']['source_fragment_ids']=['F']
-        plan=flash.orphan_plan(records,sources,root/'far-plan',Ports(reply=choose))
+        ports=Ports(choices={'O00_match':.9,'O00_claim':'C00'})
+        plan=flash.orphan_plan(records,sources,root/'far-plan',ports)
     assert plan['pairs'][0]['a']=='evidence_steps/FAR'
+    assert not any(role=='gpt' for role,req in ports.calls)
+    lookup=ports.calls[0][1]
+    assert all('evidence' not in c for c in lookup['state']['claims'].values())
 
 
 def test_declared_missing_lower_connection_is_verified_then_saved(sample):
@@ -811,35 +813,60 @@ def test_candidate_quote_uses_existing_mechanical_newline_projection(sample):
     assert list((root/'lower/candidate-quote-projection/S0001').glob('*.json'))
 
 
-def test_orphan_routing_shares_source_summaries_for_four_records(sample):
+def test_orphan_routing_shares_source_summaries_for_all_records(sample):
     store,root,_=complete(sample);records,sources=f.load_source(store,'S')
     for i in range(5):
         key='evidence_steps/FAR'+str(i);records[key]=deepcopy(records['evidence_steps/E'])
         records[key]['payload']['evidence_step_id']='FAR'+str(i)
-    def reply(req):
-        assert req['input']['task']=='orphan_candidates_batched'
-        assert list(req['input']['candidate_claims'])==['claims/C']
-        return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[],'reason':'無合適候選。'} for j in req['input']['jobs']]}
-    ports=Ports(reply=reply)
+    ports=Ports()
     from unittest.mock import patch
     fn=flash.paragraph_keys
     with patch.object(flash,'paragraph_keys',side_effect=lambda k,rs:set() if 'FAR' in k else fn(k,rs)):
         flash.orphan_plan(records,sources,root/'orphans',ports)
-    calls=[q for role,q in ports.calls if role=='gpt']
-    assert len(calls)==2 and [len(q['input']['jobs']) for q in calls]==[4,1]
+    assert not any(role=='gpt' for role,q in ports.calls)
+    calls=[q for role,q in ports.calls if role=='jev']
+    assert len(calls)==1 and len(calls[0]['questions'])==10
+    assert list(calls[0]['state']['claims'])==['C00']
 
 
-def test_orphan_routing_reuses_complete_legacy_reference_chunks(sample):
+def test_orphan_routing_preserves_completed_legacy_plan(sample):
     store,root,_=complete(sample);records,sources=f.load_source(store,'S')
     records['evidence_steps/FAR']=deepcopy(records['evidence_steps/E']);records['evidence_steps/FAR']['payload']['evidence_step_id']='FAR'
+    prior={'source_id':'S','source_sha256':sources['S']['body_sha256'],
+           'pairs':[{'a':'evidence_steps/FAR','b':'claims/C','reason':'已找到候選。'}],
+           'reused_request_sha256':['original-paid-answer']}
+    e.save(root/'orphans/plan.json',prior)
+    ports=Ports()
+    result=flash.orphan_plan(records,sources,root/'orphans',ports)
+    assert result==prior and not ports.calls
+
+
+def test_orphan_lookup_does_not_expand_to_imported_foreign_or_retired_reference_claims(sample):
+    store,root,_=complete(sample);records,sources=f.load_source(store,'S')
+    records['evidence_steps/FAR']=deepcopy(records['evidence_steps/E'])
+    records['evidence_steps/FAR']['payload'].update(evidence_step_id='FAR',produced_claim_ids=[])
+    foreign=deepcopy(records['claims/C']);foreign['payload'].update(claim_id='FOREIGN',occurrences=[{'source_id':'OTHER','anchors':[]}])
+    records['claims/FOREIGN']=foreign
+    retired=deepcopy(records['claims/C']);retired['retired']=True;retired['payload']['claim_id']='RETIRED'
+    records['claims/RETIRED']=retired
+    ports=Ports()
+    flash.orphan_plan(records,sources,root/'source-local-plan',ports)
+    assert len(ports.calls)==1
+    assert ports.calls[0][1]['state']['claims']=={'C00':flash.peer_summary(['claims/C'],records)['claims/C']}
+
+
+def test_unresolved_lookup_scope_reaches_existing_orphan_disposition(sample):
+    store,root,_=complete(sample)
+    record=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    record.update(evidence_step_id='ORPHAN',produced_claim_ids=[])
+    store.apply_plan(store.plan_package({'package_id':'isolated','evidence_steps':[record]}))
+    uncertainty={'object_key':'evidence_steps/ORPHAN','reason':'uncertain_orphan_lookup','remaining_claim_keys':['claims/C'],'match_probability':.5}
+    e.save(root/'orphan-plan/plan.json',{'pairs':[],'pending':[uncertainty]})
     def reply(req):
-        return {'items':[{'job_id':j['job_id'],'pairs':[{'a':'evidence_steps/FAR','b':'claims/C','reason':'已找到候選。'}],
-            'unresolved_keys':[],'reason':'已完整考慮所列來源 Claim。'} for j in req['input']['jobs']]}
-    ports=Ports(reply=reply)
-    flash.discover(records,sources,['claims/C'],{'evidence_steps/FAR'},root/'orphans',ports,task='orphan_candidates')
-    count=len(ports.calls)
-    from unittest.mock import patch
-    fn=flash.paragraph_keys
-    with patch.object(flash,'paragraph_keys',side_effect=lambda k,rs:set() if 'FAR' in k else fn(k,rs)):
-        result=flash.orphan_plan(records,sources,root/'orphans',ports)
-    assert len(ports.calls)==count and result['pairs'] and result['reused_request_sha256']
+        assert req['input']['task']=='remaining_orphans'
+        job=req['input']['jobs'][0]
+        assert job['lookup_uncertainty']==[uncertainty]
+        assert list(job['unresolved_claim_candidates'])==['claims/C']
+        return {'items':[{'job_id':job['job_id'],'action':'retain_evidence','reason':'本項只保留為背景，不強迫連接。'}]}
+    dispositions,pending=flash.finish_orphans(store,'S',root,Ports(reply=reply))
+    assert dispositions[0]['action']=='retain_evidence' and not pending
