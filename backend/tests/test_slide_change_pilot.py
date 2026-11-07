@@ -187,3 +187,19 @@ def test_absence_and_occlusion_clear_picture_until_a_new_visible_acquisition():
     assert slide_at_time(timeline, 4500) == 'c4.png'  # Visible acquisition resumes output.
     assert slide_at_time(timeline, 5000) is None  # Obscured/unreadable also stays blank.
     assert slide_at_time(timeline, 6000) is None
+
+
+@pytest.mark.parametrize('kind,expected', [('new_slide','visible'), ('not_visible','no_slide'), ('uncertain','unknown')])
+def test_recording_initial_state_is_classified_even_without_any_change(tmp_path, kind, expected):
+    image = np.full((240, 320, 3), 40, np.uint8)
+    cv2.putText(image, 'Rom 9:1-33', (25, 90), cv2.FONT_HERSHEY_SIMPLEX, .7, (255,255,255), 2)
+    manifest = sample_manifest(tmp_path, [image, image, image])
+    candidates = pilot.detect(tmp_path, manifest, include_initial=True)
+    assert len(candidates['candidates']) == 1
+    initial = candidates['candidates'][0]
+    assert initial['initial_acquisition'] and initial['change_from_ms'] == 0
+    review = dict(candidates_sha256=pilot.object_sha(candidates), results=[dict(candidate_id='c-initial',kind=kind,confidence=.9,label='',reason='')])
+    events = [dict(id='c-initial',slide_image='initial.png')] if kind == 'new_slide' else []
+    timeline = pilot.visibility_timeline(manifest,candidates,review,events)
+    assert timeline['spans'] == [dict(start_ms=0,end_ms=1560,state=expected,slide_event_id='c-initial' if events else None,image='initial.png' if events else None,evidence_candidate_id='c-initial')]
+    assert pilot.pair_image(tmp_path,manifest,initial).is_file()

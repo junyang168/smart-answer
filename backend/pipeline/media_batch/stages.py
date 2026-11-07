@@ -357,7 +357,7 @@ def execute(stage, payload):
                 end_ms=full.read(out / "master.json")["duration_ms"],
             )
             if not (out / "slides/candidates.json").exists():
-                full.slides.detect(out / "slides", manifest)
+                full.slides.detect(out / "slides", manifest, include_initial=True)
             full.classify_slides(out)
             full.extract_slides(out, None)
         return dict(report_sha=file_sha(out / "slides/report.json"))

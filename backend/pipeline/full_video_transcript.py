@@ -858,7 +858,7 @@ def main():
             if args.projected_screen:
                 from backend.pipeline.projected_slide_region import calibrate
                 manifest=calibrate(out/'slides')
-            if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest)
+            if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest,include_initial=True)
             classify_slides(out);extract_slides(out,args.pilot_evidence)
         process_windows(out,args.aligner_python,args.pilot_correction)
         prepare_final_alignment(out)
