@@ -57,26 +57,43 @@ def prepare(video: Path, out: Path, pilot: Path | None = None) -> dict:
     proof = out / 'master.json'
     if proof.exists():
         result = read(proof)
+        if (out / 'rough-audio-cleanup.json').exists():
+            from backend.pipeline.media_batch.rough import restore_audio
+            restore_audio(video, out, result)
         if result['source_sha256'] != sha(video) or result['audio_sha256'] != sha(out / 'master.wav'):
             raise ValueError('Master source changed')
         return result
     probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
-        'format=start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
+        'format=format_name,start_time,duration:stream=index,codec_type,start_time,time_base,duration', '-of', 'json', str(video)], text=True))
     video_stream = next((s for s in probe['streams'] if s['codec_type'] == 'video'), None)
     v = video_stream or next(s for s in probe['streams'] if s['codec_type'] == 'audio')
-    if abs(float(v.get('start_time', 0))) > .001:
+    origin = float(probe['format'].get('start_time', v.get('start_time', 0)))
+    if video_stream and (abs(origin) > .001 or float(v.get('start_time', 0)) < -.001):
         raise ValueError('Nonzero movie origin needs an explicit source-clock mapping')
-    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-copyts', '-i', str(video),
+    decode_flags = ['-copyts'] + (['-start_at_zero'] if not video_stream and abs(origin) > .001 else [])
+    subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', *decode_flags, '-i', str(video),
         '-map', '0:a:0', '-af', 'aresample=16000:async=1:first_pts=0', '-ac', '1', '-ar', str(SR),
         '-c:a', 'pcm_s16le', str(out / 'master.wav')], check=True)
     audio = read_audio(out / 'master.wav')
     # Sub-millisecond tail only. No voiced interval or silence is removed.
     usable = len(audio) // 16 * 16
-    if abs(usable / SR - float(probe['format']['duration'])) > .1:
+    # Raw ADTS AAC has only an estimated container duration; decoded samples
+    # establish the clock. Timestamped video still requires the strict check.
+    audio_stream = next(s for s in probe['streams'] if s['codec_type'] == 'audio')
+    expected_audio_end = float(probe['format']['duration'])
+    if audio_stream.get('duration') is not None:
+        # A movie may legitimately retain a final silent picture after its
+        # audio track ends. Check the audio timeline, not the longest track.
+        expected_audio_end = float(audio_stream.get('start_time', 0)) + float(audio_stream['duration'])
+        if not video_stream and abs(origin) > .001:
+            expected_audio_end -= origin
+    if probe['format'].get('format_name') != 'aac' and abs(usable / SR - expected_audio_end) > .1:
         raise ValueError('Decoded sample clock differs from the media duration')
     result = {'schema_version': 'source-sample-clock.v1', 'lecture_id':video.stem, 'source_sha256': sha(video),
         'audio_sha256': sha(out / 'master.wav'), 'source_path': str(video.resolve()),
         'media_type': 'video' if video_stream else 'audio',
+        'source_clock_mapping': {'policy': 'source-presentation-clock.v1', 'container_start_s': origin,
+                                 'presentation_origin_ms': 0, 'video_start_s': float(v.get('start_time', 0)) if video_stream else None, 'rebased_audio': not video_stream and abs(origin) > .001},
         'media_mime_type': mimetypes.guess_type(str(video))[0] or 'application/octet-stream',
         'samples': len(audio), 'covered_samples': usable, 'discarded_tail_samples': len(audio) - usable,
         'sample_rate': SR, 'duration_ms': sample_ms(usable), 'probe': probe, 'windows': []}
@@ -250,9 +267,10 @@ def join_window_visuals(out: Path, window: dict, slide_folder: Path, collection:
 
 
 def align(folder: Path, python: Path) -> None:
+    from backend.pipeline.media_batch.runtime import inherited_fds
     subprocess.run([str(python.absolute()), '-m', 'backend.pipeline.transcript_alignment_worker',
         '--out', str(folder.resolve()), '--device', 'mps'], check=True,
-        env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1'), cwd=Path(__file__).resolve().parents[2])
+        env=dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1'), cwd=Path(__file__).resolve().parents[2],pass_fds=inherited_fds())
 
 
 CLEAN_PROMPT = """你為講道逐字稿製作清理閱讀稿，只標出可刪除的非講道內容，不重寫文字。
@@ -420,7 +438,7 @@ def configure_vocabulary(out: Path, path: Path | None) -> None:
         save(out / 'master.json', master)
 
 
-def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, window_ids: set[str] | None = None) -> None:
+def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, window_ids: set[str] | None = None, *, clean_after: bool = True) -> None:
     master = read(out / 'master.json')
     vocabulary = vocabulary_from_manifest(master)
     if vocabulary is not None and pilot_correction is not None:
@@ -440,8 +458,11 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
             assemble(audio, slide_folder)
             join_window_visuals(out, w, slide_folder)
             correct(folder / 'joined', audio, correction, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
+        from backend.pipeline.media_batch.runtime import progress
+        progress('speech', len(window_ids) if window_ids is not None else master['windows'].index(w)+1, len(window_ids) if window_ids is not None else len(master['windows']), 'windows')
         print(f'Corrected {w["id"]}', flush=True)
-    clean_full_transcript(out)
+    if clean_after:
+        clean_full_transcript(out)
 
 
 def prepare_final_alignment(out: Path, window_ids: set[str] | None = None) -> None:
@@ -850,7 +871,7 @@ def main():
             if args.projected_screen:
                 from backend.pipeline.projected_slide_region import calibrate
                 manifest=calibrate(out/'slides')
-            if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest)
+            if not (out/'slides/candidates.json').exists():slides.detect(out/'slides',manifest,include_initial=True)
             classify_slides(out);extract_slides(out,args.pilot_evidence)
         process_windows(out,args.aligner_python,args.pilot_correction)
         prepare_final_alignment(out)

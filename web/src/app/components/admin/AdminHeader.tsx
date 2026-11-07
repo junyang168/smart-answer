@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { hasTranscriptBetaAccess } from "@/app/utils/roles";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -27,6 +27,15 @@ export const AdminHeader = () => {
       ]
     : navItems;
 
+  const visibleItems =
+    hasEditorAccess(session?.user?.role)
+      ? [
+          ...items.slice(0, 1),
+          { href: "/admin/media-batches", label: "批次轉錄", exact: false },
+          ...items.slice(1),
+        ]
+      : items;
+
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
       <div className="container mx-auto flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6">
@@ -44,7 +53,7 @@ export const AdminHeader = () => {
           aria-label="後台主導覽"
           className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold"
         >
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const isWangLegacy =
               item.href === "/admin/wang" &&
               pathname.startsWith("/admin/canonical-repository");

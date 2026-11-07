@@ -21,9 +21,11 @@ ASR_CONFIG = {"model": "gpt-transcribe", "prompt": ASR_PROMPT,
 
 
 def read_audio(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as audio:
+    with Path(path).open('rb') as handle, wave.open(handle) as audio:
         if (audio.getframerate(), audio.getnchannels(), audio.getsampwidth()) != (SAMPLE_RATE, 1, 2):
             raise ValueError("Audio must be 16kHz mono PCM16")
+        if os.getenv('MEDIA_BATCH_CONTEXT'):
+            return np.memmap(path, dtype='<i2', mode='r', offset=handle.tell(), shape=(audio.getnframes(),))
         return np.frombuffer(audio.readframes(audio.getnframes()), dtype='<i2').copy()
 
 
@@ -121,8 +123,8 @@ def prepare(video: Path, out: Path, duration_ms: int = 900000) -> dict:
     return result
 
 
-def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
-               budget_usd: float = 3.0) -> dict:
+def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
+               budget_usd: float = 3.0, admit=lambda: None) -> dict:
     folder = out / 'calls' / object_sha(request)
     state_path = folder / 'state.json'
     if state_path.exists():
@@ -139,6 +141,7 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
         raise ValueError('Previous call outcome unknown; reconcile before another model call')
     if len(states) >= max_calls or sum(s['reserved_usd'] for s in states) + reserved_usd > budget_usd:
         raise ValueError('Pilot call or cost reservation limit exhausted')
+    admit()
     save_json(folder / 'request.json', request)
     state = {'status': 'sent_outcome_unknown', 'reserved_usd': reserved_usd}
     save_json(state_path, state)
@@ -148,6 +151,8 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
     except Exception as error:
         status = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         state.update(http_status=status, error_type=type(error).__name__)
+        provider_code = getattr(error, 'code', None)
+        if isinstance(provider_code, str): state['provider_error_code'] = provider_code
         if status in (400, 401, 402, 403, 404, 422, 429):
             state['status'] = 'rejected'
         save_json(state_path, state)
@@ -159,7 +164,16 @@ def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_cal
     return result
 
 
-def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
+def saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_calls: int = 16,
+               budget_usd: float = 3.0) -> dict:
+    from backend.pipeline.media_batch.runtime import batch_call
+    from backend.pipeline.media_batch.credit_recovery import request_for
+    request = request_for(out, request)
+    with batch_call(out, request, reserved_usd) as admit:
+        return _saved_call(out, request, reserved_usd, invoke, max_calls=max_calls, budget_usd=budget_usd, admit=admit)
+
+
+def transcribe(out: Path, *, vocabulary: dict | None = None, transport: str | None = None) -> dict:
     config = asr_vocabulary_config(ASR_CONFIG, vocabulary)
     binding = {'vocabulary_hint': vocabulary_binding(vocabulary)} if vocabulary is not None else {}
     if (out / 'asr.json').exists():
@@ -171,6 +185,10 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
     load_dotenv(Path(__file__).resolve().parents[2] / '.env')
     client = OpenAI(timeout=180, max_retries=0)
     manifest = read_json(out / 'audio_manifest.json')
+    # A rough-stage cache retains its transport when the full pipeline reuses it.
+    previous = read_json(out / 'asr.json') if (out / 'asr.json').exists() else {}
+    transport = transport or previous.get('transport', 'wav')
+    if transport not in ('wav', 'mp3'): raise ValueError('Unknown ASR audio transport')
     chunks = []
     for chunk in manifest['chunks']:
         path = out / chunk['audio']
@@ -178,18 +196,39 @@ def transcribe(out: Path, *, vocabulary: dict | None = None) -> dict:
             raise ValueError('Chunk changed since preparation')
         request = {'stage': 'asr', 'config': config, **binding, 'audio_sha256': chunk['audio_sha256'],
                    'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunk': chunk}
+        upload = path
+        if transport == 'mp3':
+            import subprocess
+            upload = path.with_suffix('.mp3')
+            transport_receipt=upload.with_suffix('.mp3.json')
+            if upload.exists():
+                saved_transport=read_json(transport_receipt)
+                if saved_transport != {'pcm_sha256':chunk['audio_sha256'],'mp3_sha256':file_sha(upload),'recipe':'mono-16000-lame-64k-v1'}:
+                    raise ValueError('Saved MP3 transport changed; do not resend ASR')
+            else:
+                subprocess.run(['ffmpeg','-nostdin','-v','error','-y','-i',str(path),'-ac','1','-ar','16000','-c:a','libmp3lame','-b:a','64k',str(upload)],check=True)
+                save_json(transport_receipt,{'pcm_sha256':chunk['audio_sha256'],'mp3_sha256':file_sha(upload),'recipe':'mono-16000-lame-64k-v1'})
+            request['transport'] = {'format': 'mp3', 'sha256': file_sha(upload), 'recipe': 'mono-16000-lame-64k-v1'}
+        from backend.pipeline.media_batch.credit_recovery import request_for
+        effective_request = request_for(out, request)
+        old_chunk=next((c for c in previous.get('chunks',[]) if c['id']==chunk['id']),None)
+        if old_chunk and old_chunk['request_sha256'] != object_sha(effective_request):
+            raise ValueError('Saved ASR chunk input changed; do not resend')
         def invoke():
-            with path.open('rb') as stream:
+            with upload.open('rb') as stream:
                 return client.audio.transcriptions.create(file=stream, **config).model_dump(mode='json')
         response = saved_call(out, request, (chunk['end_ms'] - chunk['start_ms']) / 60000 * .01, invoke)
         if not isinstance(response.get('text'), str):
             raise ValueError('ASR response has no transcript')
-        chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(request),
+        chunks.append({**chunk, 'text': response['text'], 'request_sha256': object_sha(effective_request),
                        'response_sha256': object_sha(response)})
+        from backend.pipeline.media_batch.runtime import progress
+        progress('asr', len(chunks), len(manifest['chunks']), 'chunks')
         print(f'Transcribed {chunk["id"]}: {len(response["text"])} characters', flush=True)
     result = {'schema_version': 'audio-asr-pilot.v1', 'config': config, **binding,
               'manifest_sha256': file_sha(out / 'audio_manifest.json'), 'chunks': chunks,
               'estimated_usd': sum(c['end_ms'] - c['start_ms'] for c in chunks) / 60000 * .0045,
+              'transport': transport,
               'pricing_as_of': '2026-10-27', 'pricing_source': 'https://developers.openai.com/api/docs/pricing'}
     save_json(out / 'asr.json', result)
     return result

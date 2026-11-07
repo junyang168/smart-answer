@@ -1861,3 +1861,97 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
             "href": f"{PASSAGE_URL_PREFIX}/{slug}",
         })
     return out
+
+
+def build_notes_index(data_base_dir: Path, passage: str) -> dict[str, Any] | None:
+    """教授釋經筆記的按章页：每份母本是一「堂」，录音是 AI 朗读。
+
+    存档与讲座按章页同格式（`notes_chapter.write_records`），所以归段、灰色开关、
+    幻灯照讲座的做法；不同的只是录音是合成的、每一句的时间是合成时的书签，不用对
+    语音识别，也没有主张可挂。生活應用、附錄是灰色片段，默认收起（负责人 2026-11-06）。
+    """
+
+    from backend.pipeline import chapter_exposition, chapter_slides, notes_chapter
+
+    chapter = notes_chapter.load_chapters(data_base_dir).get(passage)
+    if chapter is None:
+        return None
+    rows_by_section: dict[str, list[dict[str, Any]]] = {s: [] for s in chapter.sections}
+    missing: list[str] = []
+    for lecture in chapter.lectures:
+        project = notes_chapter.project_of(lecture)
+        audio = notes_chapter.load_audio(data_base_dir, project)
+        audio_record = notes_chapter.work_path(data_base_dir, project, "audio.json")
+        record = (
+            chapter_exposition.load_record(data_base_dir, passage, lecture, chapter_exposition.file_sha256(audio_record))
+            if audio else None
+        )
+        if record is None:
+            missing.append(notes_chapter.notes(data_base_dir, project).title)
+            continue
+        slides_record = chapter_slides.load_record(data_base_dir, passage, lecture)
+        timed_slides = None
+        if slides_record:
+            slide_verses, timed_slides = chapter_slides.placed(record, slides_record)
+            record = {
+                **record,
+                "decisions": [
+                    {**decision, "verses": slide_verses.get(decision["id"], decision.get("verses"))}
+                    if decision.get("keep") else decision
+                    for decision in record["decisions"]
+                ],
+            }
+        lecture_rows = chapter_exposition.lecture_rows(chapter, record)
+        lines = chapter_slides.sentences(record.get("pieces") or [])
+        slides_by_section = _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else {}
+        for section, value in lecture_rows.items():
+            slides = slides_by_section.get(section, [])
+            kept = [item for item in value["stretches"] if not item.get("left_out")]
+            rows_by_section[section].append({
+                "source_id": lecture,
+                "transcript_id": lecture,
+                "title": record.get("title") or project,
+                "media_kind": "audio",
+                "media_url": f"{MEDIA_URL_PREFIX}/{quote(notes_chapter.audio_path(data_base_dir, project).name)}",
+                "media_duration": audio["duration"],
+                "ai_voice": True,
+                "stretches": value["stretches"],
+                "judgements": [
+                    {"at": slide["at"], "judgement": slide["title"], "seconds": slide["seconds"],
+                     "scripture": slide["verses"][0] if slide["verses"] else "", "points": [], "application": False}
+                    for slide in slides
+                ],
+                "slides": slides,
+                # 母本的表格不念，念到那里停顿，幻灯位置整张显示（负责人 2026-11-06）。
+                # Azure 把停顿后的书签报在停顿开始处，表格的结束以停顿长度为准。
+                "tables": [
+                    {**table, "until": max(table["until"],
+                                           table["at"] + notes_chapter.table_pause_ms(len(table["rows"])) / 1000)}
+                    for piece in record.get("pieces") or []
+                    for table in piece.get("tables") or []
+                    if any(item["start"] <= table["at"] < item["end"] for item in value["stretches"])
+                ],
+                "transcript": _transcript(lines, value["stretches"]),
+                "spoken": [],
+                "readings": [],
+                "original_language_events": [],
+                "seconds": sum(item["end"] - item["start"] for item in kept),
+                "left_out_seconds": sum(
+                    item["end"] - item["start"] for item in value["stretches"] if item.get("left_out")
+                ),
+            })
+    return {
+        "schema_version": "wang_original_audio_index_v4",
+        "passage": passage,
+        "label": format_chinese_reference(passage),
+        "title": "",
+        "source": notes_chapter.NOTES_SOURCE,
+        "ai_voice": True,
+        "sermons": [],
+        "sections": [
+            {"passage": section, "label": format_chinese_reference(section), "sermons": rows_by_section[section]}
+            for section in chapter.sections
+            if rows_by_section[section]
+        ],
+        "missing_lectures": missing,
+    }

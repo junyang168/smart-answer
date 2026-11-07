@@ -352,3 +352,46 @@ def test_only_mechanical_context_events_leave_ai_sampling_decision_in_effect(cla
     assert bool(current)==(event_kind=='context')
     if current:assert current['events_sha256']!=original['events_sha256']
     assert store.get_record_state('claims','C')==state
+
+
+@pytest.mark.parametrize('defect',[None,'human','manual','content','plan_drift','wrong_source'])
+def test_ai_spot_check_admission_survives_only_authenticated_locator_sync(claims,monkeypatch,defect):
+    store,root=claims;seed_marker(store,None)
+    with store.connect()as conn:
+        conn.execute("UPDATE wang_knowledge.review_events SET artifact=artifact||%s::jsonb WHERE collection='claims' AND object_id='C'",(json.dumps({'source_id':'OTHER'if defect=='wrong_source'else'S'}),))
+    claim=deepcopy(store.get_record_state('claims','C')['payload'])
+    claim['occurrences'][0]['anchor_migration_notes']=[{'state':'source_version_bound','model_calls':0}]
+    if defect=='content':claim['statement']='A different teaching.'
+    package={'package_id':'sampling-locator-fixture','claims':[claim]}
+    # Import a disposable historical fixture, not a live authorization path.
+    # The actual locator writer is covered by test_transcript_claim_anchor_sync.
+    with monkeypatch.context()as setup:
+        setup.setattr('backend.api.canonical_repository.postgres_store.validate_store_package_authorization',lambda package:None)
+        plan=store.plan_package(package);store.apply_plan(plan)
+    from backend.pipeline.cvp_sql_commit import binding
+    path=root.parent/'sampling-locator-plan.json';path.write_text(json.dumps({
+        'schema_version':'wang_transcript_claim_anchor_sync_v1','change_set_id':plan.change_set_id,
+        'intent':{'source_id':'S'},'package':package}))
+    metadata={'actor':'owner_authorized_locator_sync','model_calls':0,'claim_prose_changed':False,
+              'new_qualification_granted':False,'migration_plan':binding(path)}
+    if defect!='manual':
+        with store.connect()as conn:
+            conn.execute("UPDATE wang_knowledge.change_sets SET source_kind='wang_transcript_claim_anchor_sync_v1',metadata=%s::jsonb WHERE change_set_id=%s",(json.dumps(metadata),plan.change_set_id))
+    if defect=='plan_drift':path.write_text(path.read_text()+' ')
+    if defect=='human':store.record_review('claims','C',decision='human_review_required',reviewer_kind='human',reviewer_id='owner')
+    state=store.get_record_state('claims','C')
+    from backend.pipeline.claim_metadata_projection import sampling_marker
+    with store.connect()as conn,conn.cursor()as cursor:
+        marker=sampling_marker(cursor,'C',cm.model_state(state))
+    assert bool(marker) is (defect is None)
+    prepared=intake.prepare(['C'],root,instruction='Refresh the source Claim after locator sync',store=store)
+    assert bool(prepared['manifest']) is (defect is None)
+    if defect:
+        assert prepared['excluded']['C']['reason']=='human_hold';return
+    _,jobs=batch.load(prepared['manifest']['path'],root/'batch',store=store)
+    request,execution=next(iter(jobs.values()))
+    ports=SyntheticPorts(store,execution,opus=pass_review)
+    result=execute_claim_management(store,request,root=execution,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus']
+    assert store.claim_management_qualification('C')['ready']

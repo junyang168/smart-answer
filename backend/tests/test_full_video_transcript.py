@@ -14,7 +14,8 @@ def test_new_video_prepares_first_window_without_any_previous_pilot(tmp_path,mon
     from backend.pipeline import full_video_transcript as full
     video=tmp_path/'另一篇講道.mp4';video.write_bytes(b'new movie')
     audio=np.full(full.SR*2,100,dtype=np.int16)
-    probe={'streams':[{'codec_type':'video','start_time':'0','time_base':'1/30000'}],
+    probe={'streams':[{'codec_type':'video','start_time':'0','time_base':'1/30000'},
+                      {'codec_type':'audio','start_time':'0','duration':'2','time_base':'1/16000'}],
            'format':{'duration':'2'}}
     monkeypatch.setattr(full.subprocess,'check_output',lambda *a,**k:json.dumps(probe))
     monkeypatch.setattr(full.subprocess,'run',lambda command,**k:full.write_audio(tmp_path/'out/master.wav',audio))

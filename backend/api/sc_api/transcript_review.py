@@ -867,9 +867,17 @@ class ReviewStore:
                 "expected_script_sha256": expected_script_sha256,
                 "source_video_sha256": record["source_sha256"],
             }
+            if (source / 'speaker-candidate.json').is_file():
+                value['speaker_candidate_sha256'] = file_hash(source / 'speaker-candidate.json')
             path = self.candidate_path(item)
             if path.exists() and read(path) != value:
-                raise ReviewError(409, "已有不同候選，請先解決版本差異")
+                previous = read(path)
+                # Only enrich an unadopted, otherwise identical candidate with source-bound speaker attribution.
+                before = {k: v for k, v in previous.items() if k != 'speaker_candidate_sha256'}
+                after = {k: v for k, v in value.items() if k != 'speaker_candidate_sha256'}
+                if before != after or previous.get('speaker_candidate_sha256') or not value.get('speaker_candidate_sha256'):
+                    raise ReviewError(409, "已有不同候選，請先解決版本差異")
+                atomic(self.folder(item) / 'candidate-history' / (digest(previous) + '.json'), previous)
             atomic(path, value)
 
     def candidate(self, actor, item):
@@ -996,12 +1004,15 @@ class ReviewStore:
                 ):
                     raise ReviewError(412, "候選或認領狀態已改變")
                 if (
-                    file_hash(source / "full_transcript.json")
-                    != candidate["source_record_sha256"]
+                    digest(record) != candidate["source_record_sha256"]
+                    or file_hash(source / "full_transcript.json")
+                    != candidate.get("source_input_file_sha256", candidate["source_record_sha256"])
                     or file_hash(source / "reading-layout/layout.json")
                     != candidate["layout_sha256"]
                 ):
                     raise ReviewError(409, "候選已變更，拒絕採用")
+                if candidate.get('speaker_candidate_sha256') != file_hash(source / 'speaker-candidate.json'):
+                    raise ReviewError(409, '講員候選已變更，拒絕採用')
             if self.enabled(item):
                 raise ReviewError(409, "候選已採用，不覆寫人工審核稿")
             _, meta = self.meta(item)
@@ -1025,7 +1036,12 @@ class ReviewStore:
                     "timeline": read(self.root / "script" / f"{item}.json"),
                 },
             )
-            mapping = {p["id"]: str(i + 1) for i, p in enumerate(record["paragraphs"])}
+            from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
+            try:
+                editorial_paragraphs, hidden_insertions = editor_paragraphs(record)
+            except ValueError as error:
+                raise ReviewError(409, "自動軟刪除與原文不符，拒絕採用") from error
+            mapping = {p["id"]: str(i + 1) for i, p in enumerate(editorial_paragraphs)}
             rows = [
                 {
                     "index": mapping[p["id"]],
@@ -1035,13 +1051,30 @@ class ReviewStore:
                 }
                 for p in record["paragraphs"]
             ]
+            from backend.pipeline.media_batch.speakers import label_rows
+            try:
+                rows, speaker_attribution = label_rows(
+                    source, record, rows, mapping, hidden_insertions=hidden_insertions
+                )
+            except (ValueError, KeyError) as error:
+                raise ReviewError(409, '講員候選與來源不符') from error
+            by_index = {r["index"]: r for r in rows}
+            rows = [
+                by_index[mapping[p["id"]]]
+                if mapping[p["id"]] in by_index and speaker_attribution
+                else dict(
+                    index=mapping[p["id"]], end_index=mapping[p["id"]],
+                    type="content", text=p["text"],
+                )
+                for p in editorial_paragraphs
+            ]
             bindings = {
                 mapping[p["id"]]: {
                     "source_paragraph_id": p["id"],
                     "start_ms": p["start_ms"],
                     "end_ms": p["end_ms"],
                 }
-                for p in record["paragraphs"]
+                for p in editorial_paragraphs
             }
             if any(
                 p["start_ms"] is None or p["end_ms"] is None
@@ -1061,7 +1094,7 @@ class ReviewStore:
                         "end": ts(p["end_ms"]),
                         "text": p["text"],
                     }
-                    for p in record["paragraphs"]
+                    for p in editorial_paragraphs
                 ]
             }
             assets = {}
@@ -1102,6 +1135,17 @@ class ReviewStore:
                             "needs_review": rep["needs_review"],
                         }
                     )
+            timing_quality = copy.deepcopy(record.get("timing_quality"))
+            if timing_quality and any(p.get("excluded_only") for p in editorial_paragraphs):
+                timing_quality = {
+                    **timing_quality, "status": "withheld",
+                    "paragraph_states": {
+                        mapping[p["id"]]: {
+                            "status": "withheld" if p.get("excluded_only") else "qualified"
+                        }
+                        for p in editorial_paragraphs
+                    },
+                }
             c = {
                 "schema_version": "transcript-review-context.v1",
                 "revision": 0,
@@ -1112,7 +1156,9 @@ class ReviewStore:
                 "source_input_file_sha256": file_hash(source / "full_transcript.json"),
                 "source_record_path": f"transcript_review/{item}/source-record.json",
                 "paragraph_bindings": bindings,
-                "timing_quality": record.get("timing_quality"),
+                "timing_quality": timing_quality,
+                "editorial_exclusions": record.get('editorial_exclusions', []),
+                "speaker_attribution": speaker_attribution,
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},
                     "core_bible_verse": meta.get("core_bible_verse") or [],

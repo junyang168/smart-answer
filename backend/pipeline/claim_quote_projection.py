@@ -4,6 +4,7 @@ The original provider answer is immutable. Independent review sees the full
 projected candidate and the normalization receipt records every replacement.
 """
 from copy import deepcopy
+import hashlib
 import unicodedata
 import re
 from difflib import SequenceMatcher
@@ -12,6 +13,96 @@ CONTRACT = 'source_literal_punctuation_v1'
 NEAR_CONTRACT = 'source_literal_near_match_v1'
 SPAN_CONTRACT = 'source_literal_span_v2'
 FIELD = 'program_source_quote_projection'
+REPAIR = 'source_quote_highlight_repair'
+
+
+def saved_highlight_repair(previous, request, policy, authority):
+    """Authenticate one saved proposal's duplicate-highlight projection repair.
+
+    No reviewer verdict is reused and no call budget is added. The successor
+    submits the complete corrected candidate to its remaining ordinary Opus.
+    SQL admission separately matches the saved round and full current readset.
+    """
+    proof = authority.get(REPAIR)
+    if proof is None:
+        return None
+    import json
+    from pathlib import Path
+    from backend.pipeline import claim_management as cm
+    from backend.pipeline.cvp_sql_commit import check_binding
+    from backend.pipeline.cvp_sql_actions import validate_claim_stage
+    from backend.pipeline.claim_model_output import candidate as expand
+    from backend.pipeline.source_reconciliation_runner import body, read
+    from backend.pipeline.claim_review_recovery import _completed_stage_matches
+    old_policy = cm.Policy.model_validate(previous['policy'])
+    expected = {'predecessor_action_id','prior_metadata_sha256','round','authorization_quote'}
+    if (not isinstance(proof, dict) or set(proof) != expected
+            or proof['predecessor_action_id'] != previous['action_id']
+            or proof['prior_metadata_sha256'] != cm.sha256_json(previous)
+            or not proof['authorization_quote'] or authority.get('authorized_by') != 'owner'
+            or authority.get('human_content_approval') is not False
+            or authority.get('owner_call_extension') or previous.get('continued_by')
+            or previous['result'].get('status') != 'paused' or previous['result'].get('reason') != 'disagreement'
+            or previous.get('continuation', {}).get(REPAIR)
+            or old_policy.source_quote_projection != SPAN_CONTRACT
+            or policy.initial_candidate != 'existing'
+            or policy.model_dump(mode='json', exclude={'policy_id','budget'})
+                != old_policy.model_dump(mode='json', exclude={'policy_id','budget'})):
+        raise ValueError('saved highlight repair requires one exact paused action and unchanged review policy')
+    check_binding(proof['round'])
+    value = json.loads(Path(proof['round']['path']).read_text())
+    rid = value['materials']['round_id']
+    if (list(previous['latest_rounds'].values()) != [rid]
+            or value.get('parent_run_id') != 'CMA-'+cm.sha256_json(previous['action_id'])
+            or value['materials']['request'] != previous['request']
+            or value['materials']['policy'] != previous['policy']
+            or value.get('outcome') != 'disagreement' or value.get('checkpoint') != 'prepared'
+            or value.get('change_set_ids') or not value.get('candidate')
+            or set(value.get('stage_results', {})) != {'candidate','opus'}
+            or any(slot['state'] not in {'completed','planned','cancelled'}
+                   for slot in previous['call_reservations'].values())
+            or any(previous['call_reservations'].get(rid+':'+role,{}).get('state') != 'completed'
+                   for role in ('gpt','opus'))):
+        raise ValueError('saved highlight repair cannot reuse unknown, unaccepted or committed stages')
+    root = Path(value['stage_results']['candidate']['path']).parent
+    for stage in ('candidate','opus'):
+        check_binding(value['stage_results'][stage])
+        role = 'gpt' if stage == 'candidate' else 'opus'
+        if not _completed_stage_matches(previous['call_reservations'][rid+':'+role],
+                value['stage_results'][stage], rid, stage):
+            raise ValueError('saved highlight repair stage differs from original call ledger')
+    raw = validate_claim_stage(root, 'gpt', old_policy, cm.model_packet(value['materials']))
+    old = cm.Candidate.model_validate(value['candidate'])
+    if any(d.action == 'create' and d.record_key.startswith('claims/') for d in old.dispositions):
+        raise ValueError('saved highlight repair cannot transfer reserved new Claim identities')
+    if body(read(root/'candidate.json')) != old.model_dump(mode='json'):
+        raise ValueError('saved highlight repair candidate binding drift')
+    fixed, receipt = expand(raw['response'], value['materials'])
+    corrections = [c for c in receipt.get('source_quote_corrections', [])
+                   if 'source_fragment_id' in c]
+    expected_candidate = old.model_dump(mode='json')
+    for correction in corrections:
+        path = correction['path']
+        if (len(path) not in {8,9} or path[:1] != ['records']
+                or path[2:4] != ['payload','occurrences'] or path[5] != 'anchors'
+                or path[7:] not in [['proposed_highlight','text'], ['verbatim_excerpt_sha256']]):
+            raise ValueError('saved quote repair changed an unrelated field')
+        node = expected_candidate
+        for part in path[:-1]:node = node[part]
+        if node[path[-1]] != correction['before']:
+            raise ValueError('saved quote repair lacks its exact original highlight')
+        node[path[-1]] = correction['after']
+    if not corrections or expected_candidate != fixed.model_dump(mode='json'):
+        raise ValueError('saved quote repair must change only proved duplicate highlights and hashes')
+    cm.validate_candidate(cm.Request.model_validate(value['materials']['unit_request']),
+        value['materials']['before'], fixed, value['materials']['sources'],
+        created_keys=value['materials']['created_keys'], original_replacements=value['materials']['replacements'],
+        metadata_projection=value['materials'].get('program_metadata_projection'))
+    return {'direction':proof, 'round_id':rid, 'round_metadata_sha256':cm.sha256_json(value),
+            'before_sha256':cm.sha256_json(value['materials']['transaction_before']),
+            'unit_id':value['unit_id'], 'candidate':fixed.model_dump(mode='json'),
+            'original_candidate_sha256':old.digest, 'corrected_candidate_sha256':fixed.digest,
+            'corrections':corrections, 'new_budget':False, 'review_approval_reused':False}
 
 
 def selected(materials):
@@ -57,6 +148,27 @@ def initial_candidate(materials):
             disposition.reason = 'Program restored a unique literal own-source quotation before initial review; no content approval.'
             disposition.citations = [cm.Citation(source_id=sid, paragraph_key=str(pk), exact_quote=literal)]
             corrected_keys.append(key)
+        corrected_fragments = {r.object_id:r.payload for r in candidate.records}
+        occurrence_grants = {p.key for p in request.permissions if 'occurrences' in p.fields}
+        for key in sorted(own & occurrence_grants):
+            state = materials['before'].get(key)
+            if not key.startswith('claims/') or not state or state['retired']:
+                continue
+            matches = []
+            for occurrence in state['payload'].get('occurrences', []):
+                for anchor in occurrence.get('anchors', []):
+                    fragment = corrected_fragments.get(anchor.get('source_fragment_id'))
+                    if (fragment and str(anchor.get('paragraph_key')) == str(fragment['paragraph_key'])
+                            and (anchor.get('proposed_highlight') or {}).get('text') == fragment['verbatim_excerpt']):
+                        matches.append(fragment)
+            if matches:
+                candidate.records.append(cm.source.Row(collection='claims', object_id=key.split('/',1)[1],
+                    payload=deepcopy(state['payload'])))
+                dispositions[key].action = 'update'
+                dispositions[key].reason = 'Program propagated the same unique own-source quote calibration to its authorized duplicate highlight; no content approval.'
+                dispositions[key].citations = [cm.Citation(source_id=f['source_id'], paragraph_key=str(f['paragraph_key']),
+                    exact_quote=source_excerpt(f['verbatim_excerpt'], materials['sources'][f['source_id']]['paragraphs'][str(f['paragraph_key'])]['text'], contract=SPAN_CONTRACT)) for f in matches]
+                corrected_keys.append(key)
     candidate, receipt = cm.normalize_candidate(candidate.model_dump(mode='json'), materials['sources'],
                                                  source_quote_projection=selected(materials))
     if corrected_keys:
@@ -213,7 +325,7 @@ def source_excerpt(excerpt, paragraph, *, contract=CONTRACT):
 
 
 def project(candidate, sources, *, contract=CONTRACT):
-    """Only proposed fragments and typed citations; never statements or links."""
+    """Restore quotations and their identical proposed highlights, never judgments."""
     value = candidate.model_dump(mode='json')
     value,changes = _project(value,sources,('dispositions','findings','finding_resolutions'),contract,fragments=True)
     return candidate.model_validate(value),changes
@@ -246,9 +358,44 @@ def _project(raw,sources,citation_fields,contract,*,fragments=False):
                             'before':old, 'after':new, 'rule':contract})
 
     writable = {d['record_key'] for d in value.get('dispositions',[]) if d['action'] in {'create','update'}}
+    fragment_corrections = {}
     for i,row in enumerate(value.get('records',[]) if fragments else []):
         if row['collection'] == 'source_fragments' and row['collection']+'/'+row['object_id'] in writable:
+            old = row['payload'].get('verbatim_excerpt')
             correct(row['payload'],'verbatim_excerpt',['records',i,'payload'])
+            if contract == SPAN_CONTRACT and old != row['payload'].get('verbatim_excerpt'):
+                fragment_corrections[row['object_id']] = (row['payload'], old)
+
+    # A model may repeat the same copied quote in an occurrence. Carry an
+    # already proved correction to that exact duplicate only. Never infer a
+    # new binding, overwrite a different highlight, or add an unproposed row.
+    for i,row in enumerate(value.get('records',[]) if fragment_corrections else []):
+        if row['collection'] != 'claims' or 'claims/'+row['object_id'] not in writable:
+            continue
+        for j,occurrence in enumerate(row['payload'].get('occurrences', [])):
+            for k,anchor in enumerate(occurrence.get('anchors', [])):
+                correction = fragment_corrections.get(anchor.get('source_fragment_id'))
+                if not correction:
+                    continue
+                fragment, old = correction
+                highlight = anchor.get('proposed_highlight')
+                if (not isinstance(highlight, dict) or highlight.get('text') != old
+                        or str(anchor.get('paragraph_key')) != str(fragment.get('paragraph_key'))):
+                    continue
+                new = fragment['verbatim_excerpt']
+                highlight['text'] = new
+                changes.append({'path':['records',i,'payload','occurrences',j,'anchors',k,'proposed_highlight','text'],
+                    'source_id':fragment['source_id'], 'paragraph_key':str(fragment['paragraph_key']),
+                    'before':old, 'after':new, 'rule':contract,
+                    'source_fragment_id':anchor['source_fragment_id']})
+                old_hash = anchor.get('verbatim_excerpt_sha256')
+                if old_hash == hashlib.sha256(old.encode()).hexdigest():
+                    new_hash = hashlib.sha256(new.encode()).hexdigest()
+                    anchor['verbatim_excerpt_sha256'] = new_hash
+                    changes.append({'path':['records',i,'payload','occurrences',j,'anchors',k,'verbatim_excerpt_sha256'],
+                        'source_id':fragment['source_id'], 'paragraph_key':str(fragment['paragraph_key']),
+                        'before':old_hash, 'after':new_hash, 'rule':contract,
+                        'source_fragment_id':anchor['source_fragment_id']})
 
     def citations(node, path):
         if isinstance(node,list):

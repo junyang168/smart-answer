@@ -52,6 +52,50 @@ def validate(answer,case):
     return bool(verdict['verdict']=='clean_complete_paragraph' and verdict['heard_opening'].strip() and verdict['heard_ending'].strip() and answer['reason'].strip())
 
 
+def retained_phrase_range(record,p):
+    """Propose a deleted-prefix/suffix range from saved original acoustic tokens.
+
+    This is only a candidate for continuous listening, never timing approval.
+    Ambiguous text, partial tokens or changed source evidence produce no proposal.
+    """
+    import hashlib,re
+    from opencc import OpenCC
+    window=p.get('window_id','')
+    if not re.fullmatch(r'w\d+',window) or 'original_text' not in p:return None
+    root=(Path(record['source'])/'master.wav').resolve().parent
+    master=root/'master.json'
+    if not master.is_file() or read_json(master)['source_sha256']!=record['source_sha256']:return None
+    path=root/'windows'/window/'audio/asr.json'
+    if not path.is_file():return None
+    convert=OpenCC('t2s')
+    def flat(text):return ''.join(c for c in convert.convert(text) if c.isalnum())
+    target,original=flat(p['text']),flat(p['original_text'])
+    if not target or len(target)>=len(original) or original.count(target)!=1:return None
+    proposals=[]
+    for chunk in read_json(path)['chunks']:
+        text=flat(chunk['text'])
+        if text.count(original)!=1:continue
+        rawpath=path.parent/'alignment'/f'{chunk["id"]}.json'
+        if not rawpath.is_file():continue
+        raw=read_json(rawpath);identity=raw['identity'];audio=path.parent/chunk['audio']
+        if identity['text_sha256']!=hashlib.sha256(chunk['text'].encode()).hexdigest() or identity['audio_sha256']!=file_sha(audio):
+            raise ValueError('Retained phrase original alignment changed')
+        items=raw['items'];letters='';owners=[]
+        for i,item in enumerate(items):
+            part=flat(item['text']);letters+=part;owners.extend([i]*len(part))
+        if letters!=text:continue
+        start=text.index(original)+original.index(target);end=start+len(target)
+        if (start and owners[start-1]==owners[start]) or (end<len(owners) and owners[end-1]==owners[end]):continue
+        selected=items[owners[start]:owners[end-1]+1]
+        if not all(0<=x['start_ms']<=x['end_ms']<=(chunk['sample_end']-chunk['sample_start'])/16 for x in selected):continue
+        if any(a['start_ms']>b['start_ms'] for a,b in zip(selected,selected[1:])):continue
+        origin=p['source_window_origin_sample']//16+chunk['sample_start']//16
+        lo,hi=origin+selected[0]['start_ms'],origin+selected[-1]['end_ms']
+        if not 0<=lo<hi<=record['duration_ms']:continue
+        proposals.append(dict(start_ms=lo,end_ms=hi,derivation='original_acoustic_tokens_for_unique_retained_phrase',evidence=[dict(path=str(x),sha256=file_sha(x)) for x in [master,path,rawpath,audio]]))
+    return proposals[0] if len(proposals)==1 else None
+
+
 def prepare(out:Path):
     from backend.pipeline.contextual_transcript_timing import analyse
     path=out/'paragraph-coherence-plan.json'
@@ -79,11 +123,18 @@ def prepare(out:Path):
                 for end in sorted(ends):
                     if not 0<=start<end<=record['duration_ms'] or end-start>180000:continue
                     ranges.append((start,end))
+            retained=retained_phrase_range(record,p)
+            if retained:
+                lo,hi=retained['start_ms'],retained['end_ms']
+                ranges.extend([(lo,hi),(max(0,lo-120),min(record['duration_ms'],hi+120))])
+                ranges=list(dict.fromkeys(ranges))
             key=f'L{lecture}-{row["id"]}';candidates=[]
             for i,(start,end) in enumerate(ranges):
                 audio=out/'coherence-clips'/f'{key}-c{i}.wav';write_audio(audio,samples[start*16:end*16]);candidates.append({'id':f'c{i}','start_ms':start,'end_ms':end,'audio':str(audio.relative_to(out)),'audio_sha256':file_sha(audio)})
             if not candidates:raise ValueError('No bounded continuous paragraph range')
-            cases.append({'id':key,'lecture':lecture,'paragraph_id':row['id'],'reference':p['text'],'candidates':candidates})
+            case={'id':key,'lecture':lecture,'paragraph_id':row['id'],'reference':p['text'],'candidates':candidates}
+            if retained:case['retained_phrase_source']=retained
+            cases.append(case)
     plan={'schema_version':'paragraph-audio-coherence.v1','parent_plan_sha256':file_sha(out/'plan.json'),'cases':cases,'max_calls':len(cases)}
     save_json(path,plan);return plan
 
@@ -126,6 +177,8 @@ def saved_ranges(out:Path):
     if file_sha(out/'plan.json')!=plan['parent_plan_sha256']:raise ValueError('Whole-span source changed')
     parser=VisionReviewer.__new__(VisionReviewer);parser.provider='gemini';result={}
     for i,case in enumerate(plan['cases']):
+        for evidence in case.get('retained_phrase_source',{}).get('evidence',[]):
+            if file_sha(Path(evidence['path']))!=evidence['sha256']:raise ValueError('Retained phrase source evidence changed')
         folder=out/'coherence-calls'/f'c{i:04d}';validated=folder/'validated.json'
         if not validated.exists():
             if i==0:return {}

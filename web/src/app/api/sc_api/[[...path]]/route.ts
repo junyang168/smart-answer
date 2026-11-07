@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, createHmac } from "node:crypto";
 import { getServerSession } from "next-auth";
-import { hasTranscriptBetaAccess } from "@/app/utils/roles";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import { authConfig } from "@/app/utils/auth";
 
 const RAW_BASE =
@@ -61,6 +61,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   const guarded =
     params.path?.[0] === "beta" ||
     [
+      "media_batches",
       "review_document",
       "review_candidate",
       "review_mode",
@@ -95,7 +96,9 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (
     guarded &&
     process.env.NODE_ENV === "production" &&
-    !hasTranscriptBetaAccess(actor, session?.user?.role)
+    (reviewEndpoint === "media_batches"
+      ? !hasEditorAccess(session?.user?.role)
+      : !hasTranscriptBetaAccess(actor, session?.user?.role))
   )
     return NextResponse.json(
       { detail: "圖文審核 beta 目前只對指定帳號開放" },
@@ -136,6 +139,9 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
       headers,
       body,
       redirect: "manual",
+      ...(reviewEndpoint === "media_batches"
+        ? { signal: AbortSignal.timeout(15000) }
+        : {}),
     });
   } catch {
     return NextResponse.json(

@@ -4,7 +4,7 @@ export function pendingTimingIds(
 ): string[] {
   if (!timing || timing.status === "qualified") return [];
   const states = timing.paragraph_states || {};
-  const active = rows.filter((p) => p.type !== "subtitle" && p.text.replace(/~~([^~]+?)~~/gs, "\n").trim()).map((p) => p.index);
+  const active = rows.filter((p) => p.type !== "subtitle" && p.text.replace(/~~([^~]+?)~~/g, "\n").trim()).map((p) => p.index);
   const missing = active.filter((id) => states[id]?.status !== "qualified");
   if (missing.length) return missing;
   const bad = Object.keys(states).filter((id) => states[id].status !== "qualified");

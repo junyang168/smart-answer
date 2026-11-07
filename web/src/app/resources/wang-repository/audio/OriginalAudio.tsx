@@ -75,6 +75,8 @@ export type Sermon = {
   original_language_events: OriginalLanguageEvent[];
   /** 按章页面：模型读逐字稿写的投影片。有它就不用 Claim 拼的幻灯。 */
   slides?: ChapterSlideData[];
+  /** 教授釋經筆記：母本的表格不念，念到那裡停頓，`at`–`until` 之間整張顯示。 */
+  tables?: { at: number; until: number; rows: string[][] }[];
   /** 按章页面：逐字稿一句一行、带时间；`left_out` 的属灰色片段。 */
   transcript?: { at: number; end: number; text: string; left_out?: boolean }[];
   seconds: number;
@@ -253,8 +255,11 @@ export default function OriginalAudio({
   passage,
   embedded = false,
   listenHref,
+  source,
 }: {
   passage: string;
+  /** 來源；教授釋經筆記的錄音是 AI 朗讀（後端按這個取另一份資料）。 */
+  source?: string;
   embedded?: boolean;
   /** 按章页面：每一段进聆听模式的地址。 */
   listenHref?: (section: string) => string;
@@ -264,6 +269,8 @@ export default function OriginalAudio({
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
+  // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
+  const [aiVoice, setAiVoice] = useState(false);
   // 不属这一章释经的片段，默认收起；读者要听就打开。
   const [showLeftOut, setShowLeftOut] = useState(false);
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
@@ -293,7 +300,8 @@ export default function OriginalAudio({
   useEffect(() => {
     (async () => {
       try {
-        const response = await fetch(`/api/public/original-audio/${passage}`, {
+        const query = source ? `?source=${encodeURIComponent(source)}` : "";
+        const response = await fetch(`/api/public/original-audio/${passage}${query}`, {
           cache: "no-store",
         });
         if (response.status === 404) throw new Error("這段經文還沒有原聲頁面。");
@@ -302,6 +310,7 @@ export default function OriginalAudio({
         setLabel(data.label ?? "");
         setTitle(data.title ?? "");
         setMissing(data.missing_lectures ?? []);
+        setAiVoice(Boolean(data.ai_voice));
         setSections(
           data.sections ?? [{ passage: data.passage, label: "", sermons: data.sermons ?? [] }],
         );
@@ -309,7 +318,7 @@ export default function OriginalAudio({
         setError(reason instanceof Error ? reason.message : "讀不到");
       }
     })();
-  }, [passage]);
+  }, [passage, source]);
 
   // 一篇讲道里的几段接着播：放完一段自动跳到下一段的起点。跳过的地方教授在讲
   // 别的，所以时间轴上会看到断口——看得见就够了，不必打断听。
@@ -446,6 +455,12 @@ export default function OriginalAudio({
     return (
       <div className="flex flex-col gap-6">
         {title && <p className="font-serif text-lg text-stone-800">{title}</p>}
+        {aiVoice && (
+          <p className="flex flex-wrap items-center gap-2 text-sm text-stone-600">
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-900">AI 朗讀</span>
+            教授釋經筆記的原文，由 AI 合成語音朗讀，不是教授本人的聲音。生活應用與附錄預設收起。
+          </p>
+        )}
         <Link
           href={listenHref(sections[0]?.passage ?? passage)}
           className="flex w-fit items-center gap-3 rounded-xl bg-stone-900 px-5 py-3 text-white shadow-sm hover:bg-stone-700"
