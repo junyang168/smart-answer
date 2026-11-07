@@ -15,7 +15,8 @@ import re
 
 from .runtime import atomic, file_sha
 
-SERIES = ["羅馬書釋經", "約翰福音釋經", "馬太福音釋經"]
+EXPOSITION = ["羅馬書釋經", "約翰福音釋經", "馬太福音釋經"]
+SERIES = EXPOSITION + ["問答系列", "獨立主題系列"]
 
 
 def build(inputs: Path, review: Path):
@@ -44,11 +45,13 @@ def build(inputs: Path, review: Path):
         ]:
             if entry[label] != source[label] or file_sha(out / name) != source[label]:
                 raise ValueError("Reviewed source changed: " + source["recording"])
-        if entry["series"] not in SERIES + [None]:
-            raise ValueError("Only three exposition series are allowed")
-        if entry["series"] and not re.fullmatch(r"\d+:\d+", entry["anchor"] or ""):
+        if entry["series"] not in SERIES:
+            raise ValueError("Only five approved series are allowed")
+        if entry["series"] in EXPOSITION and not re.fullmatch(
+            r"\d+:\d+", entry["anchor"] or ""
+        ):
             raise ValueError("Exposition needs a chapter and verse reading anchor")
-        if not entry["series"] and not entry["primary_topic"]:
+        if entry["series"] not in EXPOSITION and not entry["primary_topic"]:
             raise ValueError("Independent recording needs a topic")
         transcript = json.loads((out / "rough.json").read_text())
         if (
@@ -83,7 +86,7 @@ def build(inputs: Path, review: Path):
         )
 
     def sort_key(row):
-        if row["series"]:
+        if row["series"] in EXPOSITION:
             chapter, verse = map(int, row["anchor"].split(":"))
             return (
                 SERIES.index(row["series"]),
@@ -94,8 +97,7 @@ def build(inputs: Path, review: Path):
                 row["recording"],
             )
         return (
-            3,
-            row["primary_topic"],
+            SERIES.index(row["series"]),
             row["date"] or "9999",
             row["camp_position"] or 999,
             row["recording"],
@@ -104,7 +106,7 @@ def build(inputs: Path, review: Path):
     result.sort(key=sort_key)
     count = Counter()
     for row in result:
-        group = row["series"] or "獨立信息與問答"
+        group = row["series"]
         count[group] += 1
         row["reading_position"] = count[group]
     return dict(
@@ -123,11 +125,11 @@ def render(catalog):
     e = lambda value: html.escape(str(value), quote=True)
     body = []
     for row in catalog["records"]:
-        group = row["series"] or "獨立信息與問答"
-        book = group.replace("釋經", "") if row["series"] else ""
+        group = row["series"]
+        book = group.replace("釋經", "") if row["series"] in EXPOSITION else ""
         anchor = (
             book + " " + row["anchor"] + "（閱讀錨點）"
-            if row["series"]
+            if row["series"] in EXPOSITION
             else row["primary_topic"]
         )
         name = Path(row["name"]).name
@@ -167,16 +169,14 @@ def render(catalog):
             f"<details><summary>開結場核對依據與來源資訊</summary><p>{e(context)}</p><p>摘要引證經文：{e(refs)}</p>"
             f"<p>來源：{e(row['name'])}</p>{boundary}<small>粗逐字稿 SHA256：{e(row['rough_sha256'])}</small></details></article>"
         )
-    options = "".join(
-        f"<option>{e(group)}</option>" for group in SERIES + ["獨立信息與問答"]
-    )
+    options = "".join(f"<option>{e(group)}</option>" for group in SERIES)
     counts = " · ".join(f"{k} {v} 篇" for k, v in catalog["counts"].items())
     return (
         """<!doctype html><html lang='zh-Hant'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>講道的三個釋經系列與補充信息排序</title>
+<title>五個講道系列與閱讀順序</title>
 <style>body{background:#f3f6fa;color:#18243a;font:16px/1.7 system-ui;margin:0}header,main{max-width:1100px;margin:auto;padding:24px}header{padding-bottom:10px}h1{font-size:28px}h2{font-size:18px;margin:.6rem 0}h3{font-size:20px;margin:.4rem 0}article{background:white;border:1px solid #d7e0eb;border-radius:12px;margin:16px 0;padding:22px}p{margin:.6rem 0}a{color:#234cc5}input,select,button{font:inherit;padding:10px;border:1px solid #bcc9da;border-radius:7px;background:white;max-width:100%}.filters{position:sticky;top:0;background:#f3f6faf5;padding:12px 0;display:flex;gap:10px;flex-wrap:wrap;z-index:1}input{flex:1;min-width:180px}.line{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:#586983}.badge{color:#274f92;font-weight:700}.filename,small{overflow-wrap:anywhere;color:#617087}details{margin-top:14px;border-top:1px solid #edf0f6;padding-top:10px}details section{padding:12px;background:#f6f8fc;margin:8px 0}details p{white-space:pre-wrap}summary{cursor:pointer;color:#375a97}[hidden]{display:none!important}aside{background:#e9eff9;border-radius:10px;padding:15px}#count{font-weight:700}@media print{.filters{display:none}article{break-inside:avoid}}</style>
-<header><h1>講道系列與閱讀順序</h1><p>釋經只設羅馬書、約翰福音、馬太福音三個系列。章節是排序欄位，營會與日期是來源資訊。</p>
-<aside>這是根據未校對粗逐字稿、摘要及開結場文字核對的整理索引，沒有重新聽音。閱讀順序不是原營會的官方講次；沒有因章節接近而宣稱錄音完整連續。獨立洗禮、問答及主日專題保留完整原檔，以主題索引查找。</aside>
+<header><h1>講道系列與閱讀順序</h1><p>羅馬書釋經、約翰福音釋經、馬太福音釋經、問答、獨立主題，共五個系列。釋經按經文排序，問答與獨立主題按日期及同場順序排列。</p>
+<aside>這是根據未校對粗逐字稿、摘要及開結場文字核對的整理索引，沒有重新聽音。閱讀順序不是原營會的官方講次；沒有因章節接近而宣稱錄音完整連續。洗禮及主日專題歸獨立主題系列；問答與已確認的問答延伸歸問答系列。主題標籤保留，可搜尋查找。</aside>
 <p>"""
         + e(counts)
         + """</p></header><main><div class='filters'><input id='search' aria-label='搜尋' placeholder='搜尋主題、經文、檔名或日期'><select id='group' aria-label='系列'><option value=''>全部</option>"""

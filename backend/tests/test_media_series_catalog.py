@@ -70,5 +70,5 @@ def test_omission_or_unreviewed_extra_series_is_rejected(tmp_path):
     entry["series"] = "羅馬書第七章系列"
     data["records"] = [entry]
     atomic(review, data)
-    with pytest.raises(ValueError, match="Only three"):
+    with pytest.raises(ValueError, match="Only five"):
         build(inputs, review)
