@@ -219,3 +219,25 @@ def test_credit_recovery_is_once_bound_and_keeps_original_rejection(
     )
     with pytest.raises(ValueError, match="proven rejected"):
         request_for(tmp_path, request)
+
+
+def test_summary_locator_padding_is_exact_and_preserves_prose():
+    value = dict(
+        theme="原樣保留",
+        passages=[
+            dict(reference="以弗所書2:10", basis="保持原文", chunks=["w03/chunk-03"])
+        ],
+        content=[dict(point="原樣保留", chunks=["w3/chunk-004"])],
+        uncertainties=["原樣保留"],
+    )
+    normalized, changes = rough.normalize_summary_locators(
+        value, {"w03/chunk-003", "w03/chunk-004"}
+    )
+    assert normalized["passages"][0]["chunks"] == ["w03/chunk-003"]
+    assert normalized["content"][0]["chunks"] == ["w03/chunk-004"]
+    assert value["passages"][0]["chunks"] == ["w03/chunk-03"]
+    assert normalized["content"][0]["point"] == value["content"][0]["point"]
+    assert len(changes) == 2
+    value["passages"][0]["chunks"] = ["w03/chunk-99"]
+    with pytest.raises(ValueError, match="unsupported"):
+        rough.normalize_summary_locators(value, {"w03/chunk-003"})
