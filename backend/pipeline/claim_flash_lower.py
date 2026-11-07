@@ -122,7 +122,8 @@ def run(store, source_id, root, ports, *, apply=False):
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         f.bind_source(store,source_id,root)
-        e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,'models':ports.identity})
+        e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
+            'gpt_review_contract':f.REVIEW_CONTRACT,'models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)

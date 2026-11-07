@@ -144,7 +144,7 @@ def test_invalid_gpt_claim_scope_cannot_write(sample):
 
 
 def test_payload_splits_on_job_count_and_bytes_before_any_call(tmp_path,monkeypatch):
-    monkeypatch.setattr(f,'GPT_BYTES',1500);monkeypatch.setattr(f,'GPT_JOBS',2)
+    monkeypatch.setattr(f,'GPT_BYTES',1500+len(f.SEMANTIC_REVIEW.encode()));monkeypatch.setattr(f,'GPT_JOBS',2)
     ports=Ports(reply=lambda req:{'items':[]})
     list(f.gpt(tmp_path,ports,'small',[{'job_id':str(i),'text':'x'*400} for i in range(5)],{},'small'))
     requests=[req for role,req in ports.calls if role=='gpt']
@@ -870,3 +870,35 @@ def test_unresolved_lookup_scope_reaches_existing_orphan_disposition(sample):
         return {'items':[{'job_id':job['job_id'],'action':'retain_evidence','reason':'本項只保留為背景，不強迫連接。'}]}
     dispositions,pending=flash.finish_orphans(store,'S',root,Ports(reply=reply))
     assert dispositions[0]['action']=='retain_evidence' and not pending
+
+
+@pytest.mark.parametrize('task,prompt,job',[
+    ('lower_repair',lower.PROMPT,{'job_id':'evidence_steps/E','statement':'待審證據。'}),
+    ('claim_statement',flash.PROMPT,{'job_id':'C','claim':{'statement':'待審主張。'},
+                                    'material':{'evidence':[{'statement':'已審證據。'}]}}),
+])
+def test_semantic_review_contract_reaches_runtime_and_keeps_layer_scope(tmp_path,task,prompt,job):
+    ports=Ports(reply=lambda req:{'items':[]})
+    list(f.gpt(tmp_path,ports,task,[job],{},prompt))
+    request=ports.calls[0][1]
+    assert request['system'].count(f.SEMANTIC_REVIEW)==1
+    assert '不審閱下一層內容' in request['system']
+    assert 'keep 也須解釋' in request['system']
+    assert request['input']['jobs']==[job]
+    if task=='claim_statement':
+        assert '不審 CVP' in request['system']
+        assert '不重審或改寫 Evidence／Observation' in request['system']
+    count=len(ports.calls)
+    list(f.gpt(tmp_path,ports,task,[job],{},prompt))
+    assert len(ports.calls)==count
+
+
+def test_legacy_prompt_intent_is_not_silently_resumed(sample):
+    store,root,ports=complete(sample)
+    intent=root/'lower/intent.json';old=json.loads(intent.read_text());old.pop('gpt_review_contract')
+    intent.write_text(json.dumps(old))
+    before=store.get_record_state('evidence_steps','E');count=len(ports.calls)
+    with pytest.raises(ValueError,match='saved input differs'):
+        lower.run(store,'S',root/'lower',ports,apply=True)
+    assert len(ports.calls)==count
+    assert store.get_record_state('evidence_steps','E')==before

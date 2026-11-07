@@ -13,6 +13,25 @@ PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded
 GPT_BYTES = 60000
 GPT_JOBS = 4
 JEV_BYTES = 40000
+REVIEW_CONTRACT = 'claim_flash_semantic_review_v1'
+SEMANTIC_REVIEW = (
+    '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'
+    '不替參考物件作完整審閱，不因發現一句判斷便要求建立下一層記錄。'
+    '已完成的下層作為依據，不重新全面審改；確實發現下層缺陷時記清對象並退回該層，'
+    '不在本層順手改寫，也不把下層新結論偷偷補成目標已表達的內容。'
+    'Jev 是待核對的線索，不是通過或錯誤的證明；復查目標完整意思，不限於提示的類別。'
+    '逐項核對實際涉及的對象與範圍、必要／充分條件、程度與重心、否定與排他性、'
+    '因果、可能／應當／必然、說話者與採納歸屬，並查自身原文及必要上下文的限制或反證。'
+    '判準是讀者據摘要能支持或反駁的，是否仍是教授斷言的同一個判斷；'
+    '改弱與改強都可能改變意思。合理同義概括、口語省略及語序變化不要求逐字一致，'
+    '不為無關維度造表，不憑外部神學或想像邊緣情形挑錯。'
+    '每個實質成分應有本層實際關聯材料共同支持；單項只支持一部分可以，'
+    '但不能以大意相近或多數部分正確掩蓋某個無據成分。'
+    '只在本次授權層內核對同一判斷的相關表述；關係類型成立不代表理由的每項斷言、'
+    '支持方向或來源歸屬都成立。保留教授實際使用的聖經證據、推理、限定與反方角色。'
+    '沿用現有 reason 欄位，簡短指出實際影響判斷的限定和來源短句或位置；'
+    'keep 也須解釋為何現有表述保留了該意思，不能只說整體有支持。'
+    '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。')
 
 
 def bind_source(store,sid,root):
@@ -112,7 +131,7 @@ def yn(text):
 def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None):
     """Split BEFORE calling by both complete wire size and task count. No truncation."""
     def request(batch):
-        return {'identity': ports.identity['gpt'], 'system': instruction,
+        return {'identity': ports.identity['gpt'], 'system': instruction+'\n'+SEMANTIC_REVIEW,
                 'input': {'task': task, 'jobs': batch, **(shared or {})}, 'schema': schema}
     batches, batch = [], []
     for job in jobs:
