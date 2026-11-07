@@ -1454,3 +1454,20 @@ def test_full_pipeline_imports_rough_saved_asr_into_new_workspace(
     imported = full.prepare(source, new)
     audio.transcribe(new / imported["windows"][0]["audio"])
     assert calls == [1] and (old / "rough.json").is_file()
+
+
+def test_credit_rejection_stops_whole_batch_without_resetting_saved_calls(store,tmp_path):
+    bid=store.batch(config(tmp_path))
+    with store.connection() as c:
+        c.execute('INSERT INTO media_ingest.recordings(id,source_sha,item,info) VALUES (%s,%s,%s,%s)',('r','sha','item',Jsonb({})))
+        task=store.task(c,bid,'r','rough_asr','all','binding',{})
+    store.reserve(bid,task,'credit-call','gpt-transcribe',.03)
+    store.call_complete('credit-call',dict(status='rejected',http_status=429,provider_error_code='credit_balance_exhausted'))
+    assert store.stop_for_credit(bid,'credit-call')==2
+    assert store.stop_for_credit(bid,'credit-call')==2
+    from backend.pipeline.media_batch.runtime import WaitingCapacity
+    with pytest.raises(WaitingCapacity,match='paused'):
+        store.reserve(bid,task,'new-call','gpt-transcribe',.03)
+    with store.connection() as c:
+        assert c.execute('SELECT calls FROM media_ingest.batches WHERE id=%s',(bid,)).fetchone()['calls']==1
+        assert c.execute('SELECT info FROM media_ingest.calls WHERE id=%s',('credit-call',)).fetchone()['info']['status']=='rejected'

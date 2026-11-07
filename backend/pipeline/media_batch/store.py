@@ -310,6 +310,48 @@ class Store:
                 (Jsonb(info), call),
             )
 
+    def stop_for_credit(self, batch, call):
+        """Stop the whole queue on a proven credit rejection, without clearing calls."""
+        with self.connection() as c:
+            b = c.execute(
+                "SELECT * FROM media_ingest.batches WHERE id=%s FOR UPDATE", (batch,)
+            ).fetchone()
+            proof = c.execute(
+                "SELECT info FROM media_ingest.calls WHERE id=%s AND batch=%s AND state='complete'",
+                (call, batch),
+            ).fetchone()
+            if (
+                not proof
+                or proof["info"].get("status") != "rejected"
+                or proof["info"].get("http_status") != 429
+                or proof["info"].get("provider_error_code")
+                not in ("credit_balance_exhausted", "insufficient_quota")
+            ):
+                raise Conflict("A saved provider credit rejection is required")
+            if b["desired"] == "paused":
+                return b["revision"]
+            revision = b["revision"] + 1
+            c.execute(
+                "UPDATE media_ingest.batches SET desired='paused',revision=%s WHERE id=%s",
+                (revision, batch),
+            )
+            c.execute(
+                "INSERT INTO media_ingest.controls VALUES (%s,%s,%s,%s)",
+                (
+                    batch,
+                    "credit-stop-" + call,
+                    Jsonb(
+                        dict(
+                            action="credit-exhausted",
+                            call=call,
+                            provider_error_code=proof["info"]["provider_error_code"],
+                        )
+                    ),
+                    revision,
+                ),
+            )
+            return revision
+
     def snapshot(self, batch=None, offset=0, limit=50):
         with self.connection() as c:
             c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")

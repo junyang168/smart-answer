@@ -152,6 +152,8 @@ def batch_call(out, request, reserved):
                     except (ValueError, KeyError, TypeError, OSError) as error:
                         state["usage_cost_error"] = str(error)
                 store.call_complete(call, state)
+                if state.get("provider_error_code") in ("credit_balance_exhausted", "insufficient_quota"):
+                    store.stop_for_credit(ctx["batch"], call)
                 atomic(journal, dict(state=state["status"], call=call))
             # No response proof: journal remains unknown even after the OS lock is released.
 
