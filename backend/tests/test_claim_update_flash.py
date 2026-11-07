@@ -733,3 +733,56 @@ def test_claim_keep_never_applies_echo_rewording_or_ids(sample):
     actual=store.get_record_state('claims','C')['payload']
     assert result['applied'] and actual['statement']==before['statement']
     assert actual['evidence_step_ids']==before['evidence_step_ids']
+
+
+def test_unresolved_coverage_proposals_are_preserved_without_partial_write(sample):
+    store,root,_=sample
+    before=store.get_record_state('evidence_steps','E')
+    def unresolved(req):
+        if req['input']['task']=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'needs_source','new_records':[],
+                'conclusions':[{'statement':'尚缺材料的候選。','support_keys':['evidence_steps/E'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],'reason':'待解。'}],
+                'connections':[],'reason':'提供的材料仍不足。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'missing_lower':'yes'},reply=unresolved)
+    result=lower.run(store,'S',root/'lower',ports,apply=True)
+    assert result['status']=='needs_attention' and not result['applied']
+    assert store.get_record_state('evidence_steps','E')==before
+    assert len([q for role,q in ports.calls if role=='gpt'])==1
+
+
+@pytest.mark.parametrize('final_action',['resolved','needs_source'])
+def test_coverage_expands_bound_support_once_without_sending_old_draft(sample,final_action):
+    store,root,path=sample
+    import hashlib
+    raw=json.loads(path.read_text());raw['script'] += [
+        {'index':2,'start_time':2.0,'end_time':3.0,'text':'這是附近的過渡。'},
+        {'index':3,'start_time':3.0,'end_time':4.0,'text':'這是同項已掛載的後續解說。'}]
+    path.write_text(json.dumps(raw,ensure_ascii=False))
+    doc=deepcopy(store.get_record_state('source_documents','S')['payload']);doc['source_file_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    snap=e.source_snapshot({'path':str(path),'file_sha256':doc['source_file_sha256']},source=doc)
+    f1=deepcopy(store.get_record_state('source_fragments','F')['payload']);f1['source_sha256']=snap['body_sha256']
+    p3=snap['paragraphs']['S0003'];f3={**f1,'fragment_id':'F3','paragraph_key':'S0003','source_segment_index':p3['index'],
+        'verbatim_excerpt':p3['text'],'media_time':p3['start_time'],'media_end_time':p3['end_time'],
+        'paragraph_text_sha256':hashlib.sha256(p3['text'].encode()).hexdigest(),
+        'verbatim_excerpt_sha256':hashlib.sha256(p3['text'].encode()).hexdigest()}
+    ev=deepcopy(store.get_record_state('evidence_steps','E')['payload']);ev['source_fragment_ids']=['F','F3']
+    store.apply_plan(store.plan_package({'package_id':'expanded-support','source_documents':[doc],
+        'source_fragments':[f1,f3],'evidence_steps':[ev]}))
+    def reply(req):
+        task=req['input']['task']
+        if task in {'lower_coverage','lower_coverage_context'}:
+            if task=='lower_coverage_context':
+                job=req['input']['jobs'][0]
+                assert 'S0003' in job['source_paragraphs']
+                assert 'original_unresolved_reply' not in job
+                assert job['coverage_target_paragraph_key']=='S0001'
+                assert job['context_recovery']['max_additional_calls']==1
+            return {'items':[{'job_id':j['job_id'],'action':'needs_source' if task=='lower_coverage' else final_action,
+                'new_records':[],'conclusions':[],'connections':[],
+                'reason':'檢查提供的完整後文。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'missing_lower':lambda req:'yes' if req['state']['paragraph_key']=='S0001' else 'no'},reply=reply)
+    result=lower.run(store,'S',root/'lower',ports,apply=True)
+    assert result['status']==('verified' if final_action=='resolved' else 'needs_attention')
+    tasks=[req['input']['task'] for role,req in ports.calls if role=='gpt']
+    assert tasks==['lower_coverage','lower_coverage_context']

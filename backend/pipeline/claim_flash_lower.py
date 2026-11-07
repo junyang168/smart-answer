@@ -201,9 +201,34 @@ def run(store, source_id, root, ports, *, apply=False):
             for item in items:
                 job=next(j for j in batch if j['job_id']==item.job_id)
                 if item.action=='needs_source':
-                    if item.new_records or item.conclusions or item.connections:
-                        raise ValueError('unresolved coverage cannot propose writes')
-                    pending.append({'paragraph_key':item.job_id,'reason':item.reason});continue
+                    # The coverage window is context, not a hard support boundary.
+                    # Expand only to physically verified sources of the records already supplied.
+                    expanded=deepcopy(job)
+                    for key in job['records']:
+                        for fid in e.evidence_fragment_ids(working[key]['payload']):
+                            fragment=working['source_fragments/'+fid]['payload']
+                            pk=fragment['paragraph_key']
+                            expanded['source_paragraphs'][pk]=sources[source_id]['paragraphs'][pk]['text']
+                    if set(expanded['source_paragraphs'])>set(job['source_paragraphs']):
+                        expanded['source_paragraphs']={pk:expanded['source_paragraphs'][pk]
+                            for pk in sources[source_id]['paragraphs'] if pk in expanded['source_paragraphs']}
+                        expanded['coverage_target_paragraph_key']=item.job_id
+                        expanded['context_recovery']={'defect':'bound record source excerpts omitted from coverage window',
+                            'original_input_sha256':e.digest(job),'original_answer_sha256':e.digest(item.model_dump()),
+                            'added_paragraph_keys':sorted(set(expanded['source_paragraphs'])-set(job['source_paragraphs'])),
+                            'max_additional_calls':1}
+                        e.save(root/'coverage-context'/item.job_id/'recovery.json',expanded['context_recovery'])
+                        recovered=f.gpt(root/'coverage-context',ports,'lower_coverage_context',[expanded],
+                            Coverage.model_json_schema(),PROMPT+
+                            '目標只限 job_id 段落；source_paragraphs 其餘段落是參考，不因相鄰設問尚未展開就判目標未完成。'
+                            '現在已補上所列記錄的完整綁定原文，重新處置這一項；不猜缺失來源，不作 Claim 升級裁決。')
+                        _,reply=next(recovered)
+                        items2=Coverage.model_validate(reply).items
+                        f.exactly([x.model_dump() for x in items2],[item.job_id],'job_id')
+                        item=items2[0];job=expanded
+                    if item.action=='needs_source':
+                        # Preserve all proposed content in the raw answer, but write none of it.
+                        pending.append({'paragraph_key':item.job_id,'reason':item.reason});continue
                 available={pk:{'source_id':source_id,'paragraph_key':pk,**sources[source_id]['paragraphs'][pk]}
                            for pk in job['source_paragraphs']}
                 temp={};local_keys=set(job['records'])
