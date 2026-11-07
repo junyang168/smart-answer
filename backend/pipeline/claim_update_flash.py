@@ -330,7 +330,18 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
               and paragraph_keys(k,records)&near}
         for key in target_keys:
             p=records[key]['payload']
-            ev=[pairs.node('evidence_steps/'+eid,records,sources) for eid in p.get('evidence_step_ids',[])]
+            ev=[{**pairs.node('evidence_steps/'+eid,records,sources),'relation_type':'supports'}
+                for eid in p.get('evidence_step_ids',[])]
+            linked={item['object_key'] for item in ev}
+            for rk,rr in records.items():
+                if not rk.startswith('knowledge_relations/') or rr['payload']['to_id']!=p['claim_id']:
+                    continue
+                relation=rr['payload']
+                for col in ['observations','evidence_steps']:
+                    sk=col+'/'+relation['from_id']
+                    if sk in records and sk not in linked:
+                        ev.append({**pairs.node(sk,records,sources),'relation_type':relation['relation_type']})
+                        linked.add(sk)
             raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
             state={'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},'evidence':ev,'source_paragraphs':raw}
             ans=f.jev(root,ports,state,{

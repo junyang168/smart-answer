@@ -620,3 +620,20 @@ def test_candidate_answer_addition_preserves_protected_question(sample):
     records,sources=f.load_source(store,'S')
     updates,pending=flash.question_links(records,sources,['claims/C'],{'S0001'},[{'claim':'C','question_ids':['Q']}],root,Ports())
     assert updates=={} and pending[0]['reason']=='protected_question_answers'
+
+
+def test_existing_direct_observation_support_is_in_claim_level_material(sample):
+    store,root,_=sample
+    ev=deepcopy(store.get_record_state('evidence_steps','E')['payload']);ev['produced_claim_ids']=[]
+    claim=deepcopy(store.get_record_state('claims','C')['payload']);claim['evidence_step_ids']=[]
+    claim['occurrences'][0]['anchors']=[{'observation_id':'O','source_fragment_id':'F','paragraph_key':'S0001'}]
+    store.apply_plan(store.plan_package({'package_id':'direct-o','claims':[claim],'evidence_steps':[ev],
+        'observations':[{'observation_id':'O','statement':'教授把聽從連到相信。','source_fragment_id':'F'}],
+        'knowledge_relations':[{'relation_id':'OC','from_id':'O','to_id':'C','relation_type':'supports',
+                               'reason':'觀察提供支持。','record_namespace':f.VERSION}]}))
+    ports=Ports(choices={'relation':lambda req:'none' if req['state']['A']['record_type']=='evidence_steps' else 'a_to_b_supports'})
+    lower.run(store,'S',root/'lower',ports,apply=True)
+    flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    req=next(q for role,q in ports.calls if role=='jev' and 'statement_fidelity' in q['questions'])
+    assert req['state']['evidence'][0]['record_type']=='observations'
+    assert req['state']['evidence'][0]['relation_type']=='supports'
