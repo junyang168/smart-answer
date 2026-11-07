@@ -1195,3 +1195,23 @@ def test_existing_manuscript_names_enrich_inventory_and_block_unverified_retrans
             c.execute("SELECT count(*) AS n FROM media_ingest.calls").fetchone()["n"]
             == 0
         )
+
+
+def test_ledger_cutover_is_repeatable_and_refuses_overwriting_target(store,tmp_path):
+    from backend.pipeline.media_batch.ledger_migration import export_ledger,restore_ledger
+    bid=store.batch(config(tmp_path))
+    with store.connection() as c:
+        c.execute("INSERT INTO media_ingest.batch_files(batch,path,bytes,state) VALUES (%s,'a.mp3',123,'waiting_download')",(bid,))
+    snapshot=tmp_path/'cutover.json'
+    saved=export_ledger(store,[bid],snapshot)
+    with store.connection() as c:
+        c.execute('DELETE FROM media_ingest.batch_files WHERE batch=%s',(bid,))
+        c.execute('DELETE FROM media_ingest.batches WHERE id=%s',(bid,))
+    assert restore_ledger(store,snapshot)['model_calls']==0
+    assert restore_ledger(store,snapshot)['counts']==saved['counts']
+    with store.connection() as c:
+        c.execute("UPDATE media_ingest.batch_files SET bytes=456 WHERE batch=%s",(bid,))
+    with pytest.raises(ValueError,match='refusing overwrite'):
+        restore_ledger(store,snapshot)
+    with store.connection() as c:
+        assert c.execute('SELECT bytes FROM media_ingest.batch_files WHERE batch=%s',(bid,)).fetchone()['bytes']==456
