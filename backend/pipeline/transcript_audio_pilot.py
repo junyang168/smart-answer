@@ -151,6 +151,8 @@ def _saved_call(out: Path, request: dict, reserved_usd: float, invoke, *, max_ca
     except Exception as error:
         status = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         state.update(http_status=status, error_type=type(error).__name__)
+        provider_code = getattr(error, 'code', None)
+        if isinstance(provider_code, str): state['provider_error_code'] = provider_code
         if status in (400, 401, 402, 403, 404, 422, 429):
             state['status'] = 'rejected'
         save_json(state_path, state)
