@@ -103,8 +103,8 @@ def record_postimage(key, record, edit, material, records, sources):
         if any(result.get(k)!=record.get(k) for k in fields) or (
                 col in {'evidence_steps','observations'} and edit.scripture_refs!=record.get('scripture_refs',[])):
             raise ValueError('keep cannot silently rewrite lower content')
-        if set(e.evidence_fragment_ids(result))!=set(e.evidence_fragment_ids(record)):
-            raise ValueError('keep cannot silently replace source bindings')
+        # Supplied excerpts justify the decision; keep is not a request to replace
+        # the complete existing source list. Projection above still validates every quote.
         return record,{},projection
     from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
     result=KNOWLEDGE_COLLECTIONS[col][0].model_validate(result).model_dump(mode='json')

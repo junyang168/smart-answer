@@ -685,3 +685,23 @@ def test_gpt_can_select_other_verified_evidence_for_candidate_support(sample):
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied'] and len(result['new_claim_ids'])==1
     assert store.get_record_state('claims',result['new_claim_ids'][0])['payload']['evidence_step_ids']==['E2']
+
+
+def test_keep_justification_can_quote_a_subset_without_replacing_any_binding(sample):
+    store,root,_=sample
+    fragment=deepcopy(store.get_record_state('source_fragments','F')['payload'])
+    quote='你沒有聽從祂的話，你根本沒信。'
+    import hashlib
+    fragment.update(fragment_id='F2',verbatim_excerpt=quote,verbatim_excerpt_sha256=hashlib.sha256(quote.encode()).hexdigest())
+    ev=deepcopy(store.get_record_state('evidence_steps','E')['payload']);ev['source_fragment_ids']=['F','F2']
+    store.apply_plan(store.plan_package({'package_id':'keep-full-sources','source_fragments':[fragment],'evidence_steps':[ev]}))
+    before=store.get_record_state('evidence_steps','E')
+    def keep(req):
+        if req['input']['task']=='lower_repair':
+            return {'items':[{'job_id':j['job_id'],'action':'keep',
+                'statement':j['record']['statement'],'speaker':j['record']['speaker'],'stance':j['record']['stance'],
+                'scripture_refs':j['record'].get('scripture_refs',[]),
+                'quotes':[{'paragraph_key':'S0001','quote':quote}], 'reason':'完整來源已支持，摘錄一處說明即可。'} for j in req['input']['jobs']]}
+    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=keep),apply=True)
+    assert result['status']=='verified' and result['updates']=={} and result['new_fragments']=={}
+    assert store.get_record_state('evidence_steps','E')==before
