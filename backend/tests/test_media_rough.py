@@ -106,3 +106,14 @@ def test_movie_picture_tail_does_not_reject_complete_audio_track(tmp_path):
     master=full.prepare(movie,tmp_path/'prepared')
     assert 900<master['duration_ms']<1200
     assert float(master['probe']['format']['duration'])>1.4
+
+
+def test_delayed_first_picture_keeps_zero_origin_audio_clock(tmp_path):
+    import subprocess
+    source=tmp_path/'speech.wav';audio.write_audio(source,np.zeros(16000,dtype='<i2'))
+    movie=tmp_path/'delayed.mp4'
+    subprocess.run(['ffmpeg','-v','error','-itsoffset','0.08','-f','lavfi','-i','color=s=64x64:r=25:d=1.5','-i',str(source),'-c:v','libx264','-c:a','aac',str(movie)],check=True)
+    master=full.prepare(movie,tmp_path/'prepared')
+    assert master['source_clock_mapping']['container_start_s']==0
+    assert master['source_clock_mapping']['video_start_s']>=.07
+    assert 900<master['duration_ms']<1200
