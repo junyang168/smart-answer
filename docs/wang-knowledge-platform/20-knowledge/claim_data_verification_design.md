@@ -37,6 +37,9 @@ Evidence 與論證步驟正式分開表示的方法為 TBD；此次不為命名�
 | 來源遷移及歷史：`source_binding_status`, `deleted_in_source_sha256`, `replacement_fragment_ids`, `split_from_fragment_id` | 先定位後判刪除；機械無法解決時沿 migration 的 Jev 新舊語義影響判定，必要時 GPT 處置。保存歷史，不任意復活刪除項 |
 | 其他已見擴充：`source_path`, `source_text_sha256`, `editorial_topology_sha256`, `anchor_binding_sha256` | 核對檔案與來源版本的實際含義，不把不同 hash 名稱當同義；歷史各格式的完整映射 TBD |
 
+教授引用的經文須另列原文經文清單，核對引用內容及對應片段；同一經文的重述可復用，但不能只因結論相同就視作經文已保存。
+經文章節定位不能代替實際引用內容，無法定位的引用保留待核對，不猜補節次；與材料表述的對應及論證用途分別交後兩層。此獨立清點尚待實作／驗證。
+
 **本層輸入**：當前來源、材料 statement 作查找目標、全部既有引用及必要舊版；Claim 只在來源變更影響分析所需時作參考，不在本層修改。
 **出口**：有版本綁定的完整來源清單，或具體未解決範圍。單純逐字命中不能證明清單完整；沒有找出候選也不能證明教授未講過。
 清單完整性與定位各有結果，不能一個通過代替另一個。Jev 查找沿既有 payload 分批覆蓋同講來源，容許多段共同支持；候選不是通過證明。
@@ -50,9 +53,12 @@ Citation 與直接 SourceFragment 綁定在新舊記錄的權威對應為 TBD；
 | 歸屬：`speaker`, `stance`；Observation 的實際發言者 | 分別由原文判斷誰說、是否採納／反對／引述／設問；隱藏待檢標籤後問有明確選項的 Jev 分類題。GPT 處置不符或不確定。原文與衍生欄位重複的歸屬判定只作一次 |
 | 經文：材料的 `scripture_refs` | 所述經文是否對應原文內容，是否漏記影響表述的重要經文？程式規範化定位；Jev 預檢、GPT 處置語義歧義。它如何支持某 Claim 留到 Claim 層 |
 | 觀察類型：`observation_type` | 是否忠實描述這項觀察的性質；類型詞彙及不同歷史格式的語義映射 TBD。不由深奧程度判斷是否為 Claim |
-| 反向覆蓋：原文 → 既有 Evidence／Observation statements | 按共用分組查本組實質材料是否已有忠實承載；Jev 提出疑點，GPT 判斷漏記或已有承載。這是漏了整筆材料的檢查，與原文層「已有材料漏掛片段」分開 |
+| 反向覆蓋：原文 → 既有 Evidence／Observation statements | 按共用分組，先以單獨 GPT 任務將原文拆成待核對的實質意思，再用 Jev 逐項問是否已保存，不能以整段大部分已覆蓋代替。疑點由 GPT 判斷漏記或已有承載。這與原文層「已有材料漏掛片段」分開；全講逐項方法及拆分完整性仍待驗證 |
 | Question 的 `question_id`, `text`（alias `question`）, `questioner`, `question_type` | 核對原問題、提問者及問題性質；不補教授未回答的答案。來源清單／定位屬原文層，`answer_state`／`answer_claim_ids` 屬 Claim 層 |
 | Position 的 `position_id`, `title`, `attribution`, `corpus_scope` | 忠實保存被引述或反對的立場及其歸屬，不能把反方改成教授主張。與 Claim 的反駁關係留到 Claim 層 |
+
+重要概念須單獨核對是否已有承載，例如「雙重國籍」不能由「給該撒的歸給該撒」自動替代。
+同組共享完整上下文、記錄清單並一次發多題；逐項判斷不要求逐項 HTTP 調用，也不要求逐項建卡。
 
 **本層輸入**：本項 statement、已驗證的完整自身來源清單及必要上下文。反向覆蓋另帶負責範圍的原文及既有材料清單；不帶整個 Claim 證據圖。
 **允許修改**：本層 statement、歸屬、材料經文及必要新增／退役的材料；不得順手改原文引用、論證連接或新建 Claim。
