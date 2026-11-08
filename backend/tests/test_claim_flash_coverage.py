@@ -332,3 +332,24 @@ def test_empty_material_catalogue_is_not_accepted_as_covered(tmp_path):
     ports=Missing()
     result=coverage.check(records,sources,'S',plan(sources),tmp_path/'run',ports)
     assert result['status']=='needs_attention' and 'jev' not in ports.calls
+
+
+def test_joint_disposition_preserves_each_candidates_own_source_and_replays(tmp_path):
+    records,sources=fixture(tmp_path,['在前的要在後。','許多在前的要在後，並非所有。'],[('S0001','在前的要在後。')])
+    units=[{'paragraph_key':pk,'quote':p['text'],'statement':p['text']} for pk,p in sources['S']['paragraphs'].items()]
+    class Joint(Ports):
+        def repair(self,request):
+            reply=super().repair(request)
+            if request['input']['task']=='reverse_coverage_adjudication':
+                for row in reply['items']:
+                    a,b=row['findings'];b['candidate_ids']=a['candidate_ids']+b['candidate_ids']
+                    row['findings']=[b]
+            return reply
+    ports=Joint(units=units,verdict='partial');root=tmp_path/'run'
+    result=coverage.check(records,sources,'S',plan(sources),root,ports)
+    finding=result['findings'][0]['findings'][0]
+    assert finding['paragraph_key']=='S0002'
+    assert finding['candidate_sources']==[{'candidate_id':'G-U'+str(i),**u} for i,u in enumerate(units)]
+    replay=Ports(fail='source_preservation_inventory')
+    assert coverage.check(records,sources,'S',plan(sources),root,replay)==result
+    assert replay.calls==[]

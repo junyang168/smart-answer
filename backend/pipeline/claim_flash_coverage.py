@@ -282,10 +282,14 @@ def check(records, sources, source_id, plan, root, ports):
             for item in row['findings']:
                 if not set(item['candidate_ids']) <= expected: raise ValueError('coverage finding has unknown candidate')
                 seen.update(item['candidate_ids'])
-                # A finding must quote the candidate's own paragraph, not another paragraph in the group.
+                # A joint disposition may cover several candidates. Its supporting quote
+                # must belong to one of them; preserve every candidate's own source below.
                 allowed = {x['source_item']['paragraph_key'] for x in job['candidates'] if x['candidate_id'] in item['candidate_ids']}
-                if allowed != {item['paragraph_key']}: raise ValueError('coverage finding has wrong source paragraph')
+                if item['paragraph_key'] not in allowed: raise ValueError('coverage finding has wrong source paragraph')
                 literal(item, {pk:paragraphs[pk] for pk in allowed}, receipts)
+                if len(allowed) > 1:
+                    item['candidate_sources'] = [{'candidate_id':x['candidate_id'], **x['source_item']}
+                        for x in job['candidates'] if x['candidate_id'] in item['candidate_ids']]
                 if not set(item['record_refs']) <= set(reverse): raise ValueError('coverage finding invented a record')
                 item['existing_record_keys'] = [reverse[r] for r in item['record_refs']]
             if seen != expected: raise ValueError('coverage disposition omitted a candidate')
