@@ -631,6 +631,58 @@ class OrphanDispositions(BaseModel):
     items: list[OrphanDisposition]
 
 
+class RemainingConclusion(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    job_id: str
+    action: Literal['represented','retain_lower','needs_claim','needs_source']
+    claim_id: str
+    reason: str=Field(min_length=1)
+
+
+class RemainingConclusions(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    items: list[RemainingConclusion]
+
+
+def finish_conclusions(store,source_id,root,ports,groups):
+    """Every handed-up judgment needs a disposition, including ones outside group pools."""
+    records,sources=f.load_source(store,source_id)
+    proof=lower.verify(root/'lower',records,sources)
+    done={d['job_id'] for group in groups for d in group['conclusion_dispositions']}
+    remaining=[v for v in proof['conclusion_candidates'] if v['candidate_id'] not in done]
+    if not remaining:return [],[]
+    claims=active_claims(records);jobs=[];pks=list(sources[source_id]['paragraphs'])
+    for candidate in remaining:
+        near={q['paragraph_key'] for q in candidate['quotes']}
+        for pk in list(near):
+            n=pks.index(pk);near.update(pks[max(0,n-1):n+2])
+        related={k for k in records if k.split('/')[0] in {'evidence_steps','observations'}
+            and k not in proof.get('excluded_context_keys',[]) and paragraph_keys(k,records)&near}
+        jobs.append({'job_id':candidate['candidate_id'],'candidate':candidate,
+            'support':{k:pairs.node(k,records,sources) for k in candidate['support_keys']},
+            'nearby_lower':{k:pairs.node(k,records,sources) for k in sorted(related-set(candidate['support_keys']))},
+            'source_paragraphs':{pk:sources[source_id]['paragraphs'][pk]['text'] for pk in pks if pk in near}})
+    decisions=[];pending=[]
+    for batch,raw in f.gpt(root/'conclusion-closeout',ports,'remaining_conclusions',jobs,
+            RemainingConclusions.model_json_schema(),PROMPT+
+            '這些下層判斷候選未落入任何原 Claim 小組，不能無聲丟棄。只作 Claim 層的承載／粒度判定，不重審下層。'
+            '現有 Claim 已明確表達同一最小判斷，represented 並給已有 claim_id；僅同主題或另一結論不算。'
+            '單純引文、地理敘事、反方立場、鋪陳評語，或只有本句重述而沒有另有支持的判斷，retain_lower。'
+            '由 GPT 按獨立論據與引用需要判斷，不以記錄數量或必須兩條 Evidence 作門檻。'
+            '確有尚未承載且有獨立支持的主張，needs_claim，明示判斷與論據；材料不足 needs_source。'
+            '本次不修改已完成 Claim，不自行新建；需要新建就留下具體待處置，不強迫通過。'
+            '非 represented 的 claim_id 留空。',shared={'existing_claims':peer_summary(sorted(claims),records)}):
+        items=RemainingConclusions.model_validate(raw).items
+        f.exactly([d.model_dump() for d in items],[j['job_id'] for j in batch],'job_id')
+        for item in items:
+            if item.action=='represented' and 'claims/'+item.claim_id not in claims:
+                raise ValueError('remaining conclusion named an unprovided Claim')
+            if item.action!='represented' and item.claim_id:raise ValueError('unexpected remaining conclusion Claim ID')
+            decisions.append(item.model_dump())
+            if item.action in {'needs_claim','needs_source'}:pending.append(item.model_dump())
+    return decisions,pending
+
+
 def finish_orphans(store,source_id,root,ports):
     records,sources=f.load_source(store,source_id)
     proof=lower.verify(root/'lower',records,sources)
@@ -687,12 +739,15 @@ def run(store,source_id,groups,root,ports,*,apply=False):
                 return e.publish(root,{'workflow':f.VERSION,'source_id':source_id,'status':'preview',
                     'stage':'claims','completed_claim_ids':[],'groups':results,'preview_only':True})
             completed.extend(ids)
-        dispositions,pending=finish_orphans(store,source_id,root,ports) if len(completed)==len(targets) else ([],[])
+        conclusions,conclusion_pending=finish_conclusions(store,source_id,root,ports,results) if len(completed)==len(targets) else ([],[])
+        dispositions,pending=finish_orphans(store,source_id,root,ports) if len(completed)==len(targets) and not conclusion_pending else ([],[])
+        pending=conclusion_pending+pending
         return e.publish(root,{'workflow':f.VERSION,'source_id':source_id,
             'stage':'claims',
             'status':'completed' if len(completed)==len(targets) and not pending else 'needs_attention',
             'completed_claim_ids':completed,'remaining_claim_ids':[x for x in targets if x not in completed],
             'groups':results,'orphan_dispositions':dispositions,
+            'remaining_conclusion_dispositions':conclusions,
             'pending':[p for group in results for p in group.get('pending',[])]+pending,
             'legacy_qualification':'not_granted'})
 

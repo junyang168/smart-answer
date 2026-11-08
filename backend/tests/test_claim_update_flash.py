@@ -52,6 +52,9 @@ class Ports:
                             'reason':'既有資料已覆蓋。'} for j in jobs]}
         if task in {'missing_attachments','missing_claim_relations'}:
             return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[], 'reason':'沒有額外直接連接。'} for j in jobs]}
+        if task=='remaining_conclusions':
+            return {'items':[{'job_id':j['job_id'],'action':'retain_lower','claim_id':'',
+                'reason':'保留原下層記錄，不強建 Claim。'} for j in jobs]}
         raise AssertionError('unexpected task: '+task)
 
 
@@ -317,6 +320,34 @@ def test_campaign_reports_remaining_targets_and_actual_nested_obstacle(sample,mo
     assert result['status']=='needs_attention' and result['stage']==blocked_stage
     assert result['completed_claim_ids']==[] and result['remaining_claim_ids']==['C']
     assert result['pending']==pending
+
+
+@pytest.mark.parametrize('action',['represented','retain_lower','needs_claim'])
+def test_candidate_outside_evidence_pool_gets_explicit_final_disposition(sample,action):
+    store,root,_=sample
+    store.apply_plan(store.plan_package({'package_id':'position-candidate','position_nodes':[{
+        'position_id':'P','title':'聽從與相信有關。','attribution':'教授','source_fragment_id':'F'}]}))
+    def reply(req):
+        if req['input']['task']=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
+                'conclusions':[{'statement':'聽從與相信有關。','support_keys':['position_nodes/P'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],
+                    'reason':'交 Claim 層判斷是否已有承載。'}],'reason':'沒有漏下層記錄。'} for j in req['input']['jobs']]}
+        if req['input']['task']=='remaining_conclusions':
+            assert req['input']['existing_claims']['claims/C']['statement']=='聽從與相信有關。'
+            assert req['input']['jobs'][0]['support']['position_nodes/P']['original_text_excerpts']
+            return {'items':[{'job_id':j['job_id'],'action':action,'claim_id':'C' if action=='represented' else '',
+                'reason':'依既有主張及來源明示處置候選。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
+    result=flash.run(store,'S',[['C']],root,ports,apply=True)
+    assert result['completed_claim_ids']==['C'] and result['remaining_claim_ids']==[]
+    assert result['groups'][0]['conclusion_dispositions']==[]
+    assert len(result['remaining_conclusion_dispositions'])==1
+    assert result['status']==('needs_attention' if action=='needs_claim' else 'completed')
+    assert bool(result['pending'])==(action=='needs_claim')
+    count=len(ports.calls)
+    assert flash.run(store,'S',[['C']],root,ports,apply=True)['status']==result['status']
+    assert len(ports.calls)==count
 
 
 def test_indirect_observation_path_is_not_orphan_and_cycle_is_not_support():
