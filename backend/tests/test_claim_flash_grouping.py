@@ -397,6 +397,10 @@ def test_same_topic_adjustment_reuses_a_known_cut_when_endpoint_move_splits_shar
     assert changes[0]['paragraph_keys'] == ['S0005', 'S0006']
     assert result['coupling'] == reference['coupling']
     assert result['coverage'] == raw['coverage']
+    refined = grouping.refine(records, sources, reference, tmp_path/'semantic',
+                              GroupingPort(starts=('S0001', 'S0007'), topics=('T', 'T')))
+    assert refined['boundary_adjustments']
+    assert refined['raw_grouping_reason'] != refined['grouping_reason']
 
 
 @pytest.mark.parametrize('starts', [('S0002',), ('S0001', 'S0001'), ('S0001', 'S9999'), ('S0001', 'S0006', 'S0003')])

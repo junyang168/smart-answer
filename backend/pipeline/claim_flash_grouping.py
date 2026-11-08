@@ -471,7 +471,9 @@ def refine(records, sources, plan, root, ports):
                    max_claims=plan['max_claims'], semantic_groups=[g.model_dump() for g in decision.groups])
     raw_coupling = result['coupling']
     result, adjustments = adjust_same_topic_boundaries(records, sources, result, reference=plan)
-    result.update(grouping_model=ports.identity['gpt'], model_calls=1, grouping_reason=decision.reason,
+    result.update(grouping_model=ports.identity['gpt'], model_calls=1, raw_grouping_reason=decision.reason,
+        grouping_reason=(decision.reason if not adjustments else
+            '依 GPT 的 topic 分工，程式調整同一 topic 內的容量切點，以減少組間已知耦合；原始理由見 raw_grouping_reason。'),
         boundary_contract=BOUNDARY_CONTRACT, boundary_adjustments=adjustments, raw_proposal_coupling=raw_coupling,
         semantic_answer_sha256=e.digest(answer),
         structural_coupling=plan['coupling'], proposed_coupling=result['coupling'],
