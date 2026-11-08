@@ -16,6 +16,7 @@ from backend.pipeline.source_projection import project_script
 
 CONTRACT = 'claim_flash_shared_groups_v1'
 SEMANTIC_CONTRACT = 'claim_flash_semantic_grouping_v2'
+BOUNDARY_CONTRACT = 'claim_flash_same_topic_boundaries_v3'
 RELATIONS = {'claim_relations', 'knowledge_relations', 'claim_relation_constraints'}
 
 
@@ -341,6 +342,90 @@ def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic
         'semantic_topic_review': 'gpt_grouping' if semantic_groups is not None else 'not_claimed'}
 
 
+def _ranges(keys, paragraphs):
+    rank = {pk: n for n, pk in enumerate(paragraphs)}
+    spans = []
+    for pk in sorted(keys, key=rank.get):
+        if spans and rank[pk] == rank[spans[-1]['last']]+1:
+            spans[-1]['last'] = pk
+        else:
+            spans.append({'first': pk, 'last': pk})
+    return spans
+
+
+def adjust_same_topic_boundaries(records, sources, plan, *, reference=None):
+    """One bounded comparison of cuts inside GPT-declared topics; no inference.
+
+    Try connected endpoints and already-known structural cuts, not every
+    paragraph/group combination. The selected result must not worsen any known
+    metric relative to the structural reference and must improve the raw plan.
+    """
+    reference = reference or plan
+    paragraphs = list(sources[plan['source_id']]['paragraphs'])
+    rank = {pk: n for n, pk in enumerate(paragraphs)}
+    groups = plan['groups']
+    owner = {pk: i for i, group in enumerate(groups) for pk in group['paragraph_keys']}
+    positions = {plan['record_aliases'][alias]: paragraphs[value[0]-1]
+                 for alias, value in plan['coupling_graph']['nodes'].items()}
+    pairs = set()
+    for link in plan['cross_group_links']:
+        a, b = (next(i for i, group in enumerate(groups) if group['group_id'] == gid)
+                for gid in link['group_ids'])
+        if groups[a].get('topic_key') and groups[a]['topic_key'] == groups[b].get('topic_key'):
+            pairs.add(tuple(sorted((a, b))))
+    proposals = {}
+    def offer(memberships):
+        if all(memberships):
+            proposals[tuple(tuple(sorted(keys, key=rank.get)) for keys in memberships)] = memberships
+    for a, b in sorted(pairs):
+        for link in plan['cross_group_links']:
+            if set(link['group_ids']) != {groups[a]['group_id'], groups[b]['group_id']}:
+                continue
+            for key in link['record_keys']:
+                if key not in positions:
+                    continue
+                pk = positions[key]; origin = owner[pk]; target = b if origin == a else a
+                for direction in (-1, 1):
+                    block = []; n = rank[pk]
+                    while 0 <= n < len(paragraphs) and owner[paragraphs[n]] == origin:
+                        block.append(paragraphs[n]); n += direction
+                    if 0 <= n < len(paragraphs) and owner[paragraphs[n]] == target:
+                        memberships = [set(group['paragraph_keys']) for group in groups]
+                        memberships[origin].difference_update(block); memberships[target].update(block)
+                        offer(memberships)
+        combined = set(groups[a]['paragraph_keys']) | set(groups[b]['paragraph_keys'])
+        for known in reference['groups'][1:]:
+            cut = rank[known['paragraph_keys'][0]]
+            left = {pk for pk in combined if rank[pk] < cut}; right = combined-left
+            memberships = [set(group['paragraph_keys']) for group in groups]
+            memberships[a], memberships[b] = left, right
+            offer(memberships)
+    better = []
+    for keys, memberships in sorted(proposals.items()):
+        proposal = [{'paragraph_ranges': _ranges(selected, paragraphs), 'title': group['title'],
+                     'topic_key': group['topic_key']} for selected, group in zip(memberships, groups)]
+        try:
+            candidate = build(records, sources, plan['source_id'], claim_ids=plan['target_claim_ids'],
+                              max_claims=plan['max_claims'], semantic_groups=proposal)
+        except ValueError:
+            continue  # Source order, coverage and capacity are never relaxed.
+        if (all(candidate['coupling'][k] <= reference['coupling'][k] for k in reference['coupling'])
+                and tuple(candidate['coupling'].values()) < tuple(plan['coupling'].values())):
+            better.append((tuple(candidate['coupling'].values()), keys, candidate))
+    if not better:
+        return plan, []
+    _, _, result = min(better, key=lambda x: x[:2])
+    new_owner = {pk: i for i, group in enumerate(result['groups']) for pk in group['paragraph_keys']}
+    transfers = defaultdict(list)
+    for pk in paragraphs:
+        if owner[pk] != new_owner[pk]:
+            transfers[(owner[pk], new_owner[pk])].append(pk)
+    changes = [{'paragraph_keys': keys, 'from_group': groups[a]['group_id'], 'to_group': groups[b]['group_id'],
+                'topic_key': groups[a]['topic_key'], 'before': plan['coupling'], 'after': result['coupling']}
+               for (a, b), keys in sorted(transfers.items())]
+    return result, changes
+
+
 def refine(records, sources, plan, root, ports):
     """One purpose, one bounded GPT request: reduce inter-group coupling.
 
@@ -384,7 +469,10 @@ def refine(records, sources, plan, root, ports):
     decision = SemanticGroups.model_validate(answer)
     result = build(records, sources, plan['source_id'], claim_ids=plan['target_claim_ids'],
                    max_claims=plan['max_claims'], semantic_groups=[g.model_dump() for g in decision.groups])
+    raw_coupling = result['coupling']
+    result, adjustments = adjust_same_topic_boundaries(records, sources, result, reference=plan)
     result.update(grouping_model=ports.identity['gpt'], model_calls=1, grouping_reason=decision.reason,
+        boundary_contract=BOUNDARY_CONTRACT, boundary_adjustments=adjustments, raw_proposal_coupling=raw_coupling,
         semantic_answer_sha256=e.digest(answer),
         structural_coupling=plan['coupling'], proposed_coupling=result['coupling'],
         structural_boundary_cost=sum(x['crossing_resources_and_links'] for x in plan['coupling_at_boundaries']),
@@ -409,6 +497,7 @@ def save(store, source_id, root, *, claim_ids=None, max_claims=8, ports=None):
     # Resuming a plan is not permission to upgrade its model or change its scope.
     e.save(root/'grouping-intent.json', {'source_id': source_id, 'source_file': plan['source_file'],
         'grouping_contract': CONTRACT, 'semantic_contract': SEMANTIC_CONTRACT if ports is not None else None,
+        'boundary_contract': BOUNDARY_CONTRACT if ports is not None else None,
         'input_sha256': e.digest({k: r['payload'] for k, r in records.items()}),
         'claim_ids': plan['target_claim_ids'], 'max_claims': max_claims,
         'model': ports.identity['gpt'] if ports is not None else None})

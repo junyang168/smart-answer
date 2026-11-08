@@ -365,6 +365,40 @@ def test_return_to_same_argument_can_join_nonadjacent_ranges_without_borrowing_m
     assert result['groups'][1]['depends_on'] == []
 
 
+@pytest.mark.parametrize('same_topic', [True, False])
+def test_program_adjusts_only_a_boundary_within_the_same_gpt_topic(tmp_path, same_topic):
+    records, sources = source(tmp_path)
+    lower(records, 'E', [3, 6])
+    claim(records, 'A', 0); claim(records, 'B', 3, evidence=['E']); claim(records, 'C', 6, evidence=['E'])
+    raw = grouping.build(records, sources, 'S', max_claims=2, semantic_groups=[
+        {'paragraph_ranges': [{'first': 'S0001', 'last': 'S0004'}], 'title': '前段', 'topic_key': 'T'},
+        {'paragraph_ranges': [{'first': 'S0005', 'last': 'S0008'}], 'title': '後段', 'topic_key': 'T' if same_topic else 'OTHER'}])
+    result, changes = grouping.adjust_same_topic_boundaries(records, sources, raw)
+    assert result['coverage'] == raw['coverage']
+    if same_topic:
+        assert len(changes) == 1 and changes[0]['paragraph_keys'] == ['S0004']
+        assert result['coupling']['cross_group_links'] == result['coupling']['shared_read_resources'] == 0
+        assert [g['claim_ids'] for g in result['groups']] == [['A'], ['B', 'C']]
+    else:
+        assert changes == [] and result == raw
+
+
+def test_same_topic_adjustment_reuses_a_known_cut_when_endpoint_move_splits_shared_source(tmp_path):
+    records, sources = source(tmp_path)
+    lower(records, 'E', [5, 7]); lower(records, 'O', [4, 5], collection='observations')
+    claim(records, 'A', 0); claim(records, 'B', 2)
+    claim(records, 'C', 5, evidence=['E']); claim(records, 'D', 7, evidence=['E'])
+    reference = plan(records, sources, max_claims=3)
+    assert reference['coupling']['shared_read_resources'] == 0
+    raw = grouping.build(records, sources, 'S', max_claims=3, semantic_groups=[
+        {'paragraph_ranges': [{'first': 'S0001', 'last': 'S0006'}], 'title': '前', 'topic_key': 'T'},
+        {'paragraph_ranges': [{'first': 'S0007', 'last': 'S0008'}], 'title': '後', 'topic_key': 'T'}])
+    result, changes = grouping.adjust_same_topic_boundaries(records, sources, raw, reference=reference)
+    assert changes[0]['paragraph_keys'] == ['S0005', 'S0006']
+    assert result['coupling'] == reference['coupling']
+    assert result['coverage'] == raw['coverage']
+
+
 @pytest.mark.parametrize('starts', [('S0002',), ('S0001', 'S0001'), ('S0001', 'S9999'), ('S0001', 'S0006', 'S0003')])
 def test_bad_model_boundaries_are_rejected_without_silent_projection(tmp_path, starts):
     records, sources = source(tmp_path)
