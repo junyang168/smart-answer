@@ -1278,5 +1278,10 @@ sermon retained both slide-2 positions and fullscreen; saved OUTPUT screenshots
 showed no PowerPoint logo, account or status bar, and preserved content/aspect.
 The private evidence directory is ~/.local/share/smart-answer/remote-652-upgrade/.
 This local observation is not a new independent Meet-receiver or on-site TV
-acceptance claim. The old artifacts remain active until the clean final build
-and download are verified. iPad remains installed at 0.6.9; this is a Mac update.
+acceptance claim. The clean final 0.6.10 packages were published through the authenticated website;
+the DMG downloaded there matched the release SHA256 (131250022 bytes). The app
+installed under /Applications also passed the actual Office fullscreen audience
+check. Existing host pairing identity remained unchanged. Code artifact:
+7142c681; this documentation update does not change packaged code. The previous
+0.6.7 app bundle is preserved privately for rollback. iPad remains installed at
+0.6.9; this is a Mac update.
