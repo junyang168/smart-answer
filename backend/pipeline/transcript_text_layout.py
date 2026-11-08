@@ -58,6 +58,22 @@ def inspect_timings(items: list[dict], duration_ms: int) -> list[str]:
     return statuses
 
 
+def verify_seam_coverage(left_text: str, right_text: str, left_suffix: str, right_prefix: str) -> None:
+    """Acoustic ownership must not silently discard unique lexical content.
+
+    A repeated span removed at a seam must still occur at the retained edge of
+    its neighbour. This necessary check is not proof of acoustic correctness;
+    mismatched ASR requires review, never fuzzy replacement or more clipping.
+    """
+    lexical=lambda s: ''.join(c for c in s if unicodedata.category(c)[0] in 'LNM')
+    left,right=lexical(left_text),lexical(right_text)
+    discarded_left,discarded_right=lexical(left_suffix),lexical(right_prefix)
+    if discarded_left and discarded_left not in right[:len(discarded_left)+40]:
+        raise ValueError('Seam ownership would discard unmatched left speech; retain both chunks for audio review')
+    if discarded_right and discarded_right not in left[-len(discarded_right)-40:]:
+        raise ValueError('Seam ownership would discard unmatched right speech; retain both chunks for audio review')
+
+
 def stitch(out: Path) -> dict:
     asr = read_json(out / 'asr.json')
     parts, all_tokens, excerpts, issues = [], [], [], []
@@ -110,6 +126,11 @@ def stitch(out: Path) -> dict:
         parts.append(body)
         offset += len(body)
     text = ''.join(parts)
+    # Both source excerpts and all alignments have been retained above. Never
+    # publish a timed draft whose boundary decision loses unique source words.
+    for left,right in zip(excerpts,excerpts[1:]):
+        verify_seam_coverage(text[left['output_start']:left['output_end']],
+            text[right['output_start']:right['output_end']],left['excluded_suffix'],right['excluded_prefix'])
     result = {'schema_version': 'timed-speech-draft.v1', 'asr_sha256': file_sha(out / 'asr.json'),
               'text': text, 'text_sha256': text_sha(text), 'tokens': all_tokens,
               'chunk_ownership': excerpts, 'issues': issues,
