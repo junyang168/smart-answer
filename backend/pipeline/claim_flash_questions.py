@@ -106,3 +106,12 @@ def lookup(label, excluded, remaining):
         'match':{'type':'noul','instructions':scope+'至少有一個直接論證匹配嗎？'+MATCH_RULE+LOOKUP_RULE},
         'claim':choice(scope+'最直接對應哪個 Claim？沒有則選 none。'+MATCH_RULE+LOOKUP_RULE,
                        {**{c:f'`claims.{c}` 中的主張。' for c in remaining},'none':'沒有直接論證匹配。'})}
+
+
+def source_location(label, remaining):
+    return choice(f'只查 `records.{label}`。在所列選項中，哪個 `current_paragraphs` 段落最直接承載'
+        '待查內容或其一個實質成分？可依歷史引文找新版對應，但歷史引文不是目前支持。'
+        '只有同話題、設問未回答或口頭強調不算支持。只從這次所列段落選，其他段落已選過或不在本批。'
+        '可選補充支持的另一段，不要求單段證明整項。',
+        {**{pk: f'`current_paragraphs.{pk}` 的完整原文。' for pk in remaining},
+         'none': '本批剩餘段落沒有直接對應或補充支持。', 'uncertain': '無法判定本批剩餘段落。'})

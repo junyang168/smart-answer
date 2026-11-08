@@ -133,7 +133,8 @@ def value(key, records, sources):
 
 def jev(root, ports, state, questions):
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
-    reply = e.recorded_call(root, 'jev', request, ports.judge)
+    reply = e.recorded_call(root, 'jev', request, ports.judge,
+                            preflight=getattr(ports, 'judge_preflight', None))
     if set(reply.get('answers', {})) != set(questions):
         raise ValueError('Jev question set differs')
     choices = {}

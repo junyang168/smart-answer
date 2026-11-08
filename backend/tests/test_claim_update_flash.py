@@ -25,6 +25,7 @@ class Ports:
                            'statement_fidelity':'faithful','support':'supported','scripture':'complete',
                            'missing_lower':'covered','conclusion_candidate':'background_or_example',
                            'answer_links':'complete','reason_valid':'grounded','relation':'a_to_b_supports'}.get(name,'no'))
+            if 'current_paragraphs' in request['state']:default='none'
             chosen=self.choices.get(name,default)
             if callable(chosen):chosen=chosen(request)
             if spec['type']=='noul':
@@ -227,13 +228,16 @@ def test_gpt_final_pair_decision_overwrites_uncertain_jev(sample):
     assert len([q for role,q in ports.calls if role=='gpt' and q['input']['task']=='pair_attachment'])==1
 
 
-def test_bad_locator_stops_before_any_model_call(sample):
+def test_unique_current_quote_calibrates_without_a_semantic_repair_call(sample):
     store,root,_=sample
     p=deepcopy(store.get_record_state('source_fragments','F')['payload']);p['anchor_state']='unresolved'
     store.apply_plan(store.plan_package({'package_id':'bad-anchor','source_fragments':[p]}))
     ports=Ports();result=lower.run(store,'S',root/'lower',ports,apply=True)
-    assert result['status']=='needs_attention' and not ports.calls
-    assert result['pending'][0]['reason']=='source_calibration_required'
+    assert result['applied'] and not result['pending']
+    assert store.get_record_state('source_fragments','F')['payload']['anchor_state']=='unresolved'
+    assert store.get_record_state('evidence_steps','E')['payload']['source_fragment_ids']!=['F']
+    assert not any(role=='gpt' and req['input']['task']=='lower_repair' for role,req in ports.calls)
+    assert not any(role=='jev' and 'current_paragraphs' in req['state'] for role,req in ports.calls)
 
 
 def test_protected_evidence_is_not_silently_rewritten(sample):

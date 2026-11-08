@@ -222,10 +222,20 @@ def repair_postimage(evidence, reply, value, records, sources):
                     and not r['retired'] and r['payload'].get('source_id') == sid
                     and r['payload'].get('source_sha256') == sources[sid]['body_sha256']
                     and r['payload'].get('paragraph_key') == item['paragraph_key']
+                    and r['payload'].get('anchor_state') == 'source_version_bound'
+                    and str(r['payload'].get('source_segment_index')) == str(p['index'])
+                    and r['payload'].get('media_time') == p.get('start_time')
+                    and r['payload'].get('media_end_time') == p.get('end_time')
+                    and r['payload'].get('paragraph_text_sha256') == hashlib.sha256(p['text'].encode()).hexdigest()
+                    and r['payload'].get('verbatim_excerpt_sha256') == hashlib.sha256(quote.encode()).hexdigest()
                     and r['payload'].get('verbatim_excerpt') == quote), None)
         fid = old['fragment_id'] if old else 'FR-BU-' + digest(
             [sid, sources[sid]['body_sha256'], item['paragraph_key'], quote])[:32]
         if not old:
+            if 'source_fragments/'+fid in records:
+                fid='FR-BU-'+digest([fid, records['source_fragments/'+fid]['payload']])[:32]
+                if 'source_fragments/'+fid in records:
+                    raise ValueError('replacement fragment identity already occupied; preserve history')
             generated['source_fragments/' + fid] = {'fragment_id': fid, 'source_id': sid,
                 'paragraph_key': item['paragraph_key'], 'verbatim_excerpt': quote,
                 'source_sha256': sources[sid]['body_sha256'], 'anchor_state': 'source_version_bound',
@@ -398,14 +408,17 @@ class Models:
                          'model': gpt.model, 'effort': gpt.reasoning_effort}}
 
     def judge(self, request):
+        self.judge_preflight()
         key = os.environ.get('TYPESAFE_API_KEY')
-        if not key:
-            raise ValueError('TYPESAFE_API_KEY is required')
         req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', method='POST',
             data=json.dumps(request, ensure_ascii=False).encode(),
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=60) as response:
             return json.loads(response.read())
+
+    def judge_preflight(self):
+        if not os.environ.get('TYPESAFE_API_KEY'):
+            raise ValueError('TYPESAFE_API_KEY is required; no request sent')
 
     def preflight(self):
         self.gpt._verify_chatgpt_login()

@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：2026-11-07，核對 #702 工作樹的 `claim_update_flash.py`、`claim_flash_lower.py`、`claim_flash_components.py`、`claim_flash_questions.py`、`claim_flash_lookup.py`、`claim_flash_pairs.py` 與測試。
+> **與代碼對齊**：2026-11-07，核對 #702 工作樹的 `claim_update_flash.py`、`claim_flash_lower.py`、`claim_flash_components.py`、`claim_flash_questions.py`、`claim_flash_lookup.py`、`claim_flash_source_lookup.py`、`claim_flash_pairs.py` 與測試。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -149,6 +149,22 @@ Jev 同次檢查拆分是否忠實完整、各成分是否獲完整自身原文�
 無實質內容的短句及重複措辭不算新論據，也不要求每句話建卡。
 
 GPT 批量處置具體發現：修正已有記錄、補足漏記內容／連接，或說明誤報與已有承載。
+判定以是否實質改變教授的教導或論證為準；不影響理解的口語、課堂建議及合理概括，
+不因措辭不同要求改寫，也不作為漏檢基準。
+
+下層的來源補找先沿用 migration 的逐字、排版與繁簡規則；同講現版能唯一對應的片段，
+由程式建立正確版本與座標的新綁定，原有共享片段及歷史不變。已標刪除的片段不由機械匹配復活。
+來源失效，或 Jev 發現 statement 的實質部分缺據時，使用 `claim_flash_source_lookup.py`：
+同一請求共享完整的當批現版段落，為多項待查內容各問一個短 Choice；可選段落、無對應或不確定。
+每次選中後排除該段再找補充支持，直到該批沒有候選或不確定；不設任意 top-k，不枚舉語義配對。
+完整 UTF-8 請求最多 40,000 bytes，每題最多 253 段加兩個出口；超限按完整段落及工作項切批，
+發送前檢查所有批次，不能截斷原文。所有來源批次均須查完，保留未確定範圍。
+Jev 候選與歷史引文只是線索，不代表支持成立，沒有候選也不證明教授沒講過。
+GPT 取得原有效片段、候選及必要上下文，一次判定保留、修正或材料不足；可多段共同支持。
+失效綁定不能以 keep 通過；修正後仍須逐字、版本、位置及時間校驗，並沿現有 guarded transaction 寫入／回讀。
+找不到可靠支持的項目明示待處置，其餘本層記錄可繼續檢查；不因此審 Claim 或授予 Claim 資格。
+節點尚未解決時，暫緩反向覆蓋補抽及依賴該節點的關係，避免把綁定未完成誤認為漏抽，
+或再次將失效來源送進關係檢查；正常節點的檢查與處置結果仍保存。
 每項有明確去向與簡短理由，不輸出整包未變資料。程式校驗來源與引用後交易保存、回讀。
 不追加全面 Jev／Opus 複審來否決有據處置。
 
@@ -321,6 +337,7 @@ Claim 身分配置及 guarded transaction，不呼叫舊 Update executor。
 | `claim_flash_common.py` | 來源內清點、共享材料、大小與任務分批、保存及復用調用 |
 | `claim_flash_lower.py` | 全篇下層忠實性、原文反向覆蓋、下層連接、結論候選交接及完整結果核對 |
 | `claim_flash_lookup.py` | 全篇孤立記錄直接 Jev 查找、多匹配、共用材料分批及未決範圍保存 |
+| `claim_flash_source_lookup.py` | 同講來源機械校準、Jev 候選段落補找、多段支持及 GPT 修正材料 |
 | `claim_flash_pairs.py` | 獨立配對判定、GPT 最終處置、端點類型與既有禁止關係校驗 |
 | `claim_update_flash.py` | Claim 分項檢查、候選承載、孤立路由、非孤立漏接、問題答案及順序執行入口 |
 
@@ -330,9 +347,11 @@ Claim 身分配置及 guarded transaction，不呼叫舊 Update executor。
 共享既有 GPT 容量設定。獨立同源單元可單獨調 `run_group`，呼叫者仍須先證明第 6 節的不重合條件。
 組交易只 pin 實際使用的物件，不因全篇清點就鎖定無關物件；新建 Claim 另沿用來源內身分核對。
 
-來源必須已登記為當前版本，片段必須已通過機械定位。原文改動時先沿既有 migration
+來源必須已登記為當前版本，片段在語義送審前校準。原文改動時先沿既有 migration
 取得新舊來源及影響處置，再進 Flash；缺少舊版材料時不猜測 migration，也不偽稱已完成原文影響判定。
-Flash 的下層入口會在任何模型調用前核對現有綁定，有錯就明示需要機械校準。
+Flash 的下層入口在語義檢查前核對現有綁定；唯一可確定的座標差異由程式校準，
+其餘可查的同講失效綁定走上述候選補找及 GPT 修正。來源文件未登記、跨講、
+缺少歷史片段身分或受保護記錄不藉此放行；原文實際變更仍必須先走來源 migration。
 Question 的來源忠實性在下層；答案 Claim 連接在上層，避免每組重審提問。
 
 Claim–Observation 及其他跨層的直接關係使用既有 `knowledge_relations` 多型記錄，

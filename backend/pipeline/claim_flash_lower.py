@@ -10,6 +10,7 @@ from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_flash_common as f
 from backend.pipeline import claim_flash_components as components
 from backend.pipeline import claim_flash_questions as jevq
+from backend.pipeline import claim_flash_source_lookup as source_lookup
 
 
 class Edit(BaseModel):
@@ -78,6 +79,12 @@ PROMPT=('這是 Claim Update Flash 全來源下層，只處置指定工作，不
  '口頭強調、無意義短句和重複措辭不是新論據。不因有判斷就強制另建 Claim。'
  '每個 job_id 恰好一次，只輸出指定 schema 和簡短理由，quotes 必須逐字出自提供的段落。')
 
+REPAIR_PROMPT=(PROMPT+
+    '修正表述或來源用 repair；異議不成立 keep；無法解答 needs_source。不得修改 Question 答案連線。'
+    'source_lookup 是同講候選查找，不是支持成立或不存在的證明；historical_quotes 只是歷史定位線索。'
+    '核對候選完整上下文，可多段共同支持；不因局部缺據就刪除教授實際講過的論據。'
+    'binding_requires_repair 時不能 keep 舊失效綁定，須以現版逐字原文 repair，否則 needs_source。')
+
 
 def record_postimage(key, record, edit, material, records, sources):
     col=key.split('/')[0]
@@ -100,6 +107,8 @@ def record_postimage(key, record, edit, material, records, sources):
     result=deepcopy(record)
     result.update({text_field:edit.statement,'source_fragment_id':None,
                    'source_fragment_ids':post['source_fragment_ids']})
+    if result.get('source_binding_status') in {'source_deleted','partially_deleted'}:
+        result['source_binding_status']='needs_claim_refresh'
     if col=='evidence_steps':
         result.update(speaker=edit.speaker, stance=edit.stance)
     if col in {'evidence_steps','observations'}:
@@ -126,40 +135,66 @@ def run(store, source_id, root, ports, *, apply=False):
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
             'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,
-            'jev_contract':f.JEV_CONTRACT,'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
+            'jev_contract':f.JEV_CONTRACT,'material_contract':f.MATERIAL_CONTRACT,
+            'source_lookup_contract':source_lookup.CONTRACT,'models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)
         e.save(root/'before.json',{'records':records,'sources':sources})
         working=deepcopy(records);updates={};generated={};outcomes=[];pending=[];jobs=[]
-        materials={};calibration=[]
-        for key,row in records.items():
+        materials={};calibration={};mechanical=[]
+        locator=None
+        for key in sorted(records):
+            row=records[key]
             if key.split('/')[0] in f.LOWER:
                 try:materials[key]=f.value(key,records,sources)
                 except (ValueError,KeyError) as exc:
-                    calibration.append({'object_key':key,'reason':'source_calibration_required','detail':str(exc)})
-        if calibration:
-            result={'version':f.VERSION,'stage':'lower','status':'needs_attention','source_id':source_id,
-                'updates':{},'new_fragments':{},'retiring_keys':[],'outcomes':[],'coverage':[],
-                'conclusion_candidates':[],'pending':calibration,'fidelity':{},
-                'source_sha256':sources[source_id]['body_sha256'],'claim_qualification':'not_granted','applied':False}
-            e.save(root/'verification.json',result)
-            return e.publish(root,result)
+                    if key.split('/')[0] not in {'evidence_steps','observations'}:
+                        pending.append({'object_key':key,'reason':'source_calibration_required','detail':str(exc)})
+                        continue
+                    if locator is None:locator=source_lookup.Locator(sources)
+                    try:
+                        material,quotes=locator.prepare(key,records,sources)
+                    except (ValueError,KeyError) as failure:
+                        pending.append({'object_key':key,'reason':'source_calibration_required','detail':str(failure)})
+                        continue
+                    if quotes is None:
+                        materials[key]=material;calibration[key]=str(exc)
+                        continue
+                    p=records[key]['payload']
+                    if p.get('review_status') in f.PROTECTED:
+                        pending.append({'object_key':key,'reason':'protected_lower_record'});continue
+                    edit=Edit(job_id=key,action='repair',statement=p['statement'],
+                        speaker=p.get('speaker') or 'professor',stance=p.get('stance') or 'asserted',
+                        scripture_refs=p.get('scripture_refs',[]),quotes=quotes,reason='唯一逐字／排版／繁簡對應，校準現版位置。')
+                    post,frags,projection=record_postimage(key,p,edit,material,working,sources)
+                    # Coordinate calibration must not change textual or semantic fields.
+                    allowed={'source_fragment_id','source_fragment_ids','source_binding_status'}
+                    if any(post.get(k)!=p.get(k) for k in set(post)|set(p) if k not in allowed):
+                        raise ValueError('mechanical source calibration changed record content')
+                    updates[key]=post;generated.update(frags)
+                    working=f.apply_overlay(working,{key:post},frags)
+                    materials[key]=f.value(key,working,sources)
+                    mechanical.append({'object_key':key,'quote_projection':projection})
+        e.save(root/'source-calibration.json',mechanical)
         e.save(root/'source-assembly.json',{key:v['source_assembly'] for key,v in materials.items() if v.get('source_assembly')})
-        parts=components.decompose(root,ports,{key:row['payload']['statement'] for key,row in records.items()
+        parts=components.decompose(root,ports,{key:working[key]['payload']['statement'] for key in materials
             if key.split('/')[0] in {'evidence_steps','observations'}})
-        for key,row in records.items():
-            if key.split('/')[0] not in f.LOWER:
-                continue
+        for key in sorted(materials):
+            row=working[key]
             v=materials[key]
-            answers=components.check(root,ports,key.split('/')[0],f.projected(row),v,parts.get(key))
+            answers=({'source_calibration_required':calibration[key]} if key in calibration else
+                     components.check(root,ports,key.split('/')[0],f.projected(row),v,parts.get(key)))
             if not components.needs_disposition(answers):
                 outcomes.append({'object_key':key,'basis':'jev_precheck'})
             else:
                 jobs.append({'job_id':key,'record':f.projected(row),'material':v,'verdict':answers,
                              'components':parts.get(key)})
-        for batch,raw in f.gpt(root,ports,'lower_repair',jobs,Edits.model_json_schema(),PROMPT+
-                '修正表述或來源用 repair；異議不成立 keep；無法解答 needs_source。不得修改 Question 答案連線。'):
+        lookup_jobs=[j for j in jobs if j['job_id'] in calibration or source_lookup.needs_lookup(j['verdict'])]
+        enriched=source_lookup.lookup(lookup_jobs,sources,root/'source-lookup',ports)
+        for job in jobs:
+            if job['job_id'] in enriched:job['material']=enriched[job['job_id']]
+        for batch,raw in f.gpt(root,ports,'lower_repair',jobs,Edits.model_json_schema(),REPAIR_PROMPT):
             edits=Edits.model_validate(raw).items
             f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
             byid={j['job_id']:j for j in batch}
@@ -167,16 +202,21 @@ def run(store, source_id, root, ports, *, apply=False):
                 key=edit.job_id
                 if edit.action=='needs_source':
                     pending.append({'object_key':key,'reason':edit.reason});continue
-                post,frags,projection=record_postimage(key,records[key]['payload'],edit,byid[key]['material'],working,sources)
+                if edit.action=='keep' and key in calibration:
+                    pending.append({'object_key':key,'reason':'invalid_source_binding_cannot_be_kept'});continue
+                post,frags,projection=record_postimage(key,working[key]['payload'],edit,byid[key]['material'],working,sources)
                 if post!=records[key]['payload']:
                     if records[key]['payload'].get('review_status') in f.PROTECTED:
                         pending.append({'object_key':key,'reason':'protected_lower_record'});continue
                     updates[key]=post;generated.update(frags)
                     working=f.apply_overlay(working,{key:post},frags)
+                f.value(key,working,sources)
                 outcomes.append({'object_key':key,'basis':'gpt_disposition','reason':edit.reason,'quote_projection':projection})
         # Scan raw source in source order even if no existing record or Claim covers a paragraph.
         coverage_jobs=[];coverage=[];conclusions=[];lower_pairs=[]
-        for pk,paragraph in sources[source_id]['paragraphs'].items():
+        # Do not mistake an unresolved node/binding for missing source coverage.
+        coverage_source=sources[source_id]['paragraphs'] if not pending else {}
+        for pk,paragraph in coverage_source.items():
             if not paragraph.get('text','').strip():
                 continue
             bound=paragraph_records(pk,working)
@@ -277,6 +317,12 @@ def run(store, source_id, root, ports, *, apply=False):
         lower_edges=[k for k,r in working.items() if k.startswith('knowledge_relations/')
                      and all(any(n+'/'+r['payload'][field] in working for n in f.LOWER)
                              for field in ['from_id','to_id'])]
+        blocked={p['object_key'] for p in pending if p.get('object_key') in working}
+        blocked_ids={k.split('/',1)[1] for k in blocked}
+        deferred=[k for k in lower_edges if any(working[k]['payload'][x] in blocked_ids for x in ['from_id','to_id'])]
+        pending.extend({'object_key':k,'reason':'lower_relation_has_unresolved_node'} for k in deferred)
+        lower_edges=[k for k in lower_edges if k not in deferred]
+        lower_pairs=[p for p in lower_pairs if not ({p['a'],p['b']}&blocked)]
         rel=pairs.review(working,sources,lower_edges,lower_pairs,root/'relations',ports,kind='lower')
         updates.update(rel['updates']);pending.extend(rel['pending'])
         for payload in rel['new_relations']:
