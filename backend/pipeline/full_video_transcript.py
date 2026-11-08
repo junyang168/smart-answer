@@ -453,7 +453,8 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
         else:
             transcribe(audio, **({'vocabulary': vocabulary} if vocabulary is not None else {}))
             align(audio, aligner)
-            stitch(audio); format_text(audio)
+            from backend.pipeline.transcript_seam_repair import stitch_with_recovery
+            stitch_with_recovery(audio,aligner); format_text(audio)
             slide_folder = local_slides(out, w)
             assemble(audio, slide_folder)
             join_window_visuals(out, w, slide_folder)
@@ -655,6 +656,8 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     master, report, evidence = read(out/'master.json'), read(out/'slides/report.json'), read(out/'visual-evidence/slide_evidence.json')
     if sha(video) != master['source_sha256']:
         raise ValueError('Source video changed before final review')
+    from backend.pipeline.transcript_seam_repair import audit_window_coverage
+    window_coverage=audit_window_coverage(out,master)
     paragraphs, decisions, timing_issues, checks, exclusions, originals, uncut = [], [], [], [], [], [], []
     withheld=[];recovered_reviews=[]
     for w in master['windows']:
@@ -729,6 +732,7 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
         'windows':master['windows'],'paragraph_checks':checks,'issues':timing_issues,'recovered_paragraph_reviews':recovered_reviews,
         'mechanical_errors':0,'semantic_timestamp_accuracy_measured':False,
         'word_timestamps_published':False,'silence_removed_samples':0,
+        'window_seam_coverage':window_coverage,
         'native_frame_pts':read(out/'frame_pts_audit.json')}
     save(out/'timing_audit.json',audit)
     record = {'schema_version':'full-illustrated-corrected-transcript.v1','lecture_id':master.get('lecture_id',video.stem),'source_sha256':master['source_sha256'],

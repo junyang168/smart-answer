@@ -177,6 +177,7 @@ def main():
                 "full_video_transcript.py",
                 "transcript_audio_pilot.py",
                 "transcript_text_layout.py",
+                "transcript_seam_repair.py",
                 "transcript_audio_correction.py",
                 "transcription_vocabulary.py",
             ],
@@ -191,6 +192,7 @@ def main():
                 "paired_boundary_review.py",
                 "paragraph_audio_coherence.py",
                 "slide_reading_layout.py",
+                "transcript_seam_repair.py",
             ],
             "speakers": [
                 "transcript_speaker_batch.py",
