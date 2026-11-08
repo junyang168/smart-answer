@@ -1137,3 +1137,51 @@ def test_question_and_position_locators_share_mechanical_recovery(sample,collect
     assert saved['source_fragment_ids']!=['STALE']
     assert all(saved[k]==v for k,v in payload.items())
     assert store.get_record_state('source_fragments','STALE')['payload']['anchor_state']=='unresolved'
+
+
+def test_full_campaign_creates_claim_updates_question_and_resumes_without_models(sample):
+    store,root,_=sample
+    store.apply_plan(store.plan_package({'package_id':'q-full','questions':[{
+        'question_id':'Q','text':'為什麼需要知道神的旨意？','questioner':'professor',
+        'source_fragment_id':'F','answer_claim_ids':['C']}]}))
+    def reply(req):
+        task=req['input']['task']
+        if task=='lower_coverage':
+            return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
+                'conclusions':[{'statement':'不知道神旨意就無法遵行。','support_keys':['evidence_steps/E'],
+                    'quotes':[{'paragraph_key':'S0001','quote':'你不知道神的旨意，怎麼遵行？'}],
+                    'reason':'將前提關係交給 Claim 層核對。'}],'reason':'不重複抽取 Evidence。'} for j in req['input']['jobs']]}
+        if task=='conclusion_disposition':
+            return {'items':[{'job_id':j['job_id'],'action':'new_claim','claim_id':'',
+                'statement':'不知道神的旨意，就無法遵行祂的旨意。','evidence_step_ids':['E'],
+                'scripture_refs':[],'answer_question_ids':['Q'],'reason':'單獨保存前提關係並補直接答案。'} for j in req['input']['jobs']]}
+    ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
+    result=flash.run(store,'S',[['C']],root,ports,apply=True)
+    assert result['status']=='completed'
+    new_ids=result['groups'][0]['new_claim_ids'];assert len(new_ids)==1
+    saved=store.get_record_state('questions','Q')['payload']
+    assert set(saved['answer_claim_ids'])=={'C',new_ids[0]} and saved['answer_state']=='answered'
+    assert set(store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids'])=={'C',new_ids[0]}
+    lower.verify(root/'lower',*f.load_source(store,'S'))
+    count=len(ports.calls)
+    resumed=flash.run(store,'S',[['C']],root,ports,apply=True)
+    assert resumed['status']=='completed' and resumed['groups'][0]['new_claim_ids']==new_ids
+    assert len(ports.calls)==count
+
+
+def test_campaign_recovers_missing_occurrence_only_from_complete_owned_source_chain(sample):
+    store,root,_=sample
+    claim=deepcopy(store.get_record_state('claims','C')['payload']);claim['occurrences']=[]
+    store.apply_plan(store.plan_package({'package_id':'no-occurrence','claims':[claim]}))
+    records,sources=f.load_source(store,'S');assert 'claims/C' in records
+    assert f.belongs_to_source(claim,records,'S')
+    result=flash.run(store,'S',[['C']],root,Ports(),apply=True)
+    assert result['status']=='completed'
+    saved=store.get_record_state('claims','C')['payload']
+    assert saved['statement']==claim['statement']
+    assert saved['occurrences'][0]['source_id']=='S'
+    assert saved['occurrences'][0]['anchors']
+    missing=deepcopy(records);missing.pop('evidence_steps/E')
+    assert not f.belongs_to_source(claim,missing,'S')
+    foreign=deepcopy(records);foreign['source_fragments/F']['payload']['source_id']='OTHER'
+    assert not f.belongs_to_source(claim,foreign,'S')

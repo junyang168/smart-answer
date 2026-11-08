@@ -179,9 +179,8 @@ def orphan_plan(records,sources,root,ports,excluded=()):
             raise ValueError('orphan plan belongs to another source version')
         return plan
     from backend.pipeline import claim_flash_lookup as lookup
-    aliases = {sid, records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
     claims = [k for k, p in active_claims(records).items() if not records[k].get('retired')
-              and any(o.get('source_id') in aliases for o in p.get('occurrences', []))]
+              and f.belongs_to_source(p,records,sid)]
     plan = lookup.run(records, sources, sorted(orphans(records,excluded)), claims, root, ports)
     if excluded:plan['excluded_context_keys']=sorted(excluded)
     e.save(path, plan)
@@ -609,10 +608,8 @@ def run(store,source_id,groups,root,ports,*,apply=False):
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
             'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,'models':ports.identity})
         target_records=c.fetch_claims(store,targets)
-        document=store.get_record_state('source_documents',source_id)['payload']
-        aliases={source_id,document.get('transcript_id') or source_id}
-        if any(not row['payload'].get('occurrences') or any(o.get('source_id') not in aliases for o in row['payload']['occurrences'])
-                for row in target_records.values()):
+        source_records,_=f.load_source(store,source_id)
+        if any(not f.belongs_to_source(row['payload'],source_records,source_id) for row in target_records.values()):
             raise ValueError('campaign Claim source differs; no lower work started')
         result=lower.run(store,source_id,root/'lower',ports,apply=apply)
         if result['status']=='needs_attention' or (not apply and result['updates']):

@@ -63,6 +63,21 @@ def projected(row):
         'support_eligibility', 'claim_group_ids', 'maturity', 'answer_state'}}
 
 
+def belongs_to_source(claim,records,sid):
+    aliases={sid,records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
+    occurrences=claim.get('occurrences',[])
+    if occurrences:return all(o.get('source_id') in aliases for o in occurrences)
+    eids=claim.get('evidence_step_ids',[])
+    if not eids:return False
+    for eid in eids:
+        evidence=records.get('evidence_steps/'+eid)
+        if not evidence:return False
+        fids=e.evidence_fragment_ids(evidence['payload'])
+        if not fids or any(records.get('source_fragments/'+fid,{}).get('payload',{}).get('source_id')!=sid for fid in fids):
+            return False
+    return True
+
+
 def load_source(store, sid):
     """One typed source census, including unowned records; no corpus snapshot."""
     records = {}
@@ -87,6 +102,14 @@ def load_source(store, sid):
             query('collection=ANY(%s) AND payload @> ANY(%s::jsonb[])', (sorted(LOWER), needles))
         query("collection='claims' AND payload @> ANY(%s::jsonb[])",
               ([json.dumps({'occurrences': [{'source_id': alias}]}) for alias in aliases],))
+        # Some historical Claims have no occurrence yet; their complete owned
+        # Evidence chain identifies the source without interpreting their text.
+        owner_ids=sorted({cid for k,r in records.items() if k.startswith('evidence_steps/')
+                          for cid in r['payload'].get('produced_claim_ids',[])})
+        known=set(records)
+        query("collection='claims' AND object_id=ANY(%s) AND (NOT payload ? 'occurrences' OR payload->'occurrences'='[]'::jsonb)", (owner_ids,))
+        for key in set(records)-known:
+            if not belongs_to_source(records[key]['payload'],records,sid):records.pop(key)
         # Include missing-source Evidence explicitly used by source-local Claims, so it cannot disappear.
         eids = sorted({eid for k, r in records.items() if k.startswith('claims/')
                        for eid in r['payload'].get('evidence_step_ids', [])})
