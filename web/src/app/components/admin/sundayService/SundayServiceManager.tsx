@@ -677,100 +677,42 @@ export function SundayServiceManager() {
     return set;
   }, [resources.workers, form.date]);
 
-  const availableWorkers = useMemo(() => {
-    if (unavailableWorkerNames.size === 0) {
-      return resources.workers;
-    }
-    return resources.workers.filter((worker) => !unavailableWorkerNames.has(worker.name));
-  }, [resources.workers, unavailableWorkerNames]);
+  const workerOptionLabel = (name: string): string => {
+    const worker = workersByName.get(name);
+    const ranges = worker ? getWorkerUnavailableRanges(worker)
+      .filter((range) => isRangeActiveOnDate(range, form.date)) : [];
+    return ranges.length > 0
+      ? `${name}（外出：${ranges.map((range) => `${range.startDate} 至 ${range.endDate}`).join("、")}）`
+      : name;
+  };
 
-  const workerAssignmentFields: Array<"presider" | "worshipLeader" | "pianist" | "sermonSpeaker"> = [
-    "presider",
-    "worshipLeader",
-    "pianist",
-    "sermonSpeaker",
-  ];
-
-  useEffect(() => {
-    if (unavailableWorkerNames.size === 0) {
-      return;
-    }
-    setForm((prev) => {
-      let changed = false;
-      const next: FormState = { ...prev };
-      workerAssignmentFields.forEach((field) => {
-        const current = prev[field];
-        if (current && unavailableWorkerNames.has(current)) {
-          next[field] = "";
-          changed = true;
-        }
-      });
-      const updatedReaders = prev.scriptureReaders.map((reader) =>
-        reader && unavailableWorkerNames.has(reader) ? "" : reader,
-      );
-      const readersChanged = updatedReaders.some((value, index) => value !== prev.scriptureReaders[index]);
-      if (readersChanged) {
-        next.scriptureReaders = updatedReaders;
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [unavailableWorkerNames]);
+  const unavailableAssignments = Array.from(new Set([
+    form.presider, form.worshipLeader, form.pianist, form.sermonSpeaker, ...form.scriptureReaders,
+  ].filter((name) => name && unavailableWorkerNames.has(name))));
 
   const roleFilteredWorkerOptions = useMemo(() => {
     const options = new Map<SundayWorkerRole, string[]>();
     SUNDAY_WORKER_ROLE_OPTIONS.forEach((role) => {
-      const names = availableWorkers
+      const names = resources.workers
         .filter((worker) => workerSupportsRole(worker, role))
         .map((worker) => worker.name.trim())
         .filter((name) => name.length > 0);
       options.set(role, names);
     });
     return options;
-  }, [availableWorkers]);
+  }, [resources.workers]);
 
-  const resolveWorkerOptionsForRole = useCallback(
-    (role: SundayWorkerRole, currentValues: string[] = []) => {
-      const names = [...(roleFilteredWorkerOptions.get(role) ?? [])];
-      const seen = new Set(names);
-      currentValues
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0)
-        .forEach((value) => {
-          if (!seen.has(value)) {
-            names.push(value);
-            seen.add(value);
-          }
-        });
-      return names;
-    },
-    [roleFilteredWorkerOptions],
-  );
+  const presiderOptions = roleFilteredWorkerOptions.get(WORKER_ROLE_FIELD_MAP.presider) ?? [];
+  const worshipLeaderOptions = roleFilteredWorkerOptions.get(WORKER_ROLE_FIELD_MAP.worshipLeader) ?? [];
+  const pianistOptions = roleFilteredWorkerOptions.get(WORKER_ROLE_FIELD_MAP.pianist) ?? [];
+  const sermonSpeakerOptions = roleFilteredWorkerOptions.get(WORKER_ROLE_FIELD_MAP.sermonSpeaker) ?? [];
+  const readerOptions = roleFilteredWorkerOptions.get("讀經經文") ?? [];
 
-  const presiderOptions = useMemo(
-    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.presider, [form.presider]),
-    [form.presider, resolveWorkerOptionsForRole],
-  );
-
-  const worshipLeaderOptions = useMemo(
-    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.worshipLeader, [form.worshipLeader]),
-    [form.worshipLeader, resolveWorkerOptionsForRole],
-  );
-
-  const pianistOptions = useMemo(
-    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.pianist, [form.pianist]),
-    [form.pianist, resolveWorkerOptionsForRole],
-  );
-
-  const sermonSpeakerOptions = useMemo(
-    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.sermonSpeaker, [form.sermonSpeaker]),
-    [form.sermonSpeaker, resolveWorkerOptionsForRole],
-  );
-
-  const readerOptions = useMemo(
-    () => resolveWorkerOptionsForRole("讀經經文", form.scriptureReaders),
-    [form.scriptureReaders, resolveWorkerOptionsForRole],
-  );
+  // Retain a saved value without making a retired worker a dropdown choice.
+  const savedAssignmentOption = (value: string, names: string[]) =>
+    value && !names.includes(value) ? (
+      <option value={value} hidden disabled>{value}</option>
+    ) : null;
 
   const handleInputChange = (field: keyof FormState) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -1524,6 +1466,12 @@ export function SundayServiceManager() {
             </div>
           )}
           <form className="space-y-4" onSubmit={handleSubmit}>
+            {unavailableAssignments.length > 0 && (
+              <p role="status" className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                {unavailableAssignments.map(workerOptionLabel).join("、")}於 {form.date} 無法服事。
+                已有安排保留顯示，請改選可出席同工後再儲存；如請假日期有誤，請至同工名單修正。
+              </p>
+            )}
             <div>
               <label className="mb-1 block text-sm font-semibold text-gray-700">主日日期</label>
               <input
@@ -1561,10 +1509,11 @@ export function SundayServiceManager() {
                   onChange={handleInputChange("presider")}
                   disabled={saving}
                 >
+                  {savedAssignmentOption(form.presider, presiderOptions)}
                   <option value="">未指定</option>
                   {presiderOptions.map((name) => (
-                    <option key={`presider-${name}`} value={name}>
-                      {name}
+                    <option key={`presider-${name}`} value={name} disabled={unavailableWorkerNames.has(name)}>
+                      {workerOptionLabel(name)}
                     </option>
                   ))}
                 </select>
@@ -1577,10 +1526,11 @@ export function SundayServiceManager() {
                   onChange={handleInputChange("worshipLeader")}
                   disabled={saving}
                 >
+                  {savedAssignmentOption(form.worshipLeader, worshipLeaderOptions)}
                   <option value="">未指定</option>
                   {worshipLeaderOptions.map((name) => (
-                    <option key={`worship-leader-${name}`} value={name}>
-                      {name}
+                    <option key={`worship-leader-${name}`} value={name} disabled={unavailableWorkerNames.has(name)}>
+                      {workerOptionLabel(name)}
                     </option>
                   ))}
                 </select>
@@ -1593,10 +1543,11 @@ export function SundayServiceManager() {
                   onChange={handleInputChange("pianist")}
                   disabled={saving}
                 >
+                  {savedAssignmentOption(form.pianist, pianistOptions)}
                   <option value="">未指定</option>
                   {pianistOptions.map((name) => (
-                    <option key={`pianist-${name}`} value={name}>
-                      {name}
+                    <option key={`pianist-${name}`} value={name} disabled={unavailableWorkerNames.has(name)}>
+                      {workerOptionLabel(name)}
                     </option>
                   ))}
                 </select>
@@ -1609,10 +1560,11 @@ export function SundayServiceManager() {
                   onChange={handleInputChange("sermonSpeaker")}
                   disabled={saving}
                 >
+                  {savedAssignmentOption(form.sermonSpeaker, sermonSpeakerOptions)}
                   <option value="">未指定</option>
                   {sermonSpeakerOptions.map((name) => (
-                    <option key={`speaker-${name}`} value={name}>
-                      {name}
+                    <option key={`speaker-${name}`} value={name} disabled={unavailableWorkerNames.has(name)}>
+                      {workerOptionLabel(name)}
                     </option>
                   ))}
                 </select>
@@ -1732,10 +1684,11 @@ export function SundayServiceManager() {
                       onChange={handleScriptureReaderChange(index)}
                       disabled={saving || readerOptions.length === 0}
                     >
+                      {savedAssignmentOption(reader, readerOptions)}
                       <option value="">{`選擇同工 ${index + 1}`}</option>
                       {readerOptions.map((name) => (
-                        <option key={`reader-${index}-${name}`} value={name}>
-                          {name}
+                        <option key={`reader-${index}-${name}`} value={name} disabled={unavailableWorkerNames.has(name)}>
+                          {workerOptionLabel(name)}
                         </option>
                       ))}
                     </select>

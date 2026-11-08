@@ -39,6 +39,31 @@ def test_existing_prepopulated_assignments_and_optional_data_are_preserved(agent
     assert skeleton_status(agent.repository,date(2026,11,1))[0]['complete']
 
 
+def test_historical_presider_with_no_current_role_is_not_reenrolled(agent):
+    enable(agent)
+    agent.repository.workers['孫劍雯'] = SundayWorker(name='孫劍雯', preferredRoles=[])
+    agent.repository.services['2026-10-25'] = SundayServiceEntry(date='2026-10-25', presider='孫劍雯')
+    maintain_skeletons(agent.repository,agent.store,date(2026,11,1))
+    assert all(agent.repository.services[day].presider != '孫劍雯' for day in ['2026-11-08','2026-11-15'])
+    assert agent.repository.services['2026-10-25'].presider == '孫劍雯'
+
+
+@pytest.mark.parametrize('replacement_available',[True,False])
+def test_auto_presider_is_rechecked_when_role_removed(agent,replacement_available):
+    enable(agent)
+    entry=SundayServiceEntry(date='2026-11-08',presider='王明',sermonTitle='保留題目',pianist='陳牧師')
+    agent.repository.services[entry.date]=entry
+    agent.store.put('auto_presider:'+entry.date,{'status':'applied','after':'王明'})
+    agent.repository.workers['王明'].preferred_roles=[]
+    if not replacement_available:
+        agent.repository.workers['李芳'].preferred_roles=[]
+    maintain_skeletons(agent.repository,agent.store,date(2026,11,1))
+    updated=agent.repository.services[entry.date]
+    assert updated.presider == ('李芳' if replacement_available else None)
+    assert updated.sermon_title=='保留題目' and updated.pianist=='陳牧師'
+    assert agent.store.get('auto_presider:'+entry.date)['after']==updated.presider
+
+
 def test_auto_presider_can_change_after_absence_but_manual_presider_is_preserved(agent):
     enable(agent)
     maintain_skeletons(agent.repository,agent.store,date(2026,11,1))
