@@ -153,7 +153,11 @@ def run(store, source_id, root, ports, *, apply=False):
             'jev_contract':f.JEV_CONTRACT,'material_contract':f.MATERIAL_CONTRACT,
             'source_lookup_contract':source_lookup.CONTRACT,'context_contract':'unowned_dialogue_context_v1','models':ports.identity})
         if (root/'verification.json').exists():
-            return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
+            result=json.loads((root/'verification.json').read_text())
+            if apply and (root/'commit.json').exists():
+                verify(root,*f.load_source(store,source_id))
+                return f.resume_committed(store,root,result)
+            return e.commit_verified(store,root) if apply else result
         records,sources=f.load_source(store,source_id)
         e.save(root/'before.json',{'records':records,'sources':sources})
         working=deepcopy(records);updates={};generated={};outcomes=[];pending=[];jobs=[]

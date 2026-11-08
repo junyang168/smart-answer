@@ -277,6 +277,8 @@ def final_candidate_checks(records,sources,keys,root,ports,pending):
 def commit_group(store,root):
     root=Path(root)
     draft=json.loads((root/'draft.json').read_text())
+    if (root/'commit.json').exists():
+        return f.resume_committed(store,root,json.loads((root/'verification.json').read_text()))
     if draft['status']=='verified' and not (root/'commit.json').exists() and not (root/'commit-intent.json').exists():
         before=json.loads((root/'before.json').read_text())
         f.source_unchanged(before['sources'])

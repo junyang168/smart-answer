@@ -63,6 +63,45 @@ def projected(row):
         'support_eligibility', 'claim_group_ids', 'maturity', 'answer_state'}}
 
 
+def resume_committed(store,root,result):
+    """Reuse a saved SQL receipt, allowing only later groups' bookkeeping writes."""
+    root=Path(root)
+    if not (root/'commit.json').exists():return None
+    receipt=json.loads((root/'commit.json').read_text())
+    intent=json.loads((root/'commit-intent.json').read_text())
+    history=store.get_change_history(receipt['change_set_id'])
+    if (not history or history['status']!='applied' or history['source_kind']!=result['version']
+            or history['fingerprint_sha256']!=intent['fingerprint_sha256']
+            or history['change_set_id']!=intent['change_set_id']):
+        raise ValueError('saved Flash SQL receipt differs')
+    # Lower fidelity deliberately excludes owner/answer bookkeeping. A later
+    # group may update these fields, but an unrelated writer must not be hidden.
+    allowed={'evidence_steps':{'produced_claim_ids'},'questions':{'answer_claim_ids','answer_state'}}
+    readback={**result,'updates':deepcopy(result['updates'])}
+    for key,expected in result['updates'].items():
+        col,oid=key.split('/',1);state=store.get_record_state(col,oid)
+        if not state or state['retired']:raise ValueError('committed Flash object missing: '+key)
+        different={k for k,v in expected.items() if k!='revision' and state['payload'].get(k)!=v}
+        if not different:continue
+        if not different<=allowed.get(col,set()):raise ValueError('committed Flash content changed: '+key)
+        with store.connect() as conn:
+            conn.execute('SET TRANSACTION READ ONLY')
+            row=conn.execute('''SELECT cs.source_kind,cs.status,cs.metadata
+                FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets cs USING(change_set_id)
+                WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s''',(col,oid,state['revision'])).fetchone()
+        path=Path((row[2] or {}).get('verification_path','')) if row else Path()
+        parent=path.parent
+        later=(parent.name.startswith('group-') and parent.name[6:].isdigit()
+               and parent.parent.resolve()==root.parent.resolve()
+               and (root.name=='lower' or root.name.startswith('group-') and root.name[6:].isdigit()
+                    and int(parent.name[6:])>int(root.name[6:])))
+        if not row or row[:2]!=(c.VERSION,'applied') or path.name!='verification.json' or not later:
+            raise ValueError('committed Flash bookkeeping changed outside later campaign group: '+key)
+        for field in different:readback['updates'][key][field]=state['payload'].get(field)
+    e.readback(store,readback)
+    return e.publish(root,{**result,'status':'applied','applied':True,'commit':receipt})
+
+
 def belongs_to_source(claim,records,sid):
     aliases={sid,records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
     occurrences=claim.get('occurrences',[])
