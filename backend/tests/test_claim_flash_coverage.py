@@ -34,9 +34,12 @@ class Ports:
                 findings=[]
                 for candidate in job['candidates']:
                     src=candidate['source_item']
+                    refs = request['input'].get('all_sermon_statements', {})
+                    if not refs:
+                        refs = {key:None for keys in request['input'].get('existing_scripture_index', {}).values() for key in keys}
                     findings.append({'candidate_ids':[candidate['candidate_id']], 'paragraph_key':src['paragraph_key'],
                         'quote':src['quote'],'statement':src.get('statement',''),'reference':src.get('reference',''),
-                        'verdict':self.disposition,'record_refs':[next(iter(request['input']['all_sermon_statements']))],
+                        'verdict':self.disposition,'record_refs':list(refs)[:1],
                         'reason':'同一內容已有保存。','source_notes':[]})
                 items.append({'job_id':job['job_id'],'findings':findings})
         return {'items':items}
@@ -230,7 +233,7 @@ def test_source_reference_discrepancy_is_reported_without_changing_source(tmp_pa
     class Notes(Ports):
         def repair(self,request):
             reply=super().repair(request)
-            if request['input']['task']=='reverse_coverage_adjudication':
+            if request['input']['task'] in {'reverse_coverage_adjudication','reverse_scripture_coverage'}:
                 for group in reply['items']:
                     for item in group['findings']:item['source_notes']=['原文節次與現有引用不一致，尚未核對錄音。']
             return reply
@@ -353,3 +356,44 @@ def test_joint_disposition_preserves_each_candidates_own_source_and_replays(tmp_
     replay=Ports(fail='source_preservation_inventory')
     assert coverage.check(records,sources,'S',plan(sources),root,replay)==result
     assert replay.calls==[]
+
+
+def test_omitted_book_still_receives_whole_sermon_deduplicated_reference_metadata(tmp_path):
+    records,sources=fixture(tmp_path,['就是二十一章三十三節到四十六節。','葡萄園的比喻。'],[('S0002','葡萄園的比喻。')])
+    records['evidence_steps/E']['payload']['scripture_refs']=['Matthew 21:33-46','Matthew 21:33-46']
+    records['observations/O']={'retired':False,'payload':{'statement':'比較福音書。','scripture_refs':['Matthew 21:33-46'],
+        'source_fragment_ids':['F0']}}
+    p=plan(sources);p['groups']=[{'group_id':'A','title':'出處','paragraph_keys':['S0001']},
+                              {'group_id':'B','title':'比喻','paragraph_keys':['S0002']}]
+    class OmittedBook(Ports):
+        def repair(self,request):
+            if request['input']['task']=='source_preservation_inventory':
+                self.calls.append('source_preservation_inventory')
+                return {'items':[{'job_id':j['job_id'],'units':[], 'citations':[
+                    {'paragraph_key':'S0001','quote':'就是二十一章三十三節到四十六節。',
+                     'reference':'二十一章33–46節（此處未明說書名）'}] if j['job_id']=='A' else []} for j in request['input']['jobs']]}
+            assert request['input']['task']=='reverse_scripture_coverage'
+            index=request['input']['existing_scripture_index']
+            assert index=={'Matthew 21:33-46':['R'+e.digest(k)[:8] for k in ['evidence_steps/E','observations/O']]}
+            assert 'all_sermon_statements' not in request['input']
+            assert request['input']['jobs'][0]['existing_details']=={}
+            return super().repair(request)
+    ports=OmittedBook();root=tmp_path/'run';before=deepcopy(records)
+    result=coverage.check(records,sources,'S',p,root,ports)
+    assert result['status']=='checked' and records==before
+    assert result['findings'][0]['findings'][0]['verdict']=='already_recorded'
+    replay=OmittedBook(fail='source_preservation_inventory')
+    assert coverage.check(records,sources,'S',p,root,replay)==result and replay.calls==[]
+
+
+def test_material_and_reference_tasks_do_not_repeat_each_others_work(tmp_path):
+    records,sources=fixture(tmp_path)
+    ports=Ports(verdict='partial',citations=[{'paragraph_key':'S0001','quote':'教授原話。','reference':'馬太福音 21:33-46'}])
+    result=coverage.check(records,sources,'S',plan(sources),tmp_path/'run',ports)
+    tasks={r['input']['task']:r['input'] for r in ports.requests if r.get('input',{}).get('task') in
+        {'reverse_scripture_coverage','reverse_coverage_adjudication'}}
+    assert {x['kind'] for j in tasks['reverse_scripture_coverage']['jobs'] for x in j['candidates']}=={'scripture_reference'}
+    assert {x['kind'] for j in tasks['reverse_coverage_adjudication']['jobs'] for x in j['candidates']}=={'material'}
+    assert 'all_sermon_statements' not in tasks['reverse_scripture_coverage']
+    assert 'existing_scripture_index' not in tasks['reverse_coverage_adjudication']
+    assert len(result['findings'])==1 and len(result['findings'][0]['findings'])==2

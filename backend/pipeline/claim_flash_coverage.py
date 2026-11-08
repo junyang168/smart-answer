@@ -34,6 +34,25 @@ DISPOSITION_PROMPT = (
     '兩端材料已在、僅涉及如何論證時用claim_layer_out_of_scope；本次未查連接，不可斷言它真缺失。'
     '歷史引文與未驗證綁定不作現版來源批准。對原文節次和現有記錄不一致，記入source_notes，'
     '不自動改原文，也不單憑差異判漏記。quote逐字出自所給原文；record_refs只用提供R代號，理由簡短具體。')
+CITATION_PROMPT = (
+    '只核對本次經文出處候選是否已有保存，不查材料內容遺漏、Claim或論證關係，不修改資料。'
+    'existing_scripture_index是本講全部現有材料的實際scripture_refs，按出處去重，值是記錄R代號；'
+    '它不只包含同段或同組記錄。判缺前必須核對此索引及existing_details。'
+    '原文省略書名或程序未能解析，不代表資料不存在；用提供的原文上下文核對已有範圍，'
+    '無法確定就needs_context，不能猜補書名、章節或將解析失敗當漏記。'
+    '只保存原文明說或上下文明確的範圍，不要求無關經文分句。'
+    '每個candidate_id至少處置一次，合併同一疑點列齊ID；quote逐字出自所給原文，'
+    'record_refs只用提供的R代號，理由簡短；原文與記錄不一致寫source_notes，不自動改原文。')
+
+
+def scripture_index(material, aliases):
+    """Actual same-sermon metadata only; no guessed book or inferred coverage."""
+    index = {}
+    for key in sorted(material):
+        for ref in material[key].get('scripture_refs', []):
+            if ref and aliases[key] not in index.setdefault(ref, []):
+                index[ref].append(aliases[key])
+    return index
 
 
 class Strict(BaseModel):
@@ -181,6 +200,7 @@ def check(records, sources, source_id, plan, root, ports):
         'models': ports.identity, 'database_writes': False,
         'policy_sha256':e.digest({'inventory':INVENTORY_PROMPT,'inventory_schema':Inventories.model_json_schema(),
             'disposition':DISPOSITION_PROMPT,'disposition_schema':Dispositions.model_json_schema(),
+            'citation':CITATION_PROMPT,'reference_policy':'whole-sermon-deduplicated-refs-v1',
             'unit_question':questions.coverage_unit('contract target'),'collections':sorted(COLLECTIONS),
             'alias_contract':'sha256-prefix8-collision-checked'}),
         'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None)})
@@ -228,7 +248,7 @@ def check(records, sources, source_id, plan, root, ports):
                     for fid in sorted(used_fragments)}})
     review = root/'reviews'/input_sha
     e.save(review/'input.json', {'contract': CONTRACT, 'input_sha256': input_sha, 'record_keys': reverse})
-    checks = []; jobs = []
+    checks = []; jobs = []; citation_jobs = []
     for row in inventory:
         g = next(g for g in plan['groups'] if g['group_id'] == row['job_id']); gid = g['group_id']
         local_keys = {k for k in material if positions[k]&set(g['paragraph_keys'])}
@@ -264,17 +284,28 @@ def check(records, sources, source_id, plan, root, ports):
                 candidates.append({'candidate_id':gid+'-C'+str(i),'kind':'scripture_reference','source_item':cite,
                                    'components':components,'unresolved_reference':unknown})
         checks.append({'group_id':gid,'answers':answers,'candidates':candidates})
-        if candidates:
-            target = {x['source_item']['paragraph_key'] for x in candidates}
+        # Keep reference lookup separate from material coverage: the full reference
+        # index replaces the statement catalogue, rather than adding another large packet.
+        for kind, destination in [('material', jobs), ('scripture_reference', citation_jobs)]:
+            selected = [x for x in candidates if x['kind'] == kind]
+            if not selected:
+                continue
+            target = {x['source_item']['paragraph_key'] for x in selected}
             needed = {k for k in material if positions[k]&target} | citation_keys
             needed |= {k for k in local_keys if k.startswith('position_nodes/')}
-            jobs.append({'job_id':gid,'title':g['title'],'source_paragraphs':{pk:paragraphs[pk]['text'] for pk in g['paragraph_keys']},
-                         'candidates':candidates,'existing_details':details(needed,material,records,sources,aliases)})
+            destination.append({'job_id':gid,'title':g['title'],'source_paragraphs':{pk:paragraphs[pk]['text'] for pk in g['paragraph_keys']},
+                         'candidates':selected,'existing_details':details(needed,material,records,sources,aliases)})
     e.save(review/'prechecks.json', checks)
     results = []
-    for batch,raw in f.gpt(root/'dispositions', ports, 'reverse_coverage_adjudication', jobs,
-                          Dispositions.model_json_schema(), DISPOSITION_PROMPT,
-                          shared={'all_sermon_statements':statements,'position_attributions':attributions}, semantic_review=False):
+    def replies():
+        for task, selected, prompt, shared in [
+            ('reverse_coverage_adjudication', jobs, DISPOSITION_PROMPT,
+             {'all_sermon_statements':statements,'position_attributions':attributions}),
+            ('reverse_scripture_coverage', citation_jobs, CITATION_PROMPT,
+             {'existing_scripture_index':scripture_index(material,aliases)})]:
+            yield from f.gpt(root/'dispositions', ports, task, selected,
+                Dispositions.model_json_schema(), prompt, shared=shared, semantic_review=False)
+    for batch,raw in replies():
         rows = Dispositions.model_validate(raw).model_dump()['items']
         f.exactly(rows, [j['job_id'] for j in batch], 'job_id')
         for row in rows:
@@ -295,6 +326,10 @@ def check(records, sources, source_id, plan, root, ports):
             if seen != expected: raise ValueError('coverage disposition omitted a candidate')
             results.append(row)
     f.source_unchanged(sources)
+    merged = {}
+    for row in results:
+        merged.setdefault(row['job_id'], {'job_id':row['job_id'], 'findings':[]})['findings'].extend(row['findings'])
+    results = list(merged.values())
     findings = [item for row in results for item in row['findings']]
     unresolved = [x for x in findings if x['verdict'] in {'missing_material','missing_source_binding','missing_scripture_reference','needs_context'}]
     result = {'contract':CONTRACT,'stage':'reverse_coverage','source_id':source_id,
