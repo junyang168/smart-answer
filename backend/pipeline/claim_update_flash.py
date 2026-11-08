@@ -761,16 +761,38 @@ def main():
     load_dotenv('.env')
     parser=argparse.ArgumentParser(description='Claim Update Flash, explicit source and ordered topic groups')
     parser.add_argument('--source-id',required=True)
-    parser.add_argument('--groups',required=True,help='JSON ordered topic groups of <=10 Claim IDs; reserves up to two unused slots')
+    parser.add_argument('--groups',help='JSON ordered topic groups of <=10 Claim IDs; reserves up to two unused slots')
     parser.add_argument('--root',required=True)
-    parser.add_argument('--capacity-file',required=True)
+    parser.add_argument('--capacity-file')
+    parser.add_argument('--plan-groups',action='store_true',help='Read-only heading-guided shared grouping; no models or content writes')
+    parser.add_argument('--semantic-groups',action='store_true',help='With --plan-groups, use one GPT task to reduce semantic coupling')
+    parser.add_argument('--max-group-claims',type=int,choices=range(1,11),default=8,help='Grouping capacity; default 8 leaves two creation slots')
     parser.add_argument('--database-url')
     parser.add_argument('--codex-executable')
     parser.add_argument('--apply',action='store_true')
     args=parser.parse_args();root=Path(args.root).resolve()
+    if args.plan_groups and args.apply:
+        parser.error('--plan-groups cannot be combined with --apply')
+    if args.semantic_groups and (not args.plan_groups or not args.capacity_file):
+        parser.error('--semantic-groups requires --plan-groups and --capacity-file')
+    if not args.plan_groups and (not args.groups or not args.capacity_file):
+        parser.error('--groups and --capacity-file are required for content processing')
     store=PostgresKnowledgeStore(args.database_url)
-    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=4000,executable=args.codex_executable)
-    ports=c.Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    def model_ports():
+        client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=4000,executable=args.codex_executable)
+        return c.Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    if args.plan_groups:
+        from backend.pipeline import claim_flash_grouping as grouping
+        ids=None
+        if args.groups:
+            groups=json.loads(Path(args.groups).read_text())
+            if not isinstance(groups,list) or any(not isinstance(g,list) or any(not isinstance(cid,str) for cid in g) for g in groups):
+                parser.error('--groups must contain a list of Claim-ID lists')
+            ids=[cid for group in groups for cid in group]
+        ports=model_ports() if args.semantic_groups else None
+        result=grouping.save(store,args.source_id,root,claim_ids=ids,max_claims=args.max_group_claims,ports=ports)
+        print(json.dumps(result,ensure_ascii=False));return
+    ports=model_ports()
     result=run(store,args.source_id,json.loads(Path(args.groups).read_text()),root,ports,apply=args.apply)
     print(json.dumps(result,ensure_ascii=False))
 
