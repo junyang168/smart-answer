@@ -176,3 +176,49 @@ def test_quoted_admin_answer_is_bound_to_exact_case(admin):
     reply = incoming(admin, '一次', group='999@g.us', id='quoted', at='2026-11-03T16:00:00+00:00')
     reply = reply.model_copy(update={'quoted_message_id': f'remote-clarify:{first}:{first}'})
     assert [c['clarification_id'] for c in admin.pending_dialogues(reply)] == [first]
+
+
+def test_defer_keeps_saved_songs_unblocks_service_and_later_reply_resumes(admin):
+    from backend.api.models import SundayServiceEntry
+    from backend.sunday_assistant.ppt_ready import PptReady
+    case = ask(admin)
+    admin.repository.services['2026-11-08'] = SundayServiceEntry(date='2026-11-08', hymn='奇異恩典', responseHymn='保留回應')
+    ppt = PptReady(admin, generator=lambda: None, template=admin.store.root/'template')
+    assert ppt.pending('2026-11-08')
+    reply = incoming(admin, 'ignore 前三行，我明天问一问', group='999@g.us', sender='admin1', id='defer', at='2026-11-03T16:00:00+00:00')
+    result = run_agent(admin, reply, model=ScriptModel(('read_group_context', {}), ('defer_pending', {'clarification_id': case})))
+    assert result['disposition'] == 'deferred' and not result['form_changed']
+    assert not ppt.pending('2026-11-08')
+    entry = admin.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn, entry.hymn_notes) == ('奇異恩典', '保留回應', None)
+    restarted = Assistant(Store(admin.store.root), admin.repository, bridge=admin.bridge)
+    assert restarted.defer_dialogue(reply, case) == result  # durable receipt, no re-send
+    later = incoming(restarted, '最後一節重複一次', group='999@g.us', sender='admin2', id='resolved-later', at='2026-11-04T16:00:00+00:00')
+    assert restarted.pending_dialogues(later)[0]['status'] == 'deferred'
+    request = {'clarification_id': case, 'service_changes': [service(field='hymnNotes', value=later.text, evidence=later.text)]}
+    assert run_agent(restarted, later, model=ScriptModel(('read_group_context', {}), ('read_sunday_record', {'day':'2026-11-08'}), ('update_records', {'request':request})))['status'] == 'done'
+    with restarted.store.db() as db:
+        assert db.execute('SELECT status FROM clarifications WHERE id=?',(case,)).fetchone()[0] == 'resolved'
+    assert restarted.repository.services['2026-11-08'].hymn_notes == later.text
+
+
+def test_relevant_pending_reply_cannot_be_discarded_as_chatter(admin, monkeypatch):
+    case = ask(admin)
+    def verify(agent, msg, action, case_id=None):
+        return {'supported':action=='defer', 'questions':[] if action=='defer' else ['這是暫緩目前安排，不是閒聊']}
+    monkeypatch.setattr('backend.sunday_assistant.grounding.verify_pending_disposition', verify)
+    reply = incoming(admin, 'ignore 前三行，我明天问一问', group='999@g.us', id='was-ignored', at='2026-11-03T16:00:00+00:00')
+    result = run_agent(admin, reply, model=ScriptModel(('read_group_context', {}), ('ignore_message', {}), ('defer_pending', {'clarification_id':case})))
+    assert result['disposition']=='deferred'
+    assert 'pending_reply_relevant' in trace(admin)[1].content
+
+
+def test_merely_answering_later_does_not_authorize_unblocking_case(admin, monkeypatch):
+    case = ask(admin)
+    monkeypatch.setattr('backend.sunday_assistant.grounding.verify_pending_disposition', lambda *_: {'supported':False,'questions':['沒有先略過指示，仍需等待回答']})
+    reply = incoming(admin, '明天回答你', group='999@g.us', id='not-a-deferral', at='2026-11-03T16:00:00+00:00')
+    with pytest.raises(RuntimeError):
+        run_agent(admin, reply, model=ScriptModel(('read_group_context', {}), ('defer_pending', {'clarification_id':case}), RuntimeError('end test after rejection')))
+    with admin.store.db() as db:
+        assert db.execute('SELECT status FROM clarifications WHERE id=?',(case,)).fetchone()[0] == 'waiting'
+    assert not admin.repository.services
