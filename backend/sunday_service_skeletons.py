@@ -29,9 +29,9 @@ def maintain_skeletons(repository, store, as_of):
     with sunday_data_lock():
         entries = {entry.date: entry for entry in repository.list_sunday_services()}
         workers = {worker.name: worker for worker in repository.list_sunday_workers()}
-        historical = {entry.presider for entry in entries.values() if entry.date <= as_of.isoformat() and entry.presider}
-        eligible = {name for name, worker in workers.items() if '司會' in worker.preferred_roles
-                    or (not worker.preferred_roles and name in historical)}
+        # Current role selections are authoritative. Historical service must not
+        # silently re-enrol someone whose roles are now empty or have changed.
+        eligible = {name for name, worker in workers.items() if '司會' in worker.preferred_roles}
         for day in next_two_sundays(as_of):
             key = day.isoformat()
             if key not in entries:
@@ -69,17 +69,17 @@ def maintain_skeletons(repository, store, as_of):
             ownership = store.get('auto_presider:' + key)
             owned = ownership and ownership.get('status') in {'applied', 'applying'} and ownership.get('after') == entry.presider
             occupied = {entry.worship_leader, entry.sermon_speaker, entry.pianist, *entry.scripture_readers}
-            if entry.presider and (not owned or (entry.presider in workers and workers[entry.presider].is_available_on(key) and entry.presider not in occupied)):
+            if entry.presider and (not owned or (entry.presider in eligible and workers[entry.presider].is_available_on(key) and entry.presider not in occupied)):
                 continue
             candidates = [name for name in eligible if workers[name].is_available_on(key) and name not in occupied]
-            if not candidates:
+            if not candidates and not (owned and entry.presider):
                 continue
             def rank(name):
                 assigned = [date.fromisoformat(other.date) for other in entries.values() if other.presider == name and other.date != key]
                 recent = sum(as_of - timedelta(days=84) <= prior <= day for prior in assigned)
                 last = max((prior for prior in assigned if prior < day), default=date.min)
                 return recent, last, name
-            chosen = min(candidates, key=rank)
+            chosen = min(candidates, key=rank) if candidates else None
             receipt = {'before': entry.presider, 'after': chosen, 'status': 'applying', 'basis': 'eligible_available_rotation'}
             store.put('auto_presider:' + key, receipt)
             updated = entry.model_copy(update={'presider': chosen})
