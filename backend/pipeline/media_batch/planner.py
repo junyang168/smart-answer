@@ -303,6 +303,7 @@ def plan(store, folder, config):
                 item=r["item"],
                 out=str(artifact / r["id"] / binding[:16]),
                 config=config,
+                queue_order=info.get('processing_order', 2147483647),
             )
             review_root = Path(config["review_root"])
             protected = any(

@@ -52,6 +52,7 @@ export interface Sermon {
   series_id?: string;
   series_title?: string;
   series_order?: number;
+  rough_href?: string;
   organization_mode?: 'scripture_led' | 'topic_led' | 'mixed';
   organization_mode_label?: string;
   classification_confidence?: 'high' | 'medium' | 'low';

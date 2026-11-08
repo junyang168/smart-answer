@@ -229,6 +229,14 @@ def register_catalog(payload):
                 )
             )
             save(catalog, rows)
+        else:
+            row = next(r for r in rows if r['item'] == item)
+            if row.get('status') == 'processing' and row.get('media_ingest_source_sha256') == payload['info']['source_sha']:
+                # A planned rough catalog entry becomes editable only at handoff,
+                # after prepare_new_review_draft has created its review workspace.
+                if (root / 'transcript_review' / item / 'context.json').is_file():
+                    row['status'] = 'ready'
+                    save(catalog, rows)
 
 
 def handoff(payload):
@@ -242,6 +250,7 @@ def handoff(payload):
     register_catalog(payload)
     store = ReviewStore(root)
     prepare_new_review_draft(store, item, out)
+    register_catalog(payload)
     result.update(
         item=item,
         editor_href="/admin/surmons/" + item,

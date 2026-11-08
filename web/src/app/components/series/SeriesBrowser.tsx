@@ -10,6 +10,7 @@ import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, seriesName } f
 /** 同工的系列總覽：每個系列幾篇已發佈、幾篇編輯中、幾篇待認領。 */
 
 const BAR_CLASS: Record<string, string> = {
+  processing: "bg-sky-300",
   published: "bg-emerald-500",
   assigned: "bg-amber-400",
   ready: "bg-stone-200",

@@ -125,7 +125,7 @@ export const SeriesPlayerView = () => {
                 <td className="px-4 py-3 font-mono text-stone-500">{order}</td>
                 <td className="px-4 py-3">
                   <Link
-                    href={`/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`}
+                    href={sermon.status === "processing" && sermon.rough_href ? sermon.rough_href : `/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`}
                     className="font-medium text-stone-900 hover:text-amber-800 hover:underline"
                   >
                     {sermon.title}
