@@ -98,7 +98,7 @@ def check(root, ports, record_type, record, material, components):
     text=record.get('statement',record.get('text',record.get('title','')))
     for field in jevq.ROLES:
         if record.get(field):
-            questions[field+'_classification'] = jevq.role(field,text)
+            questions[field+'_classification'] = jevq.role(field,text,speaker=record.get('speaker'))
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
     if len(json.dumps(request, ensure_ascii=False).encode()) > f.JEV_BYTES:
         raise ValueError('complete component check exceeds Flash payload limit; no call issued')

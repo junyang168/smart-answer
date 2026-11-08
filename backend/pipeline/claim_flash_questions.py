@@ -4,7 +4,7 @@ Guidance: https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKI
 Question ids are invisible to Jev. Each instruction names its own subject.
 """
 
-CONTRACT = 'claim_flash_classification_v1'
+CONTRACT = 'claim_flash_classification_v2'
 LOOKUP_UNCERTAINTY_FLOOR = .25  # Existing routing policy; not tuned by this change.
 
 FIDELITY = {'faithful':'實質意思有來源支持，沒有改義。',
@@ -43,8 +43,14 @@ def decomposition():
                    'changed':'有改義或多種缺陷。','uncertain':'無法判定。'})
 
 
-def role(field, text):
+def role(field, text, *, speaker=None):
     instruction,criteria=ROLES[field]
+    if field=='stance' and speaker and speaker!='professor':
+        # The actor is a query parameter, not the answer being checked. It is
+        # supplied only to this question; the speaker question remains blind.
+        actor={'audience':'聽眾','quoted_source':'所引用的來源'}.get(speaker,'相應發言者')
+        instruction=instruction.replace('教授',actor)
+        criteria={k:v.replace('教授',actor) for k,v in criteria.items()}
     return choice('只根據原文，'+instruction+'\n內容：'+text,criteria)
 
 

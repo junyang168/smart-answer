@@ -120,3 +120,22 @@ def test_legacy_yes_no_stance_reply_is_rejected_not_mapped_to_approval(tmp_path)
     with pytest.raises(ValueError):
         parts.check(tmp_path,ports,'evidence_steps',{'statement':'教授的判斷。','stance':'asserted'},
                     {'original_text_excerpts':['教授的判斷。']},None)
+
+
+def test_listener_stance_uses_listener_as_subject_without_leaking_speaker_answer(tmp_path):
+    record={'statement':'聽眾表示自己先前沒有想到。','speaker':'audience','stance':'asserted'}
+    ports=Ports(choices={'speaker_classification':'audience'})
+    result=parts.check(tmp_path,ports,'evidence_steps',record,{'original_text_excerpts':['聽眾：我沒有想到。']},None)
+    request=ports.calls[0][1]
+    assert '聽眾對這個完整判斷' in request['questions']['stance_classification']['instructions']
+    assert request['questions']['speaker_classification']['instructions'].startswith('只根據原文，這項內容的發言來源角色是誰？')
+    assert 'speaker' not in request['state']['record']
+    assert not parts.needs_disposition(result)
+
+
+def test_wrong_speaker_routes_even_when_stance_for_the_recorded_actor_matches(tmp_path):
+    ports=Ports(choices={'speaker_classification':'professor','stance_classification':'asserted'})
+    result=parts.check(tmp_path,ports,'evidence_steps',{'statement':'不能這樣推論。','speaker':'audience','stance':'asserted'},
+                        {'original_text_excerpts':['教授：不能這樣推論。']},None)
+    assert result['speaker_consistency']=='different' and result['stance_consistency']=='matched'
+    assert parts.needs_disposition(result)
