@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_flash_common as f
+from backend.pipeline import claim_flash_components as components
 
 
 class Edit(BaseModel):
@@ -123,7 +124,7 @@ def run(store, source_id, root, ports, *, apply=False):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,'models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -142,18 +143,18 @@ def run(store, source_id, root, ports, *, apply=False):
                 'source_sha256':sources[source_id]['body_sha256'],'claim_qualification':'not_granted','applied':False}
             e.save(root/'verification.json',result)
             return e.publish(root,result)
+        parts=components.decompose(root,ports,{key:row['payload']['statement'] for key,row in records.items()
+            if key.split('/')[0] in {'evidence_steps','observations'}})
         for key,row in records.items():
             if key.split('/')[0] not in f.LOWER:
                 continue
             v=materials[key]
-            verdict=f.jev(root,ports,{'record_type':key.split('/')[0],
-                'record':f.projected(row),'original_text_excerpts':v['original_text_excerpts']},
-                {'record_fidelity':f.yn('本記錄是否有任何實質內容、歸屬或經文用途不受完整原文清單支持？'
-                 'Question 只核對提問，不檢查其 answer_claim_ids；不要求支持材料成為獨立 Claim。')})['record_fidelity']
-            if verdict=='no':
+            answers=components.check(root,ports,key.split('/')[0],f.projected(row),v,parts.get(key))
+            if not components.needs_disposition(answers):
                 outcomes.append({'object_key':key,'basis':'jev_precheck'})
             else:
-                jobs.append({'job_id':key,'record':f.projected(row),'material':v,'verdict':verdict})
+                jobs.append({'job_id':key,'record':f.projected(row),'material':v,'verdict':answers,
+                             'components':parts.get(key)})
         for batch,raw in f.gpt(root,ports,'lower_repair',jobs,Edits.model_json_schema(),PROMPT+
                 '修正表述或來源用 repair；異議不成立 keep；無法解答 needs_source。不得修改 Question 答案連線。'):
             edits=Edits.model_validate(raw).items

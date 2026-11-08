@@ -19,7 +19,7 @@ class Ports:
         self.calls.append(('jev',request))
         answers={}
         for name,spec in request['questions'].items():
-            default=(0. if spec['type']=='noul' else 'none' if name.endswith('_claim')
+            default=(0. if spec['type']=='noul' else 'supported' if name.startswith('component_') else 'none' if name.endswith('_claim')
                      else 'a_to_b_supports' if name=='relation' else 'no')
             chosen=self.choices.get(name,default)
             if callable(chosen):chosen=chosen(request)
@@ -30,6 +30,10 @@ class Ports:
         return {'model':e.MODEL,'answers':answers}
     def repair(self,request):
         self.calls.append(('gpt',request))
+        if request['input']['task']=='lower_decomposition':
+            return {'items':[{'job_id':j['job_id'],'items':[
+                {'object_key':r['object_key'],'components':[{'role':'judgment','text':r['statement']}]} for r in j['records']
+            ]} for j in request['input']['jobs']]}
         if self.reply:
             result=self.reply(request)
             if result is not None:return result
@@ -579,7 +583,7 @@ def test_overlarge_lower_statement_does_not_truncate_raw_support(sample):
     p=deepcopy(store.get_record_state('evidence_steps','E')['payload']);p['statement']='這是教授的主張。'*10000
     store.apply_plan(store.plan_package({'package_id':'oversized-e','evidence_steps':[p]}))
     ports=Ports()
-    with pytest.raises(ValueError,match='bounded request size'):
+    with pytest.raises(ValueError,match='bounded request size|complete GPT job exceeds'):
         lower.run(store,'S',root/'lower',ports,apply=True)
     assert not ports.calls
 
@@ -750,7 +754,7 @@ def test_unresolved_coverage_proposals_are_preserved_without_partial_write(sampl
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert result['status']=='needs_attention' and not result['applied']
     assert store.get_record_state('evidence_steps','E')==before
-    assert len([q for role,q in ports.calls if role=='gpt'])==1
+    assert [q['input']['task'] for role,q in ports.calls if role=='gpt']==['lower_decomposition','lower_coverage']
 
 
 @pytest.mark.parametrize('final_action',['resolved','needs_source'])
@@ -787,7 +791,7 @@ def test_coverage_expands_bound_support_once_without_sending_old_draft(sample,fi
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert result['status']==('verified' if final_action=='resolved' else 'needs_attention')
     tasks=[req['input']['task'] for role,req in ports.calls if role=='gpt']
-    assert tasks==['lower_coverage','lower_coverage_context']
+    assert tasks==['lower_decomposition','lower_coverage','lower_coverage_context']
 
 
 def test_candidate_quote_uses_existing_mechanical_newline_projection(sample):
