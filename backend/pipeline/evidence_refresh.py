@@ -336,14 +336,16 @@ def _run(store, evidence_ids, root, ports, *, max_revisions, apply):
     return commit_verified(store, root) if apply else publish(root, result)
 
 
-def commit_verified(store, root):
+def commit_verified(store, root, *, source_fragments_only=False):
     result = json.loads((root / 'verification.json').read_text())
     frozen = json.loads((root / 'before.json').read_text())
     records, sources = frozen['records'], frozen['sources']
     updates, fragments = result['updates'], result['new_fragments']
     retiring = result.get('retiring_keys', [])
     source_kind = result['version']
-    if result['status'] == 'verified' and (updates or retiring):
+    if source_fragments_only and (updates or retiring or any(not k.startswith('source_fragments/') for k in fragments)):
+        raise ValueError('source-only commit cannot write or retire upper-layer records')
+    if result['status'] == 'verified' and (updates or retiring or source_fragments_only and fragments):
         if (root / 'commit.json').exists():
             readback(store, result)
             result.update(applied=True, status='applied', commit=json.loads((root / 'commit.json').read_text()))
@@ -378,7 +380,7 @@ def commit_verified(store, root):
         receipt = store.apply_plan(plan, expected_current_record_pins=pins,
             expected_current_source_claims=result.get('source_claim_index'),
             **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
-            metadata={'actor': source_kind, 'reason': 'Bottom-up semantic decisions and program-verified postimages',
+            metadata={'actor': source_kind, 'reason': result.get('commit_reason', 'Bottom-up semantic decisions and program-verified postimages'),
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)
         readback(store, result)

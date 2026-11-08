@@ -160,6 +160,13 @@ Evidence／Observation 完整性不再承擔 Claim 候選判決；Claim 整體�
 校準候選僅修來源連接，不改 statement、角色、出處或資格；單獨入口不寫資料庫。
 投影片語義核驗及逐字音訊對齊屬 future release，不是本版門檻；現有物理來源保護仍保留。
 
+已確認查漏報告的原文補齊使用獨立 `--fill-source-from` 入口。只保存報告中已明確給出的逐字片段，
+不猜補未列出的上下文，不重定位或修改原文。覆蓋已有有效片段就跳過；多個片段完整合起來已覆蓋時也跳過，
+其間僅差句讀／空白不重複建卡，缺實質文字或有意義符號仍算缺口。
+新片段保留來源版本、段落、段落時間、文字hash及candidate狀態；不修改Evidence／Observation、Claim、
+連接或資格。片段保存不等於查漏的上層內容問題已解決，原報告仍作下一層交接。
+預設只預覽；明確`--apply`才沿現有ChangeSet交易、pins、回讀及收據恢復寫入。
+
 對每篇來源的固定版本完成一次，結果供全篇各共用分組使用，不隨 Claim 逐條重做。
 本層完整讀取既有 SourceFragment 單數／複數引用清單，逐項核對物理綁定；
 不在此以 statement 是否缺據判定論據範圍，也不啟動 GPT 補材料。
@@ -454,6 +461,19 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+補齊已確認查漏報告中的原文片段（零模型；預設預覽）：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
+  --source-id ACTUAL_SOURCE_ID \
+  --fill-source-from /absolute/path/coverage-check/reviews/INPUT_SHA/result.json \
+  --root /absolute/path/source-fill
+```
+
+寫入授權範圍內加`--apply`，可沿同一root由預覽接續；報告與來源版本均須相同。
+只新增確實尚未覆蓋的SourceFragment；有非逐字、歧義或錯段等未解決項時不提交整份提案。
+相同執行復用保存驗證及交易收據，另一新執行亦會跳過已保存片段；不重新進入模型或完整Claim Update。
 
 獨立反向查漏（唯讀，GPT訂閱medium＋Jev，沿用共用容量）：
 
