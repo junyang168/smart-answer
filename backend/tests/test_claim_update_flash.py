@@ -227,6 +227,45 @@ def test_lower_wrong_job_quote_gets_one_scoped_correction_not_expanded_authority
     assert len(ports.calls)==count
 
 
+@pytest.mark.parametrize('action',['repair','retire','needs_source'])
+def test_deleted_question_uses_complete_source_then_repairs_or_retires_without_claim_edits(sample,action):
+    store,root,_=sample
+    records,sources=f.load_source(store,'S')
+    stale=deepcopy(records['source_fragments/F']['payload'])
+    stale.update(fragment_id='OLD-Q',anchor_state='source_deleted',verbatim_excerpt='以前的問題？',
+        deleted_in_source_sha256=sources['S']['body_sha256'])
+    store.apply_plan(store.plan_package({'package_id':'deleted-question','source_fragments':[stale],
+        'questions':[{'question_id':'Q','text':'以前的問題？','questioner':'professor','source_fragment_id':'OLD-Q',
+                      'answer_claim_ids':['C']}]}))
+    claim=store.get_record_state('claims','C')
+    def reply(req):
+        if req['input']['task']=='lower_repair':
+            return {'items':[{'job_id':j['job_id'],'action':'needs_source','statement':j['record']['text'],
+                'speaker':'professor','stance':'asserted','scripture_refs':[],
+                'quotes':[{'paragraph_key':'S0001','quote':'你不知道神的旨意，怎麼遵行？'}],
+                'reason':'局部來源未見此提問。'} for j in req['input']['jobs']]}
+        if req['input']['task']=='deleted_question_source':
+            assert req['input']['current_source_paragraphs']=={'S0001':sources['S']['paragraphs']['S0001']['text']}
+            return {'items':[{'job_id':j['job_id'],'action':action,'text':'不知道神的旨意，怎麼遵行？',
+                'questioner':'professor','quotes':[{'paragraph_key':'S0001','quote':'你不知道神的旨意，怎麼遵行？'}],
+                'reason':'完整現版原文已核對，舊記錄原引文已被來源遷移標為刪除。'} for j in req['input']['jobs']]}
+    ports=Ports(reply=reply)
+    result=lower.run(store,'S',root/'lower',ports,apply=True)
+    assert store.get_record_state('claims','C')==claim
+    if action=='needs_source':assert result['status']=='needs_attention'
+    else:
+        assert result['applied']
+        saved=store.get_record_state('questions','Q')
+        assert saved['retired']==(action=='retire')
+        if action=='repair':
+            assert saved['payload']['text']=='不知道神的旨意，怎麼遵行？'
+            assert saved['payload']['answer_claim_ids']==['C']
+        lower.verify(root/'lower',*f.load_source(store,'S'))
+    count=len(ports.calls)
+    lower.run(store,'S',root/'lower',ports,apply=True)
+    assert len(ports.calls)==count
+
+
 def test_indirect_observation_path_is_not_orphan_and_cycle_is_not_support():
     def row(**p):return {'payload':p,'retired':False}
     records={'claims/C':row(evidence_step_ids=['E']), 'evidence_steps/E':row(),

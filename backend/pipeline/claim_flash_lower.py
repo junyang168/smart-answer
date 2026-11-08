@@ -32,6 +32,21 @@ class Edits(BaseModel):
     items: list[Edit]
 
 
+class QuestionSourceDecision(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    job_id: str
+    action: Literal['repair','retire','needs_source']
+    text: str
+    questioner: str
+    quotes: list[e.Quote]
+    reason: str=Field(min_length=1)
+
+
+class QuestionSourceDecisions(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    items: list[QuestionSourceDecision]
+
+
 class MissingRecord(BaseModel):
     model_config=ConfigDict(extra='forbid', strict=True)
     record_type: Literal['evidence_steps','observations']
@@ -143,6 +158,62 @@ def paragraph_records(pk, records, excluded=()):
                     for fid in e.evidence_fragment_ids(r['payload']))}
 
 
+def recover_deleted_questions(records,sources,pending,root,ports):
+    """A deleted-source Question needs a complete current source, not a guessed anchor."""
+    sid,source=next(iter(sources.items()));jobs=[]
+    for item in pending:
+        key=item.get('object_key','')
+        if not key.startswith('questions/') or key not in records:continue
+        p=records[key]['payload'];fids=e.evidence_fragment_ids(p)
+        fragments=[records.get('source_fragments/'+fid,{}).get('payload',{}) for fid in fids]
+        if (p.get('review_status') in f.PROTECTED or not fragments or
+                any(v.get('source_id')!=sid or v.get('anchor_state')!='source_deleted'
+                    or v.get('deleted_in_source_sha256')!=source['body_sha256'] for v in fragments)):continue
+        jobs.append({'job_id':key,'question':f.projected(records[key]),
+            'historical_quotes':[v['verbatim_excerpt'] for v in fragments],
+            'previous_disposition':item['reason']})
+    if not jobs:return {},{},[],[],set()
+    current={pk:p['text'] for pk,p in source['paragraphs'].items()}
+    updates={};generated={};retiring=[];outcomes=[];resolved=set()
+    try:
+        replies=f.gpt(root,ports,'deleted_question_source',jobs,QuestionSourceDecisions.model_json_schema(),
+            PROMPT+'本次只處置來源遷移已明確標記原引文刪除、局部查找仍未解決的 Question。'
+            'current_source_paragraphs 是完整現版講道。核對同一語境、所問內容與發問者，不能借別處泛泛的設問。'
+            '現版仍有相同提問可 repair，給忠實 text 與逐字 quotes；全部原文已無此提問可 retire。'
+            '陳述同一主題不等於教授問過問題，不把陳述改造成提問。仍不確定 needs_source。'
+            'retire 只退役這個舊問題，保留歷史，不修改任何 Claim 或其他層。',
+            shared={'current_source_paragraphs':current,'current_source_sha256':source['body_sha256']})
+        for batch,raw in replies:
+            decisions=QuestionSourceDecisions.model_validate(raw).items
+            f.exactly([d.model_dump() for d in decisions],[j['job_id'] for j in batch],'job_id')
+            for decision in decisions:
+                key=decision.job_id;p=records[key]['payload']
+                if decision.action=='needs_source':continue
+                if decision.action=='retire':
+                    oid=key.split('/',1)[1]
+                    edges=[k for k,r in records.items() if k.startswith(('knowledge_relations/','claim_relations/'))
+                        and oid in {r['payload']['from_id'],r['payload']['to_id']}]
+                    if any(records[k]['payload'].get('review_status') in f.PROTECTED for k in edges):continue
+                    retiring.extend([key]+edges)
+                else:
+                    if not decision.quotes or not decision.text.strip():raise ValueError('Question source repair needs text and quotes')
+                    edit=Edit(job_id=key,action='repair',statement=decision.text,questioner=decision.questioner,
+                        speaker='professor',stance='asserted',scripture_refs=p.get('scripture_refs',[]),
+                        quotes=decision.quotes,reason=decision.reason)
+                    material={'nearby_paragraphs':[{'source_id':sid,'paragraph_key':pk,**v}
+                        for pk,v in source['paragraphs'].items()]}
+                    post,frags,_=record_postimage(key,p,edit,material,records,sources)
+                    updates[key]=post;generated.update(frags)
+                resolved.add(key)
+                outcomes.append({'object_key':key,'basis':'complete_current_source_question_disposition',
+                    'action':decision.action,'reason':decision.reason,'source_sha256':source['body_sha256']})
+    except ValueError as exc:
+        # Absence cannot be inferred from a truncated sermon. Oversized complete
+        # input stays pending; all other contract/source errors remain visible.
+        if 'one complete GPT job exceeds Flash payload limit' not in str(exc):raise
+    return updates,generated,retiring,outcomes,resolved
+
+
 def run(store, source_id, root, ports, *, apply=False):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     with (root/'run.lock').open('a') as lock:
@@ -157,7 +228,14 @@ def run(store, source_id, root, ports, *, apply=False):
             if apply and (root/'commit.json').exists():
                 verify(root,*f.load_source(store,source_id))
                 return f.resume_committed(store,root,result)
-            return e.commit_verified(store,root) if apply else result
+            if (result['status']=='needs_attention' and not result.get('question_source_contract')
+                    and not (root/'commit-intent.json').exists()
+                    and any(p.get('object_key','').startswith('questions/') for p in result['pending'])):
+                # New complete-source recovery can finish an older, unapplied
+                # pending result. Preserve it verbatim and reuse exact raw calls.
+                e.save(root/'superseded'/('verification-'+e.digest(result)+'.json'),result)
+                (root/'verification.json').unlink()
+            else:return e.commit_verified(store,root) if apply else result
         records,sources=f.load_source(store,source_id)
         e.save(root/'before.json',{'records':records,'sources':sources})
         working=deepcopy(records);updates={};generated={};outcomes=[];pending=[];jobs=[]
@@ -248,6 +326,12 @@ def run(store, source_id, root, ports, *, apply=False):
                     working=f.apply_overlay(working,{key:post},frags)
                 f.value(key,working,sources)
                 outcomes.append({'object_key':key,'basis':'gpt_disposition','reason':edit.reason,'quote_projection':projection})
+        recovered,frags,retiring,question_outcomes,resolved=recover_deleted_questions(
+            working,sources,pending,root/'deleted-question-source',ports)
+        updates.update(recovered);generated.update(frags);outcomes.extend(question_outcomes)
+        working=f.apply_overlay(working,recovered,frags)
+        for key in retiring:working.pop(key,None)
+        pending=[item for item in pending if item.get('object_key') not in resolved]
         # Scan raw source in source order even if no existing record or Claim covers a paragraph.
         coverage_jobs=[];coverage=[];conclusions=[];lower_pairs=[]
         # Do not mistake an unresolved node/binding for missing source coverage.
@@ -367,11 +451,13 @@ def run(store, source_id, root, ports, *, apply=False):
             rid='KR-FL-'+e.digest(payload)[:24]
             updates['knowledge_relations/'+rid]={'relation_id':rid,**payload}
         verified=f.apply_overlay(records,updates,generated)
+        for key in retiring+rel['retiring_keys']:verified.pop(key,None)
         f.source_unchanged(sources)
         result={'version':f.VERSION,'stage':'lower','status':'needs_attention' if pending else 'verified',
-            'source_id':source_id,'updates':updates,'new_fragments':generated,'retiring_keys':rel['retiring_keys'],
+            'source_id':source_id,'updates':updates,'new_fragments':generated,'retiring_keys':list(dict.fromkeys(retiring+rel['retiring_keys'])),
             'outcomes':outcomes,'coverage':coverage,'conclusion_candidates':conclusions,'pending':pending,
             'excluded_context_keys':sorted(excluded),
+            'question_source_contract':'complete_deleted_question_v1',
             'fidelity':{k:f.projected(r) for k,r in verified.items() if k.split('/')[0] in f.LOWER},
             'source_sha256':sources[source_id]['body_sha256'],'claim_qualification':'not_granted','applied':False}
         e.save(root/'verification.json',result)
