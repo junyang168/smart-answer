@@ -11,6 +11,8 @@ from backend.pipeline import claim_flash_common as f
 from backend.pipeline import claim_flash_components as components
 from backend.pipeline import claim_flash_questions as jevq
 from backend.pipeline import claim_flash_source_lookup as source_lookup
+from backend.pipeline import claim_flash_source as source_stage
+from backend.pipeline.claim_flash_source import excluded_context
 
 
 class Edit(BaseModel):
@@ -137,20 +139,6 @@ def record_postimage(key, record, edit, material, records, sources):
     return result,fragments,projection
 
 
-def excluded_context(key,records):
-    """Already non-argumentative, unowned dialogue stays historical, not verified support."""
-    p=records[key]['payload'];oid=key.split('/',1)[1]
-    if (not key.startswith('evidence_steps/') or p.get('step_type')!='dialogue_context'
-            or p.get('support_eligibility')!='context_only' or p.get('produced_claim_ids')
-            or p.get('review_status') in f.PROTECTED):
-        return False
-    for k,r in records.items():
-        q=r['payload']
-        if k.startswith('claims/') and oid in q.get('evidence_step_ids',[]):return False
-        if k.startswith('knowledge_relations/') and oid in {q['from_id'],q['to_id']} and q['relation_type']!='contextualizes':return False
-    return True
-
-
 def paragraph_records(pk, records, excluded=()):
     return {k:f.projected(r) for k,r in records.items() if k.split('/')[0] in f.LOWER
             and k not in excluded
@@ -238,43 +226,11 @@ def run(store, source_id, root, ports, *, apply=False):
             else:return e.commit_verified(store,root) if apply else result
         records,sources=f.load_source(store,source_id)
         e.save(root/'before.json',{'records':records,'sources':sources})
-        working=deepcopy(records);updates={};generated={};outcomes=[];pending=[];jobs=[]
-        materials={};calibration={};mechanical=[];excluded=[]
-        locator=None
-        for key in sorted(records):
-            row=records[key]
-            if key.split('/')[0] in f.LOWER:
-                try:materials[key]=f.value(key,records,sources)
-                except (ValueError,KeyError) as exc:
-                    if excluded_context(key,records):
-                        excluded.append(key)
-                        outcomes.append({'object_key':key,'basis':'excluded_unbound_dialogue_context',
-                                         'source_verified':False,'argument_use_permitted':False})
-                        continue
-                    if locator is None:locator=source_lookup.Locator(sources)
-                    try:
-                        material,quotes=locator.prepare(key,records,sources)
-                    except (ValueError,KeyError) as failure:
-                        pending.append({'object_key':key,'reason':'source_calibration_required','detail':str(failure)})
-                        continue
-                    if quotes is None:
-                        materials[key]=material;calibration[key]=str(exc)
-                        continue
-                    p=records[key]['payload']
-                    if p.get('review_status') in f.PROTECTED:
-                        pending.append({'object_key':key,'reason':'protected_lower_record'});continue
-                    edit=Edit(job_id=key,action='repair',statement=p.get('statement',p.get('text',p.get('title',''))),
-                        speaker=p.get('speaker') or 'professor',stance=p.get('stance') or 'asserted',
-                        scripture_refs=p.get('scripture_refs',[]),quotes=quotes,reason='唯一逐字／排版／繁簡對應，校準現版位置。')
-                    post,frags,projection=record_postimage(key,p,edit,material,working,sources)
-                    # Coordinate calibration must not change textual or semantic fields.
-                    allowed={'source_fragment_id','source_fragment_ids','source_binding_status'}
-                    if any(post.get(k)!=p.get(k) for k in set(post)|set(p) if k not in allowed):
-                        raise ValueError('mechanical source calibration changed record content')
-                    updates[key]=post;generated.update(frags)
-                    working=f.apply_overlay(working,{key:post},frags)
-                    materials[key]=f.value(key,working,sources)
-                    mechanical.append({'object_key':key,'quote_projection':projection})
+        prepared=source_stage.prepare(records,sources)
+        working=prepared['working'];updates=prepared['updates'];generated=prepared['generated']
+        outcomes=prepared['outcomes'];pending=prepared['pending'];jobs=[]
+        materials=prepared['materials'];calibration=prepared['calibration']
+        mechanical=prepared['mechanical'];excluded=prepared['excluded']
         e.save(root/'source-calibration.json',mechanical)
         e.save(root/'source-assembly.json',{key:v['source_assembly'] for key,v in materials.items() if v.get('source_assembly')})
         parts=components.decompose(root,ports,{key:working[key]['payload']['statement'] for key in materials

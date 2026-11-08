@@ -16,7 +16,7 @@
 
 Evidence 的核心是一個 statement；其原文依據由原文層管理。**EvidenceStep 是 Claim 層的論證步驟。**
 「原文支持 Evidence statement」是表述忠實性；「Evidence 支持 Claim」是論證關係，不能混為一題。
-原文層的清單完整性不是僅查 ID 是否存在；須查應共同掛載的片段是否漏掉。
+本版原文層完整讀取已記錄的單數／複數片段清單，逐項查內容、定位及版本；不藉 statement 缺據判定擴大成 Evidence 審閱。
 Evidence 層發現缺據時，可以提出來源缺口，但由原文層補找、重綁並交回；找不到時才按完整材料處置 statement。
 不靠刪除 statement 的實質內容掩蓋片段漏掛。
 
@@ -30,10 +30,10 @@ Evidence 與論證步驟正式分開表示的方法為 TBD；此次不為命名�
 | --- | --- |
 | 來源身分：`source_id`, `source_type`, `project_id`, `transcript_id`, `canonical_source_id`, `title`, `source_url` | 程式核對註冊身分、實際原件及連結，不把編輯視圖另當教授來源；語義身分衝突另行處置 |
 | 版本：`source_sha256`, `source_body_sha256`, `source_file_sha256`, `editorial_structure_sha256`, `locator_space`, `extraction_record_namespace` | 程式分開正文、實體檔案及編輯結構版本，核對現行 locator space；只改標題不等於教授內容變了 |
-| 每筆材料的全部來源連接：`source_fragment_id`, `source_fragment_ids`, `citation_id`, `citation_ids` | 合併單數／複數來源引用去重，核對每項存在及所屬版本；Jev 以 statement、既有片段及同講原文查漏掛或錯掛候選，GPT 對完整候選決定完整清單。不得只保留最相似的一段 |
+| 每筆材料的全部來源連接：`source_fragment_id`, `source_fragment_ids`, `citation_id`, `citation_ids` | 合併單數／複數來源引用去重，核對全部既有引用、片段存在及所屬版本，不漏讀複數清單。statement 是否缺據、是否漏了論據不在本階段審查；後層發現來源缺口時再調用既有同講搜尋與交接 |
 | 片段身分與逐字內容：`fragment_id`, `verbatim_excerpt`, `paragraph_key`, `paragraph_text_sha256`, `verbatim_excerpt_sha256`, `anchor_state` | 程式直接讀現版原件，查引文、段落及 hash；標點、空白、繁簡的可證明唯一對應可機械校準，保存原值與更正。不按 90% 相似度自動改字或選另一句 |
-| 時間：`media_time`、歷史擴充 `media_end_time`, `source_segment_index` | 程式核對段落／segment 座標及時間範圍；未做音訊逐字對齊時不得宣稱已證明逐字時間準確，方法 TBD |
-| 投影片：`source_visual_sha256`, `visual_source_assets`, `visual_sources`, `visual_source_attestations`, `source_modality`, `visual_locator`, `visual_block_sha256`, `visual_canonical_sha256`, `visual_renderer_version`, `visual_facts`, `visual_source_path`, `visual_source_file_sha256`, `visual_source_url` | 核對原資產、頁面／區塊與版本。已確認屬教授的 slide 與教授原話同等；使用者補充說明不得冒充教授內容。非文字視覺內容的忠實性判讀方法 TBD |
+| 時間：`media_time`、歷史擴充 `media_end_time`, `source_segment_index` | 程式核對段落／segment 座標及時間範圍；未做音訊逐字對齊時不得宣稱已證明逐字時間準確，屬 future release，不納入本版門檻 |
+| 投影片：`source_visual_sha256`, `visual_source_assets`, `visual_sources`, `visual_source_attestations`, `source_modality`, `visual_locator`, `visual_block_sha256`, `visual_canonical_sha256`, `visual_renderer_version`, `visual_facts`, `visual_source_path`, `visual_source_file_sha256`, `visual_source_url` | 核對原資產、頁面／區塊與版本。已確認屬教授的 slide 與教授原話同等；使用者補充說明不得冒充教授內容。非文字視覺內容語義核驗屬 future release，不納入本版門檻 |
 | 來源遷移及歷史：`source_binding_status`, `deleted_in_source_sha256`, `replacement_fragment_ids`, `split_from_fragment_id` | 先定位後判刪除；機械無法解決時沿 migration 的 Jev 新舊語義影響判定，必要時 GPT 處置。保存歷史，不任意復活刪除項 |
 | 其他已見擴充：`source_path`, `source_text_sha256`, `editorial_topology_sha256`, `anchor_binding_sha256` | 核對檔案與來源版本的實際含義，不把不同 hash 名稱當同義；歷史各格式的完整映射 TBD |
 
@@ -44,7 +44,7 @@ Evidence 與論證步驟正式分開表示的方法為 TBD；此次不為命名�
 
 **本層輸入**：當前來源、材料 statement 作查找目標、全部既有引用及必要舊版；Claim 只在來源變更影響分析所需時作參考，不在本層修改。
 **出口**：有版本綁定的完整來源清單，或具體未解決範圍。單純逐字命中不能證明清單完整；沒有找出候選也不能證明教授未講過。
-清單完整性與定位各有結果，不能一個通過代替另一個。Jev 查找沿既有 payload 分批覆蓋同講來源，容許多段共同支持；候選不是通過證明。
+原文層不啟動 Jev／GPT 語義審閱。後層若需既有 Jev 補找，仍按完整 payload 分批覆蓋同講來源；搜尋候選不是原文層或內容已通過的證明。
 Citation 與直接 SourceFragment 綁定在新舊記錄的權威對應為 TBD；不臨時增加所有歷史記錄必有 citation 的新門檻。
 
 ## 3. Evidence／Observation 層的元素與方法
@@ -124,7 +124,7 @@ Jev 的不足／不確定是待處置線索，不是定罪；GPT 可根據完整
 ## 7. TBD 與驗證這份設計
 
 尚待確定：Evidence／EvidenceStep 表示分離；多前提與有序論證步驟；歷史來源及 anchor 格式；
-Citation 權威映射；視覺內容及逐字音訊定位；類型詞彙、Jev 校準；用途資格與全局狀態的對應；
+Citation 權威映射；視覺語義及逐字音訊定位（future release，非本版完成條件）；類型詞彙、Jev 校準；用途資格與全局狀態的對應；
 下游路由準入；全庫開放擴充欄位清點。以上不以預設值假裝已解決。
 
 設計評估須分別包含：逐字位置正確但漏一段支持、清單完整但 statement 加料、statement 正確但 Claim 連接反向、

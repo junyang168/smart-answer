@@ -103,7 +103,7 @@ def resume_committed(store,root,result):
     return e.publish(root,{**result,'status':'applied','applied':True,'commit':receipt})
 
 
-def load_source(store, sid):
+def load_source(store, sid, *, visual_context=False):
     """One typed source census, including unowned records; no corpus snapshot."""
     records = {}
     with store.connect() as conn, conn.cursor() as cur:
@@ -134,7 +134,7 @@ def load_source(store, sid):
             query('collection=ANY(%s) AND payload->>%s=ANY(%s)',
                   (['knowledge_relations', 'claim_relations', 'claim_relation_constraints'], field, ids))
     sources = {sid: e.source_snapshot({'path': doc['source_path'],
-                    'file_sha256': doc['source_file_sha256']}, source=doc)}
+                    'file_sha256': doc['source_file_sha256']}, source=doc, visual_context=visual_context)}
     return records, sources
 
 

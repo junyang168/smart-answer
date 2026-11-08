@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組計畫入口已實作；分組後各層 task 執行、跨組判定復用及成本對照仍未完整落實，見第 7 節。
+> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組及獨立原文層入口已實作；分組後各層 task 執行、跨組判定復用及成本對照仍未完整落實，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -153,16 +153,24 @@ Evidence／Observation 完整性不再承擔 Claim 候選判決；Claim 整體�
 
 ## 2. 原文層
 
+本版先完成原文層整合：`--verify-source` 為獨立唯讀入口，不建立模型客戶端，
+不需要 Claim 清單、模型容量或登入，不執行 Evidence statement／反向查漏／Claim 審閱。
+現有下層流程復用同一原文準備函數；歷史任務的語義處置與提交契約保持。
+輸出逐片段及逐記錄的有效、歷史排除、機械校準候選和待處理清單。
+校準候選僅修來源連接，不改 statement、角色、出處或資格；單獨入口不寫資料庫。
+投影片語義核驗及逐字音訊對齊屬 future release，不是本版門檻；現有物理來源保護仍保留。
+
 對每篇來源的固定版本完成一次，結果供全篇各共用分組使用，不隨 Claim 逐條重做。
-本層也負責每筆 Evidence／Observation 的 SourceFragment 清單完整性；發現漏掛或錯掛時，
-沿同講來源查找與 GPT 處置補齊全部支持片段，再交 Evidence 層核對 statement，不只核對現有 ID。
+本層完整讀取既有 SourceFragment 單數／複數引用清單，逐項核對物理綁定；
+不在此以 statement 是否缺據判定論據範圍，也不啟動 GPT 補材料。
 沿用既有 migration：先機械核對位置、段落、時間、引文、繁簡、空白、標點及版本，
 找不到不能直接當刪除，也不能讓語義模型猜位置。
 
-涉及來源變更時，Jev 讀取每項 Evidence 完整的新舊自身片段、必要上下文及直接 Claim，
+另行執行既有 migration 的來源變更任務時，Jev 讀取每項 Evidence 完整的新舊自身片段、必要上下文及直接 Claim，
 分別問「是否影響 Evidence 忠實性／歸屬」及「是否影響對所列 Claim 的支持」。
 確認無實質影響者可保留既有有效判定；受影響或不確定者交下一層處置。
 不把舊 hold 或未審閱狀態自動變成通過，也不把影響判定冒稱全篇錄音校訂。
+這是既有 migration 的獨立任務，不是 `--verify-source` 會啟動的語義審閱。
 
 現有 migration 請求以最多六項 Evidence、完整 JSON UTF-8 最多 40,000 bytes 共同限制；
 每項兩個問題，共享材料。單項完整材料超限就在發出前明確停止，不截掉部分支持材料。
@@ -436,6 +444,19 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+獨立驗證原文層（唯讀、零模型）：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
+  --source-id ACTUAL_SOURCE_ID --verify-source --root /absolute/path/source-check
+```
+
+結果在 `source-verification.json`：`valid` 為現版物理綁定；`calibration_available` 是未提交的唯一機械校準候選；
+`historical_excluded`／`historical` 不作現版來源批准；`unresolved` 為具體定位待處理。
+`needs_attention` 不表示內容須人工判斷。本模式拒絕 `--apply`，不能將候選當作已入庫。
+未被現行記錄使用的歷史／未驗片段另列，不為清理庫存強制重審全講。
+
 
 追蹤：[#702](https://github.com/junyang168/smart-answer/issues/702)。前置來源 migration 及試驗入口
 來自 #546／PR #683。Flash 復用其來源綁定、引文投影、訂閱客戶端、容量限制、
