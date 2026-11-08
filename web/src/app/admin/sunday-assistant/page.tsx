@@ -8,6 +8,7 @@ type Settings = {
   enabled: boolean; availability_group: string; service_group: string; songs_group: string; response_hymn_group: string; offering_group: string;
   availability_group_name: string; service_group_name: string; songs_group_name: string;
   auto_generate_ppt: boolean; auto_apply: boolean; maintain_future_skeletons: boolean; collect_cross_group: boolean; group_questions_enabled: boolean; reminders_enabled: boolean; friday_hour: number; friday_minute: number;
+  admin_clarifications_enabled: boolean; admin_clarifications_since?: string;
   fellowship_enabled: boolean; fellowship_start_date?: string; fellowship_since?: string;
   admin_help_enabled: boolean; admin_group: string; admin_group_name: string;
   sender_workers: Record<string, string[]>; trusted_senders: string[];
@@ -158,11 +159,12 @@ export default function SundayAssistantPage() {
           <label><input type="checkbox" checked={settings.auto_apply} onChange={e => patch({ auto_apply: e.target.checked })} /> 自動登記所選群內的明確資料</label>
           <label><input type="checkbox" checked={settings.maintain_future_skeletons ?? true} onChange={e => patch({ maintain_future_skeletons: e.target.checked })} /> 維持未來兩個主日骨架，缺項依發問設定留後台或在負責群提問</label>
           <label><input type="checkbox" checked={settings.collect_cross_group ?? true} onChange={e => patch({ collect_cross_group: e.target.checked })} /> 收集三個來源群中的明確跨群資料</label>
-          <label><input type="checkbox" checked={settings.group_questions_enabled ?? false} onChange={e => patch({ group_questions_enabled: e.target.checked })} /> 允許在來源群發送追問（關閉時問題只留後台）</label>
+          <label><input type="checkbox" checked={settings.admin_clarifications_enabled ?? false} onChange={e => patch({ admin_clarifications_enabled: e.target.checked })} /> 澄清統一送管理員群，回答後接續處理（優先於來源群設定）</label>
+          <label><input type="checkbox" checked={settings.group_questions_enabled ?? false} onChange={e => patch({ group_questions_enabled: e.target.checked })} /> 允許在來源群發送追問（僅在未啟用管理群澄清時生效）</label>
           <label><input type="checkbox" checked={settings.reminders_enabled} onChange={e => patch({ reminders_enabled: e.target.checked })} /> 啟用周五缺項提醒</label>
           <label className="flex items-center gap-3">周五（達拉斯時間）<input type="time" value={`${String(settings.friday_hour).padStart(2, "0")}:${String(settings.friday_minute).padStart(2, "0")}`} onChange={e => { const [h, m] = e.target.value.split(":").map(Number); patch({ friday_hour: h, friday_minute: m }); }} /></label>
         </div>
-        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時依設定保留後台，只有允許發問才送到原群。首次歷史同步只提供預覽。</p>
+        <p className="mt-3 text-xs text-slate-500">所選群的不同同工可分次提供資料。更正既有內容時先讀取並核對；日期或對象不清楚時，啟用管理群澄清便送管理員群，回答後接續；否則依來源群設定或保留後台。首次歷史同步只提供預覽。</p>
         <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
           <h3 className="font-semibold">Agent 內部故障求助</h3>
           <p className="mt-2">執行失敗立即求助；工作程序超過五分鐘沒有更新、持續連線故障或反覆崩潰時通知管理員。缺資料、等待澄清及一般人工核對不通知。獨立監測，不依賴模型；事件去重，恢復後回報。</p>

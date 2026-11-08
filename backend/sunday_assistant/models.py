@@ -27,6 +27,8 @@ class Settings(BaseModel):
     maintain_future_skeletons: bool = True
     collect_cross_group: bool = True
     offering_week_rule: Literal["current_preparation_sunday"] = "current_preparation_sunday"
+    admin_clarifications_enabled: bool = False
+    admin_clarifications_since: datetime | None = None
     group_questions_enabled: bool = False
     reminders_enabled: bool = False
     fellowship_enabled: bool = False
@@ -45,7 +47,7 @@ class Settings(BaseModel):
     # Retained for old settings files; collection is authorized by selected group.
     trusted_senders: list[str] = Field(default_factory=list)
 
-    @field_validator('fellowship_since')
+    @field_validator('fellowship_since', 'admin_clarifications_since')
     @classmethod
     def fellowship_activation_timezone(cls,value):
         if value is not None and value.tzinfo is None:
@@ -59,7 +61,7 @@ class Settings(BaseModel):
             if group and not re.fullmatch(r"[0-9]+(?:-[0-9]+)?@g\.us", group):
                 raise ValueError("請選擇有效的 WhatsApp 群 ID")
         groups = [g for g in (self.availability_group, self.service_group, self.songs_group) if g]
-        if (self.admin_help_enabled or self.fellowship_enabled) and not self.admin_group:
+        if (self.admin_help_enabled or self.fellowship_enabled or self.admin_clarifications_enabled) and not self.admin_group:
             raise ValueError("請先指定網站管理員求助群")
         if self.admin_group and self.admin_group in groups:
             raise ValueError("系統求助群需與三個資料來源群分開")
@@ -113,7 +115,7 @@ class Settings(BaseModel):
 
     @property
     def ingest_group_ids(self):
-        return self.source_group_ids | ({self.admin_group} if self.fellowship_enabled and self.admin_group else set())
+        return self.source_group_ids | ({self.admin_group} if (self.fellowship_enabled or self.admin_clarifications_enabled) and self.admin_group else set())
 
     def fields_for_group(self, group_id):
         if self.collect_cross_group and group_id in self.source_group_ids:
