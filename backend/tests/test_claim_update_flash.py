@@ -266,6 +266,59 @@ def test_deleted_question_uses_complete_source_then_repairs_or_retires_without_c
     assert len(ports.calls)==count
 
 
+def test_question_link_context_can_keep_valid_empty_answers_without_creating_claim(sample):
+    store,root,_=sample
+    store.apply_plan(store.plan_package({'package_id':'context-question','questions':[{
+        'question_id':'Q','text':'你不知道神的旨意，怎麼遵行？','questioner':'professor','source_fragment_id':'F'}]}))
+    records,sources=f.load_source(store,'S')
+    def reply(req):
+        if req['input']['task']=='question_answers':
+            assert req['input']['jobs'][0]['material']['source_context']['S0001']==sources['S']['paragraphs']['S0001']['text']
+            return {'items':[{'job_id':'Q','action':'keep','answer_claim_ids':[],
+                'reason':'所列 Claim 只談聽從與相信，未直接回答這個具體問題；保留空答案。'}]}
+    ports=Ports(choices={'answer_links':'complete'},reply=reply)
+    updates,pending=flash.question_links(records,sources,['claims/C'],{'S0001'},[],root,ports,required_gpt_ids=['Q'])
+    assert not updates and not pending
+    assert [q['input']['task'] for role,q in ports.calls if role=='gpt']==['question_answers']
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==[]
+
+
+def test_old_pending_question_context_recovery_reuses_other_group_answers(sample,monkeypatch):
+    store,root,_=sample
+    store.apply_plan(store.plan_package({'package_id':'recover-q','questions':[{
+        'question_id':'Q','text':'你不知道神的旨意，怎麼遵行？','source_fragment_id':'F'}]}))
+    ports=Ports()
+    lower.run(store,'S',root/'lower',ports,apply=True)
+    original=flash.question_links
+    monkeypatch.setattr(flash,'question_links',lambda *a,**kw:({},[{'object_key':'questions/Q','reason':'缺上下文。'}]))
+    group=root/'group'
+    assert flash.run_group(store,'S',['C'],root/'lower',group,ports,apply=True)['status']=='needs_attention'
+    draft=json.loads((group/'draft.json').read_text());draft.pop('question_context_contract')
+    (group/'draft.json').write_text(json.dumps(draft,ensure_ascii=False))
+    monkeypatch.setattr(flash,'question_links',original)
+    def reply(req):
+        if req['input']['task']=='question_answers':
+            assert req['input']['jobs'][0]['material']['source_context']
+            return {'items':[{'job_id':'Q','action':'keep','answer_claim_ids':[],'reason':'沒有適合的 Claim 答案。'}]}
+    ports.reply=reply;count=len(ports.calls)
+    assert flash.run_group(store,'S',['C'],root/'lower',group,ports,apply=True)['applied']
+    assert [q['input']['task'] for role,q in ports.calls[count:] if role=='gpt']==['question_answers']
+    assert json.loads(next((group/'superseded').glob('draft-*.json')).read_text())==draft
+
+
+@pytest.mark.parametrize('blocked_stage',['lower','claims'])
+def test_campaign_reports_remaining_targets_and_actual_nested_obstacle(sample,monkeypatch,blocked_stage):
+    store,root,_=sample
+    pending=[{'object_key':'questions/Q','reason':'來源上下文未提供。'}]
+    monkeypatch.setattr(lower,'run',lambda *a,**kw:{'status':'needs_attention' if blocked_stage=='lower' else 'verified',
+        'pending':pending if blocked_stage=='lower' else [],'updates':{}})
+    monkeypatch.setattr(flash,'run_group',lambda *a,**kw:{'status':'needs_attention','pending':pending})
+    result=flash.run(store,'S',[['C']],root,Ports(),apply=True)
+    assert result['status']=='needs_attention' and result['stage']==blocked_stage
+    assert result['completed_claim_ids']==[] and result['remaining_claim_ids']==['C']
+    assert result['pending']==pending
+
+
 def test_indirect_observation_path_is_not_orphan_and_cycle_is_not_support():
     def row(**p):return {'payload':p,'retired':False}
     records={'claims/C':row(evidence_step_ids=['E']), 'evidence_steps/E':row(),

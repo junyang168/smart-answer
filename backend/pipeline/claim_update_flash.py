@@ -200,7 +200,7 @@ class AnswerDecisions(BaseModel):
     items: list[AnswerDecision]
 
 
-def question_links(records,sources,members,near,links,root,ports):
+def question_links(records,sources,members,near,links,root,ports,*,required_gpt_ids=()):
     jobs=[];updates={};pending=[]
     intended={}
     for link in links:
@@ -213,12 +213,16 @@ def question_links(records,sources,members,near,links,root,ports):
         if not (paragraph_keys(key,records)&near or set(p.get('answer_claim_ids',[]))&{k.split('/',1)[1] for k in members} or qid in intended):
             continue
         existing=p.get('answer_claim_ids',[])
-        offered={k for k in active_claims(records) if k in members or k.split('/',1)[1] in existing+intended.get(qid,[])}
+        offered={k for k,payload in active_claims(records).items() if k in members
+            or k.split('/',1)[1] in existing+intended.get(qid,[])
+            or f.belongs_to_source(payload,records,next(iter(sources))) and paragraph_keys(k,records)&near}
         proposed=list(dict.fromkeys(existing+intended.get(qid,[])))
-        state={'question':p['text'],'source':f.value(key,records,sources)['original_text_excerpts'],
+        material=f.value(key,records,sources)
+        state={'question':p['text'],'source':material['original_text_excerpts'],
+               'source_context':{v['paragraph_key']:v['text'] for v in material['nearby_paragraphs']},
                'answer_claim_ids':proposed,'claims':peer_summary(sorted(offered),records)}
         ans=f.jev(root/'question-links',ports,state,{'answer_links':jevq.answer_links()})['answer_links']
-        if ans!='complete':
+        if ans!='complete' or qid in required_gpt_ids:
             jobs.append({'job_id':qid,'material':state,'precheck':ans,'proposed_ids':proposed})
         elif proposed!=existing:
             if p.get('review_status') in f.PROTECTED:
@@ -226,6 +230,8 @@ def question_links(records,sources,members,near,links,root,ports):
             updates[key]={**p,'answer_claim_ids':proposed,'answer_state':'answered' if proposed else p.get('answer_state','unanswered')}
     for batch,raw in f.gpt(root,ports,'question_answers',jobs,AnswerDecisions.model_json_schema(),PROMPT+
             '只處置問題與 Claim 的答案連線，保留仍有效的答案，不修改提問。'
+            'source_context 補齊設問前後的指涉與回答；不是所有問題都需要 Claim 答案。'
+            '若所列 Claim 均未直接回答、既有清單又是空的，可 keep 空清單；一般例子或動物名稱不強造 Claim。'
             '每項只用 material.claims 的 Claim ID，set 給完整答案清單；keep 保留 proposed_ids。'):
         items=AnswerDecisions.model_validate(raw).items
         f.exactly([x.model_dump() for x in items],[j['job_id'] for j in batch],'job_id')
@@ -336,8 +342,20 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
             'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,
             'review_marker_contract':'verified_legacy_ai_sampling_v1','models':ports.identity})
+        required_questions=[]
         if (root/'draft.json').exists():
-            return commit_group(store,root) if apply else json.loads((root/'draft.json').read_text())
+            previous=json.loads((root/'draft.json').read_text())
+            if (previous['status']=='needs_attention' and not previous.get('question_context_contract')
+                    and not (root/'commit-intent.json').exists() and previous['pending']
+                    and all(p.get('object_key','').startswith('questions/') for p in previous['pending'])):
+                e.save(root/'superseded'/('draft-'+e.digest(previous)+'.json'),previous)
+                required_questions=[p['object_key'].split('/',1)[1] for p in previous['pending']]
+                e.save(root/'question-context-recovery.json',{'pending_question_ids':required_questions,
+                    'original_draft_sha256':e.digest(previous),'defect':'question answer review omitted adjacent source context'})
+                (root/'draft.json').unlink()
+            else:return commit_group(store,root) if apply else previous
+        elif (root/'question-context-recovery.json').exists():
+            required_questions=json.loads((root/'question-context-recovery.json').read_text())['pending_question_ids']
         records,sources=f.load_source(store,source_id)
         proof=lower.verify(lower_root,records,sources)
         c.fetch_claims(store,claim_ids)  # Existing protection, retirement and target checks.
@@ -521,7 +539,8 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         edge_keys=[k for k in edge_keys if all('claims/'+records[k]['payload'][field] in records for field in ['from_id','to_id'])]
         relationships=pairs.review(records,sources,edge_keys,claim_pairs,root/'claim-pairs',ports,kind='claim')
         pending.extend(relationships['pending']);updates.update(relationships['updates'])
-        answer_updates,answer_pending=question_links(records,sources,members,near,links,root,ports)
+        answer_updates,answer_pending=question_links(records,sources,members,near,links,root,ports,
+            required_gpt_ids=required_questions)
         updates.update(answer_updates);pending.extend(answer_pending)
         # The answer postimage includes additions and removals; do not re-add a rejected candidate link at commit.
         links=[]
@@ -545,6 +564,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             'retiring_keys':attachment['retiring_keys']+relationships['retiring_keys'],
             'claim_checks':outcomes,'conclusion_dispositions':decisions,
             'review_sampling_markers':sampling,
+            'question_context_contract':'adjacent_question_answer_context_v1',
             'attachment_discovery':dispositions,'claim_relation_discovery':claim_dispositions,
             'orphan_keys_at_start':isolation['orphan_keys'],
             'legacy_qualification':'not_granted'}
@@ -633,7 +653,8 @@ def run(store,source_id,groups,root,ports,*,apply=False):
         result=lower.run(store,source_id,root/'lower',ports,apply=apply)
         if result['status']=='needs_attention' or (not apply and result['updates']):
             return e.publish(root,{'workflow':f.VERSION,'source_id':source_id,'status':result['status'],
-                'stage':'lower','completed_claim_ids':[],'result':result,'preview_only':not apply})
+                'stage':'lower','completed_claim_ids':[],'remaining_claim_ids':targets,
+                'pending':result.get('pending',[]),'result':result,'preview_only':not apply})
         results=[];completed=[]
         for i,ids in enumerate(groups):
             group=run_group(store,source_id,ids,root/'lower',root/('group-'+str(i+1)),ports,
@@ -647,9 +668,11 @@ def run(store,source_id,groups,root,ports,*,apply=False):
             completed.extend(ids)
         dispositions,pending=finish_orphans(store,source_id,root,ports) if len(completed)==len(targets) else ([],[])
         return e.publish(root,{'workflow':f.VERSION,'source_id':source_id,
+            'stage':'claims',
             'status':'completed' if len(completed)==len(targets) and not pending else 'needs_attention',
             'completed_claim_ids':completed,'remaining_claim_ids':[x for x in targets if x not in completed],
-            'groups':results,'orphan_dispositions':dispositions,'pending':pending,
+            'groups':results,'orphan_dispositions':dispositions,
+            'pending':[p for group in results for p in group.get('pending',[])]+pending,
             'legacy_qualification':'not_granted'})
 
 

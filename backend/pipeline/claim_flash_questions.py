@@ -79,7 +79,9 @@ def coverage():
 
 
 def answer_links():
-    return choice('`question` 與所列 `claims` 的答案連線是哪種情況？保留有效直接回答及據此形成的結論，一般方法不當作具體答案。',
+    return choice('`question` 與所列 `claims` 的答案連線是哪種情況？用 `source_context` 消歧。'
+        '保留有效直接回答及據此形成的結論，一般方法不當作具體答案。'
+        '沒有合適的 Claim 時空答案清單也可完整正確，不因未建 Claim 就判漏接；沒有現有連線也不能判錯接。',
         {'complete':'完整正確。','missing':'只有漏接。','mismatched':'只有答非所問的錯接。',
          'missing_and_mismatched':'同時有漏接與錯接。','uncertain':'無法判定。'})
 
