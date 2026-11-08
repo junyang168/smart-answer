@@ -368,10 +368,7 @@ class GmailInbox:
             if not cloud:
                 raise ValueError('網站尚未設定 OneDrive 主日資料夾')
             folder = cloud.folder(parsed);folder.mkdir(exist_ok=True)
-            history = folder / '講員PPT版本'
-            if history.is_symlink() or history.resolve().parent != folder.resolve():
-                raise ValueError('講員 PPT 版本目錄不可連結到其他目錄')
-            history.mkdir(exist_ok=True)
+            history = cloud.archive_folder(parsed, '講員PPT版本')
             target = folder / f'講道-{parsed}-{safe_name(speaker)}{extension}'
             with self.db() as db:
                 current_row = db.execute('SELECT * FROM mail_current WHERE day=? AND speaker=?', (str(parsed), speaker)).fetchone()

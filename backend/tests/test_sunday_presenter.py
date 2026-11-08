@@ -24,6 +24,7 @@ def cloud(tmp_path, monkeypatch):
     config.write_text(json.dumps({"syncRoot": str(root), "webRootUrl":
         "https://onedrive.live.com/my?id=%2Fpersonal%2Ffixture%2FDocuments%2FDocuments%2F%E4%B8%BB%E6%97%A5"}))
     monkeypatch.setenv("SUNDAY_PRESENTER_CONFIG", str(config))
+    monkeypatch.setenv("DATA_BASE_DIR", str(tmp_path))
     return OneDrivePpts.configured()
 
 
@@ -131,9 +132,13 @@ def test_final_upload_download_and_email_use_same_onedrive_file(ready, cloud, mo
     agent.repository.set_sunday_service_email_body = save
     deck = Presentation(); deck.slides.add_slide(deck.slide_layouts[6])
     content = BytesIO(); deck.save(content); data = content.getvalue()
+    draft = tmp_path / "generated.pptx"; draft.write_bytes(b"initial auto generated")
+    first = cloud.publish_generated(service_day(day), draft)
     service.upload_final_sunday_service_ppt(day, UploadFile(filename="final.pptx", file=BytesIO(data)))
     target = service.get_final_sunday_service_ppt(day)
     assert target.parent == cloud.folder(service_day(day))
+    assert target == first
+    assert list(target.parent.iterdir()) == [target]
     assert target.read_bytes() == data
     assert sunday_service_email._resolve_ppt_path(agent.repository.services[day]) == target
     assert not (tmp_path / "old-local").exists()
@@ -177,3 +182,97 @@ def test_historical_migration_is_repeatable_and_refuses_collision(cloud, tmp_pat
     assert migration["plan"](source, cloud)[0]["status"] == "identical"
     original.write_bytes(b"conflict")
     with pytest.raises(ValueError, match="refusing to overwrite"): migration["plan"](source, cloud)
+
+
+def test_manual_upload_overwrites_single_playback_and_regeneration_stays_outside_day(cloud, tmp_path):
+    day = date(2026, 11, 8)
+    draft = tmp_path / "generated.pptx"; draft.write_bytes(b"first generated")
+    playback = cloud.publish_generated(day, draft)
+    sermon = playback.parent / "講道.pptx"; sermon.write_bytes(b"speaker")
+    final = tmp_path / "revised.pptx"; final.write_bytes(b"human revision")
+    assert cloud.publish_final(day, final) == playback
+    assert playback.read_bytes() == b"human revision"
+    draft.write_bytes(b"new generated draft")
+    regenerated = cloud.publish_generated(day, draft)
+    assert regenerated.read_bytes() == b"new generated draft"
+    assert regenerated.parent == cloud.archive_folder(day, "崇拜PPT版本")
+    assert playback.read_bytes() == b"human revision"
+    assert set(playback.parent.iterdir()) == {playback, sermon}
+    assert any(p.read_bytes() == b"first generated" for p in regenerated.parent.iterdir())
+
+
+def test_identical_upload_still_establishes_manual_final_ownership(cloud, tmp_path):
+    day = date(2026, 11, 8)
+    source = tmp_path / "original.pptx"; source.write_bytes(b"generated")
+    playback = cloud.publish_generated(day, source)
+    cloud.publish_final(day, source)
+    source.write_bytes(b"later regeneration")
+    cloud.publish_generated(day, source)
+    assert playback.read_bytes() == b"generated"
+
+
+def test_direct_manual_edit_and_missing_ownership_never_get_overwritten(cloud, tmp_path):
+    day = date(2026, 11, 8)
+    source = tmp_path / "original.pptx"; source.write_bytes(b"generated")
+    playback = cloud.publish_generated(day, source)
+    playback.write_bytes(b"edited directly in PowerPoint")
+    source.write_bytes(b"new automated version")
+    cloud.publish_generated(day, source)
+    assert playback.read_bytes() == b"edited directly in PowerPoint"
+    cloud._state_path(day).unlink()
+    cloud.publish_generated(day, source)
+    assert playback.read_bytes() == b"edited directly in PowerPoint"
+
+
+def test_legacy_duplicate_is_archived_outside_date_folder(cloud, tmp_path):
+    day = date(2026, 11, 8)
+    folder = cloud.folder(day); folder.mkdir()
+    legacy = folder / "主日崇拜-2026-11-08-自動生成.pptx"
+    legacy.write_bytes(b"old generated")
+    final = cloud.generated(day); final.write_bytes(b"already uploaded final")
+    source = tmp_path / "new.pptx"; source.write_bytes(b"new draft")
+    cloud.publish_generated(day, source)
+    assert list(folder.iterdir()) == [final]
+    assert final.read_bytes() == b"already uploaded final"
+    assert {p.read_bytes() for p in cloud.archive_folder(day, "崇拜PPT版本").iterdir()} == {b"old generated", b"new draft"}
+
+
+def test_background_worker_never_replaces_uploaded_revision(ready, cloud, tmp_path):
+    agent, ppt, day, now, calls = ready
+    ppt.tick(now)
+    target = cloud.generated(service_day(day))
+    final = tmp_path / "manual.pptx"; final.write_bytes(b"manual final")
+    cloud.publish_final(service_day(day), final)
+    agent.repository.services[day].sermon_title = "updated title"
+    ppt.tick(now)
+    ppt.tick(now)
+    assert target.read_bytes() == b"manual final"
+    assert len(calls) == 2
+    assert list(target.parent.iterdir()) == [target]
+
+
+def test_archive_symlink_escape_rejected_without_touching_playback(cloud, tmp_path):
+    (cloud.root / "歷史版本").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(ValueError):
+        cloud.archive_folder(date(2026, 11, 8), "講員PPT版本")
+
+
+def test_failed_final_publish_keeps_previous_deck_and_protects_it_from_worker(cloud, tmp_path, monkeypatch):
+    import backend.sunday_presenter as module
+    day = date(2026, 11, 8)
+    source = tmp_path / "original.pptx"; source.write_bytes(b"generated")
+    target = cloud.publish_generated(day, source)
+    final = tmp_path / "final.pptx"; final.write_bytes(b"final")
+    original_copy = cloud._copy
+    def fail_final(storage, source_path, target_path):
+        if source_path == final and target_path == target:
+            raise OSError("disk full")
+        return original_copy(source_path, target_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(module.OneDrivePpts, "_copy", fail_final)
+        with pytest.raises(OSError):
+            cloud.publish_final(day, final)
+    assert target.read_bytes() == b"generated"
+    source.write_bytes(b"new draft")
+    cloud.publish_generated(day, source)
+    assert target.read_bytes() == b"generated"
