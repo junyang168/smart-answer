@@ -13,12 +13,12 @@ function viewDocumentURL(value) {
   if (!isOfficeDocument(value)) return value;
   const url = new URL(value);
   const actions = [...url.searchParams].filter(([key]) => key.toLowerCase() === 'action');
-  if (actions.length === 1 && ['embedview', 'present'].includes(actions[0][1].toLowerCase())) return value;
+  if (actions.length === 1 && ['view', 'present'].includes(actions[0][1].toLowerCase())) return value;
   for (const [key] of actions) url.searchParams.delete(key);
-  // ReadingView retains Office's title/status bars in the transmitted output.
-  // embedview lets Office render its own chromeless viewer, without cropping
-  // slides or injecting CSS into the document's cross-origin frame.
-  url.searchParams.set('action', 'embedview');
+  // Read-only preparation exposes Start Slide Show. Its native popup keeps
+  // the opener/session and becomes the audience page. The embedded reader
+  // retains a status bar and does not offer the actual slideshow action.
+  url.searchParams.set('action', 'view');
   return url.href;
 }
 

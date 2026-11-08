@@ -1245,3 +1245,38 @@ The code artifact is bound to commit 89402585; this subsequent documentation
 update does not change packaged code. PR #653 remains stacked on #644; publication
 was expressly requested and does not imply completion of the remaining physical
 service/hotspot/renewal acceptance gates.
+
+
+## 2026-11-07 — 0.6.10 slide-only OUTPUT regression fix (#652 / PR #653)
+
+The owner supplied TV and Meet photos showing a colored frame, the PowerPoint
+reader status bar, and later the PowerPoint logo/account. Their Meet picker
+explicitly selected Sunday Presenter — OUTPUT. The worship deck is 13 1/3 ×
+7.5 inches (16:9); the speaker deck is 10 × 7.5 inches (4:3). Only the latter
+requires pillarboxing on a 16:9 surface.
+
+The 0.6.7 embedview default did not provide a true slide-only output: it retained
+a status bar and lacked the normal Start Slide Show entry. 0.6.10 uses the
+read-only preparation page and an explicit first-click action which requests
+browser-native fullscreen on Office's live SlidePanel. This does not edit the
+PPT, crop it into screenshots, inject slide layout CSS or open a coauthoring
+editor. The audience guard reads the actual frame's fullscreen element before
+arming or taking an Office preparation page. Exiting fullscreen/navigation
+revokes readiness. A stalled frame action has a bounded three-second timeout.
+
+Preparation also had a real viewport mismatch: on this Mac's 1920×1080 primary
+LG ULTRAFINE display, macOS limited the preparation window to 971 logical pixels
+high while its child view remained 1080 pixels high. Native screenshots were
+3840×1942 pixels. Matching actual output bounds with larger-than-screen enabled
+restored a 3840×2160 preparation surface. Re-preparing the same preview keeps
+its live view attached rather than reparenting it twice.
+
+Real Office validation used the owner's saved 2026-11-08 worship and speaker
+files. Both entered slide-only fullscreen, armed and played. Native arrow input
+advanced each from slide 1 to slide 2. Switching worship → sermon → worship →
+sermon retained both slide-2 positions and fullscreen; saved OUTPUT screenshots
+showed no PowerPoint logo, account or status bar, and preserved content/aspect.
+The private evidence directory is ~/.local/share/smart-answer/remote-652-upgrade/.
+This local observation is not a new independent Meet-receiver or on-site TV
+acceptance claim. The old artifacts remain active until the clean final build
+and download are verified. iPad remains installed at 0.6.9; this is a Mac update.

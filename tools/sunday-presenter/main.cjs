@@ -8,7 +8,8 @@ const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
 const { HostVideo } = require('./host-video.cjs');
-const { installOfficeView, viewDocumentURL } = require('./office-view.cjs');
+const { installOfficeView, viewDocumentURL, isOfficeDocument } = require('./office-view.cjs');
+const { enterOfficeSlideShow, officeSlideShowActive, runOfficeAction } = require('./office-slideshow.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -152,6 +153,18 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
   return page;
 }
 
+async function verifyAudiencePage(page) {
+  const wc = page.view.webContents;
+  if (!isOfficeDocument(wc.getURL())) return;
+  const states = await Promise.all(wc.mainFrame.framesInSubtree.map(async frame => {
+    try {
+      if (new URL(frame.url).hostname !== 'powerpoint.officeapps.live.com') return false;
+      return await runOfficeAction(frame, `(${officeSlideShowActive.toString()})(document)`);
+    } catch { return false; }
+  }));
+  if (!states.some(Boolean)) throw Error('請先按「開始投影片放映」；含有 PowerPoint 標誌與帳號的準備頁不能播給觀眾。');
+}
+
 async function act(action, args = {}) {
   switch (action) {
     case 'state': return snapshot();
@@ -202,10 +215,37 @@ async function act(action, args = {}) {
       break;
     }
     case 'prepare': stage.prepare(args.id); controller.moveTop(); break;
-    case 'confirm-play': { const page = stage.get(args.id); stage.arm(page.id); stage.take(page.deck); break; }
-    case 'arm': stage.arm(args.id); break;
+    case 'start-slideshow': {
+      const page = stage.get(args.id), wc = page.view.webContents;
+      if (!isOfficeDocument(wc.getURL())) throw Error('請先開啟 PowerPoint 唯讀準備頁。');
+      controller.hide(); stage.prepare(page.id);
+      try {
+        let entered = false;
+        for (const frame of wc.mainFrame.framesInSubtree) {
+          let officeFrame = false;
+          try { officeFrame = new URL(frame.url).hostname === 'powerpoint.officeapps.live.com'; } catch {}
+          if (!officeFrame) continue;
+          entered = await runOfficeAction(frame, `(${enterOfficeSlideShow.toString()})(document)`, true);
+          if (entered) break;
+        }
+        if (!entered) throw Error('PowerPoint 投影片尚未完成載入，請稍後再按一次。');
+        page.officeFullscreen = true;
+      } finally { toggleControls(); }
+      break;
+    }
+    case 'confirm-play': {
+      const page = stage.get(args.id);
+      await verifyAudiencePage(page);
+      stage.arm(page.id); stage.take(page.deck); break;
+    }
+    case 'arm': {
+      const page = stage.get(args.id);
+      await verifyAudiencePage(page);
+      stage.arm(page.id); break;
+    }
     case 'take':
       if (!Object.hasOwn(labels, args.deck)) throw Error('Unknown deck');
+      await verifyAudiencePage(stage.get(stage.selected[args.deck]));
       stage.take(args.deck); break;
     case 'close': {
       const page = stage.get(args.id);
@@ -325,7 +365,7 @@ app.whenReady().then(async () => {
       else if (!output.isFullScreen()) output.setFullScreen(true);
     }
   });
-  preparation = new BaseWindow({ ...hostOptions, frame: false,
+  preparation = new BaseWindow({ ...hostOptions, frame: false, enableLargerThanScreen: true, hasShadow: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
   controller = new BrowserWindow({ width: 760, height: 650, show: false, alwaysOnTop: true,
     type: process.platform === 'darwin' ? 'panel' : 'normal',

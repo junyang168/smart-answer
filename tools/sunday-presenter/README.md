@@ -133,7 +133,7 @@ files, minimum-OS support or a full service's duration. See [acceptance](accepta
 
 ## Install and use — released Phase 1
 
-Download v0.4.0 from church administration → Sunday service → Download Sunday
+Download v0.6.10 from church administration → Sunday service → Download Sunday
 Apps. Install Sunday Presenter on an Apple Silicon Mac (macOS 13+) and Sunday
 Remote on the speaker Mac (universal Intel/Apple Silicon). No Node.js installation
 is needed. The package is ad-hoc signed, without Developer ID/notarization; use
@@ -143,8 +143,12 @@ macOS Privacy & Security → Open Anyway after verifying the downloaded source.
    startup. Open this week's PPT and sign into Microsoft inside Presenter.
 2. The church API supplies the upcoming Sunday folder in America/Chicago time.
    The unique worship-named file and sole remaining sermon PPT are assigned to
-   two fixed cards. Ambiguous choices require selection. In each PowerPoint file,
-   start the slideshow, inspect it and press Confirm and Play.
+   two fixed cards. Ambiguous choices require selection. On each card, click
+   **開始投影片放映** once, inspect the slide-only preview, then **確認並播放**.
+   Presenter uses browser-native fullscreen on Office's live slide surface;
+   the PowerPoint logo, signed-in account and reader toolbars stay outside it.
+   The original Office document, animations and keyboard handlers remain loaded.
+   Leaving fullscreen revokes audience readiness until it is started again.
 3. Playback hides settings. Command-1 selects worship, Command-2 selects sermon;
    arrow keys flip the current slideshow. Switching retains the same views and
    slide state. Dock activation or Command-P restores settings; closing settings
