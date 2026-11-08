@@ -1,5 +1,6 @@
 from datetime import datetime
 from hashlib import sha256
+from functools import lru_cache
 from io import BytesIO
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ from backend.sunday_presenter import OneDrivePpts
 from backend.tests.test_sunday_assistant import agent
 
 
+@lru_cache(maxsize=None)
 def deck(text='original'):
     from pptx.util import Inches
     p = Presentation(); s = p.slides.add_slide(p.slide_layouts[6])
@@ -84,12 +86,12 @@ def test_two_mailboxes_deduplicate_and_newer_version_keeps_old_original(mail):
     first=deck('v1');second=deck('v2')
     stage(mail,data=first)
     assert stage(mail,key='two',mailbox='jian@example.com',data=first)[0]['status']=='duplicate'
-    assert len(list((root/'11-8-2026/講員PPT版本').iterdir()))==1
+    assert len(list((root/'歷史版本/11-8-2026/講員PPT版本').iterdir()))==1
     stage(mail,key='three',data=second,at='2026-11-07T19:00:00-06:00')
     assert main_file(root).read_bytes()==second
     assert stage(mail,key='old-forward',data=first,at='2026-11-07T20:00:00-06:00')[0]['status']=='older_version'
     assert main_file(root).read_bytes()==second
-    assert len(list((root/'11-8-2026/講員PPT版本').iterdir()))==2
+    assert len(list((root/'歷史版本/11-8-2026/講員PPT版本').iterdir()))==2
 
 
 def test_earlier_email_cannot_overwrite_later_unknown_hash(mail):
@@ -158,7 +160,7 @@ def test_manual_onedrive_edit_is_preserved_until_explicit_review(mail):
     assert rows[0]['status']=='review' and main_file(root).read_bytes()==changed
     inbox.decide(rows[0]['id'],'apply','2026-11-08','陳牧師')
     assert main_file(root).read_bytes()==newest
-    assert any(path.read_bytes()==changed for path in (root/'11-8-2026/講員PPT版本').iterdir())
+    assert any(path.read_bytes()==changed for path in (root/'歷史版本/11-8-2026/講員PPT版本').iterdir())
 
 
 def test_interruption_after_copy_resumes_from_saved_sha_without_duplicate_notice(mail,monkeypatch):
@@ -175,13 +177,13 @@ def test_interruption_after_copy_resumes_from_saved_sha_without_duplicate_notice
     monkeypatch.setattr(gmail_inbox,'atomic_copy',original)
     inbox.decide(row['id'],'apply','2026-11-08','陳牧師')
     with inbox.db() as db:assert db.execute('SELECT status FROM mail_files').fetchone()[0]=='imported'
-    assert len(list((root/'11-8-2026/講員PPT版本').iterdir()))==1
+    assert len(list((root/'歷史版本/11-8-2026/講員PPT版本').iterdir()))==1
 
 
 def test_untrusted_filename_stays_in_date_directory(mail):
     _,_,_,_,root=mail
     files=stage(mail,filename='../../other/講道.pptx')
-    assert Path(files[0]['archive']).parent==root/'11-8-2026/講員PPT版本'
+    assert Path(files[0]['archive']).parent==root/'歷史版本/11-8-2026/講員PPT版本'
     assert not (root/'other').exists()
     assert len(safe_name('中文'*200).encode())<=120
 
