@@ -30,11 +30,12 @@ def child():
         sys.exit(75)
     except Exception as e:
         import traceback
+        from backend.pipeline.transcript_text_layout import SeamCoverageError
 
         traceback.print_exc()
         atomic(
             Path(ctx["result_path"]),
-            dict(ok=False, error=type(e).__name__ + ": " + str(e)),
+            dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,SeamCoverageError)),
         )
         sys.exit(1)
 
@@ -166,7 +167,7 @@ def _run_task(store, batch, task, resources):
         else (
             "unknown_outcome"
             if unknown
-            else "pending" if result.get("waiting") else "failed"
+            else "pending" if result.get("waiting") else "needs_resolution" if result.get('needs_resolution') else "failed"
         )
     )
     store.update(

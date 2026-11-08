@@ -92,9 +92,11 @@ def verify_acoustics(pair,results):
 
 
 def source_binding(out,asr):
+    audio={c['id']:file_sha(out/c['audio']) for c in asr['chunks']}
+    if any(audio[c['id']]!=c['audio_sha256'] for c in asr['chunks']):raise ValueError('Original audio differs from its ASR identity')
     return dict(asr_sha256=file_sha(out/'asr.json'),
         alignments={c['id']:file_sha(out/f"alignment/{c['id']}.json") for c in asr['chunks']},
-        audio={c['id']:file_sha(out/c['audio']) for c in asr['chunks']})
+        audio=audio)
 
 
 def failing_pairs(out,asr):
@@ -297,7 +299,9 @@ def recover_audio(out,folder,capacity_root=None,*,contract_recovery=None):
 
 def load_proof(out,proof):
     """Recompute the decision from exact saved audio/alignment, never a pass flag."""
-    out=Path(out);saved=read_json(proof);asr=read_json(out/'asr.json')
+    import numpy as np
+    from backend.pipeline.transcript_audio_pilot import read_audio
+    out=Path(out);saved=read_json(proof);asr=read_json(out/'asr.json');by_id={c['id']:c for c in asr['chunks']}
     if saved['policy']!=POLICY or saved['status']!='verified' or saved['binding']!=source_binding(out,asr):
         raise ValueError('Seam recovery source/config changed')
     proposed=failing_pairs(out,asr)
@@ -324,6 +328,15 @@ def load_proof(out,proof):
                 raise ValueError('Audio request does not bind the exact proposal')
             if request['overlap_sha256']!=file_sha(case/'overlap.wav') or request['context_sha256']!=file_sha(case/'context.wav'):
                 raise ValueError('Audio request/evidence identity changed')
+            left,right=[by_id[pair[s]] for s in ('left','right')];lo,hi=pair['physical_overlap_samples']
+            a,b=[read_audio(out/c['audio']) for c in (left,right)]
+            overlap=a[lo-left['sample_start']:hi-left['sample_start']]
+            begin=max(left['sample_start'],lo-10*16000);end=min(right['sample_end'],hi+10*16000)
+            continuous=np.concatenate((a[begin-left['sample_start']:hi-left['sample_start']],b[hi-right['sample_start']:end-right['sample_start']]))
+            if (not np.array_equal(overlap,b[lo-right['sample_start']:hi-right['sample_start']])
+                or not np.array_equal(overlap,read_audio(case/'overlap.wav'))
+                or not np.array_equal(continuous,read_audio(case/'context.wav'))):
+                raise ValueError('Audio witness is not the exact original shared samples')
             left=next(c for c in asr['chunks'] if c['id']==pair['left'])
             supported=(retained_quote_supported(answer,pair,left['text']) if pair['method']=='retained_audio_overlap_quote.v2' else audio_supported(answer,pair['phrase']))
             if answer!=read_json(out/pair['answer']) or not supported:raise ValueError('Audio witness changed')
@@ -334,6 +347,8 @@ def load_proof(out,proof):
                 audio=case/c['audio'];raw=read_json(case/f"alignment/{c['id']}.json")
                 if c['text']!=ref['text'] or file_sha(audio)!=c['audio_sha256'] or raw['identity'].get('audio_sha256')!=c['audio_sha256']:
                     raise ValueError('Local audio identity changed')
+                original=read_audio(out/by_id[ref['chunk_id']]['audio']);lo,hi=ref['clip_sample_range']
+                if not np.array_equal(original[lo:hi],read_audio(audio)):raise ValueError('Local crop differs from original samples')
             result={r['id']:read_json(case/f"alignment/{r['id']}.json") for r in pair['references']}
             if verify_acoustics(pair,result)!=pair['witnesses']:raise ValueError('Local witness changed')
         for chunk,value in pair['overrides'].items():overrides.setdefault(chunk,{}).update(value)
@@ -381,3 +396,14 @@ def audit_window_coverage(out,master):
     if previous!=master['covered_samples']:raise ValueError('Window coverage misses final samples')
     return dict(policy='contiguous-samples-no-cross-window-text-deduplication.v1',windows=rows,
         acoustic_boundary_accuracy_proven=False)
+
+
+if __name__=='__main__':
+    import argparse
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--out',type=Path,required=True)
+    p.add_argument('--aligner-python',type=Path,required=True)
+    p.add_argument('--capacity-root',type=Path)
+    a=p.parse_args();result=stitch_with_recovery(a.out,a.aligner_python,a.capacity_root)
+    print(json.dumps({'text_sha256':result['text_sha256'],'seam_repair_sha256':result.get('seam_repair_sha256'),
+        'production_writes':0},ensure_ascii=False))

@@ -142,3 +142,15 @@ def test_window_joins_cannot_trim_text_or_leave_sample_gaps(tmp_path):
     with pytest.raises(ValueError,match='sample gap'):audit_window_coverage(tmp_path,changed)
     path=tmp_path/'w1/timed_text.json';timed=read_json(path);timed['chunk_ownership'][0]['source_start']=1;save_json(path,timed)
     with pytest.raises(ValueError,match='trimmed'):audit_window_coverage(tmp_path,master)
+
+
+def test_unresolved_seam_is_explicitly_reported_to_the_batch_worker(tmp_path,monkeypatch):
+    from backend.pipeline.media_batch.worker import child
+    payload=tmp_path/'payload.json';save_json(payload,{})
+    target=tmp_path/'result.json'
+    monkeypatch.setenv('MEDIA_BATCH_CONTEXT',json.dumps(dict(payload_path=str(payload),result_path=str(target),stage='speech')))
+    def fail(stage,payload):raise SeamCoverageError('Uncertain shared phrase; original text retained')
+    monkeypatch.setattr('backend.pipeline.media_batch.stages.execute',fail)
+    with pytest.raises(SystemExit):child()
+    result=read_json(target)
+    assert not result['ok'] and result['needs_resolution'] and 'original text retained' in result['error']
