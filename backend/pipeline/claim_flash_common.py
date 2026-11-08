@@ -8,6 +8,7 @@ from pathlib import Path
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_refresh as c
 from backend.pipeline import claim_flash_questions as jevq
+from backend.api.canonical_repository.source_claim_membership import belongs_to_source, load_source_claims
 
 VERSION = 'claim_update_flash_v1'
 LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
@@ -102,21 +103,6 @@ def resume_committed(store,root,result):
     return e.publish(root,{**result,'status':'applied','applied':True,'commit':receipt})
 
 
-def belongs_to_source(claim,records,sid):
-    aliases={sid,records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
-    occurrences=claim.get('occurrences',[])
-    if occurrences:return all(o.get('source_id') in aliases for o in occurrences)
-    eids=claim.get('evidence_step_ids',[])
-    if not eids:return False
-    for eid in eids:
-        evidence=records.get('evidence_steps/'+eid)
-        if not evidence:return False
-        fids=e.evidence_fragment_ids(evidence['payload'])
-        if not fids or any(records.get('source_fragments/'+fid,{}).get('payload',{}).get('source_id')!=sid for fid in fids):
-            return False
-    return True
-
-
 def load_source(store, sid):
     """One typed source census, including unowned records; no corpus snapshot."""
     records = {}
@@ -132,23 +118,13 @@ def load_source(store, sid):
         if 'source_documents/'+sid not in records:
             raise ValueError('missing source: '+sid)
         doc = records['source_documents/'+sid]['payload']
-        aliases = sorted({sid, doc.get('transcript_id') or sid})
         query("collection='source_fragments' AND payload @> %s::jsonb", (json.dumps({'source_id': sid}),))
         fids = [k.split('/', 1)[1] for k in records if k.startswith('source_fragments/')]
         for offset in range(0, len(fids), 8):
             needles = [json.dumps({field: [fid] if field.endswith('ids') else fid})
                        for fid in fids[offset:offset+8] for field in ['source_fragment_id', 'source_fragment_ids']]
             query('collection=ANY(%s) AND payload @> ANY(%s::jsonb[])', (sorted(LOWER), needles))
-        query("collection='claims' AND payload @> ANY(%s::jsonb[])",
-              ([json.dumps({'occurrences': [{'source_id': alias}]}) for alias in aliases],))
-        # Some historical Claims have no occurrence yet; their complete owned
-        # Evidence chain identifies the source without interpreting their text.
-        owner_ids=sorted({cid for k,r in records.items() if k.startswith('evidence_steps/')
-                          for cid in r['payload'].get('produced_claim_ids',[])})
-        known=set(records)
-        query("collection='claims' AND object_id=ANY(%s) AND (NOT payload ? 'occurrences' OR payload->'occurrences'='[]'::jsonb)", (owner_ids,))
-        for key in set(records)-known:
-            if not belongs_to_source(records[key]['payload'],records,sid):records.pop(key)
+        records.update(load_source_claims(cur,sid,records))
         # Include missing-source Evidence explicitly used by source-local Claims, so it cannot disappear.
         eids = sorted({eid for k, r in records.items() if k.startswith('claims/')
                        for eid in r['payload'].get('evidence_step_ids', [])})

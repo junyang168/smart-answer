@@ -280,11 +280,30 @@ def final_candidate_checks(records,sources,keys,root,ports,pending):
     return updates
 
 
+def new_claim_support_findings(draft,records):
+    """An approved proposal cannot create a Claim after its last argument was removed."""
+    findings=[]
+    for i,candidate in enumerate(draft['new_claim_candidates']):
+        if candidate['evidence_step_ids']:continue
+        incoming=[r for r in draft['new_knowledge_relation_specs'] if r['to_id']=='new:'+str(i)
+            and r['relation_type']!='contextualizes'
+            and any(col+'/'+r['from_id'] in records for col in ['evidence_steps','observations'])]
+        if not incoming:
+            findings.append({'candidate_index':i,'reason':'new_claim_has_no_current_lower_argument'})
+    return findings
+
+
 def commit_group(store,root):
     root=Path(root)
     draft=json.loads((root/'draft.json').read_text())
     if (root/'commit.json').exists():
         return f.resume_committed(store,root,json.loads((root/'verification.json').read_text()))
+    if draft['status']=='verified' and draft['new_claim_candidates']:
+        records=json.loads((root/'before.json').read_text())['records']
+        findings=new_claim_support_findings(draft,records)
+        if findings:
+            e.save(root/'postimage-support-validation.json',{'draft_sha256':e.digest(draft),'pending':findings})
+            return e.publish(root,{**draft,'status':'needs_attention','pending':draft['pending']+findings})
     if draft['status']=='verified' and not (root/'commit.json').exists() and not (root/'commit-intent.json').exists():
         before=json.loads((root/'before.json').read_text())
         f.source_unchanged(before['sources'])
@@ -593,6 +612,8 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                 key='evidence_steps/'+eid
                 frozen[key]=original[key]
                 for fid in e.evidence_fragment_ids(original[key]['payload']):frozen['source_fragments/'+fid]=original['source_fragments/'+fid]
+        draft['pending'].extend(new_claim_support_findings(draft,frozen))
+        if draft['pending']:draft['status']='needs_attention'
         e.save(root/'before.json',{'records':frozen,'sources':sources})
         e.save(root/'draft.json',draft)
         return commit_group(store,root) if apply else e.publish(root,draft)

@@ -63,15 +63,14 @@ def context(store, claims, evidence_ids, *, include_peers=True):
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         cursor.execute('SET LOCAL statement_timeout=5000')
-        cursor.execute('''SELECT object_id,revision,content_sha256,payload FROM wang_knowledge.objects
-            WHERE collection='claims' AND retired_at IS NULL AND payload @> ANY(%s::jsonb[])''',
-            ([json.dumps({'occurrences': [{'source_id': alias}]}) for alias in source_aliases(records, sid)],))
+        from backend.api.canonical_repository.source_claim_membership import load_source_claims
         peers = {}
-        for oid, rev, sha, payload in cursor.fetchall():
+        for key,row in load_source_claims(cursor,sid).items():
+            oid=key.split('/',1)[1];payload=row['payload']
             if payload.get('review_status') in {'superseded', 'retired'} or payload.get('superseded_by'):
                 continue
             if 'claims/' + oid in records:
-                records['claims/' + oid] = dict(revision=rev, content_sha256=sha, payload=payload, retired=False)
+                records['claims/' + oid] = row
             peers[oid] = payload
         # Direct questions, plus questions attached to these same source paragraphs.
         pks = sorted({r['payload']['paragraph_key'] for k, r in records.items()

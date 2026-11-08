@@ -455,8 +455,19 @@ def test_invalid_question_answer_cannot_write(sample):
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==[]
 
 
-def test_new_claim_is_handed_up_checked_linked_and_committed_once(sample):
+@pytest.mark.parametrize('peer_without_occurrence',[False,True])
+@pytest.mark.parametrize('attachment_survives',[False,True])
+def test_new_claim_is_handed_up_checked_linked_and_committed_once(sample,peer_without_occurrence,attachment_survives):
     store,root,_=sample
+    if peer_without_occurrence:
+        evidence=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+        evidence['produced_claim_ids'].append('PEER')
+        store.apply_plan(store.plan_package({'package_id':'no-occurrence-peer','evidence_steps':[evidence],
+            'claims':[{'claim_id':'PEER','claim_type':'exegesis','statement':'另一項既有判斷。',
+                       'evidence_step_ids':['E'],'occurrences':[]}]}))
+        from backend.pipeline import claim_refresh as legacy
+        _,_,_,peers=legacy.context(store,legacy.fetch_claims(store,['C']),['E'])
+        assert 'PEER' in peers
     def reply(req):
         if req['input']['task']=='lower_coverage':
             return {'items':[{'job_id':j['job_id'],'action':'resolved','new_records':[],
@@ -469,15 +480,40 @@ def test_new_claim_is_handed_up_checked_linked_and_committed_once(sample):
                 'scripture_refs':[],'answer_question_ids':[],'reason':'需要獨立保存前提。'} for j in req['input']['jobs']]}
     ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
     lower.run(store,'S',root/'lower',ports,apply=True)
+    if not attachment_survives:ports.choices['relation']='none'
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    if not attachment_survives:
+        assert result['status']=='needs_attention' and not result['applied']
+        assert len(flash.active_claims(f.load_source(store,'S')[0]))==1+int(peer_without_occurrence)
+        return
     assert result['applied'] and len(result['new_claim_ids'])==1
     cid=result['new_claim_ids'][0]
-    assert set(store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids'])=={'C',cid}
+    assert set(store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids'])=={'C',cid}|({'PEER'} if peer_without_occurrence else set())
     assert store.get_record_state('claims',cid)['payload']['occurrences'][0]['anchors']
     assert len([q for role,q in ports.calls if role=='jev' and 'statement_fidelity' in q['questions']])==2
     count=len(ports.calls)
     assert flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)['applied']
     assert len(ports.calls)==count
+
+
+def test_source_identity_guard_detects_new_complete_chain_claim_without_occurrences(sample):
+    from backend.pipeline import claim_refresh as legacy
+    store,_,_=sample
+    records,_=f.load_source(store,'S')
+    index={k.split('/',1)[1]:{'statement':p['statement'],'attribution':p.get('attribution')}
+        for k,p in flash.active_claims(records).items()}
+    changed={**records['claims/C']['payload'],'statement':'更新過的主張。'}
+    plan=store.plan_package({'package_id':'guarded-change','claims':[changed]},source_kind=legacy.VERSION)
+    evidence=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    evidence['produced_claim_ids'].append('NEW-PEER')
+    store.apply_plan(store.plan_package({'package_id':'concurrent-no-occurrence-peer','evidence_steps':[evidence],
+        'claims':[{'claim_id':'NEW-PEER','claim_type':'exegesis','statement':'並行新增的既有判斷。',
+                   'evidence_step_ids':['E'],'occurrences':[]}]}))
+    state=records['claims/C']
+    with pytest.raises(Exception,match='source Claim identities or statements changed'):
+        store.apply_plan(plan,expected_current_source_claims={'S':index},
+            expected_current_record_pins={('claims','C'):(state['revision'],state['content_sha256'],False)})
+    assert store.get_record_state('claims','C')['payload']['statement']==records['claims/C']['payload']['statement']
 
 
 def test_missing_non_orphan_evidence_connection_is_added_reciprocally(sample):
