@@ -285,7 +285,8 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'claims','source_id':source_id,
             'claim_ids':claim_ids,'lower_root':str(Path(lower_root).resolve()),'max_new_claims':max_new_claims,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
+            'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
         if (root/'draft.json').exists():
             return commit_group(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -569,7 +570,8 @@ def run(store,source_id,groups,root,ports,*,apply=False):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'workflow':f.VERSION,'source_id':source_id,'groups':groups,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
+            'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
         target_records=c.fetch_claims(store,targets)
         document=store.get_record_state('source_documents',source_id)['payload']
         aliases={source_id,document.get('transcript_id') or source_id}

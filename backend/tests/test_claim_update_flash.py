@@ -541,8 +541,10 @@ def test_every_support_fragment_reaches_fidelity_and_claim_checks(sample):
     flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     lower_req=next(q for role,q in ports.calls if role=='jev' and 'record_fidelity' in q['questions'])
     claim_req=next(q for role,q in ports.calls if role=='jev' and 'statement_fidelity' in q['questions'])
-    assert len(lower_req['state']['original_text_excerpts'])==2
-    assert len(claim_req['state']['evidence'][0]['original_text_excerpts'])==2
+    assert len(lower_req['state']['original_text_excerpts'])==1
+    assert quote in lower_req['state']['original_text_excerpts'][0]
+    assert len(claim_req['state']['evidence'][0]['original_text_excerpts'])==1
+    assert quote in claim_req['state']['evidence'][0]['original_text_excerpts'][0]
 
 
 def test_jev_malformed_multiquestion_reply_is_not_silently_accepted(sample):
@@ -947,14 +949,15 @@ def test_nonjudgment_classes_do_not_trigger_lower_extraction(sample,classificati
     assert not any(role=='gpt' and q['input']['task']=='lower_coverage' for role,q in ports.calls)
 
 
-def test_runtime_flash_questions_use_named_classes_and_legacy_contract_cannot_resume(sample):
+@pytest.mark.parametrize('contract',['jev_contract','material_contract'])
+def test_runtime_flash_questions_use_named_classes_and_legacy_contract_cannot_resume(sample,contract):
     store,root,ports=complete(sample)
     flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     for role,request in ports.calls:
         if role=='jev':
             for question in request['questions'].values():
                 if question['type']=='choice':assert not {'yes','no'}&set(question['criteria'])
-    path=root/'lower/intent.json';old=json.loads(path.read_text());old.pop('jev_contract');path.write_text(json.dumps(old))
+    path=root/'lower/intent.json';old=json.loads(path.read_text());old.pop(contract);path.write_text(json.dumps(old))
     count=len(ports.calls)
     with pytest.raises(ValueError,match='saved input differs'):
         lower.run(store,'S',root/'lower',ports)

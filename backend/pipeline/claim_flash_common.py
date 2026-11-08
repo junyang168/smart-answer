@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 import math
+import hashlib
 from pathlib import Path
 
 from backend.pipeline import evidence_refresh as e
@@ -15,6 +16,7 @@ GPT_BYTES = 60000
 GPT_JOBS = 4
 JEV_BYTES = 40000
 JEV_CONTRACT = jevq.CONTRACT
+MATERIAL_CONTRACT = 'claim_flash_same_paragraph_spans_v1'
 REVIEW_CONTRACT = 'claim_flash_semantic_review_v3'
 SEMANTIC_REVIEW = (
     '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'
@@ -100,8 +102,33 @@ def load_source(store, sid):
 
 def value(key, records, sources):
     p = records[key]['payload']
-    return e.material({**p, 'evidence_step_id': key,
+    result = e.material({**p, 'evidence_step_id': key,
         'statement': p.get('statement', p.get('text', p.get('title', '')))}, records, sources)
+    if key.split('/')[0] not in {'evidence_steps','observations'}:
+        return result
+    # Physical binding validation above must succeed before assembling any text.
+    # The original fragments remain highlights; no database object is changed.
+    groups={}
+    for fragment in result['fragments']:
+        groups.setdefault(fragment['paragraph_key'],[]).append(fragment)
+    sid=records['source_fragments/'+result['fragments'][0]['fragment_id']]['payload']['source_id']
+    excerpts=[];assembly=[]
+    for pk,paragraph in sources[sid]['paragraphs'].items():
+        fragments=groups.get(pk)
+        if not fragments:continue
+        text=paragraph['text']
+        if len(fragments)<2 or any(text.count(x['quote'])!=1 for x in fragments):
+            excerpts.extend(x['quote'] for x in fragments)
+            continue
+        start=min(text.index(x['quote']) for x in fragments)
+        end=max(text.index(x['quote'])+len(x['quote']) for x in fragments)
+        span=text[start:end]
+        excerpts.append(span)
+        assembly.append({'source_id':sid,'source_sha256':sources[sid]['body_sha256'],'paragraph_key':pk,
+                         'fragment_ids':[x['fragment_id'] for x in fragments],'start':start,'end':end,
+                         'span_sha256':hashlib.sha256(span.encode()).hexdigest()})
+    result.update(original_text_excerpts=excerpts,source_assembly=assembly)
+    return result
 
 
 def jev(root, ports, state, questions):

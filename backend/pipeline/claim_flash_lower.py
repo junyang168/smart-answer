@@ -126,7 +126,7 @@ def run(store, source_id, root, ports, *, apply=False):
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
             'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,
-            'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
+            'jev_contract':f.JEV_CONTRACT,'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -145,6 +145,7 @@ def run(store, source_id, root, ports, *, apply=False):
                 'source_sha256':sources[source_id]['body_sha256'],'claim_qualification':'not_granted','applied':False}
             e.save(root/'verification.json',result)
             return e.publish(root,result)
+        e.save(root/'source-assembly.json',{key:v['source_assembly'] for key,v in materials.items() if v.get('source_assembly')})
         parts=components.decompose(root,ports,{key:row['payload']['statement'] for key,row in records.items()
             if key.split('/')[0] in {'evidence_steps','observations'}})
         for key,row in records.items():
