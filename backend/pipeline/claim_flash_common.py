@@ -6,6 +6,7 @@ from pathlib import Path
 
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_refresh as c
+from backend.pipeline import claim_flash_questions as jevq
 
 VERSION = 'claim_update_flash_v1'
 LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
@@ -13,6 +14,7 @@ PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded
 GPT_BYTES = 60000
 GPT_JOBS = 4
 JEV_BYTES = 40000
+JEV_CONTRACT = jevq.CONTRACT
 REVIEW_CONTRACT = 'claim_flash_semantic_review_v3'
 SEMANTIC_REVIEW = (
     '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'

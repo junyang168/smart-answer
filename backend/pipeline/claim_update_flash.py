@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from backend.pipeline import evidence_refresh as e, claim_refresh as c
 from backend.pipeline import claim_flash_common as f, claim_flash_lower as lower, claim_flash_pairs as pairs
+from backend.pipeline import claim_flash_questions as jevq
 
 
 class ClaimEdit(c.ClaimEdit):
@@ -201,10 +202,8 @@ def question_links(records,sources,members,near,links,root,ports):
         proposed=list(dict.fromkeys(existing+intended.get(qid,[])))
         state={'question':p['text'],'source':f.value(key,records,sources)['original_text_excerpts'],
                'answer_claim_ids':proposed,'claims':peer_summary(sorted(offered),records)}
-        ans=f.jev(root/'question-links',ports,state,{'answer_links':f.yn(
-            '這些問題答案連線是否錯配，或漏掉所列 Claim 中教授直接回答／據此形成結論的主張？'
-            '保留仍有效的答案，不把一般方法主張當成本問題的具體答案；不重審 Question 來源。')})['answer_links']
-        if ans!='no':
+        ans=f.jev(root/'question-links',ports,state,{'answer_links':jevq.answer_links()})['answer_links']
+        if ans!='complete':
             jobs.append({'job_id':qid,'material':state,'precheck':ans,'proposed_ids':proposed})
         elif proposed!=existing:
             if p.get('review_status') in f.PROTECTED:
@@ -239,11 +238,8 @@ def final_candidate_checks(records,sources,keys,root,ports,pending):
         state={'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},
                'evidence':evid,'source_paragraphs':{pk:sources[next(iter(sources))]['paragraphs'][pk]['text']
                     for pk in paragraph_keys(key,records)}}
-        ans=f.jev(root/'candidate-checks',ports,state,{
-            'statement_fidelity':f.yn('候選 statement 是否失真或缺少影響原意的限定、條件、否定或歸屬？'),
-            'support':f.yn('完整支持材料是否仍不能支持候選的任何實質部分？'),
-            'scripture':f.yn('候選是否遺漏或錯配教授使用的關鍵經文論證？')})
-        if any(v!='no' for v in ans.values()):
+        ans=f.jev(root/'candidate-checks',ports,state,jevq.claim())
+        if any(ans[k]!=v for k,v in {'statement_fidelity':'faithful','support':'supported','scripture':'complete'}.items()):
             jobs.append({'job_id':p['claim_id'],'claim':p,'material':state,'findings':ans})
     updates={}
     for batch,raw in f.gpt(root,ports,'candidate_statement',jobs,ClaimItems.model_json_schema(),PROMPT+
@@ -289,7 +285,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'claims','source_id':source_id,
             'claim_ids':claim_ids,'lower_root':str(Path(lower_root).resolve()),'max_new_claims':max_new_claims,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
         if (root/'draft.json').exists():
             return commit_group(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -339,12 +335,9 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                         linked.add(sk)
             raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
             state={'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},'evidence':ev,'source_paragraphs':raw}
-            ans=f.jev(root,ports,state,{
-                'statement_fidelity':f.yn('Claim statement 是否歪曲教授原意或遺漏影響意思的條件、限定、否定、對象或歸屬？'),
-                'support':f.yn('statement 是否有任何實質部分不能從完整關聯證據清單共同得到支持？單條可只支持部分。'),
-                'scripture':f.yn('教授用於本主張的關鍵經文或論證作用是否遺漏或錯配？不要求每條經文抄入 statement。')})
+            ans=f.jev(root,ports,state,jevq.claim())
             outcomes.append({'claim_id':p['claim_id'],'precheck':ans})
-            if any(v!='no' for v in ans.values()):
+            if any(ans[k]!=v for k,v in {'statement_fidelity':'faithful','support':'supported','scripture':'complete'}.items()):
                 findings.append({'job_id':p['claim_id'],'claim':p,'material':state,'findings':ans,
                     'available_evidence':{k:pairs.node(k,records,sources) for k in pool if k.startswith('evidence_steps/')}})
         for batch,raw in f.gpt(root,ports,'claim_statement',findings,ClaimItems.model_json_schema(),PROMPT+
@@ -576,7 +569,7 @@ def run(store,source_id,groups,root,ports,*,apply=False):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'workflow':f.VERSION,'source_id':source_id,'groups':groups,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
         target_records=c.fetch_claims(store,targets)
         document=store.get_record_state('source_documents',source_id)['payload']
         aliases={source_id,document.get('transcript_id') or source_id}

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_flash_common as f
 from backend.pipeline import claim_flash_components as components
+from backend.pipeline import claim_flash_questions as jevq
 
 
 class Edit(BaseModel):
@@ -124,7 +125,8 @@ def run(store, source_id, root, ports, *, apply=False):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
-            'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,'models':ports.identity})
+            'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,
+            'jev_contract':f.JEV_CONTRACT,'models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -177,14 +179,9 @@ def run(store, source_id, root, ports, *, apply=False):
             if not paragraph.get('text','').strip():
                 continue
             bound=paragraph_records(pk,working)
-            answers=f.jev(root,ports,{'paragraph_key':pk,'text':paragraph['text'],'records':bound}, {
-                'missing_lower':f.yn('教授在這段提出的實質論據、經文觀察或解釋依據，是否有任何部分未被 records 表達？'
-                    '只查下層內容覆蓋，口頭強調與重複不算，已有忠實概括不算漏抽。'),
-                'conclusion_candidate':f.yn('這段是否有值得交 GPT 核對保存方式的實質判斷候選？'
-                    '只作寬鬆候選篩選，不判斷有無獨立支持，也不判斷是否應成為 Claim。'
-                    '單純故事細節、例子、設問或口頭強調不算。已有連接不排除候選。')})
+            answers=f.jev(root,ports,{'paragraph_key':pk,'text':paragraph['text'],'records':bound},jevq.coverage())
             coverage.append({'paragraph_key':pk,'precheck':answers})
-            if any(v!='no' for v in answers.values()):
+            if answers['missing_lower']!='covered' or answers['conclusion_candidate'] in {'substantive_judgment','uncertain'}:
                 # Complete support can span paragraphs: offer adjacent context, not a hard heading boundary.
                 keys=list(sources[source_id]['paragraphs']);n=keys.index(pk)
                 context={k:sources[source_id]['paragraphs'][k]['text'] for k in keys[max(0,n-1):n+2]}

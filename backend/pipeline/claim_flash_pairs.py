@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from backend.pipeline import claim_flash_common as f, evidence_refresh as e
 from backend.api.canonical_repository.knowledge_models import knowledge_relation_endpoints
+from backend.pipeline import claim_flash_questions as jevq
 
 TYPES=('supports','explains','qualifies','refutes','contrasts','contextualizes','corroborates','answers','applies')
 
@@ -108,15 +109,12 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=()):
     for case in cases:
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}
-        questions={'relation':f.c.question(
-            '只驗證兩個節點之間的直接關係。單項 Evidence／Observation 可以只支持 Claim 的部分，'
-            '不要求單項證明整個 Claim。兩端已驗證，不重審其內容；不能只因同主題就連接。'
-            '既有類型及方向成立就保留，不因同時也存在另一種關係而改成那種關係。',opts)}
+        questions={'relation':jevq.relation(opts)}
         if original and original.get('reason'):
-            questions['reason_valid']=f.yn('現有理由是否與兩端、方向或類型不一致，或加入教授未給的論據？')
+            questions['reason_valid']=jevq.reason()
         ans=f.jev(root,ports,state,questions);chosen=ans['relation']
         if chosen=='uncertain' or (chosen not in {'none','uncertain'} and
-                (not original or chosen!='a_to_b_'+original['relation_type'] or ('reason_valid' in ans and ans['reason_valid']!='no'))):
+                (not original or chosen!='a_to_b_'+original['relation_type'] or ('reason_valid' in ans and ans['reason_valid']!='grounded'))):
             jobs.append({**case,'state':state,'precheck':ans,'allowed_choices':opts})
         else:
             resolved.append((case,'remove' if chosen=='none' else 'keep',chosen,original.get('reason','') if original else '無直接關係。','jev_precheck'))

@@ -20,7 +20,11 @@ class Ports:
         answers={}
         for name,spec in request['questions'].items():
             default=(0. if spec['type']=='noul' else 'supported' if name.startswith('component_') else 'none' if name.endswith('_claim')
-                     else 'a_to_b_supports' if name=='relation' else 'no')
+                     else {'record_fidelity':'faithful','decomposition_fidelity':'faithful',
+                           'speaker_classification':'professor','stance_classification':'asserted','questioner_classification':'professor',
+                           'statement_fidelity':'faithful','support':'supported','scripture':'complete',
+                           'missing_lower':'covered','conclusion_candidate':'background_or_example',
+                           'answer_links':'complete','reason_valid':'grounded','relation':'a_to_b_supports'}.get(name,'no'))
             chosen=self.choices.get(name,default)
             if callable(chosen):chosen=chosen(request)
             if spec['type']=='noul':
@@ -116,7 +120,7 @@ def test_new_owner_does_not_repeat_lower_checks(sample):
 
 
 def test_gpt_overwrites_jev_without_veto_or_second_round(sample):
-    store,root,ports=complete(sample,Ports(choices={'record_fidelity':'yes'}))
+    store,root,ports=complete(sample,Ports(choices={'record_fidelity':'unsupported'}))
     assert store.get_record_state('evidence_steps','E')['payload']['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
     assert len([q for role,q in ports.calls if role=='jev' and 'record_fidelity' in q['questions']])==1
     assert len([q for role,q in ports.calls if role=='gpt' and q['input']['task']=='lower_repair'])==1
@@ -128,7 +132,7 @@ def test_pairs_use_revised_statement_and_not_old_statement(sample):
         if req['input']['task']=='claim_statement':
             return {'items':[{'claim_id':'C','action':'repair','statement':'沒有聽從祂的話，顯明沒有真正相信祂。',
                 'evidence_step_ids':['E'],'scripture_refs':[],'reason':'與原文一致。'}]}
-    ports=Ports(choices={'statement_fidelity':'yes'},reply=fix)
+    ports=Ports(choices={'statement_fidelity':'changed'},reply=fix)
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied']
     q=next(q for role,q in ports.calls if role=='jev' and 'relation' in q['questions'])
@@ -143,7 +147,7 @@ def test_invalid_gpt_claim_scope_cannot_write(sample):
                 'evidence_step_ids':['FOREIGN'],'scripture_refs':[],'reason':'x'}]}
     before=store.get_record_state('claims','C')
     with pytest.raises(ValueError,match='unverified Evidence'):
-        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'yes'},reply=bad),apply=True)
+        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'partial'},reply=bad),apply=True)
     assert store.get_record_state('claims','C')==before
 
 
@@ -201,7 +205,7 @@ def test_coverage_creates_missing_observation_and_hands_up_an_owned_evidence_con
                 'conclusions':[{'statement':'不知道神旨意就無法遵行。','support_keys':['evidence_steps/E'],
                     'quotes':[{'paragraph_key':'S0001','quote':'你不知道神的旨意，怎麼遵行？'}],
                     'reason':'教授以知道旨意為遵行的前提。'}]} for j in req['input']['jobs']]}
-    ports=Ports(choices={'missing_lower':'yes','conclusion_candidate':'yes'},reply=coverage)
+    ports=Ports(choices={'missing_lower':'missing_evidence','conclusion_candidate':'substantive_judgment'},reply=coverage)
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert result['applied'] and len(result['conclusion_candidates'])==1
     oid=next(k for k in result['updates'] if k.startswith('observations/'))
@@ -236,7 +240,7 @@ def test_protected_evidence_is_not_silently_rewritten(sample):
     store,root,_=sample
     p=deepcopy(store.get_record_state('evidence_steps','E')['payload']);p['review_status']='human_hold'
     store.apply_plan(store.plan_package({'package_id':'hold','evidence_steps':[p]}))
-    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'}),apply=True)
+    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'unsupported'}),apply=True)
     assert result['status']=='needs_attention' and not result['applied']
     assert store.get_record_state('evidence_steps','E')['payload']['statement']==p['statement']
 
@@ -279,7 +283,7 @@ def test_question_answer_link_is_upper_layer_not_lower_fidelity(sample):
     def answer(req):
         if req['input']['task']=='question_answers':
             return {'items':[{'job_id':'Q','action':'set','answer_claim_ids':['C'],'reason':'教授的回答由 C 承載。'}]}
-    ports=Ports(choices={'answer_links':'yes'},reply=answer)
+    ports=Ports(choices={'answer_links':'missing'},reply=answer)
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied']
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C']
@@ -296,7 +300,7 @@ def test_invalid_question_answer_cannot_write(sample):
         if req['input']['task']=='question_answers':
             return {'items':[{'job_id':'Q','action':'set','answer_claim_ids':['FOREIGN'],'reason':'x'}]}
     with pytest.raises(ValueError,match='exceeded provided Claims'):
-        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'answer_links':'yes'},reply=bad),apply=True)
+        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'answer_links':'missing'},reply=bad),apply=True)
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==[]
 
 
@@ -312,7 +316,7 @@ def test_new_claim_is_handed_up_checked_linked_and_committed_once(sample):
             return {'items':[{'job_id':j['job_id'],'action':'new_claim','claim_id':'',
                 'statement':'不知道神的旨意，就無法遵行祂的旨意。','evidence_step_ids':['E'],
                 'scripture_refs':[],'answer_question_ids':[],'reason':'需要獨立保存前提。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'conclusion_candidate':'yes'},reply=reply)
+    ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
     lower.run(store,'S',root/'lower',ports,apply=True)
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied'] and len(result['new_claim_ids'])==1
@@ -373,7 +377,7 @@ def test_new_claim_from_observation_has_source_anchors_and_typed_relation(sample
         if req['input']['task']=='pair_attachment':
             return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b',
                 'reason':'教授的觀察支持該結論。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'missing_lower':'yes','conclusion_candidate':'yes'},reply=reply)
+    ports=Ports(choices={'missing_lower':'missing_evidence','conclusion_candidate':'substantive_judgment'},reply=reply)
     lower.run(store,'S',root/'lower',ports,apply=True)
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied'] and result['new_claim_ids']
@@ -469,7 +473,7 @@ def test_duplicate_campaign_targets_are_rejected_before_calls(sample):
 
 
 def test_preview_does_not_write_and_does_not_claim_full_campaign_completion(sample):
-    store,root,_=sample;ports=Ports(choices={'record_fidelity':'yes'})
+    store,root,_=sample;ports=Ports(choices={'record_fidelity':'unsupported'})
     old=store.get_record_state('evidence_steps','E')
     result=flash.run(store,'S',[['C']],root/'campaign',ports)
     assert result['preview_only'] and result['stage']=='lower' and result['completed_claim_ids']==[]
@@ -507,7 +511,7 @@ def test_declared_missing_lower_connection_is_verified_then_saved(sample):
         if req['input']['task']=='pair_lower':
             return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b',
                 'reason':'原文觀察支持這項論據。'} for j in req['input']['jobs']]}
-    result=lower.run(store,'S',root/'lower',Ports(choices={'missing_lower':'yes'},reply=reply),apply=True)
+    result=lower.run(store,'S',root/'lower',Ports(choices={'missing_lower':'missing_evidence'},reply=reply),apply=True)
     assert result['applied']
     edge=next(p for k,p in result['updates'].items() if k.startswith('knowledge_relations/'))
     assert edge['to_id']=='E' and edge['relation_type']=='supports'
@@ -561,7 +565,7 @@ def test_post_gpt_source_change_rolls_back_the_entire_lower_write(sample):
         if req['input']['task']=='lower_repair':path.write_text(path.read_text()+' ')
     before=store.get_record_state('evidence_steps','E')
     with pytest.raises(ValueError,match='source changed'):
-        lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=drift),apply=True)
+        lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'unsupported'},reply=drift),apply=True)
     assert store.get_record_state('evidence_steps','E')==before
 
 
@@ -657,7 +661,7 @@ def test_jev_candidate_filter_is_broad_and_gpt_can_retain_leaf_evidence(sample):
             return {'items':[{'job_id':j['job_id'],'action':'retain_evidence','claim_id':'',
                 'statement':'','evidence_step_ids':[],'scripture_refs':[],'answer_question_ids':[],
                 'reason':'只作上層論據，沒有另外支持，保留 Evidence。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'conclusion_candidate':'yes'},reply=reply)
+    ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert len(result['conclusion_candidates'])==1
     q=next(req for role,req in ports.calls if role=='jev' and 'conclusion_candidate' in req['questions'])
@@ -686,7 +690,7 @@ def test_gpt_can_select_other_verified_evidence_for_candidate_support(sample):
         if req['input']['task']=='pair_attachment':
             return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b',
                 'reason':'教授的前提支持結論。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'conclusion_candidate':'yes'},reply=reply)
+    ports=Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply)
     lower.run(store,'S',root/'lower',ports,apply=True)
     result=flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
     assert result['applied'] and len(result['new_claim_ids'])==1
@@ -708,7 +712,7 @@ def test_keep_justification_can_quote_a_subset_without_replacing_any_binding(sam
                 'statement':j['record']['statement'],'speaker':j['record']['speaker'],'stance':j['record']['stance'],
                 'scripture_refs':j['record'].get('scripture_refs',[]),
                 'quotes':[{'paragraph_key':'S0001','quote':quote}], 'reason':'完整來源已支持，摘錄一處說明即可。'} for j in req['input']['jobs']]}
-    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=keep),apply=True)
+    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'unsupported'},reply=keep),apply=True)
     assert result['status']=='verified' and result['updates']=={} and result['new_fragments']=={}
     assert store.get_record_state('evidence_steps','E')==before
 
@@ -722,7 +726,7 @@ def test_keep_never_applies_rephrased_echo_fields(sample):
                 'statement':j['record']['statement']+'成立於教授的解讀。','speaker':'audience','stance':'quoted',
                 'scripture_refs':['回顯不是修改'], 'quotes':[{'paragraph_key':'S0001','quote':'附帶回顯不作新原文。'}],
                 'reason':'原記錄成立，保留。'} for j in req['input']['jobs']]}
-    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'yes'},reply=keep),apply=True)
+    result=lower.run(store,'S',root/'lower',Ports(choices={'record_fidelity':'unsupported'},reply=keep),apply=True)
     assert result['updates']=={} and result['new_fragments']=={}
     assert store.get_record_state('evidence_steps','E')==before
     assert result['outcomes'][0]['quote_projection'][0]['ignored_echo_fields']
@@ -735,7 +739,7 @@ def test_claim_keep_never_applies_echo_rewording_or_ids(sample):
         if req['input']['task']=='claim_statement':
             return {'items':[{'claim_id':'C','action':'keep','statement':'回顯中的附加說明。',
                 'evidence_step_ids':['UNUSED_ECHO'],'scripture_refs':['UNUSED_ECHO'],'reason':'原主張成立，保留。'}]}
-    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'yes'},reply=keep),apply=True)
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'partial'},reply=keep),apply=True)
     actual=store.get_record_state('claims','C')['payload']
     assert result['applied'] and actual['statement']==before['statement']
     assert actual['evidence_step_ids']==before['evidence_step_ids']
@@ -750,7 +754,7 @@ def test_unresolved_coverage_proposals_are_preserved_without_partial_write(sampl
                 'conclusions':[{'statement':'尚缺材料的候選。','support_keys':['evidence_steps/E'],
                     'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],'reason':'待解。'}],
                 'connections':[],'reason':'提供的材料仍不足。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'missing_lower':'yes'},reply=unresolved)
+    ports=Ports(choices={'missing_lower':'missing_evidence'},reply=unresolved)
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert result['status']=='needs_attention' and not result['applied']
     assert store.get_record_state('evidence_steps','E')==before
@@ -787,7 +791,7 @@ def test_coverage_expands_bound_support_once_without_sending_old_draft(sample,fi
             return {'items':[{'job_id':j['job_id'],'action':'needs_source' if task=='lower_coverage' else final_action,
                 'new_records':[],'conclusions':[],'connections':[],
                 'reason':'檢查提供的完整後文。'} for j in req['input']['jobs']]}
-    ports=Ports(choices={'missing_lower':lambda req:'yes' if req['state']['paragraph_key']=='S0001' else 'no'},reply=reply)
+    ports=Ports(choices={'missing_lower':lambda req:'missing_evidence' if req['state']['paragraph_key']=='S0001' else 'covered'},reply=reply)
     result=lower.run(store,'S',root/'lower',ports,apply=True)
     assert result['status']==('verified' if final_action=='resolved' else 'needs_attention')
     tasks=[req['input']['task'] for role,req in ports.calls if role=='gpt']
@@ -811,7 +815,7 @@ def test_candidate_quote_uses_existing_mechanical_newline_projection(sample):
                 'conclusions':[{'statement':'候選判斷。','support_keys':['evidence_steps/E'],
                     'quotes':[{'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。'}],
                     'reason':'交上層判斷。'}],'reason':'候選引文僅有換行差異。'} for j in req['input']['jobs']]}
-    result=lower.run(store,'S',root/'lower',Ports(choices={'conclusion_candidate':'yes'},reply=reply),apply=True)
+    result=lower.run(store,'S',root/'lower',Ports(choices={'conclusion_candidate':'substantive_judgment'},reply=reply),apply=True)
     assert result['status']=='verified'
     assert '\n' in result['conclusion_candidates'][0]['quotes'][0]['quote']
     assert list((root/'lower/candidate-quote-projection/S0001').glob('*.json'))
@@ -907,3 +911,71 @@ def test_legacy_prompt_intent_is_not_silently_resumed(sample):
         lower.run(store,'S',root/'lower',ports,apply=True)
     assert len(ports.calls)==count
     assert store.get_record_state('evidence_steps','E')==before
+
+
+@pytest.mark.parametrize('name,value',[
+    ('statement_fidelity',v) for v in ['unsupported','changed','contradicted','uncertain']]+[
+    ('support',v) for v in ['partial','unsupported','contradicted','uncertain']]+[
+    ('scripture',v) for v in ['missing','mismatched','missing_and_mismatched','uncertain']])
+def test_every_nonpassing_claim_classification_reaches_gpt_without_automatic_rewrite(sample,name,value):
+    store,root,_=complete(sample);before=store.get_record_state('claims','C')
+    def keep(req):
+        if req['input']['task']=='claim_statement':
+            p=before['payload']
+            return {'items':[{'claim_id':'C','action':'keep','statement':p['statement'],
+                              'evidence_step_ids':p['evidence_step_ids'],'scripture_refs':p.get('scripture_refs',[]),
+                              'reason':'本例原文支持現有表述，保留。'}]}
+    ports=Ports(choices={name:value},reply=keep)
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'classified',ports,apply=True)
+    requests=[q for role,q in ports.calls if role=='gpt' and q['input']['task']=='claim_statement']
+    assert result['applied'] and len(requests)==1
+    assert requests[0]['input']['jobs'][0]['findings'][name]==value
+    actual=store.get_record_state('claims','C')['payload']
+    # Normal group completion projects the previously absent physical anchors.
+    # Classification and a GPT keep must not change any other Claim field.
+    assert {k:v for k,v in actual.items() if k not in {'revision','occurrences'}}=={
+        k:v for k,v in before['payload'].items() if k not in {'revision','occurrences'}}
+    assert [o['source_id'] for o in actual['occurrences']]==['S']
+    assert {a['evidence_id'] for o in actual['occurrences'] for a in o['anchors']}=={'E'}
+
+
+@pytest.mark.parametrize('classification',['background_or_example','oral_or_repetition','question_only'])
+def test_nonjudgment_classes_do_not_trigger_lower_extraction(sample,classification):
+    store,root,_=sample;ports=Ports(choices={'conclusion_candidate':classification})
+    result=lower.run(store,'S',root/'lower',ports)
+    assert result['status']=='verified'
+    assert not any(role=='gpt' and q['input']['task']=='lower_coverage' for role,q in ports.calls)
+
+
+def test_runtime_flash_questions_use_named_classes_and_legacy_contract_cannot_resume(sample):
+    store,root,ports=complete(sample)
+    flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    for role,request in ports.calls:
+        if role=='jev':
+            for question in request['questions'].values():
+                if question['type']=='choice':assert not {'yes','no'}&set(question['criteria'])
+    path=root/'lower/intent.json';old=json.loads(path.read_text());old.pop('jev_contract');path.write_text(json.dumps(old))
+    count=len(ports.calls)
+    with pytest.raises(ValueError,match='saved input differs'):
+        lower.run(store,'S',root/'lower',ports)
+    assert len(ports.calls)==count
+
+
+@pytest.mark.parametrize('choice',['unsupported','mismatched','uncertain'])
+def test_relationship_reason_classes_route_without_rechecking_node_contents(sample,choice):
+    store,root,_=complete(sample)
+    records,sources=f.load_source(store,'S')
+    records['knowledge_relations/K']={'payload':{'relation_id':'K','from_id':'E','to_id':'C',
+        'relation_type':'supports','reason':'既有理由。'},'retired':False}
+    def keep(req):
+        if req['input']['task']=='pair_attachment':
+            return {'items':[{'job_id':'knowledge_relations/K','action':'keep','relation_type':'supports',
+                              'direction':'a_to_b','reason':'保留現有教授論證。'}]}
+    ports=Ports(choices={'reason_valid':choice},reply=keep)
+    result=pairs.review(records,sources,['knowledge_relations/K'],[],root/'reason',ports,kind='attachment')
+    assert not result['updates'] and not result['retiring_keys']
+    jobs=[q for role,q in ports.calls if role=='gpt']
+    assert len(jobs)==1 and jobs[0]['input']['jobs'][0]['precheck']['reason_valid']==choice
+    req=next(q for role,q in ports.calls if role=='jev')
+    assert 'existing_relation.reason' in req['questions']['reason_valid']['instructions']
+    assert '選定' not in req['questions']['reason_valid']['instructions']

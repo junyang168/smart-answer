@@ -6,8 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.pipeline import claim_flash_common as f, evidence_refresh as e
+from backend.pipeline import claim_flash_questions as jevq
 
-CONTRACT = 'claim_flash_components_v1'
+CONTRACT = 'claim_flash_components_v2'
 RECORDS_PER_JOB = 4
 PROMPT = (
     '本次只拆解 statement，不審真假，不修訂，不判錯，不找論據。沒有原文和舊審閱意見。'
@@ -83,34 +84,34 @@ def decompose(root, ports, statements):
 
 
 def check(root, ports, record_type, record, material, components):
-    state = {'record_type': record_type, 'record': record,
+    # Do not let existing classifications answer their own verification questions.
+    visible = {k:v for k,v in record.items() if k in {'statement','text','title','scripture_refs'}}
+    state = {'record_type': record_type, 'record': visible,
              'original_text_excerpts': material['original_text_excerpts'],
              'source_context': {p['paragraph_key']:p['text'] for p in material.get('nearby_paragraphs',[])}}
-    questions = {'record_fidelity': f.yn(
-        '本記錄是否有任何實質內容、歸屬或經文用途不受完整原文清單支持？'
-        'Question 只核對提問，不檢查 answer_claim_ids；不要求支持材料成為獨立 Claim。')}
+    questions = {'record_fidelity': jevq.record_fidelity()}
     if components is not None:
         state['components'] = {str(i): c for i, c in enumerate(components)}
-        questions['decomposition_fidelity'] = f.yn(
-            'components 是否漏掉、增加或改動 record.statement 的實質意思、條件、模態或範圍？'
-            '只與 statement 比，不用原文修正拆分；embedded_description 不聲稱特定行為已發生。')
-        questions['attribution_fidelity'] = f.yn(
-            'speaker／stance 與 statement 表達的判斷及來源是否矛盾？'
-            '教授採納的否定判斷本身不能因包含反方內容就標成被反對的判斷。')
-        for i in state['components']:
-            questions['component_'+i] = f.c.question(
-                '只判 components.'+i+'。完整 original_text_excerpts 是否共同支持這項的全部實質內容？'
-                '保留條件／推論／建議語氣；embedded_description 核對條件描述，不要求證明行為已發生。'
-                'source_context 只可解消指代或話題，不可補未掛載的實質前提、答案、行為或條件。'
-                '允許忠實同義概括，不以其他 component 正確代替本項支持，不補外部常識。',
-                {'supported': '全部實質內容有據。', 'unsupported': '至少一個實質成分無據，不必明確相反。',
-                 'contradicted': '原文明確相反。', 'uncertain': '材料含混或不足。'})
+        questions['decomposition_fidelity'] = jevq.decomposition()
+        for i,item in enumerate(components):
+            questions['component_'+str(i)] = jevq.component(item)
+    text=record.get('statement',record.get('text',record.get('title','')))
+    for field in jevq.ROLES:
+        if record.get(field):
+            questions[field+'_classification'] = jevq.role(field,text)
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
     if len(json.dumps(request, ensure_ascii=False).encode()) > f.JEV_BYTES:
         raise ValueError('complete component check exceeds Flash payload limit; no call issued')
-    return f.jev(root, ports, state, questions)
+    answers = f.jev(root, ports, state, questions)
+    for field in jevq.ROLES:
+        if field+'_classification' in answers:
+            chosen=answers[field+'_classification']
+            answers[field+'_consistency']=('uncertain' if chosen in {'uncertain','mixed'} else
+                                          'matched' if chosen==record[field] else 'different')
+    return answers
 
 
 def needs_disposition(answers):
-    return any(v != ('supported' if k.startswith('component_') else 'no')
-               for k, v in answers.items())
+    return any(v != ('supported' if k.startswith('component_') else
+                     'matched' if k.endswith('_consistency') else 'faithful')
+               for k,v in answers.items() if not k.endswith('_classification'))
