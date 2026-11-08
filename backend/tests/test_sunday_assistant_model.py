@@ -453,3 +453,27 @@ def test_model_answers_absence_query_with_saved_records_and_no_mutation(agent,te
     assert '不代表已確認會出席' in answer
     assert {k:v.model_dump(mode='json') for k,v in agent.repository.workers.items()}==before
     assert not agent.repository.services and not agent.store.proposals()
+
+
+def test_model_ambiguous_repeat_saves_two_songs_then_admin_reply_resumes(agent):
+    settings = agent.store.settings()
+    settings.admin_group = '999@g.us'
+    settings.admin_clarifications_enabled = True
+    settings.group_questions_enabled = False
+    agent.store.put('settings', settings.model_dump())
+    agent.repository.songs.extend([
+        SundaySong(id='404', title='我是主羊', hymnalIndex=404, source='hymnal', lyricsMarkdown='甲\n乙\n丙\n丁\n\n戊\n己\n庚\n辛'),
+        SundaySong(id='245', title='聖徒齊來歌唱', hymnalIndex=245, source='hymnal', lyricsMarkdown='完整既有歌詞')])
+    msg, result = event(agent, '11月8日 主日诗歌：\n404我是主羊（返覆前三行）\n回應詩245聖徒齊來歌唱', at='2026-11-07T22:34:24Z')
+    assert result['status'] == 'waiting_reply'
+    entry = agent.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn, entry.hymn_notes) == ('我是主羊', '聖徒齊來歌唱', None)
+    assert len(agent.bridge.sent) == 1 and agent.bridge.sent[0][1] == '999@g.us'
+    _, result = event(agent, '第一段前三行重複一次', group='999@g.us', sender='different-admin', at='2026-11-08T03:00:00Z')
+    assert result['status'] == 'done'
+    entry = agent.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn) == ('我是主羊', '聖徒齊來歌唱')
+    assert entry.hymn_notes
+    from backend.sunday_song_performance import apply_song_notes
+    assert apply_song_notes([['甲','乙','丙','丁'],['戊','己','庚','辛']], entry.hymn_notes) == [['甲','乙','丙','甲','乙','丙','丁'],['戊','己','庚','辛']]
+    assert all(x[1] == '999@g.us' for x in agent.bridge.sent)

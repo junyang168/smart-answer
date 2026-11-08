@@ -125,8 +125,13 @@ class Assistant:
 
     def pending_dialogues(self, msg):
         with self.store.db() as db:
-            rows = db.execute("SELECT * FROM clarifications WHERE group_id=? AND status='waiting' ORDER BY id DESC LIMIT 20",
-                              (msg.group_id,)).fetchall()
+            settings = self.store.settings()
+            admin_reply = settings.admin_clarifications_enabled and msg.group_id == settings.admin_group
+            if admin_reply and settings.admin_clarifications_since and msg.sent_at < settings.admin_clarifications_since:
+                return []
+            rows = db.execute("SELECT * FROM clarifications WHERE status='waiting' "
+                              "AND (? OR group_id=?) ORDER BY id DESC LIMIT 20",
+                              (admin_reply, msg.group_id)).fetchall()
             result = []
             for row in rows:
                 sources = []
@@ -136,19 +141,23 @@ class Assistant:
                         sources.append(json.loads(saved[0]))
                 if not sources or any(datetime.fromisoformat(x["sent_at"]) >= msg.sent_at for x in sources):
                     continue
-                question = db.execute("SELECT remote_id,status,text FROM outbox WHERE key=?",
+                question = db.execute("SELECT remote_id,status,text,group_id FROM outbox WHERE key=?",
                                       (f"clarify:{row['id']}:{row['proposal_id']}",)).fetchone()
                 if not question or question["status"] not in {"sent", "unknown", "held"}:
                     continue
-                if not self.same_sender(msg.sender_id, row["sender_id"]):
+                if admin_reply and (question["group_id"] != settings.admin_group or question["status"] not in {"sent", "unknown"}):
+                    continue
+                if not admin_reply and not self.same_sender(msg.sender_id, row["sender_id"]):
                     quoted = question["remote_id"] and msg.quoted_message_id == question["remote_id"]
                     if not quoted and sources[0].get("origin") != "schedule":
                         continue
                 result.append({"clarification_id": row["id"], "questions": json.loads(row["questions"]),
                                "question_message_id": question["remote_id"], "question_text": question["text"],
                                "posted_in_group": question["status"] in {"sent", "unknown"},
-                               "source_messages": sources})
-            return result
+                               "source_group_id": row["group_id"],
+                               "source_messages": [{**source, "sender_profile": self.sender_profile(source["sender_id"])} for source in sources]})
+            quoted = [case for case in result if msg.quoted_message_id and case["question_message_id"] == msg.quoted_message_id]
+            return quoted or result
 
     def context(self, msg):
         rows = [x["payload"] for x in self.store.messages(200)
@@ -191,11 +200,15 @@ class Assistant:
         songs = {x.title for x in self.repository.list_sunday_songs()}
         plan = {"operations": [], "questions": list(result.questions), "message": msg.model_dump(mode="json")}
         sources = [msg.text]
+        source_group = msg.group_id
+        dialogue = None
         if result.clarification_id is not None:
             dialogue = next((d for d in self.pending_dialogues(msg) if d["clarification_id"] == result.clarification_id), None)
             if not dialogue:
                 raise ValueError("回答對應的群內提問不存在、已處理或不屬於此發送人")
             sources.extend(x["text"] for x in dialogue["source_messages"])
+            source_group = dialogue["source_group_id"]
+            plan["source_group_id"] = source_group
             plan["clarification_id"] = result.clarification_id
         if result.cancel_clarification:
             if not plan.get("clarification_id") or result.service_changes or result.absence_changes or result.questions:
@@ -203,11 +216,15 @@ class Assistant:
             if not settings.auto_apply or msg.initial_sync:
                 raise ValueError("此發送人或歷史消息不可自動取消待登記事項")
             plan["cancel_clarification"] = True
-        if msg.group_id not in settings.source_group_ids:
+        if msg.group_id == settings.admin_group and not dialogue and (result.service_changes or result.absence_changes or result.questions or result.cancel_clarification):
+            raise ValueError("管理員回答必須連結一項已送出的主日提問，不能建立無來源的主日更新")
+        if msg.group_id == settings.admin_group and not dialogue and not (result.service_changes or result.absence_changes or result.questions or result.cancel_clarification):
+            return plan
+        if source_group not in settings.source_group_ids:
             raise ValueError("資料來源群設定已改變，請核對此消息")
-        if result.absence_changes and msg.group_id != settings.availability_group and not settings.collect_cross_group:
+        if result.absence_changes and source_group != settings.availability_group and not settings.collect_cross_group:
             raise ValueError("此資料來源群不可修改同工外出日期")
-        if any(change.field not in settings.fields_for_group(msg.group_id) for change in result.service_changes):
+        if any(change.field not in settings.fields_for_group(source_group) for change in result.service_changes):
             raise ValueError("此資料來源群不可修改這項主日欄位，請在負責此欄位的來源群提供資料")
         services = self.services()
         seen = set()
@@ -277,6 +294,12 @@ class Assistant:
             seen.add(key)
             existing = services.get(day)
             before = existing.model_dump(by_alias=True).get(change.field) if existing else None
+            if dialogue and msg.group_id == settings.admin_group and change.evidence not in msg.text:
+                evidence_sources = [source for source in dialogue["source_messages"] if change.evidence in source["text"]]
+                owner = self._owner(key)
+                if owner and evidence_sources and before != change.value and all(datetime.fromisoformat(source["sent_at"]) < datetime.fromisoformat(owner["sent_at"]) for source in evidence_sources):
+                    plan["questions"].append(f"{day} 的{SERVICE_FIELDS[change.field]}已有較新安排，保留現值；請只補尚未確定部分，若確要更正請明說新安排")
+                    continue
             plan["operations"].append({"key": key, "kind": "service", "date": day, "field": change.field,
                                        "before": before, "after": change.value, "evidence": change.evidence})
         # Performance instructions belong to a specific song. A new song without
@@ -312,6 +335,13 @@ class Assistant:
                 continue
             mapped = [self.sender_profile(msg.sender_id)["self_worker"]]
             household = self.sender_profile(msg.sender_id)["household_workers"] if change.include_household else []
+            if dialogue:
+                for source in dialogue["source_messages"]:
+                    if change.evidence in source["text"] and source["group_id"] in settings.source_group_ids:
+                        profile = self.sender_profile(source["sender_id"])
+                        mapped.append(profile["self_worker"])
+                        if change.include_household:
+                            household.extend(profile["household_workers"])
             if (not self.mentions_worker(change.worker, sources) and change.worker not in mapped and change.worker not in household
                     and not self.referenced_absence_worker(msg, change)):
                 plan["questions"].append(f"請確認此發送人是否代表 {change.worker} 登記外出")
@@ -348,13 +378,14 @@ class Assistant:
             if previous and previous["proposal_id"] != proposal_id:
                 db.execute("UPDATE proposals SET status='resolved',updated_at=? WHERE id=?", (now_text(), previous["proposal_id"]))
             db.execute("INSERT OR REPLACE INTO clarifications VALUES (?,?,?,?,?,?,'waiting',NULL,?)",
-                       (dialogue_id, proposal_id, msg.group_id, previous["sender_id"] if previous else msg.sender_id,
+                       (dialogue_id, proposal_id, previous["group_id"] if previous else msg.group_id, previous["sender_id"] if previous else msg.sender_id,
                         dump(history), dump(plan["questions"]), now_text()))
             excerpt = msg.text[:160].replace("\n", " ")
             text = f"【主日助理提問】問題 #{dialogue_id}\n關於「{excerpt}」：\n" + "\n".join(
                 f"• {q[:600]}" for q in plan["questions"][:5]) + "\n請直接回覆這則提問，補充後我會接著登記。"
             db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,?,?)",
-                       (f"clarify:{dialogue_id}:{proposal_id}", msg.group_id, text, "queued" if settings.group_questions_enabled else "held", now_text()))
+                       (f"clarify:{dialogue_id}:{proposal_id}", settings.admin_group if settings.admin_clarifications_enabled else msg.group_id, text,
+                        "queued" if settings.admin_clarifications_enabled or settings.group_questions_enabled else "held", now_text()))
             db.execute("UPDATE proposals SET status='waiting_reply',updated_at=? WHERE id=?", (now_text(), proposal_id))
         return True
 
@@ -486,6 +517,10 @@ class Assistant:
             try:
                 if row["status"] == "queued":
                     settings = self.store.settings()
+                    if row['key'].startswith('admin-clarify-selection:') and not (settings.enabled and settings.auto_apply and settings.admin_clarifications_enabled and row['group_id'] == settings.admin_group):
+                        with self.store.db() as db:
+                            db.execute("UPDATE outbox SET status='held',updated_at=? WHERE key=?", (now_text(),row['key']))
+                        continue
                     if row['key'].startswith('fellowship:'):
                         from .fellowship import Fellowship
                         text = Fellowship(self).prepare_delivery(row)
@@ -524,7 +559,18 @@ class Assistant:
                             with self.store.db() as db:
                                 db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(), row['key']))
                             continue
-                    if ((row['key'].startswith('clarify:') and not settings.group_questions_enabled)
+                    if row['key'].startswith('clarify:'):
+                        case_id, proposal_id = map(int, row['key'].split(':')[1:])
+                        with self.store.db() as db:
+                            active = db.execute("SELECT 1 FROM clarifications WHERE id=? AND proposal_id=? AND status='waiting'", (case_id, proposal_id)).fetchone()
+                        if not active:
+                            with self.store.db() as db:
+                                db.execute("UPDATE outbox SET status='cancelled',updated_at=? WHERE key=?", (now_text(),row['key']))
+                            continue
+                    if ((row['key'].startswith('clarify:') and not (
+                            settings.enabled and settings.auto_apply and
+                            ((settings.admin_clarifications_enabled and row['group_id'] == settings.admin_group)
+                             or (not settings.admin_clarifications_enabled and settings.group_questions_enabled and row['group_id'] in settings.source_group_ids))))
                             or (row['key'].startswith('friday:') and not settings.reminders_enabled)):
                         with self.store.db() as db:
                             db.execute("UPDATE outbox SET status='held',updated_at=? WHERE key=?", (now_text(), row['key']))
@@ -536,13 +582,13 @@ class Assistant:
                     from urllib.parse import quote
                     result = self.bridge.request("GET", "/outbox/" + quote(row["key"], safe=""))
                 state = result.get('status') if result.get('status') in {'sent', 'held'} else 'unknown'
-                if row['key'].startswith(('ppt-ready:', 'absence-query:')) and result.get('status') == 'deferred':
+                if row['key'].startswith(('ppt-ready:', 'absence-query:', 'clarify:', 'admin-clarify-selection:')) and result.get('status') == 'deferred':
                     state = 'queued'
                 error = None if state in {'sent', 'held'} else "發送結果待確認，未重複發送"
                 remote = result.get("message_id")
             except Exception as exc:
                 state, error, remote = "unknown", str(exc)[:500], None
-                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:', 'absence-query:', 'fellowship:')):
+                if row['key'].startswith(('ppt-ready:', 'speaker-ppt-followup:', 'absence-query:', 'fellowship:', 'clarify:', 'admin-clarify-selection:')):
                     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
                         state = 'queued'  # Not submitted; a later tick can retry.
                     elif isinstance(exc, httpx.HTTPStatusError):
@@ -614,8 +660,8 @@ class Assistant:
         with self.store.db() as db:
             if db.execute("SELECT 1 FROM proposals WHERE message_id=? LIMIT 1", (msg.message_id,)).fetchone():
                 return False
-            if db.execute("SELECT 1 FROM clarifications WHERE group_id=? AND status='waiting' LIMIT 1",
-                          (msg.group_id,)).fetchone():
+            if db.execute("SELECT 1 FROM clarifications WHERE (group_id=? OR ?) AND status='waiting' LIMIT 1",
+                          (msg.group_id, msg.group_id == self.store.settings().admin_group and self.store.settings().admin_clarifications_enabled)).fetchone():
                 return False
             result = Extraction().model_dump(mode="json")
             result["processing_path"] = "fast_path_ignore"

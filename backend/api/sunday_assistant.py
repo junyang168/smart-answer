@@ -110,6 +110,8 @@ def settings(payload: Settings):
             payload.fellowship_since = datetime.now(timezone.utc)
         if payload.fellowship_start_date is None:
             payload.fellowship_start_date = payload.fellowship_since.astimezone(ZONE).date()
+    if payload.admin_clarifications_enabled and payload.admin_clarifications_since is None:
+        payload.admin_clarifications_since = datetime.now(timezone.utc)
     before = waiting_identity_states(agent.store)
     agent.store.put("settings", payload.model_dump())
     recheck_waiting(agent.store, before)
@@ -157,7 +159,9 @@ def bridge_config():
         mail = configuration()
     except (ValueError, OSError):
         mail = None  # An email setup failure must not disconnect WhatsApp.
-    return {"allow_speaker_followup": bool(config.enabled and mail and mail.get('enabled') and mail.get('saturday_followup', True)),
+    return {"allow_admin_clarifications": bool(config.enabled and config.auto_apply and config.admin_clarifications_enabled),
+            "admin_clarifications_since": config.admin_clarifications_since.timestamp() if config.admin_clarifications_since else None,
+            "allow_speaker_followup": bool(config.enabled and mail and mail.get('enabled') and mail.get('saturday_followup', True)),
             "allow_fellowship": bool(config.enabled and config.fellowship_enabled),
             "ingest_groups": sorted(config.ingest_group_ids),
             "fellowship_since": config.fellowship_since.timestamp() if config.fellowship_since else None,
