@@ -375,6 +375,8 @@ Question 的來源忠實性在下層；答案 Claim 連接在上層，避免每�
 恢復已提交步驟時核實原 SQL 回執；後組新增 Claim 所造成的 Evidence 所屬主張、Question 答案連線變動，
 只有版本歷史證明來自同一 campaign 的後組交易才可沿用完成結果，不重做語義審閱。
 其他內容差異、無關交易或已退休物件仍阻擋接續；下層本身的來源與內容核對也不省略。
+若 GPT 格式合法但漏答部分工作，保留已答判定及原答覆，只對未答 ID 補問一次，
+明確約束回覆數量及 ID，仍計入原呼叫上限。補答仍不完整或結果未知時不自動循環重發。
 
 Claim–Observation 及其他跨層的直接關係使用既有 `knowledge_relations` 多型記錄，
 明示 `record_namespace=claim_update_flash_v1`，限定該 namespace 的合法端點擴展。

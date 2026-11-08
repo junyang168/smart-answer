@@ -255,6 +255,36 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
+        # A schema-valid reply may omit jobs. Keep every returned adjudication;
+        # request only the missing jobs once, under the same provider call budget.
+        # Unknown/duplicate IDs are not silently assigned or adjudicated by code.
+        field='claim_id' if task in {'claim_statement','candidate_statement'} else 'job_id'
+        items=reply.get('items')
+        ids=[item.get(field) for item in items] if isinstance(items,list) and all(isinstance(x,dict) for x in items) else None
+        expected=[job['job_id'] for job in batch]
+        if (schema.get('properties',{}).get('items',{}).get('type')=='array'
+                and ids is not None and len(set(ids))==len(ids) and set(ids)<set(expected)):
+            missing=[job for job in batch if job['job_id'] not in ids]
+            correction=request(missing)
+            correction['system']+='\n前次漏答；本次只處置這些未答工作，每個 ID 恰好一次，不重做已答項。'
+            correction['schema']=deepcopy(schema)
+            array=correction['schema'].get('properties',{}).get('items',{})
+            array.update(minItems=len(missing),maxItems=len(missing))
+            definition=array.get('items',{})
+            if '$ref' in definition:
+                definition=correction['schema']['$defs'][definition['$ref'].rsplit('/',1)[1]]
+            if field in definition.get('properties',{}):
+                definition['properties'][field]['enum']=[job['job_id'] for job in missing]
+            if len(json.dumps(correction,ensure_ascii=False).encode())>GPT_BYTES:
+                raise ValueError('complete missing-job correction exceeds Flash payload limit; no call made')
+            recovery=Path(root)/'output-contract'/e.digest(req)
+            e.save(recovery/'recovery.json',{'original_request_sha256':e.digest(req),
+                'original_answer_sha256':e.digest(reply),'retained_ids':ids,
+                'missing_ids':[j['job_id'] for j in missing],'max_additional_calls':1})
+            extra=e.recorded_call(recovery,'gpt',correction,ports.repair,preflight=getattr(ports,'preflight',None))
+            exactly(extra.get('items',[]),[j['job_id'] for j in missing],field)
+            byid={item[field]:item for item in items+extra['items']}
+            reply={**reply,'items':[byid[job['job_id']] for job in batch]}
         yield batch,reply
 
 

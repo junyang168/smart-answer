@@ -172,6 +172,35 @@ def test_unknown_gpt_call_is_not_automatically_repeated(tmp_path):
     assert len(ports.calls)==count
 
 
+@pytest.mark.parametrize('field,task',[('job_id','lower_repair'),('claim_id','claim_statement')])
+def test_partial_gpt_batch_reuses_answer_and_requests_only_missing_once(tmp_path,field,task):
+    from backend.pipeline.claim_flash_lower import Edits
+    calls=[]
+    def reply(req):
+        calls.append(req)
+        jobs=req['input']['jobs']
+        return {'items':[{field:j['job_id'],'reason':'有據保留。'} for j in (jobs[:1] if len(calls)==1 else jobs)]}
+    ports=Ports(reply=reply);jobs=[{'job_id':'A'},{'job_id':'B'},{'job_id':'C'}]
+    result=list(f.gpt(tmp_path,ports,task,jobs,Edits.model_json_schema(),'test'))
+    assert [i[field] for i in result[0][1]['items']]==['A','B','C']
+    assert [j['job_id'] for j in calls[1]['input']['jobs']]==['B','C']
+    assert calls[1]['schema']['properties']['items']['minItems']==2
+    assert len(calls)==2
+    assert list(f.gpt(tmp_path,ports,task,jobs,Edits.model_json_schema(),'test'))==result
+    assert len(calls)==2
+
+
+def test_partial_gpt_batch_has_no_unbounded_output_retry(tmp_path):
+    from backend.pipeline.claim_flash_lower import Edits
+    ports=Ports(reply=lambda req:{'items':[]})
+    with pytest.raises(ValueError,match='exactly once'):
+        list(f.gpt(tmp_path,ports,'lower_repair',[{'job_id':'A'}],Edits.model_json_schema(),'test'))
+    assert len(ports.calls)==2
+    with pytest.raises(ValueError,match='exactly once'):
+        list(f.gpt(tmp_path,ports,'lower_repair',[{'job_id':'A'}],Edits.model_json_schema(),'test'))
+    assert len(ports.calls)==2
+
+
 def test_indirect_observation_path_is_not_orphan_and_cycle_is_not_support():
     def row(**p):return {'payload':p,'retired':False}
     records={'claims/C':row(evidence_step_ids=['E']), 'evidence_steps/E':row(),
