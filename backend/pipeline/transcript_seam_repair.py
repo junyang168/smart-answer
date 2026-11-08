@@ -242,7 +242,7 @@ def recover_audio(out,folder,capacity_root=None,*,contract_recovery=None):
     reviewed=[]
     try:
         for index,pair in enumerate(pairs):
-            case=folder/f'audio-s{index:03d}';case.mkdir(exist_ok=True)
+            case=folder/(f'audio-s{index:03d}-v2' if contract_recovery else f'audio-s{index:03d}');case.mkdir(exist_ok=True)
             left,right=[by_id[pair[side]] for side in ('left','right')]
             a,b=[read_audio(out/c['audio']) for c in (left,right)]
             lo,hi=pair['physical_overlap_samples']
