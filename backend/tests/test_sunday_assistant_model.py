@@ -477,3 +477,30 @@ def test_model_ambiguous_repeat_saves_two_songs_then_admin_reply_resumes(agent):
     from backend.sunday_song_performance import apply_song_notes
     assert apply_song_notes([['甲','乙','丙','丁'],['戊','己','庚','辛']], entry.hymn_notes) == [['甲','乙','丙','甲','乙','丙','丁'],['戊','己','庚','辛']]
     assert all(x[1] == '999@g.us' for x in agent.bridge.sent)
+
+
+def test_model_explicit_ignore_pending_instruction_is_deferred_not_chatter(agent):
+    from backend.sunday_assistant.models import Extraction
+    settings = agent.store.settings()
+    settings.admin_group = '999@g.us'
+    settings.admin_clarifications_enabled = True
+    settings.group_questions_enabled = False
+    settings.fellowship_enabled = True
+    agent.store.put('settings', settings.model_dump())
+    agent.repository.list_fellowships = lambda: []
+    agent.repository.songs.extend([
+        SundaySong(id='404', title='我是主羊', hymnalIndex=404, lyricsMarkdown='甲\n乙\n丙\n丁'),
+        SundaySong(id='245', title='聖徒齊來歌唱', hymnalIndex=245, lyricsMarkdown='既有歌詞')])
+    agent.repository.services['2026-11-08'] = SundayServiceEntry(date='2026-11-08', hymn='我是主羊', responseHymn='聖徒齊來歌唱')
+    original = ChatMessage(message_id='pending-original', group_id='222@g.us', sender_id='sender', sent_at='2026-11-07T22:34:24Z', text='11月8日 主日诗歌：\n404我是主羊（返覆前三行）\n回應詩245聖徒齊來歌唱')
+    agent.store.receive(original)
+    agent.execute_request(original, Extraction(questions=['「返覆前三行」是指前三行重複一次嗎？請確認重複次數。']))
+    agent.deliver_outbox()
+    _, result = event(agent, 'ignore 前三行，我明天问一问', group='999@g.us', at='2026-11-08T06:31:13Z')
+    assert result['status']=='done' and result['disposition']=='deferred' and not result['form_changed']
+    entry = agent.repository.services['2026-11-08']
+    assert (entry.hymn, entry.response_hymn, entry.hymn_notes)==('我是主羊','聖徒齊來歌唱',None)
+    with agent.store.db() as db:
+        assert db.execute("SELECT status FROM clarifications").fetchone()[0]=='deferred'
+        assert db.execute("SELECT status FROM messages WHERE id='pending-original'").fetchone()[0]=='done'
+    assert len(agent.bridge.sent)==2 and all(x[1]=='999@g.us' for x in agent.bridge.sent)

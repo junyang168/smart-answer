@@ -129,7 +129,7 @@ class Assistant:
             admin_reply = settings.admin_clarifications_enabled and msg.group_id == settings.admin_group
             if admin_reply and settings.admin_clarifications_since and msg.sent_at < settings.admin_clarifications_since:
                 return []
-            rows = db.execute("SELECT * FROM clarifications WHERE status='waiting' "
+            rows = db.execute("SELECT * FROM clarifications WHERE status IN ('waiting','deferred') "
                               "AND (? OR group_id=?) ORDER BY id DESC LIMIT 20",
                               (admin_reply, msg.group_id)).fetchall()
             result = []
@@ -151,7 +151,7 @@ class Assistant:
                     quoted = question["remote_id"] and msg.quoted_message_id == question["remote_id"]
                     if not quoted and sources[0].get("origin") != "schedule":
                         continue
-                result.append({"clarification_id": row["id"], "questions": json.loads(row["questions"]),
+                result.append({"clarification_id": row["id"], "status": row["status"], "questions": json.loads(row["questions"]),
                                "question_message_id": question["remote_id"], "question_text": question["text"],
                                "posted_in_group": question["status"] in {"sent", "unknown"},
                                "source_group_id": row["group_id"],
@@ -389,6 +389,43 @@ class Assistant:
             db.execute("UPDATE proposals SET status='waiting_reply',updated_at=? WHERE id=?", (now_text(), proposal_id))
         return True
 
+    def defer_dialogue(self, msg, clarification_id):
+        """Keep an unapplied instruction for later without blocking this service.
+
+        No form mutation and no fabricated answer. A receipt makes interrupted
+        tool replay safe even after the current message joins case history.
+        """
+        receipt_key = "defer-reply:" + msg.message_id
+        receipt = self.store.get(receipt_key)
+        if receipt:
+            if receipt["clarification_id"] != clarification_id:
+                raise ValueError("此回覆已暫緩另一項待辦")
+            return receipt
+        settings = self.store.settings()
+        if not (settings.enabled and settings.auto_apply and settings.admin_clarifications_enabled
+                and msg.group_id == settings.admin_group and not (msg.initial_sync or msg.revoked or msg.unverified_edit)):
+            raise ValueError("僅接受管理群的新回覆暫緩待辦")
+        if not any(case["clarification_id"] == clarification_id for case in self.pending_dialogues(msg)):
+            raise ValueError("找不到此回覆可接續的待確認安排")
+        with self.store.db() as db:
+            row = db.execute("SELECT * FROM clarifications WHERE id=?", (clarification_id,)).fetchone()
+            if not row or row["status"] not in {"waiting", "deferred"}:
+                raise ValueError("此待辦已由另一則回覆處理")
+            history = json.loads(row["history"])
+            for mid in history:
+                db.execute("UPDATE messages SET status='done',error=NULL WHERE id=? AND status='waiting_reply'", (mid,))
+                db.execute("UPDATE proposals SET status='resolved',updated_at=? WHERE message_id=? AND status='waiting_reply'", (now_text(), mid))
+            if msg.message_id not in history:
+                history.append(msg.message_id)
+            db.execute("UPDATE clarifications SET status='deferred',history=?,updated_at=? WHERE id=?", (dump(history), now_text(), clarification_id))
+            receipt = {"status": "done", "clarification_id": clarification_id, "disposition": "deferred", "form_changed": False}
+            db.execute("INSERT INTO kv VALUES (?,?)", (receipt_key, dump(receipt)))
+            db.execute("UPDATE messages SET status='done',result=?,error=NULL WHERE id=?", (dump(receipt), msg.message_id))
+            db.execute("INSERT OR IGNORE INTO outbox(key,group_id,text,status,updated_at) VALUES (?,?,?,'queued',?)",
+                       ("confirmed:defer:" + msg.message_id, settings.admin_group,
+                        f"【主日資料回覆】問題 #{clarification_id}：收到，這項待確認安排先不套用；已保存的資料保持不變，之後補充可接續處理。", now_text()))
+        return receipt
+
     def finish_dialogue(self, db, plan, msg, status="resolved"):
         dialogue_id = plan.get("clarification_id")
         if not dialogue_id:
@@ -422,7 +459,7 @@ class Assistant:
         if plan.get("clarification_id"):
             with self.store.db() as db:
                 dialogue = db.execute("SELECT status,resolved_by FROM clarifications WHERE id=?", (plan["clarification_id"],)).fetchone()
-            if not dialogue or (dialogue["status"] != "waiting" and dialogue["resolved_by"] != msg.message_id):
+            if not dialogue or (dialogue["status"] not in {"waiting", "deferred"} and dialogue["resolved_by"] != msg.message_id):
                 raise ValueError("此群內提問已由另一則回答處理")
         with sunday_data_lock():
             workers, services = self.worker_map(), self.services()
