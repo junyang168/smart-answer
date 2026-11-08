@@ -221,6 +221,21 @@ def run(store, source_id, root, ports, *, apply=False):
             byid={j['job_id']:j for j in batch}
             for edit in edits:
                 key=edit.job_id
+                allowed={p['paragraph_key'] for p in byid[key]['material']['nearby_paragraphs']}
+                if edit.action=='repair' and any(q.paragraph_key not in allowed for q in edit.quotes):
+                    # Do not broaden a record's source authority just because the
+                    # model borrowed another job's passage. Correct this item once.
+                    correction={**deepcopy(byid[key]),'rejected_answer':edit.model_dump(),
+                        'contract_error':'引文引用了本項未提供的段落；不能借用同批其他工作的原文。只用本項材料重新處置。'}
+                    schema=Edits.model_json_schema()
+                    schema['$defs']['Quote']['properties']['paragraph_key']['enum']=sorted(allowed)
+                    recovery=root/'quote-contract'/e.digest(correction)
+                    e.save(recovery/'recovery.json',{'original_answer_sha256':e.digest(edit.model_dump()),
+                        'job_id':key,'allowed_paragraph_keys':sorted(allowed),'max_additional_calls':1})
+                    _,reply=next(f.gpt(recovery,ports,'lower_repair',[correction],schema,REPAIR_PROMPT))
+                    corrected=Edits.model_validate(reply).items
+                    f.exactly([x.model_dump() for x in corrected],[key],'job_id')
+                    edit=corrected[0]
                 if edit.action=='needs_source':
                     pending.append({'object_key':key,'reason':edit.reason});continue
                 if edit.action=='keep' and key in calibration:

@@ -201,6 +201,32 @@ def test_partial_gpt_batch_has_no_unbounded_output_retry(tmp_path):
     assert len(ports.calls)==2
 
 
+@pytest.mark.parametrize('fixed',[False,True])
+def test_lower_wrong_job_quote_gets_one_scoped_correction_not_expanded_authority(sample,fixed):
+    store,root,_=sample;calls=[]
+    def reply(req):
+        if req['input']['task']!='lower_repair':return None
+        job=req['input']['jobs'][0];calls.append(job)
+        correcting='contract_error' in job
+        return {'items':[{'job_id':job['job_id'],'action':'repair',
+            'statement':'沒有聽從祂的話，顯明沒有真正相信祂。','speaker':'professor','stance':'asserted',
+            'scripture_refs':[],'quotes':[{'paragraph_key':'S0001' if correcting and fixed else 'OTHER',
+                'quote':'你沒有聽從祂的話，你根本沒信。'}],'reason':'只用本項原文。'}]}
+    ports=Ports(choices={'record_fidelity':'unsupported'},reply=reply)
+    if fixed:
+        assert lower.run(store,'S',root/'lower',ports,apply=True)['applied']
+    else:
+        with pytest.raises(ValueError,match='unauthorized paragraph'):
+            lower.run(store,'S',root/'lower',ports,apply=True)
+    assert len(calls)==2
+    count=len(ports.calls)
+    if fixed:lower.run(store,'S',root/'lower',ports,apply=True)
+    else:
+        with pytest.raises(ValueError,match='unauthorized paragraph'):
+            lower.run(store,'S',root/'lower',ports,apply=True)
+    assert len(ports.calls)==count
+
+
 def test_indirect_observation_path_is_not_orphan_and_cycle_is_not_support():
     def row(**p):return {'payload':p,'retired':False}
     records={'claims/C':row(evidence_step_ids=['E']), 'evidence_steps/E':row(),
