@@ -1185,3 +1185,35 @@ def test_campaign_recovers_missing_occurrence_only_from_complete_owned_source_ch
     assert not f.belongs_to_source(claim,missing,'S')
     foreign=deepcopy(records);foreign['source_fragments/F']['payload']['source_id']='OTHER'
     assert not f.belongs_to_source(claim,foreign,'S')
+
+
+@pytest.mark.parametrize('human_race',[False,True])
+def test_verified_legacy_ai_sampling_refreshes_but_new_human_event_blocks_commit(sample,monkeypatch,human_race):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    store,root,_=sample
+    p=deepcopy(store.get_record_state('claims','C')['payload'])
+    p.update(review_status='human_review_required',reviewed_by='old-model')
+    resolution={'schema_version':'wang_legacy_ai_review_reconciliation_v1','claim_id':'C',
+        'approval_status':'not_human_approved','independent_review_decision':'pass',
+        'adjudication_status':'human_spot_check','target_review_status':'human_review_required'}
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET payload=%s::jsonb,review_status=%s,content_sha256=%s WHERE collection='claims' AND object_id='C'",(json.dumps(p),p['review_status'],record_content_sha(p)))
+        conn.execute("INSERT INTO wang_knowledge.review_events(review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,decision,artifact) VALUES ('OLD-AI','claims','C',1,'ai','old-model','human_review_required',%s::jsonb)",(json.dumps({'resolution':resolution}),))
+    complete(sample)
+    before=store.get_record_state('claims','C');apply=store.apply_plan
+    def race(plan,**kwargs):
+        if kwargs.get('expected_current_claim_sampling_markers'):
+            with store.connect() as conn:
+                conn.execute("INSERT INTO wang_knowledge.review_events(review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,decision) VALUES ('NEW-HUMAN','claims','C',1,'human','owner','human_review_required')")
+        return apply(plan,**kwargs)
+    if human_race:monkeypatch.setattr(store,'apply_plan',race)
+    if human_race:
+        with pytest.raises(Exception,match='sampling marker or review history'):
+            flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(),apply=True)
+        assert store.get_record_state('claims','C')==before
+    else:
+        result=flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(),apply=True)
+        assert result['applied'] and result['review_sampling_markers']
+        assert store.get_record_state('claims','C')['payload']['review_status']=='candidate'
+        with store.connect() as conn:
+            assert conn.execute("SELECT count(*) FROM wang_knowledge.review_events WHERE collection='claims' AND object_id='C'").fetchone()==(1,)

@@ -377,6 +377,7 @@ def commit_verified(store, root):
              'fingerprint_sha256': plan.fingerprint_sha256})
         receipt = store.apply_plan(plan, expected_current_record_pins=pins,
             expected_current_source_claims=result.get('source_claim_index'),
+            **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
             metadata={'actor': source_kind, 'reason': 'Bottom-up semantic decisions and program-verified postimages',
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)

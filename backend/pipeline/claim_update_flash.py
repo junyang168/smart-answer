@@ -291,10 +291,11 @@ def commit_group(store,root):
     return c.commit(store,root)
 
 
-def current_claim_payload(payload):
+def current_claim_payload(payload,*,verified_ai_sampling=False):
     """A changed Flash candidate cannot inherit another pipeline's AI approval."""
     if (not str(payload.get('review_status','')).startswith('ai_')
-            and payload.get('review_status')!='independent_terminal_reviewed'):
+            and payload.get('review_status')!='independent_terminal_reviewed'
+            and not (verified_ai_sampling and payload.get('review_status')=='human_review_required')):
         return deepcopy(payload)
     from backend.pipeline.claim_metadata_projection import RESET
     # Store packages merge payload fields, so absence would retain an old seal.
@@ -331,7 +332,8 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'claims','source_id':source_id,
             'claim_ids':claim_ids,'lower_root':str(Path(lower_root).resolve()),'max_new_claims':max_new_claims,
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
-            'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,'models':ports.identity})
+            'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,
+            'review_marker_contract':'verified_legacy_ai_sampling_v1','models':ports.identity})
         if (root/'draft.json').exists():
             return commit_group(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -357,6 +359,20 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                         state=store.get_record_state('claims',cid)
                         if state and not state['retired']:records['claims/'+cid]=state
         original=deepcopy(records);pending=[];updates={};findings=[];outcomes=[];candidates=[];links=[]
+        sampling={}
+        from backend.pipeline.claim_metadata_projection import sampling_marker
+        with store.connect() as conn,conn.cursor() as cursor:
+            cursor.execute('SET TRANSACTION READ ONLY')
+            for key in target_keys:
+                if records[key]['payload'].get('review_status')!='human_review_required':continue
+                cid=key.split('/',1)[1];marker=sampling_marker(cursor,cid,records[key])
+                if marker:
+                    sampling[cid]=marker
+                    updates[key]=current_claim_payload(records[key]['payload'],verified_ai_sampling=True)
+                else:
+                    pending.append({'claim_id':cid,'reason':'review_hold_not_verified_as_AI_sampling'})
+        e.save(root/'legacy-ai-sampling.json',sampling)
+        records=f.apply_overlay(records,updates)
         excluded=proof.get('excluded_context_keys',[])
         isolation=orphan_plan(records,sources,root.parent/'orphan-plan',ports,excluded)
         target_pks=set().union(*(paragraph_keys(k,records) for k in target_keys))
@@ -526,6 +542,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             'new_knowledge_relation_specs':new_knowledge,
             'retiring_keys':attachment['retiring_keys']+relationships['retiring_keys'],
             'claim_checks':outcomes,'conclusion_dispositions':decisions,
+            'review_sampling_markers':sampling,
             'attachment_discovery':dispositions,'claim_relation_discovery':claim_dispositions,
             'orphan_keys_at_start':isolation['orphan_keys'],
             'legacy_qualification':'not_granted'}
