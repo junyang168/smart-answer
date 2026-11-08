@@ -2,21 +2,23 @@ import { Sermon } from "@/app/interfaces/article";
 
 /** 講道的編輯狀態：ready 待認領，assigned 已認領、編輯中，published 已發佈。 */
 export const STATUS_LABEL: Record<string, string> = {
+  processing: "待完整處理",
   published: "已發佈",
   assigned: "編輯中",
   ready: "待認領",
 };
 
-export const STATUS_ORDER = ["published", "assigned", "ready"] as const;
+export const STATUS_ORDER = ["published", "assigned", "ready", "processing"] as const;
 
 export const STATUS_CLASS: Record<string, string> = {
+  processing: "bg-sky-100 text-sky-900",
   published: "bg-emerald-100 text-emerald-800",
   assigned: "bg-amber-100 text-amber-900",
   ready: "bg-stone-100 text-stone-700",
 };
 
 export function countByStatus(sermons: Sermon[]): Record<string, number> {
-  const counts: Record<string, number> = { published: 0, assigned: 0, ready: 0 };
+  const counts: Record<string, number> = { published: 0, assigned: 0, ready: 0, processing: 0 };
   for (const sermon of sermons) counts[sermon.status] = (counts[sermon.status] ?? 0) + 1;
   return counts;
 }

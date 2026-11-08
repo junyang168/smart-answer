@@ -31,6 +31,7 @@ class Sermon(BaseModel):
     series_id: Optional[str] = None
     series_title: Optional[str] = None
     series_order: Optional[int] = None
+    rough_href: Optional[str] = None
     organization_mode: Optional[str] = None
     organization_mode_label: Optional[str] = None
     classification_confidence: Optional[str] = None
@@ -157,8 +158,9 @@ class SermonMetaManager:
                                        core_bible_verse=m.get('core_bible_verse', []),
                                        source=m.get('source'),
                                        series_id=(catalog_by_id.get(m.get('item')) or {}).get('series_id') or m.get('series_id'),
-                                       series_title=(catalog_by_id.get(m.get('item')) or {}).get('series_title'),
-                                       series_order=(catalog_by_id.get(m.get('item')) or {}).get('series_order'),
+                                       series_title=(catalog_by_id.get(m.get('item')) or {}).get('series_title') or m.get('series_title'),
+                                       series_order=(catalog_by_id.get(m.get('item')) or {}).get('series_order') or m.get('series_order'),
+                                       rough_href=m.get('rough_href'),
                                        organization_mode=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode'),
                                        organization_mode_label=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode_label'),
                                        classification_confidence=(catalog_by_id.get(m.get('item')) or {}).get('classification_confidence'),
