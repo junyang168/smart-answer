@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.pipeline import claim_flash_common as f, evidence_refresh as e
 from backend.api.canonical_repository.knowledge_models import knowledge_relation_endpoints
 from backend.pipeline import claim_flash_questions as jevq
+from backend.pipeline.claim_relation_refresh import render_reason
 
 TYPES=('supports','explains','qualifies','refutes','contrasts','contextualizes','corroborates','answers','applies')
 
@@ -109,6 +110,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=()):
     for case in cases:
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}
+        case['state']=state
         questions={'relation':jevq.relation(opts)}
         if original and original.get('reason'):
             questions['reason_valid']=jevq.reason()
@@ -152,6 +154,9 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=()):
             pending.append({'job_id':case['job_id'],'reason':'explicit_relation_constraint'});continue
         if case.get('implicit'):
             implicit_changes.append({'a':case['a'],'b':case['b'],'action':'remove'})
+        state=case['state']
+        evidence=[item for name in ['A','B'] for item in [state[name]]+state[name].get('evidence',[])]
+        reason=render_reason(reason,state,evidence)
         post={**deepcopy(original or {}),'from_id':src,'to_id':dst,'relation_type':typ,'reason':reason,
               'record_namespace':f.VERSION}
         if key:

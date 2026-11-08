@@ -403,12 +403,12 @@ def test_shared_implicit_and_explicit_support_pair_is_checked_only_once(sample):
 def test_source_and_statement_drift_before_commit_block_all_group_writes(sample):
     store,root,_=complete(sample)
     def concurrent(req):
-        if req['input']['task']=='missing_attachments':
-            p=deepcopy(store.get_record_state('claims','C')['payload']);p['statement']='同時有人改寫了。'
-            store.apply_plan(store.plan_package({'package_id':'concurrent-target','claims':[p]}))
+        p=deepcopy(store.get_record_state('claims','C')['payload']);p['statement']='同時有人改寫了。'
+        store.apply_plan(store.plan_package({'package_id':'concurrent-target','claims':[p]}))
+        return 'a_to_b_supports'
     before=store.get_record_state('evidence_steps','E')
     with pytest.raises(Exception):
-        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(reply=concurrent),apply=True)
+        flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'relation':concurrent}),apply=True)
     assert store.get_record_state('evidence_steps','E')==before
     assert store.get_record_state('claims','C')['payload']['statement']=='同時有人改寫了。'
 
@@ -986,3 +986,114 @@ def test_relationship_reason_classes_route_without_rechecking_node_contents(samp
     req=next(q for role,q in ports.calls if role=='jev')
     assert 'existing_relation.reason' in req['questions']['reason_valid']['instructions']
     assert '選定' not in req['questions']['reason_valid']['instructions']
+
+
+def test_missing_attachment_discovery_skips_known_implicit_pairs(sample):
+    store,root,_=sample;records,sources=f.load_source(store,'S');ports=Ports()
+    result=flash.discover(records,sources,['claims/C'],{'evidence_steps/E'},root/'known-pairs',ports,task='missing_attachments')
+    assert result==([],[],[]) and not ports.calls
+
+
+def test_shared_evidence_missing_for_second_target_is_kept_with_existing_link_disclosed(sample):
+    store,root,_=sample;records,sources=f.load_source(store,'S')
+    records['claims/D']={'payload':{'claim_id':'D','statement':'另一主張。','evidence_step_ids':[]},'retired':False}
+    def inspect(req):
+        if req['input']['task']=='missing_attachments':
+            job=req['input']['jobs'][0]
+            assert job['candidate_records'].keys()=={'evidence_steps/E'}
+            assert {'from_id':'E','to_id':'C','relation_type':'supports'} in job['existing_connections']
+            return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[],
+                             'reason':'已披露 C 連接，另查 D。'} for j in req['input']['jobs']]}
+    ports=Ports(reply=inspect)
+    flash.discover(records,sources,['claims/C','claims/D'],{'evidence_steps/E'},root/'shared-pairs',ports,task='missing_attachments')
+    assert len(ports.calls)==1
+
+
+def test_missing_attachment_input_includes_existing_lower_route_without_inventing_direct_support(sample):
+    store,root,_=sample;records,sources=f.load_source(store,'S')
+    row=deepcopy(records['evidence_steps/E']);row['payload'].update(evidence_step_id='E2',produced_claim_ids=[])
+    records['evidence_steps/E2']=row
+    records['knowledge_relations/R']={'payload':{'from_id':'E2','to_id':'E','relation_type':'qualifies'}}
+    def inspect(req):
+        if req['input']['task']=='missing_attachments':
+            job=req['input']['jobs'][0];links=job['existing_connections']
+            assert {'from_id':'E2','to_id':'E','relation_type':'qualifies'} in links
+            assert {'from_id':'E','to_id':'C','relation_type':'supports'} in links
+            assert {'from_id':'E2','to_id':'C','relation_type':'supports'} not in links
+            return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[],
+                             'reason':'保留既有路線，不把限定當成直接支持。'} for j in req['input']['jobs']]}
+    flash.discover(records,sources,['claims/C'],{'evidence_steps/E','evidence_steps/E2'},root/'route',Ports(reply=inspect),task='missing_attachments')
+
+
+def test_saved_relation_reason_resolves_packet_labels_using_existing_renderer(sample):
+    store,root,_=sample;records,sources=f.load_source(store,'S')
+    def write(req):
+        if req['input']['task']=='pair_attachment':
+            return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'explains',
+                             'direction':'a_to_b','reason':'A解釋B。'} for j in req['input']['jobs']]}
+    result=pairs.review(records,sources,[],[{'a':'evidence_steps/E','b':'claims/C'}],root/'labels',
+                        Ports(choices={'relation':'a_to_b_explains'},reply=write),kind='attachment')
+    reason=result['new_relations'][0]['reason']
+    assert 'A' not in reason and 'B' not in reason
+    assert records['evidence_steps/E']['payload']['statement'] in reason
+    assert records['claims/C']['payload']['statement'] in reason
+
+
+def test_discovery_batches_keep_the_whole_local_route_without_expanding_node_text(sample):
+    store,root,_=sample;records,sources=f.load_source(store,'S')
+    for eid in ['E2','E3','E4','E5','Z']:
+        row=deepcopy(records['evidence_steps/E']);row['payload'].update(evidence_step_id=eid,produced_claim_ids=[])
+        records['evidence_steps/'+eid]=row
+    for name,a,b in [('R1','E2','Z'),('R2','Z','E')]:
+        records['knowledge_relations/'+name]={'payload':{'from_id':a,'to_id':b,'relation_type':'supports'}}
+    def inspect(req):
+        if req['input']['task']=='missing_attachments':
+            for job in req['input']['jobs']:
+                assert len(job['candidate_records'])<=4
+                assert {'from_id':'E2','to_id':'Z','relation_type':'supports'} in job['existing_connections']
+                assert {'from_id':'Z','to_id':'E','relation_type':'supports'} in job['existing_connections']
+                assert {'from_id':'E','to_id':'C','relation_type':'supports'} in job['existing_connections']
+            return {'items':[{'job_id':j['job_id'],'pairs':[],'unresolved_keys':[],
+                             'reason':'保留跨批次的既有路線。'} for j in req['input']['jobs']]}
+    flash.discover(records,sources,['claims/C'],{'evidence_steps/'+eid for eid in ['E','E2','E3','E4','E5','Z']},
+                   root/'batched-routes',Ports(reply=inspect),task='missing_attachments')
+
+
+def test_old_discovery_intent_cannot_silently_acquire_the_new_scope(sample):
+    store,root,_=complete(sample);ports=Ports()
+    flash.run_group(store,'S',['C'],root/'lower',root/'group',ports)
+    path=root/'group/intent.json';old=json.loads(path.read_text());old.pop('discovery_contract');path.write_text(json.dumps(old))
+    count=len(ports.calls)
+    with pytest.raises(ValueError,match='saved input differs'):
+        flash.run_group(store,'S',['C'],root/'lower',root/'group',ports)
+    assert len(ports.calls)==count
+
+
+@pytest.mark.parametrize('status',['ai_consensus_reviewed','independent_terminal_reviewed'])
+def test_changed_legacy_ai_claim_is_saved_as_a_candidate_not_a_borrowed_approval(sample,status):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    store,root,_=sample
+    p=deepcopy(store.get_record_state('claims','C')['payload'])
+    p.update(review_status=status,reviewed_by='historical-reviewer',reviewed_at='2026-09-01',
+             ai_review_provenance={'historical':'not a review of the new content'},source_reconciliation_review_sha256='historical')
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET payload=%s::jsonb,review_status=%s,content_sha256=%s WHERE collection='claims' AND object_id='C'",
+                     (json.dumps(p),p['review_status'],record_content_sha(p)))
+    lower.run(store,'S',root/'lower',Ports(),apply=True)
+    def repair(req):
+        if req['input']['task']=='claim_statement':
+            return {'items':[{'claim_id':'C','action':'repair','statement':'沒有聽從，顯明沒有真正相信。',
+                             'evidence_step_ids':['E'],'scripture_refs':[],'reason':'依教授原意澄清。'}]}
+    result=flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(choices={'support':'partial'},reply=repair),apply=True)
+    assert result['applied']
+    p=store.get_record_state('claims','C')['payload']
+    assert p['review_status']=='candidate' and p.get('reviewed_by') is None
+    assert p.get('reviewed_at') is None and p.get('ai_review_provenance') is None
+    assert p.get('source_reconciliation_review_sha256') is None
+    assert result['legacy_qualification']=='not_granted'
+
+
+def test_flash_candidate_projection_does_not_clear_human_decisions():
+    for status in ['approved','human_approved','human_hold','human_review_required','rejected']:
+        p={'review_status':status,'reviewed_by':'human'}
+        assert flash.current_claim_payload(p)==p

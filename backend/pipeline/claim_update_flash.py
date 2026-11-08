@@ -13,6 +13,8 @@ from backend.pipeline import evidence_refresh as e, claim_refresh as c
 from backend.pipeline import claim_flash_common as f, claim_flash_lower as lower, claim_flash_pairs as pairs
 from backend.pipeline import claim_flash_questions as jevq
 
+DISCOVERY_CONTRACT='claim_flash_missing_connections_v2'
+
 
 class ClaimEdit(c.ClaimEdit):
     # A Claim may be directly supported by verified Observations via typed edges.
@@ -120,23 +122,35 @@ def peer_summary(keys,records):
 
 def discover(records,sources,target_keys,pool,root,ports,*,task):
     jobs=[]
+    connections={(r['payload']['from_id'],r['payload']['to_id'],r['payload']['relation_type'])
+        for k,r in records.items() if k.startswith(('knowledge_relations/','claim_relations/'))}
+    connections.update((eid,k.split('/',1)[1],'supports')
+        for k,p in active_claims(records).items() for eid in p.get('evidence_step_ids',[]))
+    connected={frozenset((a,b)) for a,b,_ in connections}
     # A small task spans <=4 targets and its relevant candidates; no private peer evidence graphs.
     for offset in range(0,len(target_keys),4):
         targets=target_keys[offset:offset+4]
-        keys=sorted(pool)
-        for start in range(0,max(1,len(keys)),4):
+        target_ids={k.split('/',1)[1] for k in targets}
+        keys=sorted(k for k in pool if any(k!=t and frozenset((k.split('/',1)[1],t.split('/',1)[1])) not in connected
+                                        for t in targets))
+        # Existing pairs are checked by pairs.review, not rediscovered as missing.
+        carriers={a if b in target_ids else b for a,b,_ in connections if a in target_ids or b in target_ids}
+        # Text is batched, but the bounded local topology must not be cut apart.
+        context_ids=target_ids|carriers|{k.split('/',1)[1] for k in pool}
+        for start in range(0,len(keys),4):
             selected=keys[start:start+4]
             jobs.append({'job_id':'D-'+e.digest([task,targets,selected])[:24],
             'target_claims':peer_summary(targets,records),
             'candidate_records':{k:(pairs.node(k,records,sources) if k.split('/')[0] in f.LOWER
                                     else peer_summary([k],records)[k]) for k in selected},
-            'existing_connections':[{x:r['payload'].get(x) for x in ['from_id','to_id','relation_type']}
-                for k,r in records.items() if k.startswith(('knowledge_relations/','claim_relations/'))
-                and any(t.split('/',1)[1] in {r['payload']['from_id'],r['payload']['to_id']} for t in targets)]})
+            'existing_connections':[{'from_id':a,'to_id':b,'relation_type':typ}
+                for a,b,typ in sorted(connections) if {a,b}<=context_ids]})
     proposed=[];pending=[];dispositions=[]
     for batch,raw in f.gpt(root,ports,task,jobs,Discoveries.model_json_schema(),PROMPT+
             '只發現缺少的直接連接，提供兩端完整 object_key 與理由，不重審節點、不修改 statement。'
             '證據已連 A 仍可能漏連 B；支持已充分也須保留教授另一條重要論據。'
+            'existing_connections 包含 Claim 欄位中的既有支持及所列節點間已驗證的下層連接；'
+            '已有直接連接不重提，既有間接路線已承載的論據不為同一意思重複加直接邊。'
             'Claim 關係只在本批提供的 Claim 之間提出；無合適連接可空，不強制每項連接。'
             '無法判定的 record key 放 unresolved_keys。所有候選還會交獨立 Jev pair 檢查。'):
         items=Discoveries.model_validate(raw).items
@@ -276,6 +290,36 @@ def commit_group(store,root):
     return c.commit(store,root)
 
 
+def current_claim_payload(payload):
+    """A changed Flash candidate cannot inherit another pipeline's AI approval."""
+    if (not str(payload.get('review_status','')).startswith('ai_')
+            and payload.get('review_status')!='independent_terminal_reviewed'):
+        return deepcopy(payload)
+    from backend.pipeline.claim_metadata_projection import RESET
+    # Store packages merge payload fields, so absence would retain an old seal.
+    return {**payload,**RESET,'ai_review_provenance':None,'source_reconciliation_review_sha256':None}
+
+
+def claim_material(key,records,sources,source_id):
+    """Actual Claim-level input; verified lower records are supporting material."""
+    p=records[key]['payload']
+    ev=[{**pairs.node('evidence_steps/'+eid,records,sources),'relation_type':'supports'}
+        for eid in p.get('evidence_step_ids',[])]
+    linked={item['object_key'] for item in ev}
+    for rk,rr in records.items():
+        if not rk.startswith('knowledge_relations/') or rr['payload']['to_id']!=p['claim_id']:
+            continue
+        relation=rr['payload']
+        for col in ['observations','evidence_steps']:
+            sk=col+'/'+relation['from_id']
+            if sk in records and sk not in linked:
+                ev.append({**pairs.node(sk,records,sources),'relation_type':relation['relation_type']})
+                linked.add(sk)
+    raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
+    return {'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},
+            'evidence':ev,'source_paragraphs':raw}
+
+
 def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_new_claims=2):
     if not isinstance(claim_ids,list) or not claim_ids or any(not isinstance(x,str) or not x.strip() for x in claim_ids) or type(max_new_claims) is not int or len(claim_ids)!=len(set(claim_ids)) or len(claim_ids)+max_new_claims>10 or max_new_claims<0:
         raise ValueError('distinct targets and at most ten total Claim members required')
@@ -286,7 +330,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'claims','source_id':source_id,
             'claim_ids':claim_ids,'lower_root':str(Path(lower_root).resolve()),'max_new_claims':max_new_claims,
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
-            'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
+            'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,'models':ports.identity})
         if (root/'draft.json').exists():
             return commit_group(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_source(store,source_id)
@@ -322,20 +366,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
               and paragraph_keys(k,records)&near}
         for key in target_keys:
             p=records[key]['payload']
-            ev=[{**pairs.node('evidence_steps/'+eid,records,sources),'relation_type':'supports'}
-                for eid in p.get('evidence_step_ids',[])]
-            linked={item['object_key'] for item in ev}
-            for rk,rr in records.items():
-                if not rk.startswith('knowledge_relations/') or rr['payload']['to_id']!=p['claim_id']:
-                    continue
-                relation=rr['payload']
-                for col in ['observations','evidence_steps']:
-                    sk=col+'/'+relation['from_id']
-                    if sk in records and sk not in linked:
-                        ev.append({**pairs.node(sk,records,sources),'relation_type':relation['relation_type']})
-                        linked.add(sk)
-            raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
-            state={'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},'evidence':ev,'source_paragraphs':raw}
+            state=claim_material(key,records,sources,source_id)
             ans=f.jev(root,ports,state,jevq.claim())
             outcomes.append({'claim_id':p['claim_id'],'precheck':ans})
             if any(ans[k]!=v for k,v in {'statement_fidelity':'faithful','support':'supported','scripture':'complete'}.items()):
@@ -486,6 +517,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                 post['occurrences']=c.refresh_occurrences(post,post.get('evidence_step_ids',[]),records,source_id)
             if post!=original[key]['payload']:updates[key]=post
         f.source_unchanged(sources)
+        updates={k:(current_claim_payload(p) if k.startswith('claims/') else p) for k,p in updates.items()}
         draft={'version':c.VERSION,'workflow':f.VERSION,'status':'needs_attention' if pending else 'verified',
             'claim_ids':claim_ids,'source_id':source_id,'updates':updates,'new_claim_candidates':candidates,
             'question_links':links,'pending':pending,'applied':False,'new_relation_specs':relationships['new_relations'],
@@ -571,7 +603,7 @@ def run(store,source_id,groups,root,ports,*,apply=False):
         f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'workflow':f.VERSION,'source_id':source_id,'groups':groups,
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
-            'material_contract':f.MATERIAL_CONTRACT,'models':ports.identity})
+            'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,'models':ports.identity})
         target_records=c.fetch_claims(store,targets)
         document=store.get_record_state('source_documents',source_id)['payload']
         aliases={source_id,document.get('transcript_id') or source_id}
