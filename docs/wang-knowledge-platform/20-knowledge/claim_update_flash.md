@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組及獨立原文層入口已實作；分組後各層 task 執行、跨組判定復用及成本對照仍未完整落實，見第 7 節。
+> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組、獨立原文層及唯讀反向查漏入口已實作；分組後各層 task 執行、跨組判定復用及成本對照仍未完整落實，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -185,6 +185,13 @@ Flash 在送審前作同段連續引用整理：現有 Evidence／Observation �
 新執行綁定材料契約，舊 root 不自動改成新輸入；既有有效內容審閱不因機械拼接強制重審。
 
 ## 3. Evidence／Observation 層
+
+反向查漏已接入 `--reverse-coverage` 唯讀模式：先按共用分組列重要內容與實際經文引用，
+再由 Jev 逐項對照現有材料，GPT 只處置具體疑點。原文清點不讀材料，出處另作核對；
+判缺前帶上相關 Position 及完整已綁片段，參考 Claim 不作審閱目標。
+這個入口只報告，不修改資料，不啟動下文歷史 lower 的補建、連接或 Claim 流程。
+原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。
+
 
 按整篇來源清點所有 Evidence、Observation 及相關下層連接，包含未連到 Claim 的記錄。
 各組合起來完成全篇，結果供後續 task 復用。這是同一套 Claim 分組的下層範圍，不另建第二套分組。
@@ -444,6 +451,25 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+獨立反向查漏（唯讀，GPT訂閱medium＋Jev，沿用共用容量）：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
+  --source-id ACTUAL_SOURCE_ID --reverse-coverage \
+  --capacity-file /absolute/path/capacity.json \
+  --shared-groups /absolute/path/shared-groups.json \
+  --root /absolute/path/coverage-check
+```
+
+`--shared-groups` 可省略，程式只用既有分組方法產生並保存組界；續跑保留組界，不因新增 Claim 自動重分。
+驗證範圍必須覆蓋當前全部原文段落且無重複；小標題不是硬邊界，也可用已驗證的非相鄰主題組。
+本模式拒絕 `--apply` 和 Claim清單／分組生成模式，不建立Opus或切換OpenAI API。
+原文清點沿用來源綁定及精確請求快取；材料改動後，未變的清點及組檢查可復用，結果另存 `reviews/<input-sha>/result.json`。
+紀錄版本或owners單純變動不重做內容判定。提示詞／schema／問題契約變動不自動重開舊root；未知調用也不自動重發。
+固定請求大小與完整資料限制保持，超限在發送前明示，不截斷材料或提高上限。
+`checked` 只表示本次查漏範圍完成；`needs_attention` 含遺漏候選或材料不足，不代表必須人工，也不觸發修改。
+Claim層論證線索及原文節次不一致另列，不假裝本輪查過關係或已修原文。
 
 獨立驗證原文層（唯讀、零模型）：
 

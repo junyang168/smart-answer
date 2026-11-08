@@ -117,3 +117,11 @@ def source_location(label, remaining):
         '可選補充支持的另一段，不要求單段證明整項。',
         {**{pk: f'`current_paragraphs.{pk}` 的完整原文。' for pk in remaining},
          'none': '本批剩餘段落沒有直接對應或補充支持。', 'uncertain': '無法判定本批剩餘段落。'})
+
+
+def coverage_unit(statement):
+    return choice('只看 `records`：以下當下教導的實質意思，是否已有保存？\n意思：'+statement,
+        {'covered':'至少一項現有記錄明確保存同一實質意思，忠實概括也算；Position可保存反方立場。',
+         'missing':'未保存此意思；同段其他意思或僅主題相近不算。',
+         'partial':'只保存部分，缺少有實質影響的成分。',
+         'uncertain':'材料不足或含混。'})

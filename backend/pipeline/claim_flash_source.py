@@ -91,8 +91,8 @@ def prepare(records, sources):
                 excluded=excluded, outcomes=outcomes, pending=pending, updates=updates, generated=generated)
 
 
-def verify(records, sources, source_id):
-    """Report physical bindings only; no database writes, theology or statement checks."""
+def current_source(records, sources, source_id):
+    """Physical source identity only; shared by the two read-only modes."""
     if set(sources) != {source_id}:
         raise ValueError('source verification requires one explicit source')
     source = sources[source_id]
@@ -101,6 +101,12 @@ def verify(records, sources, source_id):
         if doc.get(field) and doc[field] != source['body_sha256']:
             raise ValueError('registered source body differs: ' + field)
     f.source_unchanged(sources)
+    return source
+
+
+def verify(records, sources, source_id):
+    """Report physical bindings only; no database writes, theology or statement checks."""
+    source = current_source(records, sources, source_id)
     prepared = prepare(records, sources)
     owners = {}
     for key, row in records.items():

@@ -764,6 +764,8 @@ def main():
     parser.add_argument('--groups',help='JSON ordered topic groups of <=10 Claim IDs; reserves up to two unused slots')
     parser.add_argument('--root',required=True)
     parser.add_argument('--capacity-file')
+    parser.add_argument('--reverse-coverage',action='store_true',help='Read-only grouped omission check; no content writes or Claim review')
+    parser.add_argument('--shared-groups',help='Existing source-bound shared grouping JSON for reverse coverage')
     parser.add_argument('--verify-source',action='store_true',help='Source-only read-only verification; no models or Claim work')
     parser.add_argument('--plan-groups',action='store_true',help='Read-only heading-guided shared grouping; no models or content writes')
     parser.add_argument('--semantic-groups',action='store_true',help='With --plan-groups, use one GPT task to reduce semantic coupling')
@@ -772,22 +774,31 @@ def main():
     parser.add_argument('--codex-executable')
     parser.add_argument('--apply',action='store_true')
     args=parser.parse_args();root=Path(args.root).resolve()
-    if args.verify_source and (args.apply or args.plan_groups or args.semantic_groups or args.groups):
+    if args.verify_source and (args.apply or args.plan_groups or args.semantic_groups or args.groups or args.reverse_coverage or args.shared_groups):
         parser.error('--verify-source cannot be combined with --apply or grouping/content modes')
+    if args.reverse_coverage and (args.apply or args.plan_groups or args.semantic_groups or args.groups or not args.capacity_file):
+        parser.error('--reverse-coverage requires --capacity-file and forbids mutation/grouping modes')
+    if args.shared_groups and not args.reverse_coverage:
+        parser.error('--shared-groups requires --reverse-coverage')
     if args.plan_groups and args.apply:
         parser.error('--plan-groups cannot be combined with --apply')
     if args.semantic_groups and (not args.plan_groups or not args.capacity_file):
         parser.error('--semantic-groups requires --plan-groups and --capacity-file')
-    if not args.verify_source and not args.plan_groups and (not args.groups or not args.capacity_file):
+    if not args.verify_source and not args.reverse_coverage and not args.plan_groups and (not args.groups or not args.capacity_file):
         parser.error('--groups and --capacity-file are required for content processing')
     store=PostgresKnowledgeStore(args.database_url)
     if args.verify_source:
         from backend.pipeline import claim_flash_source as source_stage
         print(json.dumps(source_stage.run(store,args.source_id,root),ensure_ascii=False))
         return
-    def model_ports():
-        client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=4000,executable=args.codex_executable)
+    def model_ports(*,max_output_tokens=4000):
+        client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=max_output_tokens,executable=args.codex_executable)
         return c.Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    if args.reverse_coverage:
+        from backend.pipeline import claim_flash_coverage as coverage
+        plan=json.loads(Path(args.shared_groups).read_text()) if args.shared_groups else None
+        print(json.dumps(coverage.run(store,args.source_id,root,model_ports(max_output_tokens=10000),plan=plan,max_claims=args.max_group_claims),ensure_ascii=False))
+        return
     if args.plan_groups:
         from backend.pipeline import claim_flash_grouping as grouping
         ids=None

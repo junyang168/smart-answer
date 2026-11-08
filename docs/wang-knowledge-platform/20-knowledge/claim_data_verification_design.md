@@ -55,7 +55,7 @@ Citation 與直接 SourceFragment 綁定在新舊記錄的權威對應為 TBD；
 | 歸屬：`speaker`, `stance`；Observation 的實際發言者 | 分別由原文判斷誰說、是否採納／反對／引述／設問；隱藏待檢標籤後問有明確選項的 Jev 分類題。GPT 處置不符或不確定。原文與衍生欄位重複的歸屬判定只作一次 |
 | 經文：材料的 `scripture_refs` | 所述經文是否對應原文內容，是否漏記影響表述的重要經文？程式規範化定位；Jev 預檢、GPT 處置語義歧義。它如何支持某 Claim 留到 Claim 層 |
 | 觀察類型：`observation_type` | 是否忠實描述這項觀察的性質；類型詞彙及不同歷史格式的語義映射 TBD。不由深奧程度判斷是否為 Claim |
-| 反向覆蓋：原文 → 既有 Evidence／Observation statements | 按共用分組，先以單獨 GPT 任務列出原文中應保存的重要概念、承重材料與必要限定，再用 Jev 逐項問是否已保存，不能以整段大部分已覆蓋代替，也不將無關經文分句、重複、口頭語或未展開預告列作必存項。疑點由 GPT 判斷漏記或已有承載。這與原文層「已有材料漏掛片段」分開；全講逐項方法已有隔離唯讀試驗；抽取完整性與對未修資料的召回仍待驗證 |
+| 反向覆蓋：原文 → 既有 Evidence／Observation statements | 按共用分組，先以單獨 GPT 任務列出原文中應保存的重要概念、承重材料與必要限定，再用 Jev 逐項問是否已保存，不能以整段大部分已覆蓋代替，也不將無關經文分句、重複、口頭語或未展開預告列作必存項。疑點由 GPT 判斷漏記或已有承載。這與原文層「已有材料漏掛片段」分開；全講逐項方法已有唯讀入口與隔離試驗；抽取完整性與對未修資料的召回仍待驗證 |
 | Question 的 `question_id`, `text`（alias `question`）, `questioner`, `question_type` | 核對原問題、提問者及問題性質；不補教授未回答的答案。來源清單／定位屬原文層，`answer_state`／`answer_claim_ids` 屬 Claim 層 |
 | Position 的 `position_id`, `title`, `attribution`, `corpus_scope` | 忠實保存被引述或反對的立場及其歸屬，不能把反方改成教授主張。與 Claim 的反駁關係留到 Claim 層 |
 
