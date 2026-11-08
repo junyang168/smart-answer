@@ -212,3 +212,11 @@ def test_missing_api_configuration_is_not_recorded_as_an_unknown_call(tmp_path,m
         f.jev(tmp_path,ports,{'text':'原文。'},{'q':{'type':'choice','instructions':'分類。','criteria':{'a':'甲','b':'乙'}}})
     assert not list(tmp_path.rglob('started.json'))
     assert list(tmp_path.rglob('request.json'))
+
+
+def test_question_lookup_uses_the_question_text_instead_of_an_empty_statement(tmp_path):
+    _,sources=scene(tmp_path,['這詞是什麼意思？'],[('S0001','這詞是什麼意思？')])
+    job=jobs(1)[0];job['record']={'text':'這詞是什麼意思？'}
+    ports=LookupPorts(matches=['S0001'])
+    lookup.lookup([job],sources,tmp_path/'question',ports)
+    assert ports.calls[0]['state']['records']['E000']['statement']=='這詞是什麼意思？'

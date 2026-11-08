@@ -86,9 +86,9 @@ def paragraph_keys(key,records):
     return {records['source_fragments/'+fid]['payload']['paragraph_key'] for fid in fids if 'source_fragments/'+fid in records}
 
 
-def orphans(records):
+def orphans(records,excluded=()):
     """Argument connectivity, not arbitrary graph reachability or proof inference."""
-    nodes={k for k in records if k.split('/')[0] in {'evidence_steps','observations'}}
+    nodes={k for k in records if k.split('/')[0] in {'evidence_steps','observations'} and k not in excluded}
     ids={k.split('/',1)[1]:k for k in nodes}
     connected=set()
     for p in active_claims(records).values():
@@ -169,19 +169,21 @@ def discover(records,sources,target_keys,pool,root,ports,*,task):
     return proposed,pending,dispositions
 
 
-def orphan_plan(records,sources,root,ports):
+def orphan_plan(records,sources,root,ports,excluded=()):
     """Source-wide candidate routing once; final pairs still use current statements."""
     root=Path(root);path=root/'plan.json';sid=next(iter(sources))
     if path.exists():
         plan=json.loads(path.read_text())
-        if plan['source_id']!=sid or plan['source_sha256']!=sources[sid]['body_sha256']:
+        if (plan['source_id']!=sid or plan['source_sha256']!=sources[sid]['body_sha256']
+                or plan.get('excluded_context_keys',[])!=sorted(excluded)):
             raise ValueError('orphan plan belongs to another source version')
         return plan
     from backend.pipeline import claim_flash_lookup as lookup
     aliases = {sid, records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
     claims = [k for k, p in active_claims(records).items() if not records[k].get('retired')
               and any(o.get('source_id') in aliases for o in p.get('occurrences', []))]
-    plan = lookup.run(records, sources, sorted(orphans(records)), claims, root, ports)
+    plan = lookup.run(records, sources, sorted(orphans(records,excluded)), claims, root, ports)
+    if excluded:plan['excluded_context_keys']=sorted(excluded)
     e.save(path, plan)
     return plan
 
@@ -356,13 +358,14 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                         state=store.get_record_state('claims',cid)
                         if state and not state['retired']:records['claims/'+cid]=state
         original=deepcopy(records);pending=[];updates={};findings=[];outcomes=[];candidates=[];links=[]
-        isolation=orphan_plan(records,sources,root.parent/'orphan-plan',ports)
+        excluded=proof.get('excluded_context_keys',[])
+        isolation=orphan_plan(records,sources,root.parent/'orphan-plan',ports,excluded)
         target_pks=set().union(*(paragraph_keys(k,records) for k in target_keys))
         pkeys=list(sources[source_id]['paragraphs']);near=set(target_pks)
         for pk in target_pks:
             if pk in pkeys:
                 n=pkeys.index(pk);near.update(pkeys[max(0,n-1):n+2])
-        pool={k for k in records if k.split('/')[0] in {'evidence_steps','observations'}
+        pool={k for k in records if k.split('/')[0] in {'evidence_steps','observations'} and k not in excluded
               and paragraph_keys(k,records)&near}
         for key in target_keys:
             p=records[key]['payload']
@@ -571,7 +574,8 @@ class OrphanDispositions(BaseModel):
 
 def finish_orphans(store,source_id,root,ports):
     records,sources=f.load_source(store,source_id)
-    remaining=sorted(orphans(records));jobs=[];dispositions=[];pending=[]
+    proof=lower.verify(root/'lower',records,sources)
+    remaining=sorted(orphans(records,proof.get('excluded_context_keys',[])));jobs=[];dispositions=[];pending=[]
     plan=json.loads((root/'orphan-plan/plan.json').read_text()) if (root/'orphan-plan/plan.json').exists() else {'pairs':[]}
     for key in remaining:
         uncertain = [p for p in plan.get('pending', []) if p.get('object_key') == key]

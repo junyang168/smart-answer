@@ -870,10 +870,11 @@ def test_orphan_lookup_does_not_expand_to_imported_foreign_or_retired_reference_
 
 
 def test_unresolved_lookup_scope_reaches_existing_orphan_disposition(sample):
-    store,root,_=complete(sample)
+    store,root,_=sample
     record=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
     record.update(evidence_step_id='ORPHAN',produced_claim_ids=[])
     store.apply_plan(store.plan_package({'package_id':'isolated','evidence_steps':[record]}))
+    complete(sample)
     uncertainty={'object_key':'evidence_steps/ORPHAN','reason':'uncertain_orphan_lookup','remaining_claim_keys':['claims/C'],'match_probability':.5}
     e.save(root/'orphan-plan/plan.json',{'pairs':[],'pending':[uncertainty]})
     def reply(req):
@@ -1097,3 +1098,42 @@ def test_flash_candidate_projection_does_not_clear_human_decisions():
     for status in ['approved','human_approved','human_hold','human_review_required','rejected']:
         p={'review_status':status,'reviewed_by':'human'}
         assert flash.current_claim_payload(p)==p
+
+
+def test_unbound_unowned_dialogue_is_excluded_without_retirement_or_source_approval(sample):
+    store,root,_=sample
+    frag=deepcopy(store.get_record_state('source_fragments','F')['payload']);frag.update(fragment_id='OLD',anchor_state='source_deleted')
+    context=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    context.update(evidence_step_id='CONTEXT',statement='請聽眾重述。',step_type='dialogue_context',
+                   support_eligibility='context_only',produced_claim_ids=[],source_fragment_ids=['OLD'])
+    store.apply_plan(store.plan_package({'package_id':'context','source_fragments':[frag],'evidence_steps':[context]}))
+    before=store.get_record_state('evidence_steps','CONTEXT');ports=Ports()
+    result=flash.run(store,'S',[['C']],root,ports,apply=True)
+    assert result['status']=='completed'
+    proof=json.loads((root/'lower/verification.json').read_text())
+    assert proof['excluded_context_keys']==['evidence_steps/CONTEXT']
+    outcome=next(x for x in proof['outcomes'] if x['object_key']=='evidence_steps/CONTEXT')
+    assert outcome['source_verified'] is False and outcome['argument_use_permitted'] is False
+    assert store.get_record_state('evidence_steps','CONTEXT')==before
+    records,sources=f.load_source(store,'S');lower.verify(root/'lower',records,sources)
+    claim=deepcopy(store.get_record_state('claims','C')['payload']);claim['evidence_step_ids'].append('CONTEXT')
+    context['produced_claim_ids']=['C']
+    store.apply_plan(store.plan_package({'package_id':'new-use','claims':[claim],'evidence_steps':[context]}))
+    with pytest.raises(ValueError,match='acquired an argument use'):
+        lower.verify(root/'lower',*f.load_source(store,'S'))
+
+
+@pytest.mark.parametrize('collection,payload',[('questions',{'question_id':'Q','text':'這話是什麼意思？'}),
+                                              ('position_nodes',{'position_id':'P','title':'外部立場。'})])
+def test_question_and_position_locators_share_mechanical_recovery(sample,collection,payload):
+    store,root,_=sample
+    frag=deepcopy(store.get_record_state('source_fragments','F')['payload']);frag.update(fragment_id='STALE',anchor_state='unresolved')
+    store.apply_plan(store.plan_package({'package_id':'stale-other','source_fragments':[frag],
+        collection:[{**payload,'source_fragment_ids':['STALE']}]}))
+    result=lower.run(store,'S',root/'lower',Ports(),apply=True)
+    assert result['applied'] and not result['pending']
+    oid=payload.get('question_id',payload.get('position_id'))
+    saved=store.get_record_state(collection,oid)['payload']
+    assert saved['source_fragment_ids']!=['STALE']
+    assert all(saved[k]==v for k,v in payload.items())
+    assert store.get_record_state('source_fragments','STALE')['payload']['anchor_state']=='unresolved'

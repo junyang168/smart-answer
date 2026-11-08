@@ -122,8 +122,23 @@ def record_postimage(key, record, edit, material, records, sources):
     return result,fragments,projection
 
 
-def paragraph_records(pk, records):
+def excluded_context(key,records):
+    """Already non-argumentative, unowned dialogue stays historical, not verified support."""
+    p=records[key]['payload'];oid=key.split('/',1)[1]
+    if (not key.startswith('evidence_steps/') or p.get('step_type')!='dialogue_context'
+            or p.get('support_eligibility')!='context_only' or p.get('produced_claim_ids')
+            or p.get('review_status') in f.PROTECTED):
+        return False
+    for k,r in records.items():
+        q=r['payload']
+        if k.startswith('claims/') and oid in q.get('evidence_step_ids',[]):return False
+        if k.startswith('knowledge_relations/') and oid in {q['from_id'],q['to_id']} and q['relation_type']!='contextualizes':return False
+    return True
+
+
+def paragraph_records(pk, records, excluded=()):
     return {k:f.projected(r) for k,r in records.items() if k.split('/')[0] in f.LOWER
+            and k not in excluded
             and any(records.get('source_fragments/'+fid,{}).get('payload',{}).get('paragraph_key')==pk
                     for fid in e.evidence_fragment_ids(r['payload']))}
 
@@ -136,21 +151,23 @@ def run(store, source_id, root, ports, *, apply=False):
         e.save(root/'intent.json',{'version':f.VERSION,'stage':'lower','source_id':source_id,
             'gpt_review_contract':f.REVIEW_CONTRACT,'component_contract':components.CONTRACT,
             'jev_contract':f.JEV_CONTRACT,'material_contract':f.MATERIAL_CONTRACT,
-            'source_lookup_contract':source_lookup.CONTRACT,'models':ports.identity})
+            'source_lookup_contract':source_lookup.CONTRACT,'context_contract':'unowned_dialogue_context_v1','models':ports.identity})
         if (root/'verification.json').exists():
             return e.commit_verified(store,root) if apply else json.loads((root/'verification.json').read_text())
         records,sources=f.load_source(store,source_id)
         e.save(root/'before.json',{'records':records,'sources':sources})
         working=deepcopy(records);updates={};generated={};outcomes=[];pending=[];jobs=[]
-        materials={};calibration={};mechanical=[]
+        materials={};calibration={};mechanical=[];excluded=[]
         locator=None
         for key in sorted(records):
             row=records[key]
             if key.split('/')[0] in f.LOWER:
                 try:materials[key]=f.value(key,records,sources)
                 except (ValueError,KeyError) as exc:
-                    if key.split('/')[0] not in {'evidence_steps','observations'}:
-                        pending.append({'object_key':key,'reason':'source_calibration_required','detail':str(exc)})
+                    if excluded_context(key,records):
+                        excluded.append(key)
+                        outcomes.append({'object_key':key,'basis':'excluded_unbound_dialogue_context',
+                                         'source_verified':False,'argument_use_permitted':False})
                         continue
                     if locator is None:locator=source_lookup.Locator(sources)
                     try:
@@ -164,7 +181,7 @@ def run(store, source_id, root, ports, *, apply=False):
                     p=records[key]['payload']
                     if p.get('review_status') in f.PROTECTED:
                         pending.append({'object_key':key,'reason':'protected_lower_record'});continue
-                    edit=Edit(job_id=key,action='repair',statement=p['statement'],
+                    edit=Edit(job_id=key,action='repair',statement=p.get('statement',p.get('text',p.get('title',''))),
                         speaker=p.get('speaker') or 'professor',stance=p.get('stance') or 'asserted',
                         scripture_refs=p.get('scripture_refs',[]),quotes=quotes,reason='唯一逐字／排版／繁簡對應，校準現版位置。')
                     post,frags,projection=record_postimage(key,p,edit,material,working,sources)
@@ -219,14 +236,14 @@ def run(store, source_id, root, ports, *, apply=False):
         for pk,paragraph in coverage_source.items():
             if not paragraph.get('text','').strip():
                 continue
-            bound=paragraph_records(pk,working)
+            bound=paragraph_records(pk,working,excluded)
             answers=f.jev(root,ports,{'paragraph_key':pk,'text':paragraph['text'],'records':bound},jevq.coverage())
             coverage.append({'paragraph_key':pk,'precheck':answers})
             if answers['missing_lower']!='covered' or answers['conclusion_candidate'] in {'substantive_judgment','uncertain'}:
                 # Complete support can span paragraphs: offer adjacent context, not a hard heading boundary.
                 keys=list(sources[source_id]['paragraphs']);n=keys.index(pk)
                 context={k:sources[source_id]['paragraphs'][k]['text'] for k in keys[max(0,n-1):n+2]}
-                bound={k:v for p in context for k,v in paragraph_records(p,working).items()}
+                bound={k:v for p in context for k,v in paragraph_records(p,working,excluded).items()}
                 coverage_jobs.append({'job_id':pk,'source_paragraphs':context,'records':bound,'precheck':answers})
         for batch,raw in f.gpt(root,ports,'lower_coverage',coverage_jobs,Coverage.model_json_schema(),PROMPT+
                 '只補現有 records 未表達的實質 Evidence 或 Observation；已有承載不重建。'
@@ -317,6 +334,8 @@ def run(store, source_id, root, ports, *, apply=False):
         lower_edges=[k for k,r in working.items() if k.startswith('knowledge_relations/')
                      and all(any(n+'/'+r['payload'][field] in working for n in f.LOWER)
                              for field in ['from_id','to_id'])]
+        excluded_ids={k.split('/',1)[1] for k in excluded}
+        lower_edges=[k for k in lower_edges if not {working[k]['payload']['from_id'],working[k]['payload']['to_id']}&excluded_ids]
         blocked={p['object_key'] for p in pending if p.get('object_key') in working}
         blocked_ids={k.split('/',1)[1] for k in blocked}
         deferred=[k for k in lower_edges if any(working[k]['payload'][x] in blocked_ids for x in ['from_id','to_id'])]
@@ -333,6 +352,7 @@ def run(store, source_id, root, ports, *, apply=False):
         result={'version':f.VERSION,'stage':'lower','status':'needs_attention' if pending else 'verified',
             'source_id':source_id,'updates':updates,'new_fragments':generated,'retiring_keys':rel['retiring_keys'],
             'outcomes':outcomes,'coverage':coverage,'conclusion_candidates':conclusions,'pending':pending,
+            'excluded_context_keys':sorted(excluded),
             'fidelity':{k:f.projected(r) for k,r in verified.items() if k.split('/')[0] in f.LOWER},
             'source_sha256':sources[source_id]['body_sha256'],'claim_qualification':'not_granted','applied':False}
         e.save(root/'verification.json',result)
@@ -352,4 +372,6 @@ def verify(root,records,sources):
     for key,p in result['fidelity'].items():
         if key not in records or f.projected(records[key])!=p:
             raise ValueError('lower content changed since verification: '+key)
+    for key in result.get('excluded_context_keys',[]):
+        if not excluded_context(key,records):raise ValueError('excluded context acquired an argument use: '+key)
     return result

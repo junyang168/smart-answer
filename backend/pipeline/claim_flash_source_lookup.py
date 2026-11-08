@@ -71,7 +71,7 @@ class Locator:
                 # Deleted occurrences are never revived by a literal match elsewhere.
                 if frag.get('anchor_state') == 'source_deleted':
                     semantic = True
-        material = {'evidence_id': key, 'statement': p.get('statement', ''),
+        material = {'evidence_id': key, 'statement': p.get('statement',p.get('text',p.get('title',''))),
             'speaker': p.get('speaker'), 'stance': p.get('stance'), 'fragments': valid,
             'original_text_excerpts': [x['quote'] for x in valid],
             'historical_quotes': historical, 'binding_requires_repair': True,
@@ -110,7 +110,8 @@ def lookup(jobs, sources, root, ports):
         parts = job.get('components') or []
         answers = job.get('verdict', {})
         missing = [item for i, item in enumerate(parts) if answers.get('component_'+str(i)) != 'supported']
-        queries[label] = {'statement': job['record'].get('statement', ''),
+        record=job['record']
+        queries[label] = {'statement': record.get('statement',record.get('text',record.get('title',''))),
             'components_to_locate': missing,
             'historical_quotes': material.get('historical_quotes', [x['quote'] for x in material['fragments']])}
     paragraphs = {pk: p['text'] for pk, p in source['paragraphs'].items() if p.get('text', '').strip()}
