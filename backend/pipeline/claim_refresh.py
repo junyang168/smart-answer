@@ -243,9 +243,17 @@ def refresh_occurrences(claim, eids, records, sid):
             if len(matches) != 1:
                 return current
             match = matches[0]
-            for field in ['source_fragment_id', 'paragraph_key', 'media_time', 'media_end_time',
-                          'speaker', 'stance', 'assertive']:
+            for field in ['source_fragment_id', 'paragraph_key', 'media_time', 'media_end_time']:
                 anchor[field] = match[field]
+            # Missing new source facts cannot disprove an existing annotation
+            # (which may have a human origin). Correct only what the source
+            # establishes; never newly infer roles for unlabelled fragments.
+            prior_speaker = anchor.get('speaker')
+            if match.get('speaker') is not None:
+                anchor['speaker'] = match['speaker']
+                for field in ['stance', 'assertive']:
+                    if match[field] is not None or prior_speaker != match['speaker']:
+                        anchor[field] = match[field]
             count += 1
     return updated if count else current
 

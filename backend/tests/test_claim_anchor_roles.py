@@ -47,3 +47,16 @@ def test_creation_and_update_shared_anchor_builder_corrects_old_labels_only(tmp_
     assert (anchor['speaker'],anchor['stance'],anchor['assertive'])==('audience',None,False)
     assert anchor['proposed_highlight']==old['occurrences'][0]['anchors'][0]['proposed_highlight']
     assert records==before
+
+
+def test_unknown_new_role_does_not_overwrite_existing_source_annotation(tmp_path):
+    records,_=fixture(tmp_path,['原話。'],[('S0001','原話。')])
+    records['evidence_steps/E']['payload'].update(speaker='professor',stance='asserted')
+    assert c.anchors(['E'],records,'S')[0]['anchors'][0]['assertive'] is None
+    old={'occurrences':[{'source_id':'S','anchors':[{'evidence_id':'E',
+        'source_fragment_id':'F0','speaker':'professor','stance':'asserted','assertive':True,
+        'role_provenance':'existing-owner-annotation',
+        'proposed_highlight':{'text':'原話。','status':'proposed'}}]}]}
+    result=c.refresh_occurrences(old,['E'],records,'S')[0]['anchors'][0]
+    assert {k:result[k] for k in ['speaker','stance','assertive','role_provenance']}=={
+        'speaker':'professor','stance':'asserted','assertive':True,'role_provenance':'existing-owner-annotation'}
