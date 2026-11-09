@@ -76,6 +76,32 @@ def test_argument_claim_candidate_is_handed_to_independent_relation_task(ready):
     assert final['consumed_argument_claim_handoffs']==result['claim_pair_handoffs']
     assert not any(req['input']['task']=='pair_claim' for role,req in ports.calls if role=='gpt')
     assert not any(role=='jev' for role,req in ports.calls)
+    discovery=next(req for role,req in ports.calls if role=='gpt')
+    assert discovery['input']['completed_connections'][0]['reason']==result['claim_pair_handoffs'][0]['reason']
+
+
+def test_conflicting_complete_proposals_never_partially_commit(ready):
+    store,root,aroot=ready
+    ports=Ports([{'a':'claims/C','b':'claims/D','reason':'第一個完整判定。'},
+                 {'a':'claims/C','b':'claims/D','direction':'b_to_a','reason':'相矛盾的完整判定。'}])
+    result=stage.run(store,'S',aroot,root/'conflicting',ports,apply=True)
+    assert result['status']=='needs_attention'
+    assert result['pending'][0]['reason']=='conflicting_completed_relation_proposals'
+    assert not (root/'conflicting'/'commit-intent.json').exists()
+    assert not any(role=='jev' or req['input']['task']=='pair_claim' for role,req in ports.calls)
+
+
+def test_postreply_source_record_drift_still_blocks_completed_relation_commit(ready):
+    store,root,aroot=ready
+    class Drift(Ports):
+        def repair(self,req):
+            raw=super().repair(req)
+            p=store.get_record_state('source_fragments','F')['payload'];p['verbatim_excerpt_sha256']='changed'
+            store.apply_plan(store.plan_package({'package_id':'after-reply-drift','source_fragments':[p]}))
+            return raw
+    ports=Drift([{'a':'claims/C','b':'claims/D','reason':'有據的完整判定。'}])
+    with pytest.raises(ValueError,match='inputs changed'):stage.run(store,'S',aroot,root/'postreply-drift',ports,apply=True)
+    assert not (root/'postreply-drift'/'commit.json').exists()
 
 
 def test_wrong_direction_repaired(ready):

@@ -70,6 +70,28 @@ def test_same_and_repeated_candidates_do_not_create_duplicates(ready):
     assert result['status']=='applied' and len(result['new_claim_ids'])==1
 
 
+def test_new_claim_link_discovery_is_complete_and_never_rejudged(ready):
+    store,root,rroot=ready
+    class CompleteLink(Ports):
+        def repair(self,req):
+            if req['input']['task']=='pair_claim':raise AssertionError('new Claim link rejudged by GPT')
+            if req['input']['task']=='missing_claim_relations':
+                self.calls.append(('gpt',req))
+                return {'items':[{'job_id':j['job_id'],'pairs':[{
+                    'a':'claims/C','b':next(iter(j['target_claims'])),'relation_type':'supports',
+                    'direction':'a_to_b','reason':'既有判斷支持這個結論。'}],
+                    'unresolved_keys':[],'reason':'完整給出直接連接。'} for j in req['input']['jobs']]}
+            return super().repair(req)
+        def judge(self,req):
+            if all(req['state'].get(k,{}).get('record_type')=='claims' for k in ['A','B']):
+                raise AssertionError('new Claim link rejudged by Jev')
+            return super().judge(req)
+    result=stage.run(store,'S',rroot,root/'complete-new-link',CompleteLink([candidate()]),apply=True)
+    assert result['status']=='applied'
+    assert any(p['from_id']=='C' and p['to_id']==result['new_claim_ids'][0]
+               for k,p in result['updates'].items() if k.startswith('claim_relations/'))
+
+
 @pytest.mark.parametrize('action',['retain_evidence','needs_material','needs_source','needs_update','represented'])
 def test_candidate_dispositions_do_not_write_old_claims(ready,action):
     store,root,rroot=ready;old=store.get_record_state('claims','C')

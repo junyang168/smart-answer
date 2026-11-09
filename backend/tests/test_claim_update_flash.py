@@ -41,7 +41,11 @@ class Ports:
             ]} for j in request['input']['jobs']]}
         if self.reply:
             result=self.reply(request)
-            if result is not None:return result
+            if result is not None:
+                if request['input']['task'] in {'missing_attachments','missing_claim_relations'}:
+                    for item in result.get('items',[]):
+                        item['pairs']=[{'relation_type':'supports','direction':'a_to_b',**p} for p in item.get('pairs',[])]
+                return result
         task=request['input']['task'];jobs=request['input']['jobs']
         if task=='lower_repair':
             return {'items':[{'job_id':j['job_id'],'action':'repair',
@@ -563,10 +567,26 @@ def test_missing_non_orphan_evidence_connection_is_added_reciprocally(sample):
         if task=='pair_attachment':
             return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b',
                              'reason':'行為觀察也支持本主張。'} for j in req['input']['jobs']]}
-    result=flash.run_group(store,'S',['C'],root/'lower2',root/'group',Ports(reply=add),apply=True)
+    ports=Ports(reply=add)
+    result=flash.run_group(store,'S',['C'],root/'lower2',root/'group',ports,apply=True)
     assert result['applied']
     assert set(store.get_record_state('claims','C')['payload']['evidence_step_ids'])=={'E','E2'}
     assert set(store.get_record_state('evidence_steps','E2')['payload']['produced_claim_ids'])=={'C','D'}
+    assert not any(role=='gpt' and req['input']['task']=='pair_attachment' for role,req in ports.calls)
+    assert not any(role=='jev' and req['state'].get('A',{}).get('object_key')=='evidence_steps/E2'
+                   and req['state'].get('B',{}).get('object_key')=='claims/C' for role,req in ports.calls)
+    rel=next(p for k,p in result['updates'].items() if k.startswith('knowledge_relations/') and p['from_id']=='E2' and p['to_id']=='C')
+    assert rel['reason']=='同樣支持本主張。'
+
+
+def test_old_discovery_contract_cannot_silently_resume_new_semantic_calls(sample):
+    store,root,_=complete(sample)
+    flash.run_group(store,'S',['C'],root/'lower',root/'group',Ports(),apply=True)
+    path=root/'group/intent.json';old=json.loads(path.read_text());old['discovery_contract']='claim_flash_missing_connections_v2'
+    path.write_text(json.dumps(old));before=store.get_record_state('claims','C');ports=Ports()
+    with pytest.raises(ValueError,match='saved input differs'):
+        flash.run_group(store,'S',['C'],root/'lower',root/'group',ports,apply=True)
+    assert ports.calls==[] and store.get_record_state('claims','C')==before
 
 
 def test_rejected_pair_removes_only_owner_link_and_preserves_shared_evidence(sample):

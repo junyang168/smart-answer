@@ -13,7 +13,7 @@ from backend.pipeline import evidence_refresh as e, claim_refresh as c
 from backend.pipeline import claim_flash_common as f, claim_flash_lower as lower, claim_flash_pairs as pairs
 from backend.pipeline import claim_flash_questions as jevq
 
-DISCOVERY_CONTRACT='claim_flash_missing_connections_v2'
+DISCOVERY_CONTRACT='claim_flash_missing_connections_v3_complete_relations'
 
 
 class ClaimEdit(c.ClaimEdit):
@@ -129,7 +129,7 @@ def peer_summary(keys,records):
             for k in keys}
 
 
-def discover(records,sources,target_keys,pool,root,ports,*,task,complete=False):
+def discover(records,sources,target_keys,pool,root,ports,*,task,complete=True):
     jobs=[]
     connections={(r['payload']['from_id'],r['payload']['to_id'],r['payload']['relation_type'])
         for k,r in records.items() if k.startswith(('knowledge_relations/','claim_relations/'))}
@@ -543,9 +543,9 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         routed=[pair for pair in isolation['pairs'] if {pair['a'],pair['b']}&set(members)]
         pool.update(k for pair in routed for k in [pair['a'],pair['b']] if k.split('/')[0] in {'evidence_steps','observations'})
         proposed,p,dispositions=discover(records,sources,members,pool,root,ports,task='missing_attachments')
-        proposed.extend(routed+observation_pairs)
         pending.extend(p)
-        attachment=pairs.review(records,sources,attachment_keys,proposed,root/'attachment-pairs',ports,kind='attachment',implicit=implicit)
+        attachment=pairs.review(records,sources,attachment_keys,routed+observation_pairs,root/'attachment-pairs',ports,
+            kind='attachment',implicit=implicit,completed_proposals=proposed)
         pending.extend(attachment['pending']);updates.update(attachment['updates'])
         new_knowledge=attachment['new_relations']
         for change in attachment['implicit_changes']:
@@ -568,7 +568,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             x.split('/',1)[1] in {r['payload']['from_id'],r['payload']['to_id']} for x in members)]
         # Incident edges may reference another source: do not silently pretend all endpoints were loaded.
         edge_keys=[k for k in edge_keys if all('claims/'+records[k]['payload'][field] in records for field in ['from_id','to_id'])]
-        relationships=pairs.review(records,sources,edge_keys,claim_pairs,root/'claim-pairs',ports,kind='claim')
+        relationships=pairs.review(records,sources,edge_keys,[],root/'claim-pairs',ports,kind='claim',completed_proposals=claim_pairs)
         pending.extend(relationships['pending']);updates.update(relationships['updates'])
         answer_updates,answer_pending=question_links(records,sources,members,near,links,root,ports,
             required_gpt_ids=required_questions)
