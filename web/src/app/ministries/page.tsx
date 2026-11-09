@@ -12,10 +12,12 @@ const cardDescriptions = {
   realLifeQA: `這裡的每一個問題，都源自**弟兄姐妹在團契查經中的真實探討**。我們利用 AI 技術將這些寶貴的討論整理、潤色，形成了一份真實、貼近生活的問答集。`
 };
 
+// 2026-11-07 實測：204 篇已登錄逐字稿 + 175 篇新轉錄；中文字數只算漢字；
+// 音視頻為 /Volumes/Jun SSD 上講道媒體資料夾合計（見 #706）。
 const metrics = {
-  sermons: "171",
-  storage: "832GB+",
-  words: "187萬字"
+  sermons: "379",
+  storage: "160GB+",
+  words: "445萬字"
 };
 
 

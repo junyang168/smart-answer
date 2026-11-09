@@ -15,6 +15,9 @@ from backend.tests.test_sunday_assistant import agent, service
 @pytest.fixture(autouse=True)
 def deterministic_grounding(monkeypatch):
     monkeypatch.setattr("backend.sunday_assistant.agent_graph.verify_grounding", lambda *_: {"supported": True, "questions": []})
+    monkeypatch.setattr("backend.sunday_assistant.grounding.verify_pending_disposition", lambda *_: {"supported": True, "questions": []})
+    from backend.sunday_assistant.models import Extraction
+    monkeypatch.setattr("backend.sunday_assistant.grounding.clarification_known_fields", lambda agent, msg, request: Extraction(clarification_id=request.clarification_id))
 
 
 class ScriptModel:

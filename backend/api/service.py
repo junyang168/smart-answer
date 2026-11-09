@@ -28,6 +28,8 @@ from opencc import OpenCC
 from fastapi import HTTPException, UploadFile, status
 from pptx import Presentation
 
+from backend.sunday_data_lock import sunday_write
+
 from .gemini_client import gemini_client
 from .models import (
     ArticleDetail,
@@ -1962,6 +1964,7 @@ def email_sunday_service(date: str):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@sunday_write
 def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServiceEntry:
     filename = file.filename or ""
     if not filename:
@@ -1995,13 +1998,18 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
             temp_path.unlink(missing_ok=True)
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上傳的檔案內容為空")
 
-        temp_path.replace(output_path)
+        if cloud:
+            cloud.publish_final(service_day(date), temp_path)
+        else:
+            temp_path.replace(output_path)
 
 #        _sanitize_zip_file(output_path)
     except HTTPException:
         raise
     except OSError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
 
     updated = repository.set_sunday_service_final_ppt(service.date, output_filename)
     _, default_html = build_sunday_service_email_bodies(updated)

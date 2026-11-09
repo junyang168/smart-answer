@@ -47,7 +47,10 @@ function isOwnReply(message) {
 async function capture(message, edited = false, initialSync = false) {
   const group = message.fromMe ? message.to : message.from;
   if (!config.enabled || !(config.ingest_groups || config.groups).includes(group) || isOwnReply(message)) return;
-  if (group === config.admin_group && (!config.allow_fellowship || !config.fellowship_since || message.timestamp < config.fellowship_since)) return;
+  if (group === config.admin_group) {
+    const starts = [config.allow_fellowship && config.fellowship_since, config.allow_admin_clarifications && config.admin_clarifications_since].filter(x => typeof x === "number" && x > 0);
+    if (!starts.length || message.timestamp < Math.min(...starts)) return;
+  }
   if (message.type === "revoked") {
     lastError = "群消息已撤回，請在後台核對可能已套用的資料";
     return;
@@ -125,7 +128,7 @@ async function poll() {
       }
     }
     for (const message of Object.values(journal.data.pending).sort((a, b) => a.sent_at.localeCompare(b.sent_at))) {
-      if (message.group_id === config.admin_group && !config.allow_fellowship) { journal.delivered(message.message_id); continue; }
+      if (message.group_id === config.admin_group && !config.allow_fellowship && !config.allow_admin_clarifications) { journal.delivered(message.message_id); continue; }
       if (!(config.ingest_groups || config.groups).includes(message.group_id)) throw new Error("有待送消息所屬群已改變，請核對橋接記錄");
       await backendCall("ingest", message);
       journal.delivered(message.message_id);

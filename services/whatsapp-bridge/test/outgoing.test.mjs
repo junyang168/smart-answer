@@ -22,3 +22,20 @@ test('questions and reminders fail closed unless explicitly enabled in fresh con
   assert.equal(allowedBySettings({allow_reminders: true}, 'friday:2026-11-08'), true);
   assert.equal(allowedBySettings({}, 'ack:message'), true);
 });
+
+test('admin clarification mode overrides source question permission and never leaks to source groups', async () => {
+  const { allowedBySettings, allowedDestination } = await import('../outgoing.mjs');
+  const config = {enabled:true, groups:['111@g.us','222@g.us'], admin_group:'999@g.us', allow_admin_clarifications:true, allow_questions:true};
+  for (const key of ['clarify:34:34','admin-clarify-selection:reply']) {
+    assert.equal(allowedBySettings(config,key),true);
+    assert.equal(allowedDestination(config,key,'999@g.us'),true);
+    assert.equal(allowedDestination(config,key,'111@g.us'),false);
+    assert.equal(allowedDestination(config,key,'888@g.us'),false);
+  }
+  assert.equal(registeredMessage('admin-clarify-selection:reply','【主日助理提問】哪一項？'),true);
+  assert.equal(allowedDestination({...config,admin_group:'111@g.us'},'clarify:34:34','111@g.us'),false);
+  assert.equal(allowedDestination({...config,enabled:false},'clarify:34:34','999@g.us'),false);
+  assert.equal(allowedBySettings({...config,allow_admin_clarifications:false},'admin-clarify-selection:reply'),false);
+  assert.equal(allowedDestination(config,'confirmed:reply','999@g.us'),true);
+  assert.equal(allowedDestination(config,'ack:reply','999@g.us'),true);
+});
