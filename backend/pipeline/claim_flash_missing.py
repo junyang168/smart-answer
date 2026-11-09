@@ -77,7 +77,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'claim_ids':ids,'group':group,
             'relation_root':str(relation_root),'max_new_claims':room,'models':ports.identity,
-            'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema()])})
+            'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema(),pairs.COMPLETED_CONTRACT,flash.CompleteDiscoveries.model_json_schema()])})
         if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_group_source(store,source_id,group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
@@ -184,9 +184,9 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             p=records[key]['payload'];proposed[index].update({k:p[k] for k in ['statement','scripture_refs','evidence_step_ids']})
             proposed[index]['_observation_ids']=[r['from_id'] for r in new_lower if r['to_id']==p['claim_id'] and 'observations/'+r['from_id'] in pool and r['relation_type'] in {'supports','explains','corroborates'}]
             if not p['evidence_step_ids'] and not proposed[index]['_observation_ids']:pending.append({'object_key':key,'reason':'new_claim_has_no_final_support'})
-        new_pairs,p,discoveries=flash.discover(records,sources,members,set(members)|{'claims/'+cid for cid in ids},root/'new-relations',ports,task='missing_claim_relations') if members else ([],[],[])
+        new_pairs,p,discoveries=flash.discover(records,sources,members,set(members)|{'claims/'+cid for cid in ids},root/'new-relations',ports,task='missing_claim_relations',complete=True) if members else ([],[],[])
         pending+=p
-        relationships=pairs.review(records,sources,[],new_pairs,root/'new-claim-pairs',ports,kind='claim',adjudicate_proposed_none=True)
+        relationships=pairs.review(records,sources,[],[],root/'new-claim-pairs',ports,kind='claim',completed_proposals=new_pairs)
         pending+=relationships['pending']
         selected_questions={qid for link in links for qid in link['question_ids']}
         question_records={k:r for k,r in records.items() if not k.startswith('questions/') or k.split('/',1)[1] in selected_questions}

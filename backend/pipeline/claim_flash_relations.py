@@ -13,6 +13,8 @@ PROMPT = (flash.PROMPT + '本次只發現所列Claim之間遺漏的重要直接�
           '原文中已由間接路線承載的意思不強加直接邊；主題相近或共享證據不等於直接關係。'
           '只用提供的Claim object_key，不沿鄰居展開。無缺口可空；材料不足列unresolved_keys。'
           '既有邊會獨立檢查，不在此修正。每個job_id恰好一次，只輸出必要候選及簡短理由。')
+PROMPT+=('每條新連接一次給齊relation_type、direction、reason，作完整判定；'
+         'completed_connections已完成，只作唯讀路線，不重判或重複提出；同一端點組合只給一個最合適直接關係。')
 
 
 def consume_arguments(store, root, ids, records, sources):
@@ -59,7 +61,7 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         pin = f.bind_source(store, source_id, root)
         e.save(root/'intent.json', {'version': VERSION, 'source': pin, 'claim_ids': ids,
             'argument_root': str(argument_root), 'models': ports.identity,
-            'policy_sha256': e.digest([PROMPT, flash.Discoveries.model_json_schema()])})
+            'policy_sha256': e.digest([PROMPT, flash.CompleteDiscoveries.model_json_schema()])})
         if (root/'verification.json').exists():
             return statements.finish(store, root) if apply else json.loads((root/'verification.json').read_text())
         records, sources = f.load_group_source(store, source_id, prior['group']); c.fetch_claims(store, ids)
@@ -80,11 +82,18 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         handoffs=json.loads((argument_root/'result.json').read_text()).get('claim_pair_handoffs',[])
         if any(p['a'] not in targets or p['b'] not in targets or p['a']==p['b'] for p in handoffs):
             raise ValueError('argument Claim handoff exceeded group')
-        proposed = [{k:p[k] for k in ['a','b','reason']} for p in handoffs]; pending = []; discoveries = []
+        completed_handoffs=[{k:p[k] for k in pairs.CompletedProposal.model_fields} for p in handoffs
+                            if 'relation_type' in p and 'direction' in p]
+        # Old actions supplied only candidates. Complete only their missing
+        # decision, preserving the saved reason, if no new complete edge covers it.
+        proposed=[{**{k:p[k] for k in ['a','b','reason']},'candidate_reason':p['reason']}
+                  for p in handoffs if 'relation_type' not in p or 'direction' not in p]
+        completed=list(completed_handoffs);pending = []; discoveries = []
+        if completed_handoffs:shared['completed_connections']=completed_handoffs
         for batch, raw in f.gpt(root/'discovery', ports, 'missing_group_claim_relations',
-                [{'job_id': prior['group']['group_id']}], flash.Discoveries.model_json_schema(),
+                [{'job_id': prior['group']['group_id']}], flash.CompleteDiscoveries.model_json_schema(),
                 PROMPT, shared=shared, semantic_review=False):
-            items = flash.Discoveries.model_validate(raw).items
+            items = flash.CompleteDiscoveries.model_validate(raw).items
             f.exactly([x.model_dump() for x in items], [j['job_id'] for j in batch], 'job_id')
             for item in items:
                 if not set(item.unresolved_keys) <= targets:
@@ -92,11 +101,11 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
                 for pair in item.pairs:
                     if pair.a not in targets or pair.b not in targets or pair.a == pair.b:
                         raise ValueError('Claim relation discovery exceeded group')
-                    proposed.append(pair.model_dump())
+                    completed.append(pair.model_dump())
                 pending.extend({'object_key': k, 'reason': item.reason} for k in item.unresolved_keys)
                 discoveries.append(item.model_dump())
         result = pairs.review(records, sources, sorted(edges), proposed, root/'pairs', ports,
-                              kind='claim', adjudicate_proposed_none=True)
+                              kind='claim', adjudicate_proposed_none=True,completed_proposals=completed)
         updates = deepcopy(result['updates'])
         for post in result['new_relations']:
             oid = 'CR-FLA-'+e.digest([source_id, post['from_id'], post['to_id'], post['relation_type']])[:24]

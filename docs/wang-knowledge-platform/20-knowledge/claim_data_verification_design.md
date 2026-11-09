@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：規範
 > **狀態**：當前設計；不表示以下分工已全部實作
-> **與代碼對齊**：2026-11-08 核對 `57991db5` 的 `knowledge_models.py` 型別欄位及 Flash 流程；開放擴充欄位尚未全庫清點
+> **與代碼對齊**：部分；2026-11-09 核對 #702 工作樹的型別欄位、Flash 分層及完整新關係交付；開放擴充欄位尚未全庫清點
 > **權威範圍**：Claim Update Flash 各元素的驗證責任與方法；不新增資料表、資格系統或 CVP 維護授權
 
 ## 1. 三層的邊界
@@ -78,9 +78,9 @@ Citation 與直接 SourceFragment 綁定在新舊記錄的權威對應為 TBD；
 | Claim 整體支持 | 全部已驗證 Evidence／Observation 合起來是否支持 Claim 全部實質內容；獨立 Jev 問題。單條配對成立不等於整個 Claim 支持完整 |
 | Claim `scripture_refs` | 教授用於此主張的經文及論證作用是否保留；獨立 Jev 問題，GPT 修正缺失或錯配。不要求將全部經文抄進 Claim statement |
 | 論證步驟 EvidenceStep：`evidence_step_id`, `step_type`, `discourse_role`, `produced_claim_ids`, `claim_group_ids`；Observation `argument_role` | 核對教授如何從材料得到結論，前提、限定、反方回應及順序是否完整；GPT 以限定主題作單一論證結構任務。存儲中材料性類型與用途型標籤混用、步驟順序與多前提表示法 TBD，不能假造已有欄位 |
-| Claim `evidence_step_ids`、材料→Claim 配對 | 程式查端點／引用；獨立 Jev call 檢查每對類型、方向及理由，允許只支持 Claim 一部分。GPT 補理由及處置歧義；不重審材料 statement |
-| `KnowledgeRelationRecord` 的 `relation_id`, `from_id`, `to_id`, `relation_type`, `reason` | **所有論證連接均在本層**，包括 Evidence→Evidence、Observation→Evidence 及 Evidence／Observation→Claim；物理兩端都在材料表不會把論證責任移到 Evidence 層。Jev 分開問關係與理由，GPT 處置 |
-| Claim 間連接：`claim_relation_id`, `from_id`, `to_id`, `relation_type`, `reason` | 與上一配對分開的 Jev call，核對直接論證關係及方向，不以共同 topic 當支持；跨講 Claim 只帶必要直接參考，不遞迴展開 |
+| Claim `evidence_step_ids`、材料→Claim 配對 | 程式查端點／引用；既有及未完成配對用獨立 Jev 問題檢查類型、方向及理由，GPT 處置具體疑點。GPT已發現並完整判定的新連接直接作機械校驗保存；允許只支持 Claim 一部分，不重審材料 statement |
+| `KnowledgeRelationRecord` 的 `relation_id`, `from_id`, `to_id`, `relation_type`, `reason` | **所有論證連接均在本層**，包括 Evidence→Evidence、Observation→Evidence 及 Evidence／Observation→Claim；物理兩端都在材料表不會把論證責任移到 Evidence 層。既有連接由Jev預檢、GPT處置疑點；GPT發現新連接時交齊類型、方向、理由及來源，後續不再重判或重寫理由 |
+| Claim 間連接：`claim_relation_id`, `from_id`, `to_id`, `relation_type`, `reason` | 與材料配對分開的任務；既有連接用Jev，GPT新發現的完整連接直接機械校驗。核對直接論證關係及方向，不以共同 topic 當支持；跨講 Claim 只帶必要直接參考，不遞迴展開 |
 | 漏接與漏步驟 | 程式全篇清點孤立材料及既有有效路徑；Jev 在同講 Claim 清單找候選，GPT 補理由並另查主題內非孤立漏接。既有充分支持不代表教授其他重要論據可刪；不作笛卡兒積配對 |
 | Claim 承載／漏抽 | GPT 區分已有 Claim、必要新 Claim 與只需保留的材料。以教授實際主張及獨立論據判斷，不以有判斷句或固定 Evidence 數量決定；Jev 只提供候選，不作建卡判決 |
 | Question `answer_state`（alias `answer_status`）, `answer_claim_ids` | 核對教授實際直接答案及後續結論的連接；保留正確舊答案，新建 Claim 時查本主題相關問題。空清單不必然錯：可能未回答，或答案不需獨立 Claim |

@@ -8,6 +8,17 @@ from backend.pipeline import claim_flash_questions as jevq
 from backend.pipeline.claim_relation_refresh import render_reason
 
 TYPES=('supports','explains','qualifies','refutes','contrasts','contextualizes','corroborates','answers','applies')
+COMPLETED_CONTRACT='claim_flash_completed_relation_v1'
+
+
+class CompletedProposal(BaseModel):
+    """A GPT-completed relation, not a candidate needing another semantic task."""
+    model_config=ConfigDict(extra='forbid',strict=True)
+    a:str
+    b:str
+    relation_type:Literal['supports','explains','qualifies','refutes','contrasts','contextualizes','corroborates','answers','applies']
+    direction:Literal['a_to_b','b_to_a']
+    reason:str=Field(min_length=1)
 
 
 class Decision(BaseModel):
@@ -78,7 +89,7 @@ def forbidden(src,dst,typ,records):
     return False
 
 
-def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False):
+def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False,completed_proposals=()):
     cases=[];seen=set()
     def find(oid):
         matches=[k for k in records if k.split('/')[0] in f.LOWER|{'claims'} and k.split('/',1)[1]==oid]
@@ -104,14 +115,40 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
                       'original':{'from_id':a.split('/',1)[1], 'to_id':b.split('/',1)[1],
                                   'relation_type':'supports'}, 'key':None, 'implicit':True})
         seen.add(frozenset([a,b]))
+    completed=[];conflicts=[];completed_seen={}
+    for raw in completed_proposals:
+        pair=CompletedProposal.model_validate(raw).model_dump();a,b=pair['a'],pair['b']
+        if a==b or a not in records or b not in records or not allowed_pair(a,b,kind):
+            raise ValueError('completed relation has unprovided or illegal endpoints')
+        choice=pair['direction']+'_'+pair['relation_type']
+        if choice not in options(a,b,kind):raise ValueError('completed relation has illegal type or direction')
+        src,dst=(a,b) if pair['direction']=='a_to_b' else (b,a)
+        signature=(src,dst,pair['relation_type']);key=frozenset([a,b])
+        if key in completed_seen:
+            if completed_seen[key]!=signature:
+                conflicts.append({'a':a,'b':b,'reason':'conflicting_completed_relation_proposals'})
+            continue
+        completed_seen[key]=signature
+        if key in seen:
+            originals=[x for x in cases if frozenset([x['a'],x['b']])==key]
+            if not any((x['original']['from_id'],x['original']['to_id'],x['original']['relation_type'])==
+                       (src.split('/',1)[1],dst.split('/',1)[1],pair['relation_type']) for x in originals):
+                conflicts.append({'a':a,'b':b,'reason':'completed_proposal_requires_existing_relation_update'})
+            continue
+        # node() mechanically verifies the same complete source bindings used
+        # by the producer. It does not ask either model to judge this edge again.
+        state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':None}
+        case={'job_id':'P-'+e.digest([a,b])[:24],'a':a,'b':b,'original':None,'key':None,'state':state}
+        completed.append((case,'set',choice,pair['reason'],'gpt_completed_proposal'));seen.add(key)
     for pair in proposed:
         a,b=pair['a'],pair['b']
         if a==b or a not in records or b not in records or not allowed_pair(a,b,kind):
             raise ValueError('unprovided or illegal pair')
         if frozenset([a,b]) not in seen:
-            cases.append({'job_id':'P-'+e.digest([a,b])[:24],'a':a,'b':b,'original':None,'key':None})
+            cases.append({'job_id':'P-'+e.digest([a,b])[:24],'a':a,'b':b,'original':None,'key':None,
+                          **({'candidate_reason':pair['candidate_reason']} if pair.get('candidate_reason') else {})})
             seen.add(frozenset([a,b]))
-    updates={};retiring=[];new=[];pending=[];outcomes=[];jobs=[];resolved=[];implicit_changes=[]
+    updates={};retiring=[];new=[];pending=conflicts;outcomes=[];jobs=[];resolved=completed;implicit_changes=[]
     for case in cases:
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}

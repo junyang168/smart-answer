@@ -63,6 +63,15 @@ class Discoveries(BaseModel):
     items: list[Discovery]
 
 
+class CompleteDiscovery(Discovery):
+    pairs:list[pairs.CompletedProposal]
+
+
+class CompleteDiscoveries(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    items:list[CompleteDiscovery]
+
+
 PROMPT=('Claim Update Flash，只審本層明列目標，不審 CVP；'
  '已驗證下層只作材料，不重審或改寫 Evidence／Observation，參考 Claim 不擴成完整審閱。'
  'GPT 對交付的語義問題作最終決定，可以覆蓋 Jev；不因不同意再請求複審。'
@@ -120,7 +129,7 @@ def peer_summary(keys,records):
             for k in keys}
 
 
-def discover(records,sources,target_keys,pool,root,ports,*,task):
+def discover(records,sources,target_keys,pool,root,ports,*,task,complete=False):
     jobs=[]
     connections={(r['payload']['from_id'],r['payload']['to_id'],r['payload']['relation_type'])
         for k,r in records.items() if k.startswith(('knowledge_relations/','claim_relations/'))}
@@ -146,14 +155,17 @@ def discover(records,sources,target_keys,pool,root,ports,*,task):
             'existing_connections':[{'from_id':a,'to_id':b,'relation_type':typ}
                 for a,b,typ in sorted(connections) if {a,b}<=context_ids]})
     proposed=[];pending=[];dispositions=[]
-    for batch,raw in f.gpt(root,ports,task,jobs,Discoveries.model_json_schema(),PROMPT+
+    contract=CompleteDiscoveries if complete else Discoveries
+    final_instruction=('每條新連接一次給齊relation_type、direction及有據reason，這是完整處置，後面只作機械校驗；'
+                       '同一端點組合給一個最合適的直接關係。' if complete else '')
+    for batch,raw in f.gpt(root,ports,task,jobs,contract.model_json_schema(),PROMPT+final_instruction+
             '只發現缺少的直接連接，提供兩端完整 object_key 與理由，不重審節點、不修改 statement。'
             '證據已連 A 仍可能漏連 B；支持已充分也須保留教授另一條重要論據。'
             'existing_connections 包含 Claim 欄位中的既有支持及所列節點間已驗證的下層連接；'
             '已有直接連接不重提，既有間接路線已承載的論據不為同一意思重複加直接邊。'
             'Claim 關係只在本批提供的 Claim 之間提出；無合適連接可空，不強制每項連接。'
             '無法判定的 record key 放 unresolved_keys。所有候選還會交獨立 Jev pair 檢查。'):
-        items=Discoveries.model_validate(raw).items
+        items=contract.model_validate(raw).items
         f.exactly([x.model_dump() for x in items],[j['job_id'] for j in batch],'job_id')
         for item in items:
             job=next(j for j in batch if j['job_id']==item.job_id)

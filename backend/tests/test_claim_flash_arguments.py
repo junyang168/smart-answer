@@ -10,7 +10,9 @@ from backend.tests.test_evidence_refresh import sample
 from backend.tests.test_claim_management_postgres import postgres_store,_temporary_postgres
 
 class Ports(BasePorts):
-    def __init__(self,proposed=(),**kwargs):super().__init__(**kwargs);self.proposed=list(proposed)
+    def __init__(self,proposed=(),**kwargs):
+        super().__init__(**kwargs)
+        self.proposed=[{'relation_type':'supports','direction':'a_to_b',**p} for p in proposed]
     def repair(self,request):
         task=request['input']['task']
         if task=='argument_completeness':
@@ -105,7 +107,7 @@ def test_human_approved_relation_is_not_rewritten(ready):
     assert store.get_record_state('knowledge_relations','H')==before
 
 
-def test_rejected_candidate_goes_to_gpt_for_final_disposition(ready):
+def test_completed_proposal_is_not_rejudged_but_existing_support_is_still_checked(ready):
     store,root,plan,eroot,sroot=ready
     class Remove(Ports):
         def repair(self,request):
@@ -115,7 +117,8 @@ def test_rejected_candidate_goes_to_gpt_for_final_disposition(ready):
             return raw
     ports=Remove([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'候選。'}],choices={'relation':'none'})
     result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
-    assert any(role=='gpt' and r['input']['task']=='pair_lower' for role,r in ports.calls)
+    assert not any(role=='gpt' and r['input']['task']=='pair_lower' for role,r in ports.calls)
+    assert not any(role=='jev' and r['state'].get('A',{}).get('object_key')=='observations/O' for role,r in ports.calls)
     assert result['status']=='needs_attention' # Existing sole support was also rejected; never complete with none.
 
 

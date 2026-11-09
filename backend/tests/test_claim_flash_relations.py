@@ -14,7 +14,9 @@ from backend.tests.test_claim_management_postgres import postgres_store, _tempor
 
 
 class Ports(BasePorts):
-    def __init__(self, proposed=(), **kwargs): super().__init__(**kwargs); self.proposed=list(proposed)
+    def __init__(self, proposed=(), **kwargs):
+        super().__init__(**kwargs)
+        self.proposed=[{'relation_type':'supports','direction':'a_to_b',**p} for p in proposed]
     def repair(self, request):
         self.calls.append(('gpt', request)); task=request['input']['task']
         assert task in {'missing_group_claim_relations', 'pair_claim'}
@@ -72,7 +74,8 @@ def test_argument_claim_candidate_is_handed_to_independent_relation_task(ready):
     ports=Ports();final=stage.run(store,'S',ar,root/'relation-handoff',ports,apply=True)
     assert final['status']=='applied' and len(final['updates'])==1
     assert final['consumed_argument_claim_handoffs']==result['claim_pair_handoffs']
-    assert any(req['input']['task']=='pair_claim' for role,req in ports.calls if role=='gpt')
+    assert not any(req['input']['task']=='pair_claim' for role,req in ports.calls if role=='gpt')
+    assert not any(role=='jev' for role,req in ports.calls)
 
 
 def test_wrong_direction_repaired(ready):

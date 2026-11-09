@@ -15,14 +15,12 @@ PROMPT=(flash.PROMPT+'只檢查指定Claim的論證路線是否完整，不重�
  '找教授實際使用但未被現有直接或間接路線承載的重要經文、例子及推理步驟。'
  '已有間接路線完整承載者不強加直接邊；主題相近不算論證。'
  '不要求每筆材料都有連接；背景及同義重複不必為消除孤立而加邊。'
- '只提出缺少連接的兩端object_key、直接相關fragment_ids及簡短reason，不改既有邊或文字。'
+ '每條缺少連接一次給齊兩端object_key、relation_type、direction、直接相關fragment_ids及簡短reason。'
+ '這是該連接的完整處置；依教授原文決定最合適的直接類型與方向，同一端點組合不要重複提出。'
+ '不改既有邊或文字，已有的直接或間接路線作唯讀參考。'
  '缺材料本身用needs_material，缺來源用needs_source；每項恰好一次。')
-class Proposed(BaseModel):
-    model_config=ConfigDict(extra='forbid',strict=True)
-    a:str
-    b:str
+class Proposed(pairs.CompletedProposal):
     fragment_ids:list[str]=Field(min_length=1)
-    reason:str=Field(min_length=1)
 class Route(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     job_id:str
@@ -117,7 +115,8 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         for kind in ['lower','attachment']:
             local=[k for k,p in edges.items() if pairs.allowed_pair(by_id[p['from_id']],by_id[p['to_id']],kind)]
             proposed=[p for p in proposals if pairs.allowed_pair(p['a'],p['b'],kind)]
-            result=pairs.review(records,sources,local,proposed,root/('pairs-'+kind),ports,kind=kind,implicit=implicit if kind=='attachment' else (),adjudicate_proposed_none=True)
+            result=pairs.review(records,sources,local,[],root/('pairs-'+kind),ports,kind=kind,implicit=implicit if kind=='attachment' else (),
+                completed_proposals=[{k:p[k] for k in pairs.CompletedProposal.model_fields} for p in proposed])
             updates.update(result['updates']);retiring+=result['retiring_keys'];new+=result['new_relations']
             pending+=result['pending'];outcomes+=result['outcomes'];removals+=result['implicit_changes']
         for post in new:
