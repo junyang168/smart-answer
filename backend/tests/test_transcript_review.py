@@ -716,7 +716,8 @@ def test_beta_activation_preserves_local_edits_history_and_legacy_manuscript(set
         module.activate(source_root, production, item, "a")
 
 
-def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup):
+@pytest.mark.parametrize('noisy_source',[False,True])
+def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup,noisy_source):
     from backend.pipeline.slide_change_pilot import object_sha
     from backend.pipeline.source_projection import project_script
     from backend.api.sc_api.transcript_review import pending_timing_ids
@@ -726,6 +727,8 @@ def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup):
     prefix='先等一下。'
     partial={**record['paragraphs'][0],'text':prefix+record['paragraphs'][0]['text']}
     record.update(duration_ms=3615000,uncut_corrected_paragraphs=[deleted,partial,record['paragraphs'][1]],timing_quality={'status':'qualified'})
+    if noisy_source:
+        record['timing_quality']={'status':'editor_draft_only','source_holds':{partial['id']:{'text_confirmed':False}}}
     record['editorial_exclusions']=[dict(paragraph_id=p['id'],old=old,start=0,end=len(old),source_text_sha256=hashlib.sha256(p['text'].encode()).hexdigest()) for p,old in [(deleted,deleted['text']),(partial,prefix)]]
     record['source_notices']=[dict(paragraph_ids=[partial['id']],start_ms=0,end_ms=1000,note='接縫保留待核對',status='retained_pending_human_review')]
     atomic(source/'full_transcript.json',record)
@@ -735,6 +738,11 @@ def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup):
     doc=adopted(setup)
     assert [p['text'] for p in doc['script']]==['~~調整麥克風。~~','~~先等一下。~~耶穌基督。','保羅所說的智慧。']
     assert doc['context']['source_notices'][0]['paragraph_ids']==['2']
+    if noisy_source:
+        assert doc['context']['timing_quality']['paragraph_states']['2']['status']=='withheld'
+        assert pending_timing_ids(doc['script'],doc['context'])==['2']
+        with pytest.raises(ReviewError,match='音源不清'):store.publish('a','講道 test',op(doc))
+        return
     assert pending_timing_ids(doc['script'],doc['context'])==[]
     restored=copy.deepcopy(doc['script']);restored[0]['text']='調整麥克風。'
     assert pending_timing_ids(restored,doc['context'])==['1']
