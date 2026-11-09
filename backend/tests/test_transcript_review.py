@@ -819,7 +819,11 @@ def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_pat
     for path, sha in before.items():
         if path != 'config/sermon.json':
             assert file_hash(target / path) == sha
-    assert beta.document('a', '講道 test')['version'] == original['version']
+    if existing_promoted:
+        with pytest.raises(ReviewError,match='移交正式資料'):
+            beta.document('a','講道 test')  # Archived writer remains blocked.
+    else:
+        assert beta.document('a', '講道 test')['version'] == original['version']
     assert beta.document('a', new)['can_edit']
     assert len(read(target / 'config/sermon.json')) == 2
     with pytest.raises(ValueError, match='refusing to overwrite'):
