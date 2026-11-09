@@ -7995,7 +7995,9 @@ class PostgresKnowledgeStore:
             Mapping[str, Sequence[tuple[str, str, int, str]]]
         ] = None,
         expected_current_source_claims: Optional[Mapping[str, Mapping[str, dict[str, Any]]]] = None,
+        expected_current_claim_sampling_markers: Optional[Mapping[str, dict[str, Any]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
+        expected_current_human_source_scope: Optional[Mapping[str, Any]] = None,
         transaction_context: Any = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
@@ -8111,6 +8113,21 @@ class PostgresKnowledgeStore:
                     # as well as its write targets. Protect that complete read
                     # set in the same short, advisory-locked transaction.
                     self._assert_transaction_read_pins(cursor, expected_current_record_pins)
+                if expected_current_human_source_scope is not None:
+                    from backend.pipeline.claim_human_source import assert_scope_current
+                    assert_scope_current(cursor, expected_current_human_source_scope)
+                if expected_current_claim_sampling_markers:
+                    if plan.source_kind!='claim_bottom_up_refresh_v1' or expected_current_record_pins is None:
+                        raise ValueError('AI sampling projection requires guarded bottom-up Claim writes')
+                    from backend.pipeline.claim_metadata_projection import sampling_marker
+                    writes={(op.collection,op.object_id) for op in plan.operations}
+                    for cid,expected in expected_current_claim_sampling_markers.items():
+                        if ('claims',cid) not in writes:raise ValueError('AI sampling marker lacks its Claim write')
+                        cursor.execute("SELECT revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s FOR UPDATE",(cid,))
+                        row=cursor.fetchone()
+                        state=(dict(revision=row[0],content_sha256=row[1],payload=row[2],retired=row[3] is not None) if row else None)
+                        if not state or sampling_marker(cursor,cid,state)!=expected:
+                            raise ChangeSetConflict('AI sampling marker or review history changed before commit')
                 if expected_current_route_material_pins is not None:
                     self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
                     viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
@@ -8301,20 +8318,12 @@ class PostgresKnowledgeStore:
                     if plan.source_kind != 'claim_bottom_up_refresh_v1':
                         raise ValueError('source Claim identity guard requires bottom-up Claim refresh')
                     for source_id, expected in expected_current_source_claims.items():
-                        cursor.execute("""SELECT payload FROM wang_knowledge.objects
-                            WHERE collection='source_documents' AND object_id=%s AND retired_at IS NULL""",
-                            (source_id,))
-                        source_row = cursor.fetchone()
-                        aliases = {source_id}
-                        if source_row and source_row[0].get('transcript_id'):
-                            aliases.add(source_row[0]['transcript_id'])
-                        cursor.execute('''SELECT object_id,payload FROM wang_knowledge.objects
-                            WHERE collection='claims' AND retired_at IS NULL AND payload @> ANY(%s::jsonb[])''',
-                            ([canonical_json({'occurrences': [{'source_id': alias}]}) for alias in sorted(aliases)],))
-                        actual = {oid: {'statement': p['statement'], 'attribution': p.get('attribution')}
-                                  for oid, p in cursor.fetchall()
-                                  if p.get('review_status') not in {'superseded', 'retired'}
-                                  and not p.get('superseded_by')}
+                        from .source_claim_membership import load_source_claims
+                        actual = {key.split('/',1)[1]: {'statement': row['payload']['statement'],
+                                  'attribution': row['payload'].get('attribution')}
+                                  for key,row in load_source_claims(cursor,source_id).items()
+                                  if row['payload'].get('review_status') not in {'superseded', 'retired'}
+                                  and not row['payload'].get('superseded_by')}
                         if actual != expected:
                             raise ChangeSetConflict('source Claim identities or statements changed: ' + source_id)
                 if expected_current_claim_related_records is not None:
@@ -9044,7 +9053,8 @@ class PostgresKnowledgeStore:
                 )
             allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
             if collection == 'knowledge_relations':
-                allowed_from, allowed_to = knowledge_relation_endpoints(relation_type)
+                allowed_from, allowed_to = knowledge_relation_endpoints(
+                    relation_type, flash=payload.get('record_namespace') == 'claim_update_flash_v1')
             if owners[from_id] not in allowed_from:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "

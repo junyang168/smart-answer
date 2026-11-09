@@ -222,10 +222,20 @@ def repair_postimage(evidence, reply, value, records, sources):
                     and not r['retired'] and r['payload'].get('source_id') == sid
                     and r['payload'].get('source_sha256') == sources[sid]['body_sha256']
                     and r['payload'].get('paragraph_key') == item['paragraph_key']
+                    and r['payload'].get('anchor_state') == 'source_version_bound'
+                    and str(r['payload'].get('source_segment_index')) == str(p['index'])
+                    and r['payload'].get('media_time') == p.get('start_time')
+                    and r['payload'].get('media_end_time') == p.get('end_time')
+                    and r['payload'].get('paragraph_text_sha256') == hashlib.sha256(p['text'].encode()).hexdigest()
+                    and r['payload'].get('verbatim_excerpt_sha256') == hashlib.sha256(quote.encode()).hexdigest()
                     and r['payload'].get('verbatim_excerpt') == quote), None)
         fid = old['fragment_id'] if old else 'FR-BU-' + digest(
             [sid, sources[sid]['body_sha256'], item['paragraph_key'], quote])[:32]
         if not old:
+            if 'source_fragments/'+fid in records:
+                fid='FR-BU-'+digest([fid, records['source_fragments/'+fid]['payload']])[:32]
+                if 'source_fragments/'+fid in records:
+                    raise ValueError('replacement fragment identity already occupied; preserve history')
             generated['source_fragments/' + fid] = {'fragment_id': fid, 'source_id': sid,
                 'paragraph_key': item['paragraph_key'], 'verbatim_excerpt': quote,
                 'source_sha256': sources[sid]['body_sha256'], 'anchor_state': 'source_version_bound',
@@ -326,14 +336,24 @@ def _run(store, evidence_ids, root, ports, *, max_revisions, apply):
     return commit_verified(store, root) if apply else publish(root, result)
 
 
-def commit_verified(store, root):
+def commit_verified(store, root, *, source_fragments_only=False):
     result = json.loads((root / 'verification.json').read_text())
     frozen = json.loads((root / 'before.json').read_text())
     records, sources = frozen['records'], frozen['sources']
+    guards = [s['human_source_guard'] for s in sources.values() if s.get('human_source_guard')]
+    if guards and 'human_source_guard' not in result:
+        if len(guards) != 1:raise ValueError('one source interpretation guard required')
+        result['human_source_guard'] = guards[0]
+    if result.get('human_source_guard') is not None:
+        from backend.pipeline.claim_human_source import assert_scope_current
+        with store.connect() as conn, conn.cursor() as cursor:
+            assert_scope_current(cursor, result['human_source_guard'])
     updates, fragments = result['updates'], result['new_fragments']
     retiring = result.get('retiring_keys', [])
     source_kind = result['version']
-    if result['status'] == 'verified' and (updates or retiring):
+    if source_fragments_only and (updates or retiring or any(not k.startswith('source_fragments/') for k in fragments)):
+        raise ValueError('source-only commit cannot write or retire upper-layer records')
+    if result['status'] == 'verified' and (updates or retiring or source_fragments_only and fragments):
         if (root / 'commit.json').exists():
             readback(store, result)
             result.update(applied=True, status='applied', commit=json.loads((root / 'commit.json').read_text()))
@@ -366,8 +386,10 @@ def commit_verified(store, root):
         save(root / 'commit-intent.json', {'change_set_id': plan.change_set_id,
              'fingerprint_sha256': plan.fingerprint_sha256})
         receipt = store.apply_plan(plan, expected_current_record_pins=pins,
+            **({'expected_current_human_source_scope':result['human_source_guard']} if result.get('human_source_guard') is not None else {}),
             expected_current_source_claims=result.get('source_claim_index'),
-            metadata={'actor': source_kind, 'reason': 'Bottom-up semantic decisions and program-verified postimages',
+            **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
+            metadata={'actor': source_kind, 'reason': result.get('commit_reason', 'Bottom-up semantic decisions and program-verified postimages'),
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)
         readback(store, result)
@@ -398,14 +420,17 @@ class Models:
                          'model': gpt.model, 'effort': gpt.reasoning_effort}}
 
     def judge(self, request):
+        self.judge_preflight()
         key = os.environ.get('TYPESAFE_API_KEY')
-        if not key:
-            raise ValueError('TYPESAFE_API_KEY is required')
         req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', method='POST',
             data=json.dumps(request, ensure_ascii=False).encode(),
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=60) as response:
             return json.loads(response.read())
+
+    def judge_preflight(self):
+        if not os.environ.get('TYPESAFE_API_KEY'):
+            raise ValueError('TYPESAFE_API_KEY is required; no request sent')
 
     def preflight(self):
         self.gpt._verify_chatgpt_login()

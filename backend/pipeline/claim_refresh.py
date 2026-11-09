@@ -63,15 +63,14 @@ def context(store, claims, evidence_ids, *, include_peers=True):
     with store.connect() as conn, conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         cursor.execute('SET LOCAL statement_timeout=5000')
-        cursor.execute('''SELECT object_id,revision,content_sha256,payload FROM wang_knowledge.objects
-            WHERE collection='claims' AND retired_at IS NULL AND payload @> ANY(%s::jsonb[])''',
-            ([json.dumps({'occurrences': [{'source_id': alias}]}) for alias in source_aliases(records, sid)],))
+        from backend.api.canonical_repository.source_claim_membership import load_source_claims
         peers = {}
-        for oid, rev, sha, payload in cursor.fetchall():
+        for key,row in load_source_claims(cursor,sid).items():
+            oid=key.split('/',1)[1];payload=row['payload']
             if payload.get('review_status') in {'superseded', 'retired'} or payload.get('superseded_by'):
                 continue
             if 'claims/' + oid in records:
-                records['claims/' + oid] = dict(revision=rev, content_sha256=sha, payload=payload, retired=False)
+                records['claims/' + oid] = row
             peers[oid] = payload
         # Direct questions, plus questions attached to these same source paragraphs.
         pks = sorted({r['payload']['paragraph_key'] for k, r in records.items()
@@ -458,6 +457,30 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
         return commit(store, root) if apply else e.publish(root, draft)
 
 
+def candidate_occurrences(candidate, records, sid):
+    result=anchors(candidate['evidence_step_ids'],records,sid)
+    for oid in candidate.get('_observation_ids',[]):
+        observation=records['observations/'+oid]['payload']
+        for fid in e.evidence_fragment_ids(observation):
+            fragment=records['source_fragments/'+fid]['payload']
+            if fragment['source_id']!=sid:
+                raise ValueError('Claim Observation crosses a source boundary')
+            result[0]['anchors'].append({'observation_id':oid,'source_fragment_id':fid,
+                'paragraph_key':fragment['paragraph_key'],'media_time':fragment.get('media_time'),
+                'media_end_time':fragment.get('media_end_time'),
+                'proposed_highlight':{'text':fragment['verbatim_excerpt'],'status':'proposed'}})
+    seen={a['source_fragment_id'] for a in result[0]['anchors']}
+    for fid in candidate.get('_statement_fragment_ids',[]):
+        fragment=records['source_fragments/'+fid]['payload']
+        if fragment['source_id']!=sid:raise ValueError('Claim statement crosses a source boundary')
+        if fid in seen:continue
+        result[0]['anchors'].append({'source_fragment_id':fid,'paragraph_key':fragment['paragraph_key'],
+            'media_time':fragment.get('media_time'),'media_end_time':fragment.get('media_end_time'),
+            'proposed_highlight':{'text':fragment['verbatim_excerpt'],'status':'proposed'}})
+        seen.add(fid)
+    return result
+
+
 def commit(store, root):
     if (root / 'verification.json').exists():
         return e.commit_verified(store, root)
@@ -476,7 +499,7 @@ def commit(store, root):
         updates['claims/' + cid] = {'claim_id': cid, 'statement': candidate['statement'],
             'claim_type': 'interpretive_judgment', 'attribution': 'professor',
             'evidence_step_ids': candidate['evidence_step_ids'], 'scripture_refs': candidate['scripture_refs'],
-            'occurrences': anchors(candidate['evidence_step_ids'], records, sid),
+            'occurrences': candidate_occurrences(candidate, records, sid),
             'review_status': 'candidate', 'maturity': 'candidate', 'visibility': 'internal', 'revision': 1}
     for relation in draft['new_relation_specs']:
         payload = deepcopy(relation)
@@ -487,6 +510,8 @@ def commit(store, root):
         updates['claim_relations/' + rid] = payload
     for relation in draft.get('new_knowledge_relation_specs',[]):
         payload=deepcopy(relation)
+        payload['from_id']=aliases.get(payload['from_id'],payload['from_id'])
+        payload['to_id']=aliases.get(payload['to_id'],payload['to_id'])
         rid='ER-BU-'+e.digest([sid,payload['from_id'],payload['to_id'],payload['relation_type']])[:32]
         payload.update(relation_id=rid,review_status='candidate',visibility='internal',revision=1)
         updates['knowledge_relations/'+rid]=payload
