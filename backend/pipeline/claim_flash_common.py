@@ -169,10 +169,27 @@ def value(key, records, sources):
     return result
 
 
-def jev(root, ports, state, questions):
+def jev(root, ports, state, questions, *, reuse_roots=()):
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
-    reply = e.recorded_call(root, 'jev', request, ports.judge,
-                            preflight=getattr(ports, 'judge_preflight', None))
+    own = Path(root)/'jev'/e.digest(request)
+    if (own/'started.json').exists() and not (own/'response.json').exists():
+        raise ValueError('Jev call has no saved reply; inspect before retrying')
+    reply = None
+    for previous in reuse_roots:
+        folder = Path(previous)/'jev'/e.digest(request)
+        if (folder/'started.json').exists() and not (folder/'response.json').exists():
+            raise ValueError('matching prior Jev call has no saved reply; no resend')
+        if (folder/'response.json').exists():
+            if json.loads((folder/'request.json').read_text()) != request:
+                raise ValueError('prior Jev request differs')
+            reply = json.loads((folder/'response.json').read_text())
+            e.save(Path(root)/'reuse'/(e.digest(request)+'.json'), {
+                'request_sha256':e.digest(request), 'response_path':str((folder/'response.json').resolve()),
+                'response_sha256':e.digest(reply)})
+            break
+    if reply is None:
+        reply = e.recorded_call(root, 'jev', request, ports.judge,
+                                preflight=getattr(ports, 'judge_preflight', None))
     if set(reply.get('answers', {})) != set(questions):
         raise ValueError('Jev question set differs')
     choices = {}

@@ -768,6 +768,9 @@ def main():
     parser.add_argument('--shared-groups',help='Existing source-bound shared grouping JSON for reverse coverage')
     parser.add_argument('--verify-source',action='store_true',help='Source-only read-only verification; no models or Claim work')
     parser.add_argument('--fill-source-from',help='Saved coverage result; prepare literal source fragments only, --apply persists them')
+    parser.add_argument('--refresh-evidence',action='store_true',help='Grouped fragment-only Evidence/Observation refresh; --apply persists material edits')
+    parser.add_argument('--reuse-coverage',help='Existing same-source reverse-coverage root with saved source inventory')
+    parser.add_argument('--group-id',action='append',help='With --refresh-evidence, select existing group IDs in source order')
     parser.add_argument('--plan-groups',action='store_true',help='Read-only heading-guided shared grouping; no models or content writes')
     parser.add_argument('--semantic-groups',action='store_true',help='With --plan-groups, use one GPT task to reduce semantic coupling')
     parser.add_argument('--max-group-claims',type=int,choices=range(1,11),default=8,help='Grouping capacity; default 8 leaves two creation slots')
@@ -775,19 +778,24 @@ def main():
     parser.add_argument('--codex-executable')
     parser.add_argument('--apply',action='store_true')
     args=parser.parse_args();root=Path(args.root).resolve()
+    if args.refresh_evidence and (args.verify_source or args.reverse_coverage or args.fill_source_from or args.plan_groups or args.semantic_groups or args.groups
+            or not args.shared_groups or not args.reuse_coverage or not args.capacity_file):
+        parser.error('--refresh-evidence requires --shared-groups, --reuse-coverage and --capacity-file, and forbids other modes')
+    if (args.reuse_coverage or args.group_id) and not args.refresh_evidence:
+        parser.error('--reuse-coverage and --group-id require --refresh-evidence')
     if args.fill_source_from and (args.verify_source or args.reverse_coverage or args.plan_groups or args.semantic_groups or args.groups or args.shared_groups):
         parser.error('--fill-source-from cannot be combined with review/grouping modes')
     if args.verify_source and (args.apply or args.plan_groups or args.semantic_groups or args.groups or args.reverse_coverage or args.shared_groups):
         parser.error('--verify-source cannot be combined with --apply or grouping/content modes')
     if args.reverse_coverage and (args.apply or args.plan_groups or args.semantic_groups or args.groups or not args.capacity_file):
         parser.error('--reverse-coverage requires --capacity-file and forbids mutation/grouping modes')
-    if args.shared_groups and not args.reverse_coverage:
-        parser.error('--shared-groups requires --reverse-coverage')
+    if args.shared_groups and not (args.reverse_coverage or args.refresh_evidence):
+        parser.error('--shared-groups requires --reverse-coverage or --refresh-evidence')
     if args.plan_groups and args.apply:
         parser.error('--plan-groups cannot be combined with --apply')
     if args.semantic_groups and (not args.plan_groups or not args.capacity_file):
         parser.error('--semantic-groups requires --plan-groups and --capacity-file')
-    if not args.fill_source_from and not args.verify_source and not args.reverse_coverage and not args.plan_groups and (not args.groups or not args.capacity_file):
+    if not args.refresh_evidence and not args.fill_source_from and not args.verify_source and not args.reverse_coverage and not args.plan_groups and (not args.groups or not args.capacity_file):
         parser.error('--groups and --capacity-file are required for content processing')
     store=PostgresKnowledgeStore(args.database_url)
     if args.fill_source_from:
@@ -801,6 +809,11 @@ def main():
     def model_ports(*,max_output_tokens=4000):
         client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=max_output_tokens,executable=args.codex_executable)
         return c.Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
+    if args.refresh_evidence:
+        from backend.pipeline import claim_flash_evidence as evidence_stage
+        print(json.dumps(evidence_stage.run(store,args.source_id,json.loads(Path(args.shared_groups).read_text()),root,
+            model_ports(max_output_tokens=6000),args.reuse_coverage,group_ids=args.group_id,apply=args.apply),ensure_ascii=False))
+        return
     if args.reverse_coverage:
         from backend.pipeline import claim_flash_coverage as coverage
         plan=json.loads(Path(args.shared_groups).read_text()) if args.shared_groups else None

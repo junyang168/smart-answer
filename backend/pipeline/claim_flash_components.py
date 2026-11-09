@@ -83,18 +83,21 @@ def decompose(root, ports, statements):
     return result
 
 
-def check(root, ports, record_type, record, material, components):
+def check(root, ports, record_type, record, material, components, *, fragment_only=False):
     # Do not let existing classifications answer their own verification questions.
     visible = {k:v for k,v in record.items() if k in {'statement','text','title','scripture_refs'}}
     state = {'record_type': record_type, 'record': visible,
              'original_text_excerpts': material['original_text_excerpts'],
-             'source_context': {p['paragraph_key']:p['text'] for p in material.get('nearby_paragraphs',[])}}
+             **({} if fragment_only else {'source_context': {p['paragraph_key']:p['text'] for p in material.get('nearby_paragraphs',[])}})}
     questions = {'record_fidelity': jevq.record_fidelity()}
     if components is not None:
         state['components'] = {str(i): c for i, c in enumerate(components)}
         questions['decomposition_fidelity'] = jevq.decomposition()
         for i,item in enumerate(components):
             questions['component_'+str(i)] = jevq.component(item)
+            if fragment_only:
+                questions['component_'+str(i)]['instructions'] = questions['component_'+str(i)]['instructions'].replace(
+                    '`source_context` 只消歧，不補未掛載的論據。','只用所列SourceFragments，不補未掛載的論據。')
     text=record.get('statement',record.get('text',record.get('title','')))
     for field in jevq.ROLES:
         if record.get(field):
