@@ -119,11 +119,14 @@ def assemble(record, evidence,*,with_resolved=False):
     import math
 
     plan = json.loads((evidence / "plan.json").read_text())
+    saved={w['id']:json.loads((evidence/w['id']/'candidate.json').read_text()) for w in plan['windows']}
+    all_valid={row['paragraph_id']:row for value in saved.values() for row in value['accepted']}
+    attribution_files={row['paragraph_id']:evidence/wid/'candidate.json' for wid,value in saved.items() for row in value['accepted']}
     accepted, notices, resolved = [], [], []
     paragraphs = {p["id"]: p for p in record["paragraphs"]}
     for window in plan["windows"]:
         path = evidence / window["id"] / "candidate.json"
-        value = json.loads(path.read_text())
+        value = saved[window['id']]
         if value["window_id"] != window["id"]:
             raise ValueError("Speaker window changed")
         valid = {p["paragraph_id"]: p for p in value["accepted"]}
@@ -190,11 +193,11 @@ def assemble(record, evidence,*,with_resolved=False):
             import unicodedata
             compact=lambda text:''.join(c for c in unicodedata.normalize('NFKC',text) if c.isalnum())
             quote=compact(gap['audio_quote'])
-            covered=next((p for p in window['paragraphs'] if valid_time and len(quote)>=2
+            covered=next((p for p in paragraphs.values() if valid_time and len(quote)>=2
                           and p['start_ms']<=absolute_end+2000 and p['end_ms']>=absolute_start-2000
-                          and any(t['role']=='audience' and t['confidence']=='clear' and compact(t['text'])==quote for t in valid.get(p['id'],{}).get('turns',[]))),None)
+                          and any(t['role']=='audience' and t['confidence']=='clear' and compact(t['text'])==quote for t in all_valid.get(p['id'],{}).get('turns',[]))),None)
             if covered:
-                resolved.append(dict(kind='missing_speech_already_attributed',paragraph_id=covered['id'],raw_gap=gap,evidence_sha256=file_sha(path),basis='同一位置已有逐字相符、聲音清楚的聽眾文字；原始模型提示保留，不要求重複補字。'))
+                resolved.append(dict(kind='missing_speech_already_attributed',paragraph_id=covered['id'],raw_gap=gap,evidence_sha256=file_sha(path),attribution_evidence_sha256=file_sha(attribution_files[covered['id']]),basis='同一位置已有逐字相符、聲音清楚的聽眾文字；原始模型提示保留，不要求重複補字。'))
                 continue
             association_start = (
                 lo + round(start * 1000)

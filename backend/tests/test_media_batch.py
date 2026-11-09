@@ -600,6 +600,15 @@ def test_speaker_missing_notice_is_resolved_only_for_same_audience_turn(tmp_path
     assert len(resolved)==resolved_count and len(notices)==1-resolved_count
     assert rows[0]['turns'][0]['text']=='第四節。'
     assert file_sha(evidence/'w000/candidate.json')==before
+    # A later window can report speech from its preceding overlap as missing.
+    plan=json.loads((evidence/'plan.json').read_text())
+    plan['windows'].append(dict(id='w001',clip_start_ms=0,clip_end_ms=10000,paragraphs=[]))
+    atomic(evidence/'plan.json',plan)
+    value=json.loads((evidence/'w000/candidate.json').read_text())
+    gaps=value.pop('missing_speech');value['missing_speech']=[];atomic(evidence/'w000/candidate.json',value)
+    atomic(evidence/'w001/candidate.json',dict(window_id='w001',accepted=[],rejected=[],missing_speech=gaps))
+    _,later_notices,later_resolved=assemble(record,evidence,with_resolved=True)
+    assert len(later_resolved)==resolved_count and len(later_notices)==1-resolved_count
 
 
 def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_words(
