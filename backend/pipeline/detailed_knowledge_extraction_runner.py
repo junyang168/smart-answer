@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Sequence
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.claim_anchor_roles import source_roles
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.base_contract_coverage import sentence_spans
@@ -2011,10 +2012,9 @@ def compile_package(
                     "media_time": paragraph.get("start_time"),
                     "evidence_id": evidence_id,
                     "evidence_type": evidence["step_type"],
-                    "speaker": evidence["speaker"],
-                    "stance": evidence["stance"],
+                    **source_roles(
+                        {'verbatim_excerpt': highlight}, str(paragraph.get('text') or '')),
                     "discourse_role": evidence["discourse_role"],
-                    "assertive": evidence["speaker"] == "professor" and evidence["stance"] == "asserted",
                     "proposed_highlight": {"text": highlight, "status": "proposed"},
                     **visual_fields,
                 })

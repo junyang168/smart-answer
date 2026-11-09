@@ -4,12 +4,12 @@ Guidance: https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKI
 Question ids are invisible to Jev. Each instruction names its own subject.
 """
 
-CONTRACT = 'claim_flash_classification_v3'
+CONTRACT = 'claim_flash_classification_v4'
 LOOKUP_UNCERTAINTY_FLOOR = .25  # Existing routing policy; not tuned by this change.
 
 FIDELITY = {'faithful':'實質意思有來源支持，沒有改義。',
             'unsupported':'增添原文沒有的內容，但沒有改變原有判斷。',
-            'changed':'改變條件、範圍、程度、模態或因果；兼有添加也選此項。',
+            'changed':'改變主詞、動作對象、條件、範圍、程度、模態或因果；兼有添加也選此項。',
             'contradicted':'與來源明確相反；兼有其他問題也選此項。','uncertain':'材料不足或含混。'}
 SUPPORT = {'supported':'所有實質成分有據。','partial':'部分成分有據，另有成分無據。',
            'unsupported':'實質成分均缺少支持。','contradicted':'有明確相反的原文；兼有缺據也選此項。',

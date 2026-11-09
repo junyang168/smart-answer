@@ -99,6 +99,29 @@ def test_process_commentary_repair_stays_within_lower_statement_task(tmp_path):
     assert records==before and result['new_fragments']=={}
 
 
+@pytest.mark.parametrize('changed',[True,False])
+def test_action_subject_is_repaired_without_touching_other_layers(tmp_path,changed):
+    text='他們從伯大尼出來，耶穌餓了。'
+    records,sources=fixture(tmp_path,[text],[('S0001',text)])
+    records['evidence_steps/E']['payload']['statement']='耶穌與門徒從伯大尼出來時餓了。' if changed else text
+    before=deepcopy(records)
+    def repair(request):
+        assert request['input']['task']=='evidence_fidelity_repair'
+        assert '不得擴大或轉移主詞' in request['system']
+        return {'items':[{'job_id':j['job_id'],'action':'repair','statement':text,'reason':'只有耶穌是飢餓的主體。'}
+                         for j in request['input']['jobs']]}
+    ports=OriginalPorts(choices={'record_fidelity':'changed' if changed else 'faithful'},reply=repair)
+    group={'group_id':'A','paragraph_keys':['S0001'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}
+    result=stage.run_group(None,records,sources,group,['evidence_steps/E'],[],tmp_path/'run',ports,saved_inventory(tmp_path/'prior',sources),apply=False)
+    assert result['status']=='verified' and result['new_fragments']=={} and records==before
+    calls=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='evidence_fidelity_repair']
+    assert len(calls)==int(changed)
+    if changed:
+        post=result['updates']['evidence_steps/E'];assert post['statement']==text
+        assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
+    else:assert result['updates']=={}
+
+
 def test_complete_bound_cross_group_fragments_are_not_truncated(tmp_path):
     records,sources,plan=setup(tmp_path)
     p=sources['S']['paragraphs']['S0002'];fragment=deepcopy(records['source_fragments/F0']['payload'])

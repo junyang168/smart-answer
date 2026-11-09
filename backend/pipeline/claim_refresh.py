@@ -17,6 +17,7 @@ from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_relation_refresh as relations
 from backend.pipeline import claim_context_refresh as attached
 from backend.api.canonical_repository.claim_identity_allocation import reserve
+from backend.pipeline.claim_anchor_roles import source_roles
 
 VERSION = 'claim_bottom_up_refresh_v1'
 UNCERTAIN_IDENTITY = '__uncertain_identity__'
@@ -203,6 +204,12 @@ PROMPT = (
 
 def anchors(eids, records, sid):
     result = []
+    paragraphs = {}
+    doc = records.get('source_documents/'+sid, {}).get('payload', {})
+    if doc.get('source_path') and Path(doc['source_path']).is_file():
+        source = e.source_snapshot({'path':doc['source_path'],
+            'file_sha256':doc.get('source_file_sha256')},source=doc)
+        paragraphs = {key:value['text'] for key,value in source['paragraphs'].items()}
     for eid in eids:
         evidence = records['evidence_steps/' + eid]['payload']
         for fid in e.evidence_fragment_ids(evidence):
@@ -213,8 +220,8 @@ def anchors(eids, records, sid):
                 continue
             result.append({'evidence_id': eid, 'source_fragment_id': fid,
                 'paragraph_key': f['paragraph_key'], 'media_time': f.get('media_time'),
-                'media_end_time': f.get('media_end_time'), 'speaker': evidence.get('speaker'),
-                'stance': evidence.get('stance'), 'assertive': evidence.get('stance') == 'asserted',
+                'media_end_time': f.get('media_end_time'),
+                **source_roles(f, paragraphs.get(f['paragraph_key'])),
                 'proposed_highlight': {'text': f['verbatim_excerpt'], 'status': 'proposed'}})
     return [{'source_id': sid, 'anchors': result}]
 
@@ -236,7 +243,8 @@ def refresh_occurrences(claim, eids, records, sid):
             if len(matches) != 1:
                 return current
             match = matches[0]
-            for field in ['source_fragment_id', 'paragraph_key', 'media_time', 'media_end_time']:
+            for field in ['source_fragment_id', 'paragraph_key', 'media_time', 'media_end_time',
+                          'speaker', 'stance', 'assertive']:
                 anchor[field] = match[field]
             count += 1
     return updated if count else current

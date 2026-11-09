@@ -18,9 +18,11 @@ GPT_JOBS = 4
 JEV_BYTES = 40000
 JEV_CONTRACT = jevq.CONTRACT
 MATERIAL_CONTRACT = 'claim_flash_same_paragraph_spans_v1'
-REVIEW_CONTRACT = 'claim_flash_semantic_review_v4'
+REVIEW_CONTRACT = 'claim_flash_semantic_review_v5'
 KNOWLEDGE_TEXT_RULES = (
     '知識內容欄位（statement、text、title、attribution）只保存來源內容與必要歸屬，'
+    '逐個動作保留原文的主詞和對象；多個人物共同出現，不代表他們都做了每個動作或具有相同狀態。'
+    '合併句子時不得擴大或轉移主詞；指涉不明就保留不確定，不自行補人物。'
     '不得混入「本組尚未解釋」「本批未核對」「尚未接入路線」等生成或審閱過程。'
     '處置過程只寫本次決定的reason／outcomes，不當作教授的教導。'
     '單純「接下來看馬可」的講課轉場不當作實質論據；保留轉場中實際的經文出處、'
