@@ -371,3 +371,17 @@ def test_unknown_cleanup_call_keeps_capacity_quarantined(tmp_path,monkeypatch):
         def generate(self,contents):raise TimeoutError('Unknown provider outcome')
     with pytest.raises(TimeoutError):cleanup_generate(Adapter(),'fixture')
     assert capacity_status(tmp_path)['sol']['unknown']==1
+
+
+def test_untimed_clip_uses_original_audio_chunk_not_neighbour_gap_or_character_ratio(tmp_path):
+    from backend.pipeline import full_video_transcript as f
+    folder=tmp_path/'windows/w00';audio=folder/'audio'
+    f.save(audio/'asr.json',{'chunks':[dict(id='a',sample_start=0,sample_end=185*16000),dict(id='b',sample_start=181*16000,sample_end=365*16000)]})
+    f.save(audio/'timed_text.json',dict(asr_sha256=f.sha(audio/'asr.json'),text='甲乙丙丁',text_sha256=f.text_sha('甲乙丙丁'),chunk_ownership=[dict(chunk_id='a',output_start=0,output_end=2),dict(chunk_id='b',output_start=2,output_end=4)]))
+    f.save(folder/'correction/correction_trial.json',{'original_paragraphs':[dict(id='p',source_start=0,source_end=1)]})
+    window=dict(origin_sample=900*16000,end_sample=1800*16000)
+    begin,end,proof=f.original_paragraph_clip(folder,dict(id='p',text='改正文字'),window)
+    assert (begin,end)==(900*16000,1085*16000)
+    assert proof['method']=='original_asr_chunk_clip_not_predicted_timing'
+    f.save(folder/'correction/correction_trial.json',{'original_paragraphs':[dict(id='p',source_start=0,source_end=4)]})
+    with pytest.raises(ValueError,match='model limit'):f.original_paragraph_clip(folder,dict(id='p'),window)

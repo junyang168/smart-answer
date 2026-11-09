@@ -978,7 +978,7 @@ def test_ai_soft_deletion_restore_uses_normal_versioned_save_and_clears_confirma
     assert after['context']['reviews'].get('p:1',{}).get('sha256') != after['paragraph_shas']['1']
 
 
-def test_browser_playback_derivative_preserves_original_identity_and_rejects_bad_clock(setup):
+def test_browser_playback_derivative_preserves_original_identity_and_rejects_bad_clock(setup,monkeypatch):
     from backend.pipeline.slide_change_pilot import object_sha
     store,root,source=setup
     record=read(source/'full_transcript.json')
@@ -994,6 +994,16 @@ def test_browser_playback_derivative_preserves_original_identity_and_rejects_bad
     assert doc['context']['media_mime_type']=='audio/mpeg'
     assert file_hash(store.folder('講道 test')/'source.mp4')==original_hash
     assert (store.folder('講道 test')/'playback.mp3').read_bytes()==playback.read_bytes()
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET','fixture-playback-secret')
+    app=FastAPI();app.include_router(create_review_router(root),prefix='/sc_api')
+    from urllib.parse import quote
+    path='/sc_api/review_document/'+quote('講道 test',safe='')+'/media'
+    now=str(int(time.time()));message='\n'.join(('GET',path,'a',now,hashlib.sha256(b'').hexdigest()))
+    headers={'x-review-actor':'a','x-review-time':now,'x-review-signature':hmac.new(b'fixture-playback-secret',message.encode(),hashlib.sha256).hexdigest(),'Range':'bytes=0-6'}
+    response=TestClient(app).get(path,headers=headers)
+    assert response.status_code==206 and response.content==b'fixture'
+    assert response.headers['content-type']=='audio/mpeg'
+
 
 
 def test_bad_playback_receipt_cannot_be_adopted(setup):

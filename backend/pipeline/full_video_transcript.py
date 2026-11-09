@@ -499,6 +499,25 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
         clean_full_transcript(out)
 
 
+def original_paragraph_clip(folder:Path,paragraph:dict,window:dict):
+    """Use exact source-chunk provenance for a clip, never character-count times."""
+    root=folder/'audio';timed=read(root/'timed_text.json');asr=read(root/'asr.json')
+    if timed['asr_sha256']!=sha(root/'asr.json') or timed['text_sha256']!=text_sha(timed['text']):
+        raise ValueError('Source paragraph provenance changed')
+    original=next(p for p in read(folder/'correction/correction_trial.json')['original_paragraphs'] if p['id']==paragraph['id'])
+    start,end=original['source_start'],original['source_end']
+    if not 0<=start<end<=len(timed['text']):raise ValueError('Paragraph has invalid source coordinates')
+    ids=[r['chunk_id'] for r in timed['chunk_ownership'] if r['output_start']<end and start<r['output_end']]
+    chunks=[c for c in asr['chunks'] if c['id'] in ids]
+    if not chunks:raise ValueError('Untimed paragraph has no source audio context')
+    begin=window['origin_sample']+min(c['sample_start'] for c in chunks)
+    stop=window['origin_sample']+max(c['sample_end'] for c in chunks)
+    if not window['origin_sample']<=begin<stop<=window['end_sample'] or stop-begin>300*SR:
+        raise ValueError('Source audio context exceeds the acoustic model limit')
+    return begin,stop,{'method':'original_asr_chunk_clip_not_predicted_timing','chunks':ids,
+        'timed_text_sha256':sha(root/'timed_text.json'),'asr_sha256':sha(root/'asr.json')}
+
+
 def prepare_final_alignment(out: Path, window_ids: set[str] | None = None) -> None:
     master = read(out / 'master.json')
     samples = read_audio(out / 'master.wav')
@@ -528,6 +547,8 @@ def prepare_final_alignment(out: Path, window_ids: set[str] | None = None) -> No
                 begin = max(w['origin_sample'], w['origin_sample'] + (p['start_ms']-3000)*16)
                 end = min(w['end_sample'], w['origin_sample'] + (p['end_ms']+3000)*16)
             if end <= begin or end-begin > 180*SR:
+                begin,end,recovery=original_paragraph_clip(folder,p,w)
+            if end <= begin or end-begin > 300*SR:
                 raise ValueError('Corrected paragraph audio interval is invalid or too long')
             path = final / f'audio/{p["id"]}.wav'; write_audio(path, samples[begin:end])
             chunks.append({'id': p['id'], 'text': p['text'], 'audio': str(path.relative_to(final)),

@@ -298,6 +298,7 @@ def test_completed_repair_keeps_valid_audio_edits_and_withholds_case_only_change
 
 
 def test_empty_completed_reply_gets_only_one_bound_format_recovery(tmp_path):
+    from backend.pipeline.transcript_audio_correction import SCHEMA
     from backend.pipeline.slide_change_pilot import read_json
     class Adapter:
         config={'max_output_tokens':2048}
