@@ -97,7 +97,16 @@ def append_staged(staging: Path, target: Path, item: str, *, permission_root: Pa
         catalog = read(target / 'config/sermon.json', [])
         with ExitStack() as locks:
             for existing in sorted(m['item'] for m in catalog):
-                locks.enter_context(store.lock(existing))
+                # Serialize the catalog snapshot without opening an archived
+                # manuscript for edits. ReviewStore.lock correctly rejects a
+                # promoted manuscript; that must not prevent adding a different
+                # lecture to the still-private Beta catalog.
+                folder=store.folder(existing)
+                folder.mkdir(parents=True,exist_ok=True)
+                handle=locks.enter_context((folder/'workflow.lock').open('a+b'))
+                fcntl.flock(handle,fcntl.LOCK_EX)
+                if not (folder/'production-link.json').exists():
+                    store.recover(existing)
             catalog = read(target / 'config/sermon.json', [])
             if any(m['item'] == item for m in catalog) or store.folder(item).exists():
                 raise ValueError('Beta item already exists; refusing to overwrite it')
