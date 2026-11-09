@@ -54,7 +54,9 @@ Claim 層消費已完成結果，分開檢查 statement、下層連接及 Claim 
 原文層負責完整片段清單、內容及定位；Evidence／Observation 層只負責材料表述；
 EvidenceStep 及所有論證關係屬 Claim 層。現有 `evidence_steps` 實體混存不同職責，不等於邏輯分層。
 
-依序完成原文層、Evidence／Observation 層、Claim 層及 Claim 關係檢查。
+先凍結共享分組，再依序完成原文層、Evidence／Observation 層、Claim 層及 Claim 關係檢查。
+原文與Evidence／Observation按整篇完成後才推進上層，各層使用同一份分組；
+不是每組各自從原文一路跑到Claim再換下一組。單組隔離試驗保留其試驗範圍，不追認整篇完成。
 程式處理可確定的機械問題；Jev 作範圍明確的語義判定；GPT 處置具體問題、
 補足必要結構及理由。Jev 是預檢；GPT 能力更強且取得較完整的任務材料，
 對交付它處置的語義問題有最終判定權，可以覆蓋 Jev 結論，不再安排整包 Opus 重審。
@@ -489,6 +491,21 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+保存結果的只讀接線入口為`backend.pipeline.claim_flash_progress`。
+manifest指向已保存的共享分組、原文、Evidence分組對帳及各Claim階段結果，逐檔綁定SHA。
+入口按「分組 → 原文 → Evidence／Observation → Claim」列出進度：已完成者skip，
+未完成者保留既有接續位置，hold另列；下層全篇未完成時不安排正常上層執行。
+下層發現來源衝突時，下一處理層回到source，既有試驗通過結果仍保存，不重審。
+新候選hold不改寫原模型判定、既有審閱或SQL結果，也不表示其他目標需重跑。
+
+這是Agent接手現有入口的進度讀取，不啟動模型或SQL，不自動執行下一步，
+不建立第二套資格框架；輸出不能當成當前正式庫資格或整篇內容已完成。
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_progress \
+  --manifest /absolute/path/saved-flow-manifest.json --out /absolute/path/progress.json
+```
 
 獨立漏抽模式使用`backend.pipeline.claim_flash_missing`，消費本組已完成的Claim關係root。
 GPT對照本組原文、已驗證材料與同篇Claim摘要，只判斷重要獨立判斷有無承載；
