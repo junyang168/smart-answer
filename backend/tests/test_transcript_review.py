@@ -1038,7 +1038,7 @@ def test_beta1_speaker_enrichment_preserves_user_edits_reviews_and_source(setup)
     after=store.document('a',item)
     assert after['script'][0]==before['script'][0]
     assert after['context']['reviews']==before['context']['reviews']
-    assert after['script'][1]['text']=='**聽眾：**'+before['script'][1]['text']
+    assert after['script'][1]['text']=='**聽眾**：'+before['script'][1]['text']
     assert after['context']['paragraph_bindings']==before['context']['paragraph_bindings']
     assert after['context']['speaker_attribution']['protected_paragraph_ids']==['1']
     assert after['context']['speaker_attribution']['pipeline_release']==RELEASE

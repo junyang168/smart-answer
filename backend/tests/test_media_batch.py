@@ -588,6 +588,29 @@ def test_progress_atomic_writes_from_same_process_threads_use_distinct_temps(
     assert not list(tmp_path.glob("*.tmp"))
 
 
+@pytest.mark.parametrize('role,gap_start,resolved_count',[('audience',1.5,1),('professor',1.5,0),('audience',8,0)])
+def test_speaker_missing_notice_is_resolved_only_for_same_audience_turn(tmp_path,role,gap_start,resolved_count):
+    from backend.pipeline.media_batch.speakers import assemble
+    paragraphs=[dict(id='p1',text='第四節。',start_ms=1000,end_ms=3000)]
+    record=dict(duration_ms=10000,paragraphs=paragraphs);evidence=tmp_path/'evidence'
+    atomic(evidence/'plan.json',dict(windows=[dict(id='w000',clip_start_ms=0,clip_end_ms=10000,paragraphs=paragraphs)]))
+    atomic(evidence/'w000/candidate.json',dict(window_id='w000',accepted=[dict(paragraph_id='p1',limitations='',turns=[dict(text='第四節。',role=role,confidence='clear',clip_start_s=1,clip_end_s=3,acoustic_basis='清楚聲音')])],rejected=[],missing_speech=[dict(audio_quote='第四節',clip_start_s=gap_start,clip_end_s=gap_start+.5,reason='疑似漏聽')]))
+    before=file_sha(evidence/'w000/candidate.json')
+    rows,notices,resolved=assemble(record,evidence,with_resolved=True)
+    assert len(resolved)==resolved_count and len(notices)==1-resolved_count
+    assert rows[0]['turns'][0]['text']=='第四節。'
+    assert file_sha(evidence/'w000/candidate.json')==before
+    # A later window can report speech from its preceding overlap as missing.
+    plan=json.loads((evidence/'plan.json').read_text())
+    plan['windows'].append(dict(id='w001',clip_start_ms=0,clip_end_ms=10000,paragraphs=[]))
+    atomic(evidence/'plan.json',plan)
+    value=json.loads((evidence/'w000/candidate.json').read_text())
+    gaps=value.pop('missing_speech');value['missing_speech']=[];atomic(evidence/'w000/candidate.json',value)
+    atomic(evidence/'w001/candidate.json',dict(window_id='w001',accepted=[],rejected=[],missing_speech=gaps))
+    _,later_notices,later_resolved=assemble(record,evidence,with_resolved=True)
+    assert len(later_resolved)==resolved_count and len(later_notices)==1-resolved_count
+
+
 def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_words(
     tmp_path,
 ):
@@ -644,7 +667,7 @@ def test_speaker_gap_reports_and_rejected_partitions_stay_visible_without_new_wo
     rows, proof = label_rows(
         tmp_path, record, [dict(index="1", text="各位平安。")], dict(p1="1")
     )
-    assert rows[0]["text"] == "**說話者未明：**各位平安。"
+    assert rows[0]["text"] == "**說話者未明**：各位平安。"
     assert proof["notices"][1]["paragraph_id"] == "1"
     assert proof["notices"][1]["start_ms"] == 3100
     value["missing_speech"][0]["clip_end_s"] = 10.2
@@ -693,7 +716,7 @@ def test_speaker_labels_keep_text_and_timing_separate_and_reject_source_drift(tm
     )
     rows = [dict(index="1", text=record["paragraphs"][0]["text"])]
     labelled, proof = label_rows(tmp_path, record, rows, dict(p1="1"))
-    assert labelled[0]["text"] == "**聽眾：**為什麼？\n\n**教授：**因為如此。"
+    assert labelled[0]["text"] == "**聽眾**：為什麼？\n\n**教授**：因為如此。"
     assert rows[0]["text"] == "為什麼？因為如此。" and proof["spoken_text_unchanged"]
     marked, _ = label_rows(
         tmp_path,
@@ -709,7 +732,7 @@ def test_speaker_labels_keep_text_and_timing_separate_and_reject_source_drift(tm
     )
     assert (
         marked[0]["text"]
-        == "**聽眾：**~~現場交代。~~為什麼？\n\n**教授：**~~停一下。~~因為如此。"
+        == "**聽眾**：~~現場交代。~~為什麼？\n\n**教授**：~~停一下。~~因為如此。"
     )
     record["paragraphs"][0]["text"] = "改過了"
     atomic(tmp_path / "full_transcript.json", record)

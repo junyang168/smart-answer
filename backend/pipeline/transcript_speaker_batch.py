@@ -71,7 +71,9 @@ def insert_labels(text: str, turns: list[dict]) -> str:
     if len(merged) == 1 and merged[0]['role'] == 'professor':
         return text
     names = {'professor': '教授', 'audience': '聽眾', 'unknown': '說話者未明'}
-    return '\n\n'.join('**' + names[t['role']] + '：**' + t['text'] for t in merged)
+    # Keep the colon outside emphasis: **聽眾：**第四節 is not valid
+    # CommonMark closing emphasis before an adjacent Chinese letter.
+    return '\n\n'.join('**' + names[t['role']] + '**：' + t['text'] for t in merged)
 
 
 def plan_windows(paragraphs: list[dict], duration_ms: int, core_seconds=300) -> list[dict]:
