@@ -62,7 +62,7 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
             'policy_sha256': e.digest([PROMPT, flash.Discoveries.model_json_schema()])})
         if (root/'verification.json').exists():
             return statements.finish(store, root) if apply else json.loads((root/'verification.json').read_text())
-        records, sources = f.load_source(store, source_id); c.fetch_claims(store, ids)
+        records, sources = f.load_group_source(store, source_id, prior['group']); c.fetch_claims(store, ids)
         if prior['source'] != pin or any(not f.belongs_to_source(records['claims/'+cid]['payload'], records, source_id) for cid in ids):
             raise ValueError('Claim relation group/source differs')
         if any(records['claims/'+cid]['payload'].get('review_status') == 'human_review_required' for cid in ids):

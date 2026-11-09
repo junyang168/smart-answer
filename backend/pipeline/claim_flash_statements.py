@@ -50,11 +50,25 @@ def verify_evidence(root,keys,records,sources):
         if not completed:raise ValueError('required Evidence group not completed: '+key)
         fp=eo.fingerprint(key,records[key]['payload'],eo.material(key,records,sources))
         path=root/'accepted'/(fp+'.json')
+        interpretation_added=False
+        if not path.exists():
+            # A legacy lower judgment still proves its unchanged statement and
+            # literal fragments. Adding source context to an upper task does
+            # not retroactively claim the lower reviewer saw that context.
+            # Never discard a confirmation that the lower review DID consume.
+            pks={records['source_fragments/'+fid]['payload']['paragraph_key'] for fid in e.evidence_fragment_ids(records[key]['payload'])}
+            previously_bound=any(set(entry['paragraph_sha256']) & pks for p in completed
+                for entry in json.loads(p.read_text()).get('human_source_guard',{}).get('entries',[]))
+            if not previously_bound:
+                old=eo.material(key,records,sources,decisions=[])
+                fp=eo.fingerprint(key,records[key]['payload'],old);path=root/'accepted'/(fp+'.json')
+                interpretation_added=True
         if not path.exists():raise ValueError('required Evidence content has no matching accepted result: '+key)
         proof=json.loads(path.read_text());decision=json.loads(Path(proof['decision_path']).read_text())
         if proof['fingerprint']!=fp or proof['decision_sha256']!=e.digest(decision):
             raise ValueError('Evidence decision binding differs: '+key)
-        receipts.append({'object_key':key,'group_id':gid,'fingerprint':fp,'proof_path':str(path),'proof_sha256':e.digest(proof)})
+        receipts.append({'object_key':key,'group_id':gid,'fingerprint':fp,'proof_path':str(path),'proof_sha256':e.digest(proof),
+                         **({'source_interpretation_added_at_claim_layer':True,'lower_reviewer_saw_new_confirmation':False} if interpretation_added else {})})
     return receipts
 
 
@@ -141,7 +155,14 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
             'evidence_root':str(Path(evidence_root).resolve()),'models':ports.identity,
             'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema()])})
         if (root/'verification.json').exists():return finish(store,root) if apply else json.loads((root/'verification.json').read_text())
-        records,sources=f.load_source(store,source_id);c.fetch_claims(store,claim_ids)
+        plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
+        group=next((g for g in plan['groups'] if set(claim_ids)<=set(g.get('claim_ids',[]))),None)
+        if group is None:
+            records,sources=f.load_source(store,source_id);c.fetch_claims(store,claim_ids)
+            group={'paragraph_keys':sorted({pk for cid in claim_ids for pk in flash.paragraph_keys('claims/'+cid,records)}),
+                   'lower_record_keys':['evidence_steps/'+eid for cid in claim_ids for eid in records['claims/'+cid]['payload'].get('evidence_step_ids',[])],
+                   'reference_record_keys':[]}
+        records,sources=f.load_group_source(store,source_id,group);c.fetch_claims(store,claim_ids)
         targets=['claims/'+cid for cid in claim_ids]
         if any(k not in records or not f.belongs_to_source(records[k]['payload'],records,source_id) for k in targets):
             raise ValueError('Claim belongs to another source')

@@ -30,12 +30,17 @@ def node(key,records,sources):
             'scripture_refs':p.get('scripture_refs',[]),'attribution':p.get('attribution'),
             'speaker':p.get('speaker'),'stance':p.get('stance')}
     if col in f.LOWER:
-        result['original_text_excerpts']=f.value(key,records,sources)['original_text_excerpts']
+        value=f.value(key,records,sources)
+        result.update({k:value[k] for k in ['original_text_excerpts','human_source_decisions','source_interpretation'] if k in value})
     elif col=='claims':
         result['evidence']=[{'object_key':'evidence_steps/'+eid,
             'statement':records['evidence_steps/'+eid]['payload']['statement'],
             'original_text_excerpts':f.value('evidence_steps/'+eid,records,sources)['original_text_excerpts']}
             for eid in p.get('evidence_step_ids',[]) if 'evidence_steps/'+eid in records]
+        pks={records['source_fragments/'+fid]['payload']['paragraph_key']
+             for eid in p.get('evidence_step_ids',[]) if 'evidence_steps/'+eid in records
+             for fid in e.evidence_fragment_ids(records['evidence_steps/'+eid]['payload'])}
+        result.update(f.source_interpretation(sources,{sid:pks for sid in sources}))
     return result
 
 

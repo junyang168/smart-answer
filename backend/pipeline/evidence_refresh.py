@@ -340,6 +340,10 @@ def commit_verified(store, root, *, source_fragments_only=False):
     result = json.loads((root / 'verification.json').read_text())
     frozen = json.loads((root / 'before.json').read_text())
     records, sources = frozen['records'], frozen['sources']
+    guards = [s['human_source_guard'] for s in sources.values() if s.get('human_source_guard')]
+    if guards and 'human_source_guard' not in result:
+        if len(guards) != 1:raise ValueError('one source interpretation guard required')
+        result['human_source_guard'] = guards[0]
     if result.get('human_source_guard') is not None:
         from backend.pipeline.claim_human_source import assert_scope_current
         with store.connect() as conn, conn.cursor() as cursor:

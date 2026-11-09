@@ -138,10 +138,44 @@ def load_source(store, sid, *, visual_context=False):
     return records, sources
 
 
+def load_group_source(store, sid, group):
+    """Carry existing source interpretations into just this group's Claim tasks."""
+    from backend.pipeline import claim_human_source as human
+    records, sources = load_source(store, sid)
+    keys = set(group['paragraph_keys'])
+    for key in group.get('lower_record_keys', []) + group.get('reference_record_keys', []):
+        if key in records:
+            keys.update(records['source_fragments/'+fid]['payload']['paragraph_key']
+                        for fid in e.evidence_fragment_ids(records[key]['payload'])
+                        if 'source_fragments/'+fid in records)
+    paragraphs = {sid: sorted(keys)}
+    entries = human.scoped(store.read_human_source_decisions([sid]), paragraphs)
+    if entries:
+        human.project(sources, entries)
+        if any(x['applicability'] != 'current' for x in sources[sid]['human_source_decisions']):
+            raise ValueError('human source clarification needs reconfirmation for changed paragraph')
+        sources[sid]['human_source_guard'] = {'paragraphs': paragraphs, 'entries': entries}
+    return records, sources
+
+
+def source_interpretation(sources, paragraphs):
+    from backend.pipeline import claim_human_source as human, claim_flash_evidence as eo
+    facts = [v for sid, src in sources.items() for v in src.get('human_source_decisions', [])
+             if set(v['paragraph_sha256']) & set(paragraphs.get(sid, []))]
+    if not facts:return {}
+    for value in facts:
+        human.validate_entry({k:v for k,v in value.items() if k not in
+                              {'applicability','source_version_changed','claim_content_approval'}})
+        if value['applicability'] != 'current':raise ValueError('source interpretation is not current')
+    return {'human_source_decisions':deepcopy(facts),'source_interpretation':eo.SOURCE_INTERPRETATION}
+
+
 def value(key, records, sources):
     p = records[key]['payload']
     result = e.material({**p, 'evidence_step_id': key,
         'statement': p.get('statement', p.get('text', p.get('title', '')))}, records, sources)
+    result.update(source_interpretation(sources, {sid: [x['paragraph_key'] for x in result['fragments']]
+        for sid in {records['source_fragments/'+x['fragment_id']]['payload']['source_id'] for x in result['fragments']}}))
     if key.split('/')[0] not in {'evidence_steps','observations'}:
         return result
     # Physical binding validation above must succeed before assembling any text.

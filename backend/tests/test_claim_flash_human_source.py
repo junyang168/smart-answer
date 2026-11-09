@@ -112,3 +112,28 @@ def test_changed_human_evidence_blocks_stale_noop_replay_and_actual_transaction(
         with pytest.raises(ChangeSetConflict,match='human source decisions changed'):
             e.commit_verified(store,phase)
     assert store.get_record_state('evidence_steps','E')==before
+
+
+@pytest.mark.parametrize('registered_before_lower',[True,False])
+def test_claim_layer_consumes_same_lower_confirmation_without_reauditing_lower(seeded,registered_before_lower):
+    from backend.pipeline import claim_flash_statements as statements, claim_update_flash as flash, claim_flash_pairs as pairs
+    from backend.tests.test_claim_update_flash import Ports as ClaimPorts
+    store,sources,plan,previous,root=seeded
+    plan['groups'][0]['claim_ids']=['C'];first=fact(sources)
+    if registered_before_lower:save(store,[first])
+    assert stage.run(store,'S',plan,root,Ports(),previous,group_ids=['A'],apply=True)['status']=='completed'
+    if not registered_before_lower:save(store,[first])
+    lower=store.get_record_state('evidence_steps','E')
+    records,current=stage.f.load_group_source(store,'S',plan['groups'][0])
+    old=stage.material('evidence_steps/E',records,sources,[first])
+    inherited=stage.material('evidence_steps/E',records,current)
+    assert inherited==old and len(inherited['human_source_decisions'])==1
+    assert flash.claim_material('claims/C',records,current,'S')['evidence'][0]['human_source_decisions']==old['human_source_decisions']
+    assert pairs.node('claims/C',records,current)['human_source_decisions']==old['human_source_decisions']
+    ports=ClaimPorts();result=statements.run(store,'S',['C'],root,root/'claim-statements',ports,apply=True)
+    assert not result['pending'] and store.get_record_state('evidence_steps','E')==lower
+    assert all('record_fidelity' not in req.get('questions',{}) for role,req in ports.calls if role=='jev')
+    assert all(req['state']['evidence'][0]['human_source_decisions'] for role,req in ports.calls if role=='jev')
+    save(store,[fact(sources,supersedes=[first['decision_id']])])
+    with pytest.raises(ChangeSetConflict,match='human source decisions changed'):
+        statements.run(store,'S',['C'],root,root/'claim-statements',ClaimPorts(),apply=True)

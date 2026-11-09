@@ -79,7 +79,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             'relation_root':str(relation_root),'max_new_claims':room,'models':ports.identity,
             'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema()])})
         if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
-        records,sources=f.load_source(store,source_id)
+        records,sources=f.load_group_source(store,source_id,group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
         read=consume(store,relation_root,records,sources);original=deepcopy(records)
         pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
@@ -105,6 +105,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         read.update(questions)
         for key in questions:read.update('source_fragments/'+fid for fid in e.evidence_fragment_ids(records[key]['payload']))
         shared={'group_id':group['group_id'], 'remaining_creation_space':room,
+            **f.source_interpretation(sources,{source_id:group['paragraph_keys']}),
             'source_paragraphs':{pk:sources[source_id]['paragraphs'][pk]['text'] for pk in group['paragraph_keys']},
             'source_fragments':{fid:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for fid,p in fragments.items()},
             'verified_material':{k:{name:p for name,p in records[k]['payload'].items() if name in {'statement','speaker','stance','scripture_refs','source_fragment_id','source_fragment_ids'}} for k in sorted(pool)},

@@ -68,7 +68,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'evidence_root':str(Path(evidence_root).resolve()),'statement_root':str(Path(statement_root).resolve()),
             'policy_sha256':e.digest([PROMPT,Routes.model_json_schema()])})
         if (root/'verification.json').exists():return statements.finish(store,root) if apply else json.loads((root/'verification.json').read_text())
-        records,sources=f.load_source(store,source_id);c.fetch_claims(store,ids);original=deepcopy(records)
+        records,sources=f.load_group_source(store,source_id,group);c.fetch_claims(store,ids);original=deepcopy(records)
         if (plan.get('source_id')!=source_id or plan.get('source_body_sha256')!=sources[source_id]['body_sha256']
                 or json.loads((Path(evidence_root)/'intent.json').read_text())['groups']!=plan):
             raise ValueError('argument group/source differs from completed Evidence plan')
@@ -96,6 +96,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'existing_edges':[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason','')} for p in edges.values()]
                  +[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason',''),'read_only':True} for p in claim_edges.values()]
                  +[{**p,'relation_type':'supports','reason':'Claim.evidence_step_ids'} for p in implicit]}
+        shared.update(f.source_interpretation(sources,{source_id:group['paragraph_keys']}))
         proposals=[];pending=[];routes=[]
         jobs=[{'job_id':k} for k in sorted(targets)]
         for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),PROMPT,shared=shared,semantic_review=False):

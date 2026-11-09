@@ -84,7 +84,7 @@ def reference_visible(payload):
             'source_fragment_ids':e.evidence_fragment_ids(payload)}
 
 
-def material(key, records, sources, decisions=()):
+def material(key, records, sources, decisions=None):
     payload = records[key]['payload']
     value = e.material({**payload,'evidence_step_id':key},records,sources)
     # Deliberately do not use f.value: no between-fragment expansion or nearby paragraphs.
@@ -93,9 +93,11 @@ def material(key, records, sources, decisions=()):
     for fragment in value['fragments']:
         sid = records['source_fragments/'+fragment['fragment_id']]['payload']['source_id']
         paragraphs.setdefault(sid, []).append(fragment['paragraph_key'])
+    if decisions is None:
+        decisions = [x for src in sources.values() for x in src.get('human_source_guard', {}).get('entries', [])]
     selected = human.scoped(decisions, paragraphs)
     if selected:
-        projected = deepcopy(sources)
+        projected = {sid:{'file':s['file'],'paragraphs':s['paragraphs']} for sid,s in sources.items()}
         human.project(projected, selected)
         facts = [fact for sid in sorted(projected) for fact in projected[sid].get('human_source_decisions', [])]
         if any(fact['applicability'] != 'current' for fact in facts):

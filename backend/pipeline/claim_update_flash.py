@@ -346,7 +346,7 @@ def claim_material(key,records,sources,source_id):
                 linked.add(sk)
     raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
     return {'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},
-            'evidence':ev,'source_paragraphs':raw}
+            'evidence':ev,'source_paragraphs':raw, **f.source_interpretation(sources,{source_id:list(raw)})}
 
 
 def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_new_claims=2):
