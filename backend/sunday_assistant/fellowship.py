@@ -83,7 +83,7 @@ class Fellowship:
     def missing(self,case,entry):
         data=entry.model_dump(by_alias=True) if entry else {}
         confirmed=case['data'].get('confirmed',{})
-        return [key for key in FIELDS if not data.get(key) and not (key in OPTIONAL and key in confirmed and confirmed[key]==data.get(key))]
+        return [key for key in FIELDS if key != 'sourceLinks' and not data.get(key) and not (key in OPTIONAL and key in confirmed and confirmed[key]==data.get(key))]
 
     def email_status(self,day):
         from backend.fellowship_reminder_status import load_last_sent_fellowship_date
@@ -147,6 +147,9 @@ class Fellowship:
                 else:case=existing
                 target=date.fromisoformat(case['target_day'])
                 entry=entries.get(str(target));missing=self.missing(case,entry)
+                status='collecting' if missing or case['data'].get('questions') else 'ready'
+                if case['data'].get('status') != status:
+                    case['data']['status']=status;self.save_case(case)
                 if target<local.date():
                     continue
                 if local>=datetime.combine(sunday,time(15),ZONE):
@@ -164,16 +167,19 @@ class Fellowship:
             if field=='sourceLinks' and value:
                 value='；'.join(link['label']+' '+link['url'] for link in value)
             shown=str(value) if value not in (None,[], '') else ('待補充' if field in missing else '無')
+            if field=='sourceLinks':
+                label+='（選填）'
+                if not value:shown='未提供，不影響資料齊備或寄信'
             lines.append('• '+label+'：'+shown)
         return (f'{PREFIX}\n上次查經已結束，下一次 {case["target_day"]} 團契資料請管理員核對並在緊接的週四前補充：\n'
-                +'\n'.join(lines)+'\n日期已依排程填好，不用重複提供。序號／來源連結若無，請明確回覆「無」。可由不同同工分次回答；已有內容若需修改，請說明更正。\nhttps://dallas-hlc.org/admin/fellowship')
+                +'\n'.join(lines)+'\n日期已依排程填好，不用重複提供。序號若無，請明確回覆「無」。來源連結選填，不需特別回覆。可由不同同工分次回答；已有內容若需修改，請說明更正。\nhttps://dallas-hlc.org/admin/fellowship')
 
     def reminder_text(self,case,missing):
         questions=case['data'].get('questions',[])
         return (f'{PREFIX}\n{case["target_day"]} 團契資料催補：週四前的回覆期限已到。\n尚缺：'
                 +'、'.join(FIELDS[key] for key in missing)
                 +(('\n待核對：'+'；'.join(questions)) if questions else '')
-                +'\n請管理員補充以上資料；已保存內容會保留。序號／來源連結若無，請回覆「無」。\nhttps://dallas-hlc.org/admin/fellowship')
+                +'\n請管理員補充以上資料；已保存內容會保留。序號若無，請回覆「無」。來源連結選填，不列入催補。\nhttps://dallas-hlc.org/admin/fellowship')
 
     def context(self,message):
         self.authorized(message)

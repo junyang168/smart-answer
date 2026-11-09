@@ -116,13 +116,13 @@ export default function SundayAssistantPage() {
       <section className={card}>
         <h2 className="text-lg font-bold">雙週讀經團契</h2>
         <label className="mt-3 block"><input type="checkbox" checked={settings.fellowship_enabled ?? false} disabled={!settings.admin_group} onChange={e => patch({ fellowship_enabled: e.target.checked })} /> 在管理員群收集下次團契資料並接續通知 email</label>
-        <p className="mt-2 text-sm text-slate-600">查經結束後的主日下午 3 點詢問；於緊接的週四前回覆，該週四上午 9 點仍缺資料就催補。時間皆為達拉斯時間。日期依排程填入，收集主講、主題、系列、序號與來源連結；序號和連結若無可回覆「無」。</p>
+        <p className="mt-2 text-sm text-slate-600">查經結束後的主日下午 3 點詢問；於緊接的週四前回覆，該週四上午 9 點仍缺資料就催補。時間皆為達拉斯時間。日期依排程填入，收集主講、主題、系列與序號；序號若無可回覆「無」。來源連結選填，不影響資料齊備或寄信。</p>
         <Link href="/admin/fellowship" className="mt-3 inline-block text-sm underline">查看團契表單與通知 email</Link>
         {settings.fellowship_enabled && !data.fellowship?.length && <p className="mt-3 text-sm text-slate-500">下一次查經結束後，會在主日建立收集待辦。</p>}
         {data.fellowship?.map(item => <div key={item.previous_day} className="mt-3 rounded border p-3 text-sm">
           <p className="font-semibold">{item.target_day} 團契 · {item.data.questions?.length ? "待核對" : item.missing.length ? "待補充" : "資料齊備"}</p>
           <p className="mt-1">主講：{item.fields.host || "待補充"}；主題：{item.fields.title || "待補充"}；系列：{item.fields.series || "待補充"}</p>
-          <p className="mt-1">序號：{item.fields.sequence ?? "未填／無"}；來源連結：{item.fields.sourceLinks?.length || 0} 筆</p>
+          <p className="mt-1">序號：{item.fields.sequence ?? "未填／無"}；來源連結（選填）：{item.fields.sourceLinks?.length || 0} 筆</p>
           <p className="mt-1">通知 email：{item.email_status === "sent" ? "已寄出" : item.email_status === "sending" ? "寄送中" : item.email_status === "retryable" ? "正在重試寄信" : item.email_status === "expired" ? "已過寄送時段，請管理員核對" : ["unknown", "error"].includes(item.email_status || "") ? "寄送需管理員核對，未繼續自動重寄" : item.missing.length || item.data.questions?.length ? "等待資料補齊" : "依排程寄出"}</p>
           {!!item.missing.length && <p className="mt-1 text-amber-800">尚缺：{item.missing.join("、")}</p>}
           {!!item.data.questions?.length && <p className="mt-1 text-amber-800">待核對：{item.data.questions.join("；")}</p>}
