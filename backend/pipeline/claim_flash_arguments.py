@@ -124,6 +124,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'existing_edges':[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason','')} for p in edges.values()]
                  +[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason',''),'read_only':True} for p in claim_edges.values()]
                  +[{**p,'relation_type':'supports','reason':'Claim.evidence_step_ids'} for p in implicit]}
+        shared['existing_edges']=sorted(shared['existing_edges'],key=e.digest)
         shared.update(f.source_interpretation(sources,{source_id:group['paragraph_keys']}))
         proposals=[];pending=[];routes=[];claim_handoffs={}
         notes=getattr(ports,'legacy_ai_findings_notes',{})

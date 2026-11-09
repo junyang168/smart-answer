@@ -43,6 +43,14 @@ def owned_edges(records, ids, groups=None):
     return result
 
 
+def discovery_schema(contract=None):
+    schema=flash.CompleteDiscoveries.model_json_schema()
+    if contract=='claim_relation_types_v1':
+        allowed=set(pairs.TYPES)-{'answers','applies'}
+        schema['$defs']['CompletedProposal']['properties']['relation_type']['enum']=sorted(allowed)
+    return schema
+
+
 def consume_arguments(store, root, ids, records, sources):
     root = Path(root).resolve()
     result = json.loads((root/'result.json').read_text())
@@ -88,6 +96,8 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         pin = f.bind_source(store, source_id, root)
         saved=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
+        contract=saved.get('discovery_contract') if saved is not None else 'claim_relation_types_v1'
+        schema=discovery_schema(contract)
         scope=(saved or {}).get('existing_relation_scope')
         if saved is None:
             plan=json.loads((Path(prior['evidence_root'])/'intent.json').read_text())['groups']
@@ -95,6 +105,7 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         e.save(root/'intent.json', {'version': VERSION, 'source': pin, 'claim_ids': ids,
             'argument_root': str(argument_root), 'models': ports.identity,
             'policy_sha256': e.digest([PROMPT, flash.CompleteDiscoveries.model_json_schema()]),
+            **({'discovery_contract':contract} if contract is not None else {}),
             **({'existing_relation_scope':scope} if scope is not None else {})})
         if (root/'verification.json').exists():
             return statements.finish(store, root) if apply else json.loads((root/'verification.json').read_text())
@@ -138,7 +149,7 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         completed=list(completed_handoffs);pending = []; discoveries = []
         if completed_handoffs:shared['completed_connections']=completed_handoffs
         for batch, raw in f.gpt(root/'discovery', ports, 'missing_group_claim_relations',
-                [{'job_id': prior['group']['group_id']}], flash.CompleteDiscoveries.model_json_schema(),
+                [{'job_id': prior['group']['group_id']}], schema,
                 PROMPT, shared=shared, semantic_review=False):
             items = flash.CompleteDiscoveries.model_validate(raw).items
             f.exactly([x.model_dump() for x in items], [j['job_id'] for j in batch], 'job_id')

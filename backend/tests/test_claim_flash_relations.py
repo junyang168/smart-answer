@@ -235,3 +235,30 @@ def test_cross_group_endpoint_is_readonly_not_a_discovery_target(ready):
     frozen=json.loads((root/'cross-group/before.json').read_text())
     assert 'claims/X' in frozen['records'] and 'evidence_steps/E' in frozen['records']
     assert store.get_record_state('claim_relations','R')['retired']
+
+
+def test_invalid_completed_type_repairs_only_that_pair_without_jev(ready):
+    from backend.pipeline import claim_flash_pairs as pairs
+    store,root,_=ready
+    third={**deepcopy(store.get_record_state('claims','C')['payload']),'claim_id':'X'}
+    store.apply_plan(store.plan_package({'package_id':'invalid-type-third','claims':[third]}))
+    records,sources=f.load_source(store,'S');ports=Ports()
+    result=pairs.review(records,sources,[],[],root/'invalid-type',ports,kind='claim',completed_proposals=[
+        {'a':'claims/C','b':'claims/D','relation_type':'applies','direction':'a_to_b','reason':'原判定的理由。'},
+        {'a':'claims/D','b':'claims/X','relation_type':'supports','direction':'a_to_b','reason':'另一條已完成判定。'}])
+    assert not result['pending'] and len(result['new_relations'])==2
+    assert len(ports.calls)==1
+    role,request=ports.calls[0];assert role=='gpt' and request['input']['task']=='pair_claim'
+    assert len(request['input']['jobs'])==1
+    job=request['input']['jobs'][0]
+    assert {job['a'],job['b']}=={'claims/C','claims/D'}
+    assert 'a_to_b_applies' not in job['allowed_choices']
+    assert job['candidate_reason']=='原判定的理由。'
+    assert result['new_relations'][0]['reason']=='另一條已完成判定。'
+
+
+def test_new_claim_discovery_schema_excludes_other_domain_types():
+    legacy=stage.discovery_schema()['$defs']['CompletedProposal']['properties']['relation_type']['enum']
+    current=stage.discovery_schema('claim_relation_types_v1')['$defs']['CompletedProposal']['properties']['relation_type']['enum']
+    assert 'applies' in legacy and 'answers' in legacy
+    assert set(current)==set(legacy)-{'applies','answers'}

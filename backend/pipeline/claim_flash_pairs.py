@@ -121,7 +121,6 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
         if a==b or a not in records or b not in records or not allowed_pair(a,b,kind):
             raise ValueError('completed relation has unprovided or illegal endpoints')
         choice=pair['direction']+'_'+pair['relation_type']
-        if choice not in options(a,b,kind):raise ValueError('completed relation has illegal type or direction')
         src,dst=(a,b) if pair['direction']=='a_to_b' else (b,a)
         signature=(src,dst,pair['relation_type']);key=frozenset([a,b])
         if key in completed_seen:
@@ -129,6 +128,16 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
                 conflicts.append({'a':a,'b':b,'reason':'conflicting_completed_relation_proposals'})
             continue
         completed_seen[key]=signature
+        if choice not in options(a,b,kind):
+            # The producer supplied a complete judgment but used another
+            # domain's type. Repair only this decision; retain all valid peers.
+            old=next((case for case in cases if frozenset([case['a'],case['b']])==key),None)
+            if old is None:
+                old={'job_id':'P-'+e.digest([a,b])[:24],'a':a,'b':b,'original':None,'key':None}
+                cases.append(old)
+            old.update(invalid_completed_relation=pair,candidate_reason=pair['reason'])
+            seen.add(key)
+            continue
         if key in seen:
             originals=[x for x in cases if frozenset([x['a'],x['b']])==key]
             if not any((x['original']['from_id'],x['original']['to_id'],x['original']['relation_type'])==
@@ -153,6 +162,9 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}
         case['state']=state
+        if case.get('invalid_completed_relation'):
+            jobs.append({**case,'state':state,'allowed_choices':opts})
+            continue  # GPT repairs its invalid type; no second Jev judgment.
         questions={'relation':jevq.relation(opts)}
         if original and original.get('reason'):
             questions['reason_valid']=jevq.reason()

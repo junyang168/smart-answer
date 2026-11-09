@@ -132,7 +132,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
         e.save(root/'flow-intent.json',intent)
-        checkpoint=None
+        checkpoint=None;resume_claims=False
         if (root/'result.json').exists():
             saved=read(root/'result.json')
             if saved['status']=='completed':
@@ -142,7 +142,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
                 return saved
-            if saved.get('pending') and saved['pending'][0].get('layer')=='evidence':
+            if saved.get('pending') and saved['pending'][0].get('layer') in {'evidence','claims'}:
                 pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
                 if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
                     raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
@@ -151,6 +151,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('pending Flash stage evidence changed')
                 checkpoint=saved['stages']
+                resume_claims=saved['pending'][0]['layer']=='claims'
         if (root/'before.json').exists():before=read(root/'before.json')
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
@@ -187,7 +188,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
         attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
                    for item in read(p).get('outcomes',[])}
-        while True:
+        while not resume_claims:
             er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
             handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
             if complete(er) or not handoffs or any(p.get('layer')!='source' for p in handoffs):break
@@ -210,27 +211,39 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 if not complete(repaired) or not repaired['updates']:break
             else:continue
             break
+        if resume_claims:
+            er=stages['evidence']
+            if not complete(er):raise ValueError('Claim checkpoint lacks completed Evidence layer')
         if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
-        stages['claims']={}
+        stages.setdefault('claims',{})
         tasks=claim_tasks(plan)
         for group,ids,batch_number in tasks:
             gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
             gr=root/'claims'/task_id
             if not ids:
+                old=stages['claims'].get(gid,{}).get('missing',{})
+                if resume_claims and complete(old):
+                    if e.digest(read(gr/'missing/result.json'))!=e.digest(old):
+                        raise ValueError('completed Claim checkpoint stage differs')
+                    continue
                 value=missing.run(store,source_id,None,gr/'missing',ports,apply=True,
                     max_new_claims=2,empty_group=group,evidence_root=root/'evidence')
                 stages['claims'][gid]={'missing':value}
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':'missing','findings':value.get('pending',[])}])
                 continue
-            outputs={};stages['claims'][task_id]=outputs
+            outputs=stages['claims'].setdefault(task_id,{})
             for name,fn in (
                 ('statements',lambda:statements.run(store,source_id,ids,root/'evidence',gr/'statements',ports,apply=True)),
                 ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',gr/'statements',gr/'arguments',ports,apply=True,
                     claim_ids=ids if group.get('sequential_claim_batches') else None)),
                 ('relations',lambda:relations.run(store,source_id,gr/'arguments',gr/'relations',ports,apply=True)),
                 ('missing',lambda:missing.run(store,source_id,gr/'relations',gr/'missing',ports,apply=True))):
+                if resume_claims and complete(outputs.get(name,{})):
+                    if e.digest(read(gr/name/'result.json'))!=e.digest(outputs[name]):
+                        raise ValueError('completed Claim checkpoint stage differs')
+                    continue
                 value=fn();outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
         return finish(stages,[])

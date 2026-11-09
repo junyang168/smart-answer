@@ -313,6 +313,29 @@ def stopped_gpt_authority(root,ports,request):
     return authority
 
 
+def reuse_argument_edge_order(root,request):
+    """Reuse only an exact saved answer with a permutation of the same edge list."""
+    def normalized(req):
+        copy=deepcopy(req)
+        copy['input']['existing_edges']=sorted(copy['input']['existing_edges'],key=e.digest)
+        return copy
+    if request['input']['task']!='argument_completeness' or 'existing_edges' not in request['input']:
+        return request
+    expected=normalized(request)
+    for path in sorted((Path(root)/'gpt').glob('*/request.json')):
+        if not (path.parent/'response.json').exists():continue
+        prior=json.loads(path.read_text())
+        if (prior.get('input',{}).get('task')!='argument_completeness'
+                or 'existing_edges' not in prior['input'] or e.digest(prior)!=path.parent.name):continue
+        if normalized(prior)==expected:
+            if prior!=request:
+                e.save(Path(root)/'edge-order-reuse'/(e.digest(request)+'.json'),
+                    {'requested_sha256':e.digest(request),'saved_request_sha256':e.digest(prior),
+                     'normalized_sha256':e.digest(expected),'rule':'only existing_edges permutation; duplicates retained'})
+            return prior
+    return request
+
+
 def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True):
     """Split BEFORE calling by both complete wire size and task count. No truncation."""
     def request(batch):
@@ -357,6 +380,8 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             middle=len(batch)//2
             batches[:0]=[batch[:middle],batch[middle:]]
             continue
+        if task=='argument_completeness':
+            req=reuse_argument_edge_order(root,req)
         reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None))
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),

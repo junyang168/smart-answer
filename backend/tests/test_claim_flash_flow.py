@@ -130,3 +130,31 @@ def test_material_only_source_gets_real_missing_claim_disposition(candidate,tmp_
     assert result['status']=='completed',result.get('pending')
     assert any(role=='gpt' and r['input']['task']=='missing_group_claims' for role,r in ports.calls)
     assert flow.read(result['package']['path'])['claims']==[]
+
+
+@pytest.mark.parametrize('fault',[None,'database','receipt'])
+def test_claim_checkpoint_skips_completed_stages_and_refuses_drift(candidate,tmp_path,monkeypatch,fault):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    original=flow.relations.run
+    def paused(*args,**kwargs):
+        result=original(*args,**kwargs)
+        return {**result,'status':'needs_attention','pending':[{'reason':'one later relation needs continuation'}]}
+    monkeypatch.setattr(flow.relations,'run',paused)
+    first=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    assert first['status']=='needs_attention' and first['pending'][0]['layer']=='claims'
+    root=tmp_path/'resume/flash'
+    if fault=='database':
+        with workspace.open_candidate(package,tmp_path/'resume/workspace') as store:
+            cid=package['claims'][0]['claim_id'];p=store.get_record_state('claims',cid)['payload'];p['statement']='外部改動。'
+            store.apply_plan(store.plan_package({'package_id':'outside-change','claims':[p]}))
+    elif fault=='receipt':
+        stage=next((root/'claims').glob('*/statements/result.json'));stage.write_text('{}')
+    monkeypatch.setattr(flow.relations,'run',original)
+    for module in (flow.source,flow.coverage,flow.eo,flow.statements,flow.arguments):
+        monkeypatch.setattr(module,'run',lambda *a,**k:pytest.fail('completed layer/stage repeated'))
+    if fault:
+        with pytest.raises(ValueError,match='checkpoint input changed|stage evidence changed'):
+            flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    else:
+        result=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+        assert result['status']=='completed'
