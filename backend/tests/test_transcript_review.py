@@ -786,7 +786,8 @@ def test_audio_candidate_media_has_correct_mime_and_byte_ranges(setup, monkeypat
     assert response.headers['cache-control'] == 'private, no-store'
 
 
-def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_path):
+@pytest.mark.parametrize('existing_promoted',[False,True])
+def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_path,existing_promoted):
     import importlib.util
     script = Path(__file__).resolve().parents[2] / 'scripts/activate-transcript-beta.py'
     spec = importlib.util.spec_from_file_location('activate_beta_append', script)
@@ -800,6 +801,8 @@ def test_beta_append_preserves_existing_claim_content_and_history(setup, tmp_pat
     module.activate(source_root, production, '講道 test', 'a', target)
     beta = ReviewStore(target)
     original = beta.document('a', '講道 test')
+    if existing_promoted:
+        atomic(beta.folder('講道 test')/'production-link.json',{'archived_for_test':True})
     new = '第二講'
     meta = read(source_root / 'config/sermon.json')
     meta.append({**meta[0], 'item': new, 'assigned_to': None, 'status': 'ready'})
