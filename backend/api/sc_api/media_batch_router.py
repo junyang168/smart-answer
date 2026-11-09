@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from backend.pipeline.media_batch.store import Store, Conflict
 from backend.pipeline.media_batch.runtime import capacity_status
@@ -31,6 +32,44 @@ def create_media_batch_router(root, store_factory=Store):
         return actor
 
     router = APIRouter(prefix="/media_batches", dependencies=[Depends(editor)])
+
+    def timing_artifacts(batch,recording):
+        from backend.pipeline.slide_change_pilot import read_json,file_sha
+        with store_factory().connection() as c:
+            task=c.execute("SELECT t.payload,t.result FROM media_ingest.tasks t JOIN media_ingest.batch_tasks b ON b.task=t.id WHERE b.batch=%s AND t.recording=%s AND t.stage='finish'",(batch,recording)).fetchone()
+        if not task or not (task.get('result') or {}).get('timing_report'):
+            raise HTTPException(404,'此講道尚無時間核驗問題報告')
+        try:
+            binding=task['result']['timing_report'];folder=Path(task['payload']['out'])/'timing-review'
+            if (binding['media_file'] not in ('playback.mp3','playback.mp4') or
+                binding['mime'] not in ('audio/mpeg','video/mp4') or
+                binding['source_sha256']!=task['payload']['info']['source_sha']):raise ValueError('Invalid source binding')
+            for name,key in [('report.json','json_sha256'),('report.html','html_sha256'),(binding['media_file'],'media_sha256')]:
+                if file_sha(folder/name)!=binding[key]:raise ValueError('Changed diagnostic artifact')
+            report=read_json(folder/'report.json')
+            if report['schema_version']!='transcript-timing-review-report.v1' or report['source_sha256']!=binding['source_sha256']:raise ValueError('Invalid report')
+            return folder,binding
+        except (OSError,ValueError,KeyError):
+            raise HTTPException(409,'報告或音訊版本已變更，請重新產生核驗報告')
+
+    @router.get('/{batch}/timing/{recording}')
+    def timing_report(batch:str,recording:str):
+        import secrets
+        from urllib.parse import quote
+        folder,binding=timing_artifacts(batch,recording)
+        page=(folder/'report.html').read_text();nonce=secrets.token_urlsafe(24)
+        old=f'{binding["media_file"]}?sha256={binding["media_sha256"]}'
+        media=f'/api/sc_api/media_batches/{quote(batch,safe="")}/timing/{quote(recording,safe="")}/media'
+        if page.count(f'src="{old}"')!=1 or page.count('<script>')!=1:raise HTTPException(409,'報告頁面結構不一致')
+        page=page.replace(f'src="{old}"',f'src="{media}"').replace('<script>',f'<script nonce="{nonce}">')
+        return Response(page,media_type='text/html',headers={
+            'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',
+            'Content-Security-Policy':f"default-src 'none'; media-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-{nonce}'; base-uri 'none'; frame-ancestors 'none'"})
+
+    @router.api_route('/{batch}/timing/{recording}/media',methods=['GET','HEAD'])
+    def timing_media(batch:str,recording:str):
+        folder,binding=timing_artifacts(batch,recording)
+        return FileResponse(folder/binding['media_file'],media_type=binding['mime'],headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
 
     @router.get("")
     def get(

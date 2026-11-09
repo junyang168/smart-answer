@@ -9,6 +9,20 @@ import shutil
 from backend.pipeline.slide_change_pilot import read_json,save_json,file_sha
 
 
+def report_binding(out:Path,batch:str,recording:str):
+    """Bind remote viewing to these exact saved diagnostics and playback bytes."""
+    from urllib.parse import quote
+    folder=out/'timing-review';report=read_json(folder/'report.json')
+    receipt=read_json(out/'media-receipt.json')
+    if report['source_sha256']!=receipt['source_sha256']:raise ValueError('Report source differs from playback')
+    media='playback.mp3' if receipt['mime']=='audio/mpeg' else 'playback.mp4'
+    if file_sha(folder/media)!=receipt['sha256']:raise ValueError('Report playback changed')
+    return dict(timing_report_href=f'/api/sc_api/media_batches/{quote(batch,safe="")}/timing/{quote(recording,safe="")}',
+        withheld=report['withheld'],qualified=report['qualified'],
+        timing_report=dict(json_sha256=file_sha(folder/'report.json'),html_sha256=file_sha(folder/'report.html'),
+            media_file=media,media_sha256=receipt['sha256'],mime=receipt['mime'],source_sha256=report['source_sha256']))
+
+
 def write_report(out:Path,record:dict,evidence:Path):
     assessment=read_json(evidence/'assessment.json');master=read_json(out/'master.json')
     windows={w['id']:w for w in master['windows']};folder=out/'timing-review';folder.mkdir(exist_ok=True)

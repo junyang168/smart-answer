@@ -139,7 +139,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
       headers,
       body,
       redirect: "manual",
-      ...(reviewEndpoint === "media_batches"
+      ...(reviewEndpoint === "media_batches" && !(params.path?.[2] === "timing" && params.path?.[4] === "media")
         ? { signal: AbortSignal.timeout(15000) }
         : {}),
     });

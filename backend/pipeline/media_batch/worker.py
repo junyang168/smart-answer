@@ -33,10 +33,18 @@ def child():
         from backend.pipeline.transcript_text_layout import SeamCoverageError
         from backend.pipeline.contextual_transcript_timing import TimingReviewRequired
 
+        diagnostic = None
+        if isinstance(e,TimingReviewRequired):
+            from backend.pipeline.transcript_timing_report import report_binding
+            try:
+                diagnostic=report_binding(Path(payload['out']),ctx['batch'],payload['recording'])
+            except (OSError,ValueError,KeyError):
+                diagnostic={'timing_report_error':'核驗報告的播放副本尚未就緒'}
+
         traceback.print_exc()
         atomic(
             Path(ctx["result_path"]),
-            dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,(SeamCoverageError,TimingReviewRequired))),
+            dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,(SeamCoverageError,TimingReviewRequired)),result=diagnostic),
         )
         sys.exit(1)
 
