@@ -73,6 +73,41 @@ def test_no_missing_material_does_not_force_gpt_review(tmp_path):
     assert replay.calls==[]
 
 
+def test_compact_bindings_preserve_every_literal_and_invalid_binding_without_mutation():
+    original={'job_id':'G','existing_details':{'R':{'scripture_refs':['Matt.5.16'],'bindings':[
+        {'paragraph_key':'S0001','quote':'完整原文，沒有刪節。','binding_verified':True},
+        {'fragment_id':'old','historical_excerpt':'舊引文。','binding_verified':False}]}}}
+    before=deepcopy(original);packed=coverage.compact_bindings(original)
+    assert original==before
+    unpacked=deepcopy(packed)
+    columns=unpacked.pop('binding_columns')
+    for detail in unpacked['existing_details'].values():
+        detail['bindings']=[dict(zip(columns,binding)) if isinstance(binding,list) else binding
+                            for binding in detail['bindings']]
+    assert unpacked==original
+
+
+def test_only_oversized_disposition_changes_wire_shape_and_stays_bounded(tmp_path,monkeypatch):
+    records,sources=fixture(tmp_path)
+    for n in range(50):
+        records['evidence_steps/EX'+str(n)]=deepcopy(records['evidence_steps/E'])
+        records['evidence_steps/EX'+str(n)]['payload']['evidence_step_id']='EX'+str(n)
+    first=Ports(verdict='missing')
+    coverage.check(records,sources,'S',plan(sources),tmp_path/'normal',first)
+    request=next(r for r in first.requests if r.get('input',{}).get('task')=='reverse_coverage_adjudication')
+    packed=deepcopy(request)
+    packed['input']['jobs']=[coverage.compact_bindings(j) for j in request['input']['jobs']]
+    size=lambda v:len(json.dumps(v,ensure_ascii=False).encode())
+    limit=(size(request)+size(packed))//2
+    assert size(packed)<limit<size(request)
+    monkeypatch.setattr(coverage.f,'GPT_BYTES',limit)
+    second=Ports(verdict='missing')
+    result=coverage.check(records,sources,'S',plan(sources),tmp_path/'compact',second)
+    wire=next(r for r in second.requests if r.get('input',{}).get('task')=='reverse_coverage_adjudication')
+    assert wire==packed and size(wire)<=limit
+    assert result['status']=='checked' and len(result['findings'][0]['findings'])==1
+
+
 def test_position_and_full_bound_quotes_are_supplied_before_claiming_omission(tmp_path):
     records,sources=fixture(tmp_path)
     records['position_nodes/P']={'retired':False,'payload':{'position_id':'P','title':'反方的立場。',
