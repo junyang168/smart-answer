@@ -364,3 +364,22 @@ def test_corrected_reference_input_retains_prior_unapplied_disposition(tmp_path)
     assert len(list((root/'coverage-decisions').glob('*/*.json')))==2
     assert len(list((root/'groups/A').glob('*/verification.json')))==2
     assert not list((root/'coverage-accepted').glob('*.json'))
+
+
+def test_new_record_with_omitted_optional_fields_keeps_acceptance_after_sql(seeded,tmp_path):
+    store,sources,plan,_,root=seeded
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'原文有支持的重要材料。'}
+    previous=saved_inventory(tmp_path/'no-optionals',sources,[unit])
+    class WithoutOptionals(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='evidence_coverage_repair':
+                for item in raw['items'][0]['items']:
+                    for field in ['scripture_refs','speaker','stance','attribution']:item.pop(field,None)
+            return raw
+    first=stage.run(store,'S',plan,root,WithoutOptionals(),previous,apply=True)
+    assert first['status']=='completed'
+    created=[p for k,p in first['groups'][0]['updates'].items() if k.startswith('observations/')]
+    assert len(created)==1 and created[0]['scripture_refs']==[]
+    replay=WithoutOptionals();second=stage.run(store,'S',plan,root,replay,previous,apply=True)
+    assert second['status']=='completed' and replay.calls==[]

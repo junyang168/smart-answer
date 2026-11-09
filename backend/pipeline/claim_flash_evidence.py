@@ -287,7 +287,9 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 if key in working:raise ValueError('new Evidence identity occupied')
             post={**p,**patch_for(key,p,edit)}
             if edit.action=='create':post.update(source_fragment_id=None,source_fragment_ids=list(dict.fromkeys(edit.fragment_ids)))
-            KNOWLEDGE_COLLECTIONS[edit.record_type][0].model_validate(post)
+            # Persist the same schema defaults SQL will store, so acceptance
+            # fingerprints survive the transaction without a second review.
+            post=KNOWLEDGE_COLLECTIONS[edit.record_type][0].model_validate(post).model_dump(mode='json')
             if key in coverage_updates and post!=coverage_updates[key]:raise ValueError('coverage edits conflict on the same Evidence')
             coverage_updates[key]=post
             updates[key]=post;working[key]={**working.get(key,{}),'payload':post,'retired':False}
