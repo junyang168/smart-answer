@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer。
 > **類型**：規範。
 > **狀態**：#723 已授權實作；分步候選與隔離 Flash 接續已實作，正式庫接收仍未授權／未實作；不取代既有 extraction 契約。
-> **與代碼對齊**：2026-11-09 核對至 614b15cd；整組生成與完整隔離 Flash 已實測，詳見測試記錄第 9 節；候選入口為 claim_creation_flash_v4，精確 prompt SHA 綁定本次生成規則，既有 extraction 預設契約保留。
+> **與代碼對齊**：2026-11-09 核對至 0f6a3952；兩步及一次生成的完整隔離比較見測試記錄第 9–10 節；候選入口為 claim_creation_flash_v4，精確 prompt SHA 綁定本次生成規則，既有 extraction 預設契約保留。
 > **權威範圍**：首次 creation 的任務分工、完整候選出口及之後的 Flash 接續；不授予正式資料寫入、舊審閱資格或 CVP 維護權限。
 
 ## 目錄
@@ -179,7 +179,7 @@ Claim statement 的送審材料須保存既有 Observation → Evidence → Clai
 
 生成完整候選，之後在隔離庫執行 Flash（不指定 through-flash 則只生成）。整組材料及關係生成加 `--grouped-package`；它同時啟用精簡覆蓋傳輸：
 
-`--single-pass` 是單組對比實驗：同一次從原文生成 Claim 候選、完整範圍、共享材料、引文及關係，沒有預先提供 Claim 答案。它沿用整組模式的 16,000 token 輸出上限及既有編譯／Flash；程式只投影模型局部 Claim ID 為穩定別名，保存原答覆及投影收據。多組輸入暫時拒收，不能將單組實驗宣稱為已支援全講道單次生成。此模式不取代預設或預先宣稱更優，必須比較 Creation＋完整 Update 的品質、總時間及總 tokens。
+`--single-pass` 是單組對比實驗：同一次從原文生成 Claim 候選、完整範圍、共享材料、引文及關係，沒有預先提供 Claim 答案。它沿用整組模式的 16,000 token 輸出上限及既有編譯／Flash；程式只投影模型局部 Claim ID 為穩定別名，保存原答覆及投影收據。多組輸入暫時拒收，不能將單組實驗宣稱為已支援全講道單次生成。此模式僅保留為試驗，不取代目前選用的兩步方案。比較 Creation＋完整 Update 的品質、總時間及總 tokens；本次對比未顯示採用一次生成的收益。
 
 
 ```bash

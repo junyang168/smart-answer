@@ -6,6 +6,19 @@
 > **與代碼對齊**：2026-11-09 核對至 9da69bb0。
 > **權威範圍**：本次固定原文、保存答覆與隔離 SQL 的驗證結果；不推論整篇講道的穩定速度。
 
+## 目錄
+
+- [1. 範圍與執行](#1-範圍與執行)
+- [2. 結果](#2-結果)
+- [3. 修正與經驗](#3-修正與經驗)
+- [4. 邊界](#4-邊界)
+- [5. 後續共用品質規則（1144a42f）](#5-後續共用品質規則1144a42f)
+- [6. 使用者要求的 v4 全新生成測試（fffe6255）](#6-使用者要求的-v4-全新生成測試fffe6255)
+- [7. Creation 防錯與完整 Update 接續（99ae359a）](#7-creation-防錯與完整-update-接續99ae359a)
+- [8. 精簡逐句輸出的獨立試驗（13a36ef9）](#8-精簡逐句輸出的獨立試驗13a36ef9)
+- [9. 整組共享材料及完整關係同次生成（f76e0e8d、614b15cd）](#9-整組共享材料及完整關係同次生成f76e0e8d614b15cd)
+- [10. Claim 也合併的一次生成實驗](#10-claim-也合併的一次生成實驗)
+
 ## 1. 範圍與執行
 
 使用 2018 NYSC《馬太福音釋經（七）》第三講已凍結的第一組 FG001：原始 S0001–S0110，共 2,729 字元，保留原段落座標。輸入來自保存的原文，不提供舊 Update 的修訂後語義答案。這是本組首次生成候選，再由 Flash 校正，不重跑舊 GPT／Opus 流程。
@@ -138,3 +151,26 @@ Creation 時間減少 48.8%、GPT tokens 減少 66.4%；完整兩階段時間減
 驗收：**702 tests passed，53.00 秒**；包括同次生成圖、答案及 owner 同步、未知端點、缺支持、load-bearing 缺路徑、舊模式、單跳 Claim 來源、精確 ID 格式與零調用重入。完成結果零模型回放通過、匯出逐筆等於實際隔離 SQL，PostgreSQL 已停止，正式資料寫入 0。完整依據在 `grouped-package-trial/completed-summary.json`、`exact-identity-recovery.json` 及 `normalized-end-to-end-acceptance.json`。最終包 SHA `72389c3343306ee6393b4c735742e852cc3a81a01302b4218970c4160b899412`。
 
 本次經驗：驗證的任務拆分不能機械套用到 Creation。Claim 已先識別並圈定範圍後，共享材料、完整引文及它們如何連到 Claim 是同一個有邊界的生成任務；程式處理機械輸出與身份，不再要求下一個模型從頭重建同一張圖。完整候選後的分層 Update 仍保留，沒有用生成成功冒充語義驗證。
+
+## 10. Claim 也合併的一次生成實驗
+
+按使用者要求，0f6a3952 增加單組 `--single-pass` 對比模式；同一份凍結原文、組界、Sol medium 訂閱及 16,000 輸出上限，一次產生 Claim、完整相關範圍、共享材料、引文及全部關係。沒有提供前次 Claim 或舊修訂答案；原答覆與局部 Claim ID 機械投影分開保存，不改舊預設。
+
+| 指標 | 第 9 節兩步生成 | 本次一次生成 |
+| --- | --- | --- |
+| Creation | 242.034 秒 | 284.055 秒 |
+| Creation GPT input／output | 44,625／11,726 | 24,434／14,028 |
+| Creation 總 tokens | 56,351 | 38,462 |
+| Update | 280.168 秒 | 326.151 秒 |
+| Update GPT tokens | 335,237 | 351,692 |
+| Update Jev tokens | 152,350 | 149,193 |
+| Creation＋Update | 522.202 秒（8 分 42 秒） | 610.235 秒（10 分 10 秒） |
+| 全部 tokens | 543,938 | 539,347 |
+
+一次生成的 Creation tokens 少約 31.7%，但 Creation 慢約 17.4%；兩階段合計慢約 16.9%，總 tokens 只少約 0.8%。Cached input 49,664、reasoning output 2,478 已包含，美元成本未知。只有一組樣本，模型延遲及粒度有隨機性，不作穩定因果結論；本次沒有理由取代兩步。使用者看完 Creation 時間後選擇保留兩步，已開始的 Update 完成後亦支持這個實務選擇。
+
+首次包有 3 Claim、5 Evidence、11 Observation、11 Question、3 Position、49 Fragment、22 knowledge relations 及 1 Claim relation。三項核心判斷均有生成，Claim 較短；原本第一條 Claim 的「立刻可涵蓋一個月」這次只留在下層材料。Update 將其另建 CL004，連接支持、背景及兩個問題答案。這是層級／粒度差異，不是原文內容完全沒抽出，不能用多一張卡斷言更好。另新增 2 條既有節點連接、修改 3 條材料關係的類型／理由；原有 Claim、Evidence／Observation 文字及全部 Fragment 不變，Evidence／Question 寫入是 owner／答案同步。
+
+獨立讀樣的限制：一次生成將「證明這麼講對不對？」另存為缺乏獨立語義的 Question；新 CL004 的 owner 只有確認文獻出處的 EV003，具體「一個月」的 OB007 仍未直接連到新卡。來源片段雖完整保留，這些粒度及論據連接仍是品質疑點；程式 completed 不等於排除全部語義問題。不為挽救未採用方案再增加模型循環或直接修改資料。
+
+本次從生成到完整 Flash 在同一版本連續完成，無工程恢復、無 pending；零模型重入通過，匯出等於實際隔離 SQL，PostgreSQL 已停止，正式寫入 0。707 項回歸通過（54.43 秒）。依據在 `single-pass-trial/result.json` 及 `end-to-end-acceptance.json`；最終包 SHA `56c00f9737709c5a47c27c76153d9d5d2290f8fef3037dc720c61776324c02da`。選定方案仍是先識別 Claim 與範圍，再一次生成共享材料及關係，最後交 Flash。
