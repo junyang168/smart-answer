@@ -292,3 +292,46 @@ def test_subset_resume_cannot_expand_original_authorized_groups(seeded):
     ports=Ports()
     with pytest.raises(ValueError,match='expands frozen scope'):stage.run(store,'S',plan,root,ports,previous,group_ids=['B'],apply=True)
     assert ports.calls==[]
+
+
+@pytest.mark.parametrize('bound', [True, False])
+def test_enrichment_uses_bound_support_without_requiring_oral_bridge(tmp_path,bound):
+    text='園主差遣愛子，期待園戶尊敬他。結果呢？他們怎麼樣？園戶把兒子殺了。'
+    quotes=[('S0001','園主差遣愛子，期待園戶尊敬他。'),('S0001','園戶把兒子殺了。'),('S0001',text)]
+    records,sources=fixture(tmp_path,[text],quotes)
+    records['evidence_steps/E']['payload'].update(statement='園主差遣愛子。',source_fragment_ids=['F0','F1'] if bound else ['F0'])
+    group={'group_id':'A','paragraph_keys':['S0001'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}
+    unit={'paragraph_key':'S0001','quote':text,'statement':'園主期待園戶尊敬愛子，園戶卻殺了他。'}
+    class Enrich(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='evidence_coverage_repair':
+                raw['items'][0]['items'][0].update(action='enrich',record_key='evidence_steps/E',record_type='evidence_steps',
+                    statement=unit['statement'],fragment_ids=['F0','F1'])
+            return raw
+    result=stage.run_group(None,records,sources,group,['evidence_steps/E'],[unit],tmp_path/'run',Enrich(),saved_inventory(tmp_path,sources,[unit]),apply=False)
+    if bound:
+        assert result['status']=='verified'
+        assert result['updates']['evidence_steps/E']['statement']==unit['statement']
+        assert result['updates']['evidence_steps/E']['source_fragment_ids']==['F0','F1']
+    else:
+        assert result['status']=='needs_attention'
+        assert result['pending'][0]['reason']=='existing_record_needs_source_binding_change'
+        assert not result['updates']
+
+
+def test_coverage_gpt_receives_position_title_as_readonly_existing_content(tmp_path):
+    records,sources,plan=setup(tmp_path)
+    records['position_nodes/P']={'retired':False,'payload':{'position_id':'P','title':'路加使用馬可加L文件。',
+        'attribution':'教授所反對的學說','source_fragment_ids':['F0']}}
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'需要判定已有承載的意思。'}
+    class KeepPosition(Ports):
+        def repair(self,request):
+            if request['input']['task']=='evidence_coverage_repair':
+                assert request['input']['records']['position_nodes/P']['title']=='路加使用馬可加L文件。'
+                assert 'position_nodes/P' not in request['input']['writable_keys']
+                return {'items':[{'job_id':'A','items':[{'job_id':'U0','action':'keep','record_key':'position_nodes/P',
+                    'record_type':'observations','fragment_ids':[],'reason':'已有反方Position保存，不重複建卡。'}]}]}
+            return super().repair(request)
+    result=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],tmp_path/'run',KeepPosition(),saved_inventory(tmp_path,sources,[unit]),apply=False)
+    assert all(not k.startswith(('position_nodes/','observations/')) for k in result['updates'])

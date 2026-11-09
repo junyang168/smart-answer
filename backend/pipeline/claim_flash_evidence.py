@@ -72,6 +72,11 @@ def visible(payload):
     return {k:payload[k] for k in FIELDS if k in payload}
 
 
+def reference_visible(payload):
+    # Position stores its judgment in title, not statement. It remains read-only.
+    return {**visible(payload), **({'title':payload['title']} if 'title' in payload else {})}
+
+
 def material(key, records, sources):
     payload = records[key]['payload']
     value = e.material({**payload,'evidence_step_id':key},records,sources)
@@ -244,7 +249,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     coverage_updates={};coverage_proofs=[]
     grouped=[{'job_id':group['group_id'],'candidates':jobs}] if jobs else []
     for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),COVERAGE_PROMPT,
-        shared={'records':{k:visible(p) for k,p in catalog.items()},'writable_keys':targets,
+        shared={'records':{k:reference_visible(p) for k,p in catalog.items()},'writable_keys':targets,
                 'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}},semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
         edits=bundles[0].items;f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in jobs],'job_id')
@@ -254,8 +259,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'handoff','reason':edit.reason});continue
             job=next(j for j in jobs if j['job_id']==edit.job_id)
             chosen={k:p for k,p in valid.items() if p['fragment_id'] in edit.fragment_ids}
-            if (not set(edit.fragment_ids)<={p['fragment_id'] for p in valid.values()}
-                    or not fill.covered_by(job['unit'],sources[sid]['paragraphs'][job['unit']['paragraph_key']],chosen)):
+            if (not edit.fragment_ids or not set(edit.fragment_ids)<={p['fragment_id'] for p in valid.values()}
+                    or edit.action=='create' and not fill.covered_by(job['unit'],sources[sid]['paragraphs'][job['unit']['paragraph_key']],chosen)):
                 raise ValueError('coverage edit lacks confirmed or borrows unprovided fragments')
             if edit.action=='enrich':
                 key=edit.record_key
@@ -264,6 +269,10 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 if p.get('review_status') in f.PROTECTED:raise ValueError('protected Evidence coverage record')
                 if not set(edit.fragment_ids)<=set(e.evidence_fragment_ids(p)):
                     pending.append({'unit_id':edit.job_id,'layer':'source','reason':'existing_record_needs_source_binding_change'});continue
+                # Enrichment retains the complete existing binding. The source
+                # stage already verified the inventory's literal span; GPT
+                # selects support for the meaning, not every oral bridge in
+                # that span. Do not require it to re-quote the inventory here.
             else:
                 if not edit.statement or not edit.statement.strip():raise ValueError('new Evidence needs statement')
                 oid=('E' if edit.record_type=='evidence_steps' else 'O')+'-FLE-'+e.digest([sid,edit.statement,sorted(edit.fragment_ids)])[:24]
