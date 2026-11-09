@@ -692,7 +692,7 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     from backend.pipeline.transcript_seam_repair import audit_window_coverage
     window_coverage=audit_window_coverage(out,master)
     paragraphs, decisions, timing_issues, checks, exclusions, originals, uncut = [], [], [], [], [], [], []
-    withheld=[];recovered_reviews=[]
+    withheld=[];recovered_reviews=[];source_notices=[]
     for w in master['windows']:
         folder = out / f'windows/{w["id"]}'
         ref=read(folder/'final_alignment_ref.json')
@@ -710,6 +710,13 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
                 'start_ms':None if p['start_ms'] is None else w['start_ms']+p['start_ms'],
                 'end_ms':None if p['end_ms'] is None else w['start_ms']+p['end_ms']} for p in trial[field])
         reading = read(folder/'editorial/reading_view.json')
+        repair_ref=folder/'audio/seam-repair.json'
+        if repair_ref.exists():
+            repair=read(repair_ref)
+            if repair.get('policy')=='retain-uncertain-asr-overlap.v1':
+                for n in read(folder/'audio'/repair['proof'])['source_notices']:
+                    source_notices.append({**n,'window_id':w['id'],
+                        'start_ms':w['start_ms']+n['start_ms'],'end_ms':w['start_ms']+n['end_ms']})
         recovered=reading.get('recovered_paragraph_review')
         if recovered:
             spath=folder/recovered['path']
@@ -774,7 +781,7 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
         'duration_ms':master['duration_ms'],'paragraphs':paragraphs,'original_paragraphs':originals,
         'uncut_corrected_paragraphs':uncut,'slides':placements,
         'visual_assets':evidence['assets'],'decisions':decisions,'editorial_exclusions':exclusions,'visibility':report['visibility'],
-        'withheld_correction_proposals':withheld,
+        'withheld_correction_proposals':withheld,'source_notices':source_notices,
         'human_confirmed':False,'repeat_asr_verification_calls':0,'timing_audit_sha256':sha(out/'timing_audit.json')}
     from importlib.metadata import version
     cleanup = out / 'editorial-full/reading_view.json'
@@ -788,6 +795,11 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     from backend.pipeline.contextual_transcript_timing import qualify_staged_record
     record = qualify_staged_record(out,record,aligner_python)
     paragraphs = record['paragraphs']
+    for notice in record.get('source_notices',[]):
+        timed=[p for p in paragraphs if p.get('start_ms') is not None and p.get('end_ms') is not None]
+        related=[p['id'] for p in timed if p['start_ms']<=notice['end_ms']+2000 and p['end_ms']>=notice['start_ms']-2000]
+        if not related and timed:related=[min(timed,key=lambda p:abs(p['start_ms']-notice['start_ms']))['id']]
+        notice['paragraph_ids']=related
     audit['contextual_timing_quality'] = record['timing_quality']
     save(out/'timing_audit.json',audit)
     record['timing_audit_sha256'] = sha(out/'timing_audit.json')

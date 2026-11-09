@@ -89,6 +89,16 @@ def acoustic_core_range(chunk,items,is_last):
     return (0 if start==0 else boundary(start),len(items) if is_last else boundary(end))
 
 
+def retained_audio_edge(out,left,right):
+    ref=read_json(Path(out)/'seam-repair.json')
+    from backend.pipeline.transcript_seam_retention import POLICY
+    if ref.get('policy')!=POLICY:return False
+    # load_repair already replays the actual saved answers. Uncertain edges
+    # do not use this exemption: they retain both edges with no removed words.
+    proof=read_json(Path(out)/ref['proof'])
+    return any(p['left']==left and p['right']==right for p in proof['approved'])
+
+
 def stitch(out: Path, *, use_repairs: bool = True) -> dict:
     asr = read_json(out / 'asr.json')
     repairs={}
@@ -144,6 +154,7 @@ def stitch(out: Path, *, use_repairs: bool = True) -> dict:
     for left,right in zip(excerpts,excerpts[1:]):
         from backend.pipeline.transcript_audio_seams import covers
         if repairs and covers(out,left['chunk_id'],right['chunk_id']):continue
+        if repairs and retained_audio_edge(out,left['chunk_id'],right['chunk_id']):continue
         verify_seam_coverage(text[left['output_start']:left['output_end']],
             text[right['output_start']:right['output_end']],left['excluded_suffix'],right['excluded_prefix'])
     result = {'schema_version': 'timed-speech-draft.v1', 'asr_sha256': file_sha(out / 'asr.json'),

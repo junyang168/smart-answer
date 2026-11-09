@@ -1158,6 +1158,7 @@ class ReviewStore:
                 "paragraph_bindings": bindings,
                 "timing_quality": timing_quality,
                 "editorial_exclusions": record.get('editorial_exclusions', []),
+                "source_notices": [{**n,"paragraph_ids":[mapping[x] for x in n.get('paragraph_ids',[]) if x in mapping]} for n in record.get('source_notices',[])],
                 "speaker_attribution": speaker_attribution,
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},

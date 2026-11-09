@@ -727,12 +727,14 @@ def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup):
     partial={**record['paragraphs'][0],'text':prefix+record['paragraphs'][0]['text']}
     record.update(duration_ms=3615000,uncut_corrected_paragraphs=[deleted,partial,record['paragraphs'][1]],timing_quality={'status':'qualified'})
     record['editorial_exclusions']=[dict(paragraph_id=p['id'],old=old,start=0,end=len(old),source_text_sha256=hashlib.sha256(p['text'].encode()).hexdigest()) for p,old in [(deleted,deleted['text']),(partial,prefix)]]
+    record['source_notices']=[dict(paragraph_ids=[partial['id']],start_ms=0,end_ms=1000,note='接縫保留待核對',status='retained_pending_human_review')]
     atomic(source/'full_transcript.json',record)
     layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
     store.candidate_path('講道 test').unlink()
     store.register_candidate('講道 test',source,expected_script_sha256=None)
     doc=adopted(setup)
     assert [p['text'] for p in doc['script']]==['~~調整麥克風。~~','~~先等一下。~~耶穌基督。','保羅所說的智慧。']
+    assert doc['context']['source_notices'][0]['paragraph_ids']==['2']
     assert pending_timing_ids(doc['script'],doc['context'])==[]
     restored=copy.deepcopy(doc['script']);restored[0]['text']='調整麥克風。'
     assert pending_timing_ids(restored,doc['context'])==['1']

@@ -62,3 +62,18 @@ def test_saved_unmatched_edge_failure_routes_to_audio_review_not_an_unhandled_va
     save_json(tmp_path/f'seam-recovery/{identity[:20]}/proof.json',dict(policy=legacy.POLICY,binding=binding,status='needs_audio_review',reason='No exact shared edge phrase; no fuzzy deletion permitted',pairs=[]))
     monkeypatch.setattr(seams,'recover',lambda *a,**kw:{'recovered':'audio branch'})
     assert legacy.stitch_with_recovery(tmp_path,Path('/unused'))=={'recovered':'audio branch'}
+
+
+def test_uncertain_audio_keeps_all_words_and_a_notice_without_new_calls(tmp_path,monkeypatch):
+    from backend.pipeline.transcript_seam_retention import recover,load
+    from backend.pipeline.transcript_text_layout import stitch
+    calls=fixture(tmp_path,monkeypatch,'reject')
+    with pytest.raises(SeamCoverageError):seams.recover(tmp_path,tmp_path/'capacity')
+    result=recover(tmp_path)
+    assert result['text']=='甲乙丙丁戊\n乙丙丁戊己庚'
+    proof=read_json(tmp_path/'seam-retention-proof.json')
+    assert not proof['approved'] and proof['source_notices'][0]['status']=='retained_pending_human_review'
+    assert proof['human_confirmed'] is False and len(calls)==2
+    assert stitch(tmp_path)['text']==result['text']
+    proof['source_notices']=[];save_json(tmp_path/'seam-retention-proof.json',proof)
+    with pytest.raises(ValueError,match='proof changed'):load(tmp_path,tmp_path/'seam-retention-proof.json')

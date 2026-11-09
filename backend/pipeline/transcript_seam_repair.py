@@ -362,6 +362,8 @@ def load_repair(out):
     if not path.is_relative_to(out.resolve()) or file_sha(path)!=ref['sha256']:raise ValueError('Seam repair proof changed')
     from backend.pipeline.transcript_audio_seams import POLICY as AUDIO_POLICY, load
     if ref.get('policy')==AUDIO_POLICY:return load(out,path)
+    from backend.pipeline.transcript_seam_retention import POLICY as RETENTION_POLICY,load as retained_load
+    if ref.get('policy')==RETENTION_POLICY:return retained_load(out,path)
     return load_proof(out,path)
 
 
@@ -372,12 +374,16 @@ def stitch_with_recovery(out,aligner_python,capacity_root=None):
         try:return recover(Path(out),aligner_python,capacity_root)
         except SeamCoverageError:
             from backend.pipeline.transcript_audio_seams import recover as acoustic_recovery
-            return acoustic_recovery(Path(out),capacity_root)
+            try:return acoustic_recovery(Path(out),capacity_root)
+            except SeamCoverageError:
+                if not (Path(out)/'seam-context-recovery/input.json').is_file():raise
+                from backend.pipeline.transcript_seam_retention import recover as retain_uncertain
+                return retain_uncertain(Path(out))
 
 
 def audit_window_coverage(out,master):
     """Window joins have no audio overlap: never deduplicate text across them."""
-    from backend.pipeline.transcript_text_layout import verify_seam_coverage,text_sha
+    from backend.pipeline.transcript_text_layout import verify_seam_coverage,text_sha,retained_audio_edge
     rows=[];previous=0
     for w in master['windows']:
         if w['origin_sample']!=previous or w['end_sample']<=previous:
@@ -399,7 +405,7 @@ def audit_window_coverage(out,master):
             if c['text'][start:end]!=timed['text'][r['output_start']:r['output_end']]:raise ValueError('Window ownership text changed')
         for a,b in zip(ownership,ownership[1:]):
             from backend.pipeline.transcript_audio_seams import covers
-            if 'seam_repair_sha256' in timed and covers(root,a['chunk_id'],b['chunk_id']):continue
+            if 'seam_repair_sha256' in timed and (covers(root,a['chunk_id'],b['chunk_id']) or retained_audio_edge(root,a['chunk_id'],b['chunk_id'])):continue
             verify_seam_coverage(timed['text'][a['output_start']:a['output_end']],timed['text'][b['output_start']:b['output_end']],a['excluded_suffix'],b['excluded_prefix'])
         rows.append(dict(window_id=w['id'],origin_sample=w['origin_sample'],end_sample=w['end_sample'],timed_text_sha256=file_sha(root/'timed_text.json')))
         previous=w['end_sample']
