@@ -54,7 +54,9 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     argument_root = Path(argument_root).resolve()
     prior = json.loads((argument_root/'intent.json').read_text())
-    ids = prior['group']['claim_ids']
+    ids = prior.get('claim_ids', prior['group']['claim_ids'])
+    if 'claim_ids' in prior and ids not in prior['group'].get('sequential_claim_batches', []):
+        raise ValueError('Claim relation batch differs from the frozen argument group')
     if not ids or len(ids) > 10 or len(ids) != len(set(ids)):
         raise ValueError('one existing group of one to ten Claims required')
     with (root/'run.lock').open('a') as lock:

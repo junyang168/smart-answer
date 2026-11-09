@@ -63,6 +63,26 @@ def test_complete_layered_candidate_and_zero_model_replay(candidate,tmp_path):
     assert again==result and not replay.calls
 
 
+def test_indivisible_source_group_uses_two_upper_batches_and_one_lower_review(candidate,tmp_path):
+    package,_=candidate
+    original=package['claims'][0]
+    package['claims']=[deepcopy(original)]+[{**deepcopy(original),'claim_id':original['claim_id']+'-test-'+str(n)} for n in range(1,11)]
+    for record in package['evidence_steps']:
+        if original['claim_id'] in record.get('produced_claim_ids',[]):
+            record['produced_claim_ids']=[p['claim_id'] for p in package['claims']]
+    for record in package.get('questions',[]):
+        if original['claim_id'] in record.get('answer_claim_ids',[]):
+            record['answer_claim_ids']=[p['claim_id'] for p in package['claims']]
+    path=tmp_path/'many.json';path.write_text(json.dumps(package))
+    result=flow.run_candidate(path,tmp_path/'many-flow',FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+    plan=flow.read(tmp_path/'many-flow/flash/shared-groups.json')
+    assert len(plan['groups'])==1
+    assert [len(batch) for batch in plan['groups'][0]['sequential_claim_batches']]==[8,3]
+    assert set(result['stages']['claims'])=={'FG001-batch-1','FG001-batch-2'}
+    assert len(result['stages']['evidence']['groups'])==1
+
+
 def test_export_pending_is_not_approval_and_tracks_real_changes(candidate,tmp_path):
     package,_=candidate
     with workspace.open_candidate(package,tmp_path/'private') as store:
