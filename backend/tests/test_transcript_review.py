@@ -1004,6 +1004,11 @@ def test_batch_new_draft_opens_unclaimed_and_retry_preserves_edits(setup):
     before = store.document('a', item)
     prepare_new_review_draft(store, item, source)
     assert store.document('a', item) == before
+    folder=store.folder(item);context=read(folder/'context.json')
+    context['speaker_attribution']=None;atomic(folder/'context.json',context)
+    with pytest.raises(ReviewError,match='升級流程'):
+        prepare_new_review_draft(store,item,source)
+    assert store.document('a',item)['script']==before['script']
 
 
 def test_batch_cannot_initialize_existing_sermon(setup):
