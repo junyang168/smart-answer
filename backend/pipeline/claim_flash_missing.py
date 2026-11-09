@@ -138,7 +138,9 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                         or not set(item.fragment_ids)<=set(fragments) or not set(item.answer_question_ids)<={k.split('/',1)[1] for k in questions}):
                     raise ValueError('missing Claim uses unprovided material or Question')
                 if item.action in {'represented','needs_update'}:
-                    key='claims/'+item.claim_id
+                    # existing_claims is keyed by object key; accept that exact
+                    # provided key as well as its bare ID, never fuzzy identities.
+                    key=item.claim_id if item.claim_id in peers else 'claims/'+item.claim_id
                     if key not in peers:raise ValueError('missing Claim named unprovided existing Claim')
                     if records[key]['retired'] or peers[key].get('review_status') in {'superseded','retired'} or peers[key].get('superseded_by'):
                         pending.append({'candidate':data,'reason':'inactive_identity_requires_handoff'})

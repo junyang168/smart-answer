@@ -103,6 +103,23 @@ def test_candidate_dispositions_do_not_write_old_claims(ready,action):
     assert not result['new_claim_candidates'] and store.get_record_state('claims','C')==old
 
 
+@pytest.mark.parametrize('identity',['C','claims/C'])
+def test_represented_claim_accepts_only_exact_provided_identity_forms(ready,identity):
+    store,root,rroot=ready;old=store.get_record_state('claims','C');ports=Ports([candidate(action='represented',claim_id=identity)])
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='verified' and store.get_record_state('claims','C')==old
+    assert len(ports.calls)==1
+    assert stage.run(store,'S',rroot,root/'missing',Ports(),apply=True)['status']=='verified'
+
+
+@pytest.mark.parametrize('identity',['claims/UNKNOWN','observations/C','claims/claims/C'])
+def test_represented_claim_key_does_not_bypass_identity_guard(ready,identity):
+    store,root,rroot=ready
+    with pytest.raises(ValueError,match='unprovided existing Claim'):
+        stage.run(store,'S',rroot,root/'missing',Ports([candidate(action='represented',claim_id=identity)]),apply=True)
+    assert not (root/'missing/commit-intent.json').exists()
+
+
 @pytest.mark.parametrize('bad',[{'support_keys':['evidence_steps/X']},{'fragment_ids':['X']},{'answer_question_ids':['X']},{'claim_id':'MODEL-ALLOCATED'}])
 def test_unprovided_material_and_model_allocated_identity_rejected(ready,bad):
     store,root,rroot=ready
