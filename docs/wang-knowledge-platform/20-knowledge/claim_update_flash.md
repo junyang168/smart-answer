@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組、獨立原文層及唯讀反向查漏入口已實作；分組後各層 task 執行、跨組判定復用及成本對照仍未完整落實，見第 7 節。
+> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組、獨立原文層、反向查漏、原文補齊及限定Evidence／Observation模式已實作；Claim層分離與同範圍成本對照仍未完整落實，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -190,8 +190,24 @@ Flash 在送審前作同段連續引用整理：現有 Evidence／Observation �
 來源、段落、片段 ID、區間及文字 SHA 在下層的 `source-assembly.json` 一次記錄。
 相同準備規則供後續節點材料復用；拼接不等於判定語義支持，也不追認舊 hold。
 新執行綁定材料契約，舊 root 不自動改成新輸入；既有有效內容審閱不因機械拼接強制重審。
+此為歷史lower入口的行為；新的限定Evidence模式只用實際掛載的SourceFragments，不執行中間文字擴張。
 
 ## 3. Evidence／Observation 層
+
+限定更新入口為`--refresh-evidence`：沿用既有組界、來源版本及原文層重要內容清單。
+每筆statement先由GPT只看自身文字拆分，再由Jev核對自身完整掛載片段、角色及立場；
+Jev異議交GPT修正或有據保留。跨組掛載片段帶齊，但不帶鄰段或整篇原文，不搜尋全講。
+片段無效或不足時交回原文層，不在本層重綁或改寫SourceFragment。
+
+原文層已抽出的重要意思直接復用，反向核對僅在組內片段及相關材料中進行。
+完全相同Jev請求有保存答覆就沿用；未知請求不重發。內容、實際片段、角色或立場改動才重查相關組／記錄，
+owners、revision等記帳變化不重做內容審閱。拆分按statement快取，已接受後像再次出現亦不重審。
+這些是本次任務內的輸入／答覆復用，不授予舊Claim Management資格。
+
+查漏GPT只處置本組缺口：優先補充既有記錄，必要才建立Evidence／Observation；
+只可使用本組已驗證片段，既有記錄需要更多掛載來源則回原文層，不自行修改綁定。
+共用目標的多項修訂須給一致完整後像，程式拒絕互相覆蓋；新來源、Claim、論證關係及問題答案均不寫入。
+組提交沿用現有ChangeSet、pins及回讀；缺少先決條件時保存交接，後組不消費未提交草稿。
 
 反向查漏已接入 `--reverse-coverage` 唯讀模式：先按共用分組列重要內容與實際經文引用，
 再由 Jev 逐項對照現有材料，GPT 只處置具體疑點。原文清點不讀材料，出處另作核對；
@@ -203,7 +219,7 @@ Flash 在送審前作同段連續引用整理：現有 Evidence／Observation �
 原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。
 
 
-按整篇來源清點所有 Evidence、Observation 及相關下層連接，包含未連到 Claim 的記錄。
+按整篇來源清點所有 Evidence、Observation，包含未連到 Claim 的記錄；論證連接另屬Claim層。
 各組合起來完成全篇，結果供後續 task 復用。這是同一套 Claim 分組的下層範圍，不另建第二套分組。
 原文、Claims、Evidence／Observation
 共用組別，各 task 仍只處置自己的問題。分組目標是將緊密連接留在組內、盡量減少組間 coupling；
@@ -461,6 +477,25 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+限定Evidence／Observation更新（GPT訂閱medium＋Jev；預設預覽）：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
+  --source-id ACTUAL_SOURCE_ID --refresh-evidence \
+  --shared-groups /absolute/path/shared-groups.json \
+  --reuse-coverage /absolute/path/coverage-check \
+  --capacity-file /absolute/path/capacity.json \
+  --group-id FG002 --root /absolute/path/evidence-refresh
+```
+
+`--group-id`可重複指定，未指定則按原文組序處理全部組；選定範圍、模型、分組及政策在root內固定。
+同root可選原授權範圍的子集接續，不得擴大原清單。實際語義寫集影響已完成組的直接參考記錄時，
+輸出`affected_prior_group_ids`交由Agent只接續這些組；不自行循環審閱，也不把未接續的組報完成。
+`--reuse-coverage`要求同版本原文的保存清點，不在本層重新抽取；來源片段物理綁定仍作必要機械核對。
+寫入授權範圍內加`--apply`。只寫Evidence／Observation，來源、Claim、關係與資格不在寫集內。
+有來源交接或其他未解決項時不提交該組；已返回有效答覆保留，下次只接續受影響項。
+相同後像重跑零模型；SQL已提交但收據未保存時，先恢復原收據／回讀，不重做交易。
 
 補齊已確認查漏報告中的原文片段（零模型；預設預覽）：
 

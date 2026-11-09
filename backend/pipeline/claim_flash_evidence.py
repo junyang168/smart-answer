@@ -138,10 +138,14 @@ def decompose(root, ports, statements):
     return {key:deepcopy(cached[text]) for key,text in statements.items()}
 
 
-def group_records(group, records):
+def group_records(group, records, target_keys=()):
     pks = set(group['paragraph_keys'])
     pool = {k:r['payload'] for k,r in records.items() if k.startswith('source_fragments/') and not r.get('retired')
             and r['payload'].get('paragraph_key') in pks}
+    for key in target_keys:
+        for fid in e.evidence_fragment_ids(records[key]['payload']):
+            fk='source_fragments/'+fid
+            if fk in records and not records[fk].get('retired'):pool[fk]=records[fk]['payload']
     keys = set(group.get('lower_record_keys',[])) | set(group.get('reference_record_keys',[]))
     keys |= {k for k,r in records.items() if k.split('/')[0] in coverage.COLLECTIONS and
              any('source_fragments/'+fid in pool for fid in e.evidence_fragment_ids(r['payload']))}
@@ -199,11 +203,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         if not accepted.exists():e.save(accepted,proof)
         outcomes.append({'object_key':key,'basis':decision['basis'],'reason':decision['reason']})
     if pending:units=[]  # Do not spend coverage calls before the group's lower prerequisites hold.
-    pool,catalog=group_records(group,working);valid={}
-    for key in targets:
-        for fid in e.evidence_fragment_ids(working[key]['payload']):
-            fk='source_fragments/'+fid
-            if fk in working:pool[fk]=working[fk]['payload']
+    pool,catalog=group_records(group,working,targets);valid={}
     for key,p in pool.items():
         try:
             e.material({'evidence_step_id':key,'statement':'','source_fragment_ids':[p['fragment_id']]},working,sources)
@@ -251,7 +251,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:
-                pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'other_group','reason':edit.reason});continue
+                pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'handoff','reason':edit.reason});continue
             job=next(j for j in jobs if j['job_id']==edit.job_id)
             chosen={k:p for k,p in valid.items() if p['fragment_id'] in edit.fragment_ids}
             if (not set(edit.fragment_ids)<={p['fragment_id'] for p in valid.values()}
@@ -288,7 +288,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     if units and not pending:
         for accepted,proof in coverage_proofs:
             if not accepted.exists():e.save(accepted,proof)
-        post_state=coverage_state(group_records(group,working)[1])
+        post_state=coverage_state(group_records(group,working,targets)[1])
         path=root/'coverage-decisions'/coverage_fingerprint(state)/'accepted-outcome.json'
         decision={'unit_outcomes':[x for x in outcomes if 'unit_id' in x], 'jev':answers,
                   'postimage_fingerprint':coverage_fingerprint(post_state)}
@@ -318,7 +318,10 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         if pin!={'source_id':source_id,**sources[source_id]['file']}:raise ValueError('Evidence source census drift')
         selected=group_ids or [g['group_id'] for g in plan['groups']]
         if len(selected)!=len(set(selected)) or not set(selected)<={g['group_id'] for g in plan['groups']}:raise ValueError('invalid Evidence group selection')
-        e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':selected,'models':ports.identity,
+        saved_intent=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
+        authorized=saved_intent['selected'] if saved_intent else selected
+        if not set(selected)<=set(authorized):raise ValueError('Evidence group selection expands frozen scope')
+        e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':authorized,'models':ports.identity,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None),
             'policy':e.digest([PROMPT,COVERAGE_PROMPT,components.PROMPT,Edits.model_json_schema(),MissingEdits.model_json_schema()]),
             'previous':str(Path(previous).resolve())})
@@ -347,15 +350,31 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             pks=[records.get('source_fragments/'+fid,{}).get('payload',{}).get('paragraph_key') for fid in e.evidence_fragment_ids(r['payload'])]
             if any(pk in pk_group for pk in pks):owners[key]=next(pk_group[pk] for pk in pks if pk in pk_group)
             else:raise ValueError('unlocated Evidence must return to source layer: '+key)
+        # Track direct readers of actual write keys, not a recursive graph audit.
+        readers={};finished=set()
+        for group in plan['groups']:
+            for path in (root/'groups'/group['group_id']).glob('*/result.json'):
+                saved=json.loads(path.read_text())
+                if saved.get('status')=='applied' or saved.get('status')=='verified' and not saved.get('updates'):
+                    finished.add(group['group_id'])
+        for group in plan['groups']:
+            primary=[k for k,gid in owners.items() if gid==group['group_id'] and k in records]
+            for key in group_records(group,records,primary)[1]:readers.setdefault(key,set()).add(group['group_id'])
         results=[]
+        affected=set(json.loads((root/'result.json').read_text()).get('affected_prior_group_ids',[])) if (root/'result.json').exists() else set()
         for group in plan['groups']:
             if group['group_id'] not in selected:continue
             targets=sorted(k for k,gid in owners.items() if gid==group['group_id'] and k in records)
             result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply)
             results.append(result)
             if result.get('applied'):
-                for key in result['updates']:records[key]=store.get_record_state(*key.split('/',1))
+                for key in result['updates']:
+                    if key in records and visible(records[key]['payload'])!=visible(result['updates'][key]):
+                        affected.update((readers.get(key,set())&finished)-{group['group_id']})
+                    records[key]=store.get_record_state(*key.split('/',1))
             elif result['updates'] or result['pending']:break  # No later group consumes an unapplied draft.
+            if not result['pending']:finished.add(group['group_id']);affected.discard(group['group_id'])
         return e.publish(root,{'version':VERSION,'source_id':source_id,'groups':results,
-            'status':'completed' if len(results)==len(selected) and all(not g['pending'] for g in results) and (apply or not any(g['updates'] for g in results)) else 'needs_attention',
+            'requested_group_ids':selected,'authorized_group_ids':authorized,'affected_prior_group_ids':sorted(affected),
+            'status':'completed' if not affected and len(results)==len(selected) and all(not g['pending'] for g in results) and (apply or not any(g['updates'] for g in results)) else 'needs_attention',
             'claim_qualification':'not_granted'})

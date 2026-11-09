@@ -267,3 +267,28 @@ def test_shared_record_cannot_be_overwritten_by_conflicting_coverage_edits(tmp_p
     # Only the independently valid fidelity decision may be accepted, not the conflicting coverage output.
     for p in (root/'accepted').glob('*.json'):
         assert 'coverage-decisions' not in json.loads(p.read_text())['decision_path']
+
+
+def test_shared_actual_write_names_prior_group_and_allows_same_scope_subset_resume(seeded,tmp_path):
+    store,sources,plan,_,root=seeded
+    good='沒有聽從祂的話，顯明沒有真正相信祂。'
+    payload=store.get_record_state('evidence_steps','E')['payload'];payload['statement']=good
+    store.apply_plan(store.plan_package({'package_id':'shared-layer-fixture','evidence_steps':[payload],
+        'observations':[{'observation_id':'O','statement':'拒絕明白祂的話，顯明沒有真正相信祂。','source_fragment_ids':['F0']}]}))
+    plan['groups'][1]['lower_record_keys']=['observations/O']
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':good}
+    previous=saved_inventory(tmp_path/'shared',sources,[unit])
+    first=stage.run(store,'S',plan,root,Ports(),previous,apply=True)
+    assert first['status']=='needs_attention' and first['affected_prior_group_ids']==['A']
+    ports=Ports();second=stage.run(store,'S',plan,root,ports,previous,group_ids=['A'],apply=True)
+    assert second['status']=='completed' and second['affected_prior_group_ids']==[]
+    assert second['authorized_group_ids']==['A','B'] and second['requested_group_ids']==['A']
+    assert not any(role=='gpt' for role,req in ports.calls)
+
+
+def test_subset_resume_cannot_expand_original_authorized_groups(seeded):
+    store,sources,plan,previous,root=seeded
+    stage.run(store,'S',plan,root,Ports(),previous,group_ids=['A'],apply=True)
+    ports=Ports()
+    with pytest.raises(ValueError,match='expands frozen scope'):stage.run(store,'S',plan,root,ports,previous,group_ids=['B'],apply=True)
+    assert ports.calls==[]
