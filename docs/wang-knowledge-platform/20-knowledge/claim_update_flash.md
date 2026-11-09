@@ -490,6 +490,25 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 
 ## 7. 實作與使用
 
+獨立Claim statement閉環使用`backend.pipeline.claim_flash_statements`。
+輸入一組Claim ID及已完成限定Evidence模式的root；不啟動舊lower、候選新建或關係維護。
+依次處置忠實性、整體支持、經文三種問題，只有Jev疑點交GPT，每次GPT只處置一種問題。
+下層結果依實際內容及來源消費，所需記錄所屬組須完成；無關組未完成不阻擋本組。
+同一任務的GPT處置直接採用；若後續修改實際影響其他任務，只更新該項判斷，
+最多三遍有界接續，未能收斂明示待處置，不當作完成。單純更新經文metadata不重查statement忠實性。
+修訂只授權statement及scripture_refs；缺來源或連接分別交接，不順手修改下層、支持ID或關係。
+交易及回讀沿用現有函式，無修改完成也核對實際輸入版本；未知調用不自動重發。
+結果的`completion_scope=claim_statement_tasks_only`不表示完整Claim更新或下游資格已完成。
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_statements \
+  --source-id ACTUAL_SOURCE_ID --claim-ids /absolute/path/one-group-claim-ids.json \
+  --evidence-root /absolute/path/completed-evidence-root \
+  --capacity-file /absolute/path/shared-capacity.json --root /absolute/path/claim-statements
+```
+
+預設預覽；只有本次授權包含寫入時加`--apply`，隔離測試須顯式使用隔離資料庫。
+
 限定Evidence／Observation更新（GPT訂閱medium＋Jev；預設預覽）：
 
 ```bash
@@ -610,9 +629,10 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_update_flash \
 不因此擴大目標。`--max-group-claims` 可在一至十條內調整容量；原文同一段承載超過容量、
 無法保留完整分組時明示，不丟掉 Claim 或虛報獨立。同 root 的計畫不可靜默覆寫。
 
-分組入口尚未替換既有內容執行：下層覆蓋仍逐段建立工作，
+既有綜合入口尚未由上述獨立模式完整替換：其下層覆蓋仍逐段建立工作，
 有判斷候選也會觸發覆蓋的 GPT 處置；候選承載仍可能隨不同 Claim 組重複判定，
-Claim 的三項檢查也仍共用 GPT `claim_statement` 處置。這些都未完整符合第 1 節的任務分工。
+其Claim三項檢查仍共用GPT `claim_statement` 處置。獨立statement入口已拆分三項任務；
+其餘舊綜合流程尚未完整符合第1節的任務分工。
 目前四項工作／60,000 bytes 是傳送限制，不能當作已完成下層獨立分組的證據。
 分組、跨組判定復用及成本對照須落實並分別驗證，才能宣稱已符合更新後設計；
 既有執行結果及費用帳不因規格更新而重寫。
