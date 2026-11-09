@@ -329,6 +329,8 @@ def test_coverage_gpt_receives_position_title_as_readonly_existing_content(tmp_p
         def repair(self,request):
             if request['input']['task']=='evidence_coverage_repair':
                 assert request['input']['records']['position_nodes/P']['title']=='路加使用馬可加L文件。'
+                assert request['input']['records']['position_nodes/P']['source_fragment_ids']==['F0']
+                assert request['input']['records']['evidence_steps/E']['source_fragment_ids']==['F0']
                 assert 'position_nodes/P' not in request['input']['writable_keys']
                 return {'items':[{'job_id':'A','items':[{'job_id':'U0','action':'keep','record_key':'position_nodes/P',
                     'record_type':'observations','fragment_ids':[],'reason':'已有反方Position保存，不重複建卡。'}]}]}

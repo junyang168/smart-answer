@@ -73,8 +73,10 @@ def visible(payload):
 
 
 def reference_visible(payload):
-    # Position stores its judgment in title, not statement. It remains read-only.
-    return {**visible(payload), **({'title':payload['title']} if 'title' in payload else {})}
+    # Supply the content and bindings used by the coverage contract. They
+    # remain read-only; enrichment cannot change a record's source list.
+    return {**visible(payload), **({'title':payload['title']} if 'title' in payload else {}),
+            'source_fragment_ids':e.evidence_fragment_ids(payload)}
 
 
 def material(key, records, sources):
