@@ -88,6 +88,7 @@ type Context = {
   media_mime_type?: string;
   timing_quality?: {
     status: string;
+    source_holds?: Record<string, unknown>;
     paragraph_states?: Record<string, { status: string }>;
   } | null;
   revision: number;
@@ -1430,7 +1431,7 @@ function TranscriptProofreader({
                 setNavigationTarget({ id: first.index });
               }}
             >
-              時間待核對 {timingPending.length} 段
+              {doc.context.timing_quality?.source_holds ? "音源不清・未確認" : "時間待核對"} {timingPending.length} 段
             </button>
           )}
         </div>
@@ -1478,11 +1479,12 @@ function TranscriptProofreader({
           </div>
         )}
       </header>
-      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="接縫待聽音核對">
-        <h2 className="font-semibold">接縫待聽音核對 · {doc.context.source_notices.length} 處</h2>
-        <p className="text-sm">以下位置未能可靠去重，完整保留了粗稿文字。請聽音檢查重複短句或辨識差異，再確認相關段落。</p>
+      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="音訊校對提醒">
+        <h2 className="font-semibold">音訊校對提醒 · {doc.context.source_notices.length} 處</h2>
+        <p className="text-sm">以下位置保留來源或播放範圍提醒。請依各項說明核對內容；少量前後文毋須逐字切齊。</p>
         {doc.context.source_notices.map((n,i) => <div key={i} className="my-2 flex flex-wrap items-center gap-2 text-sm">
           <span>{stamp(n.start_ms)}–{stamp(n.end_ms)}</span>
+          <span>{n.note}</span>
           {n.paragraph_ids.map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
           <span>{n.paragraph_ids.length && n.paragraph_ids.every(id => paragraphIsConfirmed(id,doc.context.reviews,doc.paragraph_shas,editedParagraphIds)) ? "相關段落已人工核對" : "待人工核對"}</span>
         </div>)}
@@ -2006,9 +2008,9 @@ function TranscriptProofreader({
                   {pendingTiming.includes(p.index) && (
                     <span
                       className="rounded bg-amber-50 px-2 py-1 text-amber-800"
-                      title="本段的起點或結尾尚待確認；文字校對狀態保留。"
+                      title={doc.context.timing_quality?.source_holds?.[p.index] ? "原音與粗稿保留；來源仍不清楚，不能確認或發佈。" : "本段的起點或結尾尚待確認；文字校對狀態保留。"}
                     >
-                      時間待核對
+                      {doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
                     </span>
                   )}
                   {active && doc.can_edit && playbackControls("本段播放控制")}
@@ -2081,7 +2083,7 @@ function TranscriptProofreader({
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         className={button}
-                        disabled={disabled}
+                        disabled={disabled || (!!doc.context.timing_quality?.source_holds?.[p.index] && pendingTiming.includes(p.index))}
                         onClick={() =>
                           void confirm("paragraph_review", p.index, "confirmed")
                         }

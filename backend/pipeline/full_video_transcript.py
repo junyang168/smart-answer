@@ -731,7 +731,7 @@ def check_paragraph_times(paragraphs: list[dict], duration_ms: int, *, candidate
     return issues
 
 
-def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
+def finish(out: Path, video: Path, aligner_python: Path | None = None, *, playback_policy=None) -> dict:
     master, report, evidence = read(out/'master.json'), read(out/'slides/report.json'), read(out/'visual-evidence/slide_evidence.json')
     if sha(video) != master['source_sha256']:
         raise ValueError('Source video changed before final review')
@@ -834,10 +834,11 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
         record['vocabulary_hint'] = master['vocabulary_hint']
     save(out/'full_transcript.json',record)
     from backend.pipeline.contextual_transcript_timing import qualify_staged_record
-    record = qualify_staged_record(out,record,aligner_python)
+    record = qualify_staged_record(out,record,aligner_python,**({'playback_policy':playback_policy} if playback_policy else {}))
     paragraphs = record['paragraphs']
     check_paragraph_times(paragraphs, master['duration_ms'])
     for notice in record.get('source_notices',[]):
+        if notice.get('kind') in ('brief_playback_context','unintelligible_recording_noise'):continue
         timed=[p for p in paragraphs if p.get('start_ms') is not None and p.get('end_ms') is not None]
         related=[p['id'] for p in timed if p['start_ms']<=notice['end_ms']+2000 and p['end_ms']>=notice['start_ms']-2000]
         if not related and timed:related=[min(timed,key=lambda p:abs(p['start_ms']-notice['start_ms']))['id']]
@@ -861,12 +862,18 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
         'diagram_edges':[{**visual_binding(a),**r,'interpretation':'visible_connector_only_not_an_argument_claim'}
                          for a in evidence['assets'] for r in a['content']['edges']],
         'editorial_exclusions':exclusions,'admission_status':'candidate_not_ingested','store_writes':0}
-    save(out/'argument_source_packet.json',packet)
+    editor_only=record['timing_quality'].get('status')=='editor_draft_only'
+    if editor_only:
+        from backend.pipeline.transcript_playback_readiness import withhold_knowledge_exports
+        withhold_knowledge_exports(out)
+    if not editor_only:
+        save(out/'argument_source_packet.json',packet)
     render(out,video,record,audit)
     from backend.pipeline.video_transcript_handoff import export_handoff
-    export_handoff(out)
+    if not editor_only:
+        export_handoff(out)
     return {'paragraphs':len(paragraphs),'slides':len(placements),'corrections':dict(Counter(d['status'] for d in decisions)),
-            'timing_issues':len(timing_issues),'editorial_exclusions':len(exclusions),'duration_ms':master['duration_ms']}
+            'timing_issues':len(timing_issues),'editorial_exclusions':len(exclusions),'duration_ms':master['duration_ms'], 'source_admission':'editor_draft_only' if editor_only else 'candidate_not_ingested'}
 
 
 def render(out: Path, video: Path, record: dict, audit: dict) -> None:
