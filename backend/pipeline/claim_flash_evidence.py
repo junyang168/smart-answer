@@ -188,6 +188,12 @@ def coverage_request_material(ports, jobs, shared):
                   sources={fid:[value[field] for field in columns] for fid,value in shared['sources'].items()})
     prompt+=('本次sources每個fragment_id的值為陣列，欄位順序由source_columns定義；'
              'paragraph_key與quote仍是完整位置及逐字原文，所有ID均保留。')
+    request.update(system=prompt,input={'task':'evidence_coverage_repair','jobs':jobs,**packed})
+    if len(json.dumps(request,ensure_ascii=False).encode())>f.GPT_BYTES:
+        fields={name:str(i) for i,name in enumerate(sorted({field for record in shared['records'].values() for field in record}))}
+        packed.update(record_fields={alias:name for name,alias in fields.items()},
+                      records={key:{fields[field]:value for field,value in record.items()} for key,record in shared['records'].items()})
+        prompt+='records內的欄位鍵按record_fields還原為完整欄位名稱；物件ID、欄位值與來源清單不變。'
     return prompt,packed
 
 

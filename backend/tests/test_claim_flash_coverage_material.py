@@ -42,3 +42,16 @@ def test_oversized_material_retains_every_id_position_and_literal_and_dispatches
     with pytest.raises(ValueError,match='payload limit'):
         list(f.gpt(tmp_path/'too-small',ports,'evidence_coverage_repair',jobs,eo.MissingEdits.model_json_schema(),prompt,shared=packed,semantic_review=False))
     assert len(captured)==1
+
+
+def test_record_field_compaction_is_lossless_when_sources_alone_still_exceed_limit(monkeypatch):
+    ports=SimpleNamespace(identity={'gpt':{'model':'test'}})
+    shared={'sources':{'F':{'paragraph_key':'S0001','quote':'原文。'}},
+            'records':{str(n):{'statement':'已有內容。','source_fragment_ids':['F'],
+                **({'speaker':'professor'} if n%2 else {'scripture_refs':[]})} for n in range(80)},'writable_keys':['0']}
+    before=deepcopy(shared)
+    monkeypatch.setattr(f,'GPT_BYTES',1)
+    _,packed=eo.coverage_request_material(ports,[],shared)
+    restored={key:{packed['record_fields'][field]:value for field,value in row.items()} for key,row in packed['records'].items()}
+    assert restored==shared['records'] and shared==before
+    assert len(json.dumps(packed,ensure_ascii=False))<len(json.dumps(shared,ensure_ascii=False))
