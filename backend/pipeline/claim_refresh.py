@@ -202,13 +202,18 @@ PROMPT = (
     '只輸出必要修正或新候選；ID 和雙向連結由程式處理。')
 
 
-def anchors(eids, records, sid):
+def anchors(eids, records, sid, *, source_binding=None):
     result = []
     paragraphs = {}
     doc = records.get('source_documents/'+sid, {}).get('payload', {})
     if doc.get('source_path') and Path(doc['source_path']).is_file():
-        source = e.source_snapshot({'path':doc['source_path'],
-            'file_sha256':doc.get('source_file_sha256')},source=doc)
+        binding={'path':doc['source_path'],'file_sha256':doc.get('source_file_sha256')}
+        if source_binding is not None:
+            from backend.pipeline.source_editorial_transition import verify_current_source_binding
+            if verify_current_source_binding(binding)!=source_binding:
+                raise ValueError('Claim occurrence source binding differs from exact editorial proof')
+            binding=source_binding
+        source = e.source_snapshot(binding,source=doc)
         paragraphs = {key:value['text'] for key,value in source['paragraphs'].items()}
     for eid in eids:
         evidence = records['evidence_steps/' + eid]['payload']
@@ -226,8 +231,8 @@ def anchors(eids, records, sid):
     return [{'source_id': sid, 'anchors': result}]
 
 
-def refresh_occurrences(claim, eids, records, sid):
-    current = anchors(eids, records, sid)
+def refresh_occurrences(claim, eids, records, sid, *, source_binding=None):
+    current = anchors(eids, records, sid,source_binding=source_binding)
     old = claim.get('occurrences', [])
     if any(o.get('source_id') not in source_aliases(records, sid) for o in old):
         raise ValueError('legacy cross-source Claim requires explicit reconciliation')
@@ -473,8 +478,8 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
         return commit(store, root) if apply else e.publish(root, draft)
 
 
-def candidate_occurrences(candidate, records, sid):
-    result=anchors(candidate['evidence_step_ids'],records,sid)
+def candidate_occurrences(candidate, records, sid, *, source_binding=None):
+    result=anchors(candidate['evidence_step_ids'],records,sid,source_binding=source_binding)
     for oid in candidate.get('_observation_ids',[]):
         observation=records['observations/'+oid]['payload']
         for fid in e.evidence_fragment_ids(observation):

@@ -639,9 +639,9 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                 if rel['to_id']==key.split('/',1)[1] and 'observations/'+rel['from_id'] in records:
                     obsids.append(rel['from_id'])
             if obsids:
-                post['occurrences']=c.candidate_occurrences({**post,'_observation_ids':list(dict.fromkeys(obsids))},records,source_id)
+                post['occurrences']=c.candidate_occurrences({**post,'_observation_ids':list(dict.fromkeys(obsids))},records,source_id,source_binding=sources[source_id]['file'])
             else:
-                post['occurrences']=c.refresh_occurrences(post,post.get('evidence_step_ids',[]),records,source_id)
+                post['occurrences']=c.refresh_occurrences(post,post.get('evidence_step_ids',[]),records,source_id,source_binding=sources[source_id]['file'])
             if post!=original[key]['payload']:updates[key]=post
         f.source_unchanged(sources)
         updates={k:(current_claim_payload(p) if k.startswith('claims/') else p) for k,p in updates.items()}

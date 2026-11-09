@@ -163,7 +163,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 and 'evidence_steps/'+r['payload']['from_id'] in pool]
             p['evidence_step_ids']=list(dict.fromkeys([x for x in p.get('evidence_step_ids',[]) if x not in removed]+sorted(supported)))
             if p!=records[key]['payload']:
-                p['occurrences']=c.refresh_occurrences(p,p['evidence_step_ids'],working,source_id)
+                p['occurrences']=c.refresh_occurrences(p,p['evidence_step_ids'],working,source_id,source_binding=sources[source_id]['file'])
                 updates[key]=flash.current_claim_payload(p)
         working=f.apply_overlay(working,updates)
         # Reciprocal owner fields are structural writes, not a lower content re-review.

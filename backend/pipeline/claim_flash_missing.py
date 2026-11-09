@@ -169,7 +169,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                     '_observation_ids':[k.split('/',1)[1] for k in item.support_keys if k.startswith('observations/')]}
                 proposed.append(candidate);members.append(key)
                 records[key]={'payload':{'claim_id':alias,**candidate,'attribution':'professor',
-                    'occurrences':c.candidate_occurrences(candidate,records,source_id)},'retired':False}
+                    'occurrences':c.candidate_occurrences(candidate,records,source_id,source_binding=sources[source_id]['file'])},'retired':False}
                 peers[key]=records[key]['payload']
                 for oid in candidate['_observation_ids']:
                     rid='candidate-'+e.digest([oid,alias])[:24]
