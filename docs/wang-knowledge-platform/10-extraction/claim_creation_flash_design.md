@@ -2,9 +2,20 @@
 
 > **讀者**：Solution architect、Developer。
 > **類型**：規範。
-> **狀態**：#723 設計草案，待負責人確認；尚未實作，不取代既有 extraction 契約。
-> **與代碼對齊**：2026-11-09 核對現有入口至 11143bd5；本文新增任務及候選交接尚未實作。
+> **狀態**：#723 已授權實作；分步候選與隔離 Flash 接續已實作，正式庫接收仍未授權／未實作；不取代既有 extraction 契約。
+> **與代碼對齊**：2026-11-09 核對至 9da69bb0；候選入口為 claim_creation_flash_v3，既有 extraction 預設契約保留。
 > **權威範圍**：首次 creation 的任務分工、完整候選出口及之後的 Flash 接續；不授予正式資料寫入、舊審閱資格或 CVP 維護權限。
+
+## 目錄
+
+- [1. 背景與目標](#1-背景與目標)
+- [2. 名詞與責任](#2-名詞與責任)
+- [3. Creation 的三個步驟](#3-creation-的三個步驟)
+- [4. Creation 完成與 Flash 的接點](#4-creation-完成與-flash-的接點)
+- [5. 復用、恢復與實作範圍](#5-復用恢復與實作範圍)
+- [6. 驗收與設計自查](#6-驗收與設計自查)
+- [7. 相關依據](#7-相關依據)
+- [8. 執行入口](#8-執行入口)
 
 ## 1. 背景與目標
 
@@ -50,14 +61,16 @@
 
 第三步沿用現有 Evidence／Observation／Question／Position 的欄位與抽取規則、anchor 校驗和 Fragment 編譯；連接任務復用已有關係型別及編譯能力。優先由共用 schema 取本任務子集，新增必要的任務輸入／輸出契約及接線，不複製整份 schema、校驗器、模型 client 或包合併器。
 
-本步按組處理共享材料，不對每條 Claim 各抽一套。輸入是本組**全部歸屬原文**、Claim 候選與相關範圍、必要上下文及已有共享記錄索引。Claim 的範圍幫助聚焦，不能限制本組重要材料的生成分母。
+本步按組處理共享材料，不對每條 Claim 各抽一套。材料傳輸按句數分批，v3 每批最多 24 句；保留原段落／句子 ID，輸入亦有完整 payload 上限，不能截斷資料。超長單段或超大分組須先走來源切片／計畫準備，目前不自動切斷教授段落。輸入是本組**全部歸屬原文**、Claim 候選與相關範圍、必要上下文及已有共享記錄索引。Claim 的範圍幫助聚焦，不能限制本組重要材料的生成分母。
+
+分批的歸屬範圍只決定本次要生成哪些記錄，不截斷其支持來源。每筆新記錄至少一個 anchor 屬於本批原文；可同時從 reference_paragraphs 選取同組必要前後文。參考輸入包括候選相關範圍、鄰近段落及已有材料的來源，仍受完整 payload 上限約束。Prompt 要求逐條自檢 anchors 是否共同支持 statement 的每個實質部分；比較須保存雙方，短答須保存問題，「這個字」「不是」「沒有矛盾」須保存其明示對象，不只選代表性短句。先修生成指令及可見材料，不加一套事後全面重生成流程。
 
 為保持任務單一，本步內分成兩種依序執行的任務；大組只按 payload 拆各自批次，不塞回一次大包：
 
 | 任務 | 輸出 | 不重做的工作 |
 | --- | --- | --- |
-| 材料生成 | Evidence／Observation 的 statement、經文、歸屬及完整逐字引文；實際 Question、Position 與其來源；逐句處理記錄 | 不重抽 Claim，不判整體 Claim 充分性，不編關係理由 |
-| 論證連接 | 材料間、材料與 Claim、Claim 間的實際連接；完整端點、類型、方向、理由及所需來源；直接答案／反方引用 | 不重寫材料 statement，不要求 Jev 或另一 GPT 重判剛完成的同一新連接 |
+| 材料生成 | Evidence／Observation 的 statement、經文、歸屬及完整逐字引文；實際 Question、Position 與其來源；逐句處理記錄 | 不重抽 Claim，不判 argument_role 或整體 Claim 充分性，不編關係理由 |
+| 論證連接 | 材料間、材料與 Claim、Claim 間的實際連接；完整端點、類型、方向、理由及所需來源；逐條 Observation 的 argument_role；直接答案／反方引用 | 不重寫材料 statement，不要求 Jev 或另一 GPT 重判剛完成的同一新連接 |
 
 材料生成後先復用獨立的 anchor／身份編譯能力，再交連接任務；它因此使用已存在的候選端點。既有 many-to-many owner／support 雙向索引由程式從同一份模型連接決定同步，不能叫模型各填一份再對不上。各類關係按現有欄位及 collection 存放，不為統一輸出改資料模型。
 
@@ -81,9 +94,11 @@ Flash 消費完整候選包，依既有規範先完成全來源原文／反向�
 
 已核實 `reviewed_candidate_contract.validate_store_package_authorization` 會保護帶 extraction authority 的正式匯入。**不能刪掉 extraction metadata、偽造舊 consensus seal，或改 source_kind 繞過保護。** 完整候選與 Flash 完成結果也不自動取得舊 Update／Opus 資格。
 
-首個驗收使用隔離庫，驗證候選載入與 Flash 接續，正式庫零寫入。隔離載入必須使用明確、只適用候選測試的路徑，保留完整來源／生成 provenance；不得把測試 fixture 匯入能力當作正式入口。
+`claim_flash_flow.run_candidate(candidate_path, root, ports)` 已實作：保留完整 extraction provenance，由 `claim_candidate_workspace.open_candidate` 建立專用 socket-only PostgreSQL，核對實際 data directory、禁用 TCP、空庫 bootstrap 與候選 SHA。它不接 database URL，不調 canonical ingest，不刪 metadata 或偽造審閱 seal。隔離資料保持 candidate，正常 Flash 交易及回讀在此庫內執行。
 
-候選載入的具體程式接點，以及 Flash 完成後正式庫接收的版本化 authority／資格標示，**TBD**。實作前需核對既有 store 的候選／交易能力，選最小合法接點，不新增候選資料庫產品或平行資格系統。本卡若只完成隔離接續，交付須明示；未定此項前不宣稱正式 end-to-end 可用。
+每次退出停止本次 PostgreSQL；資料目錄保留供精確接續，位置寫在 workspace/isolation.json，不留背景 daemon。正式庫的原匯入門檻不變。初始載入是明示的隔離候選 bootstrap，不是生產匯入能力或內容批准。
+
+Flash 完成後正式庫接收的版本化 authority／資格標示仍為 **TBD**，本版只交付完整候選及隔離校正產物，不宣稱正式 end-to-end 入庫。直接文字 JSON 來源受支持；投影片 attestation 和母本原格式的 creation adapter 仍沿既有入口，不能以本版略過它們的校驗。
 
 ### 4.2 Flash 輸入、執行與輸出的最小整理
 
@@ -97,9 +112,11 @@ Flash 消費完整候選包，依既有規範先完成全來源原文／反向�
 | 處理結果 | 全部目標及各層已完成／待接續／hold、具體未解決問題、下一個合法接續位置；有未完成項不能把完整快照說成校正通過 |
 | 修改與追溯摘要 | 原 candidate、結果包與來源版本 SHA、實際增修退役 ID、各層結果／交易／回讀的保存引用，以及總耗時與 token；原始輸入和答覆不覆寫 |
 
-由程式從已保存結果編譯完整輸出，不再調模型重寫。輸出明示語義驗證範圍、是否已提交及資格／authority；校正完成、正式庫提交、舊審閱資格是分開事實。正式庫 refresh 仍須保留真實交易／回讀，candidate 模式不能假裝已寫正式庫。具體載入／保存 adapter 及正式接收 authority 仍按 4.1 解決，不以統一輸出放寬舊保護。
+由程式從已保存結果編譯完整輸出，不再調模型重寫。輸出明示語義驗證範圍、是否已提交及資格／authority；校正完成、正式庫提交、舊審閱資格是分開事實。正式庫 refresh 仍須保留真實交易／回讀，candidate 模式不能假裝已寫正式庫。候選載入／保存 adapter 已按 4.1 隔離；正式接收 authority 仍待解決，不以統一輸出放寬舊保護。
 
-只增加一個薄的共同結果封裝及既有模型的完整包匯出，沿用各層原始產物，不另造事件系統或第二套狀態庫。驗收須包含多輪修改後輸出等於精確最終後像、未變內容保留、新增／退役及引用完整、來源漂移拒絕導出成功結果、有 pending 不誤報完成、重入零模型零重複提交。
+`claim_flash_flow.run` 是新的共用分層入口；既有 source refresh 明確傳 store／source_id，candidate 則經專用 wrapper。結果的 package 路徑／SHA 指向完整活躍後像，changes 記增修退役，pending／next_action 明示未完事項；原始 extraction 留在包內，另記 flash_application，不能冒用舊 seal。只增加薄的共同結果封裝及既有模型匯出，沿用各層原始產物，不另造事件系統或第二套狀態庫。驗收須包含多輪修改後輸出等於精確最終後像、未變內容保留、新增／退役及引用完整、來源漂移拒絕導出成功結果、有 pending 不誤報完成、重入零模型零重複提交。
+
+Claim statement 的送審材料須保存既有 Observation → Evidence → Claim 路線：直接附件與上游下層材料分開表示，連接保留端點、類型及理由，不能把間接論據冒稱直接附件。只循同來源已有的下層入邊，不穿越其他 Claim，每筆記錄最多帶一次；下層節點沿用其完成證明，不重新審查。實際依據及連接加入本次版本讀集，缺少有效下層證明時在調用前拒絕。
 
 ## 5. 復用、恢復與實作範圍
 
@@ -137,12 +154,29 @@ Flash 消費完整候選包，依既有規範先完成全來源原文／反向�
 
 報告 generation、Flash 及端到端 wall time，GPT／Jev input、output、快取與可取得實際費用；快取和 reasoning 子集不重複加總。區分等待、恢復與模型時間，不把少幾次調用或多建幾張卡當品質。尚未實跑不承諾一小時內完成。
 
-自查已納入的主要缺口：首次分組無圖、候選範圍可能漏內容、沒有 Claim 的組、共享與跨組記錄、第三步再次過載、逐句命中不等於語義覆蓋、creation／Update 混淆，以及舊入庫審閱門檻。正式候選載入與完成資格接點仍在 4.1 明列 TBD，不能隱藏為「直接沿用」。
+原文編譯及包驗證以顯式 native_relations 路徑支持現有模型的 Observation → Claim、Claim → 材料、材料 → Question 等連接；舊預設限制不變。Observation 的論證角色由連接任務一次判定，不能在材料層先判、再因沒有路徑要求重寫材料；load_bearing 必須有真實的有限論證路徑，循環不能冒充支持。
+
+自查已納入的主要缺口：首次分組無圖、候選範圍可能漏內容、沒有 Claim 的組、共享與跨組記錄、第三步再次過載、逐句命中不等於語義覆蓋、creation／Update 混淆，以及舊入庫審閱門檻。正式庫完成資格接點仍在 4.1 明列 TBD，不能隱藏為「直接沿用」。
 
 ## 7. 相關依據
+
+- [#723 隔離生成／Flash 測試與經驗](claim_creation_flash_test_20261109.md)
 
 - [#723 工作卡](https://github.com/junyang168/smart-answer/issues/723)
 - [Claim Update Flash](../20-knowledge/claim_update_flash.md)
 - [Claim data 分層驗證設計](../20-knowledge/claim_data_verification_design.md)
 - [詳細知識抽取流程](detailed_knowledge_extraction_workflow_v1.md)
 - [完整關係一次交付實測](../20-knowledge/claim_flash_completed_relations_20261109.md)
+
+## 8. 執行入口
+
+生成完整候選，之後在隔離庫執行 Flash（不指定 through-flash 則只生成）：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_creation_flash \
+  --source-id ID --source-file /absolute/path/source.json \
+  --root /absolute/path/run --capacity-file /absolute/path/capacity.json \
+  --through-flash
+```
+
+可用 `--groups` 提供原文範圍分組；它不是既有 Claim ID 分組。對已完整生成的候選，可獨立執行 `python -m backend.pipeline.claim_flash_flow --candidate /absolute/path/candidate.json --root /absolute/path/verification --capacity-file /absolute/path/capacity.json`。Candidate 模式拒絕 canonical `--apply` 或 database URL。原 SQL source refresh 使用 `--source-id`，並明確加 `--apply`；依原授權操作，不因新入口擴大範圍。
