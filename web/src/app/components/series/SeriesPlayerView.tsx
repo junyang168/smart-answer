@@ -6,7 +6,7 @@ import { notFound, useParams, useRouter, useSearchParams, usePathname } from "ne
 import { useEffect, useState } from "react";
 import { Check, Clipboard } from "lucide-react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
-import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName, sermonEditorHref } from "./progress";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName, sermonEditorHref, seriesIdFromRoute } from "./progress";
 
 /**
  * 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。
@@ -20,7 +20,7 @@ export const SeriesPlayerView = () => {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const seriesId = decodeURIComponent(String(params.seriesId ?? ""));
+  const seriesId = seriesIdFromRoute(String(params.seriesId ?? ""));
   const filter = searchParams.get("status") ?? "";
   const [series, setSeries] = useState<SermonSeries | null>(null);
   const [missing, setMissing] = useState(false);
@@ -116,7 +116,7 @@ export const SeriesPlayerView = () => {
               <th className="px-4 py-3 font-medium">講道日期</th>
               <th className="px-4 py-3 font-medium">狀態</th>
               <th className="px-4 py-3 font-medium">認領人</th>
-              <th className="px-4 py-3 font-medium">發佈日期</th>
+              <th className="px-4 py-3 font-medium">最近發佈日期</th>
             </tr>
           </thead>
           <tbody>
@@ -137,9 +137,9 @@ export const SeriesPlayerView = () => {
                     {STATUS_LABEL[sermon.status] ?? sermon.status}
                   </span>
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.assigned_to_name || "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.assigned_to_name || "未認領"}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-stone-700">
-                  {sermon.status === "published" ? day(sermon.published_date) || "—" : "—"}
+                  {day(sermon.published_date) || "—"}
                 </td>
               </tr>
             ))}
