@@ -66,22 +66,38 @@ def finish(store,root):
     return flash.commit_group(store,root)
 
 
-def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=None):
-    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);relation_root=Path(relation_root).resolve()
-    previous=json.loads((relation_root/'intent.json').read_text());ids=previous['claim_ids']
-    group=json.loads((Path(previous['argument_root'])/'intent.json').read_text())['group']
+def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=None,empty_group=None,evidence_root=None):
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    if empty_group is not None:
+        if relation_root is not None or empty_group.get('claim_ids') or evidence_root is None:
+            raise ValueError('empty group discovery requires only completed Evidence proof')
+        plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
+        if empty_group not in plan['groups'] or plan['source_id']!=source_id:
+            raise ValueError('empty group differs from completed Evidence plan')
+        group=empty_group;ids=[];relation_root=Path(evidence_root).resolve()
+        previous={'source':f.bind_source(store,source_id,root)}
+    else:
+        relation_root=Path(relation_root).resolve()
+        previous=json.loads((relation_root/'intent.json').read_text());ids=previous['claim_ids']
+        group=json.loads((Path(previous['argument_root'])/'intent.json').read_text())['group']
     room=10-len(ids) if max_new_claims is None else max_new_claims
-    if not ids or len(set(ids))!=len(ids) or type(room) is not int or not 0<=room<=10-len(ids):
+    if (not ids and empty_group is None) or len(set(ids))!=len(ids) or type(room) is not int or not 0<=room<=10-len(ids):
         raise ValueError('one existing group with bounded creation space required')
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'claim_ids':ids,'group':group,
             'relation_root':str(relation_root),'max_new_claims':room,'models':ports.identity,
+            **({'empty_group_contract':'claim_flash_empty_group_v1','evidence_root':str(relation_root)} if empty_group is not None else {}),
             'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema(),pairs.COMPLETED_CONTRACT,flash.CompleteDiscoveries.model_json_schema()])})
         if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
         records,sources=f.load_group_source(store,source_id,group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
-        read=consume(store,relation_root,records,sources);original=deepcopy(records)
+        if empty_group is None:read=consume(store,relation_root,records,sources)
+        else:
+            pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+            statements.verify_evidence(evidence_root,pool,records,sources)
+            read=set(pool)|{'source_documents/'+source_id}
+        original=deepcopy(records)
         pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
         if not pool<=read:raise ValueError('group lower materials lack completed proof')
         near=set(group['paragraph_keys'])
