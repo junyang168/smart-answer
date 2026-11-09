@@ -295,3 +295,22 @@ def test_completed_repair_keeps_valid_audio_edits_and_withholds_case_only_change
     assert p['text'] == '他用了 in how 和 Irresistible calling。'
     with pytest.raises(ValueError, match='invented'):
         validate_completed_repair({'proposals':[{**case,'paragraph_id':'invented'}]},[p],set())
+
+
+def test_empty_completed_reply_gets_only_one_bound_format_recovery(tmp_path):
+    from backend.pipeline.slide_change_pilot import read_json
+    class Adapter:
+        config={'max_output_tokens':2048}
+        generations=0
+        def count(self,parts):return 10
+        def generate(self,parts):
+            self.generations+=1
+            return {'candidates':[{'finish_reason':'STOP','content':{} if self.generations==1 else {'parts':[{'text':'{"proposals":[]}'}]}}]}
+        def usage(self,raw):return {'estimated_usd_upper':0}
+    adapter=Adapter();request={'stage':'original','model':'fixture'}
+    first=proposal_response(adapter,[],request,tmp_path)
+    assert adapter.generations==2
+    assert proposal_response(adapter,[],request,tmp_path)==first and adapter.generations==2
+    requests=[read_json(p) for p in (tmp_path/'calls').glob('*/request.json')]
+    recovery=next(r for r in requests if r['stage']=='known_empty_response_recovery_once')
+    assert recovery['parent_response_sha256'] and recovery['config']['response_json_schema']==SCHEMA

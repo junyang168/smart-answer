@@ -976,3 +976,33 @@ def test_ai_soft_deletion_restore_uses_normal_versioned_save_and_clears_confirma
     assert after['script'][0]['text']==original['text']
     assert after['version']!=doc['version']
     assert after['context']['reviews'].get('p:1',{}).get('sha256') != after['paragraph_shas']['1']
+
+
+def test_browser_playback_derivative_preserves_original_identity_and_rejects_bad_clock(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup
+    record=read(source/'full_transcript.json')
+    record.update(media_mime_type='audio/wav',duration_ms=3615000);atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    playback=source/'encoded.mp3';playback.write_bytes(b'fixture browser playback')
+    receipt=dict(path=str(playback),source_sha256=record['source_sha256'],sha256=file_hash(playback),mime='audio/mpeg',duration=record['duration_ms']/1000,anchors=[dict(at=t,lag_ms=0,correlation=.99) for t in (0,1,2)])
+    atomic(source/'media-receipt.json',receipt)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    original_hash=file_hash(source/'source.mp4');doc=adopted(setup)
+    assert doc['context']['source_video_sha256']==original_hash
+    assert doc['context']['source_media_mime_type']=='audio/wav'
+    assert doc['context']['media_mime_type']=='audio/mpeg'
+    assert file_hash(store.folder('講道 test')/'source.mp4')==original_hash
+    assert (store.folder('講道 test')/'playback.mp3').read_bytes()==playback.read_bytes()
+
+
+def test_bad_playback_receipt_cannot_be_adopted(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup;record=read(source/'full_transcript.json');record['duration_ms']=3615000
+    atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    playback=source/'bad.mp3';playback.write_bytes(b'bad')
+    atomic(source/'media-receipt.json',dict(path=str(playback),source_sha256=record['source_sha256'],sha256=file_hash(playback),mime='audio/mpeg',duration=record['duration_ms']/1000,anchors=[dict(at=0,lag_ms=400,correlation=.99)]*3))
+    with pytest.raises(ReviewError,match='時間軸'):adopted(setup)
+    assert not store.enabled('講道 test')
