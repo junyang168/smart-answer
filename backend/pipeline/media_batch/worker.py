@@ -31,11 +31,12 @@ def child():
     except Exception as e:
         import traceback
         from backend.pipeline.transcript_text_layout import SeamCoverageError
+        from backend.pipeline.contextual_transcript_timing import TimingReviewRequired
 
         traceback.print_exc()
         atomic(
             Path(ctx["result_path"]),
-            dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,SeamCoverageError)),
+            dict(ok=False, error=type(e).__name__ + ": " + str(e),needs_resolution=isinstance(e,(SeamCoverageError,TimingReviewRequired))),
         )
         sys.exit(1)
 

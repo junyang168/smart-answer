@@ -499,7 +499,7 @@ def process_windows(out: Path, aligner: Path, pilot_correction: Path | None, win
         clean_full_transcript(out)
 
 
-def original_paragraph_clip(folder:Path,paragraph:dict,window:dict):
+def original_paragraph_clip(folder:Path,paragraph:dict,window:dict,*,max_seconds=300):
     """Use exact source-chunk provenance for a clip, never character-count times."""
     root=folder/'audio';timed=read(root/'timed_text.json');asr=read(root/'asr.json')
     if timed['asr_sha256']!=sha(root/'asr.json') or timed['text_sha256']!=text_sha(timed['text']):
@@ -512,7 +512,7 @@ def original_paragraph_clip(folder:Path,paragraph:dict,window:dict):
     if not chunks:raise ValueError('Untimed paragraph has no source audio context')
     begin=window['origin_sample']+min(c['sample_start'] for c in chunks)
     stop=window['origin_sample']+max(c['sample_end'] for c in chunks)
-    if not window['origin_sample']<=begin<stop<=window['end_sample'] or stop-begin>300*SR:
+    if not window['origin_sample']<=begin<stop<=window['end_sample'] or (max_seconds is not None and stop-begin>max_seconds*SR):
         raise ValueError('Source audio context exceeds the acoustic model limit')
     return begin,stop,{'method':'original_asr_chunk_clip_not_predicted_timing','chunks':ids,
         'timed_text_sha256':sha(root/'timed_text.json'),'asr_sha256':sha(root/'asr.json')}
