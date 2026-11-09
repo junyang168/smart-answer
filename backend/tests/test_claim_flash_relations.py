@@ -1,5 +1,6 @@
 """Group Claim relations: bounded scope, real SQL, source reuse and recovery."""
 from copy import deepcopy
+from pathlib import Path
 import json
 import pytest
 from backend.pipeline import claim_flash_relations as stage, claim_flash_arguments as arguments
@@ -200,3 +201,37 @@ def test_exact_retired_identity_is_pinned_and_human_protection_preserved(ready,p
     assert before['records']['claim_relations/'+oid]['retired']
     replay=Ports();assert stage.run(store,'S',aroot,root/'relations',replay,apply=True)['status']=='needs_attention'
     assert replay.calls==[]
+
+
+def test_cross_group_edges_have_one_later_owner_including_sequential_batches():
+    groups=[{'claim_ids':['A','B'],'sequential_claim_batches':[['A'],['B']]},{'claim_ids':['C']}]
+    records={}
+    for oid,a,b in [('AB','A','B'),('AC','A','C'),('CA','C','A'),('BC','B','C'),('AX','A','X')]:
+        records['claim_relations/'+oid]={'payload':{'from_id':a,'to_id':b},'retired':False}
+    assert stage.owned_edges(records,['A'],groups)=={}
+    assert set(stage.owned_edges(records,['B'],groups))=={'claim_relations/AB'}
+    assert set(stage.owned_edges(records,['C'],groups))=={'claim_relations/AC','claim_relations/CA','claim_relations/BC'}
+    assert stage.owned_edges(records,['A','B'])=={'claim_relations/AB':{'from_id':'A','to_id':'B'}}
+    with pytest.raises(ValueError,match='task differs'):stage.owned_edges(records,['B','C'],groups)
+
+
+def test_cross_group_endpoint_is_readonly_not_a_discovery_target(ready):
+    store,root,aroot=ready
+    third={**deepcopy(store.get_record_state('claims','C')['payload']),'claim_id':'X'}
+    store.apply_plan(store.plan_package({'package_id':'cross-group-endpoint','claims':[third]}))
+    edge(store,from_id='X',to_id='C')
+    arg=json.loads((aroot/'intent.json').read_text());ep=Path(arg['evidence_root'])/'intent.json'
+    plan=json.loads(ep.read_text());plan['groups']['groups'].insert(0,{'group_id':'EARLIER','claim_ids':['X']})
+    ep.write_text(json.dumps(plan))  # This fixture's frozen plan predates the new relation task.
+    before=store.get_record_state('claims','X')
+    ports=Ports(choices={'relation':'none'})
+    result=stage.run(store,'S',aroot,root/'cross-group',ports,apply=True)
+    assert result['readonly_endpoint_keys']==['claims/X']
+    assert result['reviewed_existing_relation_keys']==['claim_relations/R']
+    assert store.get_record_state('claims','X')==before
+    discovery=next(req for role,req in ports.calls if role=='gpt' and req['input']['task']=='missing_group_claim_relations')
+    assert set(discovery['input']['claims'])=={'claims/C','claims/D'}
+    assert not discovery['input']['existing_edges']
+    frozen=json.loads((root/'cross-group/before.json').read_text())
+    assert 'claims/X' in frozen['records'] and 'evidence_steps/E' in frozen['records']
+    assert store.get_record_state('claim_relations','R')['retired']
