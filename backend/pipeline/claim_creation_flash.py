@@ -21,6 +21,7 @@ from backend.pipeline.knowledge_package_merge import validate_merged_package
 VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
+SINGLE_PASS = 'claim_creation_single_pass_group_v1'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -41,8 +42,9 @@ def schema(name, properties):
     return {'name': VERSION + '_' + name, 'strict': True, 'schema': object_schema(properties)}
 
 
-def schemas(*, compact_audit=False, grouped_package=False):
+def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     """Derive producer fields from the existing schema, not parallel records."""
+    grouped_package=grouped_package or single_pass
     claim = deepcopy(BASE['claims']['items'])
     for key in ('claim_id', 'evidence_step_ids', 'opposed_position_ids', 'review_status'):
         claim['properties'].pop(key); claim['required'].remove(key)
@@ -66,8 +68,11 @@ def schemas(*, compact_audit=False, grouped_package=False):
     connection = object_schema({'from_id': {'type': 'string'}, 'to_id': {'type': 'string'},
         'relation_type': {'type': 'string', 'enum': d.RELATION_TYPES}, 'reason': {'type': 'string'}})
     if grouped_package:materials['connections']=array(connection)
+    if single_pass:
+        candidate=deepcopy(claim);candidate['properties']['claim_id']={'type':'string'}
+        candidate['required'].append('claim_id');materials['candidates']=array(candidate)
     return {'claims': schema('claims', {'candidates': array(claim)}),
-            'materials': schema('group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
+            'materials': schema('single_pass_group_v1' if single_pass else 'group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
             'connections': schema('connections', {'connections': array(connection),
                 'observation_roles':array(object_schema({'observation_id':{'type':'string'},
                     'argument_role':deepcopy(BASE['observations']['items']['properties']['argument_role']),
@@ -177,6 +182,21 @@ def group_package_prompt():
         '原文說過一句話不等於它支持整條Claim；不為候選編造論據，候選本身也不能充當來源。'
         'Evidence的produced_claim_ids及Question的answer_claim_ids由程式按connections同步，不重複輸出。'
         + f.RELATION_REASON_RULES)
+
+
+def single_pass_prompt():
+    return group_package_prompt().replace(
+        'Claim候選只讀，不重抽或改寫；同時完成材料、argument_role及完整論證連接。',
+        '同次識別Claim、完整相關範圍，並生成共享材料、argument_role及完整論證連接。').replace(
+        '按claim_candidates各自相關原文範圍找論據',
+        '依教授原文識別獨立判斷及其完整論據範圍').replace(
+        '提供的Claim ID', '本次candidates的claim_id') + (
+        'candidates沿用Claim欄位，每筆給唯一局部claim_id（例如CL001）、related_ranges、'
+        'conclusion_anchor及不同於重述結論的support_hint；existing_claim_id必須null。'
+        '同次connections直接使用這些局部claim_id，不再另問模型找Claim或重建關係。'
+        'Claim ID與材料ID不得相同。教授只說一句支持性斷言卻未另給論據，不強升Claim；'
+        '沒有Claim也保存重要材料。範圍含結論、論據、限定、反方與必要問答；'
+        '不補教授沒有講過的判斷，不把候選當作本身的論據。' + f.CLAIM_DISCOVERY_RULES)
 
 
 def empty():
@@ -293,7 +313,7 @@ def bind_conclusions(package,candidates,projection):
 
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False):
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -308,16 +328,18 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if not keys: raise ValueError('empty creation source')
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
+        grouped_package=grouped_package or single_pass
         compact_audit=compact_audit or grouped_package
-        contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package)
-        material_prompt = group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
+        contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package,single_pass=single_pass)
+        material_prompt = single_pass_prompt() if single_pass else group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
         e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id,
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
             'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
             'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]), 'supplied_groups': groups,
             **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
-            **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {})})
+            **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {}),
+            **({'single_pass_contract':SINGLE_PASS} if single_pass else {})})
         if (root/'creation-result.json').exists():
             saved = json.loads((root/'creation-result.json').read_text())
             package = json.loads((root/'candidate.json').read_text())
@@ -342,7 +364,10 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         all_owned = [pk for g in groups for pk in ranges(g['paragraph_ranges'], keys)]
         if len(set(all_owned)) != len(all_owned) or set(all_owned) != set(keys):
             raise ValueError('creation groups must cover every source paragraph exactly once')
+        if single_pass and len(groups)!=1:
+            raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        single_outputs={};claim_aliases={}
         response = empty(); candidates = {}; group_claims = {}; group_materials = {}
         for n, group in enumerate(groups, 1):
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
@@ -350,7 +375,22 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
                        'context':{pk:paragraphs[pk] for pk in context},
                        'existing_claims': {k:{'statement':v['statement'],'related_ranges':v['related_ranges']} for k,v in candidates.items()}}
-            result = call(root/gid/'claims', ports, 'creation_claims', payload, contracts['claims'], CLAIMS, source_check)
+            if single_pass:
+                payload={'group_id':gid,'batch_id':1,
+                    'owned_paragraphs':{pk:paragraphs[pk] for pk in owned if paragraphs[pk].strip()},
+                    'reference_paragraphs':{pk:paragraphs[pk] for pk in context},
+                    'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index}
+                        for v in all_sentences if v.segment_index in owned], 'existing_materials':{}}
+                whole=call(root/gid/'single-pass',ports,'creation_single_pass',payload,contracts['materials'],material_prompt,source_check)
+                single_outputs[gid]=deepcopy(whole);model_ids=[v['claim_id'] for v in whole['candidates']]
+                material_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in whole[col]}
+                if len(set(model_ids))!=len(model_ids) or not all(model_ids) or set(model_ids)&material_ids:
+                    raise ValueError('single-pass Claim aliases must be unique and distinct from materials')
+                if any(v['existing_claim_id'] is not None for v in whole['candidates']):
+                    raise ValueError('single-pass fresh group cannot reuse unprovided Claims')
+                result={'candidates':[{k:v for k,v in row.items() if k!='claim_id'} for row in whole['candidates']]}
+            else:
+                result = call(root/gid/'claims', ports, 'creation_claims', payload, contracts['claims'], CLAIMS, source_check)
             e.save(root/gid/'claims'/'quote-calibration.json',calibrate(result['candidates'],paragraphs))
             group_claims[gid] = []
             for candidate in result['candidates']:
@@ -373,6 +413,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     response['claims'].append({k:deepcopy(candidate[k]) for k in BASE['claims']['items']['properties'] if k in candidate} |
                         {'claim_id':cid,'evidence_step_ids':[],'opposed_position_ids':[],'review_status':'candidate'})
                 group_claims[gid].append(cid)
+            if single_pass:claim_aliases[gid]=dict(zip(model_ids,group_claims[gid]))
         e.save(root/'claim-candidates.json',candidates)
         # Bounded material tasks keep output manageable without another full review.
         material_ordinal=0;connections=[]
@@ -401,8 +442,19 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
-                result=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_group_package' if grouped_package else 'creation_materials',payload,contracts['materials'],material_prompt,source_check)
-                raw_sha=e.digest(result)
+                if single_pass:
+                    result=deepcopy(single_outputs[gid]);result.pop('candidates')
+                    if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
+                        raise ValueError('material IDs collide with allocated Claim aliases')
+                    for edge in result['connections']:
+                        for endpoint in ('from_id','to_id'):
+                            edge[endpoint]=claim_aliases[gid].get(edge[endpoint],edge[endpoint])
+                    e.save(root/gid/'single-pass-projection.json',{'contract':SINGLE_PASS,
+                        'raw_response_sha256':e.digest(single_outputs[gid]),'claim_alias_mapping':claim_aliases[gid],
+                        'material_projection_sha256':e.digest(result),'model_calls_for_projection':0})
+                else:
+                    result=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_group_package' if grouped_package else 'creation_materials',payload,contracts['materials'],material_prompt,source_check)
+                raw_sha=e.digest(single_outputs[gid]) if single_pass else e.digest(result)
                 local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
                     result=expand_material_audit(result,[v.sentence_id for v in sentences])
@@ -508,13 +560,14 @@ def main():
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
     parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
+    parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
-    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package else 6000,executable=args.codex_executable)
+    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)

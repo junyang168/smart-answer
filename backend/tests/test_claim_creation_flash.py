@@ -83,6 +83,54 @@ class PackagePorts(Ports):
         return self.group_mutation(result) if self.group_mutation else result
 
 
+class SinglePassPorts(PackagePorts):
+    def repair(self,request):
+        assert request['input']['task']=='creation_single_pass'
+        assert 'claim_candidates' not in request['input']
+        assert 'Claim候選只讀' not in request['system']
+        claim_request=deepcopy(request);claim_request['input']['task']='creation_claims'
+        candidates=Ports.repair(self,claim_request)['candidates']
+        material_request=deepcopy(request);material_request['input'].update(task='creation_group_package',claim_candidates={'CL0001':candidates[0]})
+        result=PackagePorts.repair(self,material_request)
+        self.calls[:]=['creation_single_pass']
+        for edge in result['connections']:
+            for endpoint in ('from_id','to_id'):
+                if edge[endpoint]=='CL0001':edge[endpoint]='LOCAL-C'
+        result['candidates']=[{**candidates[0],'claim_id':'LOCAL-C'}]
+        return result
+
+
+def test_single_pass_builds_claim_materials_and_full_graph_with_one_saved_call(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run';ports=SinglePassPorts(source)
+    result=creation.run('T',path,root,ports,groups=groups(),single_pass=True)
+    assert result['status']=='creation_complete' and ports.calls==['creation_single_pass']
+    package=json.loads((root/'candidate.json').read_text());cid=package['claims'][0]['claim_id']
+    assert package['evidence_steps'][0]['produced_claim_ids']==[cid]
+    assert package['questions'][0]['answer_claim_ids']==[cid]
+    raw=json.loads(next(root.glob('G001/single-pass/gpt/*/response.json')).read_text())
+    assert raw['candidates'][0]['claim_id']=='LOCAL-C'
+    assert raw['connections'][0]['to_id']=='LOCAL-C'
+    assert not (root/'G001/claims/gpt').exists() and not (root/'G001/materials/batch-001/gpt').exists()
+    assert json.loads((root/'G001/single-pass-projection.json').read_text())['claim_alias_mapping']=={'LOCAL-C':'CL0001'}
+    ports.calls=[];assert creation.run('T',path,root,ports,groups=groups(),single_pass=True)==result
+    assert ports.calls==[]
+
+
+@pytest.mark.parametrize('fault',['alias_collision','duplicate_alias','unknown_endpoint','unsupported_claim'])
+def test_single_pass_rejects_incomplete_or_ambiguous_graph(tmp_path,fault):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    class Bad(SinglePassPorts):
+        def repair(self,request):
+            result=super().repair(request)
+            if fault=='alias_collision':result['candidates'][0]['claim_id']='E001'
+            if fault=='duplicate_alias':result['candidates'].append(deepcopy(result['candidates'][0]))
+            if fault=='unknown_endpoint':result['connections'][0]['to_id']='UNKNOWN'
+            if fault=='unsupported_claim':result['connections']=result['connections'][1:]
+            return result
+    with pytest.raises(ValueError):creation.run('T',path,root,Bad(source),groups=groups(),single_pass=True)
+    assert not (root/'creation-result.json').exists()
+
+
 def test_group_package_builds_materials_roles_and_connections_in_one_model_task(tmp_path):
     source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
     ports=PackagePorts(source);result=creation.run('T',path,root,ports,groups=groups(),grouped_package=True)
