@@ -16,7 +16,7 @@ from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements 
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
 from backend.pipeline import claim_flash_missing as missing
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
-from backend.pipeline.knowledge_package_merge import validate_merged_package
+from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError
 
 VERSION='claim_flash_layered_flow_v1'
 
@@ -91,7 +91,14 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'initial_package_sha256':e.digest(original) if original else None,
         'source_file':sources[sid]['file'],'retired_records':retired,
         'completion':'needs_attention' if pending else 'completed'}
-    validate_merged_package(result_package,native_relations=True)
+    validation_errors=[]
+    try:
+        validate_merged_package(result_package,native_relations=True)
+    except KnowledgePackageMergeError as exc:
+        # A pending report must preserve the real SQL snapshot even when an
+        # untouched legacy row is invalid. It grants no package admission.
+        if not pending:raise
+        validation_errors.append(str(exc))
     digest=e.digest(result_package);path=root/'postimages'/(digest+'.json');e.save(path,result_package)
     result={'version':VERSION,'source_id':sid,'status':'needs_attention' if pending else 'completed',
         'package':{'path':str(path),'sha256':digest},'changes':changed,'pending':pending,
@@ -101,6 +108,7 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'mode':mode,'canonical_committed':mode=='canonical_refresh' and any(root.rglob('commit.json')),
         'production_writes':0 if mode=='candidate_workspace' else None,
         'legacy_qualification':'not_granted','wall_seconds_this_invocation':round(time.monotonic()-started,3)}
+    if validation_errors:result['package_validation_errors']=validation_errors
     # Bind exact saved stage outputs; no second model-generated report.
     result['evidence_refs']=[{'path':str(p.resolve()),'sha256':e.digest(read(p))} for p in sorted(root.rglob('result.json'))
         if p.parent!=root and 'postimages' not in p.parts]
@@ -146,7 +154,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         e.save(root/'shared-groups.json',plan)
         if plan.get('pending'):return finish({},[{'layer':'grouping','findings':plan['pending']}])
         stages={}
-        sr=source.run(store,source_id,root/'source'/e.digest(records));stages['source']=sr
+        sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
         if sr['status']=='calibration_available':
             work=root/'calibration';work.mkdir(exist_ok=True)
             prepared={'version':'claim_flash_mechanical_source_v1','source_id':source_id,'status':'verified',
@@ -155,7 +163,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             e.save(work/'before.json',{'records':records,'sources':sources});e.save(work/'verification.json',prepared)
             e.commit_verified(store,work)
             records,sources=snapshot(store,source_id)
-            sr=source.run(store,source_id,root/'source'/e.digest(records));stages['source']=sr
+            sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
         if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':sr['records']}])
         cv=coverage.run(store,source_id,root/'coverage',ports,plan=plan);stages['coverage']=cv
         findings=[v for row in cv['findings'] for v in row['findings']]
@@ -164,7 +172,22 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         if any(v['verdict'] in fill.MISSING for v in findings):
             fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
             if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
-        er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
+        attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
+                   for item in read(p).get('outcomes',[])}
+        while True:
+            er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
+            handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
+            if complete(er) or not handoffs or any(p.get('layer')!='source' or not p.get('object_key')
+                    or p['object_key'] in attempted for p in handoffs):break
+            # One source completion per object in this operation. Previously
+            # accepted lower judgments are consumed by EO's existing cache.
+            for item in handoffs:
+                key=item['object_key'];attempted.add(key)
+                repaired=source.repair_bindings(store,source_id,[item],root/'source-handoffs'/e.digest(key),ports,apply=True)
+                stages.setdefault('source_handoffs',{})[key]=repaired
+                if not complete(repaired) or not repaired['updates']:break
+            else:continue
+            break
         if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])

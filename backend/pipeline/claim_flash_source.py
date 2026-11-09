@@ -6,12 +6,83 @@ preview; only an already-authorized full Update may persist its candidates.
 from copy import deepcopy
 import fcntl
 from pathlib import Path
+import json
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.pipeline import claim_flash_common as f, evidence_refresh as e
 from backend.pipeline import claim_flash_source_lookup as source_lookup
 
-CONTRACT = 'claim_flash_source_verification_v1'
+CONTRACT = 'claim_flash_source_verification_v2'
 HISTORICAL = {'source_deleted', 'replaced_by_precise_fragments', 'context_only'}
+
+
+class BindingDecision(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    job_id:str
+    action:Literal['bind','needs_source']
+    quotes:list[e.Quote]
+    reason:str=Field(min_length=1)
+
+
+class BindingDecisions(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    items:list[BindingDecision]
+
+
+def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
+    """Consume lower-layer handoffs; change only literal source attachments."""
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    with (root/'run.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        pin=f.bind_source(store,source_id,root)
+        if (root/'verification.json').exists():
+            result=json.loads((root/'verification.json').read_text())
+            return e.commit_verified(store,root) if apply else result
+        records,sources=f.load_source(store,source_id,visual_context=True)
+        current_source(records,sources,source_id)
+        if pin!={'source_id':source_id,**sources[source_id]['file']}:raise ValueError('source repair binding changed')
+        e.save(root/'intent.json',{'source':pin,'findings':findings,'models':ports.identity})
+        locator=source_lookup.Locator(sources);jobs=[]
+        for item in findings:
+            key=item['object_key']
+            if item.get('layer')!='source' or key.split('/')[0] not in f.LOWER or key not in records:
+                raise ValueError('explicit existing lower-record source handoff required')
+            row=records[key]
+            if row['payload'].get('review_status') in f.PROTECTED:raise ValueError('protected source repair target')
+            material,_=locator.prepare(key,records,sources)
+            jobs.append({'job_id':key,'record':f.projected(row),'material':material,'reason':item['reason']})
+        enriched=source_lookup.lookup(jobs,sources,root/'lookup',ports)
+        for job in jobs:job['material']=enriched[job['job_id']]
+        updates={};generated={};pending=[];outcomes=[];working=deepcopy(records)
+        prompt=('唯一任務：針對下層交回的來源缺口，選出能補足指代、主詞或必要上下文的逐字原文片段。'
+            '只用本項material提供的原文，不修改或審閱Evidence／Observation摘要、角色、立場或論證。'
+            '保留完整有意義的語句，不只取「這種文法」「所以如此」等失去指代的短句；原有有效片段會由程式保留。'
+            'quotes只列需要補充的原文；找不到就needs_source，說明具體缺口，不為維持摘要而借其他主題。'
+            'Jev只提供候選位置，不是支持成立的判決。')
+        for batch,raw in f.gpt(root/'selection',ports,'source_binding_completion',jobs,
+                BindingDecisions.model_json_schema(),prompt,semantic_review=False):
+            decisions=BindingDecisions.model_validate(raw).items
+            f.exactly([x.model_dump() for x in decisions],[j['job_id'] for j in batch],'job_id')
+            for decision in decisions:
+                key=decision.job_id;job=next(j for j in batch if j['job_id']==key)
+                outcomes.append(decision.model_dump())
+                if decision.action!='bind' or not decision.quotes:
+                    pending.append({'object_key':key,'layer':'source','reason':decision.reason});continue
+                allowed={p['paragraph_key'] for p in job['material']['nearby_paragraphs']}
+                if any(q.paragraph_key not in allowed for q in decision.quotes):raise ValueError('unprovided source repair paragraph')
+                quotes=[{'paragraph_key':p['paragraph_key'],'quote':p['quote']} for p in job['material']['fragments']]
+                quotes+= [q.model_dump() for q in decision.quotes]
+                quotes=list({(q['paragraph_key'],q['quote']):q for q in quotes}.values())
+                post,fragments,projection=binding_postimage(key,records[key]['payload'],quotes,job['material'],working,sources)
+                if post!=records[key]['payload']:updates[key]=post
+                generated.update(fragments);working=f.apply_overlay(working,{key:post},fragments)
+        f.source_unchanged(sources)
+        result={'version':'claim_flash_source_binding_completion_v1','status':'needs_attention' if pending else 'verified',
+            'source_id':source_id,'updates':updates,'new_fragments':generated,'pending':pending,'outcomes':outcomes,
+            'applied':False,'claim_qualification':'not_granted','commit_reason':'Complete literal source attachments; no statement or argument changes'}
+        e.save(root/'before.json',{'records':records,'sources':sources});e.save(root/'verification.json',result)
+        return e.commit_verified(store,root) if apply else e.publish(root,result)
 
 
 def excluded_context(key, records):
@@ -59,6 +130,15 @@ def prepare(records, sources):
             continue
         try:
             materials[key] = f.value(key, records, sources)
+            p=records[key]['payload']; ids=p.get('source_fragment_ids')
+            if isinstance(ids,list) and len(ids)!=len(set(ids)):
+                if p.get('review_status') in f.PROTECTED:
+                    pending.append({'object_key':key,'reason':'protected_duplicate_fragment_references'})
+                else:
+                    post={**deepcopy(p),'source_fragment_ids':list(dict.fromkeys(ids))}
+                    updates[key]=post;working=f.apply_overlay(working,{key:post})
+                    mechanical.append({'object_key':key,'rule':'deduplicate_identical_fragment_references',
+                                       'before':ids,'after':post['source_fragment_ids']})
         except (ValueError, KeyError) as exc:
             if excluded_context(key, records):
                 excluded.append(key)
