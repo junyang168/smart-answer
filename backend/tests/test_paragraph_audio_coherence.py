@@ -3,6 +3,24 @@ import pytest
 from backend.pipeline.paragraph_audio_coherence import validate,needs_coherence
 
 
+def test_omitted_observations_preserve_occurrence_pairs_and_never_retry_reviewed_ranges():
+    from backend.pipeline.paragraph_audio_coherence import observed_ranges,recovery_cases
+    row=dict(id='p',status='withheld',observations=[dict(start_ms=100,end_ms=800),
+        dict(start_ms=1000,end_ms=2000),dict(start_ms=1000,end_ms=2000),
+        dict(start_ms=50,end_ms=3000,start_error='wrong'),dict(start_ms=4000,end_ms=3900)])
+    assert observed_ranges(row,5000)==[(100,800),(1000,2000)]
+    source=dict(records={'s':dict(duration_ms=5000,paragraphs=[dict(id='p',start_ms=100,end_ms=800,text='原文不變')])})
+    assessment=dict(lectures={'s':dict(paragraphs=[row])})
+    parent=dict(cases=[dict(id='old',lecture='s',paragraph_id='p',candidates=[dict(start_ms=100,end_ms=800)])])
+    before=copy.deepcopy((source,assessment,parent))
+    cases=recovery_cases(source,assessment,parent)
+    assert cases==[dict(id='Ls-p-omitted-observations',lecture='s',paragraph_id='p',reference='原文不變',ranges=[(1000,2000)])]
+    assert (source,assessment,parent)==before
+    assert (100,2000) not in cases[0]['ranges']  # Never combine different occurrences.
+    assessment['lectures']['s']['paragraphs'][0]['status']='qualified'
+    assert recovery_cases(source,assessment,parent)==[]
+
+
 def test_unique_retained_phrase_uses_original_acoustic_units_only(tmp_path):
     import hashlib
     from backend.pipeline.paragraph_audio_coherence import retained_phrase_range

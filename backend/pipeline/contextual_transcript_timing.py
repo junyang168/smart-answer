@@ -382,6 +382,10 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
         review_whole(evidence)
         detail=analyse(evidence,detail=True)
     if not detail['all_qualified']:
+        from backend.pipeline.paragraph_audio_coherence import recover_omitted_observations
+        recover_omitted_observations(evidence)
+        detail=analyse(evidence,detail=True)
+    if not detail['all_qualified']:
         record['timing_quality']={'policy':POLICY,'status':'withheld',
             'assessment_path':str((evidence/'assessment.json').relative_to(out))}
         save_json(out/'full_transcript.json',record)
