@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { AiDeletionReview } from "./AiDeletionReview";
+import { aiDeletions, restoreAiDeletion, type AiExclusion, type AiDeletion } from "./review-ai-deletions";
 import { ReviewTextDiff } from "./ReviewTextDiff";
 import { pendingTimingIds } from "./review-timing";
 import {
@@ -70,6 +72,7 @@ type Metadata = {
   core_bible_verse?: Verse[];
 };
 type Context = {
+  editorial_exclusions?: AiExclusion[];
   speaker_attribution?: {
     notices?: {
       paragraph_id: string;
@@ -348,6 +351,7 @@ function TranscriptProofreader({
     revision: number;
   }>();
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [deletionsOpen, setDeletionsOpen] = useState(false);
   const [generatingHeadings, setGeneratingHeadings] = useState(false);
   const [headingSuggestions, setHeadingSuggestions] = useState<{
     version: string;
@@ -1200,6 +1204,20 @@ function TranscriptProofreader({
     });
     enqueue({ kind: "text", id, text });
   };
+  const deletionCandidates = useMemo(() => aiDeletions(doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions || []), [doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions]);
+  const restoreDeletion = (candidate: AiDeletion) => {
+    if (disabled) return;
+    try {
+      const row = current.current.script.find((p) => p.index === candidate.id);
+      if (!row) throw new Error("找不到段落");
+      const text = restoreAiDeletion(row.text, candidate);
+      const reviews = { ...current.current.context.reviews };
+      delete reviews["p:" + candidate.id];
+      updateDoc({ ...current.current, context: { ...current.current.context, reviews },
+        script: current.current.script.map((p) => p.index === candidate.id ? { ...p, text } : p) });
+      enqueue({ kind: "text", id: candidate.id, text });
+    } catch (e) { setFailure((e as Error).message); }
+  };
   const saveStatus = !ready
     ? "正在檢查本機草稿…"
     : recovered
@@ -1264,6 +1282,9 @@ function TranscriptProofreader({
             >
               舊版 Editor
             </a>
+            <button className={button} onClick={() => setDeletionsOpen((v) => !v)}>
+              {deletionsOpen ? "關閉 AI 刪除" : `AI 刪除 (${deletionCandidates.length})`}
+            </button>
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
             </button>
@@ -1456,6 +1477,8 @@ function TranscriptProofreader({
           </div>
         )}
       </header>
+      {deletionsOpen && <AiDeletionReview items={deletionCandidates} disabled={disabled}
+        onRestore={restoreDeletion} onLocate={(id) => { selectParagraph(id); setNavigationTarget({ id }); }} />}
       {metadataOpen && (
         <section className="my-4 rounded-xl border bg-white p-4">
           <p className="mb-3 text-sm text-slate-500">

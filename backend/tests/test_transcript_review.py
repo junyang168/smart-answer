@@ -950,3 +950,27 @@ def test_batch_cannot_initialize_existing_sermon(setup):
     with pytest.raises(ReviewError, match='全新講道'):
         prepare_new_review_draft(store, '講道 test', source)
     assert not store.enabled('講道 test')
+
+
+def test_ai_soft_deletion_restore_uses_normal_versioned_save_and_clears_confirmation(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup
+    record=read(source/'full_transcript.json')
+    p=record['paragraphs'][0];prefix='後來我，'
+    original={**p,'text':prefix+p['text']}
+    record['uncut_corrected_paragraphs']=[original,record['paragraphs'][1]]
+    record['editorial_exclusions']=[dict(paragraph_id=p['id'],old=prefix,start=0,end=len(prefix),
+        reason='放棄起句',kind='speech_restart',source_text_sha256=hashlib.sha256(original['text'].encode()).hexdigest())]
+    atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink()
+    store.register_candidate('講道 test',source,expected_script_sha256=None)
+    doc=adopted(setup)
+    assert doc['script'][0]['text']=='~~'+prefix+'~~'+p['text']
+    assert doc['context']['editorial_exclusions'][0]['kind']=='speech_restart'
+    doc=confirmed(store)
+    store.mutate('a','講道 test',op(doc,operations=[dict(kind='text',id='1',text=original['text'])]))
+    after=store.document('a','講道 test')
+    assert after['script'][0]['text']==original['text']
+    assert after['version']!=doc['version']
+    assert after['context']['reviews'].get('p:1',{}).get('sha256') != after['paragraph_shas']['1']
