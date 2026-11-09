@@ -106,6 +106,8 @@ def batches_from_plan(plan):
 
 
 def assert_control(answer):
+    if len(answer['results']) != 1:
+        raise ValueError('Audio boundary calibration is incomplete; real boundary approvals withheld')
     row=answer['results'][0]
     expected={'c0':'wrong_segment','c1':'clean_boundary'}
     if row['case_id']!=CONTROL_ID or row['reference_issue']!='none' or {c['id']:c['verdict'] for c in row['candidates']}!=expected or not next(c['heard_target_phrase'].strip() for c in row['candidates'] if c['id']=='c1'):

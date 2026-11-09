@@ -16,6 +16,9 @@ def test_missing_cases_remain_absent_and_cannot_shift_verdict_to_another_case():
     for bad in [[row('b'),row('a')],[row('a'),row('b'),row('a')],[row('unknown')]]:
         with pytest.raises(ValueError):validate_result(coalesce_case_rows({'results':bad},cases),cases,allow_partial=True)
     validate_result({'results':[]},cases,allow_partial=True)
+    from backend.pipeline.boundary_audio_review import assert_control
+    with pytest.raises(ValueError,match='calibration is incomplete'):
+        assert_control({'results':[]})
 
 
 def test_flattened_case_rows_regroup_without_changing_verdicts_or_hiding_conflicts():
