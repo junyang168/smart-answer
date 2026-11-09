@@ -153,7 +153,8 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
             if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
         er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
-        if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]),
+        if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
+            [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
         stages['claims']={}
         for group in plan['groups']:

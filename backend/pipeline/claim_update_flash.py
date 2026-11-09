@@ -357,8 +357,30 @@ def claim_material(key,records,sources,source_id):
                 ev.append({**pairs.node(sk,records,sources),'relation_type':relation['relation_type']})
                 linked.add(sk)
     raw={pk:sources[source_id]['paragraphs'][pk]['text'] for pk in paragraph_keys(key,records)}
-    return {'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},
+    result={'claim':{k:p.get(k) for k in ['statement','attribution','scripture_refs']},
             'evidence':ev,'source_paragraphs':raw, **f.source_interpretation(sources,{source_id:list(raw)})}
+    # Native arguments can be Observation -> Evidence -> Claim. Preserve that
+    # existing route without pretending every premise directly supports Claim,
+    # traversing another Claim, or re-reviewing the verified lower statements.
+    lower={r['payload'].get('observation_id',r['payload'].get('evidence_step_id')):k
+           for k,r in records.items() if k.startswith(('observations/','evidence_steps/'))
+           and (fids:=e.evidence_fragment_ids(r['payload'])) and all(
+               records.get('source_fragments/'+fid,{}).get('payload',{}).get('source_id')==source_id for fid in fids)}
+    incoming={}
+    for rk,rr in records.items():
+        if not rk.startswith('knowledge_relations/'):continue
+        rel=rr['payload'];src=lower.get(rel['from_id']);dst=lower.get(rel['to_id'])
+        if src and dst:incoming.setdefault(dst,[]).append((rk,src,rel))
+    seen=set(linked);queue=sorted(linked);nodes={};edges={}
+    for dst in queue:
+        for rk,src,rel in incoming.get(dst,[]):
+            edges[rk]={'object_key':rk,**deepcopy(rel)}
+            if src not in seen:
+                seen.add(src);queue.append(src);nodes[src]=pairs.node(src,records,sources)
+    if edges:
+        result['argument_context']={'records':list(nodes.values()),'relations':list(edges.values()),
+            'scope':'Existing source-local incoming lower argument paths; these are not additional direct Claim attachments.'}
+    return result
 
 
 def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_new_claims=2):

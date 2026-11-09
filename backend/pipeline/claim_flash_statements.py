@@ -172,6 +172,9 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         for key in targets:
             materials[key]=flash.claim_material(key,records,sources,source_id)
             needed.update(x['object_key'] for x in materials[key]['evidence'])
+            context=materials[key].get('argument_context',{})
+            needed.update(x['object_key'] for x in context.get('records',[]))
+            read.update(x['object_key'] for x in context.get('relations',[]))
         if any(not materials[k]['evidence'] for k in targets):raise ValueError('Claim has no verified lower support')
         proof=verify_evidence(evidence_root,needed,records,sources)
         read.update(needed)

@@ -142,3 +142,36 @@ def test_missing_or_duplicate_disposition_cannot_write(ready):
     with pytest.raises(ValueError,match='scope|job_id|missing|exact'):
         stage.run(store,'S',['C'],eroot,root/'claims',Ports(choices={'statement_fidelity':'changed'},reply=lambda r:{'items':[]}),apply=True)
     assert store.get_record_state('claims','C')==before
+
+
+def test_native_upstream_material_keeps_route_without_other_claim_expansion(ready):
+    from backend.pipeline import claim_update_flash as flash
+    store,_,_=ready
+    records,sources=f.load_source(store,'S')
+    def observation(oid):
+        return {'payload':{'observation_id':oid,'statement':'詞義與紙草例子。',
+                           'source_fragment_ids':['F'],'speaker':'professor','stance':'asserted'}}
+    records['observations/O']=observation('O')
+    records['observations/UNRELATED']=observation('UNRELATED')
+    records['claims/B']={'payload':{'claim_id':'B','statement':'旁支。','occurrences':[{'source_id':'S','anchors':[]}]}}
+    for rid,src,dst in [('R','O','E'),('CYCLE','E','O'),('OTHER','UNRELATED','B'),('CLAIM','B','E')]:
+        records['knowledge_relations/'+rid]={'payload':{'relation_id':rid,'from_id':src,'to_id':dst,'relation_type':'supports','reason':'實際論證。'}}
+    material=flash.claim_material('claims/C',records,sources,'S')
+    assert [x['object_key'] for x in material['evidence']]==['evidence_steps/E']
+    context=material['argument_context']
+    assert [x['object_key'] for x in context['records']]==['observations/O']
+    assert context['records'][0]['original_text_excerpts']
+    assert {x['object_key'] for x in context['relations']}=={'knowledge_relations/R','knowledge_relations/CYCLE'}
+    assert 'UNRELATED' not in json.dumps(material) and 'claims/B' not in json.dumps(material)
+
+
+def test_upstream_lower_must_have_existing_completed_evidence_proof(ready):
+    store,root,eroot=ready
+    store.apply_plan(store.plan_package({'package_id':'upstream-premise',
+      'observations':[{'observation_id':'O','statement':'另有詞義論據。','source_fragment_ids':['F'],
+                       'argument_role':'background','speaker':'professor','stance':'asserted'}],
+      'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'詞義支持。'}]}))
+    ports=Ports()
+    with pytest.raises(ValueError,match='required Evidence group not completed: observations/O'):
+        stage.run(store,'S',['C'],eroot,root/'claims',ports)
+    assert ports.calls==[]
