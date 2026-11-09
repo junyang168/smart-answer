@@ -264,6 +264,8 @@ def handoff(payload):
     out = Path(payload["out"])
     root = Path(payload["config"]["review_root"])
     item = payload["item"]
+    from .speakers import require_candidate
+    require_candidate(out)
     record=read(out/'full_transcript.json',{})
     editor_only=record.get('timing_quality',{}).get('status')=='editor_draft_only'
     if editor_only:
@@ -303,10 +305,16 @@ def prepare_new_review_draft(store, item, out):
         or meta.get("media_ingest_source_sha256") != record["source_sha256"]
     ):
         raise ReviewError(409, "僅可為本批次建立的全新講道準備草稿")
+    from .speakers import require_candidate,RELEASE
+    from .runtime import file_sha
+    require_candidate(out)
     if store.enabled(item):
         _, context = store.load(item)
         if context.get("source_record_sha256") != digest(record):
             raise ReviewError(409, "現有草稿與批次來源不同，拒絕取代")
+        attribution=context.get('speaker_attribution') or {}
+        if attribution.get('pipeline_release')!=RELEASE or attribution.get('source_sha256')!=file_sha(Path(out)/'speaker-candidate.json'):
+            raise ReviewError(409,'現有草稿尚未完成 Beta 1 講員標記；請使用保留人工修改的升級流程。')
         return
     # The existing importer checks empty baseline, human edits, ownership,
     # publication, timing and source hashes, and records a recoverable revision.

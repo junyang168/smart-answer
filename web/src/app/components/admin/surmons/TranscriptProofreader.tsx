@@ -75,6 +75,7 @@ type Context = {
   source_notices?: { start_ms: number; end_ms: number; note: string; paragraph_ids: string[]; status: string }[];
   editorial_exclusions?: AiExclusion[];
   speaker_attribution?: {
+    pipeline_release?: string;
     notices?: {
       paragraph_id: string;
       start_ms: number;
@@ -1272,6 +1273,7 @@ function TranscriptProofreader({
                 ? `認領人：${doc.header.assigned_to_name}`
                 : "尚未認領"}{" "}
               · 第 {doc.context.revision} 版 ·{" "}
+              {doc.context.speaker_attribution?.pipeline_release === "audio-refinement-beta1" && <span className="mr-1 rounded bg-indigo-50 px-2 py-1 text-indigo-700">精修 Beta 1</span>}
               <span role="status" aria-live="polite">
                 {saveStatus}
               </span>
@@ -2043,7 +2045,7 @@ function TranscriptProofreader({
                       key={index}
                       className="mb-3 rounded bg-amber-50 p-3 text-sm text-amber-900"
                     >
-                      <strong>原聲複核提示（模型候選）</strong>
+                      <strong>{n.kind === "speaker_labels_preserved_human_edit" ? "已保留人工修改" : "原聲複核提示（模型候選）"}</strong>
                       <p>
                         {n.timing_precision === "context_window_only"
                           ? "時間未能精確定位；上下文範圍 "

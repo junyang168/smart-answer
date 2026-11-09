@@ -99,6 +99,7 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
             or snapshot.resolve().is_relative_to(out.resolve())):
         raise ValueError('Output must be separate from source and snapshot')
     transcript = read_json(source/'full_transcript.json')
+    source_holds=(transcript.get('timing_quality') or {}).get('source_holds') or {}
     document = read_json(snapshot)
     master = read_json(source/'master.json')
     hashes = {name: file_sha(source/name) for name in ['master.wav', 'full_transcript.json']}
@@ -160,6 +161,7 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
         folder = out/window['id'];folder.mkdir(exist_ok=True)
         clip = folder/'context.wav'
         lo, hi = window['clip_start_ms'], window['clip_end_ms']
+        targets=[p for p in window['paragraphs'] if p['id'] not in source_holds]
         audio = samples[lo * 16:hi * 16]
         if clip.exists():
             import numpy as np
@@ -176,7 +178,7 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
                     'paragraphs': [{'paragraph_id':p['id'], 'text':p['text'],
                                     'approximate_clip_range_s':[(p['start_ms']-lo)/1000,
                                                                 (p['end_ms']-lo)/1000]}
-                                   for p in window['paragraphs']]}
+                                   for p in targets]}
         request = {'stage':'full-audio-speakers.v1', 'model':reviewer.model,
                    'prompt':BATCH_PROMPT, 'schema':BATCH_SCHEMA, 'config':reviewer.config,
                    'source_hashes':hashes, 'clip_sha256':file_sha(clip),
@@ -188,15 +190,21 @@ def run(source: Path, snapshot: Path, out: Path, workers=2, *,
         answer=json.loads(reviewer.text(raw))
         from backend.pipeline.slide_visual_evidence import check_schema
         check_schema(answer,BATCH_SCHEMA)
-        if [p['paragraph_id'] for p in answer['results']] != [p['id'] for p in window['paragraphs']]:
+        if [p['paragraph_id'] for p in answer['results']] != [p['id'] for p in targets]:
             raise ValueError('Missing, reordered or extra target paragraph')
         accepted, rejected = [], []
-        for row, original in zip(answer['results'],window['paragraphs']):
+        for row, original in zip(answer['results'],targets):
             try:
                 validate({k:v for k,v in row.items() if k!='paragraph_id'},original['text'],(hi-lo)/1000)
                 accepted.append(row)
             except ValueError as error:
                 rejected.append({'paragraph_id':row['paragraph_id'],'reason':str(error)})
+        # An acknowledged unintelligible source is never another guessing task.
+        for p in window['paragraphs']:
+            if p['id'] in source_holds:
+                accepted.append(dict(paragraph_id=p['id'],limitations='音源不清；保留未確認粗稿，不辨猜講員。',turns=[dict(text=p['text'],role='unknown',confidence='uncertain',clip_start_s=(p['start_ms']-lo)/1000,clip_end_s=(p['end_ms']-lo)/1000,acoustic_basis='已記錄的來源噪聲限制；未要求模型猜辨本段。')]))
+        order={p['id']:i for i,p in enumerate(window['paragraphs'])}
+        accepted.sort(key=lambda p:order[p['paragraph_id']])
         result={'window_id':window['id'],'source_clip_start_ms':lo,
                 'accepted':accepted,'rejected':rejected,'missing_speech':answer['missing_speech'],
                 'usage':reviewer.usage(raw),'review_status':'unreviewed_model_candidate'}
