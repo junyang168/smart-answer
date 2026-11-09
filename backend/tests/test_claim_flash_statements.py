@@ -221,3 +221,21 @@ def test_direct_claim_reference_cannot_bypass_completed_lower_proof(ready):
     with pytest.raises(ValueError,match='required Evidence group not completed: evidence_steps/D'):
         stage.run(store,'S',['C'],eroot,root/'claims',ports)
     assert ports.calls==[]
+
+
+def test_oversized_jev_precheck_goes_to_gpt_with_full_material_without_faking_verdict(ready,monkeypatch):
+    store,root,_=ready;records,sources=f.load_source(store,'S');calls=[]
+    class FullInput(Ports):
+        def judge(self,request):pytest.fail('oversized Jev must not be called')
+        def repair(self,request):
+            calls.append(request)
+            return {'items':[{'job_id':j['job_id'],'action':'keep','reason':'完整材料足以支持原主張。'} for j in request['input']['jobs']]}
+    monkeypatch.setattr(f,'JEV_BYTES',1)
+    result=stage.review(records,sources,['claims/C'],'S',root/'oversized-precheck',FullInput())
+    assert not result['pending'] and not result['updates'] and len(calls)==3
+    expected=stage.flash.claim_material('claims/C',records,sources,'S')
+    for request in calls:
+        job=request['input']['jobs'][0]
+        assert job['material']==expected and job['jev']=='not_run_input_limit'
+    receipts=list((root/'oversized-precheck/precheck-unavailable').glob('*.json'))
+    assert len(receipts)==1 and json.loads(receipts[0].read_text())['model_calls']==0

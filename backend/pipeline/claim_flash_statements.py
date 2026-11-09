@@ -100,7 +100,17 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
     working=deepcopy(records)
     materials={k:flash.claim_material(k,records,sources,source_id) for k in targets}
     checks=TASKS if tasks is None else {k:TASKS[k] for k in tasks}
-    initial={k:f.jev(root/'precheck',ports,materials[k],{name:q.claim(with_references=bool(materials[k].get('claim_references')))[name] for name in checks}) for k in targets}
+    def precheck(state,names):
+        questions={name:q.claim(with_references=bool(state.get('claim_references')))[name] for name in names}
+        request={'model':e.MODEL,'state':state,'questions':questions}
+        if len(json.dumps(request,ensure_ascii=False).encode())>f.JEV_BYTES:
+            # This is not a Jev verdict. Preserve the full input for the normal
+            # GPT disposition rather than truncate evidence to fit a precheck.
+            e.save(root/'precheck-unavailable'/(e.digest(request)+'.json'),
+                {'reason':'jev_input_exceeds_limit','request':request,'model_calls':0})
+            return {name:'not_run_input_limit' for name in names}
+        return f.jev(root/'precheck',ports,state,questions)
+    initial={k:precheck(materials[k],checks) for k in targets}
     outcomes=[];pending=[];settled={k:{} for k in targets}
     for attempt in range(3):
         for question,(task,passing) in checks.items():
@@ -111,7 +121,7 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
                 stamp=judgment_hash(state,question)
                 if settled[key].get(question)==stamp:continue
                 verdict=(initial[key][question] if stamp==judgment_hash(materials[key],question)
-                         else f.jev(root/'precheck',ports,state,{question:q.claim(with_references=bool(state.get('claim_references')))[question]})[question])
+                         else precheck(state,[question])[question])
                 if verdict!=passing:
                     jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
                 else:
