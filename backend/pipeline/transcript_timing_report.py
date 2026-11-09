@@ -44,11 +44,12 @@ def write_report(out:Path,record:dict,evidence:Path):
         qualified=len(record['paragraphs'])-len(rows),withheld=len(rows),paragraphs=rows,
         editor_imported=False,human_approved=False,model_calls=0)
     save_json(folder/'report.json',report)
-    receipt=out/'media-receipt.json';media=None
+    receipt=out/'media-receipt.json';media=None;media_sha=None
     if receipt.exists():
         r=read_json(receipt);source=Path(r['path'])
         if r['source_sha256']!=record['source_sha256'] or file_sha(source)!=r['sha256']:raise ValueError('Diagnostic playback source changed')
         media='playback.mp3' if r['mime']=='audio/mpeg' else 'playback.mp4'
+        media_sha=r['sha256']
         dest=folder/media
         if dest.exists():
             if file_sha(dest)!=r['sha256']:raise ValueError('Diagnostic playback changed')
@@ -68,7 +69,7 @@ def write_report(out:Path,record:dict,evidence:Path):
             button=f'<button data-start="{start/1000}" data-end="{end/1000}">聽定位候選（尚未核准）</button> '+button
         reasons=''.join(f'<li>{e(v["reason"])}</li>' for v in r['reviews']) or '<li>相鄰段落的時間仍重疊，尚無可靠的切分點。</li>'
         cards.append(f'<article><h2>第 {r["number"]} 段 <small>{e(r["id"])}</small></h2><p>{e(r["text"])}</p><details open><summary>核驗記錄（仍待解決）</summary><ul>{reasons}</ul></details>{button}</article>')
-    player=f'<audio id="player" controls preload="metadata" src="{media}"></audio>' if media else ''
+    player=f'<audio id="player" controls preload="metadata" src="{media}?sha256={media_sha}"></audio>' if media else ''
     page=f'''<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>羅馬書第一講・時間核驗結果</title>
 <style>body{{font:17px/1.7 system-ui,sans-serif;max-width:1040px;margin:32px auto;padding:0 20px;color:#172033;background:#f5f7fb}}header,article{{padding:24px;background:white;border:1px solid #dde3ec;border-radius:14px;margin:18px 0}}h1{{margin:0}}h2{{font-size:21px}}small{{font-size:13px;color:#64748b}}button{{padding:10px 15px;border:1px solid #b9c9df;border-radius:8px;background:#eef4ff;color:#1648a5;cursor:pointer}}audio{{width:100%}}p{{white-space:pre-wrap}}li{{margin:10px 0}}.hold{{color:#995318;font-weight:600}}</style>
 <header><h1>羅馬書第一講・時間核驗結果</h1><p>2014-04-18 · 羅馬書 1:1–4</p><p><strong>{report['qualified']}/{report['total']} 段通過</strong> · <span class="hold">{report['withheld']} 段尚未通過</span></p><p>這是問題檢視頁。尚未建立 Editor 草稿，未發佈。下方播放器播放的是原始錄音的來源範圍，並不表示段落起訖已正確。</p>{player}</header>{''.join(cards)}
