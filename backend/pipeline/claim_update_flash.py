@@ -330,7 +330,8 @@ def commit_group(store,root):
                     state=conn.execute('SELECT revision,content_sha256,retired_at FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',tuple(key.split('/',1))).fetchone()
                     if not state or (state[0],state[1],state[2] is not None)!=(row['revision'],row['content_sha256'],row['retired']):
                         raise ValueError('no-op inputs changed before completion: '+key)
-    return c.commit(store,root)
+    saved=json.loads((root/'before.json').read_text())
+    return c.commit(store,root,source_binding=saved['sources'][draft['source_id']]['file'])
 
 
 def current_claim_payload(payload,*,verified_ai_sampling=False,verified_ai_findings=False):

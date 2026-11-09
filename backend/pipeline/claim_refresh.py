@@ -502,7 +502,7 @@ def candidate_occurrences(candidate, records, sid, *, source_binding=None):
     return result
 
 
-def commit(store, root):
+def commit(store, root, *, source_binding=None):
     if (root / 'verification.json').exists():
         return e.commit_verified(store, root)
     draft = json.loads((root / 'draft.json').read_text())
@@ -520,7 +520,7 @@ def commit(store, root):
         updates['claims/' + cid] = {'claim_id': cid, 'statement': candidate['statement'],
             'claim_type': 'interpretive_judgment', 'attribution': 'professor',
             'evidence_step_ids': candidate['evidence_step_ids'], 'scripture_refs': candidate['scripture_refs'],
-            'occurrences': candidate_occurrences(candidate, records, sid),
+            'occurrences': candidate_occurrences(candidate, records, sid,source_binding=source_binding),
             'review_status': 'candidate', 'maturity': 'candidate', 'visibility': 'internal', 'revision': 1}
     for relation in draft['new_relation_specs']:
         payload = deepcopy(relation)
