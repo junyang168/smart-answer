@@ -61,13 +61,21 @@ def test_audience_label_is_annotation_not_an_automatic_rebinding_exception():
     assert result['proposed_fields']['speaker']=='audience'
 
 
-def test_bound_deleted_words_are_marked_without_reusing_them_as_live_quote():
+def test_partial_deletion_keeps_live_candidate_but_never_inherits_approval():
     quote='這裡是一個重要的判斷，需要逐字檢查原來的來源。'
     result=inspect(PREFIX+quote+SUFFIX,PREFIX+quote.replace('重要的','~~重要的~~')+SUFFIX,quote)
-    assert result['status']=='source_deleted'
+    assert result['status']=='located_review'
     assert result['matched_deleted_character_count']==3
     assert '重要的' not in result['candidate_quote']
-    assert result['proposed_fields']['anchor_state']=='source_deleted'
+    assert 'proposed_fields' not in result
+    assert result['content_equivalence_proven'] is False
+
+
+def test_entire_deleted_quote_is_not_rebound_to_similar_live_text():
+    quote='這裡是一個重要的判斷，需要逐字檢查原來的來源。'
+    result=inspect(PREFIX+quote+SUFFIX,PREFIX+'~~'+quote+'~~'+SUFFIX,quote)
+    assert result['status']=='source_deleted'
+    assert not result.get('candidate_quote','').strip()
 
 
 def test_new_deleted_interjection_is_not_an_old_quoted_character():

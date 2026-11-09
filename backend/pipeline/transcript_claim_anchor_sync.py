@@ -112,7 +112,7 @@ def select_fragments(anchor, evidence, records, prior, source, snapshot):
                 else 'no_current_owned_source'), list(states-{None})
 
 
-def projected_anchor(anchor, fragment, evidence, snapshot):
+def projected_anchor(anchor, fragment, evidence, snapshot, *, impact_preserved=False):
     out = deepcopy(anchor); p = snapshot['paragraphs'][fragment['paragraph_key']]
     q = literal_subquote(highlight(anchor),fragment['verbatim_excerpt'])
     # Keep a source fragment's full literal slice when a short highlight is
@@ -132,7 +132,7 @@ def projected_anchor(anchor, fragment, evidence, snapshot):
         verbatim_excerpt_sha256=m.sha(q.encode()),locator_precision='paragraph',
         highlight_resolution='unique' if p['text'].count(q)==1 else 'repeated_within_paragraph',
         source_binding_status='source_version_bound',
-        locator_content_review_required=bool(anchor.get('locator_content_review_required') or oldq != q or evidence.get('support_eligibility')=='withheld_unreviewed'
+        locator_content_review_required=bool(anchor.get('locator_content_review_required') or (e.script_layout(oldq)[0] != e.script_layout(q)[0] and not impact_preserved) or evidence.get('support_eligibility')=='withheld_unreviewed'
                                              or evidence.get('source_binding_status') in {'needs_claim_refresh','partially_deleted'}))
     return out
 
@@ -162,7 +162,7 @@ def group_overlaps(anchors, snapshot):
     cm.source.validate_basis_groups(spans)
 
 
-def compile_projection(records, prior, *, source_id, snapshot):
+def compile_projection(records, prior, *, source_id, snapshot, preserved_evidence=()):
     source=records['source_documents/'+source_id]['payload'];updates={};rows=[];skipped=[]
     for key,state in sorted(records.items()):
         if not key.startswith('claims/') or state['retired']:continue
@@ -182,7 +182,8 @@ def compile_projection(records, prior, *, source_id, snapshot):
                     ids,reason,inactive=[],'context_only',[]
                 else:
                     ids,reason,inactive=select_fragments(anchor,evidence,records,prior,source,snapshot)
-                made=[projected_anchor(anchor,records['source_fragments/'+fid]['payload'],evidence,snapshot) for fid in ids]
+                made=[projected_anchor(anchor,records['source_fragments/'+fid]['payload'],evidence,snapshot,
+                    impact_preserved='evidence_steps/'+str(eid) in preserved_evidence) for fid in ids]
                 result.extend(made)
                 if not made:
                     note={'old_anchor_sha256':cm.sha256_json(anchor),'evidence_id':eid,
@@ -252,7 +253,8 @@ def package_for(report, authority=None):
 def validate_package(package):
     """Store authority: recompute exact metadata copies, never borrow AI review."""
     app=package.get('source_repair_application') or {}
-    if set(app)!={'schema_version','before_records','prior_records','report','owner_direction','source_files'} or app['schema_version']!=VERSION:
+    fields={'schema_version','before_records','prior_records','report','owner_direction','source_files'}
+    if set(app) not in (fields, fields|{'impact_evidence_plan'}) or app['schema_version']!=VERSION:
         raise ValueError('anchor sync authority fields differ')
     for bound in [app['before_records'],app['prior_records'],app['report'],app['owner_direction'],*app['source_files']]:
         cm.source.verify_file(bound)
@@ -268,7 +270,22 @@ def validate_package(package):
     if (m.binding(Path(source['source_path'])) not in app['source_files']
             or snapshot['body_sha256']!=source['source_body_sha256']):
         raise ValueError('anchor sync source identity differs')
-    compiled=compile_projection(records,prior,source_id=report['source_id'],snapshot=snapshot)
+    preserved=[]
+    if app.get('impact_evidence_plan'):
+        cm.source.verify_file(app['impact_evidence_plan'])
+        ep=m.read(app['impact_evidence_plan']['path'])
+        if ep['records']!=app['prior_records'] or ep['source_id']!=report['source_id']:
+            raise ValueError('impact handoff differs from original Evidence inputs')
+        cm.source.verify_file(ep['report'])
+        er=m.read(ep['report']['path'])
+        from backend.pipeline.transcript_migration_impact import verified_preserved
+        preserved=verified_preserved(er,prior,snapshot)
+        for key in preserved:
+            wanted={**er['updates'][key], 'revision':prior[key]['revision']+1}
+            if records.get(key,{}).get('payload')!=wanted:
+                raise ValueError('semantic decision differs from committed Evidence')
+    compiled=compile_projection(records,prior,source_id=report['source_id'],snapshot=snapshot,
+                                preserved_evidence=preserved)
     if compiled!=report or package!=package_for(compiled,app):
         raise ValueError('anchor package differs from exact deterministic source projection')
 
@@ -334,11 +351,15 @@ def prepare(store,root,*,source_id,evidence_run,published,instruction):
     snapshot=ea.snap(source['source_path'])
     if snapshot['body_sha256']!=source['source_body_sha256'] or {**snapshot,'file':pub}!=ea.snap(published):
         raise ValueError('source does not match published body, row identities and clocks')
-    report=compile_projection(records,prior,source_id=source_id,snapshot=snapshot)
+    cm.source.verify_file(er['report'])
+    preserved=m.read(er['report']['path']).get('preserved_eligibility', [])
+    report=compile_projection(records,prior,source_id=source_id,snapshot=snapshot,preserved_evidence=preserved)
     rb=m.immutable(root/'records-before.json',records);comparison=m.immutable(root/'comparison.json',report)
     direction=m.immutable(root/'owner-direction.json',{'authorized_by':'owner','instruction':instruction,'new_qualification_granted':False})
     authority={'schema_version':VERSION,'before_records':rb,'prior_records':er['records'],'report':comparison,
                'owner_direction':direction,'source_files':[current,pub]}
+    if preserved:
+        authority['impact_evidence_plan']=m.binding(evidence_run/'plan.json')
     package=package_for(report,authority)
     plan=store.plan_package(package,source_kind=VERSION,transactional=True);validate_plan(plan,report,records)
     value={'schema_version':VERSION,'intent':intent,'records':rb,'report':comparison,'source_files':[current,pub,er['records'],m.binding(evidence_run/'plan.json')],

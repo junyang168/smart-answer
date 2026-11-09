@@ -197,3 +197,48 @@ def test_calibrated_audience_turn_keeps_speaker_through_fragment_and_evidence():
     assert report['updates']['source_fragments/F']['speaker']=='audience'
     assert report['updates']['evidence_steps/E']['speaker']=='audience'
     assert report['updates']['evidence_steps/E']['support_eligibility']=='withheld_unreviewed'
+
+
+def test_legacy_clock_witness_is_bound_through_sql_apply(relocation):
+    from backend.api.sc_api.transcript_review import atomic
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    store, root, old, published = relocation
+    fragment = store.get_record('source_fragments', 'F1')
+    fragment.update(media_time=None, media_end_time=None, source_segment_index=1,
+        paragraph_text_sha256=m.sha(a.snap(old)['paragraphs']['S0001']['text'].encode()))
+    store.apply_plan(store.plan_package({'source_fragments': [fragment]}))
+    backup = root.parent / 'clock-backup'
+    timeline = backup / 'production/script/lecture.json'
+    atomic(timeline, {'entries': [
+        {'index': 1, 'start': '00:00:01,000', 'end': '00:00:05,000'},
+        {'index': 2, 'start': '00:00:05,000', 'end': '00:00:10,000'}]})
+    atomic(backup / 'backup.json', {'schema_version': 'transcript-promotion-backup.v1',
+        'intent': {'item': 'lecture'}, 'files': {'production': {
+            'script/lecture.json': {'sha256': m.sha(timeline.read_bytes())}}}})
+    proof = {'item': 'lecture', 'source_file': m.binding(old),
+             'timeline_file': m.binding(timeline), 'backup_manifest': m.binding(backup / 'backup.json')}
+    assert verified_legacy_interval(fragment, proof)['media_end_time'] == 5
+    state = store.get_record_state('source_fragments', 'F1')
+    rules = root.parent / 'clock-calibration.json'
+    atomic(rules, {'schema_version': 'wang_transcript_locator_calibration_v1', 'source_id': 'S',
+        'fragments': {'source_fragments/F1': {'before_pin': [state['revision'], state['content_sha256']],
+            'target_source_sha256': a.snap(published)['body_sha256'], 'mode': 'relocate',
+            'reason': 'Original clock backup plus exact source paragraph', 'legacy_clock': proof,
+            'segments': [{'paragraph_key': 'S0001', 'verbatim_excerpt': '教授原話'}]}}})
+    plan = a.prepare(store, root, source_id='S', old_paths=[old], published=published,
+                     instruction='Pinned technical relocation only', calibration_path=rules)
+    assert m.binding(timeline) in plan['source_files']
+    before = store.get_record_state('source_fragments', 'F1')
+    timeline.write_text('{}')
+    with pytest.raises(ValueError): a.apply(store, root)
+    assert store.get_record_state('source_fragments', 'F1') == before
+
+
+@pytest.mark.parametrize('text', ['什麼？', '是什麼？', '還有什麼？', '問題在哪裡？', '問題在哪？', '還有其他的……還有什麼？'])
+def test_standalone_conversational_questions_are_context_only(text):
+    assert a.context_only(text)
+
+
+@pytest.mark.parametrize('text', ['信心是什麼？', '問題在哪裡？在於沒有信服神。', '神還有什麼應許？', '三年半，真的？', '馬可。'])
+def test_substantive_questions_and_short_answers_are_not_erased(text):
+    assert not a.context_only(text)
