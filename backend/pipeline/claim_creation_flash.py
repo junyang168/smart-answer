@@ -20,6 +20,7 @@ from backend.pipeline.knowledge_package_merge import validate_merged_package
 
 VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
+GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -40,7 +41,7 @@ def schema(name, properties):
     return {'name': VERSION + '_' + name, 'strict': True, 'schema': object_schema(properties)}
 
 
-def schemas(*, compact_audit=False):
+def schemas(*, compact_audit=False, grouped_package=False):
     """Derive producer fields from the existing schema, not parallel records."""
     claim = deepcopy(BASE['claims']['items'])
     for key in ('claim_id', 'evidence_step_ids', 'opposed_position_ids', 'review_status'):
@@ -53,7 +54,9 @@ def schemas(*, compact_audit=False):
     materials = {k: deepcopy(BASE[k]) for k in ('questions', 'positions', 'observations', 'evidence_steps', 'sentence_audit')}
     for col, field in (('questions', 'answer_claim_ids'), ('evidence_steps', 'produced_claim_ids')):
         row = materials[col]['items']; row['properties'].pop(field); row['required'].remove(field)
-    obs=materials['observations']['items'];obs['properties'].pop('argument_role');obs['required'].remove('argument_role')
+    compact_audit=compact_audit or grouped_package
+    if not grouped_package:
+        obs=materials['observations']['items'];obs['properties'].pop('argument_role');obs['required'].remove('argument_role')
     if compact_audit:
         audit=materials.pop('sentence_audit')['items']['properties']
         materials['coverage_by_record']=array(object_schema({'record_id':{'type':'string'},
@@ -62,8 +65,9 @@ def schemas(*, compact_audit=False):
             'reason_code':{'type':'string','enum':sorted(d.REASON_CODES)},'reason':deepcopy(audit['reason'])}))
     connection = object_schema({'from_id': {'type': 'string'}, 'to_id': {'type': 'string'},
         'relation_type': {'type': 'string', 'enum': d.RELATION_TYPES}, 'reason': {'type': 'string'}})
+    if grouped_package:materials['connections']=array(connection)
     return {'claims': schema('claims', {'candidates': array(claim)}),
-            'materials': schema('materials_compact_audit_v1' if compact_audit else 'materials', materials),
+            'materials': schema('group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
             'connections': schema('connections', {'connections': array(connection),
                 'observation_roles':array(object_schema({'observation_id':{'type':'string'},
                     'argument_role':deepcopy(BASE['observations']['items']['properties']['argument_role']),
@@ -156,6 +160,23 @@ def expand_material_audit(result, sentence_ids):
         {'sentence_id':sid,'status':'not_extracted','covered_by':[],
          'reason_code':excluded[sid]['reason_code'],'reason':excluded[sid]['reason']} for sid in sentence_ids]
     return result
+
+
+def group_package_prompt():
+    return compact_material_prompt().replace(
+        '不要生成Claim、論證連接或判argument_role，也不判Claim整體充分性。',
+        'Claim候選只讀，不重抽或改寫；同時完成材料、argument_role及完整論證連接。') + (
+        '本次一次構建整組共享底層知識包，按claim_candidates各自相關原文範圍找論據；'
+        '材料共用，不為每條Claim複製一套。全部重要材料仍須保存，不只保存候選已預期的理由。'
+        'connections一次給齊端點、類型、方向及簡短理由，包括材料間推理、材料到Claim、Claim間關係、'
+        'Claim到Question的answers及Claim到Position的refutes；直接材料回答問題也可按既有合法類型連接。'
+        '端點只能用本次實際生成的材料ID、提供的Claim ID或existing_materials的ID。'
+        '每條Observation在自身argument_role欄位給load_bearing或background；'
+        'load_bearing須在本次完整圖有通往Evidence或Claim的路線，不能為連齊所有節點虛構支持。'
+        'speaker／stance針對材料statement整個判斷；「教授反對X」表達教授採納的否定，不能因提到反方X就標opposed。'
+        '原文說過一句話不等於它支持整條Claim；不為候選編造論據，候選本身也不能充當來源。'
+        'Evidence的produced_claim_ids及Question的answer_claim_ids由程式按connections同步，不重複輸出。'
+        + f.RELATION_REASON_RULES)
 
 
 def empty():
@@ -272,7 +293,7 @@ def bind_conclusions(package,candidates,projection):
 
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False):
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -287,14 +308,16 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if not keys: raise ValueError('empty creation source')
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
-        contracts = schemas(compact_audit=compact_audit)
-        material_prompt = compact_material_prompt() if compact_audit else MATERIALS
+        compact_audit=compact_audit or grouped_package
+        contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package)
+        material_prompt = group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
         e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id,
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
-            'models': ports.identity, 'material_sentence_budget':24,
+            'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
             'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]), 'supplied_groups': groups,
-            **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {})})
+            **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
+            **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {})})
         if (root/'creation-result.json').exists():
             saved = json.loads((root/'creation-result.json').read_text())
             package = json.loads((root/'candidate.json').read_text())
@@ -352,12 +375,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 group_claims[gid].append(cid)
         e.save(root/'claim-candidates.json',candidates)
         # Bounded material tasks keep output manageable without another full review.
-        material_ordinal=0
+        material_ordinal=0;connections=[]
         for n, group in enumerate(groups,1):
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
             group_materials[gid]=[]
-            batches=[];batch=[];count=0
-            for pk in owned:
+            batches=[owned] if grouped_package else [];batch=[];count=0
+            for pk in ([] if grouped_package else owned):
                 total=sum(v.segment_index==pk for v in all_sentences)
                 if total>24:raise ValueError('one paragraph exceeds material sentence budget; use existing sentence-slice source preparation')
                 if batch and count+total>24:batches.append(batch);batch=[];count=0
@@ -372,22 +395,24 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 reference.update(a['segment_index'] for col in COLLECTIONS[:4] for row in response[col]
                     for a in row.get('anchors',[]) if a['segment_index'] in owned)
                 reference-=set(batch)
-                payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch},
+                payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch if paragraphs[pk].strip() or not grouped_package},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in keys if pk in reference},
                     'claim_candidates':{cid:candidates[cid] for cid in group_claims[gid]},
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
-                result=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_materials',payload,contracts['materials'],material_prompt,source_check)
+                result=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_group_package' if grouped_package else 'creation_materials',payload,contracts['materials'],material_prompt,source_check)
+                raw_sha=e.digest(result)
+                local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
-                    raw_sha=e.digest(result)
                     result=expand_material_audit(result,[v.sentence_id for v in sentences])
                     e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'audit-expansion.json',{
                         'contract':COMPACT_AUDIT,'raw_response_sha256':raw_sha,'sentence_audit':result['sentence_audit']})
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
                     calibrate([r for col in COLLECTIONS[:4] for r in result[col]],paragraphs))
                 partial=empty();partial.update(result)
-                for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
+                if not grouped_package:
+                    for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
                 if any(not any(a['segment_index'] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
@@ -396,6 +421,15 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 named=sections.namespace_response(partial,sections.Section(material_ordinal,0,0,group['title']))
                 local_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in partial[col]}
                 prior_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in response[col]}
+                if grouped_package:
+                    known=local_ids|prior_ids|set(group_claims[gid]);local=local_ids|set(group_claims[gid])
+                    mapping={before[IDS[col]]:after[IDS[col]] for col in COLLECTIONS[:4]
+                             for before,after in zip(partial[col],named[col])}
+                    for edge in local_edges:
+                        endpoints={edge['from_id'],edge['to_id']}
+                        if not endpoints<=known or not endpoints&local:raise ValueError('group package connection uses unprovided or unrelated endpoints')
+                        connections.append({**edge,'from_id':mapping.get(edge['from_id'],edge['from_id']),
+                            'to_id':mapping.get(edge['to_id'],edge['to_id'])})
                 audits=[]
                 for audit in partial['sentence_audit']:
                     if not set(audit['covered_by'])<=local_ids|prior_ids:raise ValueError('sentence audit cites unknown material')
@@ -407,8 +441,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 group_materials[gid].extend(r[IDS[col]] for col in COLLECTIONS[:4] for r in named[col])
                 for col in COLLECTIONS[:4]:response[col].extend(named[col])
                 response['sentence_audit'].extend(audits)
-        connections=[]
         for n, group in enumerate(groups,1):
+            if grouped_package:continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
             nodes={r[IDS[col]]:{'collection':col,**r} for col in COLLECTIONS[:5] for r in response[col]}
             local=set(group_claims[gid]+group_materials[gid])
@@ -473,13 +507,14 @@ def main():
     for name in ('source-id','source-file','root','capacity-file'):parser.add_argument('--'+name,required=True)
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
+    parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
-    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=6000,executable=args.codex_executable)
+    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package else 6000,executable=args.codex_executable)
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)

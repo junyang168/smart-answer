@@ -66,6 +66,56 @@ class CompactPorts(Ports):
         return result
 
 
+class PackagePorts(Ports):
+    def __init__(self,source,group_mutation=None):
+        super().__init__(source);self.group_mutation=group_mutation
+    def repair(self,request):
+        if request['input']['task']!='creation_group_package':return super().repair(request)
+        assert set(request['input']['claim_candidates'])=={'CL0001'}
+        assert '不要生成Claim、論證連接或判argument_role' not in request['system']
+        material_request=deepcopy(request);material_request['input']['task']='creation_materials'
+        result=super().repair(material_request);self.calls[-1]='creation_group_package'
+        result=compact_response(result)
+        for row in result['observations']:row['argument_role']='background'
+        result['connections']=[{'from_id':'E001','to_id':'CL0001','relation_type':'supports','reason':'原文支持候選。'},
+            {'from_id':'CL0001','to_id':'Q001','relation_type':'answers','reason':'直接回答問題。'},
+            {'from_id':'CL0001','to_id':'POS001','relation_type':'refutes','reason':'教授否定反方。'}]
+        return self.group_mutation(result) if self.group_mutation else result
+
+
+def test_group_package_builds_materials_roles_and_connections_in_one_model_task(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    ports=PackagePorts(source);result=creation.run('T',path,root,ports,groups=groups(),grouped_package=True)
+    assert result['status']=='creation_complete' and ports.calls==['creation_claims','creation_group_package']
+    package=json.loads((root/'candidate.json').read_text());cid=package['claims'][0]['claim_id']
+    assert package['claims'][0]['evidence_step_ids']==[package['evidence_steps'][0]['evidence_step_id']]
+    assert package['evidence_steps'][0]['produced_claim_ids']==[cid]
+    assert package['questions'][0]['answer_claim_ids']==[cid] and package['claims'][0]['opposed_position_ids']
+    assert not (root/'G001/connections').exists()
+    ports.calls=[];assert creation.run('T',path,root,ports,groups=groups(),grouped_package=True)==result
+    assert ports.calls==[]
+
+
+@pytest.mark.parametrize('fault',['unknown_endpoint','missing_support','unconnected_load_bearing'])
+def test_incomplete_group_package_cannot_become_a_complete_candidate(tmp_path,fault):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    def mutate(result):
+        if fault=='unknown_endpoint':result['connections'][0]['from_id']='MISSING'
+        if fault=='missing_support':result['connections']=result['connections'][1:]
+        if fault=='unconnected_load_bearing':result['observations'][0]['argument_role']='load_bearing'
+        return result
+    with pytest.raises(ValueError):creation.run('T',path,root,PackagePorts(source,mutate),groups=groups(),grouped_package=True)
+    assert not (root/'creation-result.json').exists()
+
+
+def test_group_package_schema_keeps_native_role_and_single_edge_authority():
+    schema=creation.schemas(grouped_package=True)['materials']['schema']['properties']
+    assert 'connections' in schema and 'argument_role' in schema['observations']['items']['properties']
+    assert 'sentence_audit' not in schema and 'observation_roles' not in schema
+    assert 'produced_claim_ids' not in schema['evidence_steps']['items']['properties']
+    assert 'answer_claim_ids' not in schema['questions']['items']['properties']
+
+
 def test_compact_transport_compiles_full_legacy_ledger_and_replays_without_calls(tmp_path):
     source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
     ports=CompactPorts(source)

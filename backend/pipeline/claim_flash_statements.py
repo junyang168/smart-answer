@@ -98,7 +98,7 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
     working=deepcopy(records)
     materials={k:flash.claim_material(k,records,sources,source_id) for k in targets}
     checks=TASKS if tasks is None else {k:TASKS[k] for k in tasks}
-    initial={k:f.jev(root/'precheck',ports,materials[k],{name:q.claim()[name] for name in checks}) for k in targets}
+    initial={k:f.jev(root/'precheck',ports,materials[k],{name:q.claim(with_references=bool(materials[k].get('claim_references')))[name] for name in checks}) for k in targets}
     outcomes=[];pending=[];settled={k:{} for k in targets}
     for attempt in range(3):
         for question,(task,passing) in checks.items():
@@ -109,7 +109,7 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
                 stamp=judgment_hash(state,question)
                 if settled[key].get(question)==stamp:continue
                 verdict=(initial[key][question] if stamp==judgment_hash(materials[key],question)
-                         else f.jev(root/'precheck',ports,state,{question:q.claim()[question]})[question])
+                         else f.jev(root/'precheck',ports,state,{question:q.claim(with_references=bool(state.get('claim_references')))[question]})[question])
                 if verdict!=passing:
                     jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
                 else:
@@ -153,7 +153,7 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'claim_ids':claim_ids,'source':pin,
             'evidence_root':str(Path(evidence_root).resolve()),'models':ports.identity,
-            'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema()])})
+            'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema(),flash.CLAIM_REFERENCE_CONTRACT])})
         if (root/'verification.json').exists():return finish(store,root) if apply else json.loads((root/'verification.json').read_text())
         plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
         group=next((g for g in plan['groups'] if set(claim_ids)<=set(g.get('claim_ids',[]))),None)
@@ -175,6 +175,11 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
             context=materials[key].get('argument_context',{})
             needed.update(x['object_key'] for x in context.get('records',[]))
             read.update(x['object_key'] for x in context.get('relations',[]))
+            for ref in materials[key].get('claim_references',[]):
+                needed.update(ref['supporting_material_keys']);read.add(ref['object_key'])
+                read.update('source_fragments/'+fid for fid in ref['source_fragment_ids'])
+                read.update(ref['supporting_relation_keys'])
+                read.update(r['object_key'] for r in ref['relations'])
         if any(not materials[k]['evidence'] for k in targets):raise ValueError('Claim has no verified lower support')
         proof=verify_evidence(evidence_root,needed,records,sources)
         read.update(needed)

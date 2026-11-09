@@ -186,3 +186,38 @@ def test_upstream_lower_must_have_existing_completed_evidence_proof(ready):
     with pytest.raises(ValueError,match='required Evidence group not completed: observations/O'):
         stage.run(store,'S',['C'],eroot,root/'claims',ports)
     assert ports.calls==[]
+
+
+def test_direct_claim_premise_brings_source_once_without_following_next_claim(tmp_path):
+    from backend.tests.test_claim_flash_source import fixture
+    from backend.pipeline import claim_update_flash as flash
+    records,sources=fixture(tmp_path,['目標原話。','直接前提的字義例子。','第三條的另一主題。'],
+        [('S0001','目標原話。'),('S0002','直接前提的字義例子。'),('S0003','第三條的另一主題。')])
+    records['evidence_steps/E']['payload']['source_fragment_ids']=['F0']
+    for cid,eid,fid in [('A','E','F0'),('B','D','F1'),('C','G','F2')]:
+        records['claims/'+cid]={'payload':{'claim_id':cid,'statement':cid+'的判斷','attribution':'professor',
+            'evidence_step_ids':[eid],'occurrences':[{'source_id':'S','anchors':[]}]}}
+        if eid!='E':records['evidence_steps/'+eid]={'payload':{'evidence_step_id':eid,'statement':cid+'的論據',
+            'source_fragment_ids':[fid],'speaker':'professor','stance':'asserted'}}
+    for rid,src,dst in [('R1','B','A'),('R2','C','B')]:
+        records['claim_relations/'+rid]={'payload':{'claim_relation_id':rid,'from_id':src,'to_id':dst,'relation_type':'supports','reason':'直接前提。'}}
+    material=flash.claim_material('claims/A',records,sources,'S')
+    assert set(material['source_paragraphs'])=={'S0001','S0002'}
+    ref,=material['claim_references']
+    assert ref['object_key']=='claims/B' and ref['supporting_material_keys']==['evidence_steps/D']
+    assert ref['relations'][0]['object_key']=='claim_relations/R1'
+    assert '第三條的另一主題' not in json.dumps(material,ensure_ascii=False)
+    assert 'claims/C' not in json.dumps(material,ensure_ascii=False)
+
+
+def test_direct_claim_reference_cannot_bypass_completed_lower_proof(ready):
+    store,root,eroot=ready
+    store.apply_plan(store.plan_package({'package_id':'direct-premise',
+      'claims':[{'claim_id':'B','statement':'直接前提。','claim_type':'reasoning_conclusion','attribution':'professor',
+                 'evidence_step_ids':['D'],'occurrences':[{'source_id':'S','anchors':[]}]}],
+      'evidence_steps':[{'evidence_step_id':'D','statement':'尚未完成的下層。','source_fragment_ids':['F']}],
+      'claim_relations':[{'claim_relation_id':'R','from_id':'B','to_id':'C','relation_type':'supports','reason':'直接論據。'}]}))
+    ports=Ports()
+    with pytest.raises(ValueError,match='required Evidence group not completed: evidence_steps/D'):
+        stage.run(store,'S',['C'],eroot,root/'claims',ports)
+    assert ports.calls==[]

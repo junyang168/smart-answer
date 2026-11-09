@@ -62,10 +62,12 @@ def component(item):
                   '保留原有條件與語氣。`source_context` 只消歧，不補未掛載的論據。\n判斷：'+item['text'],SUPPORT)
 
 
-def claim():
+def claim(*,with_references=False):
     return {
         'statement_fidelity':choice('`claim.statement` 與教授原意的對應情況是哪種？保留原有條件、否定、對象與歸屬。',FIDELITY),
-        'support':choice('完整 `evidence` 合起來對 `claim.statement` 的支持程度是哪種？單項可只支持部分。',SUPPORT),
+        'support':choice(('完整 `evidence` 與直接 `claim_references` 所綁的 `source_paragraphs`，合起來對 `claim.statement` 的支持程度是哪種？'
+                         '單項可只支持部分；參考Claim只讀，不假設其文字已獲批准，須依實際來源。' if with_references else
+                         '完整 `evidence` 合起來對 `claim.statement` 的支持程度是哪種？單項可只支持部分。'),SUPPORT),
         'scripture':choice('教授用於本主張的關鍵經文及其作用，在目前記錄中是哪種情況？不要求抄入 statement。',SCRIPTURE)}
 
 

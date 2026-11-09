@@ -344,7 +344,10 @@ def current_claim_payload(payload,*,verified_ai_sampling=False):
     return {**payload,**RESET,'ai_review_provenance':None,'source_reconciliation_review_sha256':None}
 
 
-def claim_material(key,records,sources,source_id):
+CLAIM_REFERENCE_CONTRACT='claim_flash_direct_incoming_claim_source_v1'
+
+
+def claim_material(key,records,sources,source_id,*,include_claim_references=True):
     """Actual Claim-level input; verified lower records are supporting material."""
     p=records[key]['payload']
     ev=[{**pairs.node('evidence_steps/'+eid,records,sources),'relation_type':'supports'}
@@ -383,6 +386,35 @@ def claim_material(key,records,sources,source_id):
     if edges:
         result['argument_context']={'records':list(nodes.values()),'relations':list(edges.values()),
             'scope':'Existing source-local incoming lower argument paths; these are not additional direct Claim attachments.'}
+    if include_claim_references:
+        references={}
+        for rk,rr in sorted(records.items()):
+            if not rk.startswith(('claim_relations/','knowledge_relations/')):continue
+            rel=rr['payload'];other='claims/'+rel.get('from_id','')
+            if (rel.get('to_id')!=p['claim_id'] or other==key or other not in records
+                    or not f.belongs_to_source(records[other]['payload'],records,source_id)):continue
+            if other not in references:
+                # Exactly one Claim hop. Read its actual source, not its
+                # neighbours or an assumed approval of its statement.
+                value=claim_material(other,records,sources,source_id,include_claim_references=False)
+                required={n['object_key'] for n in value['evidence']}
+                required.update(n['object_key'] for n in value.get('argument_context',{}).get('records',[]))
+                fids={fid for node in required for fid in e.evidence_fragment_ids(records[node]['payload'])}
+                fids.update(a['source_fragment_id'] for o in records[other]['payload'].get('occurrences',[])
+                            for a in o.get('anchors',[]) if a.get('source_fragment_id'))
+                for fid in sorted(fids):
+                    fragment=records['source_fragments/'+fid]['payload']
+                    if fragment['source_id']!=source_id:raise ValueError('Claim reference source crosses source boundary')
+                    pk=fragment['paragraph_key'];raw[pk]=sources[source_id]['paragraphs'][pk]['text']
+                references[other]={'object_key':other,'claim':value['claim'],
+                    'supporting_material_keys':sorted(required),'source_fragment_ids':sorted(fids),
+                    'supporting_relation_keys':[r['object_key'] for r in value.get('argument_context',{}).get('relations',[])],
+                    'source_paragraph_keys':sorted({records['source_fragments/'+fid]['payload']['paragraph_key'] for fid in fids}),
+                    'relations':[], 'scope':'Read-only direct premise; judge target against source_paragraphs, not an assumed approved Claim. No Claim-neighbour expansion.'}
+            references[other]['relations'].append({'object_key':rk,**deepcopy(rel)})
+        if references:
+            result['claim_references']=list(references.values())
+            result.update(f.source_interpretation(sources,{source_id:list(raw)}))
     return result
 
 

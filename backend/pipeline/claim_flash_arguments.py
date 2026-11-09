@@ -158,7 +158,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             state=flash.claim_material(key,working,sources,source_id)
             if state==prior and not any(x['object_key']==key for x in old_checks['pending']):
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
-            answers=f.jev(root/'postimage-support',ports,state,{k:q.claim()[k] for k in ['support','scripture']})
+            answers=f.jev(root/'postimage-support',ports,state,{k:q.claim(with_references=bool(state.get('claim_references')))[k] for k in ['support','scripture']})
             issues={k:v for k,v in answers.items() if v!=('supported' if k=='support' else 'complete')}
             if issues:
                 job={'job_id':key,'material':state,'findings':issues}
