@@ -469,6 +469,15 @@ def candidate_occurrences(candidate, records, sid):
                 'paragraph_key':fragment['paragraph_key'],'media_time':fragment.get('media_time'),
                 'media_end_time':fragment.get('media_end_time'),
                 'proposed_highlight':{'text':fragment['verbatim_excerpt'],'status':'proposed'}})
+    seen={a['source_fragment_id'] for a in result[0]['anchors']}
+    for fid in candidate.get('_statement_fragment_ids',[]):
+        fragment=records['source_fragments/'+fid]['payload']
+        if fragment['source_id']!=sid:raise ValueError('Claim statement crosses a source boundary')
+        if fid in seen:continue
+        result[0]['anchors'].append({'source_fragment_id':fid,'paragraph_key':fragment['paragraph_key'],
+            'media_time':fragment.get('media_time'),'media_end_time':fragment.get('media_end_time'),
+            'proposed_highlight':{'text':fragment['verbatim_excerpt'],'status':'proposed'}})
+        seen.add(fid)
     return result
 
 

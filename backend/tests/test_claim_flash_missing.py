@@ -1,5 +1,6 @@
 """Missing Claims: new-only review, identity safety, SQL and saved-answer recovery."""
 from copy import deepcopy
+import hashlib
 import json
 import pytest
 from backend.pipeline import claim_flash_missing as stage, claim_flash_relations as relations
@@ -137,3 +138,21 @@ def test_question_answer_link_preserves_existing_answers(ready):
     ports=Ports([candidate(answer_question_ids=['Q'])]);result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
     assert result['status']=='applied'
     assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C',result['new_claim_ids'][0]]
+
+
+@pytest.mark.parametrize('valid',[True,False])
+def test_claim_own_quote_can_differ_from_support_but_must_be_source_bound(ready,valid):
+    store,root,rroot=ready;p=deepcopy(store.get_record_state('source_fragments','F')['payload'])
+    p.update(fragment_id='OWN',verbatim_excerpt='你不知道神的旨意，怎麼遵行？' if valid else '原文沒有說這一句。')
+    p['verbatim_excerpt_sha256']=hashlib.sha256(p['verbatim_excerpt'].encode()).hexdigest()
+    store.apply_plan(store.plan_package({'package_id':'own-statement-quote','source_fragments':[p]}))
+    ports=Ports([candidate(fragment_ids=['OWN'])])
+    if not valid:
+        with pytest.raises(ValueError,match='source binding'):stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+        assert not (root/'missing'/'commit-intent.json').exists()
+        return
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied'
+    claim=store.get_record_state('claims',result['new_claim_ids'][0])['payload']
+    assert {a['source_fragment_id'] for a in claim['occurrences'][0]['anchors']}=={'F','OWN'}
+    assert store.get_record_state('evidence_steps','E')['payload']['source_fragment_ids']==['F']

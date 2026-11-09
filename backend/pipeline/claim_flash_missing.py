@@ -131,8 +131,11 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                 if item.action!='new_claim':pending.append({'candidate':data,'reason':item.action});continue
                 if not item.support_keys or not item.fragment_ids:
                     pending.append({'candidate':data,'reason':'new_claim_missing_verified_material'});continue
-                if not set(item.fragment_ids)<=set(fid for k in item.support_keys for fid in e.evidence_fragment_ids(records[k]['payload'])):
-                    raise ValueError('new Claim fragments are not bound to selected supports')
+                # A Claim's own words and the passages supporting that judgment
+                # have different roles. Both must be source-bound, but need not
+                # be the same fragment or belong to the same Evidence record.
+                e.material({'evidence_step_id':'candidate-statement','statement':item.statement,
+                    'source_fragment_ids':item.fragment_ids},records,sources)
                 existing=next((k for k,p in peers.items() if c.normalized(p['statement'])==c.normalized(item.statement)),None)
                 if existing:
                     if records[existing].get('retired') or peers[existing].get('review_status') in {'superseded','retired'} or peers[existing].get('superseded_by'):
@@ -142,9 +145,11 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                 alias='new:'+str(len(proposed));key='claims/'+alias
                 candidate={'statement':item.statement,'scripture_refs':item.scripture_refs,'reason':item.reason,
                     'evidence_step_ids':[k.split('/',1)[1] for k in item.support_keys if k.startswith('evidence_steps/')],
+                    '_statement_fragment_ids':item.fragment_ids,
                     '_observation_ids':[k.split('/',1)[1] for k in item.support_keys if k.startswith('observations/')]}
                 proposed.append(candidate);members.append(key)
-                records[key]={'payload':{'claim_id':alias,**candidate,'attribution':'professor','occurrences':[{'source_id':source_id,'anchors':[]}]},'retired':False}
+                records[key]={'payload':{'claim_id':alias,**candidate,'attribution':'professor',
+                    'occurrences':c.candidate_occurrences(candidate,records,source_id)},'retired':False}
                 peers[key]=records[key]['payload']
                 for oid in candidate['_observation_ids']:
                     rid='candidate-'+e.digest([oid,alias])[:24]
