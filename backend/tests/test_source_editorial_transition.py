@@ -117,6 +117,37 @@ def test_context_loader_consumes_proof_and_retains_body_coordinates(sample, monk
     assert [r['text'] for r in loaded[2].spoken_rows] == [r['text'] for r in original['script']]
 
 
+@pytest.mark.parametrize('fault', [None, 'no_proof', 'text', 'metadata'])
+def test_flash_consumes_exact_editorial_proof_without_migration(sample, monkeypatch, tmp_path, fault):
+    from backend.pipeline import claim_flash_common as flash
+    from backend.pipeline import evidence_refresh as evidence
+    original, after, path, source, root = sample
+    if fault != 'no_proof':
+        publish(sample)
+    if fault == 'text':
+        after['script'][1]['text'] += '意思改變。'
+    if fault == 'metadata':
+        after['metadata']['title'] = '另一標題'
+    path.write_bytes(encode(after))
+    monkeypatch.setattr(transition, 'transition_root', lambda root=None: sample[-1])
+
+    class ReadOnlyStore:
+        def get_record_state(self, collection, object_id):
+            assert (collection, object_id) == ('source_documents', 'source-1')
+            return {'payload': copy.deepcopy(source), 'retired': False}
+
+    if fault:
+        with pytest.raises(ValueError):
+            flash.bind_source(ReadOnlyStore(), 'source-1', tmp_path/'flash')
+        assert not (tmp_path/'flash'/'source-version.json').exists()
+    else:
+        binding = flash.bind_source(ReadOnlyStore(), 'source-1', tmp_path/'flash')
+        assert binding == {'source_id': 'source-1', **transition.file_binding(path)}
+        snapshot = evidence.source_snapshot(flash.source_binding(source), source=source)
+        assert snapshot['body_sha256'] == source['source_body_sha256']
+        assert source['source_file_sha256'] != snapshot['file']['file_sha256']
+
+
 def test_invalid_original_registered_body_cannot_make_proof(sample):
     sample[3]['source_body_sha256'] = '0'*64
     with pytest.raises(ValueError, match='registered source'):

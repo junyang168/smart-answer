@@ -60,17 +60,19 @@ SEMANTIC_REVIEW = (
     + KNOWLEDGE_TEXT_RULES)
 
 
+def source_binding(doc):
+    """Resolve only an exact, proven editorial transition; never infer equivalence."""
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    return verify_current_source_binding({'path': doc['source_path'],
+                                         'file_sha256': doc['source_file_sha256']})
+
+
 def bind_source(store,sid,root):
     """A completed root belongs to one source version, not just a reusable source ID."""
-    import hashlib
     state=store.get_record_state('source_documents',sid)
     if not state or state['retired']:
         raise ValueError('missing source: '+sid)
-    doc=state['payload'];path=doc['source_path']
-    actual=hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    if actual!=doc['source_file_sha256']:
-        raise ValueError('registered source file changed; run source migration first')
-    pin={'source_id':sid,'path':path,'file_sha256':actual}
+    pin={'source_id':sid,**source_binding(state['payload'])}
     e.save(Path(root)/'source-version.json',pin)
     return pin
 
@@ -151,8 +153,7 @@ def load_source(store, sid, *, visual_context=False):
         for field in ['from_id', 'to_id', 'source_id', 'target_id']:
             query('collection=ANY(%s) AND payload->>%s=ANY(%s)',
                   (['knowledge_relations', 'claim_relations', 'claim_relation_constraints'], field, ids))
-    sources = {sid: e.source_snapshot({'path': doc['source_path'],
-                    'file_sha256': doc['source_file_sha256']}, source=doc, visual_context=visual_context)}
+    sources = {sid: e.source_snapshot(source_binding(doc), source=doc, visual_context=visual_context)}
     return records, sources
 
 
