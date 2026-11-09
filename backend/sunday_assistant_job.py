@@ -28,7 +28,8 @@ def main():
             agent.tick()
         except Exception as exc:
             from backend.sunday_assistant.store import now_text
-            agent.store.put("worker", {"at": now_text(), "status": "error", "error": str(exc)[:1000]})
+            from backend.sunday_assistant.task_audit import exception_detail
+            agent.store.put("worker", {"at": now_text(), "status": "error", **exception_detail(exc), "stage": "assistant_tick"})
             logging.exception("Sunday assistant worker failed; durable queue retained")
         if args.once:
             return

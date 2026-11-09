@@ -10,10 +10,13 @@ import sqlite3
 import time
 import uuid
 
+from .task_audit import read_events, incident_detail, group_summary, completed_summary, incident_resolution, latest_attempts
+
 import httpx
 
 PREFIX = "【主日助理系統求助】"
 LINK = "https://dallas-hlc.org/admin/sunday-assistant"
+INCIDENTS = "SELECT i.*,COALESCE(c.details,'[]') details,COALESCE(c.resolution,'unverified') resolution FROM incidents i LEFT JOIN incident_context c ON c.incident=i.id"
 
 
 class AdminMonitor:
@@ -32,6 +35,7 @@ class AdminMonitor:
                 group_id TEXT, text TEXT, status TEXT, updated REAL, remote_id TEXT);
               CREATE TABLE IF NOT EXISTS monitor_kv(key TEXT PRIMARY KEY, value TEXT);
             """)
+            db.execute("CREATE TABLE IF NOT EXISTS incident_context(incident TEXT PRIMARY KEY, details TEXT NOT NULL, resolution TEXT NOT NULL)")
         self.path.chmod(0o600)
 
     @contextmanager
@@ -80,6 +84,9 @@ class AdminMonitor:
                     errors += int(time.time() - datetime.fromisoformat(mail_worker['at']).timestamp() > 300)
                 except (ValueError, KeyError):
                     errors += 1
+        with self.db() as db:
+            row=db.execute("SELECT value FROM monitor_kv WHERE key='task_cursors'").fetchone()
+        self.audit_events,self.audit_cursors=read_events(self.root,json.loads(row[0]) if row else {})
         return settings, worker, errors
 
     def record_exit(self, now=None):
@@ -114,25 +121,78 @@ class AdminMonitor:
         return found
 
     def observe(self, conditions, settings, now):
+        events=getattr(self,'audit_events',[])
+        updates={event['ref']:event for event in events if event['phase']!='failure'}
+        failures=[event for event in events if event['phase']=='failure']
+        # Failure and recovery may both happen between two monitor polls. Retain
+        # one historical notice instead of losing the task or fabricating activity.
+        conditions=dict(conditions)
+        historical=set()
+        for kind in ('worker','task_errors'):
+            selected=[e for e in failures if ('worker' if e['task_type']=='worker' else 'task_errors')==kind]
+            if selected and kind not in conditions:
+                attempts=[]
+                for event in selected:
+                    item=incident_detail(event)
+                    if event['ref'] in updates:item['phase']=updates[event['ref']]['phase']
+                    attempts.append(item)
+                latest=latest_attempts(attempts)
+                if all(e['phase'] in {'health_only','completed'} for e in latest):
+                    historical.add(kind)
+                conditions[kind]=('內部任務執行失敗',len(latest),0)
         with self.db() as db:
-            active = {row["kind"]: row for row in db.execute("SELECT * FROM incidents WHERE active=1")}
-            for kind, old in active.items():
+            # Update even a closed incident when a later receipt proves completion.
+            for row in db.execute(INCIDENTS).fetchall():
+                details=json.loads(row['details'])
+                for item in details:
+                    update=updates.get(item['ref'])
+                    if update:
+                        item.update(phase=update['phase'],outcome_at=update['at'],outcome=update['detail'])
+                resolution=incident_resolution(details,row['count'])
+                db.execute('INSERT OR REPLACE INTO incident_context VALUES(?,?,?)',(row['id'],json.dumps(details,ensure_ascii=False),resolution))
+            active={row['kind']:row for row in db.execute(INCIDENTS+' WHERE i.active=1')}
+            for kind,old in active.items():
+                if kind not in conditions and any(d['phase']=='resumed' for d in latest_attempts(json.loads(old['details']))):
+                    conditions[kind]=(old['label'],old['count'],0)
                 if kind not in conditions:
-                    db.execute("UPDATE incidents SET active=0,last_seen=? WHERE id=?", (now, old["id"]))
-                    # A transient problem recovered before notification; keep the audit only.
-                    db.execute("UPDATE notices SET status='cancelled',updated=? WHERE incident=? AND phase='open' AND status='queued'", (now, old["id"]))
-            for kind, (label, count, delay) in conditions.items():
-                old = active.get(kind)
-                incident = old["id"] if old else uuid.uuid4().hex[:12]
-                first = old["first_seen"] if old else now
-                db.execute("INSERT OR REPLACE INTO incidents VALUES(?,?,?,?,?,?,?)", (incident, kind, label, 1, count, first, now))
-                if now - first >= delay:
-                    text = f"{PREFIX}\n事件 {incident}：{label}（{count}項）。\n需要網站管理員協助查看執行紀錄與故障；請先核對已寫入部分，再處理或重試。這是內部故障，不是等待群員補資料。\n{LINK}"
-                    self._queue(db, incident, "open", settings["admin_group"], text, now)
-            # Recovery is sent once, only after the original alert was confirmed sent.
-            for row in db.execute("SELECT i.* FROM incidents i JOIN notices n ON n.incident=i.id WHERE i.active=0 AND n.phase='open' AND n.status='sent'").fetchall():
-                text = f"{PREFIX}\n事件 {row['id']}：上述系統故障條件已解除。請在管理頁核對處理結果；這不代表待登記資料已完成。\n{LINK}"
-                self._queue(db, row["id"], "recovered", settings["admin_group"], text, now)
+                    db.execute('UPDATE incidents SET active=0,last_seen=? WHERE id=?',(now,old['id']))
+                    db.execute("UPDATE notices SET status='cancelled',updated=? WHERE incident=? AND phase='open' AND status='queued'",(now,old['id']))
+            for kind,(label,count,delay) in conditions.items():
+                old=active.get(kind);incident=old['id'] if old else uuid.uuid4().hex[:12]
+                first=old['first_seen'] if old else now
+                count=max(count,old['count']) if old else count
+                details=json.loads(old['details']) if old else []
+                refs={d['ref'] for d in details}
+                for event in failures:
+                    if ('worker' if event['task_type']=='worker' else 'task_errors')!=kind or event['ref'] in refs:continue
+                    item=incident_detail(event)
+                    update=updates.get(event['ref'])
+                    if update:item.update(phase=update['phase'],outcome_at=update['at'],outcome=update['detail'])
+                    details.append(item);refs.add(event['ref'])
+                resolution=incident_resolution(details,count)
+                db.execute('INSERT OR REPLACE INTO incidents(id,kind,label,active,count,first_seen,last_seen) VALUES(?,?,?,?,?,?,?)',
+                    (incident,kind,label,int(kind not in historical),count,first,now))
+                db.execute('INSERT OR REPLACE INTO incident_context VALUES(?,?,?)',(incident,json.dumps(details,ensure_ascii=False),resolution))
+                summary=group_summary(details)
+                if kind in historical:
+                    phase='completed' if resolution=='completed' else 'recovered'
+                    result='已取得該任務的完成回執。' if resolution=='completed' else '目前故障條件已解除，但任務是否補做完成仍待核實。'
+                    text=f"{PREFIX}\n事件 {incident}：已記錄{count}項短暫任務故障。\n{summary}\n{result}原始錯誤與處理紀錄已保留於管理頁；未因告警自動重寄郵件。\n{LINK}"
+                    self._queue(db,incident,phase,settings['admin_group'],text,now)
+                elif now-first>=delay:
+                    text=f"{PREFIX}\n事件 {incident}：{label}（{count}項）。\n{summary}\n請管理員在管理頁核對已寫入部分與回執，再處理或重試。這是內部故障，不是等待群員補資料；告警本身不會重做任務或重寄郵件。\n{LINK}"
+                    self._queue(db,incident,'open',settings['admin_group'],text,now)
+            for row in db.execute(INCIDENTS+" WHERE i.active=0 AND EXISTS(SELECT 1 FROM notices n WHERE n.incident=i.id AND n.status='sent')").fetchall():
+                if row['resolution']=='completed':
+                    text=f"{PREFIX}\n事件 {row['id']}：已取得失敗任務的完成回執，補做結果已核實。\n{completed_summary(json.loads(row['details']))}\n原始錯誤與完成回執仍保留於管理頁。\n{LINK}"
+                    phase='completed'
+                else:
+                    text=f"{PREFIX}\n事件 {row['id']}：故障條件已解除；任務是否補做完成仍待核實。\n{group_summary(json.loads(row['details']))}\n這只表示目前檢查未再報錯，不代表郵件已寄出或資料已登記。請核對管理頁的原始錯誤、已完成步驟與回執。\n{LINK}"
+                    phase='recovered'
+                self._queue(db,row['id'],phase,settings['admin_group'],text,now)
+            if hasattr(self,'audit_cursors'):
+                db.execute("INSERT OR REPLACE INTO monitor_kv VALUES('task_cursors',?)",(json.dumps(self.audit_cursors),))
+        self.audit_events=[]
 
     @staticmethod
     def _queue(db, incident, phase, group, text, now):
@@ -237,7 +297,8 @@ def monitor_state(root):
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db, db:
             db.row_factory = sqlite3.Row
             row = db.execute("SELECT value FROM monitor_kv WHERE key='last_check'").fetchone()
-            return {"incidents": [dict(r) for r in db.execute("SELECT * FROM incidents ORDER BY first_seen DESC LIMIT 30")],
+            query=INCIDENTS if db.execute("SELECT 1 FROM sqlite_master WHERE name='incident_context'").fetchone() else 'SELECT * FROM incidents'
+            return {"incidents": [{**dict(r), 'details':json.loads(dict(r).get('details') or '[]')} for r in db.execute(query+" ORDER BY first_seen DESC LIMIT 30")],
                     "notices": [dict(r) for r in db.execute("SELECT key,phase,status,updated FROM notices ORDER BY updated DESC LIMIT 30")],
                     "last_check": json.loads(row[0]) if row else None}
     except sqlite3.Error:

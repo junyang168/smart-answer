@@ -56,6 +56,8 @@ class Store:
                 db.execute("ALTER TABLE proposals ADD COLUMN action_key TEXT NOT NULL DEFAULT ''")
             db.execute("DROP INDEX IF EXISTS proposal_message")
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS proposal_action ON proposals(message_id,action_key)")
+            from .task_audit import install_audit
+            install_audit(db)
         os.chmod(self.path, 0o600)
 
     @contextmanager

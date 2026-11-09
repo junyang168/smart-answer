@@ -147,7 +147,7 @@ class PptReady:
                 with self.store.db() as db:
                     job = db.execute('SELECT * FROM ppt_jobs WHERE day=? AND version=?', (day, version)).fetchone()
                 if job and job['status'] in {'error', 'blocked'}:
-                    self.store.put('ppt_readiness', {'date': day, 'status': 'error', 'error': job['error']} if job['status'] == 'error' else {'date': day, 'status': 'waiting', 'missing': [job['error']]})
+                    self.store.put('ppt_readiness', {'date': day, 'version':version, 'status': 'error', 'error': job['error']} if job['status'] == 'error' else {'date': day, 'status': 'waiting', 'missing': [job['error']]})
                     return  # explicit retry or a changed input; no expensive retry loop
                 built = False
                 if not job or job['status'] != 'ready' or not self.valid_artifact(path, job['artifact_sha']):
@@ -201,7 +201,7 @@ class PptReady:
             with self.store.db() as db:
                 if 'version' in locals() and version:
                     db.execute("UPDATE ppt_jobs SET status=?,error=?,updated_at=? WHERE day=? AND version=?", ('blocked' if blocked else 'error',detail,now_text(),day,version))
-            self.store.put('ppt_readiness', {'date': day, 'status': 'waiting', 'missing': [detail]} if blocked else {'date': day, 'status': 'error', 'error': detail})
+            self.store.put('ppt_readiness', {'date': day, 'status': 'waiting', 'missing': [detail]} if blocked else {'date': day, 'version':locals().get('version'), 'status': 'error', 'error': detail, 'error_type':type(exc).__name__, 'stage':'generate_or_publish_ppt'})
 
     @staticmethod
     def valid_artifact(path, digest=None):

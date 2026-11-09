@@ -100,6 +100,8 @@ class GmailInbox:
               CREATE TABLE IF NOT EXISTS mail_senders(email TEXT PRIMARY KEY,worker TEXT,source_job TEXT,updated TEXT);
               CREATE TABLE IF NOT EXISTS mail_kv(key TEXT PRIMARY KEY,value TEXT);
             ''')
+            from .task_audit import install_audit
+            install_audit(db, mail=True)
         self.path.chmod(0o600)
 
     @contextmanager
@@ -195,9 +197,10 @@ class GmailInbox:
                 self.put('status:' + mailbox, {'status': 'ready', 'at': now_text(), 'error': None})
             except ValueError as exc:
                 self.put('status:' + mailbox, {'status': 'needs_review', 'at': now_text(), 'error': str(exc)[:400]})
-            except Exception:
+            except Exception as exc:
+                from .task_audit import exception_detail
                 # Transport credentials and raw messages must not appear in logs/notices.
-                self.put('status:' + mailbox, {'status': 'error', 'at': now_text(), 'error': 'Gmail 接收失敗，請查看後台並重試'})
+                self.put('status:' + mailbox, {'status': 'error', 'at': now_text(), **exception_detail(exc), 'stage': 'gmail_poll'})
 
     def scan(self, mailbox, client):
         cursor = self.get('cursor:' + mailbox)

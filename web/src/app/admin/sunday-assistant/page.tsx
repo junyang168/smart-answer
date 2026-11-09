@@ -26,7 +26,7 @@ type Data = {
   ppt_readiness?: { date: string; version?: string; status: string; missing?: string[]; error?: string };
   ppt_jobs?: { day: string; version: string; status: string; error?: string }[];
   identity_audit?: IdentityAudit;
-  admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number }[]; notices: { key: string; phase: string; status: string }[] };
+  admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number; resolution?: string; details?: { ref: string; label: string; failed_at: string; phase: string; diagnostic: Record<string, unknown>; outcome?: Record<string, unknown> }[] }[]; notices: { key: string; phase: string; status: string }[] };
   identities?: { sender_id: string; worker_name: string }[];
   settings: Settings; messages: Message[]; proposals: Proposal[];
   outbox: { key: string; text: string; status: string; error?: string; updated_at: string }[];
@@ -171,7 +171,13 @@ export default function SundayAssistantPage() {
           <label className="mt-3 block"><input type="checkbox" checked={settings.admin_help_enabled ?? false} onChange={e => patch({ admin_help_enabled: e.target.checked })} /> 啟用內部故障通知網站管理員</label>
           <label className="mt-3 block">網站管理員求助群<select aria-label="網站管理員求助群" className={`${input} mt-1`} value={settings.admin_group || ""} onChange={e => patch({ admin_group: e.target.value, admin_group_name: groups.find(g => g.id === e.target.value)?.name || "網站管理員" })}><option value="">請讀取群名單後選擇</option>{settings.admin_group && !groups.some(g => g.id === settings.admin_group) && <option value={settings.admin_group}>{settings.admin_group_name}</option>}{groups.filter(g => ![settings.availability_group, settings.service_group, settings.songs_group].includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
           <p className="mt-2 text-xs">監測最近更新：{data.admin_monitor?.last_check ? new Date(data.admin_monitor.last_check * 1000).toLocaleString() : "尚未啟用"}。傳送失敗保留佇列；結果不明時不盲目重發。通知不含群原文、姓名、奉獻金額或密鑰。</p>
-          {!!data.admin_monitor?.incidents.length && <ul className="mt-2 space-y-1">{data.admin_monitor.incidents.map(i => <li key={i.id}>{i.id} · {i.label}（{i.count}項）· {i.active ? "需要管理員協助" : "故障條件已解除"}</li>)}</ul>}
+          {!!data.admin_monitor?.incidents.length && <ul className="mt-2 space-y-2">{data.admin_monitor.incidents.map(i => <li key={i.id}>
+            {i.id} · {i.label}（{i.count}項）· {i.active ? "需要管理員協助" : i.resolution === "completed" ? "補做完成（已核對回執）" : "故障條件已解除；任務完成待核實"}
+            {i.details?.length ? <details className="mt-1"><summary>失敗原因、已完成步驟與處理回執</summary>{i.details.map(d => <div key={d.ref} className="mt-2 rounded border bg-white p-2">
+              <p>{d.label} · 失敗時間：{new Date(d.failed_at).toLocaleString()} · {d.phase === "completed" ? "已有完成回執" : d.phase === "resumed" ? "已開始重試，尚未確認完成" : d.phase === "health_only" ? "目前檢查通過，完成待核實" : "失敗已記錄"}</p>
+              <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify({ failure: d.diagnostic, outcome: d.outcome }, null, 2)}</pre>
+            </div>)}</details> : <p className="text-xs text-slate-500">舊事件未保存任務詳情，無法由故障解除推斷已完成。</p>}
+          </li>)}</ul>}
           <button className={`${button} mt-3`} disabled={busy || dirty || !settings.admin_help_enabled || !settings.admin_group} onClick={() => void action(() => call("admin-help-test", "POST", {}), "已排入管理群上線測試通知（明確標示測試、無需處理）")}>向管理群發送測試通知</button>
         </div>
         <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>
