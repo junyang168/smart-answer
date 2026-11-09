@@ -72,7 +72,7 @@ def finish(store,root):
         history=store.get_change_history(json.loads((root/'commit-intent.json').read_text())['change_set_id'])
         committed=committed or bool(history and history['status']=='applied')
     for key,row in before['records'].items():
-        if committed and key in result['updates']:continue
+        if committed and (key in result['updates'] or key in result.get('retiring_keys',[])):continue
         current=store.get_record_state(*key.split('/',1))
         if not current or (current['revision'],current['content_sha256'],current['retired'])!=(row['revision'],row['content_sha256'],row['retired']):
             raise ValueError('Claim statement inputs changed: '+key)

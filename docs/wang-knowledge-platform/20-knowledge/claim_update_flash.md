@@ -490,6 +490,19 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 
 ## 7. 實作與使用
 
+獨立Claim關係模式使用`backend.pipeline.claim_flash_relations`，輸入本組已完成論證路線的root。
+核對其SQL完成及未變的來源、節點、論證材料後，GPT只找組內必要的遺漏直接關係，
+Jev獨立核對既有及候選Claim配對；疑點交GPT最終處置，沿用既有禁止／人工保護規則。
+不沿鄰居擴張，不重審下層或Claim statement，也不重建已有間接路線。
+只寫本組Claim關係，交易、回讀及已提交接續沿用現有能力；結果`group_claim_relations_only`
+不授予完整Claim／CVP資格，也不表示組外關係已查完。
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_relations \
+  --source-id ACTUAL_SOURCE_ID --argument-root /absolute/path/completed-argument-routes \
+  --capacity-file /absolute/path/shared-capacity.json --root /absolute/path/claim-relations
+```
+
 獨立論證路線模式使用`backend.pipeline.claim_flash_arguments`，沿用同一共享分組，
 消費已驗證Evidence及Claim statement結果。GPT只檢查本組原文與現有路線是否漏接重要論據，
 不要求所有背景或同義重複節點都有連接，不新建節點。候選及既有材料配對分別核對，
