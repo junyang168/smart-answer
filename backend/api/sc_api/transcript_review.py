@@ -1212,6 +1212,10 @@ class ReviewStore:
             # Browser playback may need a codec derivative (e.g. ADPCM WAV).
             # Keep source.mp4 and its original SHA as the source of record.
             playback = read(source / "media-receipt.json")
+            if (c["media_mime_type"].startswith("audio/")
+                and c["media_mime_type"] != "audio/mpeg"
+                and (playback is None or playback.get("mime") != "audio/mpeg")):
+                raise ReviewError(409, "音訊須先產生並核驗 MP3 播放副本")
             if playback is not None:
                 mime = playback.get("mime")
                 playback_path = Path(playback.get("path", ""))

@@ -1016,3 +1016,13 @@ def test_bad_playback_receipt_cannot_be_adopted(setup):
     atomic(source/'media-receipt.json',dict(path=str(playback),source_sha256=record['source_sha256'],sha256=file_hash(playback),mime='audio/mpeg',duration=record['duration_ms']/1000,anchors=[dict(at=0,lag_ms=400,correlation=.99)]*3))
     with pytest.raises(ReviewError,match='時間軸'):adopted(setup)
     assert not store.enabled('講道 test')
+
+
+def test_non_mp3_audio_cannot_enter_editor_without_verified_mp3_copy(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup;record=read(source/'full_transcript.json')
+    record['media_mime_type']='audio/wav';atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    with pytest.raises(ReviewError,match='MP3'):adopted(setup)
+    assert not store.enabled('講道 test')
