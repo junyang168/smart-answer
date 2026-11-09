@@ -196,6 +196,11 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         reviewed_material={k:flash.claim_material(k,records,sources,source_id) for k in members}
         implicit=[{'a':'evidence_steps/'+eid,'b':key} for key in members for eid in records[key]['payload']['evidence_step_ids']]
         obs=[{'a':'observations/'+oid,'b':key} for key in members for oid in records[key]['payload']['_observation_ids']]
+        # These supports existed only to review the candidate statement. They
+        # are not stored edges and must not suppress the real typed decision.
+        for key in list(records):
+            if key.startswith('knowledge_relations/candidate-') and records[key]['payload']['to_id'] in {k.split('/',1)[1] for k in members}:
+                records.pop(key)
         attachment=pairs.review(records,sources,[],obs,root/'new-attachments',ports,kind='attachment',implicit=implicit,adjudicate_proposed_none=True)
         pending+=attachment['pending'];new_lower=attachment['new_relations']
         for removal in attachment['implicit_changes']:

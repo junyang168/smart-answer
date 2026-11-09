@@ -244,3 +244,26 @@ def test_large_discovery_packs_names_without_losing_quotes_links_or_lifecycle(mo
     for name in ('source_fragments','verified_material','existing_claims','questions'):
         assert {key:{packed[name+'_fields'][field]:value for field,value in row.items()} for key,row in packed[name].items()}==shared[name]
     assert shared==before and packed['source_paragraphs']==shared['source_paragraphs']
+
+
+def test_observation_only_candidate_keeps_real_support_after_temporary_preview(sample,tmp_path):
+    store,root,_=sample
+    ev=store.get_record_state('evidence_steps','E')['payload'];ev['statement']='沒有聽從祂的話，顯明沒有真正相信祂。'
+    store.apply_plan(store.plan_package({'package_id':'observation-only-fixture','evidence_steps':[ev],
+        'observations':[{'observation_id':'O','statement':'沒有聽從祂的話。','source_fragment_id':'F'}]}))
+    records,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],'groups':[{
+        'group_id':'G','title':'one','claim_ids':['C'],'paragraph_keys':['S0001'],
+        'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';sroot=root/'statements';aroot=root/'arguments';rroot=root/'relations'
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),saved_inventory(tmp_path/'prior',sources),apply=True)['status']=='completed'
+    assert statements.run(store,'S',['C'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    assert arguments.run(store,'S',plan,'G',eroot,sroot,aroot,ArgumentPorts(),apply=True)['status']=='verified'
+    assert relations.run(store,'S',aroot,rroot,RelationPorts(),apply=True)['status']=='verified'
+    result=stage.run(store,'S',rroot,root/'missing',Ports([candidate(support_keys=['observations/O'])]),apply=True)
+    assert result['status']=='applied' and not result['pending']
+    cid=result['new_claim_ids'][0];claim=store.get_record_state('claims',cid)['payload']
+    assert not claim['evidence_step_ids']
+    records,_=f.load_source(store,'S')
+    assert any(k.startswith('knowledge_relations/') and r['payload']['from_id']=='O'
+        and r['payload']['to_id']==cid and r['payload']['relation_type']=='supports' for k,r in records.items())
+    assert any(a.get('observation_id')=='O' for o in claim['occurrences'] for a in o['anchors'])
