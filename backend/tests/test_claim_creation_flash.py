@@ -224,3 +224,41 @@ def test_load_bearing_native_chain_requires_actual_route_not_cycle_or_question_o
     d.validate_response(r,_transcript(),additional_relations=edges)
     edges[1]['to_id']='OBS001'
     with pytest.raises(d.DetailedExtractionValidationError,match='load_bearing'):d.validate_response(r,_transcript(),additional_relations=edges)
+
+
+def test_material_can_bind_supporting_reference_without_generating_other_groups(tmp_path):
+    source=_transcript();p=tmp_path/'source.json';p.write_text(json.dumps(source))
+    plans=[{'title':'判斷','topic_key':'人子','paragraph_ranges':[{'first':'S0001','last':'S0001'}]},
+           {'title':'論據','topic_key':'人子','paragraph_ranges':[{'first':'S0002','last':'S0003'}]}]
+    class Shared(Ports):
+        def repair(self,req):
+            out=super().repair(req);task=req['input']['task'];gid=req['input'].get('group_id')
+            if task=='creation_claims':
+                if gid=='G002':out['candidates'][0]['existing_claim_id']='CL0001'
+                else:out['candidates'][0]['related_ranges']=[{'first':'S0001','last':'S0002'}]
+            if task=='creation_materials':
+                owned=set(req['input']['owned_paragraphs'])
+                for col in creation.COLLECTIONS[:4]:out[col]=[r for r in out[col] if r['anchors'][0]['segment_index'] in owned]
+                out['sentence_audit']=[v for v in out['sentence_audit'] if v['sentence_id'].split('#')[0] in owned]
+                if gid=='G001':
+                    assert req['input']['reference_paragraphs']['S0002']==source['script'][1]['text']
+                    out['evidence_steps'][0]['anchors'].append({'segment_index':'S0002','verbatim_excerpt':source['script'][1]['text'],'start_time':None,'end_time':None})
+            if task=='creation_connections':
+                out['connections']=([{'from_id':'P01-E001','to_id':'CL0001','relation_type':'supports','reason':'完整兩段支持。'}] if gid=='G001' else [])
+            return out
+    root=tmp_path/'run';creation.run('T',p,root,Shared(source),groups=plans)
+    package=json.loads((root/'candidate.json').read_text())
+    e=next(e for e in package['evidence_steps'] if e['produced_claim_ids'])
+    fragments={f['fragment_id']:f for f in package['source_fragments']}
+    assert {fragments[f]['paragraph_key'] for f in e['source_fragment_ids']}=={'S0001','S0002'}
+
+
+def test_reference_material_cannot_be_silently_regenerated_without_owned_anchor(tmp_path):
+    source=_transcript();p=tmp_path/'source.json';p.write_text(json.dumps(source))
+    g=[{'title':'甲','topic_key':'甲','paragraph_ranges':[{'first':'S0001','last':'S0001'}]},
+       {'title':'乙','topic_key':'乙','paragraph_ranges':[{'first':'S0002','last':'S0003'}]}]
+    def out_of_scope(task,out):
+        if task=='creation_claims':out['candidates'][0]['related_ranges']=[{'first':'S0001','last':'S0002'}]
+        return out
+    with pytest.raises(ValueError,match='owned primary'):
+        creation.run('T',p,tmp_path/'run',Ports(source,out_of_scope),groups=g)

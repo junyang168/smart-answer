@@ -18,7 +18,7 @@ from backend.pipeline.claim_flash_grouping import SemanticGroups, _ranges
 from backend.pipeline.source_projection import project_script
 from backend.pipeline.knowledge_package_merge import validate_merged_package
 
-VERSION = 'claim_creation_flash_v2'
+VERSION = 'claim_creation_flash_v3'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -81,9 +81,18 @@ MATERIALS = RULES + (
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
     '按既有欄位定義與原文粒度整理，共同材料只生成一次，不為每條Claim複製。'
     '不要生成Claim、論證連接或判argument_role，也不判Claim整體充分性。只對owned_paragraphs中的句子建記錄，'
-    'context只供理解。已有材料索引已保存同一意思時可duplicate_of指其ID，不複製建記錄。'
+    '每筆新記錄至少一個anchor落在owned_paragraphs；支持片段可同時來自reference_paragraphs，'
+    '不能因為分批就截掉同一意思所需的前文。已有材料完整保存同一意思及該句引文時，'
+    'sentence_audit.covered_by可引用existing_materials的ID，不複製建記錄。'
     '每個本組sentence_id恰好一筆sentence_audit；extracted的covered_by指錨點真正落在該句的材料。'
-    'not_extracted給具體reason與既有reason_code；不得為避免處理而全排除。')
+    'not_extracted給具體reason與既有reason_code；不得為避免處理而全排除。'
+    '輸出前逐條自檢：只讀此記錄anchors清單，是否能支持statement的每個實質部分？'
+    '不是選一句代表性引文，而是一次保存完整支持清單，可多段共同支持。'
+    '「這個字」「不是」「沒有矛盾」「對」等短句須同掛明示所指的前文；'
+    '比較馬太與馬可的敘事，須保存比較雙方和必要時間順序，不能只掛結論句。'
+    '回答聽眾的簡短肯定，須同掛原問句及明示對象；否定舊說須同掛舊說及教授的否定。'
+    '不能把Claim候選當證據，不能臆測未提供的指涉；可選較長完整句，但不無差別掛整組原文。'
+    '不把「本批尚未解釋」「接下來將會談到」等抽取／編排評論寫進statement。')
 # Reuse the existing producer definitions/attribution rules, excluding its
 # all-at-once Claim and relationship instructions.
 _existing_prompt=x.PROMPT_PATH.read_text(encoding='utf-8')
@@ -309,11 +318,16 @@ def run(source_id, source_path, root, ports, *, groups=None):
                 material_ordinal+=1
                 sentences=[v for v in all_sentences if v.segment_index in batch]
                 context=sorted({keys[j] for pk in batch for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(batch),key=keys.index)
+                reference=set(context)
+                for cid in group_claims[gid]:reference.update(ranges(candidates[cid]['related_ranges'],keys))
+                reference.update(a['segment_index'] for col in COLLECTIONS[:4] for row in response[col]
+                    for a in row.get('anchors',[]) if a['segment_index'] in owned)
+                reference-=set(batch)
                 payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch},
-                    'context':{pk:paragraphs[pk] for pk in context},
+                    'reference_paragraphs':{pk:paragraphs[pk] for pk in keys if pk in reference},
                     'claim_candidates':{cid:candidates[cid] for cid in group_claims[gid]},
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
-                    'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title','')))}
+                    'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
                 result=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_materials',payload,contracts['materials'],MATERIALS,source_check)
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
@@ -322,13 +336,23 @@ def run(source_id, source_path, root, ports, *, groups=None):
                 for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
-                d.validate_response(partial,source,visible_locators=set(batch),require_load_bearing_relations=False)
-                d.validate_sentence_audit(partial,source,sentences)
+                if any(not any(a['segment_index'] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
+                    raise ValueError('new material requires an owned primary source; reference context is not a second extraction root')
+                d.validate_response(partial,source,visible_locators=set(batch)|reference,require_load_bearing_relations=False)
                 named=sections.namespace_response(partial,sections.Section(material_ordinal,0,0,group['title']))
+                local_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in partial[col]}
+                prior_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in response[col]}
+                audits=[]
+                for audit in partial['sentence_audit']:
+                    if not set(audit['covered_by'])<=local_ids|prior_ids:raise ValueError('sentence audit cites unknown material')
+                    audits.append({**audit,'covered_by':[f'P{material_ordinal:02d}-'+oid if oid in local_ids else oid for oid in audit['covered_by']]})
+                audit_view=empty()
+                for col in COLLECTIONS[:4]:audit_view[col]=response[col]+named[col]
+                audit_view['sentence_audit']=audits
+                d.validate_sentence_audit(audit_view,source,sentences)
                 group_materials[gid].extend(r[IDS[col]] for col in COLLECTIONS[:4] for r in named[col])
                 for col in COLLECTIONS[:4]:response[col].extend(named[col])
-                for audit in partial['sentence_audit']:
-                    response['sentence_audit'].append({**audit,'covered_by':[f'P{material_ordinal:02d}-'+oid for oid in audit['covered_by']]})
+                response['sentence_audit'].extend(audits)
         connections=[]
         for n, group in enumerate(groups,1):
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
