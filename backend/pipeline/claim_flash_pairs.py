@@ -73,7 +73,7 @@ def forbidden(src,dst,typ,records):
     return False
 
 
-def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=()):
+def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False):
     cases=[];seen=set()
     def find(oid):
         matches=[k for k in records if k.split('/')[0] in f.LOWER|{'claims'} and k.split('/',1)[1]==oid]
@@ -115,7 +115,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=()):
         if original and original.get('reason'):
             questions['reason_valid']=jevq.reason()
         ans=f.jev(root,ports,state,questions);chosen=ans['relation']
-        if chosen=='uncertain' or (chosen not in {'none','uncertain'} and
+        if chosen=='uncertain' or (adjudicate_proposed_none and chosen=='none' and not original) or (chosen not in {'none','uncertain'} and
                 (not original or chosen!='a_to_b_'+original['relation_type'] or ('reason_valid' in ans and ans['reason_valid']!='grounded'))):
             jobs.append({**case,'state':state,'precheck':ans,'allowed_choices':opts})
         else:

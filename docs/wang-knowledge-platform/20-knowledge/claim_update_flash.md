@@ -490,6 +490,25 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 
 ## 7. 實作與使用
 
+獨立論證路線模式使用`backend.pipeline.claim_flash_arguments`，沿用同一共享分組，
+消費已驗證Evidence及Claim statement結果。GPT只檢查本組原文與現有路線是否漏接重要論據，
+不要求所有背景或同義重複節點都有連接，不新建節點。候選及既有材料配對分別核對，
+下層間連接與Claim–下層連接使用各自配對任務；不處理Claim–Claim維護。
+新候選若被Jev判無關，交GPT作一次最終處置，保存原判定，不重新投票。
+既有Claim–Claim邊可作只讀間接路線；不因未展開成新的直接邊而判缺。
+程式同步實際支持連接、Claim支持ID、Evidence使用者及必要來源anchors，
+只更新受實際論據集合變動影響的整體支持／經文判定，不重審節點忠實性。
+若statement階段只待補連，已審定候選可與補連同一交易保存；其他來源／材料未決不藉此放行。
+未知來源、越界候選、人工保護及最後支持被撤除均不得宣稱完成。
+結果`group_lower_argument_routes_only`不表示整篇Claim維護及下游資格已完成。
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_arguments \
+  --source-id ACTUAL_SOURCE_ID --shared-groups /absolute/path/shared-groups.json --group-id GROUP_ID \
+  --evidence-root /absolute/path/completed-evidence-root --statement-root /absolute/path/claim-statements \
+  --capacity-file /absolute/path/shared-capacity.json --root /absolute/path/argument-routes
+```
+
 獨立Claim statement閉環使用`backend.pipeline.claim_flash_statements`。
 輸入一組Claim ID及已完成限定Evidence模式的root；不啟動舊lower、候選新建或關係維護。
 依次處置忠實性、整體支持、經文三種問題，只有Jev疑點交GPT，每次GPT只處置一種問題。
