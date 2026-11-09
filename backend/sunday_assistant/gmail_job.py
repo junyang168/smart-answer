@@ -18,8 +18,9 @@ def start_mail_worker(agent):
                 agent.store.put('gmail_worker', {'status': 'idle', 'at': now_text()})
             except BlockingIOError:
                 pass  # A website review owns the intake lock; try on the next pass.
-            except Exception:
-                agent.store.put('gmail_worker', {'status': 'error', 'at': now_text(), 'error': '講員郵件接收程序失敗，請查看後台'})
+            except Exception as exc:
+                from .task_audit import exception_detail
+                agent.store.put('gmail_worker', {'status': 'error', 'at': now_text(), **exception_detail(exc), 'stage': 'poll_mailbox'})
             threading.Event().wait(15)
     thread = threading.Thread(target=run, name='sunday-speaker-mail', daemon=True)
     thread.start()
