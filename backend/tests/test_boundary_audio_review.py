@@ -2,6 +2,22 @@ import pytest
 from backend.pipeline.boundary_audio_review import validate_result
 
 
+def test_missing_cases_remain_absent_and_cannot_shift_verdict_to_another_case():
+    import copy
+    from backend.pipeline.boundary_audio_review import coalesce_case_rows
+    cases=[{'case_id':i,'candidates':[{'id':'c0'}]} for i in ['a','b','c']]
+    row=lambda i:dict(case_id=i,reference_issue='none',candidates=[dict(id='c0',verdict='clean_boundary',heard_target_phrase='實際原聲',reason='已聽音')])
+    answer={'results':[row('c')]};before=copy.deepcopy(answer)
+    actual=coalesce_case_rows(answer,cases)
+    validate_result(actual,cases,allow_partial=True)
+    assert actual==answer==before
+    assert actual['results'][0]['case_id']=='c'
+    with pytest.raises(ValueError):validate_result(actual,cases)
+    for bad in [[row('b'),row('a')],[row('a'),row('b'),row('a')],[row('unknown')]]:
+        with pytest.raises(ValueError):validate_result(coalesce_case_rows({'results':bad},cases),cases,allow_partial=True)
+    validate_result({'results':[]},cases,allow_partial=True)
+
+
 def test_flattened_case_rows_regroup_without_changing_verdicts_or_hiding_conflicts():
     import copy
     from backend.pipeline.boundary_audio_review import coalesce_case_rows
@@ -51,10 +67,12 @@ def test_empty_positive_is_excluded_without_rewriting_or_repeating_saved_answer(
     root=tmp_path;save_json(root/'plan.json',{'source':'fixed'})
     control=control_case(root)
     case={**control,'case_id':'actual-p10','lecture':'1','paragraph_id':'p10'}
-    plan={'parent_plan_sha256':file_sha(root/'plan.json'),'cases':[control,case]};save_json(root/'boundary-audio-plan.json',plan)
+    missing={**control,'case_id':'omitted-p9','lecture':'1','paragraph_id':'p9'}
+    plan={'parent_plan_sha256':file_sha(root/'plan.json'),'cases':[control,missing,case]};save_json(root/'boundary-audio-plan.json',plan)
     for index,cases in enumerate(batches_from_plan(plan)):
         rows=[]
         for c in cases:
+            if c['case_id']=='omitted-p9':continue
             judgments=[]
             for option in c['candidates']:
                 verdict='wrong_segment' if index==0 and option['id']=='c0' else 'clean_boundary'
@@ -68,4 +86,5 @@ def test_empty_positive_is_excluded_without_rewriting_or_repeating_saved_answer(
         save_json(folder/'validated.json',{'answer':answer,'request_sha256':object_sha(request),'raw_response_sha256':object_sha(raw)})
     accepted=saved_verdicts(root)
     assert accepted[('1','p10','start')]['time_ms']==200500
+    assert ('1','p9','start') not in accepted
     assert read_json(root/'boundary-calls/b0001/validated.json')['answer']['results'][0]['candidates'][0]['heard_target_phrase']==''

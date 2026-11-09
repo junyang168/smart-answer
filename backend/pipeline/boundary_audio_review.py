@@ -193,11 +193,17 @@ def coalesce_case_rows(answer,cases):
             if grouped[-1]['reference_issue']!=row['reference_issue']:return answer
             grouped[-1]['candidates'].extend(row['candidates'])
         else:grouped.append({**row,'candidates':list(row['candidates'])})
-    if [r['case_id'] for r in grouped]!=[c['case_id'] for c in cases]:return answer
+    expected=[c['case_id'] for c in cases]
+    actual=[r['case_id'] for r in grouped]
+    # Omitted cases supply no evidence. Preserve a correctly ordered subset;
+    # never invent judgments, reorder a reply, or conceal duplicate identities.
+    if len(set(actual))!=len(actual) or actual!=[i for i in expected if i in actual]:return answer
     # A model may explicitly emit an empty/uncertain placeholder for a clip
     # that the request never supplied. It cannot witness any acoustic boundary.
     # Retain it in the immutable raw response; exclude only this non-verdict.
-    for row,case in zip(grouped,cases):
+    by_id={c['case_id']:c for c in cases}
+    for row in grouped:
+        case=by_id[row['case_id']]
         known={c['id'] for c in case['candidates']}
         row['candidates']=[c for c in row['candidates'] if not (c['id'] not in known and c['verdict']=='uncertain' and not c['heard_target_phrase'].strip())]
     return {**answer,'results':grouped}
@@ -206,8 +212,13 @@ def coalesce_case_rows(answer,cases):
 def validate_result(answer,cases,*,strict_quotes=True,allow_partial=False):
     from backend.pipeline.slide_visual_evidence import check_schema
     check_schema(answer,SCHEMA)
-    if [r['case_id'] for r in answer['results']]!=[c['case_id'] for c in cases]:raise ValueError('Missing, reordered or invented audio cases')
-    for row,case in zip(answer['results'],cases):
+    actual_cases=[r['case_id'] for r in answer['results']];expected_cases=[c['case_id'] for c in cases]
+    if (actual_cases!=expected_cases if not allow_partial else
+            len(set(actual_cases))!=len(actual_cases) or actual_cases!=[i for i in expected_cases if i in actual_cases]):
+        raise ValueError('Missing, reordered or invented audio cases')
+    by_id={c['case_id']:c for c in cases}
+    for row in answer['results']:
+        case=by_id[row['case_id']]
         actual=[c['id'] for c in row['candidates']];expected=[c['id'] for c in case['candidates']]
         if allow_partial:
             if len(set(actual))!=len(actual) or not set(actual)<=set(expected):raise ValueError('Unknown or duplicate audio candidate identity')
@@ -239,9 +250,11 @@ def run(out:Path,workers=2,*,phase=None):
         folder=destination/'boundary-calls'/f'b{index:04d}'
         raw=saved_call(folder,request,1,lambda:reviewer.generate(parts),max_calls=1,budget_usd=1)
         answer=coalesce_case_rows(json.loads(reviewer.text(raw)),cases);validate_result(answer,cases,strict_quotes=False,allow_partial=True)
+        by_id={row['case_id']:row for row in answer['results']}
         save_json(folder/'validated.json',{'answer':answer,'request_sha256':object_sha(request),
                                          'raw_response_sha256':object_sha(raw),'model':reviewer.model,
-                                         'missing_candidate_verdicts':[{'case_id':case['case_id'],'candidate_id':c['id']} for case,row in zip(cases,answer['results']) for c in case['candidates'] if c['id'] not in {x['id'] for x in row['candidates']}],
+                                         'missing_case_ids':[case['case_id'] for case in cases if case['case_id'] not in by_id],
+                                         'missing_candidate_verdicts':[{'case_id':case['case_id'],'candidate_id':c['id']} for case in cases for c in case['candidates'] if c['id'] not in {x['id'] for x in by_id.get(case['case_id'],{}).get('candidates',[])}],
                                          'excluded_unquoted_candidates':[{'case_id':row['case_id'],'candidate_id':c['id']} for row in answer['results'] for c in row['candidates'] if c['verdict'] in ('clean_boundary','genuine_overlap') and not c['heard_target_phrase'].strip()]})
         print('Boundary batch',index+1,'/',len(batches),'complete',flush=True)
         return index
@@ -274,7 +287,10 @@ def _saved_verdicts_one(out:Path,destination:Path):
         raw=read_json(calls[0]);answer=coalesce_case_rows(json.loads(parser.text(raw)),cases);validate_result(answer,cases,strict_quotes=False,allow_partial=True)
         if answer!=value['answer']:raise ValueError('Audio witness interpretation changed')
         if index==0:assert_control(answer)
-        for case,row in zip(cases,answer['results']):
+        by_id={row['case_id']:row for row in answer['results']}
+        for case in cases:
+            row=by_id.get(case['case_id'])
+            if row is None:continue  # No saved answer means no acoustic witness.
             acceptable=[]
             judgments={j['id']:j for j in row['candidates']}
             for candidate in case['candidates']:
