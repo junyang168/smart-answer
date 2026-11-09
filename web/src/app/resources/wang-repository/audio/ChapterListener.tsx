@@ -419,7 +419,12 @@ export default function ChapterListener({
       </header>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
-        <div className="min-h-0 overflow-auto rounded-xl">
+        <div
+          data-slide-scroll
+          onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
+          onTouchMove={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
+          className="min-h-0 overflow-auto rounded-xl"
+        >
           {table ? (
             <section className="min-h-full overflow-auto rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
               {slide && <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>}
@@ -452,7 +457,12 @@ export default function ChapterListener({
               <p className="mt-2 leading-7">{leftOutPart}</p>
             </div>
           ) : slide ? (
-            <ChapterSlide slide={slide} seconds={time} className="min-h-full" />
+            <ChapterSlide
+              slide={slide}
+              seconds={time}
+              className="min-h-full"
+              sentence={lineIndex >= 0 ? lines[lineIndex].text : undefined}
+            />
           ) : clip ? (
             <ScriptureSlide
               slug={verseAt(clip.sermon, time, sections[section].passage)}
