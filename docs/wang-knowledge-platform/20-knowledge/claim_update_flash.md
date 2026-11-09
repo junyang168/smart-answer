@@ -589,6 +589,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_relations 
 既有Claim–Claim邊可作只讀間接路線；不因未展開成新的直接邊而判缺。
 程式同步實際支持連接、Claim支持ID、Evidence使用者及必要來源anchors，
 只更新受實際論據集合變動影響的整體支持／經文判定，不重審節點忠實性。
+最後支持檢查先收齊本組尚待 GPT 處置的項，再按既有 job／完整 payload 上限合批；每個 job_id 只使用自身完整材料、獨立返回判定。精確匹配的舊逐條答覆直接復用，未知調用仍攔住；不為合批重問已答項，也不把一條通過套給另一條。
 若statement階段只待補連，已審定候選可與補連同一交易保存；其他來源／材料未決不藉此放行。
 未知來源、越界候選、人工保護及最後支持被撤除均不得宣稱完成。
 結果`group_lower_argument_routes_only`不表示整篇Claim維護及下游資格已完成。

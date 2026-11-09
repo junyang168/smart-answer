@@ -33,6 +33,31 @@ class Routes(BaseModel):
     items:list[Route]
 
 
+FINAL_SUPPORT_PROMPT='只判斷最終論據集合是否仍完整支持此Claim及關鍵經文。keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
+
+FINAL_SUPPORT_BATCH_PROMPT=FINAL_SUPPORT_PROMPT+'每個job_id獨立判定且恰好一次；只用該job材料，不將其他job的論據視為它的支持。'
+
+
+def final_support_decisions(root,ports,jobs):
+    """Reuse exact legacy single-job replies; batch only unanswered checks."""
+    root=Path(root);schema=statements.Edits.model_json_schema();answers={};remaining=[]
+    def consume(batches):
+        for batch,raw in batches:
+            edits=statements.Edits.model_validate(raw).items
+            f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
+            for edit in edits:answers[edit.job_id]=edit
+    for job in jobs:
+        legacy={'identity':ports.identity['gpt'],'system':FINAL_SUPPORT_PROMPT,
+                'input':{'task':'argument_final_support','jobs':[job]},'schema':schema}
+        saved=root/'gpt'/e.digest(legacy)
+        if (saved/'response.json').exists() or (saved/'started.json').exists():
+            # Unknown earlier calls still fail closed in the common recorder.
+            consume(f.gpt(root,ports,'argument_final_support',[job],schema,FINAL_SUPPORT_PROMPT,semantic_review=False))
+        else:remaining.append(job)
+    consume(f.gpt(root,ports,'argument_final_support',remaining,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    return [answers[j['job_id']] for j in jobs]
+
+
 def statement_proof(root,claim_ids,records,sources):
     root=Path(root).resolve();result=json.loads((root/'verification.json').read_text());before=json.loads((root/'before.json').read_text())
     if (result.get('version')!=statements.VERSION or result['status'] not in {'verified','needs_attention'}
@@ -145,6 +170,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if set(owners)!=set(p.get('produced_claim_ids',[])):
                 p['produced_claim_ids']=list(dict.fromkeys(owners));updates[key]=p
         # Reuse unchanged whole-support/scripture decisions; only changed argument sets need those tasks.
+        final_jobs=[]
         for key in sorted(targets):
             if (not working[key]['payload'].get('evidence_step_ids') and not any(
                     k.startswith('knowledge_relations/') and r['payload']['to_id']==key.split('/',1)[1]
@@ -160,14 +186,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
             answers=f.jev(root/'postimage-support',ports,state,{k:q.claim(with_references=bool(state.get('claim_references')))[k] for k in ['support','scripture']})
             issues={k:v for k,v in answers.items() if v!=('supported' if k=='support' else 'complete')}
-            if issues:
-                job={'job_id':key,'material':state,'findings':issues}
-                for _,raw in f.gpt(root/'postimage-disposition',ports,'argument_final_support',[job],statements.Edits.model_json_schema(),
-                    '只判斷最終論據集合是否仍完整支持此Claim及關鍵經文。keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。',semantic_review=False):
-                    edit=statements.Edits.model_validate(raw).items
-                    f.exactly([x.model_dump() for x in edit],[key],'job_id')
-                    if edit[0].action!='keep':pending.append({'object_key':key,'layer':'claim_connections','reason':edit[0].reason})
-                    outcomes.append({'object_key':key,'basis':'gpt_final_support','action':edit[0].action,'reason':edit[0].reason})
+            if issues:final_jobs.append({'job_id':key,'material':state,'findings':issues})
+        for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
+            if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})
+            outcomes.append({'object_key':edit.job_id,'basis':'gpt_final_support','action':edit.action,'reason':edit.reason})
         read=set(nodes)|set(edges)|set(claim_edges)|{'source_fragments/'+fid for fid in fragments}|{'source_documents/'+source_id}
         read.update(k for k,r in records.items() if k.startswith('claim_relation_constraints/') and {r['payload']['source_id'],r['payload']['target_id']}&set(by_id))
         allowed=targets|pool|set(edges)|{k for k in updates if k.startswith('knowledge_relations/') and k not in records}
