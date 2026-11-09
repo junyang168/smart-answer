@@ -35,7 +35,7 @@ def generate(out,*,workers=1):
         raise ValueError(
             "Speaker attribution incomplete; inspect saved speaker progress"
         )
-    accepted, notices = assemble(record, evidence)
+    accepted, notices, resolved = assemble(record, evidence,with_resolved=True)
     candidate = dict(
         schema_version="media-batch-speakers.v1",
         source_record_sha256=file_sha(out / "full_transcript.json"),
@@ -43,6 +43,7 @@ def generate(out,*,workers=1):
         evidence_root=str(evidence),
         review_status="unreviewed_model_candidate",
         notices=notices,
+        resolved_notices=resolved,
         assembly_policy="preserve-source-and-disclose.v1",
         pipeline_release=RELEASE,
     )
@@ -107,7 +108,7 @@ def enrich_existing_draft(store,item,out,actor,*,expected_version,expected_epoch
         return store.commit(item,actor,operation_id,request,updated,context,'audio_refinement_beta1_speaker_enrichment',extra=None)
 
 
-def assemble(record, evidence):
+def assemble(record, evidence,*,with_resolved=False):
     """Keep uncertain attribution and gap reports visible without editing speech.
 
     A missing-speech report is a model hypothesis, including deliberately excluded
@@ -118,7 +119,7 @@ def assemble(record, evidence):
     import math
 
     plan = json.loads((evidence / "plan.json").read_text())
-    accepted, notices = [], []
+    accepted, notices, resolved = [], [], []
     paragraphs = {p["id"]: p for p in record["paragraphs"]}
     for window in plan["windows"]:
         path = evidence / window["id"] / "candidate.json"
@@ -184,6 +185,17 @@ def assemble(record, evidence):
                 if valid_time
                 else (lo, hi)
             )
+            # A model's missing-speech hypothesis is redundant when the same
+            # audible participant turn is already present at this location.
+            import unicodedata
+            compact=lambda text:''.join(c for c in unicodedata.normalize('NFKC',text) if c.isalnum())
+            quote=compact(gap['audio_quote'])
+            covered=next((p for p in window['paragraphs'] if valid_time and len(quote)>=2
+                          and p['start_ms']<=absolute_end+2000 and p['end_ms']>=absolute_start-2000
+                          and any(t['role']=='audience' and t['confidence']=='clear' and compact(t['text'])==quote for t in valid.get(p['id'],{}).get('turns',[]))),None)
+            if covered:
+                resolved.append(dict(kind='missing_speech_already_attributed',paragraph_id=covered['id'],raw_gap=gap,evidence_sha256=file_sha(path),basis='同一位置已有逐字相符、聲音清楚的聽眾文字；原始模型提示保留，不要求重複補字。'))
+                continue
             association_start = (
                 lo + round(start * 1000)
                 if type(start) in (int, float)
@@ -216,7 +228,7 @@ def assemble(record, evidence):
             )
     if [p["paragraph_id"] for p in accepted] != list(paragraphs):
         raise ValueError("Speaker candidate must cover every paragraph once")
-    return accepted, notices
+    return (accepted, notices,resolved) if with_resolved else (accepted, notices)
 
 
 def label_rows(source, record, rows, mapping, *, hidden_insertions=None):
