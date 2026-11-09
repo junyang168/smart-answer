@@ -79,7 +79,7 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'initial_package_sha256':e.digest(original) if original else None,
         'source_file':sources[sid]['file'],'retired_records':retired,
         'completion':'needs_attention' if pending else 'completed'}
-    validate_merged_package(result_package)
+    validate_merged_package(result_package,native_relations=True)
     digest=e.digest(result_package);path=root/'postimages'/(digest+'.json');e.save(path,result_package)
     result={'version':VERSION,'source_id':sid,'status':'needs_attention' if pending else 'completed',
         'package':{'path':str(path),'sha256':digest},'changes':changed,'pending':pending,

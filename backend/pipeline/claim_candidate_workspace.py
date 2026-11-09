@@ -28,7 +28,7 @@ def command(args):
 @contextmanager
 def open_candidate(package, root):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
-    validate_merged_package(package)
+    validate_merged_package(package,native_relations=True)
     records=normalize_package(package)
     if len(records.get('source_documents',{}))!=1:raise ValueError('candidate workspace requires one source')
     if any(p.get('review_status') not in (None,'candidate') for values in records.values() for p in values.values()):

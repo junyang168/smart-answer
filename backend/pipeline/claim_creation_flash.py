@@ -162,7 +162,7 @@ def calibrate(rows, paragraphs):
 def attach(response, connections):
     """Compile complete semantic decisions to native arrays/relations once."""
     nodes = {r[IDS[col]]: (col, r) for col in COLLECTIONS[:5] for r in response[col]}
-    seen = set()
+    seen = set(); additional = []
     for edge in connections:
         a, b, kind = edge['from_id'], edge['to_id'], edge['relation_type']
         if a == b or a not in nodes or b not in nodes or not edge['reason'].strip():
@@ -180,7 +180,33 @@ def attach(response, connections):
             response['claim_relations'].append({'claim_relation_id': f'CR{len(response["claim_relations"])+1:04d}', **edge})
         elif ac in ('observations', 'evidence_steps') and bc == 'evidence_steps':
             response['evidence_relations'].append({'relation_id': f'ER{len(response["evidence_relations"])+1:04d}', **edge})
-        else: raise ValueError('connection not representable by native extraction model')
+        else: additional.append(deepcopy(edge))
+    return additional
+
+
+def bind_conclusions(package,candidates,projection):
+    """Retain the Claim's own selected source, not just its supporting passages."""
+    namespace=package['extraction']['record_namespace'];sid=package['source_documents'][0]['source_id']
+    fragments=package['source_fragments']
+    for alias,candidate in candidates.items():
+        cid=namespace+'-'+alias;anchor=candidate['conclusion_anchor']
+        fragment=next((p for p in fragments if p['paragraph_key']==anchor['segment_index']
+            and p['verbatim_excerpt']==anchor['verbatim_excerpt']),None)
+        if fragment is None:
+            fid='FR-'+e.digest([sid,cid,anchor])[:32]
+            fragment=x._anchored_fragment(fragment_id=fid,source_id=sid,anchor=anchor,
+                source_rows=projection.body_rows,visual_blocks={},source_sha256=projection.body_sha256)
+            fragments.append(fragment)
+        claim=next(p for p in package['claims'] if p['claim_id']==cid)
+        from backend.api.canonical_repository.postgres_store import normalize_package
+        records={col+'/'+oid:{'payload':p,'retired':False} for col,values in normalize_package(package).items() for oid,p in values.items()}
+        observation_ids={p['observation_id'] for p in package['observations']}
+        source_candidate={'evidence_step_ids':claim['evidence_step_ids'],
+            '_statement_fragment_ids':[fragment['fragment_id']],
+            '_observation_ids':[r['from_id'] for r in package['knowledge_relations']
+                if r['to_id']==cid and r['relation_type']=='supports' and r['from_id'] in observation_ids]}
+        claim['occurrences']=f.c.candidate_occurrences(source_candidate,records,sid)
+
 
 
 def run(source_id, source_path, root, ports, *, groups=None):
@@ -209,7 +235,7 @@ def run(source_id, source_path, root, ports, *, groups=None):
             package = json.loads((root/'candidate.json').read_text())
             if saved['candidate_sha256'] != e.digest(package):
                 raise ValueError('completed creation candidate changed')
-            validate_merged_package(package); source_check()
+            validate_merged_package(package,native_relations=True); source_check()
             return saved
         if groups is None:
             # Use the established heading planner for the initial suggestions.
@@ -316,8 +342,8 @@ def run(source_id, source_path, root, ports, *, groups=None):
                 if not {edge['from_id'],edge['to_id']}<=set(available):raise ValueError('connection requires unprovided material; do not infer from index alone')
                 if not ({edge['from_id'],edge['to_id']}&local):raise ValueError('connection is unrelated to its source group')
             connections.extend(result['connections'])
-        attach(response,connections)
-        d.validate_response(response,source)
+        additional=attach(response,connections)
+        d.validate_response(response,source,additional_relations=additional)
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
@@ -327,9 +353,10 @@ def run(source_id, source_path, root, ports, *, groups=None):
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
         source_check()
         package=x.compile_package(transcript_id=source_id,transcript_path=path,transcript=source,raw=raw,
-            response=response,extraction=identity)
-        validate_merged_package(package);source_check()
-        e.save(root/'extraction-response.json',response);e.save(root/'candidate.json',package)
+            response=response,extraction=identity,additional_relations=additional)
+        bind_conclusions(package,candidates,projection)
+        validate_merged_package(package,native_relations=True);source_check()
+        e.save(root/'extraction-response.json',response);e.save(root/'additional-relations.json',additional);e.save(root/'candidate.json',package)
         result={'version':VERSION,'status':'creation_complete','candidate_path':str(root/'candidate.json'),
             'candidate_sha256':e.digest(package),'source_id':package['source_documents'][0]['source_id'],
             'source_file_sha256':hashlib.sha256(raw).hexdigest(),'groups':groups,

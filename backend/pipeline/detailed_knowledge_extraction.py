@@ -511,6 +511,7 @@ def validate_response(
     visible_locators: set[str] | None = None,
     visible_visual_locators: set[str] | None = None,
     require_load_bearing_relations: bool = True,
+    additional_relations: Sequence[dict[str, Any]] = (),
 ) -> None:
     """Check one response against the source it claims to come from.
 
@@ -751,6 +752,20 @@ def validate_response(
                 row["support_eligibility"] != "eligible_candidate",
                 f"{row['evidence_step_id']}: non-professor/asserted evidence cannot be eligible",
             )
+    additional_support = {r.get("to_id") for r in additional_relations
+        if r.get("from_id") in ids["observation"] | ids["evidence"]
+        and r.get("to_id") in ids["claim"] and r.get("relation_type") == "supports"}
+    native_nodes = set().union(*(ids[k] for k in ("question", "position", "observation", "evidence", "claim")))
+    native_signatures = set()
+    for row in additional_relations:
+        signature = (row.get("from_id"), row.get("to_id"), row.get("relation_type"))
+        collect(row.get("from_id") in native_nodes and row.get("to_id") in native_nodes,
+                "additional relation has unknown endpoint")
+        collect(row.get("from_id") != row.get("to_id"), "additional relation cannot point to itself")
+        collect(row.get("relation_type") in RELATION_TYPES and bool(str(row.get("reason", "")).strip()),
+                "additional relation has invalid type or reason")
+        collect(signature not in native_signatures, "duplicate additional relation")
+        native_signatures.add(signature)
     for row in response.get("claims", []):
         collect(row["review_status"] == "candidate", f"{row['claim_id']}: extraction cannot approve")
         collect(
@@ -770,7 +785,7 @@ def validate_response(
             set(row["opposed_position_ids"]) <= ids["position"],
             f"{row['claim_id']}: unknown opposed position",
         )
-        collect(bool(row["evidence_step_ids"]), f"{row['claim_id']}: claim has no evidence")
+        collect(bool(row["evidence_step_ids"]) or row["claim_id"] in additional_support, f"{row['claim_id']}: claim has no evidence")
 
     # A Claim's evidence_step_ids and an EvidenceStep's produced_claim_ids are
     # the two projections of the same many-to-many connection.  Neither side
@@ -795,7 +810,8 @@ def validate_response(
     # An observation may be the source of a relation into the argument: that
     # edge is how "the professor reasoned from this" is recorded at all.  The
     # target stays an evidence step -- observations do not support each other.
-    supported_by_observation: set[str] = set()
+    supported_by_observation: set[str] = {r["from_id"] for r in additional_relations
+        if r.get("from_id") in ids["observation"] and r.get("to_id") in ids["evidence"] | ids["claim"]}
     evidence_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("evidence_relations", []):
         from_id = row["from_id"]

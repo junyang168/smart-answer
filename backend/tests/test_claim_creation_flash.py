@@ -155,3 +155,47 @@ def test_punctuation_projection_preserves_raw_and_avoids_model_retry(tmp_path):
     assert json.loads(raw.read_text())['evidence_steps'][0]['anchors'][0]['verbatim_excerpt']=='我说不对！'
     assert json.loads((root/'extraction-response.json').read_text())['evidence_steps'][0]['anchors'][0]['verbatim_excerpt']=='我说不对。'
     assert len(ports.calls)==3
+
+
+def test_native_observation_support_and_leaf_answer_need_no_fabricated_evidence(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
+    class Native(Ports):
+        def repair(self,req):
+            out=super().repair(req)
+            if req['input']['task']=='creation_connections':
+                out['connections']=[
+                    {'from_id':'P01-OBS001','to_id':'CL0001','relation_type':'supports','reason':'教授的經文觀察直接支持判斷。'},
+                    {'from_id':'P01-E002','to_id':'P01-Q001','relation_type':'answers','reason':'材料直接回答問題，不另造Claim。'},
+                    {'from_id':'CL0001','to_id':'P01-E001','relation_type':'contextualizes','reason':'主張交代這項反駁的背景。'}]
+            return out
+    root=tmp_path/'run';creation.run('T',path,root,Native(source),groups=groups())
+    package=json.loads((root/'candidate.json').read_text())
+    assert len(package['claims'])==1 and len(package['evidence_steps'])==2
+    assert package['claims'][0]['evidence_step_ids']==[]
+    assert len(package['knowledge_relations'])==3
+    anchors=package['claims'][0]['occurrences'][0]['anchors']
+    assert any(a.get('observation_id') for a in anchors)
+    assert all(a['source_fragment_id'] in {f['fragment_id'] for f in package['source_fragments']} for a in anchors)
+    from backend.api.canonical_repository.postgres_store import normalize_package
+    normalize_package(package)
+
+
+def test_legacy_validator_does_not_implicitly_allow_empty_claim_support():
+    r=_response();r['claims'][0]['evidence_step_ids']=[];r['evidence_steps'][0]['produced_claim_ids']=[]
+    with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):d.validate_response(r,_transcript())
+    d.validate_response(r,_transcript(),additional_relations=[{'from_id':'OBS001','to_id':'CL001','relation_type':'supports','reason':'直接支持。'}])
+    with pytest.raises(d.DetailedExtractionValidationError,match='unknown endpoint'):
+        d.validate_response(r,_transcript(),additional_relations=[{'from_id':'ALIEN','to_id':'CL001','relation_type':'supports','reason':'未知。'}])
+
+
+def test_native_package_validation_is_opt_in_and_still_rejects_missing_endpoints(tmp_path):
+    from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError
+    source=_transcript();p=tmp_path/'source.json';p.write_text(json.dumps(source));root=tmp_path/'run'
+    creation.run('T',p,root,Ports(source),groups=groups())
+    package=json.loads((root/'candidate.json').read_text())
+    package['knowledge_relations'].append({'relation_id':'NATIVE','from_id':package['observations'][0]['observation_id'],
+        'to_id':package['claims'][0]['claim_id'],'relation_type':'supports','reason':'經文支持。'})
+    with pytest.raises(KnowledgePackageMergeError,match='unknown endpoints'):validate_merged_package(package)
+    validate_merged_package(package,native_relations=True)
+    package['knowledge_relations'][-1]['to_id']='MISSING'
+    with pytest.raises(KnowledgePackageMergeError,match='unknown endpoints'):validate_merged_package(package,native_relations=True)
