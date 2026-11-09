@@ -70,6 +70,43 @@ def require_candidate(out,record=None):
     return candidate
 
 
+def enrich_existing_draft(store,item,out,actor,*,expected_version,expected_epoch,operation_id):
+    """One versioned insertion-only upgrade; never overwrite user edits or reviews."""
+    import copy
+    from backend.api.sc_api.transcript_review import digest,ReviewError
+    from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
+    out=Path(out);record=json.loads((out/'full_transcript.json').read_text())
+    require_candidate(out,record)
+    editorial,hidden=editor_paragraphs(record)
+    with store.lock(item):
+        store.require(actor,item,write=True,epoch=expected_epoch)
+        prior=store.receipt(item,operation_id,actor,{'version':expected_version,'source_candidate_sha256':file_sha(out/'speaker-candidate.json')})
+        if prior:return prior
+        rows,context=store.load(item);store.version(rows,context,expected_version)
+        if context.get('source_record_sha256')!=digest(record):raise ReviewError(409,'講員結果與目前草稿來源不同，不覆寫。')
+        mapping={v['source_paragraph_id']:key for key,v in context['paragraph_bindings'].items()}
+        if any(p['id'] not in mapping for p in editorial):raise ReviewError(409,'原文段落綁定已改變，不覆寫。')
+        raw=[dict(index=mapping[p['id']],text=p['text']) for p in record['paragraphs']]
+        labeled,attribution=label_rows(out,record,raw,mapping,hidden_insertions=hidden)
+        labels={p['index']:p['text'] for p in labeled}
+        baseline={mapping[p['id']]:p['text'] for p in editorial if not p.get('excluded_only')}
+        updated=copy.deepcopy(rows);changed=[];protected=[]
+        for row in updated:
+            key=row['index']
+            if key not in baseline:continue
+            if 'p:'+key in context['reviews'] or row['text']!=baseline[key]:
+                protected.append(key)
+                binding=context['paragraph_bindings'][key]
+                attribution['notices'].append(dict(kind='speaker_labels_preserved_human_edit',paragraph_id=key,start_ms=binding['start_ms'],end_ms=binding['end_ms'],audio_quote='',reason='此段已有人工修改或核對，已保留；未自動插入講員標記。來源講員候選另存備查。',timing_precision='source_paragraph'))
+                continue
+            if row['text']!=labels[key]:
+                row['text']=labels[key];changed.append(key)
+        attribution.update(protected_paragraph_ids=protected,labels_inserted_paragraph_ids=changed)
+        context=copy.deepcopy(context);context['speaker_attribution']=attribution
+        request={'version':expected_version,'source_candidate_sha256':file_sha(out/'speaker-candidate.json')}
+        return store.commit(item,actor,operation_id,request,updated,context,'audio_refinement_beta1_speaker_enrichment',extra=None)
+
+
 def assemble(record, evidence):
     """Keep uncertain attribution and gap reports visible without editing speech.
 

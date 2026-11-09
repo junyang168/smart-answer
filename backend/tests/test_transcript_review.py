@@ -1015,6 +1015,31 @@ def test_batch_cannot_initialize_existing_sermon(setup):
     assert not store.enabled('講道 test')
 
 
+def test_beta1_speaker_enrichment_preserves_user_edits_reviews_and_source(setup):
+    from backend.pipeline.media_batch.speakers import enrich_existing_draft,RELEASE
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup;item='講道 test'
+    record=read(source/'full_transcript.json');record['duration_ms']=3615000;atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path(item).unlink();store.register_candidate(item,source,expected_script_sha256=None)
+    doc=adopted(setup)
+    store.mutate('a',item,op(doc,operations=[dict(kind='text',id='1',text='人工修正。')]))
+    doc=store.document('a',item)
+    store.mutate('a',item,op(doc,operations=[dict(kind='paragraph_review',id='1',decision='confirmed',content_sha256=doc['paragraph_shas']['1'])]))
+    before=store.document('a',item)
+    atomic(source/'speaker-candidate.json',dict(pipeline_release=RELEASE,source_record_sha256=file_hash(source/'full_transcript.json'),results=[dict(paragraph_id=p['id'],limitations='',turns=[dict(text=p['text'],role='audience',confidence='clear',clip_start_s=0,clip_end_s=1,acoustic_basis='不同聲音')]) for p in record['paragraphs']]))
+    request=dict(expected_version=before['version'],expected_epoch=before['epoch'],operation_id=uuid.uuid4().hex)
+    result=enrich_existing_draft(store,item,source,'a',**request)
+    after=store.document('a',item)
+    assert after['script'][0]==before['script'][0]
+    assert after['context']['reviews']==before['context']['reviews']
+    assert after['script'][1]['text']=='**聽眾：**'+before['script'][1]['text']
+    assert after['context']['paragraph_bindings']==before['context']['paragraph_bindings']
+    assert after['context']['speaker_attribution']['protected_paragraph_ids']==['1']
+    assert after['context']['speaker_attribution']['pipeline_release']==RELEASE
+    assert enrich_existing_draft(store,item,source,'a',**request)==result
+
+
 def test_ai_soft_deletion_restore_uses_normal_versioned_save_and_clears_confirmation(setup):
     from backend.pipeline.slide_change_pilot import object_sha
     store,root,source=setup
