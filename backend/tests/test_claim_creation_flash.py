@@ -46,6 +46,89 @@ class Ports:
 def groups():return [{'title':'人子身份','topic_key':'人子身份','paragraph_ranges':[{'first':'S0001','last':'S0003'}]}]
 
 
+def compact_response(result):
+    result=deepcopy(result);coverage={};excluded=[]
+    for row in result.pop('sentence_audit'):
+        if row['status']=='extracted':
+            for rid in row['covered_by']:coverage.setdefault(rid,[]).append(row['sentence_id'])
+        else:excluded.append({k:row[k] for k in ['sentence_id','reason_code','reason']})
+    result.update(coverage_by_record=[{'record_id':rid,'sentence_ids':ids} for rid,ids in coverage.items()],excluded_sentences=excluded)
+    return result
+
+
+class CompactPorts(Ports):
+    def repair(self,request):
+        result=super().repair(request)
+        if request['input']['task']=='creation_materials':
+            assert 'sentence_audit' not in request['schema']['schema']['properties']
+            assert '不從引文自動推定' in request['system']
+            return compact_response(result)
+        return result
+
+
+def test_compact_transport_compiles_full_legacy_ledger_and_replays_without_calls(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    ports=CompactPorts(source)
+    result=creation.run('T',path,root,ports,groups=groups(),compact_audit=True)
+    assert result['status']=='creation_complete'
+    response=json.loads((root/'extraction-response.json').read_text())
+    sentences=x.section_sentences(source,Section(1,0,3,'all'))
+    d.validate_sentence_audit(response,source,sentences)
+    assert [r['sentence_id'] for r in response['sentence_audit']]==[v.sentence_id for v in sentences]
+    raw=next(root.glob('G001/materials/batch-001/gpt/*/response.json'))
+    assert 'sentence_audit' not in json.loads(raw.read_text())
+    receipt=json.loads((root/'G001/materials/batch-001/audit-expansion.json').read_text())
+    assert receipt['contract']==creation.COMPACT_AUDIT
+    assert all(r['covered_by'] for r in response['sentence_audit'])
+    ports.calls=[];assert creation.run('T',path,root,ports,groups=groups(),compact_audit=True)==result
+    assert ports.calls==[]
+
+
+def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
+    reason=next(iter(d.REASON_CODES))
+    raw={'observations':[],'coverage_by_record':[{'record_id':'O','sentence_ids':['A','B']},
+        {'record_id':'EXISTING','sentence_ids':['B']}],
+        'excluded_sentences':[{'sentence_id':'C','reason_code':reason,'reason':'純轉場，不是實質內容。'}]}
+    before=deepcopy(raw);out=creation.expand_material_audit(raw,['C','B','A'])
+    assert raw==before and [r['sentence_id'] for r in out['sentence_audit']]==['C','B','A']
+    assert out['sentence_audit'][1]['covered_by']==['O','EXISTING']
+    assert out['sentence_audit'][0]=={'sentence_id':'C','status':'not_extracted','covered_by':[],
+        'reason_code':reason,'reason':'純轉場，不是實質內容。'}
+
+
+@pytest.mark.parametrize('defect',['missing','foreign','duplicate_record','duplicate_sentence','overlap','empty_reason','unknown_reason'])
+def test_bad_compact_audit_is_rejected_without_inventing_a_decision(defect):
+    row={'record_id':'O','sentence_ids':['A']};reason=next(iter(d.REASON_CODES))
+    result={'observations':[{'anchors':[{'segment_index':'S0001','verbatim_excerpt':'原句。'}]}],
+        'coverage_by_record':[row],'excluded_sentences':[{'sentence_id':'B','reason_code':reason,'reason':'口頭語。'}]}
+    if defect=='missing':result['coverage_by_record']=[]
+    if defect=='foreign':row['sentence_ids']=['OTHER']
+    if defect=='duplicate_record':result['coverage_by_record'].append(deepcopy(row))
+    if defect=='duplicate_sentence':row['sentence_ids']=['A','A']
+    if defect=='overlap':result['excluded_sentences'][0]['sentence_id']='A'
+    if defect=='empty_reason':result['excluded_sentences'][0]['reason']=' '
+    if defect=='unknown_reason':result['excluded_sentences'][0]['reason_code']='invented'
+    with pytest.raises(ValueError):creation.expand_material_audit(result,['A','B'])
+
+
+def test_compact_unknown_record_still_hits_existing_reference_guard(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
+    class WrongRecord(CompactPorts):
+        def repair(self,request):
+            result=super().repair(request)
+            if request['input']['task']=='creation_materials':result['coverage_by_record'][0]['record_id']='MISSING'
+            return result
+    with pytest.raises(ValueError,match='unknown material'):
+        creation.run('T',path,tmp_path/'run',WrongRecord(source),groups=groups(),compact_audit=True)
+
+
+def test_audit_mode_change_cannot_silently_upgrade_a_frozen_run(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    creation.run('T',path,root,Ports(source),groups=groups());ports=CompactPorts(source)
+    with pytest.raises(ValueError):creation.run('T',path,root,ports,groups=groups(),compact_audit=True)
+    assert ports.calls==[]
+
+
 def test_complete_candidate_then_zero_call_replay(tmp_path):
     source=_transcript();p=tmp_path/'source.json';p.write_text(json.dumps(source));root=tmp_path/'run'
     ports=Ports(source);result=creation.run('T',p,root,ports,groups=groups())
