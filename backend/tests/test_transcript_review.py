@@ -985,6 +985,15 @@ def test_batch_new_draft_opens_unclaimed_and_retry_preserves_edits(setup):
     metadata.append(dict(item=item, title='新講道', status='ready', assigned_to=None,
                          media_ingest_source_sha256=read(source / 'full_transcript.json')['source_sha256']))
     atomic(root / 'config/sermon.json', metadata)
+    with pytest.raises(ValueError,match='requires speaker attribution'):
+        prepare_new_review_draft(store,item,source)
+    from backend.pipeline.media_batch.speakers import RELEASE
+    record=read(source/'full_transcript.json')
+    record['duration_ms']=3615000
+    atomic(source/'full_transcript.json',record)
+    from backend.pipeline.slide_change_pilot import object_sha
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    atomic(source/'speaker-candidate.json',dict(pipeline_release=RELEASE,source_record_sha256=file_hash(source/'full_transcript.json'),results=[dict(paragraph_id=p['id'],limitations='',turns=[dict(text=p['text'],role='professor',confidence='clear',clip_start_s=0,clip_end_s=1,acoustic_basis='清楚的主講聲音')]) for p in record['paragraphs']]))
     prepare_new_review_draft(store, item, source)
     doc = store.document('a', item)
     assert doc['script'] and doc['can_claim'] and not doc['can_edit']

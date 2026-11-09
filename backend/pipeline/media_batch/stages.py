@@ -264,6 +264,8 @@ def handoff(payload):
     out = Path(payload["out"])
     root = Path(payload["config"]["review_root"])
     item = payload["item"]
+    from .speakers import require_candidate
+    require_candidate(out)
     record=read(out/'full_transcript.json',{})
     editor_only=record.get('timing_quality',{}).get('status')=='editor_draft_only'
     if editor_only:
@@ -308,6 +310,8 @@ def prepare_new_review_draft(store, item, out):
         if context.get("source_record_sha256") != digest(record):
             raise ReviewError(409, "現有草稿與批次來源不同，拒絕取代")
         return
+    from .speakers import require_candidate
+    require_candidate(out)
     # The existing importer checks empty baseline, human edits, ownership,
     # publication, timing and source hashes, and records a recoverable revision.
     store.register_candidate(item, out, expected_script_sha256=None)

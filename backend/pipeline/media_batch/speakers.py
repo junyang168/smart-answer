@@ -5,7 +5,10 @@ import json
 from .runtime import atomic, file_sha
 
 
-def generate(out):
+RELEASE='audio-refinement-beta1'
+
+
+def generate(out,*,workers=1):
     from backend.pipeline.transcript_speaker_batch import run
 
     out = Path(out)
@@ -27,7 +30,7 @@ def generate(out):
         ),
     )
     evidence = out.with_name(out.name + "-speakers")
-    result = run(out, snapshot, evidence, workers=1, thinking_level="LOW")
+    result = run(out, snapshot, evidence, workers=workers, thinking_level="LOW")
     if any(w["status"] != "complete" for w in result["windows"]):
         raise ValueError(
             "Speaker attribution incomplete; inspect saved speaker progress"
@@ -41,13 +44,30 @@ def generate(out):
         review_status="unreviewed_model_candidate",
         notices=notices,
         assembly_policy="preserve-source-and-disclose.v1",
+        pipeline_release=RELEASE,
     )
     atomic(out / "speaker-candidate.json", candidate)
     return dict(
         speaker_candidate_sha256=file_sha(out / "speaker-candidate.json"),
         paragraphs=len(accepted),
         review_notices=len(notices),
+        pipeline_release=RELEASE,
     )
+
+
+def require_candidate(out,record=None):
+    """Beta 1 Editor admission requires complete source-bound speaker coverage."""
+    out=Path(out)
+    record=record or json.loads((out/'full_transcript.json').read_text())
+    path=out/'speaker-candidate.json'
+    if not path.is_file():raise ValueError('Beta 1 requires speaker attribution before Editor admission')
+    candidate=json.loads(path.read_text())
+    if candidate.get('pipeline_release')!=RELEASE:raise ValueError('Speaker candidate is not a Beta 1 result')
+    # This validates every ID, role and exact character partition, not a ready flag.
+    mapping={p['id']:p['id'] for p in record['paragraphs']}
+    rows=[dict(index=p['id'],text=p['text']) for p in record['paragraphs']]
+    label_rows(out,record,rows,mapping)
+    return candidate
 
 
 def assemble(record, evidence):
@@ -82,7 +102,10 @@ def assemble(record, evidence):
         for pid in owned:
             p = paragraphs[pid]
             if pid in valid:
-                accepted.append(valid[pid])
+                row=valid[pid]
+                # Saved model answers stay immutable; uncertain voice identity
+                # is disclosed as unknown in the Editor candidate.
+                accepted.append({**row,'turns':[{**t,'role':'unknown' if t['confidence']=='uncertain' else t['role']} for t in row['turns']]})
             else:
                 reason = rejected[pid]["reason"]
                 accepted.append(
@@ -203,6 +226,7 @@ def label_rows(source, record, rows, mapping, *, hidden_insertions=None):
         texts[mapping[p["id"]]] = insert_labels(marked, turns)
     return [{**r, "text": texts[r["index"]]} for r in rows], dict(
         source_sha256=file_sha(path),
+        pipeline_release=candidate.get('pipeline_release'),
         status="unreviewed_model_candidate",
         spoken_text_unchanged=True,
         notices=[

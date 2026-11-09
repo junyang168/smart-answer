@@ -45,3 +45,32 @@ def test_apply_plan_preserves_reviews_edits_and_concurrent_changes():
     assert len(result['skipped'])==4
     assert current['script'][0]['text']=='甲乙'
     assert current['context']['reviews']=={'p:1':{'decision':'confirmed'},'p:2':{'decision':'confirmed'}}
+
+
+def test_noisy_source_is_not_sent_as_a_speaker_target(tmp_path,monkeypatch):
+    import numpy as np
+    import backend.pipeline.transcript_speaker_batch as module
+    from backend.pipeline.slide_change_pilot import save_json,read_json
+    from backend.pipeline.transcript_audio_pilot import write_audio
+    source=tmp_path/'source';source.mkdir();output=tmp_path/'speakers';snapshot=tmp_path/'snapshot.json'
+    paragraphs=[dict(id='a',text='清楚。',start_ms=0,end_ms=1000),dict(id='noise',text='未確認粗稿',start_ms=1000,end_ms=2000)]
+    save_json(source/'full_transcript.json',dict(paragraphs=paragraphs,timing_quality={'source_holds':{'noise':{'text_confirmed':False}}}))
+    save_json(source/'master.json',dict(duration_ms=3000));write_audio(source/'master.wav',np.zeros(48000,dtype=np.int16))
+    save_json(snapshot,dict(script=[dict(index=p['id'],text=p['text']) for p in paragraphs],context=dict(revision=0,reviews={},paragraph_bindings={p['id']:{'source_paragraph_id':p['id']} for p in paragraphs})))
+    class Reviewer:
+        model='fake';config={}
+        def __init__(self,*a):self.config={}
+        def generate(self,contents):return {}
+        def text(self,raw):
+            import json
+            return json.dumps(dict(results=[dict(paragraph_id='a',limitations='',turns=[dict(text='清楚。',role='professor',confidence='clear',clip_start_s=0,clip_end_s=1,acoustic_basis='清楚主講聲音')])],missing_speech=[]))
+        def usage(self,raw):return {}
+    seen=[]
+    def saved(folder,request,*a,**k):
+        seen.extend(p['paragraph_id'] for p in request['material']['paragraphs']);return {}
+    monkeypatch.setattr(module,'VisionReviewer',Reviewer);monkeypatch.setattr(module,'saved_call',saved)
+    result=module.run(source,snapshot,output,workers=1,thinking_level='LOW')
+    assert result['complete'] and seen==['a']
+    answer=read_json(output/'w000/candidate.json')
+    assert answer['accepted'][1]['turns'][0]['role']=='unknown'
+    assert answer['accepted'][1]['turns'][0]['text']=='未確認粗稿'
