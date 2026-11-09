@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
-import { STATUS_CLASS, STATUS_LABEL, day, seriesName } from "./progress";
+import { STATUS_CLASS, STATUS_LABEL, day, seriesName, sermonEditorHref } from "./progress";
 
 /**
  * 「我的講道」：登入的同工若認領過講道，顯示自己發佈了幾篇、還在編輯幾篇；
@@ -88,7 +88,7 @@ export function MyWork({ seriesList }: { seriesList: SermonSeries[] }) {
                   <tr key={sermon.item || sermon.id} className="border-t border-stone-100">
                     <td className="px-4 py-2.5">
                       <Link
-                        href={`/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`}
+                        href={sermonEditorHref(sermon)}
                         className="text-amber-800 hover:text-amber-900 hover:underline"
                       >
                         {sermon.title || sermon.item}

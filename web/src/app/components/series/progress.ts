@@ -1,4 +1,10 @@
-import { Sermon } from "@/app/interfaces/article";
+import type { Sermon } from "@/app/interfaces/article";
+
+export function sermonEditorHref(sermon: Pick<Sermon, "item" | "id" | "status" | "rough_href" | "editor_href">): string {
+  return sermon.editor_href ||
+    (sermon.status === "processing" && sermon.rough_href ? sermon.rough_href :
+      `/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`);
+}
 
 /** 講道的編輯狀態：ready 待認領，assigned 已認領、編輯中，published 已發佈。 */
 export const STATUS_LABEL: Record<string, string> = {

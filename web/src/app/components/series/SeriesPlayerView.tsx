@@ -6,7 +6,7 @@ import { notFound, useParams, useRouter, useSearchParams, usePathname } from "ne
 import { useEffect, useState } from "react";
 import { Check, Clipboard } from "lucide-react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
-import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName } from "./progress";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName, sermonEditorHref } from "./progress";
 
 /**
  * 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。
@@ -125,7 +125,7 @@ export const SeriesPlayerView = () => {
                 <td className="px-4 py-3 font-mono text-stone-500">{order}</td>
                 <td className="px-4 py-3">
                   <Link
-                    href={sermon.status === "processing" && sermon.rough_href ? sermon.rough_href : `/admin/surmons/${encodeURIComponent(sermon.item || sermon.id)}`}
+                    href={sermonEditorHref(sermon)}
                     className="font-medium text-stone-900 hover:text-amber-800 hover:underline"
                   >
                     {sermon.title}

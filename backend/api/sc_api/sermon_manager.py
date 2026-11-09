@@ -973,6 +973,8 @@ class SermonManager:
         return copilot.chat(docs, history)
     
     def get_sermon_series(self):
+        from .series_review_catalog import SeriesReviewCatalog
+        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'))
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
         if not os.path.exists(series_meta_file):
             return []
@@ -983,7 +985,7 @@ class SermonManager:
             for item in series.get('sermons', []):
                 sermon_meta = self._sm.get_sermon_metadata('junyang168@gmail.com', item)
                 if sermon_meta:
-                    sermons.append(sermon_meta)
+                    sermons.append(sermon_meta.model_copy(update=review_catalog.for_item(item)))
             series['sermons'] = sermons
         return series_meta
 
