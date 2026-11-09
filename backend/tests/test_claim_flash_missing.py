@@ -5,6 +5,8 @@ import json
 import pytest
 from backend.pipeline import claim_flash_missing as stage, claim_flash_relations as relations
 from backend.pipeline import claim_flash_common as f
+from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements, claim_flash_arguments as arguments
+from backend.tests.test_claim_flash_evidence import Ports as EvidencePorts, saved_inventory
 from backend.tests.test_claim_flash_relations import ready as relation_ready, Ports as RelationPorts
 from backend.tests.test_claim_flash_arguments import Ports as ArgumentPorts
 from backend.tests.test_claim_update_flash import Ports as BasePorts
@@ -156,3 +158,32 @@ def test_claim_own_quote_can_differ_from_support_but_must_be_source_bound(ready,
     claim=store.get_record_state('claims',result['new_claim_ids'][0])['payload']
     assert {a['source_fragment_id'] for a in claim['occurrences'][0]['anchors']}=={'F','OWN'}
     assert store.get_record_state('evidence_steps','E')['payload']['source_fragment_ids']==['F']
+
+
+def test_final_scripture_repair_does_not_demand_statement_pair_handoff(sample,tmp_path):
+    store,root,_=sample;ev=store.get_record_state('evidence_steps','E')['payload'];ev['statement']='沒有聽從祂的話，顯明沒有真正相信祂。'
+    store.apply_plan(store.plan_package({'package_id':'material','evidence_steps':[ev],
+        'observations':[{'observation_id':'O','statement':'沒有聽從祂的話。','source_fragment_id':'F'}]}))
+    records,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],'groups':[{
+        'group_id':'G','title':'one','claim_ids':['C'],'paragraph_keys':['S0001'],
+        'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';sroot=root/'statements';aroot=root/'arguments';rroot=root/'relations'
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),saved_inventory(tmp_path/'prior',sources),apply=True)['status']=='completed'
+    assert statements.run(store,'S',['C'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    assert arguments.run(store,'S',plan,'G',eroot,sroot,aroot,ArgumentPorts(),apply=True)['status']=='verified'
+    assert relations.run(store,'S',aroot,rroot,RelationPorts(),apply=True)['status']=='verified'
+    class FinalScripture(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='pair_attachment':
+                for item in raw['items']:item.update(action='remove',reason='同一觀察已由Evidence承載，不重複連接。')
+            if request['input']['task']=='claim_scripture':
+                for item in raw['items']:item.update(action='repair',scripture_refs=[],reason='移除未由本主張材料支持的經文標籤。')
+            return raw
+    ports=FinalScripture([candidate(support_keys=['evidence_steps/E','observations/O'],scripture_refs=['Matt 1:1'])],
+        choices={'scripture':lambda req:'missing' if req['state'].get('claim',{}).get('statement')==candidate()['statement'] and len(req['state'].get('evidence',[]))==1 else 'complete'})
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied' and not result['pending']
+    post=store.get_record_state('claims',result['new_claim_ids'][0])['payload']
+    assert post['statement']==candidate()['statement'] and post['scripture_refs']==[]
+    assert len([r for role,r in ports.calls if role=='gpt' and r['input']['task']=='pair_attachment'])==1

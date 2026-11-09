@@ -177,7 +177,8 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             records=f.apply_overlay(records,postcheck['updates']);pending+=postcheck['pending'];checked['final_support']=postcheck
             # A text change here would stale already-reviewed pairs. Keep it as
             # a handoff rather than write those pairs against different text.
-            if postcheck['updates']:pending.append({'reason':'final_statement_change_requires_pair_handoff'})
+            if any(p['statement']!=reviewed_material[k]['claim']['statement'] for k,p in postcheck['updates'].items()):
+                pending.append({'reason':'final_statement_change_requires_pair_handoff'})
         for index,key in enumerate(members):
             p=records[key]['payload'];proposed[index].update({k:p[k] for k in ['statement','scripture_refs','evidence_step_ids']})
             proposed[index]['_observation_ids']=[r['from_id'] for r in new_lower if r['to_id']==p['claim_id'] and 'observations/'+r['from_id'] in pool and r['relation_type'] in {'supports','explains','corroborates'}]
