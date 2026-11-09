@@ -25,7 +25,7 @@ class Ports(OriginalPorts):
         task=request['input']['task']
         if task=='lower_decomposition':return super().repair(request)
         self.calls.append(('gpt',request));items=[]
-        for job in request['input']['jobs']:
+        for job in (request['input']['jobs'][0]['candidates'] if task=='evidence_coverage_repair' else request['input']['jobs']):
             if task=='evidence_fidelity_repair':
                 items.append({'job_id':job['job_id'],'action':'repair','statement':'沒有聽從祂的話，顯明沒有真正相信祂。',
                     'speaker':None,'stance':None,'attribution':None,'scripture_refs':None,'reason':'保留原來行為判準。'})
@@ -34,7 +34,7 @@ class Ports(OriginalPorts):
                     'statement':job['unit']['statement'],'speaker':None,'stance':None,'attribution':None,'scripture_refs':[],
                     'fragment_ids':job['required_fragment_ids'],'reason':'保存已確認的重要意思。'})
             else:raise AssertionError(task)
-        return {'items':items}
+        return {'items':[{'job_id':request['input']['jobs'][0]['job_id'],'items':items}]} if task=='evidence_coverage_repair' else {'items':items}
 
 
 def setup(tmp_path):
@@ -172,8 +172,8 @@ def test_bad_inventory_or_scope_expansion_cannot_write(tmp_path,defect):
         def repair(self,req):
             raw=super().repair(req)
             if req['input']['task']=='evidence_coverage_repair':
-                if defect=='unprovided_fragment':raw['items'][0]['fragment_ids']=['OTHER']
-                else:raw['items'][0].update(action='enrich',record_key='claims/C')
+                if defect=='unprovided_fragment':raw['items'][0]['items'][0]['fragment_ids']=['OTHER']
+                else:raw['items'][0]['items'][0].update(action='enrich',record_key='claims/C')
             return raw
     with pytest.raises(ValueError):stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],tmp_path/'run',Broken(),previous,apply=False)
 
@@ -193,7 +193,7 @@ def test_exact_source_stage_coverage_verdict_is_consumed_without_rechecking(tmp_
     records,sources,plan=setup(tmp_path);p=records['evidence_steps/E']['payload'];p['statement']='既有判斷。'
     unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'既有判斷。'}
     previous=saved_inventory(tmp_path,sources,[unit]);alias='R'+e.digest('evidence_steps/E')[:8]
-    state={'records':{alias:{'statement':p['statement'],'scripture_refs':[],'record_type':'evidence_steps','attribution':None}}}
+    state=stage.coverage_state({'evidence_steps/E':p})
     f.jev(previous/'coverage'/'A',Ports(),state,{'U0':q.coverage_unit(unit['statement'])})
     ports=Ports();root=tmp_path/'run'
     result=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],root,ports,previous,apply=False)
@@ -240,3 +240,30 @@ def test_sql_committed_without_receipt_recovers_before_any_models(seeded,monkeyp
     replay=Ports();result=stage.run(store,'S',plan,root,replay,previous,apply=True)
     assert result['status']=='completed' and replay.calls==[]
     assert len(list((root/'groups').glob('*/*/commit.json')))==1
+
+
+def test_coverage_creation_is_not_reviewed_again_on_resume(seeded,tmp_path):
+    store,sources,plan,_,root=seeded
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'聽從是相信的檢驗。'}
+    previous=saved_inventory(tmp_path/'with-units',sources,[unit])
+    first=stage.run(store,'S',plan,root,Ports(),previous,apply=True)
+    assert first['status']=='completed' and any(k.startswith('observations/') for k in first['groups'][0]['updates'])
+    replay=Ports();second=stage.run(store,'S',plan,root,replay,previous,apply=True)
+    assert second['status']=='completed' and replay.calls==[]
+
+
+def test_shared_record_cannot_be_overwritten_by_conflicting_coverage_edits(tmp_path):
+    records,sources,plan=setup(tmp_path);units=[{'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],
+        'statement':'需保存的意思'+str(i)} for i in range(2)]
+    class Conflict(Ports):
+        def repair(self,request):
+            raw=super().repair(request)
+            if request['input']['task']=='evidence_coverage_repair':
+                for i,item in enumerate(raw['items'][0]['items']):item.update(action='enrich',record_key='evidence_steps/E',record_type='evidence_steps',statement='不同的最終表述'+str(i))
+            return raw
+    root=tmp_path/'run'
+    with pytest.raises(ValueError,match='conflict'):stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],units,root,Conflict(),saved_inventory(tmp_path,sources),apply=False)
+    assert not list((root/'groups').glob('*/*/commit-intent.json'))
+    # Only the independently valid fidelity decision may be accepted, not the conflicting coverage output.
+    for p in (root/'accepted').glob('*.json'):
+        assert 'coverage-decisions' not in json.loads(p.read_text())['decision_path']

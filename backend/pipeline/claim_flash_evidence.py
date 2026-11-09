@@ -28,6 +28,7 @@ COVERAGE_PROMPT = PROMPT + (
     'enrich只准writable_keys；其他組記錄需要修改用handoff，不能為繞過範圍重複create。'
     'fragment_ids只能選所給sources，須完整覆蓋候選原話，不要求採用全部候選ID。'
     'enrich只能使用該記錄已掛載的片段；需要改來源綁定用needs_source，不繞過原文層。'
+    '本組多個候選若enrich同一記錄，每項須給相同、完整保存全部相關候選的最終表述，不能互相覆蓋。'
     'keep表示已有保存或確定不必另存；需要更多原話用needs_source。')
 
 
@@ -55,9 +56,15 @@ class Missing(Edit):
     fragment_ids: list[str]
 
 
+class MissingBundle(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    job_id: str
+    items: list[Missing]
+
+
 class MissingEdits(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    items: list[Missing]
+    items: list[MissingBundle]
 
 
 def visible(payload):
@@ -141,6 +148,14 @@ def group_records(group, records):
                   and k.split('/')[0] in coverage.COLLECTIONS and not records[k].get('retired')}
 
 
+def coverage_state(catalog):
+    aliases={key:'R'+e.digest(key)[:8] for key in catalog}
+    if len(set(aliases.values()))!=len(aliases):raise ValueError('Evidence catalogue alias collision')
+    return {'records':{aliases[k]:{'statement':p.get('statement',p.get('title','')),
+        'scripture_refs':p.get('scripture_refs',[]),'record_type':k.split('/')[0],'attribution':p.get('attribution'),
+        **{field:p[field] for field in ('speaker','stance') if p.get(field)}} for k,p in catalog.items()}}
+
+
 def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply):
     sid = next(iter(sources)); working = dict(records); updates = {}; outcomes = []; pending = []; values = {}; ready = {}
     for key in targets:
@@ -193,10 +208,17 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             e.material({'evidence_step_id':key,'statement':'','source_fragment_ids':[p['fragment_id']]},working,sources)
             valid[key]=p
         except (KeyError,ValueError):pass  # Invalid fragments are never offered as new support.
-    aliases={key:'R'+e.digest(key)[:8] for key in catalog}
-    if len(set(aliases.values()))!=len(aliases):raise ValueError('Evidence catalogue alias collision')
-    state={'records':{aliases[k]:{'statement':p.get('statement',p.get('title','')),'scripture_refs':p.get('scripture_refs',[]),
-           'record_type':k.split('/')[0],'attribution':p.get('attribution')} for k,p in catalog.items()}}
+    state=coverage_state(catalog)
+    def coverage_fingerprint(current):
+        return e.digest({'group_id':group['group_id'],'units':units,'state':current,
+            'fragments':{k:{field:p.get(field) for field in ('fragment_id','paragraph_key','verbatim_excerpt','source_sha256')}
+                         for k,p in valid.items()}})
+    accepted_coverage=root/'coverage-accepted'/(coverage_fingerprint(state)+'.json')
+    if accepted_coverage.exists():
+        proof=json.loads(accepted_coverage.read_text());decision=json.loads(Path(proof['decision_path']).read_text())
+        if proof['decision_sha256']!=e.digest(decision):raise ValueError('coverage acceptance proof differs')
+        outcomes.append({'group_id':group['group_id'],'basis':'reused_coverage_postimage'})
+        units=[]
     jobs=[];specs={};covered={}
     for i,unit in enumerate(units):
         token='U'+str(i)
@@ -218,15 +240,18 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         token='U'+str(i)
         if token in answers and answers[token]!='covered':jobs.append({'job_id':token,'unit':unit,
             'required_fragment_ids':covered[token],'jev':answers[token]})
-    for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',jobs,MissingEdits.model_json_schema(),COVERAGE_PROMPT,
+    coverage_updates={};coverage_proofs=[]
+    grouped=[{'job_id':group['group_id'],'candidates':jobs}] if jobs else []
+    for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),COVERAGE_PROMPT,
         shared={'records':{k:visible(p) for k,p in catalog.items()},'writable_keys':targets,
                 'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}},semantic_review=False):
-        edits=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
+        bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
+        edits=bundles[0].items;f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in jobs],'job_id')
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:
                 pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'other_group','reason':edit.reason});continue
-            job=next(j for j in batch if j['job_id']==edit.job_id)
+            job=next(j for j in jobs if j['job_id']==edit.job_id)
             chosen={k:p for k,p in valid.items() if p['fragment_id'] in edit.fragment_ids}
             if (not set(edit.fragment_ids)<={p['fragment_id'] for p in valid.values()}
                     or not fill.covered_by(job['unit'],sources[sid]['paragraphs'][job['unit']['paragraph_key']],chosen)):
@@ -251,12 +276,24 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             post={**p,**patch_for(key,p,edit)}
             if edit.action=='create':post.update(source_fragment_id=None,source_fragment_ids=list(dict.fromkeys(edit.fragment_ids)))
             KNOWLEDGE_COLLECTIONS[edit.record_type][0].model_validate(post)
+            if key in coverage_updates and post!=coverage_updates[key]:raise ValueError('coverage edits conflict on the same Evidence')
+            coverage_updates[key]=post
             updates[key]=post;working[key]={**working.get(key,{}),'payload':post,'retired':False}
-            value=material(key,working,sources);fp=fingerprint(key,post,value);path=root/'coverage-decisions'/e.digest(job)/'result.json'
+            value=material(key,working,sources);fp=fingerprint(key,post,value);path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest(job)+'.json')
             decision={'postimage':visible(post),'fragment_ids':e.evidence_fragment_ids(post),'reason':edit.reason};e.save(path,decision)
             accepted=root/'accepted'/(fp+'.json')
-            if not accepted.exists():e.save(accepted,{'fingerprint':fp,'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)})
+            coverage_proofs.append((accepted,{'fingerprint':fp,'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)}))
             outcomes.append({'unit_id':edit.job_id,'basis':'gpt_'+edit.action,'object_key':key,'reason':edit.reason})
+    if units and not pending:
+        for accepted,proof in coverage_proofs:
+            if not accepted.exists():e.save(accepted,proof)
+        post_state=coverage_state(group_records(group,working)[1])
+        path=root/'coverage-decisions'/coverage_fingerprint(state)/'accepted-outcome.json'
+        decision={'unit_outcomes':[x for x in outcomes if 'unit_id' in x], 'jev':answers,
+                  'postimage_fingerprint':coverage_fingerprint(post_state)}
+        e.save(path,decision)
+        accepted=root/'coverage-accepted'/(coverage_fingerprint(post_state)+'.json')
+        if not accepted.exists():e.save(accepted,{'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)})
     read_keys=set(targets)|set(catalog)|set(valid)|{'source_documents/'+sid}
     for key in targets:
         read_keys.update('source_fragments/'+fid for fid in e.evidence_fragment_ids(records[key]['payload']))
