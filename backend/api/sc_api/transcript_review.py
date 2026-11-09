@@ -1156,7 +1156,7 @@ class ReviewStore:
                     **timing_quality, "status": "withheld",
                     "paragraph_states": {
                         mapping[p["id"]]: {
-                            "status": "withheld" if p.get("excluded_only") else "qualified"
+                            "status": "withheld" if p.get("excluded_only") or mapping[p['id']] in (timing_quality.get('source_holds') or {}) else "qualified"
                         }
                         for p in editorial_paragraphs
                     },
