@@ -27,10 +27,12 @@ PROMPT = (
     '發言者及採納立場；合理同義概括可保留，不為吹毛求疵增加限定。保存教授引用的經文及反方。'
     '經文規範化節次不要求片段逐字念出；缺上下文時保留並交接，不因局部未重述就刪除既有經文。'
     '只輸出必要欄位修改及簡短理由。keep不改記錄。缺少來源用needs_source交回原文層，'
-    '不得改片段、連接、owners、審閱狀態或資格。每個job_id恰好一次。')
+    '不得改片段、連接、owners、審閱狀態或資格。每個job_id恰好一次。'
+    + f.KNOWLEDGE_TEXT_RULES +
+    '既有記錄若只有準確的轉場，不憑空改成實質論據，也不在本任務越權刪除；keep時明示其僅為轉場。')
 COVERAGE_PROMPT = PROMPT + (
     '本次只處置指定重要意思是否已保存，不全面重審參考記錄。優先enrich既有Evidence/Observation，'
-    '必要才create一筆，不把口頭語、預告或重複拆成新卡，不新建Claim。'
+    '必要才create一筆，不把口頭語、純轉場、預告或重複拆成新卡，不新建Claim。'
     'enrich只准writable_keys；其他組記錄需要修改用handoff，不能為繞過範圍重複create。'
     'fragment_ids只能選所給sources，須完整覆蓋候選原話，不要求採用全部候選ID。'
     'enrich只能使用該記錄已掛載的片段；需要改來源綁定用needs_source，不繞過原文層。'

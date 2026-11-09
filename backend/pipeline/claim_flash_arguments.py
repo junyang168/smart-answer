@@ -18,7 +18,8 @@ PROMPT=(flash.PROMPT+'只檢查指定Claim的論證路線是否完整，不重�
  '每條缺少連接一次給齊兩端object_key、relation_type、direction、直接相關fragment_ids及簡短reason。'
  '這是該連接的完整處置；依教授原文決定最合適的直接類型與方向，同一端點組合不要重複提出。'
  '不改既有邊或文字，已有的直接或間接路線作唯讀參考。'
- '缺材料本身用needs_material，缺來源用needs_source；每項恰好一次。')
+ '缺材料本身用needs_material，缺來源用needs_source；每項恰好一次。'
+ + f.RELATION_REASON_RULES)
 class Proposed(pairs.CompletedProposal):
     fragment_ids:list[str]=Field(min_length=1)
 class Route(BaseModel):

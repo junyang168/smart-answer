@@ -19,7 +19,8 @@ PROMPT=(flash.PROMPT+'只檢查本組是否有教授已論證、值得獨立引�
  '需要修改既有Claim用needs_update，缺已驗證材料用needs_material，缺來源用needs_source。'
  '只用提供的support_keys和fragment_ids；新Claim的claim_id留空，程式分配ID。'
  'Claim與Evidence可同時承載同一判斷，但原話重述只證明教授說過，不算另外的論據。'
- 'answer_question_ids只選直接回答的已提供問題。可輸出空candidates，不能為湊數碎片化。')
+ 'answer_question_ids只選直接回答的已提供問題。可輸出空candidates，不能為湊數碎片化。'
+ + f.CLAIM_DISCOVERY_RULES)
 
 class Candidate(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)

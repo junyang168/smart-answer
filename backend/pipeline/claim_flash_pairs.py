@@ -165,7 +165,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
     for batch,raw in f.gpt(root,ports,'pair_'+kind,jobs,Decisions.model_json_schema(),
             '這是連接處置，不重審節點。GPT 最終決定可覆蓋 Jev；每個 job_id 恰好一次。'
             '選 set 並給 relation_type、direction 及教授論證中的簡短 reason；已有原關係完全保留可 keep。'
-            '不成立 remove；仍無法判定 needs_source。只能使用 allowed_choices，不能補外部論據。'+
+            '不成立 remove；仍無法判定 needs_source。只能使用 allowed_choices，不能補外部論據。'+f.RELATION_REASON_RULES+
             ('candidate_reason是舊候選已保存的理由；有據且符合最終類型方向就原樣沿用，只補缺少的判定，'
              '確有失真或錯配才修正，不為措辭重寫。' if any(j.get('candidate_reason') for j in jobs) else '')):
         items=Decisions.model_validate(raw).items

@@ -75,6 +75,30 @@ def test_fidelity_uses_only_complete_actual_fragments_and_source_blind_split(tmp
     assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
 
 
+def test_process_commentary_repair_stays_within_lower_statement_task(tmp_path):
+    records,sources,plan=setup(tmp_path)
+    records['evidence_steps/E']['payload']['statement']='沒有聽從祂的話，顯明沒有真正相信祂；本組尚未解釋。'
+    before=deepcopy(records)
+    class CommentaryPorts(Ports):
+        def judge(self,request):
+            if 'record' in request['state']:
+                self.choices={'record_fidelity':'changed'}
+                return OriginalPorts.judge(self,request)
+            return super().judge(request)
+    ports=CommentaryPorts();previous=saved_inventory(tmp_path/'prior',sources)
+    result=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[],tmp_path/'run',ports,previous,apply=False)
+    assert result['status']=='verified' and set(result['updates'])=={'evidence_steps/E'}
+    post=result['updates']['evidence_steps/E']
+    assert post['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
+    assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
+    requests=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='evidence_fidelity_repair']
+    assert len(requests)==1 and f.KNOWLEDGE_TEXT_RULES in requests[0]['system']
+    screening=next(r for role,r in ports.calls if role=='jev' and 'record_fidelity' in r['questions'])
+    assert '本組尚未解釋' in screening['questions']['record_fidelity']['instructions']
+    assert 'unsupported' in screening['questions']['record_fidelity']['criteria']
+    assert records==before and result['new_fragments']=={}
+
+
 def test_complete_bound_cross_group_fragments_are_not_truncated(tmp_path):
     records,sources,plan=setup(tmp_path)
     p=sources['S']['paragraphs']['S0002'];fragment=deepcopy(records['source_fragments/F0']['payload'])

@@ -44,6 +44,8 @@ def test_no_missing_claims_needs_one_task_and_no_other_review(ready):
     result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
     assert result['status']=='verified' and not result['new_claim_candidates']
     assert len(ports.calls)==1 and ports.calls[0][1]['input']['task']=='missing_group_claims'
+    assert f.CLAIM_DISCOVERY_RULES in ports.calls[0][1]['system']
+    assert f.KNOWLEDGE_TEXT_RULES in ports.calls[0][1]['system']
     replay=Ports();assert stage.run(store,'S',rroot,root/'missing',replay,apply=True)['status']=='verified'
     assert replay.calls==[]
 

@@ -48,6 +48,8 @@ def test_new_argument_and_zero_model_replay(ready):
     rel=[p for k,p in result['updates'].items() if k.startswith('knowledge_relations/')]
     assert len(rel)==1 and (rel[0]['from_id'],rel[0]['to_id'],rel[0]['relation_type'])==('O','E','supports')
     assert store.get_record_state('evidence_steps','E')['payload']==old
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert f.RELATION_REASON_RULES in request['system']
     assert not any('record_fidelity' in r.get('questions',{}) or 'statement_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
     replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
     assert replay.calls==[]

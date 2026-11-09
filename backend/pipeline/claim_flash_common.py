@@ -18,7 +18,22 @@ GPT_JOBS = 4
 JEV_BYTES = 40000
 JEV_CONTRACT = jevq.CONTRACT
 MATERIAL_CONTRACT = 'claim_flash_same_paragraph_spans_v1'
-REVIEW_CONTRACT = 'claim_flash_semantic_review_v3'
+REVIEW_CONTRACT = 'claim_flash_semantic_review_v4'
+KNOWLEDGE_TEXT_RULES = (
+    '知識內容欄位（statement、text、title、attribution）只保存來源內容與必要歸屬，'
+    '不得混入「本組尚未解釋」「本批未核對」「尚未接入路線」等生成或審閱過程。'
+    '處置過程只寫本次決定的reason／outcomes，不當作教授的教導。'
+    '單純「接下來看馬可」的講課轉場不當作實質論據；保留轉場中實際的經文出處、'
+    '比較及判斷，不能因含轉場語就丟掉整句重要內容。')
+CLAIM_DISCOVERY_RULES = (
+    '除具體釋經結論，也檢查教授明說且另給論據的解經原則，例如以字義用例說明主觀讀法造成誤解。'
+    '原則不是必建配額：已有Claim承載就引用；只有支持上層的一句斷言、沒有另外論據時保留Evidence，'
+    '不從單一例子自行擴張成教授未說的普遍原則。')
+RELATION_REASON_RULES = (
+    '寫入關係的reason只用簡短文字說明教授如何從此端點支持、解釋或限定另一端點，'
+    '區分實質支持與背景確認，不整段重抄兩端statement。'
+    '不得寫「尚未接入既有路線」「本輪補建」「審閱通過」等系統處理過程；'
+    '這些處置說明只放本次決定／outcomes，不寫入關係reason。')
 SEMANTIC_REVIEW = (
     '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'
     '不替參考物件作完整審閱，不因發現一句判斷便要求建立下一層記錄。'
@@ -39,7 +54,8 @@ SEMANTIC_REVIEW = (
     '不因局部片段未重述就刪除。無法核實時先明示所缺上下文，不能以刪去已有論據代替查證。'
     '沿用現有 reason 欄位，簡短指出實際影響判斷的限定和來源短句或位置；'
     'keep 也須解釋為何現有表述保留了該意思，不能只說整體有支持。'
-    '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。')
+    '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。'
+    + KNOWLEDGE_TEXT_RULES)
 
 
 def bind_source(store,sid,root):

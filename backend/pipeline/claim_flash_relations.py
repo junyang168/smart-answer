@@ -14,7 +14,8 @@ PROMPT = (flash.PROMPT + '本次只發現所列Claim之間遺漏的重要直接�
           '只用提供的Claim object_key，不沿鄰居展開。無缺口可空；材料不足列unresolved_keys。'
           '既有邊會獨立檢查，不在此修正。每個job_id恰好一次，只輸出必要候選及簡短理由。')
 PROMPT+=('每條新連接一次給齊relation_type、direction、reason，作完整判定；'
-         'completed_connections已完成，只作唯讀路線，不重判或重複提出；同一端點組合只給一個最合適直接關係。')
+         'completed_connections已完成，只作唯讀路線，不重判或重複提出；同一端點組合只給一個最合適直接關係。'
+         + f.RELATION_REASON_RULES)
 
 
 def consume_arguments(store, root, ids, records, sources):

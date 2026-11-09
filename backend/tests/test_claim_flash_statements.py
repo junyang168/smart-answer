@@ -58,6 +58,17 @@ def test_lower_drift_blocks_before_models(ready):
     assert ports.calls==[]
 
 
+def test_changed_prompt_does_not_silently_upgrade_a_saved_stage(ready,monkeypatch):
+    store,root,eroot=ready;folder=root/'claims'
+    first=stage.run(store,'S',['C'],eroot,folder,Ports(),apply=True)
+    saved=(folder/'verification.json').read_bytes()
+    monkeypatch.setattr(stage,'PROMPT',stage.PROMPT+'新的內容規則。')
+    ports=Ports()
+    with pytest.raises(ValueError):stage.run(store,'S',['C'],eroot,folder,ports,apply=True)
+    assert ports.calls==[] and (folder/'verification.json').read_bytes()==saved
+    assert first['status']=='verified'
+
+
 def test_unrelated_unfinished_group_does_not_block(ready):
     store,root,eroot=ready;intent=json.loads((eroot/'intent.json').read_text())
     intent['groups']['groups'].append({'group_id':'H','lower_record_keys':['observations/PENDING']})

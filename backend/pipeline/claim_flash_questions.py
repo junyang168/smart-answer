@@ -4,7 +4,7 @@ Guidance: https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKI
 Question ids are invisible to Jev. Each instruction names its own subject.
 """
 
-CONTRACT = 'claim_flash_classification_v2'
+CONTRACT = 'claim_flash_classification_v3'
 LOOKUP_UNCERTAINTY_FLOOR = .25  # Existing routing policy; not tuned by this change.
 
 FIDELITY = {'faithful':'實質意思有來源支持，沒有改義。',
@@ -34,7 +34,9 @@ def choice(instruction, criteria):
 
 
 def record_fidelity():
-    return choice('這項記錄的實質內容與完整原文清單的對應情況是哪種？問題記錄只核對提問本身。',FIDELITY)
+    return choice('這項記錄的實質內容與完整原文清單的對應情況是哪種？問題記錄只核對提問本身。'
+                  '摘要添加來源沒有的「本組尚未解釋」「本批未核對」等系統處理說明，屬unsupported；'
+                  '若同時改變教授判斷，按changed或contradicted處置，不把處理說明當教授的話。',FIDELITY)
 
 
 def decomposition():
