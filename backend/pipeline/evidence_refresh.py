@@ -33,9 +33,9 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2))
 
 
-def recorded_call(root, role, request, function, *, preflight=None, gpt_max_bytes=80000):
+def recorded_call(root, role, request, function, *, preflight=None, gpt_max_bytes=80000, jev_max_bytes=40000):
     """Reuse exact replies; never silently retry an unknown call."""
-    if len(json.dumps(request, ensure_ascii=False).encode()) > (40000 if role == 'jev' else gpt_max_bytes):
+    if len(json.dumps(request, ensure_ascii=False).encode()) > (jev_max_bytes if role == 'jev' else gpt_max_bytes):
         raise ValueError('model input exceeds the bounded request size; do not truncate evidence')
     folder = Path(root) / role / digest(request)
     save(folder / 'request.json', request)

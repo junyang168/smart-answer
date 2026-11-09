@@ -15,7 +15,7 @@ LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
 PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded'}
 GPT_BYTES = 128000
 GPT_JOBS = 4
-JEV_BYTES = 40000
+JEV_BYTES = 128000  # Wire-size guard, not the provider's 64k/32k token limits.
 JEV_CONTRACT = jevq.CONTRACT
 MATERIAL_CONTRACT = 'claim_flash_same_paragraph_spans_v1'
 REVIEW_CONTRACT = 'claim_flash_semantic_review_v5'
@@ -268,7 +268,7 @@ def jev(root, ports, state, questions, *, reuse_roots=()):
             break
     if reply is None:
         reply = e.recorded_call(root, 'jev', request, ports.judge,
-                                preflight=getattr(ports, 'judge_preflight', None))
+                                preflight=getattr(ports, 'judge_preflight', None),jev_max_bytes=JEV_BYTES)
     if set(reply.get('answers', {})) != set(questions):
         raise ValueError('Jev question set differs')
     choices = {}
