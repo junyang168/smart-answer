@@ -35,6 +35,8 @@ def file_hash(path):
 def pending_timing_ids(rows,context):
     from backend.pipeline.source_projection import live_text
     timing=context.get('timing_quality') or {}
+    holds=pending_source_ids(rows,context)
+    if holds:return holds
     if not timing or timing.get('status')=='qualified':return []
     states=timing.get('paragraph_states') or {}
     active=[str(p['index']) for p in rows if p.get('type')!='subtitle' and live_text(p.get('text','')).strip()]
@@ -42,8 +44,14 @@ def pending_timing_ids(rows,context):
     if missing:return missing
     bad=[pid for pid,s in states.items() if s.get('status')!='qualified']
     known={str(p['index']) for p in rows}
-    if timing.get('status')=='withheld' and bad and all(pid in known and pid not in active for pid in bad):return []
+    if timing.get('status') in ('withheld','editor_draft_only') and bad and all(pid in known and pid not in active for pid in bad):return []
     return ['unresolved_timing_quality']
+
+
+def pending_source_ids(rows,context):
+    from backend.pipeline.source_projection import live_text
+    holds=(context.get('timing_quality') or {}).get('source_holds') or {}
+    return [str(p['index']) for p in rows if str(p['index']) in holds and live_text(p.get('text','')).strip()]
 
 
 def read(path, default=None):
@@ -423,6 +431,8 @@ class ReviewStore:
                         "pending",
                     ):
                         raise ReviewError(400, "無效確認")
+                    if op.get('decision')=='confirmed' and key in pending_source_ids(rows,c):
+                        raise ReviewError(409,'此段音源不清，粗稿仍未確認；不能用一般確認略過來源問題。原音與粗稿會保留。')
                     target = {
                         "text": by_id[key]["text"],
                         **c["paragraph_bindings"].get(key, {}),
@@ -625,6 +635,8 @@ class ReviewStore:
                 raise ReviewError(403, "沒有發佈權限")
             rows, c = self.load(item)
             self.version(rows, c, request.get("version"))
+            if pending_source_ids(rows,c):
+                raise ReviewError(409,'尚有音源不清的未確認粗稿，不能發佈或作為 Claim 證據。')
             pending_timing=pending_timing_ids(rows,c)
             if pending_timing:
                 count=len(pending_timing)
@@ -839,7 +851,7 @@ class ReviewStore:
         record = read(source / "full_transcript.json")
         from backend.pipeline.contextual_transcript_timing import require_verified_timing
         try:
-            require_verified_timing(source,record)
+            require_verified_timing(source,record,allow_editor_draft=True)
         except (ValueError,OSError,KeyError) as error:
             raise ReviewError(409,'段落時間尚未通過原聲邊界檢查，不能採用候選稿') from error
         layout = read(source / "reading-layout/layout.json")
@@ -983,7 +995,7 @@ class ReviewStore:
         record = read_json(source / "full_transcript.json")
         from backend.pipeline.contextual_transcript_timing import require_verified_timing
         try:
-            require_verified_timing(source,record)
+            require_verified_timing(source,record,allow_editor_draft=True)
         except (ValueError,OSError,KeyError) as error:
             raise ReviewError(409,'段落時間尚未通過原聲邊界檢查，不能採用候選稿') from error
         layout = read_json(source / "reading-layout/layout.json")
@@ -1136,6 +1148,9 @@ class ReviewStore:
                         }
                     )
             timing_quality = copy.deepcopy(record.get("timing_quality"))
+            if timing_quality and timing_quality.get('source_holds'):
+                timing_quality['source_holds']={mapping[pid]:hold for pid,hold in timing_quality['source_holds'].items() if pid in mapping}
+                timing_quality['paragraph_states']={mapping[p['id']]:{'status':'withheld' if p['id'] in record['timing_quality']['source_holds'] else 'qualified'} for p in editorial_paragraphs}
             if timing_quality and any(p.get("excluded_only") for p in editorial_paragraphs):
                 timing_quality = {
                     **timing_quality, "status": "withheld",

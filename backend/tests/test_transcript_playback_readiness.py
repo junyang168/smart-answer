@@ -3,6 +3,46 @@ import pytest
 from backend.pipeline.transcript_playback_readiness import base_rows,usable,require_control
 
 
+def test_noisy_owner_source_can_enter_editor_but_not_knowledge(tmp_path,monkeypatch):
+    import hashlib
+    import backend.pipeline.transcript_playback_readiness as module
+    from backend.pipeline.slide_change_pilot import save_json
+    from backend.pipeline.transcript_source_observations import record_unintelligible
+    from backend.pipeline.contextual_transcript_timing import require_verified_timing
+    evidence=tmp_path/'evidence';evidence.mkdir()
+    paragraphs=[dict(id='p1',text='清楚',start_ms=0,end_ms=1000),dict(id='p2',text='不清楚粗稿',start_ms=1000,end_ms=2000)]
+    record=dict(schema_version='full-illustrated-corrected-transcript.v1',source_sha256='a'*64,paragraphs=copy.deepcopy(paragraphs))
+    save_json(evidence/'plan.json',dict(records={'source':dict(source_sha256='a'*64,paragraphs=paragraphs)},chunks=[]))
+    save_json(evidence/'playback-readiness/input.json',dict(text_sha256={'source':{p['id']:hashlib.sha256(p['text'].encode()).hexdigest() for p in paragraphs}}))
+    result=dict(blocked=1,source_plan_sha256='plan',input_sha256='input',plan_sha256='reviews',paragraphs={'source':[dict(**paragraphs[0],status='ready'),dict(**paragraphs[1],status='blocked')]})
+    monkeypatch.setattr(module,'assess',lambda *a,**k:copy.deepcopy(result))
+    monkeypatch.setattr('backend.pipeline.transcript_timing_report.write_report',lambda *a,**k:None)
+    # An unresolved boundary without the exact owner observation is still blocked.
+    with pytest.raises(ValueError):module.qualify_record(tmp_path,copy.deepcopy(record),evidence,saved_only=True)
+    observation=record_unintelligible(evidence,'p2','owner','噪音太大聽不清楚')
+    module.qualify_record(tmp_path,record,evidence,saved_only=True)
+    assert record['timing_quality']['status']=='editor_draft_only'
+    assert record['paragraphs'][1]['text']==paragraphs[1]['text']
+    require_verified_timing(tmp_path,record,allow_editor_draft=True)
+    with pytest.raises(ValueError,match='knowledge exports'):require_verified_timing(tmp_path,record)
+    # Neither a forged qualified flag nor changed hold/source/text can bypass it.
+    for mutate in [lambda r:r['timing_quality'].update(status='qualified'),lambda r:r['timing_quality'].update(source_holds={}),lambda r:r['paragraphs'][1].update(text='猜測內容')]:
+        bad=copy.deepcopy(record);mutate(bad)
+        with pytest.raises(ValueError):require_verified_timing(tmp_path,bad,allow_editor_draft=bad['timing_quality']['status']!='qualified')
+    observation.unlink()
+    with pytest.raises(ValueError):require_verified_timing(tmp_path,record,allow_editor_draft=True)
+
+
+def test_editor_only_draft_withholds_stale_exports_without_deleting(tmp_path):
+    from backend.pipeline.transcript_playback_readiness import withhold_knowledge_exports
+    (tmp_path/'handoff').mkdir();(tmp_path/'handoff/source.json').write_text('old knowledge')
+    (tmp_path/'argument_source_packet.json').write_text('old packet')
+    withhold_knowledge_exports(tmp_path)
+    assert not (tmp_path/'handoff').exists() and not (tmp_path/'argument_source_packet.json').exists()
+    assert sorted(p.read_text() for p in (tmp_path/'withheld-source-exports').rglob('*.json'))==['old knowledge','old packet']
+    withhold_knowledge_exports(tmp_path)  # Retry after the completed move is a no-op.
+
+
 def test_joint_selection_reuses_complete_candidates_without_rewriting_model_preference():
     from backend.pipeline.transcript_playback_readiness import choose_compatible_ranges
     complete=dict(verdict='complete',clipped_word=False,leading_context='none',trailing_context='brief',heard_opening='開頭',heard_ending='結尾')

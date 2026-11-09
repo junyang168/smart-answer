@@ -257,10 +257,11 @@ def assess(evidence,*,write=True):
     return result
 
 
-def qualify_record(out,record,evidence):
+def qualify_record(out,record,evidence,*,saved_only=False):
     from backend.pipeline.contextual_transcript_timing import TimingReviewRequired,timing_fingerprint
-    result=run(evidence)
-    if result['blocked']:
+    result=assess(evidence) if saved_only else run(evidence)
+    holds=editor_source_holds(evidence,result)
+    if result['blocked'] and len(holds)!=result['blocked']:
         record['timing_quality']=dict(policy=POLICY,status='withheld',assessment_path=str((evidence/'playback-readiness/assessment.json').relative_to(out)))
         save_json(out/'full_transcript.json',record)
         from backend.pipeline.transcript_timing_report import write_report
@@ -270,35 +271,62 @@ def qualify_record(out,record,evidence):
     if set(rows)!={p['id'] for p in record['paragraphs']}:raise ValueError('Playback paragraph identity changed')
     warnings=[]
     for p in record['paragraphs']:
-        row=rows[p['id']];p.update(start_ms=row['start_ms'],end_ms=row['end_ms'],timing_precision='complete_paragraph_playback',word_timing_valid=False)
+        row=rows[p['id']]
+        if p['id'] in holds:
+            warnings.append(dict(kind='unintelligible_recording_noise',start_ms=p['start_ms'],end_ms=p['end_ms'],paragraph_ids=[p['id']],status='source_unclear',note='音源噪聲過大，粗稿未確認；播放位置僅供找尋原聲，不是已核準邊界。保留原音與粗稿，不能確認、發佈或作為 Claim 證據。'))
+            p.update(timing_precision='unverified_source',word_timing_valid=False)
+            continue
+        p.update(start_ms=row['start_ms'],end_ms=row['end_ms'],timing_precision='complete_paragraph_playback',word_timing_valid=False)
         if row['status']=='ready_with_context':warnings.append(dict(kind='brief_playback_context',start_ms=row['start_ms'],end_ms=row['end_ms'],paragraph_ids=[p['id']],status='context_warning',note='本段內容完整，可用於校對；前後可能帶有少量鄰段聲音，毋須逐字切齊'))
-    record['source_notices']=[n for n in record.get('source_notices',[]) if n.get('kind')!='brief_playback_context']+warnings
+    record['source_notices']=[n for n in record.get('source_notices',[]) if n.get('kind') not in ('brief_playback_context','unintelligible_recording_noise')]+warnings
     certificate=dict(policy=POLICY,fingerprint=timing_fingerprint(record),evidence_root=str(evidence.relative_to(out)),
         source_plan_sha256=result['source_plan_sha256'],input_sha256=result['input_sha256'],review_plan_sha256=result['plan_sha256'],
-        word_timestamps_verified=False,original_strict_verdicts_unchanged=True)
+        word_timestamps_verified=False,original_strict_verdicts_unchanged=True,source_holds=holds)
     path=evidence/'playback-readiness/certificate.json';save_json(path,certificate)
-    record['timing_quality']=dict(policy=POLICY,status='qualified',precision='paragraph_playback',certificate_path=str(path.relative_to(out)),certificate_sha256=file_sha(path),context_warnings=len(warnings))
+    record['timing_quality']=dict(policy=POLICY,status='editor_draft_only' if holds else 'qualified',precision='paragraph_playback',certificate_path=str(path.relative_to(out)),certificate_sha256=file_sha(path),context_warnings=len(warnings),source_holds=holds)
     return record
 
 
-def require_record(source,record):
+def editor_source_holds(evidence,result):
+    """Only exact owner-reported noisy sources can enter an unconfirmed Editor draft."""
+    from backend.pipeline.transcript_source_observations import load_observations
+    observations=load_observations(evidence)
+    return {r['id']:observations[r['id']] for r in result['paragraphs']['source'] if r['status']=='blocked' and r['id'] in observations}
+
+
+def withhold_knowledge_exports(out):
+    """Retain stale exports privately; never leave them at the ingestion entry point."""
+    import shutil
+    from backend.pipeline.slide_change_pilot import object_sha
+    for name in ('argument_source_packet.json','handoff'):
+        path=out/name
+        if not path.exists():continue
+        hashes={str(p.relative_to(path)):file_sha(p) for p in path.rglob('*') if p.is_file()} if path.is_dir() else {'file':file_sha(path)}
+        target=out/'withheld-source-exports'/object_sha(hashes)/name
+        target.parent.mkdir(parents=True,exist_ok=True)
+        if target.exists():raise ValueError('Withheld export archive already exists; inspect before moving')
+        shutil.move(str(path),str(target))
+
+
+def require_record(source,record,*,allow_editor_draft=False):
     from backend.pipeline.contextual_transcript_timing import timing_fingerprint
     quality=record['timing_quality'];root=source.resolve()
-    if quality.get('status')!='qualified':raise ValueError('Timing quality gate: substantive playback problems remain')
+    if quality.get('status')!='qualified' and not (allow_editor_draft and quality.get('status')=='editor_draft_only'):raise ValueError('Timing quality gate: substantive playback problems remain; Editor-only source holds cannot enter knowledge exports')
     path=(root/quality.get('certificate_path','')).resolve()
     if not path.is_relative_to(root) or not path.is_file() or file_sha(path)!=quality.get('certificate_sha256'):raise ValueError('Playback certificate missing or changed')
     certificate=read_json(path);evidence=(root/certificate['evidence_root']).resolve()
     if (certificate.get('policy')!=POLICY or not evidence.is_relative_to(root) or certificate.get('fingerprint')!=timing_fingerprint(record)):
         raise ValueError('Playback certificate belongs to other text/times/source')
     result=assess(evidence,write=False)
-    if result['blocked'] or any(certificate[k]!=result[v] for k,v in [('source_plan_sha256','source_plan_sha256'),('input_sha256','input_sha256'),('review_plan_sha256','plan_sha256')]):raise ValueError('Playback eligibility is unverified')
+    holds=editor_source_holds(evidence,result)
+    if (result['blocked'] and (not allow_editor_draft or len(holds)!=result['blocked'])) or certificate.get('source_holds',{})!=holds or quality.get('source_holds',{})!=holds or any(certificate[k]!=result[v] for k,v in [('source_plan_sha256','source_plan_sha256'),('input_sha256','input_sha256'),('review_plan_sha256','plan_sha256')]):raise ValueError('Playback eligibility is unverified')
     snapshot=read_json(evidence/'playback-readiness/input.json');rows={r['id']:r for r in result['paragraphs']['source']}
     source_plan=read_json(evidence/'plan.json')
     if source_plan['records']['source']['source_sha256']!=record['source_sha256']:raise ValueError('Playback recording changed')
     if len(rows)!=len(record['paragraphs']) or len({p['id'] for p in record['paragraphs']})!=len(rows):raise ValueError('Playback paragraph set changed')
     for p in record['paragraphs']:
         row=rows.get(p['id'])
-        if (not row or (p['start_ms'],p['end_ms'])!=(row['start_ms'],row['end_ms']) or
+        if (not row or (p['id'] not in holds and (p['start_ms'],p['end_ms'])!=(row['start_ms'],row['end_ms'])) or
             hashlib.sha256(p['text'].encode()).hexdigest()!=snapshot['text_sha256']['source'][p['id']]):raise ValueError('Playback text or coordinates changed')
     for chunk in source_plan['chunks']:
         raw=read_json(evidence/'alignment'/f'{chunk["id"]}.json')

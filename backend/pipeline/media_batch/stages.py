@@ -264,7 +264,16 @@ def handoff(payload):
     out = Path(payload["out"])
     root = Path(payload["config"]["review_root"])
     item = payload["item"]
-    result = export_handoff(out)
+    record=read(out/'full_transcript.json',{})
+    editor_only=record.get('timing_quality',{}).get('status')=='editor_draft_only'
+    if editor_only:
+        from backend.pipeline.contextual_transcript_timing import require_verified_timing
+        require_verified_timing(out,record,allow_editor_draft=True)
+        from backend.pipeline.transcript_playback_readiness import withhold_knowledge_exports
+        withhold_knowledge_exports(out)
+        result={'knowledge_export':'withheld_source_unclear'}
+    else:
+        result = export_handoff(out)
     register_catalog(payload)
     store = ReviewStore(root)
     prepare_new_review_draft(store, item, out)
@@ -272,7 +281,7 @@ def handoff(payload):
     result.update(
         item=item,
         editor_href=editor_link(item,payload["config"].get("editor_origin")),
-        source_admission="awaiting_human_publication",
+        source_admission="editor_draft_only" if editor_only else "awaiting_human_publication",
     )
     atomic(out / "review-receipt.json", result)
     return result

@@ -924,6 +924,43 @@ def test_publication_cannot_bypass_pending_time_quality_even_with_confirmed_text
     assert not (root/'script_published/講道 test.json').exists()
 
 
+def test_source_hold_is_local_and_cannot_be_confirmed_or_published(setup):
+    from backend.api.sc_api.transcript_review import pending_timing_ids
+    store,root,source=setup;adopted(setup)
+    folder=store.folder('講道 test');context=read(folder/'context.json')
+    context['timing_quality']={'status':'editor_draft_only','source_holds':{'1':{'kind':'unintelligible_recording_noise'}},'paragraph_states':{'1':{'status':'withheld'},'2':{'status':'qualified'}}}
+    atomic(folder/'context.json',context)
+    doc=store.document('a','講道 test')
+    assert pending_timing_ids(doc['script'],doc['context'])==['1']
+    with pytest.raises(ReviewError,match='音源不清'):
+        store.mutate('a','講道 test',op(doc,operations=[dict(kind='paragraph_review',id='1',decision='confirmed',content_sha256=doc['paragraph_shas']['1'])]))
+    store.mutate('a','講道 test',op(doc,operations=[dict(kind='paragraph_review',id='2',decision='confirmed',content_sha256=doc['paragraph_shas']['2'])]))
+    doc=store.document('a','講道 test')
+    assert doc['context']['reviews']['p:2']['decision']=='confirmed'
+    with pytest.raises(ReviewError,match='音源不清'):store.publish('a','講道 test',op(doc))
+    assert not (root/'script_published/講道 test.json').exists()
+    removed=copy.deepcopy(doc['script']);removed[0]['text']='~~'+removed[0]['text']+'~~'
+    assert pending_timing_ids(removed,doc['context'])==[]
+    removed[0]['text']+=' 恢復部分'
+    assert pending_timing_ids(removed,doc['context'])==['1']
+
+
+def test_import_maps_source_holds_without_adding_approvals(setup):
+    store,root,source=setup
+    record=read(source/'full_transcript.json')
+    pid=record['paragraphs'][1]['id']
+    record['timing_quality']={'status':'editor_draft_only','source_holds':{pid:{'text_confirmed':False}}}
+    atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json')
+    layout['source_record_sha256']=__import__('backend.pipeline.slide_change_pilot',fromlist=['object_sha']).object_sha(record)
+    atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink()
+    store.register_candidate('講道 test',source,expected_script_sha256=None)
+    doc=adopted(setup)
+    assert doc['context']['timing_quality']['source_holds']=={'2':{'text_confirmed':False}}
+    assert doc['context']['reviews']=={}
+
+
 def test_batch_new_draft_opens_unclaimed_and_retry_preserves_edits(setup):
     from backend.pipeline.media_batch.stages import prepare_new_review_draft
 

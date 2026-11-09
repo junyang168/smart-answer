@@ -299,7 +299,7 @@ def playback_bindings(lecture):
     return result
 
 
-def require_verified_timing(source:Path,record:dict):
+def require_verified_timing(source:Path,record:dict,*,allow_editor_draft=False):
     """Fail closed at handoff and fresh machine-candidate registration/adoption."""
     if not isinstance(record,dict):raise ValueError('Timing quality gate: staged source is incomplete')
     machine=(record.get('schema_version')=='full-illustrated-corrected-transcript.v1'
@@ -308,7 +308,7 @@ def require_verified_timing(source:Path,record:dict):
     quality=record.get('timing_quality',{})
     from backend.pipeline.transcript_playback_readiness import POLICY as PLAYBACK_POLICY,require_record
     if quality.get('policy')==PLAYBACK_POLICY:
-        return require_record(source,record)
+        return require_record(source,record,allow_editor_draft=allow_editor_draft)
     if quality.get('policy')!=POLICY or quality.get('status')!='qualified':
         raise ValueError('Timing quality gate: contextual acoustic boundaries are unverified')
     root=source.resolve();path=(root/quality.get('certificate_path','')).resolve()
