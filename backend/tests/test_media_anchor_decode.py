@@ -26,3 +26,11 @@ def test_adpcm_recording_checks_use_origin_decode_and_retain_strict_lag_gate(tmp
     with pytest.raises(ValueError,match='clock mismatch'):
         playback_anchors(source,badmedia/'.S.partial.mp3',duration)
     assert not (badmedia/'S.mp3').exists()
+
+
+def test_isolated_editor_link_keeps_correct_host_and_escapes_sermon_id():
+    from backend.pipeline.media_batch.stages import editor_link
+    assert editor_link('講道 1','http://127.0.0.1:3685')=='http://127.0.0.1:3685/admin/surmons/%E8%AC%9B%E9%81%93%201'
+    assert editor_link('S')=='/admin/surmons/S'
+    for origin in ('javascript:alert(1)','https://example.com/path','https://user:secret@example.com'):
+        with pytest.raises(ValueError):editor_link('S',origin)

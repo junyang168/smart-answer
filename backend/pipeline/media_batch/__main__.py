@@ -26,6 +26,7 @@ def main():
     plan = sub.add_parser("plan")
     plan.add_argument("--folder", type=Path, required=True)
     plan.add_argument("--title")
+    plan.add_argument("--editor-origin", help="Optional editor host for an isolated review destination")
     for name in (
         "artifact-root",
         "media-root",

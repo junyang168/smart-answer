@@ -247,6 +247,16 @@ def register_catalog(payload):
                     save(catalog, rows)
 
 
+def editor_link(item, origin=None):
+    from urllib.parse import urlsplit,quote
+    if origin:
+        url=urlsplit(origin)
+        if (url.scheme not in ('http','https') or not url.hostname or url.username or url.password
+            or url.path not in ('','/') or url.query or url.fragment):
+            raise ValueError('Editor origin must be an HTTP(S) origin without path or credentials')
+    return (origin.rstrip('/') if origin else '')+'/admin/surmons/'+quote(item,safe='')
+
+
 def handoff(payload):
     from backend.api.sc_api.transcript_review import ReviewStore, atomic as save, read
     from backend.pipeline.video_transcript_handoff import export_handoff
@@ -261,7 +271,7 @@ def handoff(payload):
     register_catalog(payload)
     result.update(
         item=item,
-        editor_href="/admin/surmons/" + item,
+        editor_href=editor_link(item,payload["config"].get("editor_origin")),
         source_admission="awaiting_human_publication",
     )
     atomic(out / "review-receipt.json", result)
