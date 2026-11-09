@@ -52,3 +52,13 @@ def test_cut_requires_exact_prefix_complete_token_and_positive_audio_verdict(tmp
     pairs[0].update(alignment_path=str(tmp_path/'alignment/b.json'),left_alignment_path=str(tmp_path/'alignment/a.json'))
     for prefix in ['不存在','乙丙丁戊己庚','，']:
         with pytest.raises(ValueError):seams.decisions(asr,pairs,{'pairs':[dict(id='s000',decision='remove_duplicate',right_prefix=prefix,audio_quote='fixture',reason='fixture')]},{'pairs':[dict(id='s000',verdict='pass',audio_quote='fixture',reason='fixture')]})
+
+
+def test_saved_unmatched_edge_failure_routes_to_audio_review_not_an_unhandled_valueerror(tmp_path,monkeypatch):
+    from backend.pipeline import transcript_seam_repair as legacy
+    from backend.pipeline.slide_change_pilot import object_sha
+    chunks=case(tmp_path);binding=legacy.source_binding(tmp_path,read_json(tmp_path/'asr.json'))
+    identity=object_sha({'policy':legacy.POLICY,'binding':binding})
+    save_json(tmp_path/f'seam-recovery/{identity[:20]}/proof.json',dict(policy=legacy.POLICY,binding=binding,status='needs_audio_review',reason='No exact shared edge phrase; no fuzzy deletion permitted',pairs=[]))
+    monkeypatch.setattr(seams,'recover',lambda *a,**kw:{'recovered':'audio branch'})
+    assert legacy.stitch_with_recovery(tmp_path,Path('/unused'))=={'recovered':'audio branch'}

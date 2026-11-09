@@ -131,6 +131,8 @@ def recover(out,aligner_python,capacity_root=None):
         saved=read_json(proof)
         if saved['binding']!=binding:raise ValueError('Saved seam recovery drift')
         if saved['status']!='verified':
+            if not saved.get('pairs') and 'No exact shared edge phrase' in saved.get('reason',''):
+                raise SeamCoverageError(saved['reason'])
             return recover_audio(out,folder,capacity_root)
         load_proof(out,proof)
         save_json(out/'seam-repair.json',{'proof':str(proof.relative_to(out)),'sha256':file_sha(proof)})
