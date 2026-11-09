@@ -317,7 +317,33 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if prepare:
             batch=prepare(deepcopy(batch))
         req=request(batch)
+        if task=='evidence_fidelity_repair' and getattr(ports,'focus_evidence_findings',False):
+            from backend.pipeline import claim_flash_evidence as eo
+            direction=getattr(ports,'focused_review_instruction','')
+            if not direction:raise ValueError('focused Evidence continuation requires its owner direction')
+            e.save(Path(root)/'focused-review-admission.json',{'contract':eo.FOCUSED_CONTRACT,
+                'owner_direction':direction,'legacy_prompt_sha256':e.digest(instruction),
+                'focused_prompt_sha256':e.digest(eo.FOCUSED_PROMPT),'models':ports.identity})
+            old_key=e.digest(req);old=Path(root)/'gpt'/old_key
+            if not (old/'response.json').exists():
+                if (old/'started.json').exists():
+                    if not (old/'owner-recovery.json').exists():
+                        raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
+                    authority=json.loads((old/'owner-recovery.json').read_text())
+                    expected=Path(ports.root)/'gpt'/old_key/'transport'/'exit.json'
+                    if (authority.get('original_request_sha256')!=old_key or not authority.get('owner_direction')
+                            or authority.get('max_reissues')!=1 or authority.get('exit_path')!=str(expected)
+                            or authority.get('exit_sha256')!=e.digest(json.loads(expected.read_text()))
+                            or json.loads(expected.read_text()).get('error_type')!='TimeoutExpired'):
+                        raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+                    if e.digest(json.loads((old/'request.json').read_text()))!=old_key:
+                        raise ValueError('original unknown request changed')
+                    req=eo.focused_request(req)
+                    req['execution_recovery']={'original_request_sha256':old_key,'authority_sha256':e.digest(authority)}
+                else:req=eo.focused_request(req)
         if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
+            if req.get('execution_recovery'):
+                raise ValueError('authorized complete recovery exceeds payload limit; no split or call made')
             if len(batch)==1:
                 raise ValueError('one complete GPT job exceeds Flash payload limit; no truncation')
             middle=len(batch)//2
@@ -337,7 +363,10 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if (schema.get('properties',{}).get('items',{}).get('type')=='array'
                 and ids is not None and len(set(ids))==len(ids) and set(ids)<set(expected)):
             missing=[job for job in batch if job['job_id'] not in ids]
+            if req.get('execution_recovery'):
+                raise ValueError('bounded owner recovery omitted jobs; saved reply retained, no automatic extra call')
             correction=request(missing)
+            if req.get('focused_contract'):correction=eo.focused_request(correction)
             correction['system']+='\n前次漏答；本次只處置這些未答工作，每個 ID 恰好一次，不重做已答項。'
             correction['schema']=deepcopy(schema)
             array=correction['schema'].get('properties',{}).get('items',{})
@@ -357,6 +386,8 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             exactly(extra.get('items',[]),[j['job_id'] for j in missing],field)
             byid={item[field]:item for item in items+extra['items']}
             reply={**reply,'items':[byid[job['job_id']] for job in batch]}
+        if req.get('focused_contract'):
+            eo.validate_focused_reply(req,reply)
         yield batch,reply
 
 

@@ -39,6 +39,42 @@ COVERAGE_PROMPT = PROMPT + (
     '本組多個候選若enrich同一記錄，每項須給相同、完整保存全部相關候選的最終表述，不能互相覆蓋。'
     'keep表示已有保存或確定不必另存；需要更多原話用needs_source。')
 
+FOCUSED_CONTRACT='claim_flash_jev_findings_only_v1'
+FOCUSED_PROMPT=(
+    '唯一任務：核對每個job.review_focus列出的Jev疑點，保留或作最小修正。Jev可能誤判，不能盲從。'
+    'record、sources及其他已通過成分只作上下文，不重新全面審閱。只准改writable_fields列出的欄位；'
+    '若只列stance，就只判採納立場，不重寫已通過的statement。修訂statement時保留其他已通過意思。'
+    '只用已掛SourceFragments；缺必要上下文用needs_source交回原文層，不自行借鄰段。'
+    '不審Claim、論證或節點關係。keep表示原值可保留。只輸出必要修改和針對疑點的簡短理由，'
+    '每個job_id恰好一次；未改欄位用null。保留教授的經文引用。'+f.KNOWLEDGE_TEXT_RULES)
+
+
+def focused_request(request):
+    result=deepcopy(request);result['system']=FOCUSED_PROMPT
+    result['focused_contract']=FOCUSED_CONTRACT
+    for job in result['input']['jobs']:
+        issues={k:v for k,v in job['jev'].items() if not k.endswith('_classification')
+            and v!=('supported' if k.startswith('component_') else 'matched' if k.endswith('_consistency') else 'faithful')}
+        fields=set()
+        if any(k in {'record_fidelity','decomposition_fidelity'} or k.startswith('component_') for k in issues):
+            fields.update({'statement','scripture_refs'})
+        if 'speaker_consistency' in issues:fields.update({'speaker','attribution'})
+        if 'stance_consistency' in issues:fields.add('stance')
+        if not issues:raise ValueError('focused GPT job has no Jev finding')
+        job.update(review_focus=issues,writable_fields=sorted(fields))
+    return result
+
+
+def validate_focused_reply(request,reply):
+    jobs={j['job_id']:j for j in request['input']['jobs']}
+    for edit in Edits.model_validate(reply).items:
+        if edit.action!='repair':continue
+        job=jobs[edit.job_id]
+        changed={field for field in FIELDS if getattr(edit,field) is not None
+                 and getattr(edit,field)!=job['record'].get(field)}
+        if not changed<=set(job['writable_fields']):
+            raise ValueError('focused Evidence repair changed a field outside the Jev findings')
+
 
 class Edit(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
