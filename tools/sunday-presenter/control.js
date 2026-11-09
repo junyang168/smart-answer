@@ -29,7 +29,49 @@ async function act(action, args) {
     return true;
   } catch { error.textContent = '操作未完成，請重試。'; return false; }
 }
+const musicLabels = { hymn:'詩歌',responseHymn:'回應詩歌',doxology:'三一頌' };
+for (const [slot,label] of Object.entries(musicLabels)) {
+  const row=document.createElement('div');row.className='music-slot';row.dataset.slot=slot;
+  const title=document.createElement('strong');title.textContent=label;
+  const file=document.createElement('span');file.className='music-name';file.textContent='尚未選擇 MP3';
+  const choose=document.createElement('button');choose.textContent='選擇 MP3';choose.onclick=()=>act('music-file',{slot});
+  const play=document.createElement('button');play.className='music-play';play.textContent='播放';play.disabled=true;play.onclick=()=>act('music-play',{slot});
+  row.append(title,file,choose,play);document.querySelector('#music-slots').append(row);
+}
+function musicTime(value) { const seconds=Math.floor(Number.isFinite(value)?value:0);return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`; }
+function renderMusic(music) {
+  if (!music) return;
+  for (const slot of Object.keys(musicLabels)) {
+    const row=document.querySelector(`[data-slot="${slot}"]`), track=music.tracks.find(t=>t.id===music.slots[slot]);
+    row.querySelector('.music-name').textContent=track?.name||'尚未選擇 MP3';
+    const play=row.querySelector('.music-play');play.disabled=!track;
+    play.textContent=music.activeSlot===slot&&music.status==='playing'?'暫停':music.activeSlot===slot&&music.status==='paused'?'繼續':'播放';
+    row.classList.toggle('music-active',music.activeSlot===slot&&music.status==='playing');
+  }
+  const states={playing:'播放中',paused:'已暫停',stopped:'已停止',loading:'正在讀取 MP3…',ended:'播放完畢',error:'無法播放'};
+  const current=music.tracks.find(t=>t.id===music.selected);
+  document.querySelector('#music-status').textContent=music.error || `${states[music.status]||'已停止'}${music.activeSlot&&current?' · '+musicLabels[music.activeSlot]+'：'+current.name:''}`;
+  document.querySelector('#music-time').textContent=musicTime(music.position)+' / '+musicTime(music.duration);
+  const seek=document.querySelector('#music-seek');seek.disabled=!music.duration;
+  if(document.activeElement!==seek){seek.max=music.duration||0;seek.value=music.position||0;}
+  const volume=document.querySelector('#music-volume');if(document.activeElement!==volume)volume.value=music.volume;
+  document.querySelector('#music-volume-label').textContent=Math.round(music.volume*100)+'%';
+  document.querySelector('#music-stop').disabled=!music.activeSlot||!['playing','paused','loading','ended'].includes(music.status);
+}
+window.presenter.onMusic(renderMusic);
+document.querySelector('#music-stop').onclick=()=>act('music-stop');
+document.querySelector('#music-seek').onchange=e=>act('music-seek',{position:Number(e.target.value)});
+document.querySelector('#music-volume').oninput=e=>act('music-volume',{volume:Number(e.target.value)});
 function render(state) {
+  renderMusic(state.music);
+  const preparation=state.preparation||{status:'idle',decks:{}};
+  const preparing=!!preparation.busy;
+  const prepareButton=document.querySelector('#prepare-week');
+  prepareButton.disabled=preparing;
+  prepareButton.textContent=preparing?'正在準備…':preparation.status==='blocked'?'繼續準備兩份 PPT':'準備本週兩份 PPT';
+  document.querySelector('#preparation-status').textContent=preparation.message||'按一次準備，兩份放映畫面完成檢查後會顯示敬拜首頁。';
+  const deckStatus={pending:'等待',preparing:'準備中',ready:'已就緒',blocked:'需處理'};
+  document.querySelector('#preparation-decks').textContent='講道：'+(deckStatus[preparation.decks.sermon]||'尚未準備')+' · 主日崇拜：'+(deckStatus[preparation.decks.worship]||'尚未準備');
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
   const recording = state.recording || { status: 'idle', devices: [] };
   const recordingBusy = ['starting', 'recording', 'stopping'].includes(recording.status);
@@ -84,7 +126,7 @@ function render(state) {
     const candidate = window.presenterCards.cardPage(state, deck);
     const primary = section.querySelector('.primary');
     section.querySelector('.current-title').textContent = candidate?.title || '尚未選擇檔案';
-    let action = 'sunday-folder', args = { deck }, hint = '點「開啟本週 PPT」，登入後自動識別敬拜與講道。';
+    let action = 'sunday-folder', args = { deck }, hint = '按上方「準備本週兩份 PPT」自動完成。';
     let buttonLabel = '選擇 PPT', disabled = false;
     if (candidate) {
       args = { id: candidate.id };
@@ -101,6 +143,7 @@ function render(state) {
         hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，回到設定窗口確認畫面，播放後會自動隱藏設定。';
       }
     }
+    if(preparing){buttonLabel='正在準備';disabled=true;}
     primary.textContent = buttonLabel; primary.disabled = disabled;
     primary.onclick = () => act(action, args);
     section.querySelector('.next-step').textContent = hint;

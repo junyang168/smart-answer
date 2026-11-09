@@ -139,16 +139,19 @@ Remote on the speaker Mac (universal Intel/Apple Silicon). No Node.js installati
 is needed. The package is ad-hoc signed, without Developer ID/notarization; use
 macOS Privacy & Security → Open Anyway after verifying the downloaded source.
 
-1. Open Presenter. A movable settings window appears; no blank OUTPUT appears at
-   startup. Open this week's PPT and sign into Microsoft inside Presenter.
-2. The church API supplies the upcoming Sunday folder in America/Chicago time.
-   The unique worship-named file and sole remaining sermon PPT are assigned to
-   two fixed cards. Ambiguous choices require selection. On each card, click
-   **開始投影片放映** once, inspect the slide-only preview, then **確認並播放**.
-   Presenter uses browser-native fullscreen on Office's live slide surface;
-   the PowerPoint logo, signed-in account and reader toolbars stay outside it.
-   The original Office document, animations and keyboard handlers remain loaded.
-   Leaving fullscreen revokes audience readiness until it is started again.
+1. Open Presenter and click **準備本週兩份 PPT**. The church API supplies the
+   current Sunday folder in America/Chicago time. Complete Microsoft sign-in
+   privately if requested; the same run continues when login finishes.
+2. Presenter identifies the unique worship-named file and sole remaining sermon
+   PPT by exact filenames, binds their actual document identities, then prepares
+   sermon followed by worship. It waits for rendered slide content, enters
+   browser-native fullscreen on Office's live SlidePanel, verifies the first
+   slide and finally shows the worship homepage. The PowerPoint logo, account
+   and reader toolbars remain outside OUTPUT; original rendering and animations
+   are retained. Missing/ambiguous files or bounded loading failures show a
+   concrete error. Press **繼續準備兩份 PPT** to retry; already verified decks and
+   their current pages are preserved. Repeated clicks never create concurrent runs.
+   Manual file and slideshow actions remain under **手動處理檔案** and the deck cards.
 3. Playback hides settings. Command-1 selects worship, Command-2 selects sermon;
    arrow keys flip the current slideshow. Switching retains the same views and
    slide state. Dock activation or Command-P restores settings; closing settings
@@ -197,8 +200,8 @@ commands are exposed by the Phase 1 protocol. Audio does not share this channel.
 The church's iPhone hotspot must allow peer connectivity between both Macs.
 Flip commands stay local; Office and manually operated Meet use the internet.
 Keeping a page loaded preserves state, not paused timers: background video,
-animations and automatic slide advances may continue. Readiness is the operator's
-visual confirmation. Office account policies, unsupported web animations and
+animations and automatic slide advances may continue. Readiness requires the live Office slide surface and fullscreen checks;
+the operator should still inspect the final visual result. Office account policies, unsupported web animations and
 actual Meet audio require testing with the intended files and receiving device.
 
 ## Development and packaging
@@ -237,3 +240,13 @@ slide buttons and keyboard navigation. Pairings are stored separately for each
 pinned Presenter identity; **重新配對** removes only the selected host. Mac upgrades
 can read the previous single-host Keychain item only for its exact fingerprint.
 Both clients use the same endpoint/certificate checks and reject HTTP redirects.
+
+## Local MP3 accompaniment (0.6.11, #712)
+
+The control panel has three fixed music slots: 詩歌, 回應詩歌 and 三一頌. Select a local MP3 for each slot, then press that slot's play button when ready. A playing slot's button pauses/resumes it. Switching to another slot starts that track from the beginning and stops the previous one. The common controls adjust music volume, seek and stop back at the beginning. End-of-file does not start another slot. Filenames and volume are remembered privately; the app restarts stopped. Missing/cloud-only or invalid files show a playback error rather than selecting a different recording.
+
+Playback is independent of PPT navigation and deck switching. OUTPUT continues to show only slides/lyrics; the music player and native file chooser stay in the control panel. The existing Mac output device supplies room/HDMI audio; the app does not change system audio settings. Music uses no microphone, screen-capture or new account permission.
+
+For Meet, share **Sunday Presenter — OUTPUT** and explicitly enable **Also share system audio**. Google supports window/system-audio presentation on macOS 14.2+ and Chrome 142+ ([official release note](https://workspaceupdates.googleblog.com/2025/12/share-devices-audio-when-presenting.html), [Meet help](https://support.google.com/meet/answer/9308856?co=GENIE.Platform%3DDesktop)). Leave Meet's speaker device on the system default as Google advises. Verify both room and an independent Meet participant before the service; playback on the host alone is not proof of remote delivery. Local Presenter MP4 recording keeps its existing selected-microphone audio track; this feature does not mix MP3 into that recording.
+
+`npm run smoke:music` runs real MP3 playback in Electron along with the existing slide/focus smoke. It covers the three slots, silent startup, continuity through deck changes, pause/resume, seeking, volume, single-track playback, no automatic advance, invalid MP3 errors, and cancelling a pending start with Stop. It does not claim Meet receiver acceptance.

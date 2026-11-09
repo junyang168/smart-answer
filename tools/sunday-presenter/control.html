@@ -16,14 +16,24 @@
   <section class="sunday-folder" aria-label="本主日簡報">
     <strong id="sunday-date">正在取得本主日資料夾…</strong>
     <p id="sunday-status" role="status"></p>
-    <div class="transport"><button class="take" data-action="choose-week">開啟本週 PPT</button>
+    <div class="transport"><button class="take" data-action="prepare-week" id="prepare-week">準備本週兩份 PPT</button>
       <button data-action="refresh-folder">更新連結</button></div>
-    <p id="auto-status" role="status">登入 OneDrive 後，自動識別「主日崇拜」和另一份講道 PPT。多份候選時，請在資料夾選擇要用的檔案。</p>
+    <p id="preparation-status" role="status">按一次準備，兩份放映畫面完成檢查後會顯示敬拜首頁。</p>
+    <p id="preparation-decks">講道：尚未準備 · 主日崇拜：尚未準備</p>
+    <details><summary>手動處理檔案</summary><p id="auto-status" role="status">登入 OneDrive 後辨識本週兩份 PPT。</p><button data-action="choose-week">只開啟本週資料夾</button></details>
   </section>
   <section class="onair"><span id="live" role="status">尚未播放</span><div class="switches">
     <button data-take="worship" class="take" disabled>主日崇拜</button>
     <button data-take="sermon" class="take" disabled>講道</button>
 </div></section>
+  <section class="sunday-folder music" aria-label="詩歌伴奏與三一頌">
+    <strong>詩歌伴奏與三一頌</strong>
+    <div id="music-slots"></div>
+    <p id="music-status" role="status">選擇本地 MP3，準備好後手動播放。</p>
+    <div class="music-progress"><span id="music-time">0:00 / 0:00</span><input id="music-seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="音樂播放進度" disabled></div>
+    <div class="transport"><button id="music-stop" disabled>停止並回到開頭</button><label>音量 <input id="music-volume" type="range" min="0" max="1" step="0.01" value="0.7" aria-label="伴奏音量"><span id="music-volume-label">70%</span></label></div>
+    <p class="note">翻頁或切換簡報，音樂繼續播放。Meet 分享 OUTPUT 時，請開啟「共享系統音訊」。</p>
+  </section>
   <p id="error" role="alert"></p>
   <main id="decks"></main>
   <section class="sunday-folder" aria-label="本機錄影">
@@ -45,7 +55,7 @@
       <button data-action="remote-forget">重設所有配對</button></div>
   </section>
   <footer><div class="transport"><button data-action="show-output">顯示輸出視窗</button></div>
-    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → 在設定窗口確認畫面 → 播放。</p>
+    <p>按「準備本週兩份 PPT」，完成後即可切換。</p>
     <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。Meet 的加入、分享與收音請手動操作；本機錄影使用上方控制。⌘1 敬拜／⌘2 講道；方向鍵翻頁。點 Dock 圖示叫回設定。</p>
   </footer>
 </body>
