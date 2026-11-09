@@ -26,7 +26,7 @@ type Data = {
   ppt_readiness?: { date: string; version?: string; status: string; missing?: string[]; error?: string };
   ppt_jobs?: { day: string; version: string; status: string; error?: string }[];
   identity_audit?: IdentityAudit;
-  admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number }[]; notices: { key: string; phase: string; status: string }[] };
+  admin_monitor?: { last_check?: number; incidents: { id: string; label: string; active: number; count: number; resolution?: string; details?: { ref: string; label: string; failed_at: string; phase: string; diagnostic: Record<string, unknown>; outcome?: Record<string, unknown> }[] }[]; notices: { key: string; phase: string; status: string }[] };
   identities?: { sender_id: string; worker_name: string }[];
   settings: Settings; messages: Message[]; proposals: Proposal[];
   outbox: { key: string; text: string; status: string; error?: string; updated_at: string }[];
@@ -116,13 +116,13 @@ export default function SundayAssistantPage() {
       <section className={card}>
         <h2 className="text-lg font-bold">雙週讀經團契</h2>
         <label className="mt-3 block"><input type="checkbox" checked={settings.fellowship_enabled ?? false} disabled={!settings.admin_group} onChange={e => patch({ fellowship_enabled: e.target.checked })} /> 在管理員群收集下次團契資料並接續通知 email</label>
-        <p className="mt-2 text-sm text-slate-600">查經結束後的主日下午 3 點詢問；於緊接的週四前回覆，該週四上午 9 點仍缺資料就催補。時間皆為達拉斯時間。日期依排程填入，收集主講、主題、系列、序號與來源連結；序號和連結若無可回覆「無」。</p>
+        <p className="mt-2 text-sm text-slate-600">查經結束後的主日下午 3 點詢問；於緊接的週四前回覆，該週四上午 9 點仍缺資料就催補。時間皆為達拉斯時間。日期依排程填入，收集主講、主題、系列與序號；序號若無可回覆「無」。來源連結選填，不影響資料齊備或寄信。</p>
         <Link href="/admin/fellowship" className="mt-3 inline-block text-sm underline">查看團契表單與通知 email</Link>
         {settings.fellowship_enabled && !data.fellowship?.length && <p className="mt-3 text-sm text-slate-500">下一次查經結束後，會在主日建立收集待辦。</p>}
         {data.fellowship?.map(item => <div key={item.previous_day} className="mt-3 rounded border p-3 text-sm">
           <p className="font-semibold">{item.target_day} 團契 · {item.data.questions?.length ? "待核對" : item.missing.length ? "待補充" : "資料齊備"}</p>
           <p className="mt-1">主講：{item.fields.host || "待補充"}；主題：{item.fields.title || "待補充"}；系列：{item.fields.series || "待補充"}</p>
-          <p className="mt-1">序號：{item.fields.sequence ?? "未填／無"}；來源連結：{item.fields.sourceLinks?.length || 0} 筆</p>
+          <p className="mt-1">序號：{item.fields.sequence ?? "未填／無"}；來源連結（選填）：{item.fields.sourceLinks?.length || 0} 筆</p>
           <p className="mt-1">通知 email：{item.email_status === "sent" ? "已寄出" : item.email_status === "sending" ? "寄送中" : item.email_status === "retryable" ? "正在重試寄信" : item.email_status === "expired" ? "已過寄送時段，請管理員核對" : ["unknown", "error"].includes(item.email_status || "") ? "寄送需管理員核對，未繼續自動重寄" : item.missing.length || item.data.questions?.length ? "等待資料補齊" : "依排程寄出"}</p>
           {!!item.missing.length && <p className="mt-1 text-amber-800">尚缺：{item.missing.join("、")}</p>}
           {!!item.data.questions?.length && <p className="mt-1 text-amber-800">待核對：{item.data.questions.join("；")}</p>}
@@ -171,7 +171,13 @@ export default function SundayAssistantPage() {
           <label className="mt-3 block"><input type="checkbox" checked={settings.admin_help_enabled ?? false} onChange={e => patch({ admin_help_enabled: e.target.checked })} /> 啟用內部故障通知網站管理員</label>
           <label className="mt-3 block">網站管理員求助群<select aria-label="網站管理員求助群" className={`${input} mt-1`} value={settings.admin_group || ""} onChange={e => patch({ admin_group: e.target.value, admin_group_name: groups.find(g => g.id === e.target.value)?.name || "網站管理員" })}><option value="">請讀取群名單後選擇</option>{settings.admin_group && !groups.some(g => g.id === settings.admin_group) && <option value={settings.admin_group}>{settings.admin_group_name}</option>}{groups.filter(g => ![settings.availability_group, settings.service_group, settings.songs_group].includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></label>
           <p className="mt-2 text-xs">監測最近更新：{data.admin_monitor?.last_check ? new Date(data.admin_monitor.last_check * 1000).toLocaleString() : "尚未啟用"}。傳送失敗保留佇列；結果不明時不盲目重發。通知不含群原文、姓名、奉獻金額或密鑰。</p>
-          {!!data.admin_monitor?.incidents.length && <ul className="mt-2 space-y-1">{data.admin_monitor.incidents.map(i => <li key={i.id}>{i.id} · {i.label}（{i.count}項）· {i.active ? "需要管理員協助" : "故障條件已解除"}</li>)}</ul>}
+          {!!data.admin_monitor?.incidents.length && <ul className="mt-2 space-y-2">{data.admin_monitor.incidents.map(i => <li key={i.id}>
+            {i.id} · {i.label}（{i.count}項）· {i.active ? "需要管理員協助" : i.resolution === "completed" ? "補做完成（已核對回執）" : "故障條件已解除；任務完成待核實"}
+            {i.details?.length ? <details className="mt-1"><summary>失敗原因、已完成步驟與處理回執</summary>{i.details.map(d => <div key={d.ref} className="mt-2 rounded border bg-white p-2">
+              <p>{d.label} · 失敗時間：{new Date(d.failed_at).toLocaleString()} · {d.phase === "completed" ? "已有完成回執" : d.phase === "resumed" ? "已開始重試，尚未確認完成" : d.phase === "health_only" ? "目前檢查通過，完成待核實" : "失敗已記錄"}</p>
+              <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify({ failure: d.diagnostic, outcome: d.outcome }, null, 2)}</pre>
+            </div>)}</details> : <p className="text-xs text-slate-500">舊事件未保存任務詳情，無法由故障解除推斷已完成。</p>}
+          </li>)}</ul>}
           <button className={`${button} mt-3`} disabled={busy || dirty || !settings.admin_help_enabled || !settings.admin_group} onClick={() => void action(() => call("admin-help-test", "POST", {}), "已排入管理群上線測試通知（明確標示測試、無需處理）")}>向管理群發送測試通知</button>
         </div>
         <details className="mt-5 rounded-lg border p-3"><summary className="cursor-pointer font-semibold">發送人姓名對應</summary>

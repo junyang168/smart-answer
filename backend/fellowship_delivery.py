@@ -63,7 +63,7 @@ def ready_for_email(event,base_dir):
     if not case:return True
     data=json.loads(case[0])
     confirmed=data.get('confirmed',{})
-    optional={'sequence':event.sequence,'sourceLinks':getattr(event,'source_links',None) or []}
+    optional={'sequence':event.sequence}
     return not data.get('questions') and all(value or (key in confirmed and confirmed[key]==value) for key,value in optional.items())
 
 
