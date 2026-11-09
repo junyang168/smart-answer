@@ -9,6 +9,26 @@ from backend.pipeline.full_video_transcript import (
 from backend.pipeline.transcript_text_layout import text_sha
 
 
+def test_repeated_phrase_candidate_reaches_context_without_approving_playback():
+    from backend.pipeline.full_video_transcript import check_paragraph_times
+    rows=[dict(id='earlier',start_ms=1735640,end_ms=1762840),
+          dict(id='repeated',start_ms=1707240,end_ms=1734120)]
+    before=copy.deepcopy(rows)
+    issues=check_paragraph_times(rows,1800000,candidate=True)
+    assert rows==before  # Never sort, clamp, or fabricate timing.
+    assert issues==[dict(paragraph_id='repeated',kind='isolated_alignment_moves_backwards',
+                         previous_start_ms=1735640,start_ms=1707240)]
+    with pytest.raises(ValueError,match='backwards'):
+        check_paragraph_times(rows,1800000)
+    for candidate in (False,True):
+        with pytest.raises(ValueError,match='range'):
+            check_paragraph_times([dict(id='out',start_ms=1799000,end_ms=1801000)],1800000,candidate=candidate)
+    with pytest.raises(ValueError,match='unresolved'):
+        check_paragraph_times([dict(id='unknown',start_ms=None,end_ms=None)],1800000)
+    corrected=[rows[0],dict(id='repeated',start_ms=1763000,end_ms=1774500)]
+    assert check_paragraph_times(corrected,1800000)==[]
+
+
 def test_new_video_prepares_first_window_without_any_previous_pilot(tmp_path,monkeypatch):
     import numpy as np
     from backend.pipeline import full_video_transcript as full

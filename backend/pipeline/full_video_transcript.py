@@ -706,6 +706,31 @@ def refine_backward_predictions(out: Path, python: Path) -> None:
         save(folder/'final_alignment_ref.json',{**ref,'folder':str(refined.relative_to(folder)),
             'timing_refinement':'one_acoustic_retry_with_neighbour_bound','parent_folder':ref['folder']})
 
+def check_paragraph_times(paragraphs: list[dict], duration_ms: int, *, candidate=False) -> list[dict]:
+    """Initial acoustic matches may need context; only qualified output may play.
+
+    Preserve every prediction verbatim. A repeated phrase can match earlier audio
+    in an isolated clip. Record that defect for the mandatory contextual stage,
+    rather than sorting paragraphs or inventing replacement coordinates.
+    """
+    previous = -1
+    issues = []
+    for p in paragraphs:
+        if p['start_ms'] is None:
+            if not candidate:
+                raise ValueError('Final paragraph timing is unresolved')
+            continue
+        if not 0 <= p['start_ms'] < p['end_ms'] <= duration_ms:
+            raise ValueError('Final paragraph times leave movie range')
+        if p['start_ms'] < previous:
+            if not candidate:
+                raise ValueError('Final paragraph times move backwards')
+            issues.append({'paragraph_id':p['id'], 'kind':'isolated_alignment_moves_backwards',
+                           'previous_start_ms':previous, 'start_ms':p['start_ms']})
+        previous = p['start_ms']
+    return issues
+
+
 def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     master, report, evidence = read(out/'master.json'), read(out/'slides/report.json'), read(out/'visual-evidence/slide_evidence.json')
     if sha(video) != master['source_sha256']:
@@ -775,12 +800,7 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
                 'timing_refinement':clip.get('timing_refinement'),
                 'start_ms':result['start_ms'],'end_ms':result['end_ms']})
         decisions += [{**d,'paragraph_id':w['id']+'-'+d['paragraph_id']} for d in trial['decisions']]
-    previous = -1
-    for p in paragraphs:
-        if p['start_ms'] is not None:
-            if not previous <= p['start_ms'] < p['end_ms'] <= master['duration_ms']:
-                raise ValueError('Final paragraph times move backwards or leave movie range')
-            previous = p['start_ms']
+    timing_issues += check_paragraph_times(paragraphs, master['duration_ms'], candidate=True)
     for left,right in zip(master['windows'],master['windows'][1:]):
         if left['end_sample'] != right['origin_sample']:
             raise ValueError('Window coverage has a gap or overlap')
@@ -816,6 +836,7 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None) -> dict:
     from backend.pipeline.contextual_transcript_timing import qualify_staged_record
     record = qualify_staged_record(out,record,aligner_python)
     paragraphs = record['paragraphs']
+    check_paragraph_times(paragraphs, master['duration_ms'])
     for notice in record.get('source_notices',[]):
         timed=[p for p in paragraphs if p.get('start_ms') is not None and p.get('end_ms') is not None]
         related=[p['id'] for p in timed if p['start_ms']<=notice['end_ms']+2000 and p['end_ms']>=notice['start_ms']-2000]
