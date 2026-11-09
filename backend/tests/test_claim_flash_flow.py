@@ -105,6 +105,22 @@ def test_completed_output_drift_is_rejected_without_new_calls(candidate,tmp_path
     assert not p.calls
 
 
+def test_pending_evidence_checkpoint_does_not_repeat_completed_source_layers(candidate,tmp_path,monkeypatch):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    original=flow.eo.run
+    def paused(*args,**kwargs):
+        result=original(*args,**kwargs)
+        return {**result,'status':'needs_attention','pending':[{'layer':'handoff','reason':'test checkpoint'}]}
+    monkeypatch.setattr(flow.eo,'run',paused)
+    first=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert first['status']=='needs_attention'
+    monkeypatch.setattr(flow.eo,'run',original)
+    monkeypatch.setattr(flow.source,'run',lambda *a,**k:pytest.fail('completed source verification repeated'))
+    monkeypatch.setattr(flow.coverage,'run',lambda *a,**k:pytest.fail('completed source coverage repeated'))
+    result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+
+
 def test_material_only_source_gets_real_missing_claim_disposition(candidate,tmp_path):
     package,_=candidate;package['claims']=[]
     for p in package['evidence_steps']:p['produced_claim_ids']=[]

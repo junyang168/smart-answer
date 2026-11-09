@@ -54,3 +54,24 @@ def test_source_handoff_does_not_write_missing_or_invented_quote(sample,action,q
     else:
         assert source.repair_bindings(store,'S',findings,root/'handoff',Ports(quote,action),apply=True)['status']=='needs_attention'
     assert store.get_record_state('evidence_steps','E')==before
+
+
+def test_uncovered_saved_inventory_unit_is_compiled_without_model_or_upper_write(sample):
+    from backend.pipeline import claim_flash_common as f, claim_flash_source_fill as fill
+    from backend.tests.test_claim_flash_evidence import saved_inventory
+    store,root,_=sample
+    fragment=store.get_record_state('source_fragments','F')['payload']
+    fragment['verbatim_excerpt']='你不知道神的旨意，怎麼遵行？'
+    fragment['verbatim_excerpt_sha256']=hashlib.sha256(fragment['verbatim_excerpt'].encode()).hexdigest()
+    store.apply_plan(store.plan_package({'package_id':'short-inventory-span','source_fragments':[fragment]}))
+    records,sources=f.load_source(store,'S')
+    unit={'paragraph_key':'S0001','quote':'你沒有聽從祂的話，你根本沒信。','statement':'沒有聽從顯明沒有真正相信。'}
+    previous=saved_inventory(root/'prior',sources,units=[unit])
+    handoff={'layer':'source','reason':'important_unit_not_covered_by_verified_fragments','unit':unit}
+    result=fill.fill_inventory_handoff(store,'S',[handoff],previous,root/'fill',apply=True)
+    assert result['status']=='applied' and result['model_calls']==0 and len(result['new_fragments'])==1
+    assert result['updates']=={}
+    for key,row in records.items():
+        assert store.get_record_state(*key.split('/',1))==row
+    with pytest.raises(ValueError,match='exact saved'):
+        fill.fill_inventory_handoff(store,'S',[{**handoff,'unit':{**unit,'statement':'自行改過的意思。'}}],previous,root/'bad',apply=True)

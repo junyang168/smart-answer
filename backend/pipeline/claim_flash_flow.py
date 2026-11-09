@@ -132,6 +132,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
         e.save(root/'flow-intent.json',intent)
+        checkpoint=None
         if (root/'result.json').exists():
             saved=read(root/'result.json')
             if saved['status']=='completed':
@@ -141,6 +142,15 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
                 return saved
+            if saved.get('pending') and saved['pending'][0].get('layer')=='evidence':
+                pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
+                if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
+                    raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
+                    raise ValueError('pending Flash output package changed')
+                for ref in saved['evidence_refs']:
+                    if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('pending Flash stage evidence changed')
+                checkpoint=saved['stages']
         if (root/'before.json').exists():before=read(root/'before.json')
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
@@ -153,32 +163,44 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         coverage.validate_groups(plan,source_id,sources[source_id])
         e.save(root/'shared-groups.json',plan)
         if plan.get('pending'):return finish({},[{'layer':'grouping','findings':plan['pending']}])
-        stages={}
-        sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
-        if sr['status']=='calibration_available':
-            work=root/'calibration';work.mkdir(exist_ok=True)
-            prepared={'version':'claim_flash_mechanical_source_v1','source_id':source_id,'status':'verified',
-                'updates':sr['calibration_candidates']['updates'],'new_fragments':sr['calibration_candidates']['new_fragments'],
-                'retiring_keys':[],'pending':[],'applied':False,'claim_qualification':'not_granted'}
-            e.save(work/'before.json',{'records':records,'sources':sources});e.save(work/'verification.json',prepared)
-            e.commit_verified(store,work)
-            records,sources=snapshot(store,source_id)
+        if checkpoint is not None:
+            stages=deepcopy(checkpoint)
+        else:
+            stages={}
             sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
-        if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':sr['records']}])
-        cv=coverage.run(store,source_id,root/'coverage',ports,plan=plan);stages['coverage']=cv
-        findings=[v for row in cv['findings'] for v in row['findings']]
-        if any(v['verdict']=='needs_context' for v in findings):
-            return finish(stages,[{'layer':'source','findings':[v for v in findings if v['verdict']=='needs_context']}])
-        if any(v['verdict'] in fill.MISSING for v in findings):
-            fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
-            if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
+            if sr['status']=='calibration_available':
+                work=root/'calibration';work.mkdir(exist_ok=True)
+                prepared={'version':'claim_flash_mechanical_source_v1','source_id':source_id,'status':'verified',
+                    'updates':sr['calibration_candidates']['updates'],'new_fragments':sr['calibration_candidates']['new_fragments'],
+                    'retiring_keys':[],'pending':[],'applied':False,'claim_qualification':'not_granted'}
+                e.save(work/'before.json',{'records':records,'sources':sources});e.save(work/'verification.json',prepared)
+                e.commit_verified(store,work)
+                records,sources=snapshot(store,source_id)
+                sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
+            if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':sr['records']}])
+            cv=coverage.run(store,source_id,root/'coverage',ports,plan=plan);stages['coverage']=cv
+            findings=[v for row in cv['findings'] for v in row['findings']]
+            if any(v['verdict']=='needs_context' for v in findings):
+                return finish(stages,[{'layer':'source','findings':[v for v in findings if v['verdict']=='needs_context']}])
+            if any(v['verdict'] in fill.MISSING for v in findings):
+                fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
+                if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
         attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
                    for item in read(p).get('outcomes',[])}
         while True:
             er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
             handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
-            if complete(er) or not handoffs or any(p.get('layer')!='source' or not p.get('object_key')
-                    or p['object_key'] in attempted for p in handoffs):break
+            if complete(er) or not handoffs or any(p.get('layer')!='source' for p in handoffs):break
+            units=[p for p in handoffs if p.get('unit')]
+            if units:
+                token='units-'+e.digest(units)
+                if token in attempted:break
+                attempted.add(token)
+                repaired=fill.fill_inventory_handoff(store,source_id,units,root/'coverage',root/'source-handoffs'/token,apply=True)
+                stages.setdefault('source_handoffs',{})[token]=repaired
+                if not complete(repaired) or not repaired['new_fragments']:break
+            handoffs=[p for p in handoffs if not p.get('unit')]
+            if any(not p.get('object_key') or p['object_key'] in attempted for p in handoffs):break
             # One source completion per object in this operation. Previously
             # accepted lower judgments are consumed by EO's existing cache.
             for item in handoffs:
