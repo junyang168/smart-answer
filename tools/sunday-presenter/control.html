@@ -24,6 +24,14 @@
     <button data-take="worship" class="take" disabled>主日崇拜</button>
     <button data-take="sermon" class="take" disabled>講道</button>
 </div></section>
+  <section class="sunday-folder music" aria-label="詩歌伴奏與三一頌">
+    <strong>詩歌伴奏與三一頌</strong>
+    <div id="music-slots"></div>
+    <p id="music-status" role="status">選擇本地 MP3，準備好後手動播放。</p>
+    <div class="music-progress"><span id="music-time">0:00 / 0:00</span><input id="music-seek" type="range" min="0" max="0" step="0.1" value="0" aria-label="音樂播放進度" disabled></div>
+    <div class="transport"><button id="music-stop" disabled>停止並回到開頭</button><label>音量 <input id="music-volume" type="range" min="0" max="1" step="0.01" value="0.7" aria-label="伴奏音量"><span id="music-volume-label">70%</span></label></div>
+    <p class="note">翻頁或切換簡報，音樂繼續播放。Meet 分享 OUTPUT 時，請開啟「共享系統音訊」。</p>
+  </section>
   <p id="error" role="alert"></p>
   <main id="decks"></main>
   <section class="sunday-folder" aria-label="本機錄影">

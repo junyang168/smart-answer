@@ -29,7 +29,41 @@ async function act(action, args) {
     return true;
   } catch { error.textContent = '操作未完成，請重試。'; return false; }
 }
+const musicLabels = { hymn:'詩歌',responseHymn:'回應詩歌',doxology:'三一頌' };
+for (const [slot,label] of Object.entries(musicLabels)) {
+  const row=document.createElement('div');row.className='music-slot';row.dataset.slot=slot;
+  const title=document.createElement('strong');title.textContent=label;
+  const file=document.createElement('span');file.className='music-name';file.textContent='尚未選擇 MP3';
+  const choose=document.createElement('button');choose.textContent='選擇 MP3';choose.onclick=()=>act('music-file',{slot});
+  const play=document.createElement('button');play.className='music-play';play.textContent='播放';play.disabled=true;play.onclick=()=>act('music-play',{slot});
+  row.append(title,file,choose,play);document.querySelector('#music-slots').append(row);
+}
+function musicTime(value) { const seconds=Math.floor(Number.isFinite(value)?value:0);return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`; }
+function renderMusic(music) {
+  if (!music) return;
+  for (const slot of Object.keys(musicLabels)) {
+    const row=document.querySelector(`[data-slot="${slot}"]`), track=music.tracks.find(t=>t.id===music.slots[slot]);
+    row.querySelector('.music-name').textContent=track?.name||'尚未選擇 MP3';
+    const play=row.querySelector('.music-play');play.disabled=!track;
+    play.textContent=music.activeSlot===slot&&music.status==='playing'?'暫停':music.activeSlot===slot&&music.status==='paused'?'繼續':'播放';
+    row.classList.toggle('music-active',music.activeSlot===slot&&music.status==='playing');
+  }
+  const states={playing:'播放中',paused:'已暫停',stopped:'已停止',loading:'正在讀取 MP3…',ended:'播放完畢',error:'無法播放'};
+  const current=music.tracks.find(t=>t.id===music.selected);
+  document.querySelector('#music-status').textContent=music.error || `${states[music.status]||'已停止'}${music.activeSlot&&current?' · '+musicLabels[music.activeSlot]+'：'+current.name:''}`;
+  document.querySelector('#music-time').textContent=musicTime(music.position)+' / '+musicTime(music.duration);
+  const seek=document.querySelector('#music-seek');seek.disabled=!music.duration;
+  if(document.activeElement!==seek){seek.max=music.duration||0;seek.value=music.position||0;}
+  const volume=document.querySelector('#music-volume');if(document.activeElement!==volume)volume.value=music.volume;
+  document.querySelector('#music-volume-label').textContent=Math.round(music.volume*100)+'%';
+  document.querySelector('#music-stop').disabled=!music.activeSlot||!['playing','paused','loading','ended'].includes(music.status);
+}
+window.presenter.onMusic(renderMusic);
+document.querySelector('#music-stop').onclick=()=>act('music-stop');
+document.querySelector('#music-seek').onchange=e=>act('music-seek',{position:Number(e.target.value)});
+document.querySelector('#music-volume').oninput=e=>act('music-volume',{volume:Number(e.target.value)});
 function render(state) {
+  renderMusic(state.music);
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
   const recording = state.recording || { status: 'idle', devices: [] };
   const recordingBusy = ['starting', 'recording', 'stopping'].includes(recording.status);

@@ -1,4 +1,4 @@
-const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu, globalShortcut, dialog, powerSaveBlocker } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu, globalShortcut, dialog, powerSaveBlocker, protocol } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
@@ -8,6 +8,8 @@ const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
 const { HostVideo } = require('./host-video.cjs');
+const { Music } = require('./music.cjs');
+protocol.registerSchemesAsPrivileged([{ scheme: 'sunday-music', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 const { installOfficeView, viewDocumentURL, isOfficeDocument } = require('./office-view.cjs');
 const { enterOfficeSlideShow, officeSlideShowActive, runOfficeAction } = require('./office-slideshow.cjs');
 
@@ -17,7 +19,8 @@ else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
 let controller, output, preparation, stage, officeSession, quitting = false, quitReady = false, quitCleanupDone = false, quitTask, testOrigin;
-let website, remoteControl, awakeBlocker, hostVideo;
+let website, remoteControl, awakeBlocker, hostVideo, music;
+let choosingMusic = false;
 let keyQueue = Promise.resolve();
 let folderTimer, choosingRecording = false;
 let filePlan = null;
@@ -48,7 +51,7 @@ function changed(reason) {
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  folderMessage, recording: hostVideo?.recording.snapshot() }; }
+  folderMessage, recording: hostVideo?.recording.snapshot(), music: music?.snapshot() }; }
 
 
 function remotePreferences() {
@@ -178,6 +181,20 @@ async function act(action, args = {}) {
       folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
       break;
     }
+    case 'music-file': {
+      if (!['hymn','responseHymn','doxology'].includes(args.slot)) throw Error('請選擇音樂項目。');
+      if (choosingMusic) break;
+      choosingMusic = true;
+      try {
+        const result = await dialog.showOpenDialog(controller, { title: '選擇 MP3 伴奏', properties: ['openFile'], filters: [{ name:'MP3 音樂',extensions:['mp3'] }] });
+        if (!result.canceled && result.filePaths.length) await music.assign(args.slot, result.filePaths[0]);
+      } finally { choosingMusic = false; }
+      break;
+    }
+    case 'music-play': await music.toggle(args.slot); break;
+    case 'music-stop': await music.stop(); break;
+    case 'music-seek': await music.seek(args.position); break;
+    case 'music-volume': await music.volume(args.volume); break;
     case 'record-devices': await hostVideo.recording.devices(); break;
     case 'record-start': {
       if (choosingRecording || hostVideo.recording.run) throw Error('錄影操作尚未完成。');
@@ -367,7 +384,7 @@ app.whenReady().then(async () => {
   });
   preparation = new BaseWindow({ ...hostOptions, frame: false, enableLargerThanScreen: true, hasShadow: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
-  controller = new BrowserWindow({ width: 760, height: 650, show: false, alwaysOnTop: true,
+  controller = new BrowserWindow({ width: 760, height: Math.min(900, require('electron').screen.getPrimaryDisplay().workArea.height - 80), show: false, alwaysOnTop: true,
     type: process.platform === 'darwin' ? 'panel' : 'normal',
     fullscreenable: false, maximizable: false,
     title: 'Sunday Presenter — 控制台',
@@ -388,6 +405,9 @@ app.whenReady().then(async () => {
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
   hostVideo = new HostVideo({ output, changed, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
+  music = new Music({ file:path.join(app.getPath('userData'),'music.json'), changed: state => {
+    if (controller && !controller.isDestroyed()) controller.webContents.send('presenter:music-state',state);
+  } });
   output.on('minimize', () => hostVideo.observe());
   output.on('hide', () => hostVideo.observe());
   let remoteIdentity, identityError;
@@ -464,7 +484,8 @@ app.whenReady().then(async () => {
   if (smoke) {
     try {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
-        website, remoteControl, hostVideo, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
+        website, remoteControl, hostVideo, music, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
+      if (process.argv.includes('--music-smoke')) await require('./test/music-smoke.cjs').run({ music, act, stage, controller, setOrigin: origin => { testOrigin = origin; } });
       console.log('SMOKE PASS');
       app.quit();
     } catch (error) { console.error(error); await hostVideo?.close(); app.exit(1); }
@@ -485,7 +506,7 @@ app.on('second-instance', () => {
 app.on('before-quit', event => {
   if (!quitReady && hostVideo) {
     event.preventDefault(); quitting = true;
-    quitTask ||= Promise.allSettled([hostVideo.close(), remoteControl?.stop()]).then(() => { quitReady = true; app.quit(); });
+    quitTask ||= Promise.allSettled([hostVideo.close(), music?.close(), remoteControl?.stop()]).then(() => { quitReady = true; app.quit(); });
     return;
   }
   if (quitCleanupDone) return;

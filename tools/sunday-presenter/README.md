@@ -237,3 +237,13 @@ slide buttons and keyboard navigation. Pairings are stored separately for each
 pinned Presenter identity; **重新配對** removes only the selected host. Mac upgrades
 can read the previous single-host Keychain item only for its exact fingerprint.
 Both clients use the same endpoint/certificate checks and reject HTTP redirects.
+
+## Local MP3 accompaniment (0.6.11, #712)
+
+The control panel has three fixed music slots: 詩歌, 回應詩歌 and 三一頌. Select a local MP3 for each slot, then press that slot's play button when ready. A playing slot's button pauses/resumes it. Switching to another slot starts that track from the beginning and stops the previous one. The common controls adjust music volume, seek and stop back at the beginning. End-of-file does not start another slot. Filenames and volume are remembered privately; the app restarts stopped. Missing/cloud-only or invalid files show a playback error rather than selecting a different recording.
+
+Playback is independent of PPT navigation and deck switching. OUTPUT continues to show only slides/lyrics; the music player and native file chooser stay in the control panel. The existing Mac output device supplies room/HDMI audio; the app does not change system audio settings. Music uses no microphone, screen-capture or new account permission.
+
+For Meet, share **Sunday Presenter — OUTPUT** and explicitly enable **Also share system audio**. Google supports window/system-audio presentation on macOS 14.2+ and Chrome 142+ ([official release note](https://workspaceupdates.googleblog.com/2025/12/share-devices-audio-when-presenting.html), [Meet help](https://support.google.com/meet/answer/9308856?co=GENIE.Platform%3DDesktop)). Leave Meet's speaker device on the system default as Google advises. Verify both room and an independent Meet participant before the service; playback on the host alone is not proof of remote delivery. Local Presenter MP4 recording keeps its existing selected-microphone audio track; this feature does not mix MP3 into that recording.
+
+`npm run smoke:music` runs real MP3 playback in Electron along with the existing slide/focus smoke. It covers the three slots, silent startup, continuity through deck changes, pause/resume, seeking, volume, single-track playback, no automatic advance, invalid MP3 errors, and cancelling a pending start with Stop. It does not claim Meet receiver acceptance.

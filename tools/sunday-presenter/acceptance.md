@@ -1285,3 +1285,14 @@ check. Existing host pairing identity remained unchanged. Code artifact:
 7142c681; this documentation update does not change packaged code. The previous
 0.6.7 app bundle is preserved privately for rollback. iPad remains installed at
 0.6.9; this is a Mac update.
+
+### MP3 accompaniment — #712
+
+- [x] Three fixed slots; private remembered filenames/volume; startup stopped.
+- [x] Real Electron MP3 playback, pause/resume, stop-to-start, seeking, switching and no automatic advance.
+- [x] PPT switching preserves continuous playback; music controls do not enter OUTPUT.
+- [x] Opaque selected-file access with byte-range streaming; invalid/missing files fail clearly.
+- [x] Native file-selection and packaged 0.6.11 UI verification; real MP3 progress advances, pause retained while opening the actual OneDrive worship PPT, slide-only OUTPUT verified.
+- [ ] Simultaneous room and independent Meet receiver audio with OUTPUT system-audio sharing.
+
+Chrome 156.0.8078.79 on macOS 26.5.2 has both screen/system-audio permissions enabled. On 2026-11-08 the private Meet test returned a screen-share error before the source picker (also after focusing the meeting); no system-audio toggle could yet be selected. Owner manual-share check requested. Do not mark Meet audio accepted from the local playback result.
