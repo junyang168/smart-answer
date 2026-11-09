@@ -1296,3 +1296,16 @@ check. Existing host pairing identity remained unchanged. Code artifact:
 - [ ] Simultaneous room and independent Meet receiver audio with OUTPUT system-audio sharing.
 
 Chrome 156.0.8078.79 on macOS 26.5.2 has both screen/system-audio permissions enabled. On 2026-11-08 the private Meet test returned a screen-share error before the source picker (also after focusing the meeting); no system-audio toggle could yet be selected. Owner manual-share check requested. Do not mark Meet audio accepted from the local playback result.
+
+
+### One-click two-deck preparation — 0.6.12 (#712)
+
+- [x] Coordinator and actual Electron Office-frame fixtures: sequential sermon/worship preparation, rendered-content/fullscreen/first-slide checks, slow load, login continuation, duplicate presses, retained positions, isolated reload recovery, empty-surface rejection and bounded failure.
+- [x] Real 2026-11-08 OneDrive worship and sermon documents opened automatically and reached verified slide-only playback on the development app. Worship homepage was selected after both completed.
+- [x] Actual Office hidden, source-less accessibility image reproduced as a counterexample; it no longer blocks a fully rendered worship slide. Actual late Office loading is checked again before arming.
+- [x] Installed 0.6.12: actual worship and sermon reached slide-only playback; both retained slide 2 across switching and repeated one-click preparation, with exactly two document pages and no Office header. ASAR runtime bytes match source, codesign verification passed and existing pairing identity hashes are unchanged.
+- [x] 85 Node tests, actual Electron preparation/music/focus smoke and frontend TypeScript passed.
+
+The 0.6.12 Mac pilot uses the existing immutable artifact publisher; no website code deployment or iPad installation is required. Private receipts are under ~/.local/share/smart-answer/presenter-music/.
+
+Meet automation is explicitly outside this change. Microsoft sign-in remains a private operator action when the existing session expires. These checks do not claim on-site TV or independent Meet audio acceptance.

@@ -303,6 +303,7 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     await until(() => wc(ending).mainFrame.frames.length === 1, 'cross-origin frame');
     const endFrame = wc(ending).mainFrame.frames[0];
     await until(async () => await endFrame.executeJavaScript('!!window.__sundayEndProtected'), 'end guard installed in frame');
+    await until(() => ending.loaded && !wc(ending).isLoading(), 'end fixture fully loaded');
     await act('arm', {id:ending.id}); await act('take', {deck:'sermon'});
     await until(async () => await endFrame.executeJavaScript('typeof steps') === 'number', 'end fixture loaded');
     const endKey = key => endFrame.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', {key:${JSON.stringify(key)}, bubbles:true, cancelable:true}))`);

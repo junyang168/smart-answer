@@ -64,6 +64,14 @@ document.querySelector('#music-seek').onchange=e=>act('music-seek',{position:Num
 document.querySelector('#music-volume').oninput=e=>act('music-volume',{volume:Number(e.target.value)});
 function render(state) {
   renderMusic(state.music);
+  const preparation=state.preparation||{status:'idle',decks:{}};
+  const preparing=!!preparation.busy;
+  const prepareButton=document.querySelector('#prepare-week');
+  prepareButton.disabled=preparing;
+  prepareButton.textContent=preparing?'正在準備…':preparation.status==='blocked'?'繼續準備兩份 PPT':'準備本週兩份 PPT';
+  document.querySelector('#preparation-status').textContent=preparation.message||'按一次準備，兩份放映畫面完成檢查後會顯示敬拜首頁。';
+  const deckStatus={pending:'等待',preparing:'準備中',ready:'已就緒',blocked:'需處理'};
+  document.querySelector('#preparation-decks').textContent='講道：'+(deckStatus[preparation.decks.sermon]||'尚未準備')+' · 主日崇拜：'+(deckStatus[preparation.decks.worship]||'尚未準備');
   if (state.folderMessage) document.querySelector('#auto-status').textContent = state.folderMessage;
   const recording = state.recording || { status: 'idle', devices: [] };
   const recordingBusy = ['starting', 'recording', 'stopping'].includes(recording.status);
@@ -118,7 +126,7 @@ function render(state) {
     const candidate = window.presenterCards.cardPage(state, deck);
     const primary = section.querySelector('.primary');
     section.querySelector('.current-title').textContent = candidate?.title || '尚未選擇檔案';
-    let action = 'sunday-folder', args = { deck }, hint = '點「開啟本週 PPT」，登入後自動識別敬拜與講道。';
+    let action = 'sunday-folder', args = { deck }, hint = '按上方「準備本週兩份 PPT」自動完成。';
     let buttonLabel = '選擇 PPT', disabled = false;
     if (candidate) {
       args = { id: candidate.id };
@@ -135,6 +143,7 @@ function render(state) {
         hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，回到設定窗口確認畫面，播放後會自動隱藏設定。';
       }
     }
+    if(preparing){buttonLabel='正在準備';disabled=true;}
     primary.textContent = buttonLabel; primary.disabled = disabled;
     primary.onclick = () => act(action, args);
     section.querySelector('.next-step').textContent = hint;

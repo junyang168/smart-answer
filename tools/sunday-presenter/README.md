@@ -139,16 +139,19 @@ Remote on the speaker Mac (universal Intel/Apple Silicon). No Node.js installati
 is needed. The package is ad-hoc signed, without Developer ID/notarization; use
 macOS Privacy & Security → Open Anyway after verifying the downloaded source.
 
-1. Open Presenter. A movable settings window appears; no blank OUTPUT appears at
-   startup. Open this week's PPT and sign into Microsoft inside Presenter.
-2. The church API supplies the upcoming Sunday folder in America/Chicago time.
-   The unique worship-named file and sole remaining sermon PPT are assigned to
-   two fixed cards. Ambiguous choices require selection. On each card, click
-   **開始投影片放映** once, inspect the slide-only preview, then **確認並播放**.
-   Presenter uses browser-native fullscreen on Office's live slide surface;
-   the PowerPoint logo, signed-in account and reader toolbars stay outside it.
-   The original Office document, animations and keyboard handlers remain loaded.
-   Leaving fullscreen revokes audience readiness until it is started again.
+1. Open Presenter and click **準備本週兩份 PPT**. The church API supplies the
+   current Sunday folder in America/Chicago time. Complete Microsoft sign-in
+   privately if requested; the same run continues when login finishes.
+2. Presenter identifies the unique worship-named file and sole remaining sermon
+   PPT by exact filenames, binds their actual document identities, then prepares
+   sermon followed by worship. It waits for rendered slide content, enters
+   browser-native fullscreen on Office's live SlidePanel, verifies the first
+   slide and finally shows the worship homepage. The PowerPoint logo, account
+   and reader toolbars remain outside OUTPUT; original rendering and animations
+   are retained. Missing/ambiguous files or bounded loading failures show a
+   concrete error. Press **繼續準備兩份 PPT** to retry; already verified decks and
+   their current pages are preserved. Repeated clicks never create concurrent runs.
+   Manual file and slideshow actions remain under **手動處理檔案** and the deck cards.
 3. Playback hides settings. Command-1 selects worship, Command-2 selects sermon;
    arrow keys flip the current slideshow. Switching retains the same views and
    slide state. Dock activation or Command-P restores settings; closing settings
@@ -197,8 +200,8 @@ commands are exposed by the Phase 1 protocol. Audio does not share this channel.
 The church's iPhone hotspot must allow peer connectivity between both Macs.
 Flip commands stay local; Office and manually operated Meet use the internet.
 Keeping a page loaded preserves state, not paused timers: background video,
-animations and automatic slide advances may continue. Readiness is the operator's
-visual confirmation. Office account policies, unsupported web animations and
+animations and automatic slide advances may continue. Readiness requires the live Office slide surface and fullscreen checks;
+the operator should still inspect the final visual result. Office account policies, unsupported web animations and
 actual Meet audio require testing with the intended files and receiving device.
 
 ## Development and packaging

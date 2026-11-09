@@ -2,16 +2,17 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, session, Menu,
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
-const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('./folder-wizard.js');
+const { identifyFiles, fileElements, isDocumentURL, sameFolderURL, documentKey } = require('./folder-wizard.js');
 const { Website } = require('./website.cjs');
 const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
 const { HostVideo } = require('./host-video.cjs');
 const { Music } = require('./music.cjs');
+const { Preparation, waitUntil } = require('./preparation.cjs');
 protocol.registerSchemesAsPrivileged([{ scheme: 'sunday-music', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 const { installOfficeView, viewDocumentURL, isOfficeDocument } = require('./office-view.cjs');
-const { enterOfficeSlideShow, officeSlideShowActive, runOfficeAction } = require('./office-slideshow.cjs');
+const { enterOfficeSlideShow, officeSlideShowActive, runOfficeAction, officeSurfaceState } = require('./office-slideshow.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -19,11 +20,10 @@ else app.setPath('userData', path.join(app.getPath('appData'), 'Sunday Presenter
 app.setName('Sunday Presenter');
 if (!app.requestSingleInstanceLock()) app.quit();
 let controller, output, preparation, stage, officeSession, quitting = false, quitReady = false, quitCleanupDone = false, quitTask, testOrigin;
-let website, remoteControl, awakeBlocker, hostVideo, music;
+let website, remoteControl, awakeBlocker, hostVideo, music, preparer;
 let choosingMusic = false;
 let keyQueue = Promise.resolve();
 let folderTimer, choosingRecording = false;
-let filePlan = null;
 let folderMessage = '';
 const folderRuns = new Map();
 const controlURL = pathToFileURL(path.join(__dirname, 'control.html')).href;
@@ -45,13 +45,14 @@ function changed(reason) {
     output.focus();
     stage.get(stage.active).view.webContents.focus();
   }
+  preparer?.observe();
   if (stage) remoteControl?.observe(stage.active);
   hostVideo?.observe();
   if (stage && controller && !controller.isDestroyed()) controller.webContents.send('presenter:state', snapshot());
 }
 
 function snapshot() { return { ...stage.snapshot(), website: website?.state, remote: remoteControl?.snapshot(),
-  folderMessage, recording: hostVideo?.recording.snapshot(), music: music?.snapshot() }; }
+  preparation: preparer?.snapshot(), folderMessage, recording: hostVideo?.recording.snapshot(), music: music?.snapshot() }; }
 
 
 function remotePreferences() {
@@ -75,12 +76,17 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
   const popup = !!popupOptions.webContents;
   const page = stage.add(deck, view, { select: !popup });
   const wc = view.webContents;
+  if (followFrom) {
+    page.planContext = stage.pages.get(followFrom.id)?.planContext;
+    page.requestedKey = documentKey(followFrom.url);
+  }
   wc.setWindowOpenHandler(({ url, postBody }) => {
     // Repeated GET clicks reuse the existing private document; never replace a
     // POST popup or destroy its opener/body. Authentication popups stay parked.
     if (!postBody && isDocumentURL(url)) {
-      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === viewDocumentURL(url));
+      const existing = [...stage.pages.values()].find(p => documentKey(url) && (documentKey(p.view.webContents.getURL()) === documentKey(url) || p.requestedKey === documentKey(url)));
       if (existing) {
+        bindDocument(existing, page.planContext);
         if (stage.preview === page.id && !existing.ready) {
           stage.prepare(existing.id); controller.moveTop();
         } else if (existing.ready) { stage.selected[existing.deck] = existing.id; changed(); }
@@ -107,13 +113,8 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
   });
   wc.on('did-finish-load', () => {
     page.loaded = true; page.error = '';
-    const name = (() => { try { return new URL(wc.getURL()).searchParams.get('file') || ''; } catch { return ''; } })();
-    const assigned = filePlan && Object.keys(filePlan).find(key => name === filePlan[key]);
-    if (assigned && assigned !== page.deck) {
-      if (stage.selected[page.deck] === page.id) stage.selected[page.deck] = null;
-      page.deck = assigned;
-    }
-    if (followFrom && isDocumentURL(wc.getURL()) && stage.preview === followFrom.id) {
+    bindDocument(page, page.planContext);
+    if (followFrom && !preparer?.running && isDocumentURL(wc.getURL()) && stage.preview === followFrom.id) {
       stage.prepare(page.id); controller.moveTop();
     }
     changed();
@@ -156,6 +157,156 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
   return page;
 }
 
+function bindDocument(page, context) {
+  if (!context) return;
+  const wc = page.view.webContents, key = documentKey(wc.getURL());
+  if (!key) return;
+  const name = new URL(wc.getURL()).searchParams.get('file') || '';
+  const deck = Object.keys(context.plan).find(deck => context.plan[deck] === name);
+  if (!deck) return;
+  if (page.documentKey && page.documentKey !== key) {
+    page.week = null; page.ready = false; page.error = 'PPT 的文件身份已改變，請重新選擇本週檔案。'; return;
+  }
+  if (deck !== page.deck) {
+    if (stage.selected[page.deck] === page.id) stage.selected[page.deck] = null;
+    page.deck = deck;
+  }
+  page.week = context.date; page.documentKey = key; page.expectedName = name; page.planContext = context;
+}
+
+function boundDocuments(folder) {
+  const result = {};
+  for (const deck of ['sermon','worship']) {
+    const candidates = [...stage.pages.values()].filter(page => page.deck === deck && page.week === folder.date &&
+      sameFolderURL(page.planContext?.folderUrl, folder.folderUrl) && !page.view.webContents.isDestroyed() &&
+      page.documentKey === documentKey(page.view.webContents.getURL()));
+    if (new Set(candidates.map(page => page.documentKey)).size > 1) throw Error(`${labels[deck]}出現多份不同的文件，請先關閉不使用的版本。`);
+    result[deck] = candidates.find(page => page.id === stage.selected[deck] && page.ready) || candidates.find(page => page.ready) || candidates.at(-1);
+  }
+  return result;
+}
+
+function openWeekFolder(folder) {
+  let page = [...stage.pages.values()].find(page => !page.view.webContents.isDestroyed() && sameFolderURL(page.view.webContents.getURL(), folder.folderUrl));
+  if (page) { stage.prepare(page.id); controller.moveTop(); }
+  else {
+    page = createPage('worship');
+    page.view.webContents.loadURL(folder.folderUrl).catch(() => {});
+  }
+  const existing = boundDocuments(folder);
+  folderRuns.set(page.id, { date: folder.date, url: folder.folderUrl,
+    opened: new Set(Object.values(existing).filter(Boolean).map(page => page.expectedName)), busy: false, deadline: Date.now() + 120000 });
+  return page;
+}
+
+async function probeOfficePage(page) {
+  const wc = page.view.webContents;
+  if (!wc || wc.isDestroyed()) return null;
+  for (const frame of wc.mainFrame.framesInSubtree) {
+    let office = false;
+    try { office = new URL(frame.url).hostname === 'powerpoint.officeapps.live.com'; } catch {}
+    if (!office) continue;
+    try { return { frame, state: await runOfficeAction(frame, `(${officeSurfaceState.toString()})(document)`) }; }
+    catch { /* An Office iframe may be replaced during loading; recheck the live tree. */ }
+  }
+  return null;
+}
+
+function preparationDriver() {
+  let currentFolder, pages;
+  const driver = {
+    folderTimeoutMs: 120000, surfaceTimeoutMs: 45000,
+    folder: () => website.refresh(),
+    active: () => stage.active,
+    intact: () => pages && Object.values(pages).every(page => page?.ready && page.loaded && !page.error &&
+      !page.view.webContents.isDestroyed() && page.documentKey === documentKey(page.view.webContents.getURL())),
+    documents: async (folder, signal) => {
+      currentFolder = folder;
+      let current = boundDocuments(folder);
+      if (!current.sermon || !current.worship) {
+        const list = openWeekFolder(folder);
+        current = await waitUntil(() => {
+          const run = folderRuns.get(list.id);
+          if (run?.issue) throw Error(run.issue);
+          const found = boundDocuments(folder);
+          if (found.sermon && found.worship) return found;
+          if (list.view.webContents.isDestroyed()) throw Error('OneDrive 選檔頁已關閉，請繼續準備。');
+          const auth = [list, ...stage.pages.values()].find(page => {
+            if (page.id !== list.id && page.planContext?.date !== folder.date || page.view.webContents.isDestroyed()) return false;
+            try { const host = new URL(page.view.webContents.getURL()).hostname; return host === 'login.live.com' || host === 'login.microsoftonline.com' || host.endsWith('.microsoftonline.com'); } catch { return false; }
+          });
+          if (auth && preparer.state.status !== 'waiting-login') {
+            stage.prepare(auth.id); toggleControls();
+            preparer.update({ status:'waiting-login',message:'請在 Microsoft 頁面完成登入；完成後會繼續準備。' });
+          }
+          if (!auth && preparer.state.status === 'waiting-login') preparer.update({status:'discovering',message:'登入已完成，正在開啟本週兩份 PPT…'});
+          return false;
+        }, { signal, timeoutMs: driver.folderTimeoutMs, message:'尚未確認本週兩份 PPT；請完成 Microsoft 登入或核對缺少的檔案，再按「繼續準備」。' });
+      }
+      pages = current;
+      return current;
+    },
+    ready: async (page, signal) => {
+      signal?.throwIfAborted();
+      if (!page.ready || !page.loaded || page.error || !currentFolder || page.week !== currentFolder.date ||
+          page.view.webContents.isDestroyed() || page.documentKey !== documentKey(page.view.webContents.getURL())) return false;
+      const probe = await probeOfficePage(page);
+      signal?.throwIfAborted();
+      return !!(probe?.state.ready && probe.state.fullscreen);
+    },
+    prepare: async (page, signal) => {
+      const wc = page.view.webContents;
+      signal.throwIfAborted();
+      if (wc.isDestroyed()) throw Error(`${labels[page.deck]}頁面已關閉，請繼續準備。`);
+      app.focus({ steal: true }); controller.hide(); stage.prepare(page.id);
+      try {
+        if (page.error || !page.loaded && !wc.isLoading()) wc.reload();
+        const probe = await waitUntil(async () => {
+          if (wc.isDestroyed()) throw Error(`${labels[page.deck]}頁面已關閉，請繼續準備。`);
+          if (page.error && !wc.isLoading()) throw Error(`${labels[page.deck]}載入失敗，請檢查網路後繼續準備。`);
+          if (!page.loaded || wc.isLoading()) return false;
+          const value = await probeOfficePage(page);
+          return value?.state.ready ? value : false;
+        }, { signal, timeoutMs: driver.surfaceTimeoutMs, message:`${labels[page.deck]}的投影片內容尚未完成載入，請繼續準備這份檔案。` });
+        signal.throwIfAborted();
+        if (!probe.state.fullscreen) {
+          const entered = await runOfficeAction(probe.frame, `(${enterOfficeSlideShow.toString()})(document)`, true);
+          signal.throwIfAborted();
+          if (!entered) throw Error(`${labels[page.deck]}未能進入投影片放映，請檢查後繼續。`);
+        }
+        page.officeFullscreen = true;
+        if (probe.state.slideIndex !== 1) {
+          await runOfficeAction(probe.frame, 'window.focus(); true', true);
+          wc.focus();
+          if (wc.debugger.isAttached()) throw Error('請先關閉此簡報的開發工具，再繼續準備。');
+          wc.debugger.attach('1.3');
+          try {
+            await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyDown',key:'Home',code:'Home',windowsVirtualKeyCode:36 });
+            await wc.debugger.sendCommand('Input.dispatchKeyEvent', { type:'keyUp',key:'Home',code:'Home',windowsVirtualKeyCode:36 });
+          } finally { if (wc.debugger.isAttached()) wc.debugger.detach(); }
+        }
+        await waitUntil(async () => {
+          if (!page.loaded || page.error || wc.isDestroyed() || wc.isLoading()) return false;
+          if (stage.preview !== page.id) stage.prepare(page.id);
+          const current = await probeOfficePage(page);
+          return current?.state.ready && current.state.fullscreen && current.state.slideIndex === 1;
+        }, { signal, timeoutMs: 8000, message:`尚未核對到${labels[page.deck]}的第一張投影片，請檢查後繼續。` });
+        signal.throwIfAborted();
+        await verifyAudiencePage(page);
+        signal.throwIfAborted();
+        stage.arm(page.id);
+      } finally { if (!quitting) toggleControls(); }
+    },
+    present: async (page, signal) => {
+      signal.throwIfAborted();
+      await verifyAudiencePage(page);
+      signal.throwIfAborted();
+      if (stage.active !== page.id) stage.take(page.deck);
+    }
+  };
+  return driver;
+}
+
 async function verifyAudiencePage(page) {
   const wc = page.view.webContents;
   if (!isOfficeDocument(wc.getURL())) return;
@@ -169,16 +320,17 @@ async function verifyAudiencePage(page) {
 }
 
 async function act(action, args = {}) {
+  if (preparer?.running && ['choose-week','open','office','sunday-folder','prepare','start-slideshow','confirm-play','arm','take','close'].includes(action)) {
+    throw Error('正在準備兩份 PPT；請等待完成或顯示需要處理的步驟。');
+  }
   switch (action) {
+    case 'prepare-week': preparer.start(); break;
     case 'state': return snapshot();
     case 'hide-panel': controller.hide(); if (stage.active !== null) { output.focus(); stage.get(stage.active).view.webContents.focus(); } break;
     case 'choose-week': {
-      filePlan = null; folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
+      folderMessage = '登入後會自動打開本週敬拜和講道 PPT。';
       const folder = await website.refresh();
-      const existing = [...stage.pages.values()].find(p => sameFolderURL(p.view.webContents.getURL(), folder.folderUrl));
-      if (existing) { stage.prepare(existing.id); controller.moveTop(); }
-      else await act('open', { deck: 'worship', url: folder.folderUrl });
-      folderRuns.set(stage.preview, { url: folder.folderUrl, opened: new Set(), busy: false, deadline: Date.now() + 120000 });
+      openWeekFolder(folder);
       break;
     }
     case 'music-file': {
@@ -235,7 +387,7 @@ async function act(action, args = {}) {
     case 'start-slideshow': {
       const page = stage.get(args.id), wc = page.view.webContents;
       if (!isOfficeDocument(wc.getURL())) throw Error('請先開啟 PowerPoint 唯讀準備頁。');
-      controller.hide(); stage.prepare(page.id);
+      app.focus({ steal: true }); controller.hide(); stage.prepare(page.id);
       try {
         let entered = false;
         for (const frame of wc.mainFrame.framesInSubtree) {
@@ -405,6 +557,7 @@ app.whenReady().then(async () => {
   stage = new Stage(output, preparation, changed);
   website = new Website({ apiURL: process.env.SUNDAY_PRESENTER_API_URL, changed });
   hostVideo = new HostVideo({ output, changed, ready: () => !!stage.pages.get(stage.active)?.ready && !stage.pages.get(stage.active).view.webContents.isDestroyed() && output.isVisible() && !output.isMinimized() });
+  preparer = new Preparation({ driver: preparationDriver(), changed });
   music = new Music({ file:path.join(app.getPath('userData'),'music.json'), changed: state => {
     if (controller && !controller.isDestroyed()) controller.webContents.send('presenter:music-state',state);
   } });
@@ -458,21 +611,23 @@ app.whenReady().then(async () => {
       if (!page || page.view.webContents.isDestroyed()) { folderRuns.delete(id); continue; }
       const wc = page.view.webContents;
       if (Date.now() > run.deadline) { folderRuns.delete(id); folderMessage = '自動選檔已停止；可重新按「開啟本週 PPT」，或在 OneDrive 選擇檔案。'; changed(); continue; }
-      if (run.busy || !page.loaded || !sameFolderURL(wc.getURL(), run.url) || run.opened.size === 2) continue;
+      if (run.issue || run.busy || !page.loaded || !sameFolderURL(wc.getURL(), run.url) || run.opened.size === 2) continue;
       run.busy = true;
       try {
-        const names = await wc.executeJavaScript(`(${fileElements.toString()})().map(item => item.name)`);
+        const names = [...new Set(await runOfficeAction(wc, `(${fileElements.toString()})().map(item => item.name)`))];
         const plan = identifyFiles(names);
-        if (!plan) { if (names.length) { folderMessage = '找到多份候選或缺少檔案，請在 OneDrive 選擇本週要用的 PPT。'; changed(); } continue; }
-        filePlan = plan; folderMessage = '已找到本週敬拜與講道，檔名顯示在下方。'; changed();
+        if (!plan) { if (names.length > 2 || names.length === 2 && !names.some(name => /主日崇拜|主日敬拜|^敬拜/.test(name))) run.issue = '本週資料夾的 PPT 無法唯一對應敬拜與講道，請先核對檔案。'; if (names.length) { folderMessage = '找到多份候選或缺少檔案，請在 OneDrive 選擇本週要用的 PPT。'; changed(); } continue; }
+        run.plan = plan;
+        page.planContext = { date: run.date, folderUrl: run.url, plan };
+        folderMessage = '已找到本週敬拜與講道，檔名顯示在下方。'; changed();
         for (const name of Object.values(plan)) {
           if (run.opened.has(name)) continue;
           // Only click the exact file name observed above, in the same dated folder.
           if (!sameFolderURL(wc.getURL(), run.url)) break;
-          const point = await wc.executeJavaScript(`(() => { const item = (${fileElements.toString()})().find(item => item.name === ${JSON.stringify(name)}); if (!item) return null; const r = item.element.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+          const point = await runOfficeAction(wc, `(() => { const item = (${fileElements.toString()})().find(item => item.name === ${JSON.stringify(name)}); if (!item) return null; const r = item.element.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}; })()`);
           if (point) {
-            wc.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
-            wc.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+            wc.sendInputEvent({type:'mouseDown',...point,button:'left',clickCount:1});
+            wc.sendInputEvent({type:'mouseUp',...point,button:'left',clickCount:1});
             run.opened.add(name);
           }
         }
@@ -486,6 +641,7 @@ app.whenReady().then(async () => {
       await require('./test/smoke.cjs').run({ stage, act, output, preparation, controller, toggleControls,
         website, remoteControl, hostVideo, music, controlShortcut, setOrigin: origin => { testOrigin = origin; } });
       if (process.argv.includes('--music-smoke')) await require('./test/music-smoke.cjs').run({ music, act, stage, controller, setOrigin: origin => { testOrigin = origin; } });
+      if (process.argv.includes('--preparation-smoke')) await require('./test/preparation-smoke.cjs').run({ preparer, act, stage, controller, website, officeSession });
       console.log('SMOKE PASS');
       app.quit();
     } catch (error) { console.error(error); await hostVideo?.close(); app.exit(1); }
@@ -506,6 +662,7 @@ app.on('second-instance', () => {
 app.on('before-quit', event => {
   if (!quitReady && hostVideo) {
     event.preventDefault(); quitting = true;
+    preparer?.cancel();
     quitTask ||= Promise.allSettled([hostVideo.close(), music?.close(), remoteControl?.stop()]).then(() => { quitReady = true; app.quit(); });
     return;
   }

@@ -1,6 +1,6 @@
 {
   "name": "sunday-presenter",
-  "version": "0.6.11",
+  "version": "0.6.12",
   "private": true,
   "description": "Sunday Presenter pilot: local PPT video and paired slide control",
   "main": "main.cjs",
@@ -12,7 +12,8 @@
     "smoke:video": "node build-native.cjs && electron . --smoke --focus-smoke --video-smoke",
     "icons": "node build-icons.cjs",
     "package:mac": "node package-mac.cjs",
-    "smoke:music": "electron . --smoke --focus-smoke --music-smoke"
+    "smoke:music": "electron . --smoke --focus-smoke --music-smoke",
+    "smoke:preparation": "electron . --smoke --focus-smoke --preparation-smoke"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",
