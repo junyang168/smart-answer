@@ -983,6 +983,10 @@ function TranscriptProofreader({
   const timingPending = doc.script.filter((p) =>
     pendingTiming.includes(p.index),
   );
+  const blockingSourceNotices = (doc.context.source_notices || []).filter(
+    (notice) => notice.status === "source_unclear" &&
+      notice.paragraph_ids.some((id) => pendingTiming.includes(id)),
+  );
   useEffect(() => {
     if (!navigationTarget) return;
     // Wait until React has opened the destination editor, including re-clicks.
@@ -1481,14 +1485,12 @@ function TranscriptProofreader({
           </div>
         )}
       </header>
-      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="音訊校對提醒">
-        <h2 className="font-semibold">音訊校對提醒 · {doc.context.source_notices.length} 處</h2>
-        <p className="text-sm">以下位置保留來源或播放範圍提醒。請依各項說明核對內容；少量前後文毋須逐字切齊。</p>
-        {doc.context.source_notices.map((n,i) => <div key={i} className="my-2 flex flex-wrap items-center gap-2 text-sm">
+      {!!blockingSourceNotices.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="阻止發佈的音訊問題">
+        <h2 className="font-semibold">需處理的音訊問題 · {blockingSourceNotices.length} 處</h2>
+        {blockingSourceNotices.map((n,i) => <div key={i} className="my-2 flex flex-wrap items-center gap-2 text-sm">
           <span>{stamp(n.start_ms)}–{stamp(n.end_ms)}</span>
           <span>{n.note}</span>
-          {n.paragraph_ids.map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
-          <span>{n.paragraph_ids.length && n.paragraph_ids.every(id => paragraphIsConfirmed(id,doc.context.reviews,doc.paragraph_shas,editedParagraphIds)) ? "相關段落已人工核對" : "待人工核對"}</span>
+          {n.paragraph_ids.filter(id => pendingTiming.includes(id)).map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
         </div>)}
       </section>}
       {deletionsOpen && <AiDeletionReview items={deletionCandidates} disabled={disabled}
@@ -1679,7 +1681,6 @@ function TranscriptProofreader({
                       ? " ✓"
                       : ""}
                     {g.hidden ? "（隱藏）" : ""}
-                    {g.needs_review ? " · 待釐清" : ""}
                   </option>
                 ))}
               </select>
@@ -1700,14 +1701,8 @@ function TranscriptProofreader({
                 <p className="mt-2 text-xs text-slate-500">
                   影片時間{" "}
                   {stamp(doc.context.occurrences[shownSlide!].time_ms || 0)} ·
-                  原始畫面 · {group.member_ids.length} 個逐步狀態 · SVG
-                  尚未核實，使用原圖核對
+                  原始畫面 · {group.member_ids.length} 個逐步狀態
                 </p>
-                {group.needs_review && (
-                  <p className="mt-2 rounded bg-amber-50 p-2 text-sm">
-                    此組含不確定的中間內容，請逐張查看。{group.reason}
-                  </p>
-                )}
                 <div
                   className="my-3 flex flex-wrap gap-2"
                   aria-label="本組逐步畫面"
@@ -1936,12 +1931,6 @@ function TranscriptProofreader({
             const active = p.index === selected;
             const binding = doc.context.paragraph_bindings[p.index];
             const review = doc.context.reviews["p:" + p.index];
-            const uncertainFrames = doc.context.groups.filter(
-              (g) =>
-                !g.hidden &&
-                g.needs_review &&
-                g.before_paragraph_id === p.index,
-            );
             const reviewed = paragraphReviewed(p.index);
             return (
               <article
@@ -1953,7 +1942,6 @@ function TranscriptProofreader({
                   .filter(
                     (g) =>
                       !g.hidden &&
-                      !g.needs_review &&
                       g.before_paragraph_id === p.index,
                   )
                   .map((g) => (
@@ -1972,34 +1960,6 @@ function TranscriptProofreader({
                       投影片 · 檢視原圖與文字
                     </button>
                   ))}
-                {uncertainFrames.length > 0 && (
-                  <details className="mb-3 text-xs text-slate-500">
-                    <summary className="cursor-pointer">
-                      待釐清的短暫畫面（{uncertainFrames.length}）
-                    </summary>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {uncertainFrames.map((g) => (
-                        <button
-                          key={g.id}
-                          className="rounded border px-2 py-1 text-left text-blue-700"
-                          onClick={() => {
-                            setActiveGroup({
-                              paragraphId: selected,
-                              groupId: g.id,
-                            });
-                            setPeekSlide(undefined);
-                          }}
-                        >
-                          查看{" "}
-                          {stamp(
-                            doc.context.occurrences[g.slide_id].time_ms || 0,
-                          )}{" "}
-                          的原始畫面
-                        </button>
-                      ))}
-                    </div>
-                  </details>
-                )}
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <button
                     className="text-blue-700"
@@ -2038,25 +1998,6 @@ function TranscriptProofreader({
                       />
                     </details>
                   )}
-                {doc.context.speaker_attribution?.notices
-                  ?.filter((n) => n.paragraph_id === p.index)
-                  .map((n, index) => (
-                    <div
-                      key={index}
-                      className="mb-3 rounded bg-amber-50 p-3 text-sm text-amber-900"
-                    >
-                      <strong>{n.kind === "speaker_labels_preserved_human_edit" ? "已保留人工修改" : "原聲複核提示（模型候選）"}</strong>
-                      <p>
-                        {n.timing_precision === "context_window_only"
-                          ? "時間未能精確定位；上下文範圍 "
-                          : "約 "}
-                        {stamp(n.start_ms)}–{stamp(n.end_ms)}
-                        {n.audio_quote ? `：「${n.audio_quote}」` : ""}
-                      </p>
-                      <p>{n.reason}</p>
-                      <p>請連同本段核對。提示文字不會自動加入逐字稿。</p>
-                    </div>
-                  ))}
                 {active && doc.can_edit ? (
                   <div
                     onCompositionStart={() => {
