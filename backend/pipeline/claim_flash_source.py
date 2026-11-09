@@ -71,10 +71,14 @@ def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
                     pending.append({'object_key':key,'layer':'source','reason':decision.reason});continue
                 allowed={p['paragraph_key'] for p in job['material']['nearby_paragraphs']}
                 if any(q.paragraph_key not in allowed for q in decision.quotes):raise ValueError('unprovided source repair paragraph')
-                quotes=[{'paragraph_key':p['paragraph_key'],'quote':p['quote']} for p in job['material']['fragments']]
-                quotes+= [q.model_dump() for q in decision.quotes]
+                # Existing valid IDs already bind their paragraph; rebuilding
+                # them can fail on a repeated phrase and adds no authority.
+                # Compile only the newly selected spans, then retain old IDs.
+                old_ids=[p['fragment_id'] for p in job['material']['fragments']]
+                quotes=[q.model_dump() for q in decision.quotes]
                 quotes=list({(q['paragraph_key'],q['quote']):q for q in quotes}.values())
                 post,fragments,projection=binding_postimage(key,records[key]['payload'],quotes,job['material'],working,sources)
+                post['source_fragment_ids']=list(dict.fromkeys(old_ids+post['source_fragment_ids']))
                 if post!=records[key]['payload']:updates[key]=post
                 generated.update(fragments);working=f.apply_overlay(working,{key:post},fragments)
         f.source_unchanged(sources)

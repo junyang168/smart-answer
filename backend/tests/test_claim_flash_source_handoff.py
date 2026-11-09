@@ -24,10 +24,11 @@ class Ports:
             'reason':'補足原文指代；不修改摘要。'} for job in request['input']['jobs']]}
 
 
-def test_source_handoff_commits_only_complete_bindings_and_reuses_exact_answer(sample):
+@pytest.mark.parametrize('old_quote',['你不知道神的旨意，怎麼遵行？','你'])
+def test_source_handoff_commits_only_complete_bindings_and_reuses_exact_answer(sample,old_quote):
     store,root,_=sample
     fragment=store.get_record_state('source_fragments','F')['payload']
-    fragment['verbatim_excerpt']='你不知道神的旨意，怎麼遵行？'
+    fragment['verbatim_excerpt']=old_quote
     fragment['verbatim_excerpt_sha256']=hashlib.sha256(fragment['verbatim_excerpt'].encode()).hexdigest()
     store.apply_plan(store.plan_package({'package_id':'short-fragment','source_fragments':[fragment]}))
     fragment=store.get_record_state('source_fragments','F')['payload']
