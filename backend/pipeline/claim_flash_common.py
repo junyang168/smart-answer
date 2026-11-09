@@ -13,7 +13,7 @@ from backend.api.canonical_repository.source_claim_membership import belongs_to_
 VERSION = 'claim_update_flash_v1'
 LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
 PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded'}
-GPT_BYTES = 60000
+GPT_BYTES = 128000
 GPT_JOBS = 4
 JEV_BYTES = 40000
 JEV_CONTRACT = jevq.CONTRACT
@@ -382,7 +382,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             continue
         if task=='argument_completeness':
             req=reuse_argument_edge_order(root,req)
-        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None))
+        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
@@ -415,7 +415,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             e.save(recovery/'recovery.json',{'original_request_sha256':e.digest(req),
                 'original_answer_sha256':e.digest(reply),'retained_ids':ids,
                 'missing_ids':[j['job_id'] for j in missing],'max_additional_calls':1})
-            extra=e.recorded_call(recovery,'gpt',correction,ports.repair,preflight=getattr(ports,'preflight',None))
+            extra=e.recorded_call(recovery,'gpt',correction,ports.repair,preflight=getattr(ports,'preflight',None),gpt_max_bytes=GPT_BYTES)
             exactly(extra.get('items',[]),[j['job_id'] for j in missing],field)
             byid={item[field]:item for item in items+extra['items']}
             reply={**reply,'items':[byid[job['job_id']] for job in batch]}
