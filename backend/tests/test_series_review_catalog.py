@@ -96,3 +96,57 @@ def test_invalid_item_and_absent_drafts_leave_existing_metadata_alone(tmp_path):
     for item in [ITEM, '../secret', 'a/b']:
         assert SeriesReviewCatalog(prod).for_item(item) == {}
     assert meta == saved
+
+
+@pytest.mark.parametrize('has_draft',[False,True])
+def test_unclaim_preserves_latest_publication_and_clears_owner(tmp_path,has_draft):
+    prod=tmp_path/'prod'
+    create=draft if has_draft else catalog
+    create(prod,status='ready',assigned_to=None,assigned_to_name=None,published_date='2026-11-09 12:49')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'},'script':[{'text':'已發布內容'}]})
+    before=file_hash(prod/'config/sermon.json')
+    result=SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['status']=='published' and result['published_date']=='2026-11-09 12:49'
+    assert result['assigned_to'] is None and result['assigned_to_name'] is None
+    assert before==file_hash(prod/'config/sermon.json')
+
+
+def test_publication_history_time_wins_over_older_catalog_date(tmp_path):
+    prod=tmp_path/'prod';draft(prod,status='ready',published_date='2025-01-01')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','review_revision':8,'review_operation_id':'release-8'}})
+    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json',
+           {'kind':'publish','revision':8,'operation_id':'release-8','time':'2026-11-09T18:49:00+00:00'})
+    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2026-11-09T18:49:00+00:00'
+
+
+@pytest.mark.parametrize('kind,operation',[('unclaim','release-8'),('publish','another-operation')])
+def test_edit_or_unrelated_history_does_not_replace_publication_date(tmp_path,kind,operation):
+    prod=tmp_path/'prod';draft(prod,status='ready',published_date='2025-01-01')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','review_revision':8,'review_operation_id':'release-8'}})
+    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json',
+           {'kind':kind,'revision':8,'operation_id':operation,'time':'2026-11-09T18:49:00+00:00'})
+    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2025-01-01'
+
+
+def test_beta_draft_owner_does_not_hide_existing_public_release(tmp_path):
+    prod,beta=tmp_path/'prod',tmp_path/'beta';catalog(prod,status='ready',published_date='2026-11-09')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'}})
+    draft(beta,status='assigned',assigned_to='editor',assigned_to_name='校對者')
+    result=SeriesReviewCatalog(prod,beta).for_item(ITEM)
+    assert result['status']=='published' and result['published_date']=='2026-11-09'
+    assert result['assigned_to']=='editor' and result['editor_href']==f'/admin/transcript-beta/{ITEM}'
+
+
+def test_missing_publication_date_stays_unknown_not_edit_time(tmp_path):
+    prod=tmp_path/'prod';catalog(prod,status='ready',last_updated='2026-11-09')
+    atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','last_updated':'2026-11-09'}})
+    result=SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['status']=='published' and result['published_date'] is None
+
+
+def test_beta_only_release_is_not_a_publication_in_production(tmp_path):
+    prod,beta=tmp_path/'prod',tmp_path/'beta';catalog(prod)
+    draft(beta,status='published',published_date='2026-11-09')
+    atomic(beta/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published'}})
+    result=SeriesReviewCatalog(prod,beta).for_item(ITEM)
+    assert result['status']=='ready' and result['published_date'] is None

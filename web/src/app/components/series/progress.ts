@@ -54,3 +54,16 @@ export function seriesName(series: { id: string; title?: string | null }): { nam
   if (title && title !== series.id && /^\d{4}/.test(title)) return { name: title, subtitle: "" };
   return { name: series.id, subtitle: title && title !== series.id ? title : "" };
 }
+
+
+/** Accept canonical and previously double-encoded series links. */
+export function seriesIdFromRoute(value: string): string {
+  for (let i = 0; i < 2; i++) {
+    try {
+      const decoded = decodeURIComponent(value);
+      if (decoded === value) break;
+      value = decoded;
+    } catch { break; }
+  }
+  return value;
+}

@@ -35,10 +35,30 @@ class SeriesReviewCatalog:
         if expected and context['source_video_sha256']!=expected:return None
         return meta
 
+    def _publication(self,item):
+        # Publication and current draft ownership are independent. Legacy
+        # unclaim operations may leave status=ready without withdrawing a release.
+        path=self.production/'script_published'/f'{item}.json'
+        if not path.is_file():return {}
+        meta=self.catalogs.get(self.production,{}).get(item,{})
+        snapshot=read(path,{})
+        published=snapshot.get('metadata',{}) if isinstance(snapshot,dict) else {}
+        if (meta.get('status')!='published' and published.get('status')!='published'
+                and published.get('review_revision') is None):return {}
+        date=meta.get('published_date') or published.get('published_date')
+        revision=published.get('review_revision')
+        if type(revision) is int and revision>=0:
+            history=read(self.production/'transcript_review'/item/'revisions'/f'{revision:08}.json',{})
+            if (history.get('kind')=='publish' and history.get('revision')==revision
+                    and history.get('operation_id')==published.get('review_operation_id')):
+                date=history.get('time') or date
+        return dict(status='published',published_date=date)
+
     def for_item(self,item):
         try:
             # Validate once before using the identifier in any file path.
             ReviewStore(self.production).folder(item)
+            publication=self._publication(item)
             root=self.production;href='/admin/surmons/'+quote(item,safe='')
             marker=read(ReviewStore(self.beta).folder(item)/'production-link.json') if self.beta else None
             if marker is not None:
@@ -55,10 +75,13 @@ class SeriesReviewCatalog:
                 if meta is None and self.beta:
                     root=self.beta;meta=self._draft(root,item)
                     href='/admin/transcript-beta/'+quote(item,safe='')
-            if meta is None:return {}
-            published=meta.get('status')=='published' and (root/'script_published'/f'{item}.json').is_file()
-            return dict(status='published' if published else 'assigned' if meta.get('assigned_to') else 'ready',
+            if meta is None:
+                if not publication:return {}
+                legacy=self.catalogs.get(self.production,{}).get(item,{})
+                return dict(**publication,assigned_to=legacy.get('assigned_to'),assigned_to_name=legacy.get('assigned_to_name'),
+                            assigned_to_date=legacy.get('assigned_to_date'))
+            return dict(status='published' if publication else 'assigned' if meta.get('assigned_to') else 'ready',
                         editor_href=href,assigned_to=meta.get('assigned_to'),assigned_to_name=meta.get('assigned_to_name'),
-                        assigned_to_date=meta.get('assigned_to_date'),published_date=meta.get('published_date') if published else None)
+                        assigned_to_date=meta.get('assigned_to_date'),published_date=publication.get('published_date'))
         except (OSError,ValueError,TypeError,KeyError,ReviewError):
             return {}
