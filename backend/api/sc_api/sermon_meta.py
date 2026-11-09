@@ -32,6 +32,7 @@ class Sermon(BaseModel):
     series_title: Optional[str] = None
     series_order: Optional[int] = None
     rough_href: Optional[str] = None
+    editor_href: Optional[str] = None
     organization_mode: Optional[str] = None
     organization_mode_label: Optional[str] = None
     classification_confidence: Optional[str] = None
