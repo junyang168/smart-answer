@@ -77,7 +77,10 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         # One bounded group, one discovery task; no Cartesian candidate enumeration.
         shared = {'claims': {k:pairs.node(k, records, sources) for k in sorted(targets)},
                   'existing_edges': edges}
-        proposed = []; pending = []; discoveries = []
+        handoffs=json.loads((argument_root/'result.json').read_text()).get('claim_pair_handoffs',[])
+        if any(p['a'] not in targets or p['b'] not in targets or p['a']==p['b'] for p in handoffs):
+            raise ValueError('argument Claim handoff exceeded group')
+        proposed = [{k:p[k] for k in ['a','b','reason']} for p in handoffs]; pending = []; discoveries = []
         for batch, raw in f.gpt(root/'discovery', ports, 'missing_group_claim_relations',
                 [{'job_id': prior['group']['group_id']}], flash.Discoveries.model_json_schema(),
                 PROMPT, shared=shared, semantic_review=False):
@@ -118,6 +121,7 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
             'status': 'needs_attention' if pending else 'verified', 'updates': updates,
             'new_fragments': {}, 'retiring_keys': result['retiring_keys'], 'pending': pending,
             'discoveries': discoveries, 'outcomes': result['outcomes'], 'applied': False,
+            'consumed_argument_claim_handoffs':handoffs,
             'completion_scope': 'group_claim_relations_only', 'claim_qualification': 'not_granted',
             'commit_reason': 'Group Claim relationships only; reuse completed lower and argument tasks'}
         e.save(root/'before.json', {'records': {k:records[k] for k in read}, 'sources': sources})

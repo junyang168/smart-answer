@@ -61,6 +61,20 @@ def test_missing_relation_and_zero_model_replay(ready):
     assert replay.calls==[]
 
 
+def test_argument_claim_candidate_is_handed_to_independent_relation_task(ready):
+    store,root,original=ready
+    intent=json.loads((original/'intent.json').read_text());group=intent['group']
+    ar=root/'argument-handoff';argports=ArgumentPorts([{'a':'claims/C','b':'claims/D','fragment_ids':['F'],'reason':'候選論證承接。'}])
+    plan={'source_id':'S','source_body_sha256':f.load_source(store,'S')[1]['S']['body_sha256'],'groups':[group]}
+    result=arguments.run(store,'S',plan,group['group_id'],intent['evidence_root'],intent['statement_root'],ar,argports,apply=True)
+    assert result['status']=='verified' and len(result['claim_pair_handoffs'])==1
+    assert not result['updates'] and not any(req['input']['task']=='pair_claim' for role,req in argports.calls if role=='gpt')
+    ports=Ports();final=stage.run(store,'S',ar,root/'relation-handoff',ports,apply=True)
+    assert final['status']=='applied' and len(final['updates'])==1
+    assert final['consumed_argument_claim_handoffs']==result['claim_pair_handoffs']
+    assert any(req['input']['task']=='pair_claim' for role,req in ports.calls if role=='gpt')
+
+
 def test_wrong_direction_repaired(ready):
     store,root,aroot=ready; edge(store)
     result=stage.run(store,'S',aroot,root/'relations',Ports(choices={'relation':'b_to_a_supports'}),apply=True)

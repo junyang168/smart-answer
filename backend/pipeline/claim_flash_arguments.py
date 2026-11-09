@@ -97,7 +97,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                  +[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason',''),'read_only':True} for p in claim_edges.values()]
                  +[{**p,'relation_type':'supports','reason':'Claim.evidence_step_ids'} for p in implicit]}
         shared.update(f.source_interpretation(sources,{source_id:group['paragraph_keys']}))
-        proposals=[];pending=[];routes=[]
+        proposals=[];pending=[];routes=[];claim_handoffs={}
         jobs=[{'job_id':k} for k in sorted(targets)]
         for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),PROMPT,shared=shared,semantic_review=False):
             replies=Routes.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
@@ -108,7 +108,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                     if pair.a not in nodes or pair.b not in nodes or pair.a==pair.b or not set(pair.fragment_ids)<=set(fragments):
                         raise ValueError('unprovided argument endpoint or source fragment')
                     if pair.a.startswith('claims/') and pair.b.startswith('claims/'):
-                        raise ValueError('Claim-Claim relation belongs to its independent task')
+                        # A valid same-group candidate belongs to the next
+                        # independent task, not a failed whole argument reply.
+                        claim_handoffs[e.digest(pair.model_dump())]=pair.model_dump()
+                        continue
                     proposals.append(pair.model_dump())
         updates=deepcopy(statement_updates);retiring=[];outcomes=[];new=[];removals=[]
         for kind in ['lower','attachment']:
@@ -174,6 +177,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 raise ValueError('argument stage modified lower content')
         result={'version':VERSION,'status':'needs_attention' if pending else 'verified','source_id':source_id,'claim_ids':ids,
             'updates':updates,'new_fragments':{},'retiring_keys':sorted(set(retiring)),'pending':pending,'routes':routes,'outcomes':outcomes,
+            'claim_pair_handoffs':list(claim_handoffs.values()),
             'completion_scope':'group_lower_argument_routes_only','claim_qualification':'not_granted','applied':False,
             'resolved_statement_handoffs':[x for x in old_checks['pending'] if x['object_key'] in targets and not pending],
             'commit_reason':'Group argument completeness and typed pairs; preserve lower content and Claim statements'}
