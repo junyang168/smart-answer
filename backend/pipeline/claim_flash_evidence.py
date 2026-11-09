@@ -175,6 +175,22 @@ def reference_visible(payload):
             'source_fragment_ids':e.evidence_fragment_ids(payload)}
 
 
+def coverage_request_material(ports, jobs, shared):
+    """Pack repeated field names only when the complete request is oversized."""
+    prompt=COVERAGE_PROMPT
+    request={'identity':ports.identity['gpt'],'system':prompt,
+             'input':{'task':'evidence_coverage_repair','jobs':jobs,**shared},
+             'schema':MissingEdits.model_json_schema()}
+    if len(json.dumps(request,ensure_ascii=False).encode())<=f.GPT_BYTES:return prompt,shared
+    packed=deepcopy(shared)
+    columns=['paragraph_key','quote']
+    packed.update(source_columns=columns,
+                  sources={fid:[value[field] for field in columns] for fid,value in shared['sources'].items()})
+    prompt+=('本次sources每個fragment_id的值為陣列，欄位順序由source_columns定義；'
+             'paragraph_key與quote仍是完整位置及逐字原文，所有ID均保留。')
+    return prompt,packed
+
+
 def material(key, records, sources, decisions=None):
     payload = records[key]['payload']
     value = e.material({**payload,'evidence_step_id':key},records,sources)
@@ -376,10 +392,12 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             'required_fragment_ids':covered[token],'jev':answers[token]})
     coverage_updates={};coverage_proofs=[]
     grouped=[{'job_id':group['group_id'],'candidates':jobs}] if jobs else []
-    for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),COVERAGE_PROMPT,
-        shared={'records':{k:reference_visible(p) for k,p in catalog.items()},'writable_keys':targets,
+    instruction,shared=coverage_request_material(ports,grouped,
+        {'records':{k:reference_visible(p) for k,p in catalog.items()},'writable_keys':targets,
                 **{k:state[k] for k in ('human_source_decisions','source_interpretation') if k in state},
-                'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}},semantic_review=False):
+                'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}})
+    for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),instruction,
+        shared=shared,semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
         edits=coverage_edits(bundles[0].items,jobs)
         for edit in edits:
