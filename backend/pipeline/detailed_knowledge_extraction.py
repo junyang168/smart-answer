@@ -834,6 +834,22 @@ def validate_response(
         if from_id in ids["observation"] and to_id in ids["evidence"]:
             supported_by_observation.add(from_id)
 
+    if additional_relations:
+        # Native Observation chains may reach a Claim through another Observation.
+        # Prove the finite saved route, never recursively fetch more corpus data.
+        graph = {}
+        for edge in list(response.get("evidence_relations", [])) + list(additional_relations):
+            graph.setdefault(edge["from_id"], set()).add(edge["to_id"])
+        for observation in ids["observation"]:
+            todo = list(graph.get(observation, ())); visited = {observation}
+            while todo:
+                node = todo.pop()
+                if node in visited: continue
+                visited.add(node)
+                if node in ids["claim"] | ids["evidence"]:
+                    supported_by_observation.add(observation); break
+                if node in ids["observation"]: todo.extend(graph.get(node, ()))
+
     # The rule this whole schema change exists for.  An observation the
     # professor reasoned from must also record the step that reasoning took.
     # Without it an extraction can produce the lexical fact and silently drop

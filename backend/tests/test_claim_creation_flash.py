@@ -22,6 +22,7 @@ class Ports:
                 'support_hint':'但以理書人子領受永遠權柄。','existing_claim_id':None}]}
         elif task=='creation_materials':
             out={k:r[k] for k in ('questions','positions','observations','evidence_steps')}
+            for o in out['observations']:o.pop('argument_role')
             for q in out['questions']:q.pop('answer_claim_ids')
             for e in out['evidence_steps']:e.pop('produced_claim_ids')
             sentences=x.section_sentences(self.source,Section(1,0,3,'all'))
@@ -38,6 +39,7 @@ class Ports:
         elif task=='creation_grouping':
             out={'groups':groups(),'reason':'完整論證。'}
         else:raise AssertionError(task)
+        if task=='creation_connections':out['observation_roles']=[{'observation_id':oid,'argument_role':'background','reason':'測試背景觀察。'} for oid in request['input']['local_observation_ids']]
         return self.mutate(task,out) if self.mutate else out
 
 
@@ -199,3 +201,26 @@ def test_native_package_validation_is_opt_in_and_still_rejects_missing_endpoints
     validate_merged_package(package,native_relations=True)
     package['knowledge_relations'][-1]['to_id']='MISSING'
     with pytest.raises(KnowledgePackageMergeError,match='unknown endpoints'):validate_merged_package(package,native_relations=True)
+
+
+def test_material_task_does_not_decide_argument_role_and_connection_must_dispose_each(tmp_path):
+    contracts=creation.schemas()
+    assert 'argument_role' not in contracts['materials']['schema']['properties']['observations']['items']['properties']
+    source=_transcript();p=tmp_path/'source.json';p.write_text(json.dumps(source))
+    def omit(task,out):
+        if task=='creation_connections':out['observation_roles']=[]
+        return out
+    with pytest.raises(ValueError,match='exactly once'):
+        creation.run('T',p,tmp_path/'run',Ports(source,omit),groups=groups())
+    assert not (tmp_path/'run'/'candidate.json').exists()
+
+
+def test_load_bearing_native_chain_requires_actual_route_not_cycle_or_question_only():
+    r=_response();r['observations'][0]['argument_role']='load_bearing'
+    second=deepcopy(r['observations'][0]);second['observation_id']='OBS002';second['argument_role']='background'
+    r['observations'].append(second)
+    edges=[{'from_id':'OBS001','to_id':'OBS002','relation_type':'supports','reason':'第一步。'},
+           {'from_id':'OBS002','to_id':'E001','relation_type':'supports','reason':'第二步。'}]
+    d.validate_response(r,_transcript(),additional_relations=edges)
+    edges[1]['to_id']='OBS001'
+    with pytest.raises(d.DetailedExtractionValidationError,match='load_bearing'):d.validate_response(r,_transcript(),additional_relations=edges)

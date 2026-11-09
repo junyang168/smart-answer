@@ -18,7 +18,7 @@ from backend.pipeline.claim_flash_grouping import SemanticGroups, _ranges
 from backend.pipeline.source_projection import project_script
 from backend.pipeline.knowledge_package_merge import validate_merged_package
 
-VERSION = 'claim_creation_flash_v1'
+VERSION = 'claim_creation_flash_v2'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -52,11 +52,15 @@ def schemas():
     materials = {k: deepcopy(BASE[k]) for k in ('questions', 'positions', 'observations', 'evidence_steps', 'sentence_audit')}
     for col, field in (('questions', 'answer_claim_ids'), ('evidence_steps', 'produced_claim_ids')):
         row = materials[col]['items']; row['properties'].pop(field); row['required'].remove(field)
+    obs=materials['observations']['items'];obs['properties'].pop('argument_role');obs['required'].remove('argument_role')
     connection = object_schema({'from_id': {'type': 'string'}, 'to_id': {'type': 'string'},
         'relation_type': {'type': 'string', 'enum': d.RELATION_TYPES}, 'reason': {'type': 'string'}})
     return {'claims': schema('claims', {'candidates': array(claim)}),
             'materials': schema('materials', materials),
-            'connections': schema('connections', {'connections': array(connection)})}
+            'connections': schema('connections', {'connections': array(connection),
+                'observation_roles':array(object_schema({'observation_id':{'type':'string'},
+                    'argument_role':deepcopy(BASE['observations']['items']['properties']['argument_role']),
+                    'reason':{'type':'string'}}))})}
 
 
 RULES = (
@@ -76,7 +80,7 @@ MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
     '按既有欄位定義與原文粒度整理，共同材料只生成一次，不為每條Claim複製。'
-    '不要生成Claim或論證連接，也不判Claim整體充分性。只對owned_paragraphs中的句子建記錄，'
+    '不要生成Claim、論證連接或判argument_role，也不判Claim整體充分性。只對owned_paragraphs中的句子建記錄，'
     'context只供理解。已有材料索引已保存同一意思時可duplicate_of指其ID，不複製建記錄。'
     '每個本組sentence_id恰好一筆sentence_audit；extracted的covered_by指錨點真正落在該句的材料。'
     'not_extracted給具體reason與既有reason_code；不得為避免處理而全排除。')
@@ -90,6 +94,9 @@ CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
     '每條一次輸出from_id、to_id、relation_type及完整但簡短reason，方向由端點表達。'
     '不要重複completed_connections。只使用提供的端點，不重抽Claim或材料。'
+    '對local_observation_ids逐項判argument_role並給簡短理由，恰好一次。'
+    'load_bearing表示教授實際據以推論，須保留通往Evidence或Claim的論證路徑；'
+    '只是敘事／背景則background，不為通過機械校驗虛構連接，不憑位置或相似詞判使用。'
     'Evidence到Claim的supports會由程式同步雙向owner；Claim到Position的refutes表示反方；'
     'Claim到Question的answers表示教授確有回答。Observation/Evidence到Evidence以及'
     'Claim到Claim使用現有關係類型。不要為連接所有節點編造論據。')
@@ -312,6 +319,7 @@ def run(source_id, source_path, root, ports, *, groups=None):
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
                     calibrate([r for col in COLLECTIONS[:4] for r in result[col]],paragraphs))
                 partial=empty();partial.update(result)
+                for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
                 d.validate_response(partial,source,visible_locators=set(batch),require_load_bearing_relations=False)
@@ -332,12 +340,20 @@ def run(source_id, source_path, root, ports, *, groups=None):
             for cid in group_claims[gid]:relevant.update(ranges(candidates[cid]['related_ranges'],keys))
             available={oid:node for oid,node in nodes.items() if node['collection']=='claims' or oid in local
                 or any(a['segment_index'] in relevant for a in node.get('anchors',[]))}
+            for node in available.values():
+                if node['collection']=='observations':node.pop('argument_role',None)
+            local_observations={oid for oid in local if nodes[oid]['collection']=='observations'}
             catalog={oid:{'collection':node['collection'],'statement':node.get('statement',node.get('text',node.get('title','')))}
                 for oid,node in nodes.items() if oid not in available}
             result=call(root/gid/'connections',ports,'creation_connections',{
                 'group_id':gid,'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
-                'nodes':available,'other_material_index':catalog,'local_node_ids':sorted(local),'completed_connections':connections},
+                'nodes':available,'other_material_index':catalog,'local_node_ids':sorted(local),
+                'local_observation_ids':sorted(local_observations),'completed_connections':connections},
                 contracts['connections'],CONNECTIONS,source_check)
+            roles=result['observation_roles']
+            f.exactly(roles,local_observations,'observation_id')
+            byid={r['observation_id']:r for r in response['observations']}
+            for decision in roles:byid[decision['observation_id']]['argument_role']=decision['argument_role']
             for edge in result['connections']:
                 if not {edge['from_id'],edge['to_id']}<=set(available):raise ValueError('connection requires unprovided material; do not infer from index alone')
                 if not ({edge['from_id'],edge['to_id']}&local):raise ValueError('connection is unrelated to its source group')
