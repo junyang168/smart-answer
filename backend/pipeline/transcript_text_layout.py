@@ -142,6 +142,8 @@ def stitch(out: Path, *, use_repairs: bool = True) -> dict:
     # Both source excerpts and all alignments have been retained above. Never
     # publish a timed draft whose boundary decision loses unique source words.
     for left,right in zip(excerpts,excerpts[1:]):
+        from backend.pipeline.transcript_audio_seams import covers
+        if repairs and covers(out,left['chunk_id'],right['chunk_id']):continue
         verify_seam_coverage(text[left['output_start']:left['output_end']],
             text[right['output_start']:right['output_end']],left['excluded_suffix'],right['excluded_prefix'])
     result = {'schema_version': 'timed-speech-draft.v1', 'asr_sha256': file_sha(out / 'asr.json'),

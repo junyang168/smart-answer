@@ -358,13 +358,19 @@ def load_proof(out,proof):
 def load_repair(out):
     out=Path(out);ref=read_json(out/'seam-repair.json');path=(out/ref['proof']).resolve()
     if not path.is_relative_to(out.resolve()) or file_sha(path)!=ref['sha256']:raise ValueError('Seam repair proof changed')
+    from backend.pipeline.transcript_audio_seams import POLICY as AUDIO_POLICY, load
+    if ref.get('policy')==AUDIO_POLICY:return load(out,path)
     return load_proof(out,path)
 
 
 def stitch_with_recovery(out,aligner_python,capacity_root=None):
     from backend.pipeline.transcript_text_layout import stitch,SeamCoverageError
     try:return stitch(Path(out))
-    except SeamCoverageError:return recover(Path(out),aligner_python,capacity_root)
+    except SeamCoverageError:
+        try:return recover(Path(out),aligner_python,capacity_root)
+        except SeamCoverageError:
+            from backend.pipeline.transcript_audio_seams import recover as acoustic_recovery
+            return acoustic_recovery(Path(out),capacity_root)
 
 
 def audit_window_coverage(out,master):
@@ -390,6 +396,8 @@ def audit_window_coverage(out,master):
             start,end=r['source_start'],r['source_end']
             if c['text'][start:end]!=timed['text'][r['output_start']:r['output_end']]:raise ValueError('Window ownership text changed')
         for a,b in zip(ownership,ownership[1:]):
+            from backend.pipeline.transcript_audio_seams import covers
+            if 'seam_repair_sha256' in timed and covers(root,a['chunk_id'],b['chunk_id']):continue
             verify_seam_coverage(timed['text'][a['output_start']:a['output_end']],timed['text'][b['output_start']:b['output_end']],a['excluded_suffix'],b['excluded_prefix'])
         rows.append(dict(window_id=w['id'],origin_sample=w['origin_sample'],end_sample=w['end_sample'],timed_text_sha256=file_sha(root/'timed_text.json')))
         previous=w['end_sample']

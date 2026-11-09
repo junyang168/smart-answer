@@ -178,6 +178,7 @@ def main():
                 "transcript_audio_pilot.py",
                 "transcript_text_layout.py",
                 "transcript_seam_repair.py",
+                "transcript_audio_seams.py",
                 "transcript_audio_correction.py",
                 "transcription_vocabulary.py",
             ],
@@ -193,6 +194,7 @@ def main():
                 "paragraph_audio_coherence.py",
                 "slide_reading_layout.py",
                 "transcript_seam_repair.py",
+                "transcript_audio_seams.py",
             ],
             "speakers": [
                 "transcript_speaker_batch.py",
