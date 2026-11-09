@@ -407,7 +407,13 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 resolution=covered_handoff(root,job,records,sources,ports)
                 if resolution:
                     outcomes.append({'unit_id':edit.job_id,'basis':'gpt_handoff_resolution',**resolution});continue
-                pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'handoff','reason':edit.reason});continue
+                target={}
+                if edit.action=='needs_source' and edit.record_key:
+                    if edit.record_key not in targets or edit.record_key.split('/')[0]!=edit.record_type:
+                        raise ValueError('coverage source handoff attempted other-group target')
+                    target={'object_key':edit.record_key}
+                pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'handoff',
+                                'reason':edit.reason,**target});continue
             job=next(j for j in jobs if j['job_id']==edit.job_id)
             chosen={k:p for k,p in valid.items() if p['fragment_id'] in edit.fragment_ids}
             if (not edit.fragment_ids or not set(edit.fragment_ids)<={p['fragment_id'] for p in valid.values()}

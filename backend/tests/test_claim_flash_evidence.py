@@ -445,3 +445,22 @@ def test_new_record_with_omitted_optional_fields_keeps_acceptance_after_sql(seed
     assert len(created)==1 and created[0]['scripture_refs']==[]
     replay=WithoutOptionals();second=stage.run(store,'S',plan,root,replay,previous,apply=True)
     assert second['status']=='completed' and replay.calls==[]
+
+
+@pytest.mark.parametrize('key',['evidence_steps/E','', 'evidence_steps/OUTSIDE'])
+def test_coverage_source_handoff_keeps_exact_writable_target(tmp_path,key):
+    records,sources,plan=setup(tmp_path)
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'待核定的重要意思。'}
+    class SourceHandoff(Ports):
+        def repair(self,request):
+            if request['input']['task']!='evidence_coverage_repair':return super().repair(request)
+            return {'items':[{'job_id':'A','items':[{'job_id':'U0','action':'needs_source','record_key':key,
+                'record_type':'evidence_steps','fragment_ids':['F0'],'reason':'須補充已知記錄的來源。'}]}]}
+    def run():return stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],
+        tmp_path/'run',SourceHandoff(),saved_inventory(tmp_path/'prior',sources,[unit]),apply=False)
+    if key.endswith('OUTSIDE'):
+        with pytest.raises(ValueError,match='other-group target'):run()
+    else:
+        result=run();assert result['status']=='needs_attention'
+        finding=next(p for p in result['pending'] if p.get('unit_id')=='U0')
+        assert finding.get('object_key')==(key or None)
