@@ -3,6 +3,17 @@ import pytest
 from backend.pipeline.transcript_playback_readiness import base_rows,usable,require_control
 
 
+def test_joint_selection_reuses_complete_candidates_without_rewriting_model_preference():
+    from backend.pipeline.transcript_playback_readiness import choose_compatible_ranges
+    complete=dict(verdict='complete',clipped_word=False,leading_context='none',trailing_context='brief',heard_opening='開頭',heard_ending='結尾')
+    rows=[dict(id='left',start_ms=0,end_ms=9000),dict(id='target',model_selected_id='wide',selected_id='wide',start_ms=10000,end_ms=26000,
+          complete_options=[dict(id='wide',start_ms=10000,end_ms=26000,judgment=complete),dict(id='short',start_ms=10000,end_ms=20000,judgment=complete)]),dict(id='next',start_ms=21000,end_ms=30000)]
+    choose_compatible_ranges(rows)
+    assert rows[1]['selected_id']=='short' and rows[1]['model_selected_id']=='wide'
+    assert rows[1]['end_ms']==20000 and rows[1]['status']=='ready_with_context'
+    assert 'program_selection_note' in rows[1]
+
+
 def test_brief_overlap_does_not_erase_strict_verdict_or_omit_content_gate():
     rows=[dict(id='a',status='qualified',start_ms=1000,end_ms=5000),dict(id='b',status='withheld',start_ms=4800,end_ms=8000)]
     before=copy.deepcopy(rows);lecture=dict(paragraphs=rows,duration_ms=10000)

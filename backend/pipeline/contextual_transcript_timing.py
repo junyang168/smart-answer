@@ -306,6 +306,9 @@ def require_verified_timing(source:Path,record:dict):
              or 'repeat_asr_verification_calls' in record)
     if not machine:return  # Existing human/legacy imports keep their contract.
     quality=record.get('timing_quality',{})
+    from backend.pipeline.transcript_playback_readiness import POLICY as PLAYBACK_POLICY,require_record
+    if quality.get('policy')==PLAYBACK_POLICY:
+        return require_record(source,record)
     if quality.get('policy')!=POLICY or quality.get('status')!='qualified':
         raise ValueError('Timing quality gate: contextual acoustic boundaries are unverified')
     root=source.resolve();path=(root/quality.get('certificate_path','')).resolve()
@@ -335,7 +338,7 @@ def require_verified_timing(source:Path,record:dict):
         raise ValueError('Timing quality gate: speech text changed')
 
 
-def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
+def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None,*,playback_policy=None):
     """Required producer step. Uncertain results stay staged and cannot hand off."""
     import shutil
     import subprocess
@@ -366,6 +369,10 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
         subprocess.run([str(aligner_python.absolute()),'-m','backend.pipeline.transcript_alignment_worker',
                         '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True,**subprocess_options)
     detail=analyse(evidence,detail=True)
+    if playback_policy is not None:
+        from backend.pipeline.transcript_playback_readiness import POLICY as PLAYBACK_POLICY,qualify_record
+        if playback_policy!=PLAYBACK_POLICY:raise ValueError('Unknown paragraph playback policy')
+        return qualify_record(out,record,evidence)
     if not detail['all_qualified'] and aligner_python is not None and add_recovery_contexts(evidence):
         subprocess.run([str(aligner_python.absolute()),'-m','backend.pipeline.transcript_alignment_worker',
                         '--out',str(evidence.resolve()),'--device','mps','--decode-profile','monotonic'],check=True,**subprocess_options)

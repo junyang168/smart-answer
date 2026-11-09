@@ -1478,11 +1478,12 @@ function TranscriptProofreader({
           </div>
         )}
       </header>
-      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="接縫待聽音核對">
-        <h2 className="font-semibold">接縫待聽音核對 · {doc.context.source_notices.length} 處</h2>
-        <p className="text-sm">以下位置未能可靠去重，完整保留了粗稿文字。請聽音檢查重複短句或辨識差異，再確認相關段落。</p>
+      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="音訊校對提醒">
+        <h2 className="font-semibold">音訊校對提醒 · {doc.context.source_notices.length} 處</h2>
+        <p className="text-sm">以下位置保留來源或播放範圍提醒。請依各項說明核對內容；少量前後文毋須逐字切齊。</p>
         {doc.context.source_notices.map((n,i) => <div key={i} className="my-2 flex flex-wrap items-center gap-2 text-sm">
           <span>{stamp(n.start_ms)}–{stamp(n.end_ms)}</span>
+          <span>{n.note}</span>
           {n.paragraph_ids.map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
           <span>{n.paragraph_ids.length && n.paragraph_ids.every(id => paragraphIsConfirmed(id,doc.context.reviews,doc.paragraph_shas,editedParagraphIds)) ? "相關段落已人工核對" : "待人工核對"}</span>
         </div>)}

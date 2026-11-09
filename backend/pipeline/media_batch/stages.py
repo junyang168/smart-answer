@@ -432,7 +432,7 @@ def execute(stage, payload):
                 out / "frame_pts_audit.json",
                 full.audit_frame_pts(source, full.read(out / "slides/manifest.json")),
             )
-        full.finish(out, source, aligner)
+        full.finish(out, source, aligner,**({'playback_policy':cfg['playback_timing_policy']} if cfg.get('playback_timing_policy') not in (None,'strict') else {}))
         from backend.pipeline.slide_reading_layout import infer
 
         infer(full.read(out / "full_transcript.json"), out / "reading-layout")

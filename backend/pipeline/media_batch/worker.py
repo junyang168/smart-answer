@@ -88,6 +88,7 @@ def _run_task(store, batch, task, resources):
             "SELECT config FROM media_ingest.batches WHERE id=%s", (batch,)
         ).fetchone()["config"]
     runtime_keys = (
+        "playback_timing_policy",
         "capacity_root",
         "storage_guards",
         "ssd_reserve_gib",

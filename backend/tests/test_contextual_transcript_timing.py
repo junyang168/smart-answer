@@ -59,7 +59,8 @@ def test_new_machine_candidate_without_quality_cannot_hand_off(tmp_path):
     assert not (tmp_path/'handoff').exists()
 
 
-def test_producer_requires_context_verification_before_handoff(tmp_path,monkeypatch):
+@pytest.mark.parametrize('playback_policy',[None,'complete-paragraph-playback.v1'])
+def test_producer_requires_context_verification_before_handoff(tmp_path,monkeypatch,playback_policy):
     import subprocess
     import json
     from backend.pipeline.contextual_transcript_timing import qualify_staged_record,token_ranges
@@ -78,10 +79,14 @@ def test_producer_requires_context_verification_before_handoff(tmp_path,monkeypa
             raw={'identity':{'text_sha256':hashlib.sha256(chunk['text'].encode()).hexdigest(),'audio_sha256':chunk['audio_sha256'],'config':{'decode_profile':'monotonic-logit-path.v1'}},'items':items,'monotonic_items':items}
             save_json(root/'alignment'/f'{chunk["id"]}.json',raw)
     monkeypatch.setattr(subprocess,'run',acoustic_worker)
-    qualified=qualify_staged_record(tmp_path,copy.deepcopy(record),__import__('pathlib').Path('/fake/aligner'))
+    qualified=qualify_staged_record(tmp_path,copy.deepcopy(record),__import__('pathlib').Path('/fake/aligner'),playback_policy=playback_policy)
     assert [p['text'] for p in qualified['paragraphs']]==[p['text'] for p in record['paragraphs']]
     assert qualified['timing_quality']['status']=='qualified'
     require_verified_timing(tmp_path,qualified)
+    if playback_policy:
+        assert qualified['timing_quality']['policy']==playback_policy
+        modified=copy.deepcopy(qualified);modified['paragraphs'][0]['text']='改字'
+        with pytest.raises(ValueError):require_verified_timing(tmp_path,modified)
 
 
 def test_failed_verification_cannot_leave_old_handoff_current(tmp_path):

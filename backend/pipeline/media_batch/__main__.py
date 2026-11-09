@@ -27,6 +27,7 @@ def main():
     plan.add_argument("--folder", type=Path, required=True)
     plan.add_argument("--title")
     plan.add_argument("--editor-origin", help="Optional editor host for an isolated review destination")
+    plan.add_argument('--playback-timing-policy',choices=['complete-paragraph-playback.v1','strict'],default='complete-paragraph-playback.v1',help='Complete paragraph playback with brief context warnings; strict preserves exact-boundary review')
     for name in (
         "artifact-root",
         "media-root",
@@ -190,6 +191,8 @@ def main():
             ],
             "finish": [
                 "full_video_transcript.py",
+                "transcript_playback_readiness.py",
+                "transcript_timing_report.py",
                 "contextual_transcript_timing.py",
                 "boundary_audio_review.py",
                 "paired_boundary_review.py",

@@ -52,6 +52,28 @@ def usable(answer,case):
     return None
 
 
+def choose_compatible_ranges(rows):
+    """Choose only affirmatively complete ranges; never create a new endpoint.
+
+    A model's preference between several complete clips is not an extra content
+    verdict. Keep that preference visible while minimizing neighbouring context.
+    """
+    for i,row in enumerate(rows):
+        options=row.get('complete_options',[])
+        if not options:continue
+        previous=rows[i-1] if i else {};following=rows[i+1] if i+1<len(rows) else {}
+        def cost(c):
+            if c['start_ms']<previous.get('start_ms',0) or c['start_ms']>following.get('start_ms',float('inf')):return (float('inf'),0,c['id'])
+            overlap=max(0,previous.get('end_ms',0)-c['start_ms'])+max(0,c['end_ms']-following.get('start_ms',float('inf')))
+            return overlap,c['end_ms']-c['start_ms'],c['id']
+        best=min(options,key=cost)
+        if cost(best)[0]==float('inf'):continue
+        row.update(start_ms=best['start_ms'],end_ms=best['end_ms'],selected_id=best['id'],context=best['judgment'])
+        row['status']='ready_with_context' if any(best['judgment'][k]=='brief' for k in ('leading_context','trailing_context')) else 'ready'
+        if best['id']!=row['model_selected_id']:
+            row['program_selection_note']='候選皆已有完整內容的聽音肯定；程式選擇與鄰段重疊較少的範圍，模型原先偏好仍保留於原始答覆'
+
+
 def require_control(answer,case):
     selected=usable(answer,case)
     cut=next((c for c in answer['candidates'] if c['id']=='c0'),None)
@@ -189,7 +211,7 @@ def run(evidence,workers=2):
     return assess(evidence)
 
 
-def assess(evidence):
+def assess(evidence,*,write=True):
     from backend.pipeline.slide_pilot_models import VisionReviewer
     folder=evidence/'playback-readiness';snapshot=read_json(folder/'input.json');plan=read_json(folder/'plan.json')
     if plan['policy']!=POLICY or plan['input_sha256']!=file_sha(folder/'input.json') or current_snapshot(evidence)!=snapshot:raise ValueError('Playback eligibility belongs to changed source evidence')
@@ -215,14 +237,69 @@ def assess(evidence):
         selected=usable(answer,case)
         if selected:
             c=next(c for c in case['candidates'] if c['id']==selected['id']);warning=any(selected[k]=='brief' for k in ('leading_context','trailing_context'))
+            options=[]
+            for candidate in case['candidates']:
+                judgment=next((j for j in answer['candidates'] if j['id']==candidate['id']),None)
+                if judgment and judgment['verdict']=='complete' and not judgment['clipped_word'] and all(judgment[k] in ('none','brief') for k in ('leading_context','trailing_context')) and all(judgment[k].strip() for k in ('heard_opening','heard_ending')):
+                    options.append(dict(id=candidate['id'],start_ms=candidate['start_ms'],end_ms=candidate['end_ms'],judgment=judgment))
             row.update(status='ready_with_context' if warning else 'ready',start_ms=c['start_ms'],end_ms=c['end_ms'],
-                       basis='complete_content_audio_review_under_new_policy',selected_id=c['id'],context=selected)
+                       basis='complete_content_audio_review_under_new_policy',selected_id=c['id'],context=selected,model_selected_id=c['id'],complete_options=options)
     # Mechanical source bounds, order and substantial overlaps remain blockers.
     for lecture,rs in rows.items():
+        choose_compatible_ranges(rs)
         for left,right in zip(rs,rs[1:]):
             if left['status']=='blocked' or right['status']=='blocked':continue
             if right['start_ms']<left['start_ms'] or left['end_ms']-right['start_ms']>MAX_CONTEXT_MS:
                 for r in (left,right):r.update(status='blocked',reason='候選範圍明顯倒退或與鄰段重疊超過少量上下文')
     result=dict(policy=POLICY,source_plan_sha256=snapshot['source_plan_sha256'],input_sha256=file_sha(folder/'input.json'),plan_sha256=file_sha(folder/'plan.json'),paragraphs=rows,
                 ready=sum(r['status']!='blocked' for rs in rows.values() for r in rs),warnings=sum(r['status']=='ready_with_context' for rs in rows.values() for r in rs),blocked=sum(r['status']=='blocked' for rs in rows.values() for r in rs),human_approved=False,word_timestamps_verified=False)
-    save_json(folder/'assessment.json',result);return result
+    if write:save_json(folder/'assessment.json',result)
+    return result
+
+
+def qualify_record(out,record,evidence):
+    from backend.pipeline.contextual_transcript_timing import TimingReviewRequired,timing_fingerprint
+    result=run(evidence)
+    if result['blocked']:
+        record['timing_quality']=dict(policy=POLICY,status='withheld',assessment_path=str((evidence/'playback-readiness/assessment.json').relative_to(out)))
+        save_json(out/'full_transcript.json',record)
+        from backend.pipeline.transcript_timing_report import write_report
+        write_report(out,record,evidence,playback=result)
+        raise TimingReviewRequired(f"Paragraph playback: {result['blocked']} material source issue(s) remain; brief context does not block proofreading")
+    rows={r['id']:r for r in result['paragraphs']['source']}
+    if set(rows)!={p['id'] for p in record['paragraphs']}:raise ValueError('Playback paragraph identity changed')
+    warnings=[]
+    for p in record['paragraphs']:
+        row=rows[p['id']];p.update(start_ms=row['start_ms'],end_ms=row['end_ms'],timing_precision='complete_paragraph_playback',word_timing_valid=False)
+        if row['status']=='ready_with_context':warnings.append(dict(kind='brief_playback_context',start_ms=row['start_ms'],end_ms=row['end_ms'],paragraph_ids=[p['id']],status='context_warning',note='本段內容完整，可用於校對；前後可能帶有少量鄰段聲音，毋須逐字切齊'))
+    record['source_notices']=[n for n in record.get('source_notices',[]) if n.get('kind')!='brief_playback_context']+warnings
+    certificate=dict(policy=POLICY,fingerprint=timing_fingerprint(record),evidence_root=str(evidence.relative_to(out)),
+        source_plan_sha256=result['source_plan_sha256'],input_sha256=result['input_sha256'],review_plan_sha256=result['plan_sha256'],
+        word_timestamps_verified=False,original_strict_verdicts_unchanged=True)
+    path=evidence/'playback-readiness/certificate.json';save_json(path,certificate)
+    record['timing_quality']=dict(policy=POLICY,status='qualified',precision='paragraph_playback',certificate_path=str(path.relative_to(out)),certificate_sha256=file_sha(path),context_warnings=len(warnings))
+    return record
+
+
+def require_record(source,record):
+    from backend.pipeline.contextual_transcript_timing import timing_fingerprint
+    quality=record['timing_quality'];root=source.resolve()
+    if quality.get('status')!='qualified':raise ValueError('Timing quality gate: substantive playback problems remain')
+    path=(root/quality.get('certificate_path','')).resolve()
+    if not path.is_relative_to(root) or not path.is_file() or file_sha(path)!=quality.get('certificate_sha256'):raise ValueError('Playback certificate missing or changed')
+    certificate=read_json(path);evidence=(root/certificate['evidence_root']).resolve()
+    if (certificate.get('policy')!=POLICY or not evidence.is_relative_to(root) or certificate.get('fingerprint')!=timing_fingerprint(record)):
+        raise ValueError('Playback certificate belongs to other text/times/source')
+    result=assess(evidence,write=False)
+    if result['blocked'] or any(certificate[k]!=result[v] for k,v in [('source_plan_sha256','source_plan_sha256'),('input_sha256','input_sha256'),('review_plan_sha256','plan_sha256')]):raise ValueError('Playback eligibility is unverified')
+    snapshot=read_json(evidence/'playback-readiness/input.json');rows={r['id']:r for r in result['paragraphs']['source']}
+    source_plan=read_json(evidence/'plan.json')
+    if source_plan['records']['source']['source_sha256']!=record['source_sha256']:raise ValueError('Playback recording changed')
+    if len(rows)!=len(record['paragraphs']) or len({p['id'] for p in record['paragraphs']})!=len(rows):raise ValueError('Playback paragraph set changed')
+    for p in record['paragraphs']:
+        row=rows.get(p['id'])
+        if (not row or (p['start_ms'],p['end_ms'])!=(row['start_ms'],row['end_ms']) or
+            hashlib.sha256(p['text'].encode()).hexdigest()!=snapshot['text_sha256']['source'][p['id']]):raise ValueError('Playback text or coordinates changed')
+    for chunk in source_plan['chunks']:
+        raw=read_json(evidence/'alignment'/f'{chunk["id"]}.json')
+        if raw['identity']['config'].get('decode_profile')!='monotonic-logit-path.v1':raise ValueError('Playback acoustic input decoder changed')
