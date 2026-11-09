@@ -75,6 +75,23 @@ class MissingEdits(BaseModel):
     items: list[MissingBundle]
 
 
+def coverage_edits(edits,jobs):
+    """A source unit can enrich several records; each write must be distinct."""
+    expected={job['job_id'] for job in jobs}
+    if {edit.job_id for edit in edits}!=expected:
+        raise ValueError('coverage disposition must address every unit and no unknown unit')
+    for unit_id in expected:
+        local=[edit for edit in edits if edit.job_id==unit_id]
+        if len(local)<2:continue
+        if any(edit.action not in {'enrich','create'} for edit in local):
+            raise ValueError('repeated coverage unit has conflicting decisions')
+        keys=[('enrich',edit.record_key) if edit.action=='enrich' else
+              ('create',edit.record_type,edit.statement,tuple(sorted(edit.fragment_ids))) for edit in local]
+        if len(keys)!=len(set(keys)):
+            raise ValueError('repeated coverage unit writes the same record twice')
+    return edits
+
+
 def visible(payload):
     return {k:payload[k] for k in FIELDS if k in payload}
 
@@ -292,7 +309,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 **{k:state[k] for k in ('human_source_decisions','source_interpretation') if k in state},
                 'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}},semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
-        edits=bundles[0].items;f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in jobs],'job_id')
+        edits=coverage_edits(bundles[0].items,jobs)
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:

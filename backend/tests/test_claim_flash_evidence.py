@@ -47,6 +47,21 @@ def setup(tmp_path):
     return records,sources,plan
 
 
+@pytest.mark.parametrize('fault',[None,'same_record','conflicting','missing','unknown'])
+def test_one_unit_can_repair_two_distinct_records_without_duplicate_disposition(fault):
+    def item(key):return stage.Missing(job_id='U8',action='enrich',record_key=key,
+        record_type='evidence_steps',fragment_ids=['F'],reason='保留本項的不同實質部分。')
+    edits=[item('evidence_steps/A'),item('evidence_steps/B')]
+    if fault=='same_record':edits[1].record_key=edits[0].record_key
+    if fault=='conflicting':edits[1].action='keep'
+    if fault=='missing':edits=[]
+    if fault=='unknown':edits[1].job_id='unknown'
+    if fault:
+        with pytest.raises(ValueError):stage.coverage_edits(edits,[{'job_id':'U8'}])
+    else:
+        assert stage.coverage_edits(edits,[{'job_id':'U8'}])==edits
+
+
 def saved_inventory(tmp_path,sources,units=()):
     previous=tmp_path/'coverage';rows=[];jobs=[]
     for i,pk in enumerate(sources['S']['paragraphs']):
