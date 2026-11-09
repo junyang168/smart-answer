@@ -5,6 +5,7 @@ import pytest
 from backend.pipeline import claim_flash_relations as stage, claim_flash_arguments as arguments
 from backend.pipeline import claim_flash_statements as statements, claim_flash_common as f
 from backend.pipeline import claim_flash_evidence as eo
+from backend.pipeline import evidence_refresh as e
 from backend.tests.test_claim_flash_arguments import Ports as ArgumentPorts
 from backend.tests.test_claim_flash_evidence import Ports as EvidencePorts, saved_inventory
 from backend.tests.test_claim_update_flash import Ports as BasePorts
@@ -138,3 +139,21 @@ def test_completed_relation_input_drift_not_hidden_on_replay(ready):
     store.apply_plan(store.plan_package({'package_id':'after-completion-drift','claims':[p]})); ports=Ports()
     with pytest.raises(ValueError,match='inputs changed'):stage.run(store,'S',aroot,root/'relations',ports,apply=True)
     assert ports.calls==[]
+
+
+@pytest.mark.parametrize('protected',[False,True])
+def test_exact_retired_identity_is_pinned_and_human_protection_preserved(ready,protected):
+    store,root,aroot=ready
+    oid='CR-FLA-'+e.digest(['S','C','D','supports'])[:24]
+    edge(store,claim_relation_id=oid,from_id='C',to_id='D',review_status='human_approved' if protected else 'candidate')
+    store.apply_plan(store.plan_package({'package_id':'retire-exact-identity'},retiring_keys=[('claim_relations',oid)]))
+    ports=Ports([{'a':'claims/C','b':'claims/D','reason':'本次完整材料支持這條直接邊。'}])
+    result=stage.run(store,'S',aroot,root/'relations',ports,apply=True)
+    assert result['status']=='needs_attention'
+    assert result['pending'][0]['reason']==('protected_retired_relation' if protected else 'retired_relation_requires_restore')
+    assert store.get_record_state('claim_relations',oid)['retired']
+    assert not result['updates'] and not (root/'relations'/'commit-intent.json').exists()
+    before=json.loads((root/'relations'/'before.json').read_text())
+    assert before['records']['claim_relations/'+oid]['retired']
+    replay=Ports();assert stage.run(store,'S',aroot,root/'relations',replay,apply=True)['status']=='needs_attention'
+    assert replay.calls==[]

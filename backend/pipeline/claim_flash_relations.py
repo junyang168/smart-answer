@@ -97,7 +97,20 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         updates = deepcopy(result['updates'])
         for post in result['new_relations']:
             oid = 'CR-FLA-'+e.digest([source_id, post['from_id'], post['to_id'], post['relation_type']])[:24]
-            updates['claim_relations/'+oid] = {'claim_relation_id': oid, **post}
+            key = 'claim_relations/'+oid
+            previous = store.get_record_state('claim_relations', oid)
+            if previous:
+                if not previous['retired'] or any(previous['payload'][k] != post[k] for k in ['from_id','to_id','relation_type']):
+                    raise ValueError('new Claim relation identity already occupied')
+                records[key] = previous; read.add(key)
+                # Deliberate retirement is a lifecycle fact, not a missing edge.
+                # Preserve the candidate for Restore instead of re-ingestion or
+                # silently allocating a different identity to bypass retirement.
+                pending.append({'object_key': key, 'reason': 'protected_retired_relation'
+                    if previous['payload'].get('review_status') in f.PROTECTED else 'retired_relation_requires_restore',
+                    'candidate': post})
+                continue
+            updates[key] = {'claim_relation_id': oid, **post}
         if not (set(updates) | set(result['retiring_keys'])) <= set(edges) | {k for k in updates if k.startswith('claim_relations/') and k not in records}:
             raise ValueError('Claim relation write scope expanded')
         pending += result['pending']

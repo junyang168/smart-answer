@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-08 核對 #702 工作樹。共用分組、獨立原文層、反向查漏、原文補齊及限定Evidence／Observation模式已實作；Claim層分離與同範圍成本對照仍未完整落實，見第 7 節。
+> **與代碼對齊**：部分；2026-11-09 核對 #702 工作樹。共用分組、原文及限定Evidence／Observation模式，以及獨立Claim statement、論證路線、組內Claim關係模式已實作；新Claim發現的分離與同範圍成本對照仍未完整落實，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -496,6 +496,8 @@ Jev獨立核對既有及候選Claim配對；疑點交GPT最終處置，沿用既
 不沿鄰居擴張，不重審下層或Claim statement，也不重建已有間接路線。
 只寫本組Claim關係，交易、回讀及已提交接續沿用現有能力；結果`group_claim_relations_only`
 不授予完整Claim／CVP資格，也不表示組外關係已查完。
+候選若對應已退役的同一關係ID，保存候選並交接Restore；不以普通重匯入或另分ID繞過退役，
+人工保護保持。這個入口本身不執行Restore。
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_relations \
