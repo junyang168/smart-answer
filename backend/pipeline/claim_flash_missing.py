@@ -39,6 +39,20 @@ class Discovery(BaseModel):
     reason:str=Field(min_length=1)
 
 
+def discovery_material(ports,jobs,shared):
+    """Lossless field-name packing; preserve all same-sermon identity references."""
+    request={'identity':ports.identity['gpt'],'system':PROMPT,'schema':Discovery.model_json_schema(),
+             'input':{'task':'missing_group_claims','jobs':jobs,**shared}}
+    if len(json.dumps(request,ensure_ascii=False).encode())<=f.GPT_BYTES:return PROMPT,shared
+    packed=deepcopy(shared)
+    for name in ('source_fragments','verified_material','existing_claims','questions'):
+        fields={field:str(i) for i,field in enumerate(sorted({field for row in shared[name].values() for field in row}))}
+        packed[name+'_fields']={alias:field for field,alias in fields.items()}
+        packed[name]={key:{fields[field]:value for field,value in row.items()} for key,row in shared[name].items()}
+    return PROMPT+('本次source_fragments、verified_material、existing_claims、questions內的欄位鍵，'
+        '分別按同名_fields字典還原完整欄位名稱；所有物件ID、逐字原文、欄位值、生命週期與連結清單完整保留。'),packed
+
+
 def consume(store,root,records,sources):
     root=Path(root);result=json.loads((root/'result.json').read_text());before=json.loads((root/'before.json').read_text())
     if (result.get('version')!=relations.VERSION or result.get('completion_scope')!='group_claim_relations_only'
@@ -130,7 +144,9 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                 'review_status':p.get('review_status'),'superseded_by':p.get('superseded_by')} for k,p in peers.items()},
             'questions':{k.split('/',1)[1]:{'text':p['text'],'answer_claim_ids':p.get('answer_claim_ids',[])} for k,p in questions.items()}}
         proposed=[];pending=[];dispositions=[];links=[];members=[]
-        for _,raw in f.gpt(root/'discovery',ports,'missing_group_claims',[{'job_id':group['group_id']}],Discovery.model_json_schema(),PROMPT,shared=shared,semantic_review=False):
+        jobs=[{'job_id':group['group_id']}]
+        instruction,shared=discovery_material(ports,jobs,shared)
+        for _,raw in f.gpt(root/'discovery',ports,'missing_group_claims',jobs,Discovery.model_json_schema(),instruction,shared=shared,semantic_review=False):
             discovery=Discovery.model_validate(raw)
             for item in discovery.candidates:
                 data=item.model_dump();dispositions.append(data)

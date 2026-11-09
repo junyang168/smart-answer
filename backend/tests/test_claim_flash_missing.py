@@ -228,3 +228,19 @@ def test_final_scripture_repair_does_not_demand_statement_pair_handoff(sample,tm
     post=store.get_record_state('claims',result['new_claim_ids'][0])['payload']
     assert post['statement']==candidate()['statement'] and post['scripture_refs']==[]
     assert len([r for role,r in ports.calls if role=='gpt' and r['input']['task']=='pair_attachment'])==1
+
+
+def test_large_discovery_packs_names_without_losing_quotes_links_or_lifecycle(monkeypatch):
+    from types import SimpleNamespace
+    ports=SimpleNamespace(identity={'gpt':{'model':'test'}})
+    shared={'source_fragments':{'F':{'paragraph_key':'S0001','quote':'完整原話。'}},
+        'verified_material':{'E':{'statement':'論據。','source_fragment_ids':['F']}},
+        'existing_claims':{'C':{'statement':'已有主張。','retired':True,'review_status':'superseded','superseded_by':['D']}},
+        'questions':{'Q':{'text':'教授的問題？','answer_claim_ids':['D']}},'source_paragraphs':{'S0001':'完整原話。其他內容。'}}
+    before=deepcopy(shared);jobs=[{'job_id':'G'}]
+    assert stage.discovery_material(ports,jobs,shared)==(stage.PROMPT,shared)
+    monkeypatch.setattr(f,'GPT_BYTES',1)
+    _,packed=stage.discovery_material(ports,jobs,shared)
+    for name in ('source_fragments','verified_material','existing_claims','questions'):
+        assert {key:{packed[name+'_fields'][field]:value for field,value in row.items()} for key,row in packed[name].items()}==shared[name]
+    assert shared==before and packed['source_paragraphs']==shared['source_paragraphs']
