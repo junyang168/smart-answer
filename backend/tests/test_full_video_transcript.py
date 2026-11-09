@@ -9,6 +9,26 @@ from backend.pipeline.full_video_transcript import (
 from backend.pipeline.transcript_text_layout import text_sha
 
 
+def test_repeated_phrase_candidate_reaches_context_without_approving_playback():
+    from backend.pipeline.full_video_transcript import check_paragraph_times
+    rows=[dict(id='earlier',start_ms=1735640,end_ms=1762840),
+          dict(id='repeated',start_ms=1707240,end_ms=1734120)]
+    before=copy.deepcopy(rows)
+    issues=check_paragraph_times(rows,1800000,candidate=True)
+    assert rows==before  # Never sort, clamp, or fabricate timing.
+    assert issues==[dict(paragraph_id='repeated',kind='isolated_alignment_moves_backwards',
+                         previous_start_ms=1735640,start_ms=1707240)]
+    with pytest.raises(ValueError,match='backwards'):
+        check_paragraph_times(rows,1800000)
+    for candidate in (False,True):
+        with pytest.raises(ValueError,match='range'):
+            check_paragraph_times([dict(id='out',start_ms=1799000,end_ms=1801000)],1800000,candidate=candidate)
+    with pytest.raises(ValueError,match='unresolved'):
+        check_paragraph_times([dict(id='unknown',start_ms=None,end_ms=None)],1800000)
+    corrected=[rows[0],dict(id='repeated',start_ms=1763000,end_ms=1774500)]
+    assert check_paragraph_times(corrected,1800000)==[]
+
+
 def test_new_video_prepares_first_window_without_any_previous_pilot(tmp_path,monkeypatch):
     import numpy as np
     from backend.pipeline import full_video_transcript as full
@@ -317,3 +337,71 @@ def test_conservative_retention_keeps_uncertain_teaching_and_is_bound_to_source_
     assert withheld[0]['status']=='retained_uncertain_content' and withheld[0]['human_confirmed'] is False
     with pytest.raises(ValueError,match='another paragraph revision'):
         retain_uncertain_paragraphs(paragraphs,deletions,[{**reviews[0],'source_text_sha256':'stale'}])
+
+
+def test_conservative_cleanup_supports_restart_and_aside_without_rewriting():
+    from backend.pipeline.full_video_transcript import apply_exclusions
+    paragraphs=[{'id':'p','text':'因為受達爾文影響，達爾文進化論影響。'},
+                {'id':'q','text':'搬家後開車二十分鐘。'}]
+    cleaned,rows=apply_exclusions(paragraphs,{'deletions':[
+        dict(paragraph_id='p',old='影響，達爾文',reason='放棄半句，後面重講完成',kind='speech_restart'),
+        dict(paragraph_id='q',old=paragraphs[1]['text'],reason='獨立生活旁枝',kind='unrelated_aside')]})
+    assert cleaned[0]['text']=='因為受達爾文進化論影響。' and len(cleaned)==1
+    assert paragraphs[0]['text'].startswith('因為受達爾文影響')
+    assert all(not r['human_confirmed'] for r in rows)
+    for old in ['。','因為受達爾文影響，達爾文進化論影響。']:
+        with pytest.raises(ValueError):apply_exclusions(paragraphs,{'deletions':[dict(paragraph_id='p',old=old,reason='bad',kind='speech_restart')]})
+
+
+def test_overlapping_whole_lecture_proposals_keep_disjoint_valid_deletions(tmp_path,monkeypatch):
+    from backend.pipeline import full_video_transcript as f
+    f.save(tmp_path/'master.json',{'windows':[{'id':'w00'}]})
+    f.save(tmp_path/'windows/w00/correction/correction_trial.json',{'corrected_paragraphs':[{'id':'p','text':'甲乙丙丁戊己庚'}]})
+    answer={'deletions':[dict(paragraph_id='w00-p',old=s,reason='fixture',kind='unrelated_aside') for s in ['甲乙','乙丙','戊己']]}
+    class Adapter:
+        config={};model='fixture'
+        def text(self,raw):return json.dumps(answer)
+        def usage(self,raw):return {'estimated_usd_upper':0}
+    monkeypatch.setattr(f,'cleanup_adapter',lambda:Adapter())
+    monkeypatch.setattr(f,'saved_call',lambda *a,**kw:{})
+    result=f.clean_full_transcript(tmp_path)
+    assert len(result['withheld_deletions'])==1
+    assert result['paragraphs'][0]['text']=='丙丁庚'
+    f.save(tmp_path/'windows/w00/correction/correction_trial.json',{'corrected_paragraphs':[{'id':'p','text':'新版本'}]})
+    with pytest.raises(ValueError,match='changed'):f.clean_full_transcript(tmp_path)
+
+
+def test_standalone_cleanup_respects_two_shared_sol_slots(tmp_path,monkeypatch):
+    from backend.pipeline.full_video_transcript import cleanup_generate
+    from backend.pipeline.media_batch.runtime import slot,WaitingCapacity
+    monkeypatch.delenv('MEDIA_BATCH_CONTEXT',raising=False)
+    monkeypatch.setenv('MEDIA_BATCH_CAPACITY_ROOT',str(tmp_path))
+    class Adapter:
+        def generate(self,contents):raise AssertionError('No third call allowed')
+    with slot(tmp_path,'sol',2),slot(tmp_path,'sol',2):
+        with pytest.raises(WaitingCapacity):cleanup_generate(Adapter(),'fixture')
+
+
+def test_unknown_cleanup_call_keeps_capacity_quarantined(tmp_path,monkeypatch):
+    from backend.pipeline.full_video_transcript import cleanup_generate
+    from backend.pipeline.media_batch.runtime import capacity_status
+    monkeypatch.delenv('MEDIA_BATCH_CONTEXT',raising=False)
+    monkeypatch.setenv('MEDIA_BATCH_CAPACITY_ROOT',str(tmp_path))
+    class Adapter:
+        def generate(self,contents):raise TimeoutError('Unknown provider outcome')
+    with pytest.raises(TimeoutError):cleanup_generate(Adapter(),'fixture')
+    assert capacity_status(tmp_path)['sol']['unknown']==1
+
+
+def test_untimed_clip_uses_original_audio_chunk_not_neighbour_gap_or_character_ratio(tmp_path):
+    from backend.pipeline import full_video_transcript as f
+    folder=tmp_path/'windows/w00';audio=folder/'audio'
+    f.save(audio/'asr.json',{'chunks':[dict(id='a',sample_start=0,sample_end=185*16000),dict(id='b',sample_start=181*16000,sample_end=365*16000)]})
+    f.save(audio/'timed_text.json',dict(asr_sha256=f.sha(audio/'asr.json'),text='甲乙丙丁',text_sha256=f.text_sha('甲乙丙丁'),chunk_ownership=[dict(chunk_id='a',output_start=0,output_end=2),dict(chunk_id='b',output_start=2,output_end=4)]))
+    f.save(folder/'correction/correction_trial.json',{'original_paragraphs':[dict(id='p',source_start=0,source_end=1)]})
+    window=dict(origin_sample=900*16000,end_sample=1800*16000)
+    begin,end,proof=f.original_paragraph_clip(folder,dict(id='p',text='改正文字'),window)
+    assert (begin,end)==(900*16000,1085*16000)
+    assert proof['method']=='original_asr_chunk_clip_not_predicted_timing'
+    f.save(folder/'correction/correction_trial.json',{'original_paragraphs':[dict(id='p',source_start=0,source_end=4)]})
+    with pytest.raises(ValueError,match='model limit'):f.original_paragraph_clip(folder,dict(id='p'),window)

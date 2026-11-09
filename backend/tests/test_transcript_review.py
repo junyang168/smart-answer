@@ -727,12 +727,14 @@ def test_automatic_exclusions_adopt_as_soft_deletions_and_never_publish(setup):
     partial={**record['paragraphs'][0],'text':prefix+record['paragraphs'][0]['text']}
     record.update(duration_ms=3615000,uncut_corrected_paragraphs=[deleted,partial,record['paragraphs'][1]],timing_quality={'status':'qualified'})
     record['editorial_exclusions']=[dict(paragraph_id=p['id'],old=old,start=0,end=len(old),source_text_sha256=hashlib.sha256(p['text'].encode()).hexdigest()) for p,old in [(deleted,deleted['text']),(partial,prefix)]]
+    record['source_notices']=[dict(paragraph_ids=[partial['id']],start_ms=0,end_ms=1000,note='接縫保留待核對',status='retained_pending_human_review')]
     atomic(source/'full_transcript.json',record)
     layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
     store.candidate_path('講道 test').unlink()
     store.register_candidate('講道 test',source,expected_script_sha256=None)
     doc=adopted(setup)
     assert [p['text'] for p in doc['script']]==['~~調整麥克風。~~','~~先等一下。~~耶穌基督。','保羅所說的智慧。']
+    assert doc['context']['source_notices'][0]['paragraph_ids']==['2']
     assert pending_timing_ids(doc['script'],doc['context'])==[]
     restored=copy.deepcopy(doc['script']);restored[0]['text']='調整麥克風。'
     assert pending_timing_ids(restored,doc['context'])==['1']
@@ -949,4 +951,78 @@ def test_batch_cannot_initialize_existing_sermon(setup):
     store, root, source = setup
     with pytest.raises(ReviewError, match='全新講道'):
         prepare_new_review_draft(store, '講道 test', source)
+    assert not store.enabled('講道 test')
+
+
+def test_ai_soft_deletion_restore_uses_normal_versioned_save_and_clears_confirmation(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup
+    record=read(source/'full_transcript.json')
+    p=record['paragraphs'][0];prefix='後來我，'
+    original={**p,'text':prefix+p['text']}
+    record['uncut_corrected_paragraphs']=[original,record['paragraphs'][1]]
+    record['editorial_exclusions']=[dict(paragraph_id=p['id'],old=prefix,start=0,end=len(prefix),
+        reason='放棄起句',kind='speech_restart',source_text_sha256=hashlib.sha256(original['text'].encode()).hexdigest())]
+    atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink()
+    store.register_candidate('講道 test',source,expected_script_sha256=None)
+    doc=adopted(setup)
+    assert doc['script'][0]['text']=='~~'+prefix+'~~'+p['text']
+    assert doc['context']['editorial_exclusions'][0]['kind']=='speech_restart'
+    doc=confirmed(store)
+    store.mutate('a','講道 test',op(doc,operations=[dict(kind='text',id='1',text=original['text'])]))
+    after=store.document('a','講道 test')
+    assert after['script'][0]['text']==original['text']
+    assert after['version']!=doc['version']
+    assert after['context']['reviews'].get('p:1',{}).get('sha256') != after['paragraph_shas']['1']
+
+
+def test_browser_playback_derivative_preserves_original_identity_and_rejects_bad_clock(setup,monkeypatch):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup
+    record=read(source/'full_transcript.json')
+    record.update(media_mime_type='audio/wav',duration_ms=3615000);atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    playback=source/'encoded.mp3';playback.write_bytes(b'fixture browser playback')
+    receipt=dict(path=str(playback),source_sha256=record['source_sha256'],sha256=file_hash(playback),mime='audio/mpeg',duration=record['duration_ms']/1000,anchors=[dict(at=t,lag_ms=0,correlation=.99) for t in (0,1,2)])
+    atomic(source/'media-receipt.json',receipt)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    original_hash=file_hash(source/'source.mp4');doc=adopted(setup)
+    assert doc['context']['source_video_sha256']==original_hash
+    assert doc['context']['source_media_mime_type']=='audio/wav'
+    assert doc['context']['media_mime_type']=='audio/mpeg'
+    assert file_hash(store.folder('講道 test')/'source.mp4')==original_hash
+    assert (store.folder('講道 test')/'playback.mp3').read_bytes()==playback.read_bytes()
+    monkeypatch.setenv('TRANSCRIPT_REVIEW_ACTION_SECRET','fixture-playback-secret')
+    app=FastAPI();app.include_router(create_review_router(root),prefix='/sc_api')
+    from urllib.parse import quote
+    path='/sc_api/review_document/'+quote('講道 test',safe='')+'/media'
+    now=str(int(time.time()));message='\n'.join(('GET',path,'a',now,hashlib.sha256(b'').hexdigest()))
+    headers={'x-review-actor':'a','x-review-time':now,'x-review-signature':hmac.new(b'fixture-playback-secret',message.encode(),hashlib.sha256).hexdigest(),'Range':'bytes=0-6'}
+    response=TestClient(app).get(path,headers=headers)
+    assert response.status_code==206 and response.content==b'fixture'
+    assert response.headers['content-type']=='audio/mpeg'
+
+
+
+def test_bad_playback_receipt_cannot_be_adopted(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup;record=read(source/'full_transcript.json');record['duration_ms']=3615000
+    atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    playback=source/'bad.mp3';playback.write_bytes(b'bad')
+    atomic(source/'media-receipt.json',dict(path=str(playback),source_sha256=record['source_sha256'],sha256=file_hash(playback),mime='audio/mpeg',duration=record['duration_ms']/1000,anchors=[dict(at=0,lag_ms=400,correlation=.99)]*3))
+    with pytest.raises(ReviewError,match='時間軸'):adopted(setup)
+    assert not store.enabled('講道 test')
+
+
+def test_non_mp3_audio_cannot_enter_editor_without_verified_mp3_copy(setup):
+    from backend.pipeline.slide_change_pilot import object_sha
+    store,root,source=setup;record=read(source/'full_transcript.json')
+    record['media_mime_type']='audio/wav';atomic(source/'full_transcript.json',record)
+    layout=read(source/'reading-layout/layout.json');layout['source_record_sha256']=object_sha(record);atomic(source/'reading-layout/layout.json',layout)
+    store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
+    with pytest.raises(ReviewError,match='MP3'):adopted(setup)
     assert not store.enabled('講道 test')

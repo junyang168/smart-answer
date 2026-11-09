@@ -17,6 +17,10 @@ from backend.pipeline.transcript_audio_pilot import read_audio,write_audio
 POLICY='contextual-acoustic-boundaries.v2'
 
 
+class TimingReviewRequired(ValueError):
+    """Completed acoustic checks left genuine unresolved source boundaries."""
+
+
 def paragraph_groups(rows,offset):
     owned=[]
     if offset:owned.append((0,1))
@@ -382,15 +386,21 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None):
         review_whole(evidence)
         detail=analyse(evidence,detail=True)
     if not detail['all_qualified']:
+        from backend.pipeline.paragraph_audio_coherence import recover_omitted_observations
+        recover_omitted_observations(evidence)
+        detail=analyse(evidence,detail=True)
+    if not detail['all_qualified']:
         record['timing_quality']={'policy':POLICY,'status':'withheld',
             'assessment_path':str((evidence/'assessment.json').relative_to(out))}
         save_json(out/'full_transcript.json',record)
+        from backend.pipeline.transcript_timing_report import write_report
+        write_report(out,record,evidence)
         # Do not leave an older successful handoff looking current after a failed finish.
         if (out/'handoff').exists():
             archive=out/'withheld-handoffs'/signature;archive.parent.mkdir(exist_ok=True)
             if archive.exists():raise ValueError('Prior withheld handoff archive exists; preserve both for inspection')
             shutil.move(str(out/'handoff'),str(archive))
-        raise ValueError('Timing quality gate: unresolved paragraph boundaries; handoff withheld')
+        raise TimingReviewRequired('Timing quality gate: unresolved paragraph boundaries; handoff withheld; see timing-review/report.html')
     bindings=playback_bindings(detail['lectures']['source'])
     qualified={p['id']:p for p in detail['lectures']['source']['paragraphs']}
     for p in record['paragraphs']:

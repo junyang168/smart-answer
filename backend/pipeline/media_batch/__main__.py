@@ -26,6 +26,7 @@ def main():
     plan = sub.add_parser("plan")
     plan.add_argument("--folder", type=Path, required=True)
     plan.add_argument("--title")
+    plan.add_argument("--editor-origin", help="Optional editor host for an isolated review destination")
     for name in (
         "artifact-root",
         "media-root",
@@ -177,6 +178,9 @@ def main():
                 "full_video_transcript.py",
                 "transcript_audio_pilot.py",
                 "transcript_text_layout.py",
+                "transcript_seam_repair.py",
+                "transcript_audio_seams.py",
+                "transcript_seam_retention.py",
                 "transcript_audio_correction.py",
                 "transcription_vocabulary.py",
             ],
@@ -191,6 +195,9 @@ def main():
                 "paired_boundary_review.py",
                 "paragraph_audio_coherence.py",
                 "slide_reading_layout.py",
+                "transcript_seam_repair.py",
+                "transcript_audio_seams.py",
+                "transcript_seam_retention.py",
             ],
             "speakers": [
                 "transcript_speaker_batch.py",

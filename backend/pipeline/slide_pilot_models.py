@@ -83,7 +83,10 @@ class VisionReviewer:
         candidates = raw.get("candidates", [])
         if len(candidates) != 1 or candidates[0].get("finish_reason") != "STOP":
             raise ValueError("Incomplete Gemini response saved; no automatic retry")
-        return ''.join(p.get("text", "") for p in candidates[0]["content"]["parts"] if not p.get("thought"))
+        parts=candidates[0].get("content", {}).get("parts", [])
+        text=''.join(p.get("text", "") for p in parts if not p.get("thought"))
+        if not text.strip():raise ValueError("Empty completed Gemini response saved; no silent empty answer")
+        return text
 
     def usage(self, raw: dict) -> dict:
         if self.provider == "openai":

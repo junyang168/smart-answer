@@ -14,6 +14,10 @@ from backend.pipeline.transcript_audio_pilot import saved_call
 PUNCTUATION = set('，。！？；：、,.!?;:「」『』“”')
 
 
+class SeamCoverageError(ValueError):
+    """Source words would be lost by the proposed acoustic ownership."""
+
+
 def text_sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -58,8 +62,49 @@ def inspect_timings(items: list[dict], duration_ms: int) -> list[str]:
     return statuses
 
 
-def stitch(out: Path) -> dict:
+def verify_seam_coverage(left_text: str, right_text: str, left_suffix: str, right_prefix: str) -> None:
+    """Acoustic ownership must not silently discard unique lexical content.
+
+    A repeated span removed at a seam must still occur at the retained edge of
+    its neighbour. This necessary check is not proof of acoustic correctness;
+    mismatched ASR requires review, never fuzzy replacement or more clipping.
+    """
+    lexical=lambda s: ''.join(c for c in s if unicodedata.category(c)[0] in 'LNM')
+    left,right=lexical(left_text),lexical(right_text)
+    discarded_left,discarded_right=lexical(left_suffix),lexical(right_prefix)
+    if discarded_left and discarded_left not in right[:len(discarded_left)+40]:
+        raise SeamCoverageError('Seam ownership would discard unmatched left speech; retain both chunks for audio review')
+    if discarded_right and discarded_right not in left[-len(discarded_right)-40:]:
+        raise SeamCoverageError('Seam ownership would discard unmatched right speech; retain both chunks for audio review')
+
+
+def acoustic_core_range(chunk,items,is_last):
+    duration=chunk['end_ms']-chunk['start_ms']
+    def boundary(ms):
+        return next((i for i,p in enumerate(items) if
+            0<=p['start_ms']<p['end_ms']<=duration and p['end_ms']-p['start_ms']<=4000
+            and (p['start_ms']+p['end_ms'])/2>=ms),len(items))
+    start=(chunk['core_start_sample']-chunk['sample_start'])/16
+    end=(chunk['core_end_sample']-chunk['sample_start'])/16
+    return (0 if start==0 else boundary(start),len(items) if is_last else boundary(end))
+
+
+def retained_audio_edge(out,left,right):
+    ref=read_json(Path(out)/'seam-repair.json')
+    from backend.pipeline.transcript_seam_retention import POLICY
+    if ref.get('policy')!=POLICY:return False
+    # load_repair already replays the actual saved answers. Uncertain edges
+    # do not use this exemption: they retain both edges with no removed words.
+    proof=read_json(Path(out)/ref['proof'])
+    return any(p['left']==left and p['right']==right for p in proof['approved'])
+
+
+def stitch(out: Path, *, use_repairs: bool = True) -> dict:
     asr = read_json(out / 'asr.json')
+    repairs={}
+    if use_repairs and (out/'seam-repair.json').exists():
+        from backend.pipeline.transcript_seam_repair import load_repair
+        repairs=load_repair(out)
     parts, all_tokens, excerpts, issues = [], [], [], []
     offset = 0
     for chunk in asr['chunks']:
@@ -70,18 +115,12 @@ def stitch(out: Path) -> dict:
         items = raw['items']
         spans = token_spans(chunk['text'], [item['text'] for item in items])
         local_start = (chunk['core_start_sample'] - chunk['sample_start']) * 1000 / 16000
-        local_end = (chunk['core_end_sample'] - chunk['sample_start']) * 1000 / 16000
         duration = chunk['end_ms'] - chunk['start_ms']
         # Boundary ownership only uses nonzero, in-range raw acoustic predictions.
         # No word-count timing, interpolation, or text-only deduplication.
-        def reliable(index):
-            item = items[index]
-            return 0 <= item['start_ms'] < item['end_ms'] <= duration and item['end_ms'] - item['start_ms'] <= 4000
-        def boundary(ms):
-            return next((i for i in range(len(items)) if reliable(i)
-                         and (items[i]['start_ms'] + items[i]['end_ms']) / 2 >= ms), len(items))
-        first = 0 if local_start == 0 else boundary(local_start)
-        last = len(items) if chunk == asr['chunks'][-1] else boundary(local_end)
+        first,last=acoustic_core_range(chunk,items,chunk==asr['chunks'][-1])
+        override=repairs.get(chunk['id'],{})
+        first=override.get('first',first);last=override.get('last',last)
         if first >= last:
             raise ValueError('Core audio cannot be mapped to a nonempty text interval')
         start_char = 0 if first == 0 else spans[first][0]
@@ -100,7 +139,7 @@ def stitch(out: Path) -> dict:
         excerpts.append({'chunk_id': chunk['id'], 'source_start': start_char, 'source_end': end_char,
             'output_start': offset, 'output_end': offset + len(body),
             'excluded_prefix': chunk['text'][:start_char], 'excluded_suffix': chunk['text'][end_char:],
-            'reason': 'outside core audio ownership in 2-second overlapping chunks',
+            'reason': ('locally verified acoustic seam repair' if override else 'outside core audio ownership in 2-second overlapping chunks'),
             'alignment_sha256': file_sha(out / f'alignment/{chunk["id"]}.json')})
         # The guard text remains in raw ASR and this ledger. Clipping is an
         # alignment-based draft decision, not a claim of reviewed seam fidelity.
@@ -110,11 +149,20 @@ def stitch(out: Path) -> dict:
         parts.append(body)
         offset += len(body)
     text = ''.join(parts)
+    # Both source excerpts and all alignments have been retained above. Never
+    # publish a timed draft whose boundary decision loses unique source words.
+    for left,right in zip(excerpts,excerpts[1:]):
+        from backend.pipeline.transcript_audio_seams import covers
+        if repairs and covers(out,left['chunk_id'],right['chunk_id']):continue
+        if repairs and retained_audio_edge(out,left['chunk_id'],right['chunk_id']):continue
+        verify_seam_coverage(text[left['output_start']:left['output_end']],
+            text[right['output_start']:right['output_end']],left['excluded_suffix'],right['excluded_prefix'])
     result = {'schema_version': 'timed-speech-draft.v1', 'asr_sha256': file_sha(out / 'asr.json'),
               'text': text, 'text_sha256': text_sha(text), 'tokens': all_tokens,
               'chunk_ownership': excerpts, 'issues': issues,
               'script_normalization': 'none; preserve zh-tw ASR output and spelling variants',
               'human_confirmed': False}
+    if repairs:result['seam_repair_sha256']=file_sha(out/'seam-repair.json')
     save_json(out / 'timed_text.json', result)
     return result
 

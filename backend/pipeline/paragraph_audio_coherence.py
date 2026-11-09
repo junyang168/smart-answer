@@ -40,6 +40,17 @@ def needs_coherence(row,threshold=2000):
     return False
 
 
+def observed_ranges(row,duration_ms):
+    """Keep complete acoustic observations paired, never mix occurrences."""
+    ranges=[]
+    for view in row['observations']:
+        if any(k in view for k in ('error','start_error','end_error')):continue
+        start,end=view.get('start_ms'),view.get('end_ms')
+        if type(start) is int and type(end) is int and 0<=start<end<=duration_ms and end-start<=180000:
+            if (start,end) not in ranges:ranges.append((start,end))
+    return ranges
+
+
 def validate(answer,case):
     from backend.pipeline.slide_visual_evidence import check_schema
     check_schema(answer,SCHEMA)
@@ -123,6 +134,7 @@ def prepare(out:Path):
                 for end in sorted(ends):
                     if not 0<=start<end<=record['duration_ms'] or end-start>180000:continue
                     ranges.append((start,end))
+            ranges=list(dict.fromkeys(ranges+observed_ranges(row,record['duration_ms'])))
             retained=retained_phrase_range(record,p)
             if retained:
                 lo,hi=retained['start_ms'],retained['end_ms']
@@ -170,8 +182,7 @@ def run(out:Path,workers=2):
     return len(plan['cases'])
 
 
-def saved_ranges(out:Path):
-    path=out/'paragraph-coherence-plan.json'
+def _saved_ranges(out:Path,path:Path,folder_name='coherence-calls',calibrate=True):
     if not path.exists():return {}
     plan=read_json(path)
     if file_sha(out/'plan.json')!=plan['parent_plan_sha256']:raise ValueError('Whole-span source changed')
@@ -179,9 +190,9 @@ def saved_ranges(out:Path):
     for i,case in enumerate(plan['cases']):
         for evidence in case.get('retained_phrase_source',{}).get('evidence',[]):
             if file_sha(Path(evidence['path']))!=evidence['sha256']:raise ValueError('Retained phrase source evidence changed')
-        folder=out/'coherence-calls'/f'c{i:04d}';validated=folder/'validated.json'
+        folder=out/folder_name/f'c{i:04d}';validated=folder/'validated.json'
         if not validated.exists():
-            if i==0:return {}
+            if i==0 and calibrate:return {}
             continue
         value=read_json(validated);raws=list((folder/'calls').glob('*/response.json'))
         if len(raws)!=1 or object_sha(read_json(raws[0]))!=value['raw_response_sha256']:raise ValueError('Whole-span raw changed')
@@ -192,11 +203,107 @@ def saved_ranges(out:Path):
         eligible=validate(answer,case)
         for c in case['candidates']:
             if file_sha(out/c['audio'])!=c['audio_sha256']:raise ValueError('Whole-span saved audio changed')
-        if i==0:
+        if i==0 and calibrate:
             if not eligible or answer['selected_id']!='c1' or next(c for c in answer['candidates'] if c['id']=='c0')['verdict']=='clean_complete_paragraph':raise ValueError('Whole-span calibration failed')
             continue
         if eligible:
             chosen=next(c for c in case['candidates'] if c['id']==answer['selected_id'])
             result[(case['lecture'],case['paragraph_id'])]={'start_ms':chosen['start_ms'],'end_ms':chosen['end_ms'],
                 'whole_candidate_id':chosen['id'],'raw_response_sha256':value['raw_response_sha256'],'whole_case_id':case['id']}
+    return result
+
+
+def recovery_cases(source,assessment,parent):
+    """Pure, replayable selection for the omitted-observation input defect.
+
+    Only still-withheld paragraphs and previously unreviewed physical ranges.
+    No rejected candidate is resubmitted and no original judgment is upgraded.
+    """
+    old={(c['lecture'],c['paragraph_id']):{(r['start_ms'],r['end_ms']) for r in c['candidates']}
+         for c in parent['cases'] if c['id']!='control'}
+    cases=[]
+    for lecture,lec in assessment['lectures'].items():
+        record=source['records'][lecture];original={p['id']:p for p in record['paragraphs']}
+        for row in lec['paragraphs']:
+            if row['status']=='qualified':continue
+            ranges=observed_ranges(row,record['duration_ms'])
+            # A newly exposed neighbour conflict has not had a whole-span check.
+            p=original[row['id']]
+            if (lecture,row['id']) not in old and 0<=p['start_ms']<p['end_ms']<=record['duration_ms'] and p['end_ms']-p['start_ms']<=180000:
+                ranges=list(dict.fromkeys([(p['start_ms'],p['end_ms'])]+ranges))
+            ranges=[r for r in ranges if r not in old.get((lecture,row['id']),set())]
+            if ranges:
+                cases.append(dict(id=f'L{lecture}-{row["id"]}-omitted-observations',lecture=lecture,
+                                  paragraph_id=row['id'],reference=p['text'],ranges=ranges))
+    return cases
+
+
+def recover_omitted_observations(out:Path,workers=2):
+    """Exactly one source-bound engineering recovery, sharing normal budgets."""
+    path=out/'coherence-observation-recovery-plan.json'
+    parent=out/'paragraph-coherence-plan.json';source=read_json(out/'plan.json')
+    frozen=out/'coherence-observation-recovery-input.json'
+    if not path.exists():
+        from backend.pipeline.contextual_transcript_timing import analyse
+        assessment=analyse(out,detail=True,write=False)
+        if frozen.exists() and read_json(frozen)!=assessment:raise ValueError('Recovery input changed')
+        save_json(frozen,assessment)
+        cases=recovery_cases(source,assessment,read_json(parent));complete=[]
+        for case in cases:
+            record=source['records'][case['lecture']];audio=Path(record['source'])/'master.wav'
+            if file_sha(audio)!=record['audio_sha256']:raise ValueError('Recovery source PCM changed')
+            samples=read_audio(audio);candidates=[]
+            for i,(start,end) in enumerate(case['ranges']):
+                dest=out/'coherence-recovery-clips'/f'{case["id"]}-c{i}.wav'
+                write_audio(dest,samples[start*16:end*16])
+                candidates.append(dict(id=f'c{i}',start_ms=start,end_ms=end,audio=str(dest.relative_to(out)),audio_sha256=file_sha(dest)))
+            complete.append({k:v for k,v in case.items() if k!='ranges'}|{'candidates':candidates})
+        save_json(path,dict(schema_version='omitted-acoustic-observation-recovery.v1',
+            parent_plan_sha256=file_sha(out/'plan.json'),original_whole_plan_sha256=file_sha(parent),
+            input_sha256=file_sha(frozen),cases=complete,max_calls=len(complete),
+            defect='Whole-span candidate construction omitted saved complete acoustic observations',
+            prior_answers_immutable=True,repeat_candidate_calls=0))
+    plan=read_json(path);verify_recovery(out,plan)
+    # The existing calibration is replayed from its original saved request.
+    _saved_ranges(out,parent)
+    if not (out/'coherence-calls/c0000/validated.json').exists():raise ValueError('Missing original calibration')
+    def one(i):
+        from google.genai import types
+        case=plan['cases'][i];reviewer=VisionReviewer('gemini',PROMPT,SCHEMA);reviewer.config['thinking_config']={'thinking_level':'LOW'}
+        material={**case,'candidates':[{k:v for k,v in c.items() if k!='audio'} for c in case['candidates']]}
+        parts=[types.Part.from_text(text=PROMPT+'\n'+json.dumps(material,ensure_ascii=False))]
+        for c in case['candidates']:
+            audio=out/c['audio']
+            if file_sha(audio)!=c['audio_sha256']:raise ValueError('Recovery clip changed')
+            parts.extend([types.Part.from_text(text='COMPLETE CANDIDATE '+c['id']),types.Part.from_bytes(data=audio.read_bytes(),mime_type='audio/wav')])
+        request=dict(stage='omitted-observation-engineering-recovery.v1',plan_sha256=file_sha(path),
+                     prompt=PROMPT,schema=SCHEMA,model=reviewer.model,config=reviewer.config,case=material)
+        folder=out/'coherence-recovery-calls'/f'c{i:04d}'
+        raw=saved_call(folder,request,1,lambda:reviewer.generate(parts),max_calls=1,budget_usd=1)
+        answer=json.loads(reviewer.text(raw));eligible=validate(answer,case)
+        save_json(folder/'validated.json',dict(answer=answer,eligible=eligible,request_sha256=object_sha(request),raw_response_sha256=object_sha(raw)))
+        print('Omitted acoustic observation',i+1,'/',len(plan['cases']),'eligible',eligible,flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:list(pool.map(one,range(len(plan['cases']))))
+    return len(plan['cases'])
+
+
+def verify_recovery(out,plan):
+    if (plan['parent_plan_sha256']!=file_sha(out/'plan.json') or
+        plan['original_whole_plan_sha256']!=file_sha(out/'paragraph-coherence-plan.json') or
+        plan['input_sha256']!=file_sha(out/'coherence-observation-recovery-input.json')):
+        raise ValueError('Observation recovery parent changed')
+    expected=recovery_cases(read_json(out/'plan.json'),read_json(out/'coherence-observation-recovery-input.json'),read_json(out/'paragraph-coherence-plan.json'))
+    projected=[{k:v for k,v in c.items() if k!='candidates'}|{'ranges':[(r['start_ms'],r['end_ms']) for r in c['candidates']]} for c in plan['cases']]
+    if projected!=expected or plan['max_calls']!=len(expected):raise ValueError('Observation recovery selection changed')
+
+
+def saved_ranges(out:Path):
+    result=_saved_ranges(out,out/'paragraph-coherence-plan.json')
+    path=out/'coherence-observation-recovery-plan.json'
+    if path.exists():
+        verify_recovery(out,read_json(path))
+        if not (out/'coherence-calls/c0000/validated.json').exists():raise ValueError('Missing original calibration')
+        for key,value in _saved_ranges(out,path,'coherence-recovery-calls',calibrate=False).items():
+            if key in result:value['prior_whole_witness']=result[key]
+            result[key]=value
     return result

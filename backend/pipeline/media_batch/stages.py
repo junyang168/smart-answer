@@ -10,6 +10,64 @@ import fcntl
 from .runtime import atomic, file_sha, progress, slot
 
 
+def playback_anchors(source, tmp, duration):
+    # Full PCM equality cannot be required for lossy encodings. Check lag/correlation at anchors.
+    import numpy as np
+
+    anchors = [0, max(0, duration / 2 - 5), max(0, duration - 12)]
+    checks = []
+    for start in anchors:
+        arrays = []
+        for path in (source, tmp):
+            raw = subprocess.check_output(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-i",
+                    str(path),
+                    # Decode from the source origin before trimming. Input
+                    # seeking is not sample-accurate for ADPCM WAV (and can
+                    # falsely report lossy playback drift at later anchors).
+                    "-ss",
+                    str(start),
+                    "-t",
+                    "8",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "8000",
+                    "-f",
+                    "f32le",
+                    "-",
+                ]
+            )
+            arrays.append(np.frombuffer(raw, dtype="<f4"))
+        n = min(map(len, arrays))
+        a, b = (x[:n] for x in arrays)
+        if n < 800:
+            raise ValueError("Media anchor too short")
+        if np.std(a) < 1e-5:
+            checks.append(dict(at=start, silent=True))
+            continue
+        length = 1 << (2 * n - 1).bit_length()
+        corr = np.fft.irfft(
+            np.fft.rfft(b, length) * np.conj(np.fft.rfft(a, length)), length
+        )
+        lags = np.arange(-1600, 1601)
+        values = corr[lags % length]
+        k = np.argmax(values)
+        lag = int(lags[k])
+        score = float(values[k] / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+        if abs(lag) > 400 or score < 0.65:
+            raise ValueError("Playback acoustic clock mismatch")
+        checks.append(dict(at=start, lag_ms=lag / 8, correlation=score))
+    if not any(not c.get("silent") for c in checks):
+        raise ValueError("No audible media anchor")
+    return checks
+
+
 def media(payload):
     info = payload["info"]
     source = Path(info["source"])
@@ -129,57 +187,7 @@ def media(payload):
         # Verify acoustic origin and sampled anchors, including AAC/MP3 encoder padding.
         from .planner import pcm_identity
 
-        # Full PCM equality cannot be required for lossy encodings. Check lag/correlation at anchors.
-        import numpy as np
-
-        anchors = [0, max(0, info["duration"] / 2 - 5), max(0, info["duration"] - 12)]
-        checks = []
-        for start in anchors:
-            arrays = []
-            for path in (source, tmp):
-                raw = subprocess.check_output(
-                    [
-                        "ffmpeg",
-                        "-nostdin",
-                        "-v",
-                        "error",
-                        "-ss",
-                        str(start),
-                        "-i",
-                        str(path),
-                        "-t",
-                        "8",
-                        "-ac",
-                        "1",
-                        "-ar",
-                        "8000",
-                        "-f",
-                        "f32le",
-                        "-",
-                    ]
-                )
-                arrays.append(np.frombuffer(raw, dtype="<f4"))
-            n = min(map(len, arrays))
-            a, b = (x[:n] for x in arrays)
-            if n < 800:
-                raise ValueError("Media anchor too short")
-            if np.std(a) < 1e-5:
-                checks.append(dict(at=start, silent=True))
-                continue
-            length = 1 << (2 * n - 1).bit_length()
-            corr = np.fft.irfft(
-                np.fft.rfft(b, length) * np.conj(np.fft.rfft(a, length)), length
-            )
-            lags = np.arange(-1600, 1601)
-            values = corr[lags % length]
-            k = np.argmax(values)
-            lag = int(lags[k])
-            score = float(values[k] / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
-            if abs(lag) > 400 or score < 0.65:
-                raise ValueError("Playback acoustic clock mismatch")
-            checks.append(dict(at=start, lag_ms=lag / 8, correlation=score))
-        if not any(not c.get("silent") for c in checks):
-            raise ValueError("No audible media anchor")
+        checks = playback_anchors(source, tmp, info["duration"])
         with tmp.open("rb") as f:
             os.fsync(f.fileno())
         prepared = dict(
@@ -239,6 +247,16 @@ def register_catalog(payload):
                     save(catalog, rows)
 
 
+def editor_link(item, origin=None):
+    from urllib.parse import urlsplit,quote
+    if origin:
+        url=urlsplit(origin)
+        if (url.scheme not in ('http','https') or not url.hostname or url.username or url.password
+            or url.path not in ('','/') or url.query or url.fragment):
+            raise ValueError('Editor origin must be an HTTP(S) origin without path or credentials')
+    return (origin.rstrip('/') if origin else '')+'/admin/surmons/'+quote(item,safe='')
+
+
 def handoff(payload):
     from backend.api.sc_api.transcript_review import ReviewStore, atomic as save, read
     from backend.pipeline.video_transcript_handoff import export_handoff
@@ -253,7 +271,7 @@ def handoff(payload):
     register_catalog(payload)
     result.update(
         item=item,
-        editor_href="/admin/surmons/" + item,
+        editor_href=editor_link(item,payload["config"].get("editor_origin")),
         source_admission="awaiting_human_publication",
     )
     atomic(out / "review-receipt.json", result)

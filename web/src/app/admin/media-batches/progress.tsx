@@ -29,7 +29,7 @@ type Task = {
     at?: number;
     attempt_started_at?: number;
   };
-  result?: { editor_href?: string; rough_href?: string };
+  result?: { editor_href?: string; rough_href?: string; timing_report_href?: string; withheld?: number };
 };
 type Recording = {
   id: string;
@@ -489,6 +489,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                 const link = r.tasks.find((t) => t.result?.editor_href)?.result
                   ?.editor_href;
                 const roughLink=r.tasks.find((t)=>t.result?.rough_href)?.result?.rough_href;
+                const timingReport=r.tasks.find((t)=>t.result?.timing_report_href)?.result;
                 return (
                   <article
                     key={r.id}
@@ -503,6 +504,7 @@ export function MediaBatchProgress({ batch }: { batch?: string }) {
                       </div>
                       <Work task={current} />
                       <div>
+                        {timingReport?.timing_report_href && (<a className="mb-2 inline-flex rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900" href={timingReport.timing_report_href} target="_blank" rel="noreferrer">查看 {timingReport.withheld ?? ""} 個待處理問題</a>)}
                         {roughLink && (<a className="mt-2 inline-flex items-center gap-1 text-sm font-semibold text-indigo-700" href={roughLink} target="_blank" rel="noreferrer">查看粗逐字稿與概要</a>)}
                         {link && (
                           <Link

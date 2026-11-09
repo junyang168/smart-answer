@@ -327,7 +327,14 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             with store.lock(item):
                 store.require(actor, item)
                 _, context = store.load(item)
-                path = store.folder(item) / "source.mp4"
+                playback = context.get("playback_media")
+                name = "source.mp4"
+                if playback:
+                    name = playback.get("file")
+                    if (name not in ("playback.mp3", "playback.mp4")
+                        or playback.get("source_sha256") != context["source_video_sha256"]):
+                        raise ReviewError(409, "播放副本與原始來源不符")
+                path = store.folder(item) / name
                 if not path.exists():
                     raise ReviewError(404, "此講道沒有本機影片")
                 mime = context.get("media_mime_type", "video/mp4")

@@ -276,7 +276,11 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
                      lambda: adapter.generate(parts), max_calls=48, budget_usd=3)
     cost = adapter.usage(raw)['estimated_usd_upper']
     reason = raw.get('candidates', [{}])[0].get('finish_reason')
-    if reason not in ('MAX_TOKENS', 'MALFORMED_FUNCTION_CALL'):
+    candidates=raw.get('candidates',[])
+    empty_stop=(len(candidates)==1 and reason=='STOP' and 'content' in candidates[0]
+        and not candidates[0].get('content',{}).get('parts')
+        and not raw.get('prompt_feedback',{}).get('block_reason'))
+    if reason not in ('MAX_TOKENS', 'MALFORMED_FUNCTION_CALL') and not empty_stop:
         return raw, cost, object_sha(request)
     # Only known terminal format failures get one distinct corrected request.
     # Unknown outcomes, timeouts, safety refusals and a second failure stop.
@@ -284,8 +288,8 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
     recovery_config = {**base_config, 'max_output_tokens': 16384,
                        'thinking_config': {'thinking_level': 'LOW'}}
     stage = 'known_truncation_recovery_once'
-    if reason == 'MALFORMED_FUNCTION_CALL':
-        stage = 'known_malformed_function_recovery_once'
+    if reason == 'MALFORMED_FUNCTION_CALL' or empty_stop:
+        stage = 'known_empty_response_recovery_once' if empty_stop else 'known_malformed_function_recovery_once'
         recovery_config.update(automatic_function_calling={'disable': True},
                                tool_config={'function_calling_config': {'mode': 'NONE'}},
                                response_json_schema=SCHEMA)

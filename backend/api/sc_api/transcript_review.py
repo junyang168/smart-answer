@@ -1158,6 +1158,7 @@ class ReviewStore:
                 "paragraph_bindings": bindings,
                 "timing_quality": timing_quality,
                 "editorial_exclusions": record.get('editorial_exclusions', []),
+                "source_notices": [{**n,"paragraph_ids":[mapping[x] for x in n.get('paragraph_ids',[]) if x in mapping]} for n in record.get('source_notices',[])],
                 "speaker_attribution": speaker_attribution,
                 "editorial_metadata": {
                     **{k: meta.get(k) or "" for k in ("title", "summary", "keypoints")},
@@ -1208,6 +1209,44 @@ class ReviewStore:
                     os.replace(temporary, dest)
                 finally:
                     temporary.unlink(missing_ok=True)
+            # Browser playback may need a codec derivative (e.g. ADPCM WAV).
+            # Keep source.mp4 and its original SHA as the source of record.
+            playback = read(source / "media-receipt.json")
+            if (c["media_mime_type"].startswith("audio/")
+                and c["media_mime_type"] != "audio/mpeg"
+                and (playback is None or playback.get("mime") != "audio/mpeg")):
+                raise ReviewError(409, "音訊須先產生並核驗 MP3 播放副本")
+            if playback is not None:
+                mime = playback.get("mime")
+                playback_path = Path(playback.get("path", ""))
+                checks = playback.get("anchors", [])
+                if (playback.get("source_sha256") != record["source_sha256"]
+                    or mime not in ("audio/mpeg", "video/mp4")
+                    or not playback_path.is_file()
+                    or file_hash(playback_path) != playback.get("sha256")
+                    or abs(playback.get("duration", 0) * 1000 - record["duration_ms"]) > 300
+                    or len(checks) != 3
+                    or not any(not x.get("silent") for x in checks)
+                    or any(not x.get("silent") and (abs(x.get("lag_ms", 9999)) > 50 or x.get("correlation", 0) < .65) for x in checks)):
+                    raise ReviewError(409, "播放副本尚未通過原聲時間軸核驗")
+                name = "playback.mp3" if mime == "audio/mpeg" else "playback.mp4"
+                playback_dest = folder / name
+                if not playback_dest.exists():
+                    temporary = folder / (".playback-" + uuid.uuid4().hex)
+                    try:
+                        try: os.link(playback_path, temporary)
+                        except OSError: shutil.copyfile(playback_path, temporary)
+                        if file_hash(temporary) != playback["sha256"]:
+                            raise ReviewError(409, "播放副本保存不符")
+                        with temporary.open("rb") as stream: os.fsync(stream.fileno())
+                        os.replace(temporary, playback_dest)
+                    finally: temporary.unlink(missing_ok=True)
+                if playback_dest.is_symlink() or file_hash(playback_dest) != playback["sha256"]:
+                    raise ReviewError(409, "既有播放副本已變更")
+                c["source_media_mime_type"] = c["media_mime_type"]
+                c["media_mime_type"] = mime
+                c["playback_media"] = {"file": name, "sha256": playback["sha256"],
+                    "source_sha256": record["source_sha256"], "receipt_sha256": file_hash(source / "media-receipt.json")}
             return self.commit(
                 item,
                 actor or "operator-import",

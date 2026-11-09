@@ -273,8 +273,9 @@ def main():
                         '--out', str(args.out.resolve()), '--device', args.device],
                        check=True, env=env, cwd=Path(__file__).resolve().parents[2])
     if args.stage in ('format', 'run'):
-        from backend.pipeline.transcript_text_layout import stitch, format_text
-        stitch(args.out)
+        from backend.pipeline.transcript_text_layout import format_text
+        from backend.pipeline.transcript_seam_repair import stitch_with_recovery
+        stitch_with_recovery(args.out,args.aligner_python)
         format_text(args.out)
     if args.stage in ('assemble', 'run'):
         from backend.pipeline.transcript_slide_assembly import assemble

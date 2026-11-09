@@ -1,6 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { AiDeletionReview } from "./AiDeletionReview";
+import { aiDeletions, restoreAiDeletion, type AiExclusion, type AiDeletion } from "./review-ai-deletions";
 import { ReviewTextDiff } from "./ReviewTextDiff";
 import { pendingTimingIds } from "./review-timing";
 import {
@@ -70,6 +72,8 @@ type Metadata = {
   core_bible_verse?: Verse[];
 };
 type Context = {
+  source_notices?: { start_ms: number; end_ms: number; note: string; paragraph_ids: string[]; status: string }[];
+  editorial_exclusions?: AiExclusion[];
   speaker_attribution?: {
     notices?: {
       paragraph_id: string;
@@ -348,6 +352,7 @@ function TranscriptProofreader({
     revision: number;
   }>();
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [deletionsOpen, setDeletionsOpen] = useState(false);
   const [generatingHeadings, setGeneratingHeadings] = useState(false);
   const [headingSuggestions, setHeadingSuggestions] = useState<{
     version: string;
@@ -1200,6 +1205,20 @@ function TranscriptProofreader({
     });
     enqueue({ kind: "text", id, text });
   };
+  const deletionCandidates = useMemo(() => aiDeletions(doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions || []), [doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions]);
+  const restoreDeletion = (candidate: AiDeletion) => {
+    if (disabled) return;
+    try {
+      const row = current.current.script.find((p) => p.index === candidate.id);
+      if (!row) throw new Error("找不到段落");
+      const text = restoreAiDeletion(row.text, candidate);
+      const reviews = { ...current.current.context.reviews };
+      delete reviews["p:" + candidate.id];
+      updateDoc({ ...current.current, context: { ...current.current.context, reviews },
+        script: current.current.script.map((p) => p.index === candidate.id ? { ...p, text } : p) });
+      enqueue({ kind: "text", id: candidate.id, text });
+    } catch (e) { setFailure((e as Error).message); }
+  };
   const saveStatus = !ready
     ? "正在檢查本機草稿…"
     : recovered
@@ -1264,6 +1283,9 @@ function TranscriptProofreader({
             >
               舊版 Editor
             </a>
+            <button className={button} onClick={() => setDeletionsOpen((v) => !v)}>
+              {deletionsOpen ? "關閉 AI 刪除" : `AI 刪除 (${deletionCandidates.length})`}
+            </button>
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
             </button>
@@ -1456,6 +1478,17 @@ function TranscriptProofreader({
           </div>
         )}
       </header>
+      {!!doc.context.source_notices?.length && <section className="my-3 rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="接縫待聽音核對">
+        <h2 className="font-semibold">接縫待聽音核對 · {doc.context.source_notices.length} 處</h2>
+        <p className="text-sm">以下位置未能可靠去重，完整保留了粗稿文字。請聽音檢查重複短句或辨識差異，再確認相關段落。</p>
+        {doc.context.source_notices.map((n,i) => <div key={i} className="my-2 flex flex-wrap items-center gap-2 text-sm">
+          <span>{stamp(n.start_ms)}–{stamp(n.end_ms)}</span>
+          {n.paragraph_ids.map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
+          <span>{n.paragraph_ids.length && n.paragraph_ids.every(id => paragraphIsConfirmed(id,doc.context.reviews,doc.paragraph_shas,editedParagraphIds)) ? "相關段落已人工核對" : "待人工核對"}</span>
+        </div>)}
+      </section>}
+      {deletionsOpen && <AiDeletionReview items={deletionCandidates} disabled={disabled}
+        onRestore={restoreDeletion} onLocate={(id) => { selectParagraph(id); setNavigationTarget({ id }); }} />}
       {metadataOpen && (
         <section className="my-4 rounded-xl border bg-white p-4">
           <p className="mb-3 text-sm text-slate-500">
