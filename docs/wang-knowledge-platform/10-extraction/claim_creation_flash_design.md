@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer。
 > **類型**：規範。
 > **狀態**：#723 已授權實作；分步候選與隔離 Flash 接續已實作，正式庫接收仍未授權／未實作；不取代既有 extraction 契約。
-> **與代碼對齊**：2026-11-09 核對本次整組材料及關係生成實作（待實測）；候選入口為 claim_creation_flash_v4，精確 prompt SHA 綁定本次生成規則，既有 extraction 預設契約保留。
+> **與代碼對齊**：2026-11-09 核對至 614b15cd；整組生成與完整隔離 Flash 已實測，詳見測試記錄第 9 節；候選入口為 claim_creation_flash_v4，精確 prompt SHA 綁定本次生成規則，既有 extraction 預設契約保留。
 > **權威範圍**：首次 creation 的任務分工、完整候選出口及之後的 Flash 接續；不授予正式資料寫入、舊審閱資格或 CVP 維護權限。
 
 ## 目錄
@@ -161,7 +161,7 @@ Claim statement 的送審材料須保存既有 Observation → Evidence → Clai
 
 報告 generation、Flash 及端到端 wall time，GPT／Jev input、output、快取與可取得實際費用；快取和 reasoning 子集不重複加總。區分等待、恢復與模型時間，不把少幾次調用或多建幾張卡當品質。尚未實跑不承諾一小時內完成。
 
-原文編譯及包驗證以顯式 native_relations 路徑支持現有模型的 Observation → Claim、Claim → 材料、材料 → Question 等連接；舊預設限制不變。Observation 的論證角色由連接任務一次判定，不能在材料層先判、再因沒有路徑要求重寫材料；load_bearing 必須有真實的有限論證路徑，循環不能冒充支持。
+原文編譯及包驗證以顯式 native_relations 路徑支持現有模型的 Observation → Claim、Claim → 材料、材料 → Question 等連接；舊預設限制不變。整組模式的 Observation 論證角色與關係同次判定；相容模式在連接任務一次判定，不能在材料層先判、再因沒有路徑要求重寫材料；load_bearing 必須有真實的有限論證路徑，循環不能冒充支持。
 
 自查已納入的主要缺口：首次分組無圖、候選範圍可能漏內容、沒有 Claim 的組、共享與跨組記錄、第三步再次過載、逐句命中不等於語義覆蓋、creation／Update 混淆，以及舊入庫審閱門檻。正式庫完成資格接點仍在 4.1 明列 TBD，不能隱藏為「直接沿用」。
 
@@ -177,7 +177,7 @@ Claim statement 的送審材料須保存既有 Observation → Evidence → Clai
 
 ## 8. 執行入口
 
-生成完整候選，之後在隔離庫執行 Flash（不指定 through-flash 則只生成）：
+生成完整候選，之後在隔離庫執行 Flash（不指定 through-flash 則只生成）。整組材料及關係生成加 `--grouped-package`；它同時啟用精簡覆蓋傳輸：
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_creation_flash \

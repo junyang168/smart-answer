@@ -99,3 +99,42 @@ Codex 對照固定原文讀完 3 條 Claim、19 條下層表述、7 條 Question
 驗收：678 項回歸通過（52.47 秒）；完成結果零模型重入；完整匯出逐筆等於 SQL；三條 Claim 主張不變；SourceFragments 不變；聽眾標籤正確；隔離 PostgreSQL 已停止；正式寫入為 0。最終包 SHA `88e922ef2f952beb4b0bf20ad991886e754025ce4fe3ccba8dab3f88135daade`，完整依據在 `fresh-v4/end-to-end-acceptance.json`。正式庫接收 authority 邊界仍按設計，不標舊審閱資格通過。
 
 後續防回歸 c9438256：新增「新來源沒有角色資料時，不抹除可能由人工確認的既有復現註記」控制例。最終同範圍回歸 **679 passed，53.23 秒**。離線重編譯逐筆證明候選投影未改；已保存 Update 的論證階段沒有改 Claim occurrences，亦沒有新建 Claim，因此此保留分支不改本次模型輸入／後像。檢查保存於 `fresh-v4/existing-role-preservation-check.json`，沒有新模型調用，也不重播已完成內容階段。
+
+
+## 8. 精簡逐句輸出的獨立試驗（13a36ef9）
+
+同一份凍結原文及組界，不提供舊生成答案。此中間版只改逐句輸出：模型按材料列出覆蓋句子及排除理由，程式展開原有完整 ledger；仍沿用四批材料及獨立連接任務。三條候選生成 10 Evidence、9 Observation、7 Question、3 Position、45 Fragment；91 句清單完整通過既有校驗。材料數量變化不是改善品質的證據。
+
+Creation 343.772 秒，對照第 7 節的 473.021 秒減少 27.3%；GPT input 143,557、output 15,940，總計 159,497 tokens，對照 167,747 減少 4.9%。Output 約少 29%，但不能把輸出縮減當成總成本同幅下降；不同次生成內容亦有隨機差異。
+
+此中間版完整 Update **未完成**：第二條 Claim 已有第一條 Claim 的直接 supports 前提，第一條攜帶字義實例原文；程式卻只投影 Evidence 路徑，送審漏帶直接 Claim 前提的來源，GPT 因此報 needs_source。原 pending、答覆及帳目保留，不能算成生成真的缺來源，也不能以未完成的時間／用量與成功版本比端到端效率。已新增 source-local、單一 incoming Claim 跳數的唯讀來源投影與反例，不遞迴帶入第三層 Claim；不假定鄰卡已通過。
+
+使用者其後要求第三步改成整組材料及完整關係同次生成。本節中間版存於 `compact-audit-trial/`，後續整組模式另保留自己的原始輸入與帳目，不重置本節試驗或將其追認為完成。
+
+
+## 9. 整組共享材料及完整關係同次生成（f76e0e8d、614b15cd）
+
+使用者指出 Creation 的材料與 Claim–Evidence 連接互相關聯，應同次生成。本次 `--grouped-package` 不再按 24 句切四批，也沒有後續獨立生成連接的模型任務；先識別三條候選及各自範圍，再把同一組的 91 句、候選及完整相關範圍交給一次材料／關係任務。完整請求 45,852 bytes，在既有上限內；只刪除傳輸中的空白段落，不改原文或位置。Sol medium 訂閱輸出上限 16,000 tokens，沒有要求模型填滿；此上限亦用於本次 Update，與第 7 節的 6,000 上限不同，實際輸出仍獨立記帳。
+
+首次完整候選直接生成 3 Claim、6 Evidence、12 Observation、7 Question、3 Position、45 Fragment、20 knowledge relations、2 Claim relations。完整結構、逐字及 91 句 ledger 均通過。三項核心教導均保留，飢餓主體正確為耶穌，沒有將門徒一起寫為餓了；獨立解經原則、兩卷敘事比較、字義用例、普通希臘文背景、聽眾問答及教授引用的經文都在候選中。記錄少不等於省略，關係多亦不自動代表品質提高。
+
+| 階段 | 第 7 節四批材料＋獨立連接 | 本次整組材料＋關係 |
+| --- | --- | --- |
+| Creation 執行時間 | 473.021 秒 | 242.034 秒（4 分 2 秒） |
+| Creation GPT input／output | 145,306／22,441 | 44,625／11,726 |
+| Creation GPT 總 tokens | 167,747 | 56,351 |
+| 完整 Update 執行時間 | 274.813 秒 | 280.168 秒 |
+| Update GPT 總 tokens | 297,167 | 335,237 |
+| Update Jev 總 tokens | 120,640 | 152,350 |
+| 兩階段執行時間合計 | 747.834 秒 | 522.202 秒（8 分 42 秒） |
+| 兩階段全部 tokens | 585,554 | 543,938 |
+
+Creation 時間減少 48.8%、GPT tokens 減少 66.4%；完整兩階段時間減少約 30.2%、總 tokens 減少約 7.1%。Update 的用量並沒有下降，不能將 Creation 單段節省誤報為總成本同幅改善。兩次內容有隨機變化、prompt／來源投影及輸出上限亦不同，本表是相同凍結原文上的實際比較，不是單一因素的嚴格實驗，也不是原始 legacy creation 的直接 benchmark。沒有可核實美元費用；cached input 24,960 及 reasoning output 2,035 已包含在本次總 tokens，不能再相加。
+
+完整 Update 最後只有三項圖變更：普通希臘文與字義實例的 supports 改為反方向 contextualizes；乾燥環境對蒲草紙保存背景的 contextualizes 改為 explains；補一條觀察對第三條 Claim 的 supports。沒有新增／退役 Claim；所有 Claim、Evidence、Observation、Question、Position 及 SourceFragment 的正規化內容均不變。SQL 匯出補齊 schema defaults 不算來源內容變更。
+
+**接續事實。** 首次執行在最後漏抽檢查拒收：模型使用提供的 `claims/ID` 字典鍵，parser 卻無條件再加 `claims/`。614b15cd 只接受精確已提供物件鍵或其裸 ID；未知鍵、其他 collection 及雙重前綴仍拒收。原答覆、錯誤、消耗及帳目保留。修復後從最後完成的關係階段接續原漏抽答覆，0 次新 GPT／Jev、0.372 秒完成；不把後階段已改的圖倒送前階段重新審閱。兩次只讀頂層恢復檢查分別被輸出上限 pin 及較早的 statement 讀集保護攔住，沒有模型調用或內容寫入；最終用既有末階段 consume 校驗、正式 missing 入口和同一 export 完成。此表排除工程暫停及只讀恢復診斷時間，不宣稱單一版本無干預一次跑完。
+
+驗收：**702 tests passed，53.00 秒**；包括同次生成圖、答案及 owner 同步、未知端點、缺支持、load-bearing 缺路徑、舊模式、單跳 Claim 來源、精確 ID 格式與零調用重入。完成結果零模型回放通過、匯出逐筆等於實際隔離 SQL，PostgreSQL 已停止，正式資料寫入 0。完整依據在 `grouped-package-trial/completed-summary.json`、`exact-identity-recovery.json` 及 `normalized-end-to-end-acceptance.json`。最終包 SHA `72389c3343306ee6393b4c735742e852cc3a81a01302b4218970c4160b899412`。
+
+本次經驗：驗證的任務拆分不能機械套用到 Creation。Claim 已先識別並圈定範圍後，共享材料、完整引文及它們如何連到 Claim 是同一個有邊界的生成任務；程式處理機械輸出與身份，不再要求下一個模型從頭重建同一張圖。完整候選後的分層 Update 仍保留，沒有用生成成功冒充語義驗證。
