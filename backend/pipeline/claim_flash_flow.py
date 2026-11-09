@@ -28,6 +28,18 @@ def complete(result):
     return result.get('status') in {'verified','applied','completed'} and not result.get('pending')
 
 
+def claim_tasks(plan):
+    tasks=[]
+    for group in plan['groups']:
+        batches=group.get('sequential_claim_batches', [group['claim_ids']])
+        if ([cid for batch in batches for cid in batch] != group['claim_ids']
+                or any(len(batch)>10 for batch in batches)
+                or len(set(group['claim_ids'])) != len(group['claim_ids'])):
+            raise ValueError('sequential Claim batches must partition their frozen group exactly once')
+        tasks.extend((group,batch,n) for n,batch in enumerate(batches,1))
+    return tasks
+
+
 def snapshot(store,sid):
     records,sources=f.load_source(store,sid,visual_context=True)
     f.source_unchanged(sources)
@@ -129,7 +141,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             return e.publish(root,result)
         if plan is None:
             gp=root/'grouping'/'shared-groups.json'
-            plan=read(gp) if gp.exists() else grouping.save(store,source_id,root/'grouping')
+            plan=read(gp) if gp.exists() else grouping.save(store,source_id,root/'grouping',allow_claim_batches=True)
         coverage.validate_groups(plan,source_id,sources[source_id])
         e.save(root/'shared-groups.json',plan)
         if plan.get('pending'):return finish({},[{'layer':'grouping','findings':plan['pending']}])
@@ -157,18 +169,21 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
         stages['claims']={}
-        for group in plan['groups']:
-            ids=group['claim_ids'];gid=group['group_id'];gr=root/'claims'/gid
+        tasks=claim_tasks(plan)
+        for group,ids,batch_number in tasks:
+            gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
+            gr=root/'claims'/task_id
             if not ids:
                 value=missing.run(store,source_id,None,gr/'missing',ports,apply=True,
                     max_new_claims=2,empty_group=group,evidence_root=root/'evidence')
                 stages['claims'][gid]={'missing':value}
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':'missing','findings':value.get('pending',[])}])
                 continue
-            outputs={};stages['claims'][gid]=outputs
+            outputs={};stages['claims'][task_id]=outputs
             for name,fn in (
                 ('statements',lambda:statements.run(store,source_id,ids,root/'evidence',gr/'statements',ports,apply=True)),
-                ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',gr/'statements',gr/'arguments',ports,apply=True)),
+                ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',gr/'statements',gr/'arguments',ports,apply=True,
+                    claim_ids=ids if group.get('sequential_claim_batches') else None)),
                 ('relations',lambda:relations.run(store,source_id,gr/'arguments',gr/'relations',ports,apply=True)),
                 ('missing',lambda:missing.run(store,source_id,gr/'relations',gr/'missing',ports,apply=True))):
                 value=fn();outputs[name]=value

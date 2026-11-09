@@ -238,6 +238,25 @@ def test_too_many_claims_at_same_paragraph_does_not_fake_an_independent_split(tm
         plan(records, sources, max_claims=1)
 
 
+def test_indivisible_paragraph_can_have_sequential_claim_tasks_without_duplicate_lower_review(tmp_path):
+    from backend.pipeline.claim_flash_flow import claim_tasks
+    records, sources = source(tmp_path)
+    for n in range(11):
+        claim(records, f'C{n:02d}', 0)
+    lower(records, 'E', [0])
+    result=plan(records, sources, max_claims=8, allow_claim_batches=True)
+    group=next(g for g in result['groups'] if g['claim_ids'])
+    assert [len(x) for x in group['sequential_claim_batches']] == [8,3]
+    assert sum('S0001' in g['paragraph_keys'] for g in result['groups']) == 1
+    assert sum('evidence_steps/E' in g['lower_record_keys'] for g in result['groups']) == 1
+    tasks=[t for t in claim_tasks(result) if t[1]]
+    assert [cid for _,batch,_ in tasks for cid in batch] == group['claim_ids']
+    assert tasks[0][0] is tasks[1][0]  # Shared source group, explicitly sequential.
+    group['sequential_claim_batches'][1].append(group['claim_ids'][0])
+    with pytest.raises(ValueError, match='exactly once'):
+        claim_tasks(result)
+
+
 def test_missing_source_records_remain_pending_not_silently_omitted(tmp_path, monkeypatch):
     records, sources = source(tmp_path); claim(records, 'A', 0, evidence=['MISSING'])
     lower(records, 'UNLOCATED', [])

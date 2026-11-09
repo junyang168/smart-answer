@@ -82,13 +82,18 @@ def statement_proof(root,claim_ids,records,sources):
     return result,before,prepared
 
 
-def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,apply=False):
+def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,apply=False,claim_ids=None):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     group=next(g for g in plan['groups'] if g['group_id']==group_id);ids=group['claim_ids']
+    if claim_ids is not None:
+        if claim_ids not in group.get('sequential_claim_batches', []):
+            raise ValueError('Claim batch is not frozen in the completed Evidence plan')
+        ids=claim_ids
     if not ids or len(ids)>10 or len(ids)!=len(set(ids)):raise ValueError('one nonempty existing Claim group required')
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'group':group,'models':ports.identity,
+            **({'claim_ids':ids} if claim_ids is not None else {}),
             'evidence_root':str(Path(evidence_root).resolve()),'statement_root':str(Path(statement_root).resolve()),
             'policy_sha256':e.digest([PROMPT,Routes.model_json_schema()])})
         if (root/'verification.json').exists():return statements.finish(store,root) if apply else json.loads((root/'verification.json').read_text())
