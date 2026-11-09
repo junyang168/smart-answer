@@ -389,6 +389,7 @@ def commit_verified(store, root, *, source_fragments_only=False):
             **({'expected_current_human_source_scope':result['human_source_guard']} if result.get('human_source_guard') is not None else {}),
             expected_current_source_claims=result.get('source_claim_index'),
             **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
+            **({'expected_current_claim_legacy_ai_findings':result['legacy_ai_findings_markers']} if result.get('legacy_ai_findings_markers') else {}),
             metadata={'actor': source_kind, 'reason': result.get('commit_reason', 'Bottom-up semantic decisions and program-verified postimages'),
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)

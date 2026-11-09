@@ -103,8 +103,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             raise ValueError('argument group/source differs from completed Evidence plan')
         if any(not f.belongs_to_source(records['claims/'+cid]['payload'],records,source_id) for cid in ids):
             raise ValueError('argument target belongs to another source')
-        if any(records['claims/'+cid]['payload'].get('review_status')=='human_review_required' for cid in ids):
-            raise ValueError('Claim hold requires its existing handoff')
+        markers=f.legacy_ai_findings(store,records,ids,ports)
         old_checks,old_before,statement_updates=statement_proof(statement_root,ids,records,sources)
         records=f.apply_overlay(records,statement_updates)
         targets={'claims/'+cid for cid in ids}
@@ -127,8 +126,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                  +[{**p,'relation_type':'supports','reason':'Claim.evidence_step_ids'} for p in implicit]}
         shared.update(f.source_interpretation(sources,{source_id:group['paragraph_keys']}))
         proposals=[];pending=[];routes=[];claim_handoffs={}
-        jobs=[{'job_id':k} for k in sorted(targets)]
-        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),PROMPT,shared=shared,semantic_review=False):
+        notes=getattr(ports,'legacy_ai_findings_notes',{})
+        jobs=[{'job_id':k,**({'legacy_ai_finding':notes[k]} if k in notes else {})} for k in sorted(targets)]
+        prompt=PROMPT+('逐項據當前材料處置job中的legacy_ai_finding；reason須說明舊異議如何解決或為何不成立，不能只略過。無法解決就返回對應缺口，不得complete。' if any(k in notes for k in targets) else '')
+        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),prompt,shared=shared,semantic_review=False):
             replies=Routes.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
             for item in replies:
                 routes.append(item.model_dump())
@@ -195,6 +196,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
             if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})
             outcomes.append({'object_key':edit.job_id,'basis':'gpt_final_support','action':edit.action,'reason':edit.reason})
+        if markers and not pending:
+            for cid in markers:
+                key='claims/'+cid
+                updates[key]=flash.current_claim_payload(updates.get(key,records[key]['payload']),verified_ai_findings=True)
         read=set(nodes)|set(edges)|set(claim_edges)|{'source_fragments/'+fid for fid in fragments}|{'source_documents/'+source_id}
         read.update(k for k,r in records.items() if k.startswith('claim_relation_constraints/') and {r['payload']['source_id'],r['payload']['target_id']}&set(by_id))
         allowed=targets|pool|set(edges)|{k for k in updates if k.startswith('knowledge_relations/') and k not in records}
@@ -208,6 +213,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'completion_scope':'group_lower_argument_routes_only','claim_qualification':'not_granted','applied':False,
             'resolved_statement_handoffs':[x for x in old_checks['pending'] if x['object_key'] in targets and not pending],
             'commit_reason':'Group argument completeness and typed pairs; preserve lower content and Claim statements'}
+        if markers:result['legacy_ai_findings_markers']=markers
         e.save(root/'before.json',{'records':{k:original[k] for k in read if k in original},'sources':sources});e.save(root/'consumed-evidence.json',proof)
         e.save(root/'verification.json',result)
         return statements.finish(store,root) if apply else e.publish(root,result)

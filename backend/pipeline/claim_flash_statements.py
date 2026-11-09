@@ -90,6 +90,8 @@ def finish(store,root):
         current=store.get_record_state(*key.split('/',1))
         if not current or (current['revision'],current['content_sha256'],current['retired'])!=(row['revision'],row['content_sha256'],row['retired']):
             raise ValueError('Claim statement inputs changed: '+key)
+    if result.get('deferred_legacy_ai_commit') and not committed:
+        return e.publish(root,result)
     return e.commit_verified(store,root)
 
 
@@ -166,8 +168,8 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         targets=['claims/'+cid for cid in claim_ids]
         if any(k not in records or not f.belongs_to_source(records[k]['payload'],records,source_id) for k in targets):
             raise ValueError('Claim belongs to another source')
-        if any(records[k]['payload'].get('review_status')=='human_review_required' for k in targets):
-            raise ValueError('Claim hold requires its existing authorized handoff')
+        markers=f.legacy_ai_findings(store,records,claim_ids,ports)
+        if markers:e.save(root/'legacy-ai-findings.json',markers)
         working=deepcopy(records);read=set(targets)|{'source_documents/'+source_id};materials={};needed=set()
         for key in targets:
             materials[key]=flash.claim_material(key,records,sources,source_id)
@@ -199,6 +201,7 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         result={'version':VERSION,'source_id':source_id,'claim_ids':claim_ids,'status':'needs_attention' if pending else 'verified',
             'updates':updates,'new_fragments':{},'pending':pending,'outcomes':outcomes,'applied':False,
             'claim_qualification':'not_granted','completion_scope':'claim_statement_tasks_only','commit_reason':'Claim statement dispositions using completed Evidence; no lower review or relation writes'}
+        if markers:result['deferred_legacy_ai_commit']=True
         e.save(root/'verification.json',result)
         return finish(store,root) if apply else e.publish(root,result)
 

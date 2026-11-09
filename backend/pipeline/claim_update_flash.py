@@ -333,11 +333,11 @@ def commit_group(store,root):
     return c.commit(store,root)
 
 
-def current_claim_payload(payload,*,verified_ai_sampling=False):
+def current_claim_payload(payload,*,verified_ai_sampling=False,verified_ai_findings=False):
     """A changed Flash candidate cannot inherit another pipeline's AI approval."""
     if (not str(payload.get('review_status','')).startswith('ai_')
             and payload.get('review_status')!='independent_terminal_reviewed'
-            and not (verified_ai_sampling and payload.get('review_status')=='human_review_required')):
+            and not ((verified_ai_sampling or verified_ai_findings) and payload.get('review_status')=='human_review_required')):
         return deepcopy(payload)
     from backend.pipeline.claim_metadata_projection import RESET
     # Store packages merge payload fields, so absence would retain an old seal.

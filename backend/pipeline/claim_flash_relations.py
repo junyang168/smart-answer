@@ -82,6 +82,8 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         # One bounded group, one discovery task; no Cartesian candidate enumeration.
         shared = {'claims': {k:pairs.node(k, records, sources) for k in sorted(targets)},
                   'existing_edges': edges}
+        notes={k:v for k,v in getattr(ports,'legacy_ai_findings_notes',{}).items() if k in targets}
+        if notes:shared['legacy_ai_findings']=notes
         handoffs=json.loads((argument_root/'result.json').read_text()).get('claim_pair_handoffs',[])
         if any(p['a'] not in targets or p['b'] not in targets or p['a']==p['b'] for p in handoffs):
             raise ValueError('argument Claim handoff exceeded group')

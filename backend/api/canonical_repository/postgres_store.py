@@ -7996,6 +7996,7 @@ class PostgresKnowledgeStore:
         ] = None,
         expected_current_source_claims: Optional[Mapping[str, Mapping[str, dict[str, Any]]]] = None,
         expected_current_claim_sampling_markers: Optional[Mapping[str, dict[str, Any]]] = None,
+        expected_current_claim_legacy_ai_findings: Optional[Mapping[str, dict[str, Any]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
         expected_current_human_source_scope: Optional[Mapping[str, Any]] = None,
         transaction_context: Any = None,
@@ -8128,6 +8129,18 @@ class PostgresKnowledgeStore:
                         state=(dict(revision=row[0],content_sha256=row[1],payload=row[2],retired=row[3] is not None) if row else None)
                         if not state or sampling_marker(cursor,cid,state)!=expected:
                             raise ChangeSetConflict('AI sampling marker or review history changed before commit')
+                if expected_current_claim_legacy_ai_findings:
+                    if plan.source_kind!='claim_flash_arguments_v1' or expected_current_record_pins is None:
+                        raise ValueError('legacy AI refresh requires guarded Flash argument writes')
+                    from backend.pipeline.claim_legacy_ai_reopen import marker
+                    writes={(op.collection,op.object_id) for op in plan.operations}
+                    for cid,expected in expected_current_claim_legacy_ai_findings.items():
+                        if ('claims',cid) not in writes:raise ValueError('legacy AI finding lacks its Claim write')
+                        cursor.execute("SELECT revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s FOR UPDATE",(cid,))
+                        row=cursor.fetchone()
+                        state=(dict(revision=row[0],content_sha256=row[1],payload=row[2],retired=row[3] is not None) if row else None)
+                        if not state or marker(cursor,cid,state)!=expected:
+                            raise ChangeSetConflict('legacy AI finding or human review history changed before commit')
                 if expected_current_route_material_pins is not None:
                     self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
                     viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
