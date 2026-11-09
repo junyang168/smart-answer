@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-09 核對 #702 工作樹。共用分組、原文及限定Evidence／Observation模式，以及獨立Claim statement、論證路線、組內Claim關係模式已實作；新Claim發現的分離與同範圍成本對照仍未完整落實，見第 7 節。
+> **與代碼對齊**：部分；2026-11-09 核對 #702 工作樹。共用分組、原文及限定Evidence／Observation模式，以及獨立Claim statement、論證路線、組內Claim關係、漏抽模式已實作；完整階段串接與同範圍成本對照仍未完整落實，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -489,6 +489,27 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+獨立漏抽模式使用`backend.pipeline.claim_flash_missing`，消費本組已完成的Claim關係root。
+GPT對照本組原文、已驗證材料與同篇Claim摘要，只判斷重要獨立判斷有無承載；
+保留Evidence、已有承載及無新增均為合法結果，原話重述不自動構成另一層論據。
+現有Claim只讀；需補足現有Claim、缺材料或來源者明確交接，不把新增入口變成全面Update。
+候選不受「至少兩條Evidence」的數量門檻；仍須有已驗證支持及其實際來源。
+查重包含明列同篇來源的退役Claim及取代狀態，不以重建繞過生命週期。
+
+只對新候選使用既有逐項statement檢查，並核對新節點的支持、必要Claim關係和直接回答的Question。
+既有三層及組內舊關係不重審；新支持變動只重查受影響的整體支持／經文。
+ID分配、Evidence使用者同步、Question答案與交易沿用既有bottom-up commit，
+SQL版本保護及實際來源Claim清單保護保持，不增加另一套資格或身份帳。
+最後一項有效支持被撤除、超過本組新增空間及未決項均不入庫，不假裝覆蓋完成。
+已有Claim需Update或退役項需Restore時保存具體交接；本入口不執行這兩種操作。
+結果`group_missing_claims_only`不授予完整Claim／CVP資格。
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.claim_flash_missing \
+  --source-id ACTUAL_SOURCE_ID --relation-root /absolute/path/completed-claim-relations \
+  --capacity-file /absolute/path/shared-capacity.json --root /absolute/path/missing-claims
+```
 
 獨立Claim關係模式使用`backend.pipeline.claim_flash_relations`，輸入本組已完成論證路線的root。
 核對其SQL完成及未變的來源、節點、論證材料後，GPT只找組內必要的遺漏直接關係，

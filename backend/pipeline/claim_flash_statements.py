@@ -79,6 +79,57 @@ def finish(store,root):
     return e.commit_verified(store,root)
 
 
+def review(records,sources,targets,source_id,root,ports,*,tasks=None):
+    """Review only these statements, including not-yet-committed new candidates."""
+    working=deepcopy(records)
+    materials={k:flash.claim_material(k,records,sources,source_id) for k in targets}
+    checks=TASKS if tasks is None else {k:TASKS[k] for k in tasks}
+    initial={k:f.jev(root/'precheck',ports,materials[k],{name:q.claim()[name] for name in checks}) for k in targets}
+    outcomes=[];pending=[];settled={k:{} for k in targets}
+    for attempt in range(3):
+        for question,(task,passing) in checks.items():
+            jobs=[];states={}
+            for key in targets:
+                if any(x['object_key']==key for x in pending):continue
+                state=flash.claim_material(key,working,sources,source_id);states[key]=state
+                stamp=judgment_hash(state,question)
+                if settled[key].get(question)==stamp:continue
+                verdict=(initial[key][question] if stamp==judgment_hash(materials[key],question)
+                         else f.jev(root/'precheck',ports,state,{question:q.claim()[question]})[question])
+                if verdict!=passing:
+                    jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
+                else:
+                    settled[key][question]=stamp
+                    outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state)})
+            for batch,raw in f.gpt(root/'dispositions',ports,task,jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
+                edits=Edits.model_validate(raw).items
+                f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
+                for edit in edits:
+                    key=edit.job_id
+                    outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key])})
+                    if edit.action in {'needs_source','needs_connection'}:
+                        pending.append({'object_key':key,'layer':'source' if edit.action=='needs_source' else 'claim_connections','reason':edit.reason})
+                        continue
+                    if edit.action=='keep':
+                        settled[key][question]=judgment_hash(states[key],question)
+                        continue
+                    post=deepcopy(working[key]['payload'])
+                    if edit.statement is not None:
+                        if not edit.statement.strip():raise ValueError('empty Claim statement')
+                        post['statement']=edit.statement
+                    if edit.scripture_refs is not None:post['scripture_refs']=edit.scripture_refs
+                    if post!=working[key]['payload']:
+                        working[key]['payload']=flash.current_claim_payload(post)
+                    # GPT's disposition is final for its own task, not a Jev-vote loop.
+                    settled[key][question]=judgment_hash(flash.claim_material(key,working,sources,source_id),question)
+        if all(any(x['object_key']==k for x in pending) or all(settled[k].get(q)==judgment_hash(flash.claim_material(k,working,sources,source_id),q) for q in checks) for k in targets):break
+    for key in targets:
+        if not any(x['object_key']==key for x in pending) and any(settled[key].get(q)!=judgment_hash(flash.claim_material(key,working,sources,source_id),q) for q in checks):
+            pending.append({'object_key':key,'layer':'claim_statement','reason':'bounded_task_passes_exhausted'})
+    updates={k:working[k]['payload'] for k in targets if working[k]['payload']!=records[k]['payload']}
+    return {'updates':updates,'pending':pending,'outcomes':outcomes}
+
+
 def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
     if not claim_ids or len(claim_ids)>10 or len(set(claim_ids))!=len(claim_ids):
         raise ValueError('one group of one to ten distinct Claim IDs required')
@@ -113,50 +164,8 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
                 read.update('source_fragments/'+a['source_fragment_id'] for a in occurrence.get('anchors',[]) if a.get('source_fragment_id'))
         e.save(root/'before.json',{'records':{k:records[k] for k in read if k in records},'sources':sources})
         e.save(root/'consumed-evidence.json',proof)
-        initial={k:f.jev(root/'precheck',ports,materials[k],q.claim()) for k in targets}
-        outcomes=[];pending=[];settled={k:{} for k in targets}
-        for attempt in range(3):
-            for question,(task,passing) in TASKS.items():
-                jobs=[];states={}
-                for key in targets:
-                    if any(x['object_key']==key for x in pending):continue
-                    state=flash.claim_material(key,working,sources,source_id);states[key]=state
-                    stamp=judgment_hash(state,question)
-                    if settled[key].get(question)==stamp:continue
-                    verdict=(initial[key][question] if stamp==judgment_hash(materials[key],question)
-                             else f.jev(root/'precheck',ports,state,{question:q.claim()[question]})[question])
-                    if verdict!=passing:
-                        jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
-                    else:
-                        settled[key][question]=stamp
-                        outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state)})
-                for batch,raw in f.gpt(root/'dispositions',ports,task,jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
-                    edits=Edits.model_validate(raw).items
-                    f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
-                    for edit in edits:
-                        key=edit.job_id
-                        outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key])})
-                        if edit.action in {'needs_source','needs_connection'}:
-                            pending.append({'object_key':key,'layer':'source' if edit.action=='needs_source' else 'claim_connections','reason':edit.reason})
-                            continue
-                        if edit.action=='keep':
-                            settled[key][question]=judgment_hash(states[key],question)
-                            continue
-                        post=deepcopy(working[key]['payload'])
-                        if edit.statement is not None:
-                            if not edit.statement.strip():raise ValueError('empty Claim statement')
-                            post['statement']=edit.statement
-                        if edit.scripture_refs is not None:post['scripture_refs']=edit.scripture_refs
-                        if post!=working[key]['payload']:
-                            working[key]['payload']=flash.current_claim_payload(post)
-                        # GPT's disposition is final for its own task, not a Jev-vote loop.
-                        settled[key][question]=judgment_hash(flash.claim_material(key,working,sources,source_id),question)
-            if all(any(x['object_key']==k for x in pending) or all(settled[k].get(q)==judgment_hash(flash.claim_material(k,working,sources,source_id),q) for q in TASKS) for k in targets):break
-        for key in targets:
-            if not any(x['object_key']==key for x in pending) and any(settled[key].get(q)!=judgment_hash(flash.claim_material(key,working,sources,source_id),q) for q in TASKS):
-                pending.append({'object_key':key,'layer':'claim_statement','reason':'bounded_task_passes_exhausted'})
-        updates={k:working[k]['payload'] for k in targets if working[k]['payload']!=records[k]['payload']}
-        if any(k not in targets for k in updates):raise ValueError('statement write scope expanded')
+        reviewed=review(records,sources,targets,source_id,root,ports)
+        updates,pending,outcomes=(reviewed[k] for k in ['updates','pending','outcomes'])
         f.source_unchanged(sources)
         result={'version':VERSION,'source_id':source_id,'claim_ids':claim_ids,'status':'needs_attention' if pending else 'verified',
             'updates':updates,'new_fragments':{},'pending':pending,'outcomes':outcomes,'applied':False,

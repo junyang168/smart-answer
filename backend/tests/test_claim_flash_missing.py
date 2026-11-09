@@ -1,0 +1,139 @@
+"""Missing Claims: new-only review, identity safety, SQL and saved-answer recovery."""
+from copy import deepcopy
+import json
+import pytest
+from backend.pipeline import claim_flash_missing as stage, claim_flash_relations as relations
+from backend.pipeline import claim_flash_common as f
+from backend.tests.test_claim_flash_relations import ready as relation_ready, Ports as RelationPorts
+from backend.tests.test_claim_flash_arguments import Ports as ArgumentPorts
+from backend.tests.test_claim_update_flash import Ports as BasePorts
+from backend.tests.test_evidence_refresh import sample
+from backend.tests.test_claim_management_postgres import postgres_store, _temporary_postgres
+
+
+def candidate(**changes):
+    return {'action':'new_claim','claim_id':'','statement':'真正相信必然表現在聽從祂的話。',
+        'support_keys':['evidence_steps/E'],'fragment_ids':['F'],'scripture_refs':[],
+        'answer_question_ids':[],'reason':'教授以沒有聽從的觀察推到沒有真正相信。',**changes}
+
+
+class Ports(ArgumentPorts):
+    def __init__(self,candidates=(),**kwargs):super().__init__(**kwargs);self.candidates=list(candidates)
+    def repair(self,request):
+        task=request['input']['task']
+        if task=='missing_group_claims':
+            self.calls.append(('gpt',request));return {'candidates':self.candidates,'reason':'已對照教授原文、獨立論據及既有承載。'}
+        if task in {'claim_fidelity','claim_support','claim_scripture'}:
+            self.calls.append(('gpt',request))
+            return {'items':[{'job_id':j['job_id'],'action':'keep','reason':'完整材料保留此判斷及限定。'} for j in request['input']['jobs']]}
+        return super().repair(request)
+
+
+@pytest.fixture
+def ready(relation_ready):
+    store,root,aroot=relation_ready;rroot=root/'relations'
+    assert relations.run(store,'S',aroot,rroot,RelationPorts(),apply=True)['status']=='verified'
+    return store,root,rroot
+
+
+def test_no_missing_claims_needs_one_task_and_no_other_review(ready):
+    store,root,rroot=ready;ports=Ports()
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='verified' and not result['new_claim_candidates']
+    assert len(ports.calls)==1 and ports.calls[0][1]['input']['task']=='missing_group_claims'
+    replay=Ports();assert stage.run(store,'S',rroot,root/'missing',replay,apply=True)['status']=='verified'
+    assert replay.calls==[]
+
+
+def test_new_claim_actual_identity_owners_anchors_and_replay(ready):
+    store,root,rroot=ready;old={x:store.get_record_state('claims',x) for x in ['C','D']};old_e=store.get_record_state('evidence_steps','E')['payload']
+    ports=Ports([candidate()]);result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied' and len(result['new_claim_ids'])==1
+    cid=result['new_claim_ids'][0];p=store.get_record_state('claims',cid)['payload']
+    assert cid not in ['C','D'] and p['statement']==candidate()['statement'] and p['evidence_step_ids']==['E']
+    assert p['occurrences'][0]['anchors'][0]['source_fragment_id']=='F'
+    assert store.get_record_state('evidence_steps','E')['payload']['produced_claim_ids']==['C','D',cid]
+    assert {k:v for k,v in store.get_record_state('evidence_steps','E')['payload'].items() if k not in {'produced_claim_ids','revision'}}=={k:v for k,v in old_e.items() if k not in {'produced_claim_ids','revision'}}
+    assert old=={x:store.get_record_state('claims',x) for x in ['C','D']}
+    checks=[r for role,r in ports.calls if role=='jev' and 'statement_fidelity' in r['questions']]
+    assert len(checks)==1 and checks[0]['state']['claim']['statement']==candidate()['statement']
+    assert not any('record_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
+    replay=Ports();assert stage.run(store,'S',rroot,root/'missing',replay,apply=True)['status']=='applied';assert replay.calls==[]
+
+
+def test_same_and_repeated_candidates_do_not_create_duplicates(ready):
+    store,root,rroot=ready;text=store.get_record_state('claims','C')['payload']['statement']
+    result=stage.run(store,'S',rroot,root/'missing',Ports([candidate(statement=text),candidate(),candidate()]),apply=True)
+    assert result['status']=='applied' and len(result['new_claim_ids'])==1
+
+
+@pytest.mark.parametrize('action',['retain_evidence','needs_material','needs_source','needs_update','represented'])
+def test_candidate_dispositions_do_not_write_old_claims(ready,action):
+    store,root,rroot=ready;old=store.get_record_state('claims','C')
+    item=candidate(action=action,claim_id='C' if action in {'needs_update','represented'} else '')
+    result=stage.run(store,'S',rroot,root/'missing',Ports([item]),apply=True)
+    assert result['status']==('needs_attention' if action.startswith('needs_') else 'verified')
+    assert not result['new_claim_candidates'] and store.get_record_state('claims','C')==old
+
+
+@pytest.mark.parametrize('bad',[{'support_keys':['evidence_steps/X']},{'fragment_ids':['X']},{'answer_question_ids':['X']},{'claim_id':'MODEL-ALLOCATED'}])
+def test_unprovided_material_and_model_allocated_identity_rejected(ready,bad):
+    store,root,rroot=ready
+    with pytest.raises(ValueError):stage.run(store,'S',rroot,root/'missing',Ports([candidate(**bad)]),apply=True)
+    assert not (root/'missing'/'commit-intent.json').exists()
+
+
+def test_creation_space_exhaustion_keeps_candidate_pending(ready):
+    store,root,rroot=ready
+    result=stage.run(store,'S',rroot,root/'missing',Ports([candidate()]),apply=True,max_new_claims=0)
+    assert result['status']=='needs_attention' and result['pending'][0]['reason']=='creation_space_exceeded'
+
+
+def test_inactive_identity_is_not_recreated(ready):
+    store,root,rroot=ready
+    store.apply_plan(store.plan_package({'package_id':'inactive','claims':[{'claim_id':'OLD','claim_type':'interpretive_judgment','statement':candidate()['statement'],
+        'evidence_step_ids':['E'],'occurrences':[{'source_id':'S','anchors':[]}]}]}))
+    store.apply_plan(store.plan_package({'package_id':'retire-old'},retiring_keys=[('claims','OLD')]))
+    result=stage.run(store,'S',rroot,root/'missing',Ports([candidate()]),apply=True)
+    assert result['status']=='needs_attention' and result['pending'][0]['reason']=='inactive_identity_requires_handoff'
+    assert not result['new_claim_candidates']
+
+
+def test_input_drift_rejects_before_models(ready):
+    store,root,rroot=ready;p=store.get_record_state('evidence_steps','E')['payload'];p['statement']='另有意思。'
+    store.apply_plan(store.plan_package({'package_id':'changed-material','evidence_steps':[p]}));ports=Ports()
+    with pytest.raises(ValueError,match='input changed'):stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert ports.calls==[]
+
+
+def test_new_statement_doubts_only_review_new_claim(ready):
+    store,root,rroot=ready;ports=Ports([candidate()],choices={'statement_fidelity':'changed'})
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied'
+    fidelity=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='claim_fidelity']
+    assert len(fidelity)==1 and all(j['job_id'].startswith('claims/new:') for j in fidelity[0]['input']['jobs'])
+
+
+def test_rejected_last_support_blocks_creation(ready):
+    store,root,rroot=ready;result=stage.run(store,'S',rroot,root/'missing',Ports([candidate()],choices={'relation':'none'}),apply=True)
+    assert result['status']=='needs_attention' and any(x['reason']=='new_claim_has_no_final_support' for x in result['pending'])
+    assert not (root/'missing'/'commit-intent.json').exists()
+
+
+def test_actual_commit_crash_reuses_identity_and_answers(ready,monkeypatch):
+    store,root,rroot=ready;apply=store.apply_plan
+    def crash(*a,**kw):apply(*a,**kw);raise RuntimeError('after SQL')
+    monkeypatch.setattr(store,'apply_plan',crash)
+    with pytest.raises(RuntimeError,match='after SQL'):stage.run(store,'S',rroot,root/'missing',Ports([candidate()]),apply=True)
+    monkeypatch.setattr(store,'apply_plan',lambda *a,**kw:pytest.fail('duplicate SQL'))
+    ports=Ports();result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied' and len(result['new_claim_ids'])==1 and ports.calls==[]
+
+
+def test_question_answer_link_preserves_existing_answers(ready):
+    store,root,rroot=ready
+    store.apply_plan(store.plan_package({'package_id':'question','questions':[{'question_id':'Q','text':'真正相信會有甚麼表現？',
+        'source_fragment_id':'F','answer_claim_ids':['C'],'answer_state':'answered'}]}))
+    ports=Ports([candidate(answer_question_ids=['Q'])]);result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='applied'
+    assert store.get_record_state('questions','Q')['payload']['answer_claim_ids']==['C',result['new_claim_ids'][0]]
