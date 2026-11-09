@@ -76,3 +76,19 @@ def test_uncovered_saved_inventory_unit_is_compiled_without_model_or_upper_write
         assert store.get_record_state(*key.split('/',1))==row
     with pytest.raises(ValueError,match='exact saved'):
         fill.fill_inventory_handoff(store,'S',[{**handoff,'unit':{**unit,'statement':'自行改過的意思。'}}],previous,root/'bad',apply=True)
+
+
+def test_changed_diagnostic_wording_reuses_same_saved_source_answer_after_program_failure(sample,monkeypatch):
+    store,root,_=sample;ports=Ports()
+    first=[{'object_key':'evidence_steps/E','layer':'source','reason':'舊的缺口說明。'}]
+    original=source.binding_postimage
+    monkeypatch.setattr(source,'binding_postimage',lambda *a,**k:(_ for _ in ()).throw(ValueError('program defect')))
+    with pytest.raises(ValueError,match='program defect'):
+        source.repair_bindings(store,'S',first,root/'repair',ports,apply=True)
+    assert ports.calls==['jev','gpt']
+    monkeypatch.setattr(source,'binding_postimage',original)
+    second=[{**first[0],'reason':'相同材料的另一種缺口說明。'}]
+    result=source.repair_bindings(store,'S',second,root/'repair',ports,apply=True)
+    assert result['status']=='applied' and ports.calls==['jev','gpt']
+    import json
+    assert json.loads((root/'repair/intent.json').read_text())['findings']==first

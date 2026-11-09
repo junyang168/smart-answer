@@ -42,7 +42,21 @@ def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
         records,sources=f.load_source(store,source_id,visual_context=True)
         current_source(records,sources,source_id)
         if pin!={'source_id':source_id,**sources[source_id]['file']}:raise ValueError('source repair binding changed')
-        e.save(root/'intent.json',{'source':pin,'findings':findings,'models':ports.identity})
+        intent={'source':pin,'findings':findings,'models':ports.identity}
+        if (root/'intent.json').exists() and json.loads((root/'intent.json').read_text())!=intent:
+            original=json.loads((root/'intent.json').read_text())
+            lookup=json.loads((root/'lookup/input.json').read_text())
+            before={j['job_id']:j['record'] for j in lookup['jobs']}
+            keys={x.get('object_key') for x in findings}
+            if (original['source']!=pin or original['models']!=ports.identity
+                    or keys!={x.get('object_key') for x in original['findings']}
+                    or any(x.get('layer')!='source' for x in findings)
+                    or any(key not in records or before.get(key)!=f.projected(records[key]) for key in keys)):
+                raise ValueError('source handoff material changed; explicit continuation required')
+            e.save(root/'continuation-findings'/ (e.digest(findings)+'.json'),{'findings':findings,
+                'original_intent_sha256':e.digest(original),'basis':'same source and target; preserve original lookup/answer'})
+            findings=original['findings'];intent=original
+        e.save(root/'intent.json',intent)
         locator=source_lookup.Locator(sources);jobs=[]
         for item in findings:
             key=item['object_key']
