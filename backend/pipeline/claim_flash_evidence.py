@@ -434,7 +434,10 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
-                raise ValueError('Evidence call has no saved reply; inspect original transport before continuing')
+                if started.parent.parent.name=='gpt' and (started.parent/'owner-recovery.json').exists():
+                    f.stopped_gpt_authority(started.parent.parent.parent,ports,
+                        json.loads((started.parent/'request.json').read_text()))
+                else:raise ValueError('Evidence call has no saved reply; inspect original transport before continuing')
         # Complete the original receipt after a post-commit crash, even when
         # the current postimage already has a reusable semantic decision.
         for intent in sorted((root/'groups').glob('*/*/commit-intent.json')):

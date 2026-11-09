@@ -2,6 +2,8 @@ from copy import deepcopy
 import json
 import pytest
 from backend.pipeline import claim_flash_common as f,claim_flash_evidence as eo,evidence_refresh as e
+from backend.tests.test_evidence_refresh import sample
+from backend.tests.test_claim_management_postgres import postgres_store, _temporary_postgres
 
 
 def job():
@@ -63,3 +65,28 @@ def test_successful_legacy_reply_is_reused_before_focusing_new_requests(tmp_path
     def run():return list(f.gpt(tmp_path/'fidelity',ports,'evidence_fidelity_repair',[job()],eo.Edits.model_json_schema(),eo.PROMPT,semantic_review=False))
     original=run();ports.focus_evidence_findings=True
     assert run()==original and ports.calls==1
+
+
+def test_outer_evidence_runner_admits_only_the_authorized_timeout_then_commits(sample):
+    from backend.tests.test_claim_flash_evidence import Ports as BasePorts,saved_inventory
+    store,root,_=sample;records,sources=f.load_source(store,'S')
+    plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],'groups':[{
+        'group_id':'G','paragraph_keys':['S0001'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}]}
+    previous=saved_inventory(root/'prior',sources)
+    class Ports(BasePorts):
+        def __init__(self):super().__init__();self.root=root/'providers';self.fail=True
+        def repair(self,request):
+            if self.fail and request['input']['task']=='evidence_fidelity_repair':raise TimeoutError('ended timeout')
+            return super().repair(request)
+    ports=Ports();eroot=root/'evidence'
+    with pytest.raises(TimeoutError):eo.run(store,'S',plan,eroot,ports,previous,apply=True)
+    old=next(p.parent for p in eroot.rglob('started.json') if not (p.parent/'response.json').exists())
+    exit_path=ports.root/'gpt'/old.name/'transport/exit.json'
+    e.save(exit_path,{'error_type':'TimeoutExpired','returncode':None})
+    e.save(old/'owner-recovery.json',{'owner_direction':'重跑一下吧','max_reissues':1,
+        'original_request_sha256':old.name,'exit_path':str(exit_path),'exit_sha256':e.digest(json.loads(exit_path.read_text()))})
+    ports.focus_evidence_findings=True;ports.focused_review_instruction='只查有疑點的部分';ports.fail=False
+    result=eo.run(store,'S',plan,eroot,ports,previous,apply=True)
+    assert result['status']=='completed'
+    assert store.get_record_state('evidence_steps','E')['payload']['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
+    assert not (old/'response.json').exists()

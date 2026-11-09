@@ -295,6 +295,24 @@ def yn(text):
     return c.question(text, {'yes': '有此問題。', 'no': '沒有此問題。', 'uncertain': '無法確定。'})
 
 
+def stopped_gpt_authority(root,ports,request):
+    key=e.digest(request);old=Path(root)/'gpt'/key
+    if (request.get('input',{}).get('task')!='evidence_fidelity_repair'
+            or request.get('execution_recovery') or not getattr(ports,'focus_evidence_findings',False)
+            or not (old/'started.json').exists() or (old/'response.json').exists()
+            or not (old/'owner-recovery.json').exists()):
+        raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
+    authority=json.loads((old/'owner-recovery.json').read_text())
+    expected=Path(ports.root)/'gpt'/key/'transport'/'exit.json'
+    receipt=json.loads(expected.read_text())
+    if (authority.get('original_request_sha256')!=key or not authority.get('owner_direction')
+            or authority.get('max_reissues')!=1 or authority.get('exit_path')!=str(expected)
+            or authority.get('exit_sha256')!=e.digest(receipt) or receipt.get('error_type')!='TimeoutExpired'
+            or e.digest(json.loads((old/'request.json').read_text()))!=key):
+        raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+    return authority
+
+
 def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True):
     """Split BEFORE calling by both complete wire size and task count. No truncation."""
     def request(batch):
@@ -327,17 +345,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             old_key=e.digest(req);old=Path(root)/'gpt'/old_key
             if not (old/'response.json').exists():
                 if (old/'started.json').exists():
-                    if not (old/'owner-recovery.json').exists():
-                        raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
-                    authority=json.loads((old/'owner-recovery.json').read_text())
-                    expected=Path(ports.root)/'gpt'/old_key/'transport'/'exit.json'
-                    if (authority.get('original_request_sha256')!=old_key or not authority.get('owner_direction')
-                            or authority.get('max_reissues')!=1 or authority.get('exit_path')!=str(expected)
-                            or authority.get('exit_sha256')!=e.digest(json.loads(expected.read_text()))
-                            or json.loads(expected.read_text()).get('error_type')!='TimeoutExpired'):
-                        raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
-                    if e.digest(json.loads((old/'request.json').read_text()))!=old_key:
-                        raise ValueError('original unknown request changed')
+                    authority=stopped_gpt_authority(root,ports,req)
                     req=eo.focused_request(req)
                     req['execution_recovery']={'original_request_sha256':old_key,'authority_sha256':e.digest(authority)}
                 else:req=eo.focused_request(req)
