@@ -79,7 +79,7 @@ def test_thursday_0900_reminds_only_missing_fields_and_once(fellowship):
     assert not any(r['key'].startswith('fellowship:reminder:') for r in agent.store.outbox())
     service.maintain(local('2026-11-12T09:00:00-06:00'))
     reminder=next(r for r in agent.store.outbox() if r['key'].startswith('fellowship:reminder:'))
-    assert '系列、序號、來源連結' in reminder['text'] and '主講、主題' not in reminder['text']
+    assert '尚缺：系列、序號\n' in reminder['text'] and '主講、主題' not in reminder['text']
     service.maintain(local('2026-11-12T12:00:00-06:00'))
     assert len([r for r in agent.store.outbox() if r['key'].startswith('fellowship:reminder:')])==1
 
@@ -208,3 +208,24 @@ def test_backend_does_not_accept_admin_history_before_activation(fellowship):
     old=ChatMessage(message_id='before-activation',group_id='999@g.us',sender_id='sender',sent_at='2026-11-04T12:00:00Z',text='下次王明帶')
     assert agent.store.receive(old) is False
     assert not agent.store.messages()
+
+
+def test_no_source_link_needed_for_complete_case_or_thursday_reminder(fellowship):
+    agent,service,entries=seed(fellowship)
+    patch(service,event(agent,'王明帶，主題饒恕，系列馬太福音18章，序號2'),
+          {'host':'王明','title':'饒恕','series':'馬太福音18章','sequence':2})
+    assert service.state()[0]['missing']==[]
+    assert service.state()[0]['data']['status']=='ready'
+    assert '來源連結（選填）' in service.request_text(service.cases()[0],entries['11/20/2026'])
+    service.maintain(local('2026-11-12T09:00:00-06:00'))
+    assert not any(r['key'].startswith('fellowship:reminder:') for r in agent.store.outbox())
+
+
+def test_existing_case_reconciles_ready_without_changing_fields_or_link_confirmation(fellowship):
+    agent,service,entries=seed(fellowship)
+    entries['11/20/2026']=FellowshipEntry(date='11/20/2026',host='王明',title='饒恕',series='馬太福音18章',sequence=2)
+    before=entries['11/20/2026'].model_dump()
+    service.maintain(local('2026-11-09T09:00:00-06:00'))
+    assert service.state()[0]['data']['status']=='ready'
+    assert 'sourceLinks' not in service.cases()[0]['data']['confirmed']
+    assert entries['11/20/2026'].model_dump()==before

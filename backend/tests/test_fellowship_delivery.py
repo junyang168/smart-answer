@@ -64,3 +64,17 @@ def test_email_catch_up_after_details_are_completed_and_stops_before_meeting(tmp
     monkeypatch.setenv('SMTP_HOST','test.invalid');monkeypatch.setattr(sys,'argv',['job','--catch-up'])
     job.main();assert len(calls)==expected
     if expected:job.main();assert len(calls)==1
+
+
+def test_email_allows_missing_unconfirmed_source_link_but_keeps_sequence_requirement(tmp_path):
+    import sqlite3
+    from backend.fellowship_delivery import ready_for_email
+    from backend.fellowship_reminder_job import FellowshipEvent
+    root=tmp_path/'sunday-assistant';root.mkdir()
+    with sqlite3.connect(root/'assistant.sqlite3') as db:
+        db.execute('create table fellowship_cases(target_day text,data text)')
+        db.execute('insert into fellowship_cases values (?,?)',('2026-11-20',json.dumps({'confirmed':{},'questions':[]})))
+    event=FellowshipEvent(date=date(2026,11,20),host='王明',title='饒恕',series='馬太福音18章',sequence=2)
+    assert ready_for_email(event,tmp_path)
+    event.sequence=None
+    assert not ready_for_email(event,tmp_path)
