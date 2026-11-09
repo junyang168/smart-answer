@@ -340,6 +340,10 @@ def commit_verified(store, root, *, source_fragments_only=False):
     result = json.loads((root / 'verification.json').read_text())
     frozen = json.loads((root / 'before.json').read_text())
     records, sources = frozen['records'], frozen['sources']
+    if result.get('human_source_guard') is not None:
+        from backend.pipeline.claim_human_source import assert_scope_current
+        with store.connect() as conn, conn.cursor() as cursor:
+            assert_scope_current(cursor, result['human_source_guard'])
     updates, fragments = result['updates'], result['new_fragments']
     retiring = result.get('retiring_keys', [])
     source_kind = result['version']
@@ -378,6 +382,7 @@ def commit_verified(store, root, *, source_fragments_only=False):
         save(root / 'commit-intent.json', {'change_set_id': plan.change_set_id,
              'fingerprint_sha256': plan.fingerprint_sha256})
         receipt = store.apply_plan(plan, expected_current_record_pins=pins,
+            **({'expected_current_human_source_scope':result['human_source_guard']} if result.get('human_source_guard') is not None else {}),
             expected_current_source_claims=result.get('source_claim_index'),
             **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
             metadata={'actor': source_kind, 'reason': result.get('commit_reason', 'Bottom-up semantic decisions and program-verified postimages'),

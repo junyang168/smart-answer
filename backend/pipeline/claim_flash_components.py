@@ -89,6 +89,7 @@ def check(root, ports, record_type, record, material, components, *, fragment_on
     state = {'record_type': record_type, 'record': visible,
              'original_text_excerpts': material['original_text_excerpts'],
              **({} if fragment_only else {'source_context': {p['paragraph_key']:p['text'] for p in material.get('nearby_paragraphs',[])}})}
+    state.update({k:material[k] for k in ('human_source_decisions','source_interpretation') if k in material})
     questions = {'record_fidelity': jevq.record_fidelity()}
     if components is not None:
         state['components'] = {str(i): c for i, c in enumerate(components)}

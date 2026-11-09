@@ -11,10 +11,15 @@ from backend.pipeline import claim_flash_common as f, claim_flash_components as 
 from backend.pipeline import claim_flash_coverage as coverage, claim_flash_questions as q
 from backend.pipeline import claim_flash_source as source, claim_flash_source_fill as fill
 from backend.pipeline import evidence_refresh as e
+from backend.pipeline import claim_human_source as human
 
 VERSION = 'claim_flash_grouped_evidence_v1'
 COLLECTIONS = {'evidence_steps','observations'}
 FIELDS = ('statement','speaker','stance','attribution','scripture_refs')
+SOURCE_INTERPRETATION = (
+    'human_source_decisions是已保存的人工來源澄清，只在applicability=current的指定段落內解釋原文。'
+    '按澄清核對所指意思，逐字引文仍保留原樣；不推定錄音字音、錯誤原因或Claim已獲批准。'
+    '未涵蓋的內容仍須正常核對，記錄自己聲稱有人工確認不能代替這份依據。')
 PROMPT = (
     '只處置Evidence/Observation本身，不審Claim、EvidenceStep論證、問題答案或節點關係。'
     'sources只包含已驗證的SourceFragments；不查整篇原文、不補未掛片段作為自身支持。'
@@ -79,15 +84,29 @@ def reference_visible(payload):
             'source_fragment_ids':e.evidence_fragment_ids(payload)}
 
 
-def material(key, records, sources):
+def material(key, records, sources, decisions=()):
     payload = records[key]['payload']
     value = e.material({**payload,'evidence_step_id':key},records,sources)
     # Deliberately do not use f.value: no between-fragment expansion or nearby paragraphs.
-    return {k:value[k] for k in ('fragments','original_text_excerpts')}
+    result = {k:value[k] for k in ('fragments','original_text_excerpts')}
+    paragraphs = {}
+    for fragment in value['fragments']:
+        sid = records['source_fragments/'+fragment['fragment_id']]['payload']['source_id']
+        paragraphs.setdefault(sid, []).append(fragment['paragraph_key'])
+    selected = human.scoped(decisions, paragraphs)
+    if selected:
+        projected = deepcopy(sources)
+        human.project(projected, selected)
+        facts = [fact for sid in sorted(projected) for fact in projected[sid].get('human_source_decisions', [])]
+        if any(fact['applicability'] != 'current' for fact in facts):
+            raise ValueError('human source clarification needs reconfirmation for changed paragraph')
+        result.update(human_source_decisions=facts, source_interpretation=SOURCE_INTERPRETATION)
+    return result
 
 
 def fingerprint(key, payload, value):
-    return e.digest({'key':key,'record':visible(payload),'fragments':value['fragments']})
+    return e.digest({'key':key,'record':visible(payload),'fragments':value['fragments'],
+        **({k:value[k] for k in ('human_source_decisions','source_interpretation')} if value.get('human_source_decisions') else {})})
 
 
 def patch_for(key, payload, edit):
@@ -170,9 +189,13 @@ def coverage_state(catalog):
 
 def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply):
     sid = next(iter(sources)); working = dict(records); updates = {}; outcomes = []; pending = []; values = {}; ready = {}
+    pool, _ = group_records(group, records, targets)
+    paragraphs = {sid: sorted(set(group['paragraph_keys']) | {p['paragraph_key'] for p in pool.values()})}
+    decisions = human.scoped(store.read_human_source_decisions([sid]), paragraphs) if store is not None else []
+    guard = {'paragraphs': paragraphs, 'entries': decisions}
     for key in targets:
         try:
-            values[key]=material(key,working,sources)
+            values[key]=material(key,working,sources,decisions)
         except (KeyError,ValueError) as exc:
             pending.append({'object_key':key,'layer':'source','reason':str(exc)});continue
         fp=fingerprint(key,working[key]['payload'],values[key]); accepted=root/'accepted'/(fp+'.json')
@@ -189,7 +212,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         answers=components.check(root/'fidelity',ports,key.split('/')[0],visible(working[key]['payload']),values[key],parts[key],fragment_only=True)
         if components.needs_disposition(answers):
             jobs.append({'job_id':key,'record':visible(working[key]['payload']),'sources':values[key]['fragments'],
-                         'components':parts[key],'jev':answers})
+                         'components':parts[key],'jev':answers,
+                         **{k:values[key][k] for k in ('human_source_decisions','source_interpretation') if k in values[key]}})
         else:ready[key]={'patch':{},'basis':'jev_precheck','reason':'本層逐項檢查無異議。'}
     for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
         replies=Edits.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
@@ -217,6 +241,15 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             valid[key]=p
         except (KeyError,ValueError):pass  # Invalid fragments are never offered as new support.
     state=coverage_state(catalog)
+    projected = deepcopy(sources)
+    human.project(projected, decisions)
+    facts = projected[sid].get('human_source_decisions', [])
+    if facts:
+        if any(fact['applicability'] != 'current' for fact in facts):
+            pending.append({'layer':'source','reason':'human source clarification needs reconfirmation for changed paragraph'})
+            units=[]
+        else:
+            state.update(human_source_decisions=facts,source_interpretation=SOURCE_INTERPRETATION)
     def coverage_fingerprint(current):
         return e.digest({'group_id':group['group_id'],'units':units,'state':current,
             'fragments':{k:{field:p.get(field) for field in ('fragment_id','paragraph_key','verbatim_excerpt','source_sha256')}
@@ -252,6 +285,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     grouped=[{'job_id':group['group_id'],'candidates':jobs}] if jobs else []
     for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),COVERAGE_PROMPT,
         shared={'records':{k:reference_visible(p) for k,p in catalog.items()},'writable_keys':targets,
+                **{k:state[k] for k in ('human_source_decisions','source_interpretation') if k in state},
                 'sources':{p['fragment_id']:{'paragraph_key':p['paragraph_key'],'quote':p['verbatim_excerpt']} for p in valid.values()}},semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
         edits=bundles[0].items;f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in jobs],'job_id')
@@ -293,7 +327,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if key in coverage_updates and post!=coverage_updates[key]:raise ValueError('coverage edits conflict on the same Evidence')
             coverage_updates[key]=post
             updates[key]=post;working[key]={**working.get(key,{}),'payload':post,'retired':False}
-            value=material(key,working,sources);fp=fingerprint(key,post,value)
+            value=material(key,working,sources,decisions);fp=fingerprint(key,post,value)
             decision={'postimage':visible(post),'fragment_ids':e.evidence_fragment_ids(post),'reason':edit.reason}
             path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest([job,decision])+'.json');e.save(path,decision)
             accepted=root/'accepted'/(fp+'.json')
@@ -303,6 +337,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         for accepted,proof in coverage_proofs:
             if not accepted.exists():e.save(accepted,proof)
         post_state=coverage_state(group_records(group,working,targets)[1])
+        post_state.update({k:state[k] for k in ('human_source_decisions','source_interpretation') if k in state})
         decision={'unit_outcomes':[x for x in outcomes if 'unit_id' in x], 'jev':answers,
                   'postimage_fingerprint':coverage_fingerprint(post_state)}
         path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest(decision)+'-accepted-outcome.json')
@@ -317,6 +352,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         'updates':{k:p for k,p in updates.items() if k not in records or p!=records[k]['payload']},'new_fragments':{},
         'outcomes':outcomes,'pending':pending,'applied':False,'claim_qualification':'not_granted',
         'commit_reason':'Grouped fragment-bound Evidence/Observation dispositions only'}
+    if store is not None:result['human_source_guard']=guard
     stage=root/'groups'/group['group_id']/e.digest({'before':{k:(v.get('revision'),v.get('content_sha256'),v['payload']) for k,v in frozen.items()},'result':result})
     if any(k.split('/')[0] not in COLLECTIONS for k in result['updates']):raise ValueError('Evidence layer write scope expanded')
     f.source_unchanged(sources);e.save(stage/'before.json',{'records':frozen,'sources':sources});e.save(stage/'verification.json',result)
