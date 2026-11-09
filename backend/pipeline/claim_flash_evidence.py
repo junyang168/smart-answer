@@ -289,8 +289,9 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if key in coverage_updates and post!=coverage_updates[key]:raise ValueError('coverage edits conflict on the same Evidence')
             coverage_updates[key]=post
             updates[key]=post;working[key]={**working.get(key,{}),'payload':post,'retired':False}
-            value=material(key,working,sources);fp=fingerprint(key,post,value);path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest(job)+'.json')
-            decision={'postimage':visible(post),'fragment_ids':e.evidence_fragment_ids(post),'reason':edit.reason};e.save(path,decision)
+            value=material(key,working,sources);fp=fingerprint(key,post,value)
+            decision={'postimage':visible(post),'fragment_ids':e.evidence_fragment_ids(post),'reason':edit.reason}
+            path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest([job,decision])+'.json');e.save(path,decision)
             accepted=root/'accepted'/(fp+'.json')
             coverage_proofs.append((accepted,{'fingerprint':fp,'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)}))
             outcomes.append({'unit_id':edit.job_id,'basis':'gpt_'+edit.action,'object_key':key,'reason':edit.reason})
@@ -298,9 +299,9 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         for accepted,proof in coverage_proofs:
             if not accepted.exists():e.save(accepted,proof)
         post_state=coverage_state(group_records(group,working,targets)[1])
-        path=root/'coverage-decisions'/coverage_fingerprint(state)/'accepted-outcome.json'
         decision={'unit_outcomes':[x for x in outcomes if 'unit_id' in x], 'jev':answers,
                   'postimage_fingerprint':coverage_fingerprint(post_state)}
+        path=root/'coverage-decisions'/coverage_fingerprint(state)/(e.digest(decision)+'-accepted-outcome.json')
         e.save(path,decision)
         accepted=root/'coverage-accepted'/(coverage_fingerprint(post_state)+'.json')
         if not accepted.exists():e.save(accepted,{'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)})
@@ -308,11 +309,11 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     for key in targets:
         read_keys.update('source_fragments/'+fid for fid in e.evidence_fragment_ids(records[key]['payload']))
     frozen={k:records[k] for k in read_keys if k in records}
-    stage=root/'groups'/group['group_id']/e.digest({k:(v.get('revision'),v.get('content_sha256'),v['payload']) for k,v in frozen.items()})
     result={'version':VERSION,'status':'needs_attention' if pending else 'verified','source_id':sid,'group_id':group['group_id'],
         'updates':{k:p for k,p in updates.items() if k not in records or p!=records[k]['payload']},'new_fragments':{},
         'outcomes':outcomes,'pending':pending,'applied':False,'claim_qualification':'not_granted',
         'commit_reason':'Grouped fragment-bound Evidence/Observation dispositions only'}
+    stage=root/'groups'/group['group_id']/e.digest({'before':{k:(v.get('revision'),v.get('content_sha256'),v['payload']) for k,v in frozen.items()},'result':result})
     if any(k.split('/')[0] not in COLLECTIONS for k in result['updates']):raise ValueError('Evidence layer write scope expanded')
     f.source_unchanged(sources);e.save(stage/'before.json',{'records':frozen,'sources':sources});e.save(stage/'verification.json',result)
     return e.commit_verified(store,stage) if apply else e.publish(stage,result)

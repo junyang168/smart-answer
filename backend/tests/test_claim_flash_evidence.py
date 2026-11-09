@@ -335,3 +335,30 @@ def test_coverage_gpt_receives_position_title_as_readonly_existing_content(tmp_p
             return super().repair(request)
     result=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],tmp_path/'run',KeepPosition(),saved_inventory(tmp_path,sources,[unit]),apply=False)
     assert all(not k.startswith(('position_nodes/','observations/')) for k in result['updates'])
+
+
+def test_corrected_reference_input_retains_prior_unapplied_disposition(tmp_path):
+    records,sources,plan=setup(tmp_path)
+    records['evidence_steps/E']['payload']['statement']='既有表述。'
+    records['position_nodes/P']={'retired':False,'payload':{'position_id':'P','title':'原參考內容。','source_fragment_ids':['F0']}}
+    units=[{'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':t} for t in ['候選一。','候選二。']]
+    class Pending(Ports):
+        def repair(self,request):
+            if request['input']['task']!='evidence_coverage_repair':return super().repair(request)
+            title=request['input']['records']['position_nodes/P']['title']
+            return {'items':[{'job_id':'A','items':[
+                {'job_id':'U0','action':'enrich','record_key':'evidence_steps/E','record_type':'evidence_steps',
+                 'fragment_ids':['F0'],'statement':'增補'+title,'reason':'依完整參考判定'+title},
+                {'job_id':'U1','action':'needs_source','record_key':'','record_type':'observations','fragment_ids':[],'reason':'待補來源。'}]}]}
+    root=tmp_path/'run';previous=saved_inventory(tmp_path,sources,units)
+    first=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],units,root,Pending(),previous,apply=False)
+    originals={p:p.read_bytes() for p in (root/'coverage-decisions').glob('*/*.json')}
+    assert first['status']=='needs_attention' and len(originals)==1
+    records['position_nodes/P']['payload']['title']='補齊後參考內容。'
+    second=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],units,root,Pending(),previous,apply=False)
+    assert second['status']=='needs_attention'
+    assert second['updates']['evidence_steps/E']['statement']!=first['updates']['evidence_steps/E']['statement']
+    assert all(p.read_bytes()==raw for p,raw in originals.items())
+    assert len(list((root/'coverage-decisions').glob('*/*.json')))==2
+    assert len(list((root/'groups/A').glob('*/verification.json')))==2
+    assert not list((root/'coverage-accepted').glob('*.json'))
