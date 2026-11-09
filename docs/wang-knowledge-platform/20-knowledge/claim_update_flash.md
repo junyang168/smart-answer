@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
-> **與代碼對齊**：部分；2026-11-09 核對 #702 工作樹。共用分組、原文及限定Evidence／Observation模式，以及獨立Claim statement、論證路線、組內Claim關係、漏抽模式已實作；完整階段串接與同範圍成本對照仍未完整落實，見第 7 節。#723 於 1144a42f 同步共用內容品質規則；不追認舊結果已受新版提示核對。
+> **與代碼對齊**：部分；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -83,6 +83,10 @@ Creation 與 Flash Update 共用知識內容標準：statement、text、title、
 不由這項任務越權刪除。漏抽 Claim 任務也查教授另有論據支持的解經原則，不能由單例自行概括普遍原則。
 關係 reason 只簡短描述教授的論證作用，不整段重抄端點，也不混入「尚未接入路線」等維護過程。
 這些要求加入既有任務，不增加審閱輪次、新模型角色或自動刪除門檻。
+
+逐個動作保留原文主詞／對象，不因同行或同場而擴大主體；先在 Creation 防錯，Update 的既有忠實性分類亦覆蓋此維度。
+Claim anchor 的角色只來自片段自身事實或明確原文發言標籤，不能繼承 Evidence 整體 speaker／stance。
+教授發言標籤本身也不證明教授採納該片段，資訊不足保持未定；不另加模型猜測。
 
 Jev 離散判斷直接選有業務含義的分類，不只問「是否有錯／是否矛盾」。各分類題獨立作答，
 程式比較現有欄位或檢查通過類別；不同、含混及材料不足都交 GPT，不自動改資料。
@@ -518,6 +522,10 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 整篇收尾只對帳漏項、未完成處置與交易，不重跑已完成各組，也不建立另一套資格系統。
 
 ## 7. 實作與使用
+
+#723 已有薄的共用分層入口 `backend.pipeline.claim_flash_flow`：完整 candidate 經 `run_candidate` 在專用 socket-only PostgreSQL 執行各層，匯出實際 SQL 後像及已保存證明；不接正式庫 URL 或授予舊資格。
+既有來源 refresh 則明確傳入 store／source_id。詳見 [Creation／Flash 接點](../10-extraction/claim_creation_flash_design.md#4-creation-完成與-flash-的接點)。
+已完成的 [單組測試與限制](../10-extraction/claim_creation_flash_test_20261109.md#7-creation-防錯與完整-update-接續99ae359a) 分開列 Creation、編譯修復及 Update；不能把分階段接續稱作同一版本無干預的一次全跑。
 
 保存結果的只讀接線入口為`backend.pipeline.claim_flash_progress`。
 manifest指向已保存的共享分組、原文、Evidence分組對帳及各Claim階段結果，逐檔綁定SHA。

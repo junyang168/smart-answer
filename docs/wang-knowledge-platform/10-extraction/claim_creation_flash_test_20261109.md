@@ -72,3 +72,30 @@ Codex 對照固定原文讀完 3 條 Claim、19 條下層表述、7 條 Question
 2. **既有程式派生的角色標籤問題**：CL0003 的 S0107、S0108 是聽眾問句，Claim anchor 卻有 `speaker=professor`、`assertive=true`。已核實 `claim_refresh.anchors` 將 Evidence 整體 speaker／stance 複製給全部支持片段，沒有區分作為上下文的聽眾發言。Evidence 的教授判斷本身正確，這不代表每個來源片段都由教授說出；需處理程式派生責任，不能靠模型重寫正確 Claim。
 
 完整首次包 SHA：`ffaac65f9754721e6c56aaf813eda9273a838bb0185868aa9074704669556dc3`。`fresh-v4/summary.json`、`mechanical-source-verification.json`、`quality-evaluation.json` 保存時耗、機械核對及具體發現。此次結論是**生成品質改善、已形成完整候選，但仍有待校正項**；不宣稱 v4 全流程或正式庫資格完成。
+
+## 7. Creation 防錯與完整 Update 接續（99ae359a）
+
+使用者要求優先在 Creation 防錯，並明確要求測試同時涵蓋 Update。共用品質指令補入逐個動作保留主詞／對象，Jev 原有忠實性分類亦明列主詞與動作對象改變。沒有新增題型、模型角色或審閱輪。來源標籤則由共用 `claim_anchor_roles.source_roles` 機械派生，Creation 編譯與 Update 均使用，不繼承 Evidence 整體發言角色／採納立場。單一標籤也不證明教授採納每個片段；未知資料保持未定。
+
+**Creation 單項實測。** 對 S0086 用一般材料生成任務重測，不提供錯誤摘要，新規則直接生成「第二天他們從伯大尼出來，耶穌餓了」，沒有擴大到門徒。結構、逐字引文、逐句清單均通過。此額外反例使用 23,509 tokens，不混入首次六個生成任務的數據，也不聲稱整組已用最新主詞規則重新生成。
+
+**編譯器修復。** 保留第 6 節首次候選及六份原答覆，零模型重新投影角色：兩個聽眾問句正確標為 audience／非教授肯定，其他沒有片段級依據的採納標籤保持未定。14 個 anchor 的派生欄位發生變化，其他知識內容、片段、時間碼及來源完全不變。`fresh-v4/anchor-projection/projection.json` 綁定原包、改後包、允許欄位及固定版本。這是已證明編譯缺陷的重編譯，不是假裝舊答覆使用了新 prompt。
+
+**完整 Update。** 以重編譯後的完整候選啟動全新隔離 SQL，執行原文查漏、Evidence／Observation、Claim statement、論證連接、Claim 關係及漏抽。第一次候選的主詞歧義刻意原樣保留，測 Update 實際能否修正，不預先填好答案。結果完成、無 pending，沒有增加或退役 Claim，三條 Claim 的 statement 全部不變，SourceFragments 也未改動。
+
+| 階段 | 執行時間 | 實際總 tokens |
+| --- | --- | --- |
+| 首次 Creation | 473.021 秒 | GPT 167,747 |
+| 完整 Update | 274.813 秒 | GPT 297,167；Jev 120,640 |
+| 正常兩階段相加 | 747.834 秒，約 12 分 28 秒 | 585,554 |
+| 額外 Creation 主詞反例 | 未獨立記錄完整階段時長 | GPT 23,509；加上本項共 609,063 |
+
+以上時間是兩個執行階段相加，不包含中間修程式、單元測試與等待使用者的時間。不是同一版本無干預從頭一次跑完的宣稱。Update 有 12,416 cached input tokens，已在 input 中，不重複計數；全部無 Opus，沒有可核實的美元帳單。正常兩階段的 GPT 合計 464,914 tokens，Jev 另計；首次 Creation 與 Update 的成本分開可追溯。
+
+實際內容改動只有：一筆 Evidence 的引用角色改為 quoted_source；兩條 Observation 的主詞表述修訂，其中真正的飢餓主體擴大已改成「他們從伯大尼出來，耶穌餓了」，另一條保守保留原文「他們」的指涉。另補一條下層 explains、兩條 Claim 關係（普通希臘文提供字義解讀背景；具體字義個案支持解經原則）。不把全部變更都算成嚴重內容錯誤。
+
+**預檢限制。** Jev 對飢餓主體那條選 faithful／component supported，並沒有獨立抓出主詞歧義；它因另一個 component 疑點將該筆送到 GPT，GPT 按本任務的完整忠實性要求修正了主詞。這證明這次 Update 最終修對，但不能證明 Jev 已可靠攔截所有同類歧義。Creation 預防、Jev 分流及 GPT 處置的效果須分開評估，不能把最終修好算成 Jev 命中，也不因此新增全面模型複審。
+
+驗收：678 項回歸通過（52.47 秒）；完成結果零模型重入；完整匯出逐筆等於 SQL；三條 Claim 主張不變；SourceFragments 不變；聽眾標籤正確；隔離 PostgreSQL 已停止；正式寫入為 0。最終包 SHA `88e922ef2f952beb4b0bf20ad991886e754025ce4fe3ccba8dab3f88135daade`，完整依據在 `fresh-v4/end-to-end-acceptance.json`。正式庫接收 authority 邊界仍按設計，不標舊審閱資格通過。
+
+後續防回歸 c9438256：新增「新來源沒有角色資料時，不抹除可能由人工確認的既有復現註記」控制例。最終同範圍回歸 **679 passed，53.23 秒**。離線重編譯逐筆證明候選投影未改；已保存 Update 的論證階段沒有改 Claim occurrences，亦沒有新建 Claim，因此此保留分支不改本次模型輸入／後像。檢查保存於 `fresh-v4/existing-role-preservation-check.json`，沒有新模型調用，也不重播已完成內容階段。
