@@ -128,6 +128,42 @@ def coverage_edits(edits,jobs):
     return edits
 
 
+def covered_handoff(root,job,records,sources,ports):
+    """Consume a focused successor; never rewrite the original handoff reply."""
+    folder=Path(root)/'handoff-resolutions'/e.digest(job)
+    if not (folder/'resolution.json').exists():return None
+    context=json.loads((folder/'input.json').read_text());saved=json.loads((folder/'resolution.json').read_text())
+    sid=next(iter(sources))
+    if (context['source']!=sources[sid]['file'] or context['unit']!=job
+            or saved['input_sha256']!=e.digest(context) or saved['database_writes']!=0):
+        raise ValueError('coverage handoff successor source/input differs')
+    for key,expected in context['material'].items():
+        p=records[key]['payload']
+        projected={field:p[field] for field in ('statement','title','speaker','stance','attribution','scripture_refs') if field in p}
+        value=e.material({**p,'evidence_step_id':key,'statement':p.get('statement',p.get('title',''))},records,sources)
+        if expected!={'record':projected,'sources':value['fragments']}:
+            raise ValueError('coverage handoff successor material changed')
+    original=Path(context['original_request']['path'])
+    if (e.digest(json.loads(original.read_text()))!=context['original_request']['sha256']
+            or e.digest(json.loads((original.parent/'response.json').read_text()))!=context['original_reply_sha256']):
+        raise ValueError('original coverage handoff changed')
+    replies=[]
+    for path in folder.glob('gpt/*/request.json'):
+        req=json.loads(path.read_text());reply=path.parent/'response.json'
+        if (req['identity']!=ports.identity['gpt'] or req['input']['task']!='evidence_coverage_handoff_disposition'
+                or len(req['input']['jobs'])!=1 or e.digest(req)!=path.parent.name or not reply.exists()):continue
+        actual=req['input']['jobs'][0]
+        if actual['unit']==job['unit'] and actual['existing_records']==context['material']:
+            replies.extend(json.loads(reply.read_text())['items'])
+    verdict=saved['verdict']
+    if replies!=[verdict] or verdict['job_id']!=job['job_id']:
+        raise ValueError('coverage handoff successor lacks its exact saved model reply')
+    if verdict['action']!='covered':return None
+    if not verdict['record_keys'] or not set(verdict['record_keys'])<=set(context['material']):
+        raise ValueError('coverage handoff successor cites an unprovided record')
+    return {**verdict,'resolution_path':str(folder/'resolution.json'),'resolution_sha256':e.digest(saved)}
+
+
 def visible(payload):
     return {k:payload[k] for k in FIELDS if k in payload}
 
@@ -349,6 +385,10 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:
+                job=next(j for j in jobs if j['job_id']==edit.job_id)
+                resolution=covered_handoff(root,job,records,sources,ports)
+                if resolution:
+                    outcomes.append({'unit_id':edit.job_id,'basis':'gpt_handoff_resolution',**resolution});continue
                 pending.append({'unit_id':edit.job_id,'layer':'source' if edit.action=='needs_source' else 'handoff','reason':edit.reason});continue
             job=next(j for j in jobs if j['job_id']==edit.job_id)
             chosen={k:p for k,p in valid.items() if p['fragment_id'] in edit.fragment_ids}
