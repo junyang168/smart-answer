@@ -171,7 +171,7 @@ def literal(item, paragraphs, receipts):
     pk = item['paragraph_key']
     if pk not in paragraphs:
         raise ValueError('coverage quoted unprovided paragraph')
-    raw = item['quote']; exact = e.source_excerpt(raw, paragraphs[pk]['text'])
+    raw = item['quote']; exact = e.source_excerpt(raw, paragraphs[pk]['text'], contract=e.SPAN_CONTRACT)
     if not exact or exact not in paragraphs[pk]['text']:
         raise ValueError('coverage quote is not literal source text')
     if raw != exact:
