@@ -72,7 +72,11 @@ def test_four_outcomes_share_one_call_and_are_not_reviewed_again(campaign):
     store,root,_,plan,previous=campaign;ports=Ports();before=store.compile_package()
     result=eo.run(store,'S',plan,root/'run',ports,previous,apply=True)
     assert result['status']=='completed' and len(fidelity_calls(ports))==1
-    assert len(fidelity_calls(ports)[0]['input']['jobs'])==4
+    first=fidelity_calls(ports)[0]
+    assert len(first['input']['jobs'])==4
+    assert first['schema']['properties']['items']['minItems']==4
+    assert first['schema']['properties']['items']['maxItems']==4
+    assert first['schema']['$defs']['CompletionEdit']['properties']['job_id']['enum']==[j['job_id'] for j in first['input']['jobs']]
     assert all(req['input']['task']!='source_binding_completion' for role,req in ports.calls if role=='gpt')
     assert store.get_record_state('evidence_steps','E')['payload']['statement']=='不知道神的旨意就無法遵行。'
     assert store.get_record_state('evidence_steps','KEEP')['payload']==next(p for p in before['evidence_steps'] if p['evidence_step_id']=='KEEP')
@@ -328,4 +332,6 @@ def test_seven_small_records_split_into_four_and_three_despite_fitting_bytes(cam
     assert result['status']=='completed'
     requests=fidelity_calls(ports)
     assert [len(req['input']['jobs']) for req in requests]==[4,3]
+    assert [req['schema']['properties']['items']['minItems'] for req in requests]==[4,3]
+    assert [req['schema']['properties']['items']['maxItems'] for req in requests]==[4,3]
     assert all(len(req['input']['source_paragraphs'])==1 for req in requests)

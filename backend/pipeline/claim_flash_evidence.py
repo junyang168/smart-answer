@@ -82,6 +82,16 @@ def completion_input(data):
     return data
 
 
+def completion_schema(schema,job_ids):
+    """Require the first reply to cover the batch, not merely its recovery reply."""
+    result=deepcopy(schema);array=result['properties']['items']
+    array.update(minItems=len(job_ids),maxItems=len(job_ids))
+    definition=array['items']
+    if '$ref' in definition:definition=result['$defs'][definition['$ref'].rsplit('/',1)[1]]
+    definition['properties']['job_id']['enum']=job_ids
+    return result
+
+
 def assert_candidate_context(decision,all_decisions):
     context=decision.get('source_context')
     if context and human.scoped(all_decisions,context['paragraphs'])!=context['entries']:

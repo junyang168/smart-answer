@@ -351,9 +351,14 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
     def request(batch):
         data={'task': task, 'jobs': batch, **(shared or {})}
         if project_input:data=project_input(deepcopy(data))
-        return {'identity': ports.identity['gpt'],
+        result={'identity': ports.identity['gpt'],
                 'system': instruction+('\n'+SEMANTIC_REVIEW if semantic_review else ''),
                 'input': data, 'schema': schema}
+        if task=='evidence_fidelity_repair' and data.get('source_completion_contract'):
+            from backend.pipeline import claim_flash_evidence as eo
+            if data['source_completion_contract']==eo.COMPLETION_CONTRACT:
+                result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
+        return result
     batches, batch = [], []
     for job in jobs:
         trial = batch+[job]
