@@ -2,7 +2,7 @@
 
 > **讀者**：Developer、流程設計者
 > **類型**：流程
-> **狀態**：當前流程；#702 已有獨立入口與隔離測試，尚未正式啟用於內容批次
+> **狀態**：當前流程；已有獨立入口、隔離測試及指定來源的正式 refresh，不授予舊 Claim／CVP 資格
 > **與代碼對齊**：部分；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
@@ -545,6 +545,15 @@ SQL transaction 後精確回讀；只增反向使用者等上層連接，不使�
 #723 已有薄的共用分層入口 `backend.pipeline.claim_flash_flow`：完整 candidate 經 `run_candidate` 在專用 socket-only PostgreSQL 執行各層，匯出實際 SQL 後像及已保存證明；不接正式庫 URL 或授予舊資格。
 既有來源 refresh 則明確傳入 store／source_id。詳見 [Creation／Flash 接點](../10-extraction/claim_creation_flash_design.md#4-creation-完成與-flash-的接點)。
 已完成的 [單組測試與限制](../10-extraction/claim_creation_flash_test_20261109.md#7-creation-防錯與完整-update-接續99ae359a) 分開列 Creation、編譯修復及 Update；不能把分階段接續稱作同一版本無干預的一次全跑。
+
+來源局部輸出只包含本篇實際資料。直接引用的外部知識節點由唯讀 SQL 按 ID 批量核對存在、未退役、版本及與本篇的實際反向連接，
+以 `external_reference_pins` 保存修訂與內容 SHA；不展開其私人證據圖，不擴大目標或宣稱外部內容已審閱。
+輸出驗證可使用這些獨立查證的節點身份，但普通整包匯入仍須完整閉合，不信任包內自行聲明的外部 ID。
+本篇片段、來源版本及 Claim／Evidence 雙向一致性仍作原有嚴格校驗；真正缺失、退役、類型錯配、連接不一致或 ID 衝突不得以外部引用名義放行。
+
+Evidence 層的 `result.json` 是可更新的進度索引。完成與接續綁定其不可變內容快照，
+不把合法的共享影響核對當作歷史審閱遭改動。逐組審閱與交易收據仍嚴格綁定；
+舊停止點只有在原摘要完整保存在原結果且 SHA 一致時才可復用，不能用新摘要取代舊判定。
 
 保存結果的只讀接線入口為`backend.pipeline.claim_flash_progress`。
 manifest指向已保存的共享分組、原文、Evidence分組對帳及各Claim階段結果，逐檔綁定SHA。
