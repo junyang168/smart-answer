@@ -90,3 +90,20 @@ def test_outer_evidence_runner_admits_only_the_authorized_timeout_then_commits(s
     assert result['status']=='completed'
     assert store.get_record_state('evidence_steps','E')['payload']['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
     assert not (old/'response.json').exists()
+
+
+def test_fused_gpt_uses_shared_jev_role_definitions_and_legacy_prompt_is_unchanged(monkeypatch):
+    from backend.pipeline import claim_flash_questions as q
+    for focused in (False,True):
+        prompt=eo.completion_prompt(focused)
+        assert 'record.statement' in prompt and '記錄本身提出問題' in prompt
+        for field in ('speaker','stance'):
+            for option,meaning in q.ROLES[field][1].items():
+                assert option in prompt and meaning in prompt
+    # Updating the authoritative definition changes both consumers, rather
+    # than allowing a copied GPT option list to drift away from Jev.
+    monkeypatch.setitem(q.ROLES['stance'][1],'asserted','共用定義測試')
+    assert q.role('stance','測試')['criteria']['asserted']=='共用定義測試'
+    assert '共用定義測試' in eo.completion_prompt(True)
+    legacy={'system':eo.PROMPT,'identity':{},'input':{'task':'evidence_fidelity_repair','jobs':[job()]},'schema':{}}
+    assert eo.focused_request(legacy)['system']==eo.FOCUSED_PROMPT

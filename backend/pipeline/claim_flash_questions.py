@@ -3,6 +3,7 @@
 Guidance: https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md
 Question ids are invisible to Jev. Each instruction names its own subject.
 """
+import json
 
 CONTRACT = 'claim_flash_classification_v4'
 LOOKUP_UNCERTAINTY_FLOOR = .25  # Existing routing policy; not tuned by this change.
@@ -27,6 +28,18 @@ ROLES = {
     'questioner': ('這個問題由誰提出？',
                    {'professor':'教授設問。','audience':'聽眾提問。','quoted_source':'引述別人的問題。',
                     'mixed':'多方共同提出，不能歸一位。','uncertain':'無法確定。'})}
+
+
+def gpt_role_rules():
+    """One option vocabulary for Jev and the GPT disposition, not two taxonomies."""
+    options={field:{'question':ROLES[field][0],'choices':ROLES[field][1]} for field in ('speaker','stance')}
+    return ('分類選項與Jev共用，按以下定義選擇，不另造標籤：'
+            +json.dumps(options,ensure_ascii=False,separators=(',',':'))+
+            'stance針對record.statement所表達的完整判斷，不按原文問句句型、問號或個別否定詞分類。'
+            '「描述教授發問的陳述」不同於「記錄本身提出問題」：肯定地描述其發問行為可為asserted；'
+            '只有記錄本身保存材料中尚未回答的疑問才是questioned。'
+            '摘要若表達教授否定某推論，教授採納這個否定判斷，應為asserted，不能因否定詞選opposed。'
+            '發言者是quoted_source或audience時，stance按該發言來源的立場理解，不作平台的神學判斷。')
 
 
 def choice(instruction, criteria):

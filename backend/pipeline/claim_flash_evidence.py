@@ -65,7 +65,7 @@ def completion_prompt(focused=False):
     base=base.replace('sources只包含已驗證的SourceFragments；不查整篇原文、不補未掛片段作為自身支持。','')
     base=base.replace('缺少來源用needs_source交回原文層，','')
     base=base.replace('缺上下文時保留並交接，','必要上下文先核對所給候選，')
-    return base+COMPLETION_RULES
+    return base+COMPLETION_RULES+q.gpt_role_rules()
 
 
 def completion_input(data):
