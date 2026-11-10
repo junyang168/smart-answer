@@ -32,6 +32,18 @@ def test_source_stage_does_not_judge_or_change_statement_roles_or_qualification(
     assert not result['calibration_candidates']['updates'] and (records, sources) == before
 
 
+def test_repeated_fragment_reference_has_only_mechanical_calibration(tmp_path):
+    records,sources=fixture(tmp_path)
+    payload=records['evidence_steps/E']['payload']
+    payload['source_fragment_ids']=['F0','F0']
+    before=deepcopy(payload)
+    result=source.verify(records,sources,'S')
+    assert result['status']=='calibration_available'
+    post=result['calibration_candidates']['updates']['evidence_steps/E']
+    assert post=={**before,'source_fragment_ids':['F0']}
+    assert payload==before and result['database_writes']==0
+
+
 def test_unique_move_returns_binding_preview_without_changing_shared_history(tmp_path):
     records, sources = fixture(tmp_path, ['別的內容。', '教授原話。'], [('S0002', '教授原話。')])
     records['source_fragments/F0']['payload']['paragraph_key'] = 'S0001'

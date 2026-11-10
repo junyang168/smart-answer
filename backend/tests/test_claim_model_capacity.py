@@ -181,6 +181,32 @@ def test_explicit_stopped_quarantine_preserves_unknown_and_never_retries(tmp_pat
     with gate.call('opus',tmp_path/'different'):returned(tmp_path/'different')
 
 
+@pytest.mark.parametrize('fault',[None,'tampered','wrong_error'])
+def test_stopped_timeout_can_release_capacity_without_authorizing_retry(tmp_path,fault):
+    import hashlib
+    gate=capacity(tmp_path);lost=tmp_path/'timed-out'
+    with gate.call('gpt',lost):
+        lost.mkdir();(lost/'invocation.json').write_text('{}')
+        (lost/'stdout.log').write_text('{"type":"turn.started"}')
+        (lost/'stderr.log').write_text('')
+        files={n:hashlib.sha256((lost/n).read_bytes()).hexdigest() for n in ('stdout.log','stderr.log')}
+        (lost/'exit.json').write_text(json.dumps({'returncode':None,'error_type':'TimeoutExpired',
+                                                'finished_at':'2026-11-09T20:39:07Z','files':files}))
+    if fault=='tampered':(lost/'stdout.log').write_text('changed')
+    if fault=='wrong_error':
+        receipt=json.loads((lost/'exit.json').read_text());receipt['error_type']='OSError'
+        (lost/'exit.json').write_text(json.dumps(receipt))
+    if fault:
+        with pytest.raises(ValueError):gate.quarantine_stopped('gpt',lost)
+    else:
+        before={p.name:p.read_bytes() for p in lost.iterdir()}
+        proof=gate.quarantine_stopped('gpt',lost)
+        assert proof['result_state']=='unknown' and not proof['retry_authorized']
+        assert {p.name:p.read_bytes() for p in lost.iterdir()}==before
+        with pytest.raises(CapacityUnavailable):
+            with gate.call('gpt',lost):pytest.fail('old invocation repeated')
+
+
 @pytest.mark.parametrize('defect',['live','quota','wrong_artifacts','returned'])
 def test_stopped_quarantine_refuses_live_unrelated_and_settled_calls(tmp_path,defect):
     import fcntl

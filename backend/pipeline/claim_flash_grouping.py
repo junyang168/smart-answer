@@ -63,7 +63,9 @@ def _headings(records, source, sid):
             for h in projection.headings]
 
 
-def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic_groups=None):
+DEFAULT_MAX_CLAIMS = 10
+
+def build(records, sources, source_id, *, claim_ids=None, max_claims=DEFAULT_MAX_CLAIMS, semantic_groups=None, allow_claim_batches=False):
     """Partition one sermon, minimizing cross-group resources and direct links.
 
     Use heading cuts first; add paragraph cuts only where the Claim limit
@@ -192,9 +194,14 @@ def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic
     for change in delta:
         value += change; costs.append(value)
     owned_at = Counter(placement[k] for k in targets if k in placement)
+    # Lower-layer ownership remains paragraph-based. An indivisible paragraph
+    # may require several sequential upper-layer tasks, never parallel copies
+    # of the source or Evidence review.
+    task_counts = {n: min(count, max_claims) if allow_claim_batches else count
+                   for n, count in owned_at.items()}
     prefix = [0]
     for n in range(len(paragraphs)):
-        prefix.append(prefix[-1]+owned_at[n])
+        prefix.append(prefix[-1]+task_counts.get(n, 0))
     heading_cuts = {h['boundary'] for h in headings if 0 < h['boundary'] < len(paragraphs)}
     boundaries = sorted({0, len(paragraphs)} | heading_cuts)
     # An oversized heading section can be subdivided, but its title remains a
@@ -290,6 +297,13 @@ def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic
         group['fragment_keys'] = sorted({fk for k in material_nodes for fk in fragments[k]})
         for field in ['claim_ids', 'lower_record_keys', 'relation_keys', 'external_reference_ids']:
             group[field] = sorted(set(group[field]))
+        if len(group['claim_ids']) > max_claims:
+            count=len(group['claim_ids']);parts=(count+max_claims-1)//max_claims
+            width,extra=divmod(count,parts);offset=0;batches=[]
+            for part in range(parts):
+                stop=offset+width+(part<extra)
+                batches.append(group['claim_ids'][offset:stop]);offset=stop
+            group['sequential_claim_batches']=batches
         group['record_keys'] = sorted(own | ref | set(group['fragment_keys']) | set(group['relation_keys']))
     # Read/read overlap also forbids independent execution. Dependencies are
     # listed as earlier groups to await; this module starts no workers.
@@ -490,10 +504,11 @@ def refine(records, sources, plan, root, ports):
     return result
 
 
-def save(store, source_id, root, *, claim_ids=None, max_claims=8, ports=None):
+def save(store, source_id, root, *, claim_ids=None, max_claims=DEFAULT_MAX_CLAIMS, ports=None, allow_claim_batches=False):
     """Read the existing source-local census; write only a reviewable plan."""
     records, sources = f.load_source(store, source_id)
-    plan = build(records, sources, source_id, claim_ids=claim_ids, max_claims=max_claims)
+    plan = build(records, sources, source_id, claim_ids=claim_ids, max_claims=max_claims,
+                 allow_claim_batches=allow_claim_batches)
     root = Path(root)
     # Bind the actual source-local inputs before any optional model dispatch.
     # Resuming a plan is not permission to upgrade its model or change its scope.
@@ -502,9 +517,10 @@ def save(store, source_id, root, *, claim_ids=None, max_claims=8, ports=None):
         'boundary_contract': BOUNDARY_CONTRACT if ports is not None else None,
         'input_sha256': e.digest({k: r['payload'] for k, r in records.items()}),
         'claim_ids': plan['target_claim_ids'], 'max_claims': max_claims,
+        'allow_claim_batches': allow_claim_batches,
         'model': ports.identity['gpt'] if ports is not None else None})
     e.save(root/'structural-groups.json', plan)
-    if ports is not None:
+    if ports is not None and not any(g.get('sequential_claim_batches') for g in plan['groups']):
         plan = refine(records, sources, plan, root, ports)
     e.save(root/'shared-groups.json', plan)
     if not plan['pending']:

@@ -17,6 +17,7 @@ from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_relation_refresh as relations
 from backend.pipeline import claim_context_refresh as attached
 from backend.api.canonical_repository.claim_identity_allocation import reserve
+from backend.pipeline.claim_anchor_roles import source_roles
 
 VERSION = 'claim_bottom_up_refresh_v1'
 UNCERTAIN_IDENTITY = '__uncertain_identity__'
@@ -201,8 +202,19 @@ PROMPT = (
     '只輸出必要修正或新候選；ID 和雙向連結由程式處理。')
 
 
-def anchors(eids, records, sid):
+def anchors(eids, records, sid, *, source_binding=None):
     result = []
+    paragraphs = {}
+    doc = records.get('source_documents/'+sid, {}).get('payload', {})
+    if doc.get('source_path') and Path(doc['source_path']).is_file():
+        binding={'path':doc['source_path'],'file_sha256':doc.get('source_file_sha256')}
+        if source_binding is not None:
+            from backend.pipeline.source_editorial_transition import verify_current_source_binding
+            if verify_current_source_binding(binding)!=source_binding:
+                raise ValueError('Claim occurrence source binding differs from exact editorial proof')
+            binding=source_binding
+        source = e.source_snapshot(binding,source=doc)
+        paragraphs = {key:value['text'] for key,value in source['paragraphs'].items()}
     for eid in eids:
         evidence = records['evidence_steps/' + eid]['payload']
         for fid in e.evidence_fragment_ids(evidence):
@@ -213,14 +225,14 @@ def anchors(eids, records, sid):
                 continue
             result.append({'evidence_id': eid, 'source_fragment_id': fid,
                 'paragraph_key': f['paragraph_key'], 'media_time': f.get('media_time'),
-                'media_end_time': f.get('media_end_time'), 'speaker': evidence.get('speaker'),
-                'stance': evidence.get('stance'), 'assertive': evidence.get('stance') == 'asserted',
+                'media_end_time': f.get('media_end_time'),
+                **source_roles(f, paragraphs.get(f['paragraph_key'])),
                 'proposed_highlight': {'text': f['verbatim_excerpt'], 'status': 'proposed'}})
     return [{'source_id': sid, 'anchors': result}]
 
 
-def refresh_occurrences(claim, eids, records, sid):
-    current = anchors(eids, records, sid)
+def refresh_occurrences(claim, eids, records, sid, *, source_binding=None):
+    current = anchors(eids, records, sid,source_binding=source_binding)
     old = claim.get('occurrences', [])
     if any(o.get('source_id') not in source_aliases(records, sid) for o in old):
         raise ValueError('legacy cross-source Claim requires explicit reconciliation')
@@ -238,6 +250,15 @@ def refresh_occurrences(claim, eids, records, sid):
             match = matches[0]
             for field in ['source_fragment_id', 'paragraph_key', 'media_time', 'media_end_time']:
                 anchor[field] = match[field]
+            # Missing new source facts cannot disprove an existing annotation
+            # (which may have a human origin). Correct only what the source
+            # establishes; never newly infer roles for unlabelled fragments.
+            prior_speaker = anchor.get('speaker')
+            if match.get('speaker') is not None:
+                anchor['speaker'] = match['speaker']
+                for field in ['stance', 'assertive']:
+                    if match[field] is not None or prior_speaker != match['speaker']:
+                        anchor[field] = match[field]
             count += 1
     return updated if count else current
 
@@ -457,8 +478,8 @@ def run(store, claim_ids, root, ports, *, evidence_root=None, apply=False, max_n
         return commit(store, root) if apply else e.publish(root, draft)
 
 
-def candidate_occurrences(candidate, records, sid):
-    result=anchors(candidate['evidence_step_ids'],records,sid)
+def candidate_occurrences(candidate, records, sid, *, source_binding=None):
+    result=anchors(candidate['evidence_step_ids'],records,sid,source_binding=source_binding)
     for oid in candidate.get('_observation_ids',[]):
         observation=records['observations/'+oid]['payload']
         for fid in e.evidence_fragment_ids(observation):
@@ -481,7 +502,7 @@ def candidate_occurrences(candidate, records, sid):
     return result
 
 
-def commit(store, root):
+def commit(store, root, *, source_binding=None):
     if (root / 'verification.json').exists():
         return e.commit_verified(store, root)
     draft = json.loads((root / 'draft.json').read_text())
@@ -499,7 +520,7 @@ def commit(store, root):
         updates['claims/' + cid] = {'claim_id': cid, 'statement': candidate['statement'],
             'claim_type': 'interpretive_judgment', 'attribution': 'professor',
             'evidence_step_ids': candidate['evidence_step_ids'], 'scripture_refs': candidate['scripture_refs'],
-            'occurrences': candidate_occurrences(candidate, records, sid),
+            'occurrences': candidate_occurrences(candidate, records, sid,source_binding=source_binding),
             'review_status': 'candidate', 'maturity': 'candidate', 'visibility': 'internal', 'revision': 1}
     for relation in draft['new_relation_specs']:
         payload = deepcopy(relation)

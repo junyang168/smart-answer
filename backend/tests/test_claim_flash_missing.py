@@ -44,6 +44,8 @@ def test_no_missing_claims_needs_one_task_and_no_other_review(ready):
     result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
     assert result['status']=='verified' and not result['new_claim_candidates']
     assert len(ports.calls)==1 and ports.calls[0][1]['input']['task']=='missing_group_claims'
+    assert f.CLAIM_DISCOVERY_RULES in ports.calls[0][1]['system']
+    assert f.KNOWLEDGE_TEXT_RULES in ports.calls[0][1]['system']
     replay=Ports();assert stage.run(store,'S',rroot,root/'missing',replay,apply=True)['status']=='verified'
     assert replay.calls==[]
 
@@ -99,6 +101,23 @@ def test_candidate_dispositions_do_not_write_old_claims(ready,action):
     result=stage.run(store,'S',rroot,root/'missing',Ports([item]),apply=True)
     assert result['status']==('needs_attention' if action.startswith('needs_') else 'verified')
     assert not result['new_claim_candidates'] and store.get_record_state('claims','C')==old
+
+
+@pytest.mark.parametrize('identity',['C','claims/C'])
+def test_represented_claim_accepts_only_exact_provided_identity_forms(ready,identity):
+    store,root,rroot=ready;old=store.get_record_state('claims','C');ports=Ports([candidate(action='represented',claim_id=identity)])
+    result=stage.run(store,'S',rroot,root/'missing',ports,apply=True)
+    assert result['status']=='verified' and store.get_record_state('claims','C')==old
+    assert len(ports.calls)==1
+    assert stage.run(store,'S',rroot,root/'missing',Ports(),apply=True)['status']=='verified'
+
+
+@pytest.mark.parametrize('identity',['claims/UNKNOWN','observations/C','claims/claims/C'])
+def test_represented_claim_key_does_not_bypass_identity_guard(ready,identity):
+    store,root,rroot=ready
+    with pytest.raises(ValueError,match='unprovided existing Claim'):
+        stage.run(store,'S',rroot,root/'missing',Ports([candidate(action='represented',claim_id=identity)]),apply=True)
+    assert not (root/'missing/commit-intent.json').exists()
 
 
 @pytest.mark.parametrize('bad',[{'support_keys':['evidence_steps/X']},{'fragment_ids':['X']},{'answer_question_ids':['X']},{'claim_id':'MODEL-ALLOCATED'}])
@@ -209,3 +228,42 @@ def test_final_scripture_repair_does_not_demand_statement_pair_handoff(sample,tm
     post=store.get_record_state('claims',result['new_claim_ids'][0])['payload']
     assert post['statement']==candidate()['statement'] and post['scripture_refs']==[]
     assert len([r for role,r in ports.calls if role=='gpt' and r['input']['task']=='pair_attachment'])==1
+
+
+def test_large_discovery_packs_names_without_losing_quotes_links_or_lifecycle(monkeypatch):
+    from types import SimpleNamespace
+    ports=SimpleNamespace(identity={'gpt':{'model':'test'}})
+    shared={'source_fragments':{'F':{'paragraph_key':'S0001','quote':'完整原話。'}},
+        'verified_material':{'E':{'statement':'論據。','source_fragment_ids':['F']}},
+        'existing_claims':{'C':{'statement':'已有主張。','retired':True,'review_status':'superseded','superseded_by':['D']}},
+        'questions':{'Q':{'text':'教授的問題？','answer_claim_ids':['D']}},'source_paragraphs':{'S0001':'完整原話。其他內容。'}}
+    before=deepcopy(shared);jobs=[{'job_id':'G'}]
+    assert stage.discovery_material(ports,jobs,shared)==(stage.PROMPT,shared)
+    monkeypatch.setattr(f,'GPT_BYTES',1)
+    _,packed=stage.discovery_material(ports,jobs,shared)
+    for name in ('source_fragments','verified_material','existing_claims','questions'):
+        assert {key:{packed[name+'_fields'][field]:value for field,value in row.items()} for key,row in packed[name].items()}==shared[name]
+    assert shared==before and packed['source_paragraphs']==shared['source_paragraphs']
+
+
+def test_observation_only_candidate_keeps_real_support_after_temporary_preview(sample,tmp_path):
+    store,root,_=sample
+    ev=store.get_record_state('evidence_steps','E')['payload'];ev['statement']='沒有聽從祂的話，顯明沒有真正相信祂。'
+    store.apply_plan(store.plan_package({'package_id':'observation-only-fixture','evidence_steps':[ev],
+        'observations':[{'observation_id':'O','statement':'沒有聽從祂的話。','source_fragment_id':'F'}]}))
+    records,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],'groups':[{
+        'group_id':'G','title':'one','claim_ids':['C'],'paragraph_keys':['S0001'],
+        'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';sroot=root/'statements';aroot=root/'arguments';rroot=root/'relations'
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),saved_inventory(tmp_path/'prior',sources),apply=True)['status']=='completed'
+    assert statements.run(store,'S',['C'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    assert arguments.run(store,'S',plan,'G',eroot,sroot,aroot,ArgumentPorts(),apply=True)['status']=='verified'
+    assert relations.run(store,'S',aroot,rroot,RelationPorts(),apply=True)['status']=='verified'
+    result=stage.run(store,'S',rroot,root/'missing',Ports([candidate(support_keys=['observations/O'])]),apply=True)
+    assert result['status']=='applied' and not result['pending']
+    cid=result['new_claim_ids'][0];claim=store.get_record_state('claims',cid)['payload']
+    assert not claim['evidence_step_ids']
+    records,_=f.load_source(store,'S')
+    assert any(k.startswith('knowledge_relations/') and r['payload']['from_id']=='O'
+        and r['payload']['to_id']==cid and r['payload']['relation_type']=='supports' for k,r in records.items())
+    assert any(a.get('observation_id')=='O' for o in claim['occurrences'] for a in o['anchors'])

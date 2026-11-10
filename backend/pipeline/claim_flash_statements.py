@@ -90,6 +90,8 @@ def finish(store,root):
         current=store.get_record_state(*key.split('/',1))
         if not current or (current['revision'],current['content_sha256'],current['retired'])!=(row['revision'],row['content_sha256'],row['retired']):
             raise ValueError('Claim statement inputs changed: '+key)
+    if result.get('deferred_legacy_ai_commit') and not committed:
+        return e.publish(root,result)
     return e.commit_verified(store,root)
 
 
@@ -98,7 +100,17 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
     working=deepcopy(records)
     materials={k:flash.claim_material(k,records,sources,source_id) for k in targets}
     checks=TASKS if tasks is None else {k:TASKS[k] for k in tasks}
-    initial={k:f.jev(root/'precheck',ports,materials[k],{name:q.claim()[name] for name in checks}) for k in targets}
+    def precheck(state,names):
+        questions={name:q.claim(with_references=bool(state.get('claim_references')))[name] for name in names}
+        request={'model':e.MODEL,'state':state,'questions':questions}
+        if len(json.dumps(request,ensure_ascii=False).encode())>f.JEV_BYTES:
+            # This is not a Jev verdict. Preserve the full input for the normal
+            # GPT disposition rather than truncate evidence to fit a precheck.
+            e.save(root/'precheck-unavailable'/(e.digest(request)+'.json'),
+                {'reason':'jev_input_exceeds_limit','request':request,'model_calls':0})
+            return {name:'not_run_input_limit' for name in names}
+        return f.jev(root/'precheck',ports,state,questions)
+    initial={k:precheck(materials[k],checks) for k in targets}
     outcomes=[];pending=[];settled={k:{} for k in targets}
     for attempt in range(3):
         for question,(task,passing) in checks.items():
@@ -109,7 +121,7 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
                 stamp=judgment_hash(state,question)
                 if settled[key].get(question)==stamp:continue
                 verdict=(initial[key][question] if stamp==judgment_hash(materials[key],question)
-                         else f.jev(root/'precheck',ports,state,{question:q.claim()[question]})[question])
+                         else precheck(state,[question])[question])
                 if verdict!=passing:
                     jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
                 else:
@@ -153,7 +165,7 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'claim_ids':claim_ids,'source':pin,
             'evidence_root':str(Path(evidence_root).resolve()),'models':ports.identity,
-            'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema()])})
+            'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema(),flash.CLAIM_REFERENCE_CONTRACT])})
         if (root/'verification.json').exists():return finish(store,root) if apply else json.loads((root/'verification.json').read_text())
         plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
         group=next((g for g in plan['groups'] if set(claim_ids)<=set(g.get('claim_ids',[]))),None)
@@ -166,12 +178,18 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         targets=['claims/'+cid for cid in claim_ids]
         if any(k not in records or not f.belongs_to_source(records[k]['payload'],records,source_id) for k in targets):
             raise ValueError('Claim belongs to another source')
-        if any(records[k]['payload'].get('review_status')=='human_review_required' for k in targets):
-            raise ValueError('Claim hold requires its existing authorized handoff')
         working=deepcopy(records);read=set(targets)|{'source_documents/'+source_id};materials={};needed=set()
         for key in targets:
             materials[key]=flash.claim_material(key,records,sources,source_id)
             needed.update(x['object_key'] for x in materials[key]['evidence'])
+            context=materials[key].get('argument_context',{})
+            needed.update(x['object_key'] for x in context.get('records',[]))
+            read.update(x['object_key'] for x in context.get('relations',[]))
+            for ref in materials[key].get('claim_references',[]):
+                needed.update(ref['supporting_material_keys']);read.add(ref['object_key'])
+                read.update('source_fragments/'+fid for fid in ref['source_fragment_ids'])
+                read.update(ref['supporting_relation_keys'])
+                read.update(r['object_key'] for r in ref['relations'])
         if any(not materials[k]['evidence'] for k in targets):raise ValueError('Claim has no verified lower support')
         proof=verify_evidence(evidence_root,needed,records,sources)
         read.update(needed)

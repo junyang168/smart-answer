@@ -19,7 +19,8 @@ PROMPT=(flash.PROMPT+'只檢查本組是否有教授已論證、值得獨立引�
  '需要修改既有Claim用needs_update，缺已驗證材料用needs_material，缺來源用needs_source。'
  '只用提供的support_keys和fragment_ids；新Claim的claim_id留空，程式分配ID。'
  'Claim與Evidence可同時承載同一判斷，但原話重述只證明教授說過，不算另外的論據。'
- 'answer_question_ids只選直接回答的已提供問題。可輸出空candidates，不能為湊數碎片化。')
+ 'answer_question_ids只選直接回答的已提供問題。可輸出空candidates，不能為湊數碎片化。'
+ + f.CLAIM_DISCOVERY_RULES)
 
 class Candidate(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
@@ -36,6 +37,20 @@ class Discovery(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     candidates:list[Candidate]
     reason:str=Field(min_length=1)
+
+
+def discovery_material(ports,jobs,shared):
+    """Lossless field-name packing; preserve all same-sermon identity references."""
+    request={'identity':ports.identity['gpt'],'system':PROMPT,'schema':Discovery.model_json_schema(),
+             'input':{'task':'missing_group_claims','jobs':jobs,**shared}}
+    if len(json.dumps(request,ensure_ascii=False).encode())<=f.GPT_BYTES:return PROMPT,shared
+    packed=deepcopy(shared)
+    for name in ('source_fragments','verified_material','existing_claims','questions'):
+        fields={field:str(i) for i,field in enumerate(sorted({field for row in shared[name].values() for field in row}))}
+        packed[name+'_fields']={alias:field for field,alias in fields.items()}
+        packed[name]={key:{fields[field]:value for field,value in row.items()} for key,row in shared[name].items()}
+    return PROMPT+('本次source_fragments、verified_material、existing_claims、questions內的欄位鍵，'
+        '分別按同名_fields字典還原完整欄位名稱；所有物件ID、逐字原文、欄位值、生命週期與連結清單完整保留。'),packed
 
 
 def consume(store,root,records,sources):
@@ -66,22 +81,45 @@ def finish(store,root):
     return flash.commit_group(store,root)
 
 
-def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=None):
-    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);relation_root=Path(relation_root).resolve()
-    previous=json.loads((relation_root/'intent.json').read_text());ids=previous['claim_ids']
-    group=json.loads((Path(previous['argument_root'])/'intent.json').read_text())['group']
+def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=None,empty_group=None,evidence_root=None):
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    if empty_group is not None:
+        if relation_root is not None or empty_group.get('claim_ids') or evidence_root is None:
+            raise ValueError('empty group discovery requires only completed Evidence proof')
+        plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
+        if empty_group not in plan['groups'] or plan['source_id']!=source_id:
+            raise ValueError('empty group differs from completed Evidence plan')
+        group=empty_group;ids=[];relation_root=Path(evidence_root).resolve()
+        previous={'source':f.bind_source(store,source_id,root)}
+    else:
+        relation_root=Path(relation_root).resolve()
+        previous=json.loads((relation_root/'intent.json').read_text());ids=previous['claim_ids']
+        group=json.loads((Path(previous['argument_root'])/'intent.json').read_text())['group']
     room=10-len(ids) if max_new_claims is None else max_new_claims
-    if not ids or len(set(ids))!=len(ids) or type(room) is not int or not 0<=room<=10-len(ids):
+    if (not ids and empty_group is None) or len(set(ids))!=len(ids) or type(room) is not int or not 0<=room<=10-len(ids):
         raise ValueError('one existing group with bounded creation space required')
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'claim_ids':ids,'group':group,
             'relation_root':str(relation_root),'max_new_claims':room,'models':ports.identity,
+            **({'empty_group_contract':'claim_flash_empty_group_v1','evidence_root':str(relation_root)} if empty_group is not None else {}),
             'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema(),pairs.COMPLETED_CONTRACT,flash.CompleteDiscoveries.model_json_schema()])})
         if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
-        records,sources=f.load_group_source(store,source_id,group)
+        load_group=group
+        if empty_group is None:
+            # Consume the relationship stage's exact direct-reference scope,
+            # including current human interpretations of those references.
+            prior_result=json.loads((relation_root/'result.json').read_text())
+            load_group={**group,'reference_record_keys':sorted(set(group.get('reference_record_keys',[]))
+                |set(prior_result.get('readonly_endpoint_keys',[])))}
+        records,sources=f.load_group_source(store,source_id,load_group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
-        read=consume(store,relation_root,records,sources);original=deepcopy(records)
+        if empty_group is None:read=consume(store,relation_root,records,sources)
+        else:
+            pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+            statements.verify_evidence(evidence_root,pool,records,sources)
+            read=set(pool)|{'source_documents/'+source_id}
+        original=deepcopy(records)
         pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
         if not pool<=read:raise ValueError('group lower materials lack completed proof')
         near=set(group['paragraph_keys'])
@@ -113,7 +151,9 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                 'review_status':p.get('review_status'),'superseded_by':p.get('superseded_by')} for k,p in peers.items()},
             'questions':{k.split('/',1)[1]:{'text':p['text'],'answer_claim_ids':p.get('answer_claim_ids',[])} for k,p in questions.items()}}
         proposed=[];pending=[];dispositions=[];links=[];members=[]
-        for _,raw in f.gpt(root/'discovery',ports,'missing_group_claims',[{'job_id':group['group_id']}],Discovery.model_json_schema(),PROMPT,shared=shared,semantic_review=False):
+        jobs=[{'job_id':group['group_id']}]
+        instruction,shared=discovery_material(ports,jobs,shared)
+        for _,raw in f.gpt(root/'discovery',ports,'missing_group_claims',jobs,Discovery.model_json_schema(),instruction,shared=shared,semantic_review=False):
             discovery=Discovery.model_validate(raw)
             for item in discovery.candidates:
                 data=item.model_dump();dispositions.append(data)
@@ -121,7 +161,9 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                         or not set(item.fragment_ids)<=set(fragments) or not set(item.answer_question_ids)<={k.split('/',1)[1] for k in questions}):
                     raise ValueError('missing Claim uses unprovided material or Question')
                 if item.action in {'represented','needs_update'}:
-                    key='claims/'+item.claim_id
+                    # existing_claims is keyed by object key; accept that exact
+                    # provided key as well as its bare ID, never fuzzy identities.
+                    key=item.claim_id if item.claim_id in peers else 'claims/'+item.claim_id
                     if key not in peers:raise ValueError('missing Claim named unprovided existing Claim')
                     if records[key]['retired'] or peers[key].get('review_status') in {'superseded','retired'} or peers[key].get('superseded_by'):
                         pending.append({'candidate':data,'reason':'inactive_identity_requires_handoff'})
@@ -150,7 +192,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
                     '_observation_ids':[k.split('/',1)[1] for k in item.support_keys if k.startswith('observations/')]}
                 proposed.append(candidate);members.append(key)
                 records[key]={'payload':{'claim_id':alias,**candidate,'attribution':'professor',
-                    'occurrences':c.candidate_occurrences(candidate,records,source_id)},'retired':False}
+                    'occurrences':c.candidate_occurrences(candidate,records,source_id,source_binding=sources[source_id]['file'])},'retired':False}
                 peers[key]=records[key]['payload']
                 for oid in candidate['_observation_ids']:
                     rid='candidate-'+e.digest([oid,alias])[:24]
@@ -161,6 +203,11 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         reviewed_material={k:flash.claim_material(k,records,sources,source_id) for k in members}
         implicit=[{'a':'evidence_steps/'+eid,'b':key} for key in members for eid in records[key]['payload']['evidence_step_ids']]
         obs=[{'a':'observations/'+oid,'b':key} for key in members for oid in records[key]['payload']['_observation_ids']]
+        # These supports existed only to review the candidate statement. They
+        # are not stored edges and must not suppress the real typed decision.
+        for key in list(records):
+            if key.startswith('knowledge_relations/candidate-') and records[key]['payload']['to_id'] in {k.split('/',1)[1] for k in members}:
+                records.pop(key)
         attachment=pairs.review(records,sources,[],obs,root/'new-attachments',ports,kind='attachment',implicit=implicit,adjudicate_proposed_none=True)
         pending+=attachment['pending'];new_lower=attachment['new_relations']
         for removal in attachment['implicit_changes']:

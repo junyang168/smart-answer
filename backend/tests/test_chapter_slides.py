@@ -242,3 +242,79 @@ def test_the_cuv_spelling_of_kings_is_read():
 
     assert reference_slugs("列王紀上 1:32-33") == ["1ki-1-32-33"]
     assert reference_slugs("列王紀下 2:11") == ["2ki-2-11"]
+
+
+def test_a_rejected_answer_is_rechecked_without_calling_the_model(tmp_path, monkeypatch):
+    record = {"pieces": KEPT, "decisions": [
+        {"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    path = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    answer = {"slides": [slide("S0001", "5:1-48", points=("一", "二"))]}
+    # 程序先拒收（像书名表不认得的写法），修好后同一份回答重核就过。
+    real_check = chapter_slides.check
+    monkeypatch.setattr(chapter_slides, "check", lambda *a: (["書名讀不出來"], [], []))
+    assert chapter_slides.decide(CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([answer]))["status"] == "rejected"
+    monkeypatch.setattr(chapter_slides, "check", real_check)
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "saved"
+    assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")["slides"][0]["points"][1]["text"] == "二"
+    # 存过之后，旧的拒收稿不再重核，免得盖掉审过、修过的那一份。
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "already_saved"
+
+
+def test_a_rejected_answer_is_not_rechecked_after_the_keep_decisions_change(tmp_path, monkeypatch):
+    record = {"pieces": KEPT, "decisions": [
+        {"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    path = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    monkeypatch.setattr(chapter_slides, "check", lambda *a: (["x"], [], []))
+    chapter_slides.decide(CHAPTER, "L", data_base_dir=tmp_path,
+                          client=FakeClient([{"slides": [slide("S0001", "5:1-48")]}]))
+    record["decisions"][0]["keep"] = False
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "decisions_changed"
+
+
+def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path):
+    """Regression for the shared policy and normal correction path, not a model eval."""
+    from pathlib import Path
+    fixture = json.loads((Path(__file__).parent / 'fixtures/chapter_slides/title_scope_owner_case.json').read_text())
+    pieces = [{'id': 'U001', 'start': fixture['sentences'][0]['start'],
+               'end': fixture['sentences'][-1]['end'],
+               'text': ''.join(s['text'] for s in fixture['sentences'])}]
+    decisions = {'pieces': pieces, 'decisions': [
+        {'id': 'U001', 'keep': True, 'verses': ['mat-5-1-48'], 'kind': '釋經'}]}
+    path = chapter_exposition.record_path(tmp_path, CHAPTER.passage, 'L')
+    path.parent.mkdir(parents=True); path.write_text(json.dumps(decisions, ensure_ascii=False))
+    wrong = {'slides': [slide('S0001', title=fixture['rejected_title'])]}
+    finding = {'grade': 'B', 'blocking': False, 'findings': [
+        {'slide': 'S0001', 'kind': '跟得上', 'problem': fixture['reason'],
+         'fix': '標題改為「' + fixture['reference_title'] + '」，保留內容與分張。'}]}
+    corrected = {'slides': [slide('S0001', title=fixture['reference_title'])]}
+
+    class Capture(FakeClient):
+        def __init__(self, answers):
+            super().__init__(answers)
+            self.systems = []
+
+        def generate_json(self, system, user, schema):
+            self.systems.append(system)
+            return super().generate_json(system, user, schema)
+
+    author, reviewer, reviser = Capture([wrong]), Capture([finding]), Capture([corrected])
+    chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=author)
+    chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=reviewer)
+    chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
+    # All three real pipeline calls receive the same range rule, including revisions.
+    for client in (author, reviewer, reviser):
+        assert chapter_slides.SLIDE_TITLE_RULES in client.systems[0]
+        assert '〈標題規則〉' not in client.systems[0]
+    assert '原文中標題沒有涵蓋的部分' in reviewer.systems[0]
+    assert fixture['reason'] in reviser.prompts[0]
+    assert fixture['reference_title'] in reviser.prompts[0]
+    record = chapter_slides.load_record(tmp_path, CHAPTER.passage, 'L')
+    assert record['slides'][0]['title'] == fixture['reference_title']
+    assert record['revision'] == 1
+    previous = json.loads(chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').with_suffix('.revision-0.json').read_text())
+    assert previous['slides'][0]['title'] == fixture['rejected_title']

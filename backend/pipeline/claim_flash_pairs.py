@@ -89,7 +89,7 @@ def forbidden(src,dst,typ,records):
     return False
 
 
-def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False,completed_proposals=()):
+def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False,completed_proposals=(),repair_invalid_completed=False):
     cases=[];seen=set()
     def find(oid):
         matches=[k for k in records if k.split('/')[0] in f.LOWER|{'claims'} and k.split('/',1)[1]==oid]
@@ -121,7 +121,8 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
         if a==b or a not in records or b not in records or not allowed_pair(a,b,kind):
             raise ValueError('completed relation has unprovided or illegal endpoints')
         choice=pair['direction']+'_'+pair['relation_type']
-        if choice not in options(a,b,kind):raise ValueError('completed relation has illegal type or direction')
+        if choice not in options(a,b,kind) and not repair_invalid_completed:
+            raise ValueError('completed relation has illegal type or direction')
         src,dst=(a,b) if pair['direction']=='a_to_b' else (b,a)
         signature=(src,dst,pair['relation_type']);key=frozenset([a,b])
         if key in completed_seen:
@@ -129,6 +130,16 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
                 conflicts.append({'a':a,'b':b,'reason':'conflicting_completed_relation_proposals'})
             continue
         completed_seen[key]=signature
+        if choice not in options(a,b,kind):
+            # The producer supplied a complete judgment but used another
+            # domain's type. Repair only this decision; retain all valid peers.
+            old=next((case for case in cases if frozenset([case['a'],case['b']])==key),None)
+            if old is None:
+                old={'job_id':'P-'+e.digest([a,b])[:24],'a':a,'b':b,'original':None,'key':None}
+                cases.append(old)
+            old.update(invalid_completed_relation=pair,candidate_reason=pair['reason'])
+            seen.add(key)
+            continue
         if key in seen:
             originals=[x for x in cases if frozenset([x['a'],x['b']])==key]
             if not any((x['original']['from_id'],x['original']['to_id'],x['original']['relation_type'])==
@@ -149,10 +160,13 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
                           **({'candidate_reason':pair['candidate_reason']} if pair.get('candidate_reason') else {})})
             seen.add(frozenset([a,b]))
     updates={};retiring=[];new=[];pending=conflicts;outcomes=[];jobs=[];resolved=completed;implicit_changes=[]
-    for case in cases:
+    for case in sorted(cases,key=lambda case:case['job_id']):
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}
         case['state']=state
+        if case.get('invalid_completed_relation'):
+            jobs.append({**case,'state':state,'allowed_choices':opts})
+            continue  # GPT repairs its invalid type; no second Jev judgment.
         questions={'relation':jevq.relation(opts)}
         if original and original.get('reason'):
             questions['reason_valid']=jevq.reason()
@@ -165,7 +179,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
     for batch,raw in f.gpt(root,ports,'pair_'+kind,jobs,Decisions.model_json_schema(),
             '這是連接處置，不重審節點。GPT 最終決定可覆蓋 Jev；每個 job_id 恰好一次。'
             '選 set 並給 relation_type、direction 及教授論證中的簡短 reason；已有原關係完全保留可 keep。'
-            '不成立 remove；仍無法判定 needs_source。只能使用 allowed_choices，不能補外部論據。'+
+            '不成立 remove；仍無法判定 needs_source。只能使用 allowed_choices，不能補外部論據。'+f.RELATION_REASON_RULES+
             ('candidate_reason是舊候選已保存的理由；有據且符合最終類型方向就原樣沿用，只補缺少的判定，'
              '確有失真或錯配才修正，不為措辭重寫。' if any(j.get('candidate_reason') for j in jobs) else '')):
         items=Decisions.model_validate(raw).items

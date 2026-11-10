@@ -73,6 +73,66 @@ def test_no_missing_material_does_not_force_gpt_review(tmp_path):
     assert replay.calls==[]
 
 
+def test_inventory_restores_unique_near_literal_without_recalling_model(tmp_path):
+    quote='馬太說六天以後，馬可說六天以後，路加說：「說了這話以後，大約有八天。」不是矛盾嗎？沒有。你要了解猶太人算日子。'
+    exact='馬太說六天以後，馬可說六天以後，路加說什麼？「耶穌說了這話以後，大約有八天。」不是矛盾嗎？沒有。你要了解猶太人算日子。'
+    text='路加說：「說了這話以後，大約有八天。」「耶穌帶著門徒上山。」'+exact
+    records,sources=fixture(tmp_path,[text],[('S0001',exact)])
+    ports=Ports(units=[{'paragraph_key':'S0001','quote':quote,'statement':'六天與八天並不矛盾。'}])
+    root=tmp_path/'run'
+    result=coverage.check(records,sources,'S',plan(sources),root,ports)
+    saved=list((root/'source-inventory/gpt').glob('*/response.json'))
+    assert len(saved)==1
+    assert json.loads(saved[0].read_text())['items'][0]['units'][0]['quote']==quote
+    replay=Ports(fail='source_preservation_inventory')
+    assert coverage.check(records,sources,'S',plan(sources),root,replay)==result
+    assert replay.calls==[]
+    assert result['quote_projection']==[{'paragraph_key':'S0001','supplied':quote,'exact':exact}]
+
+
+def test_inventory_never_projects_a_different_sentence_or_foreign_paragraph():
+    paragraphs={'S0001':{'text':'耶穌不是普通先知，而是神的兒子。'}}
+    with pytest.raises(ValueError,match='not literal'):
+        coverage.literal({'paragraph_key':'S0001','quote':'神的國已經完全實現，不再有任何未來。'},paragraphs,[])
+    with pytest.raises(ValueError,match='unprovided'):
+        coverage.literal({'paragraph_key':'S0002','quote':paragraphs['S0001']['text']},paragraphs,[])
+
+
+def test_compact_bindings_preserve_every_literal_and_invalid_binding_without_mutation():
+    original={'job_id':'G','existing_details':{'R':{'scripture_refs':['Matt.5.16'],'bindings':[
+        {'paragraph_key':'S0001','quote':'完整原文，沒有刪節。','binding_verified':True},
+        {'fragment_id':'old','historical_excerpt':'舊引文。','binding_verified':False}]}}}
+    before=deepcopy(original);packed=coverage.compact_bindings(original)
+    assert original==before
+    unpacked=deepcopy(packed)
+    columns=unpacked.pop('binding_columns')
+    for detail in unpacked['existing_details'].values():
+        detail['bindings']=[dict(zip(columns,binding)) if isinstance(binding,list) else binding
+                            for binding in detail['bindings']]
+    assert unpacked==original
+
+
+def test_only_oversized_disposition_changes_wire_shape_and_stays_bounded(tmp_path,monkeypatch):
+    records,sources=fixture(tmp_path)
+    for n in range(50):
+        records['evidence_steps/EX'+str(n)]=deepcopy(records['evidence_steps/E'])
+        records['evidence_steps/EX'+str(n)]['payload']['evidence_step_id']='EX'+str(n)
+    first=Ports(verdict='missing')
+    coverage.check(records,sources,'S',plan(sources),tmp_path/'normal',first)
+    request=next(r for r in first.requests if r.get('input',{}).get('task')=='reverse_coverage_adjudication')
+    packed=deepcopy(request)
+    packed['input']['jobs']=[coverage.compact_bindings(j) for j in request['input']['jobs']]
+    size=lambda v:len(json.dumps(v,ensure_ascii=False).encode())
+    limit=(size(request)+size(packed))//2
+    assert size(packed)<limit<size(request)
+    monkeypatch.setattr(coverage.f,'GPT_BYTES',limit)
+    second=Ports(verdict='missing')
+    result=coverage.check(records,sources,'S',plan(sources),tmp_path/'compact',second)
+    wire=next(r for r in second.requests if r.get('input',{}).get('task')=='reverse_coverage_adjudication')
+    assert wire==packed and size(wire)<=limit
+    assert result['status']=='checked' and len(result['findings'][0]['findings'])==1
+
+
 def test_position_and_full_bound_quotes_are_supplied_before_claiming_omission(tmp_path):
     records,sources=fixture(tmp_path)
     records['position_nodes/P']={'retired':False,'payload':{'position_id':'P','title':'反方的立場。',
@@ -397,3 +457,37 @@ def test_material_and_reference_tasks_do_not_repeat_each_others_work(tmp_path):
     assert 'all_sermon_statements' not in tasks['reverse_scripture_coverage']
     assert 'existing_scripture_index' not in tasks['reverse_coverage_adjudication']
     assert len(result['findings'])==1 and len(result['findings'][0]['findings'])==2
+
+@pytest.mark.parametrize('verdict',['not_required','needs_context','wrong_candidate'])
+def test_context_continuation_only_resolves_pending_and_keeps_original(tmp_path,verdict):
+    text='不要為肉體預備什麼東西。'
+    records,sources=fixture(tmp_path,[text],[('S0001',text)])
+    original=coverage.check(records,sources,'S',plan(sources),tmp_path/'base',
+        Ports(units=[],citations=[{'paragraph_key':'S0001','quote':text,'reference':'未明說章節'}],
+              disposition='needs_context'))
+    before=deepcopy(original)
+    class Context(Ports):
+        def repair(self,request):
+            self.calls.append(request['input']['task'])
+            assert request['input']['task']=='reverse_coverage_context'
+            assert len(request['input']['jobs'])==1
+            job=request['input']['jobs'][0];item=deepcopy(job['original_finding'])
+            item.pop('existing_record_keys',None)
+            item.update(verdict='not_required' if verdict=='wrong_candidate' else verdict,reason='原文未明說章節，不猜補。')
+            if verdict=='wrong_candidate':item['candidate_ids']=['other']
+            return {'items':[{'job_id':job['job_id'],'findings':[item]}]}
+    p=Context();root=tmp_path/'context'
+    if verdict=='wrong_candidate':
+        with pytest.raises(ValueError,match='candidate identity'):
+            coverage.clarify_context(records,sources,'S',plan(sources),original,root,p)
+        assert not (root/'result.json').exists()
+        return
+    result=coverage.clarify_context(records,sources,'S',plan(sources),original,root,p)
+    assert result['status']==('checked' if verdict=='not_required' else 'needs_attention')
+    assert original==before and json.loads(Path(original['report_path']).read_text())==before
+    replay=Context()
+    assert coverage.clarify_context(records,sources,'S',plan(sources),original,root,replay)==result
+    assert not replay.calls  # Still-unresolved context cannot trigger a retry loop.
+    changed=deepcopy(records);changed['evidence_steps/E']['payload']['statement']='資料改動。'
+    with pytest.raises(ValueError,match='saved input differs'):
+        coverage.clarify_context(changed,sources,'S',plan(sources),original,root,Context())

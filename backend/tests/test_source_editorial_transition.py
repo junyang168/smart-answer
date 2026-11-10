@@ -117,6 +117,37 @@ def test_context_loader_consumes_proof_and_retains_body_coordinates(sample, monk
     assert [r['text'] for r in loaded[2].spoken_rows] == [r['text'] for r in original['script']]
 
 
+@pytest.mark.parametrize('fault', [None, 'no_proof', 'text', 'metadata'])
+def test_flash_consumes_exact_editorial_proof_without_migration(sample, monkeypatch, tmp_path, fault):
+    from backend.pipeline import claim_flash_common as flash
+    from backend.pipeline import evidence_refresh as evidence
+    original, after, path, source, root = sample
+    if fault != 'no_proof':
+        publish(sample)
+    if fault == 'text':
+        after['script'][1]['text'] += '意思改變。'
+    if fault == 'metadata':
+        after['metadata']['title'] = '另一標題'
+    path.write_bytes(encode(after))
+    monkeypatch.setattr(transition, 'transition_root', lambda root=None: sample[-1])
+
+    class ReadOnlyStore:
+        def get_record_state(self, collection, object_id):
+            assert (collection, object_id) == ('source_documents', 'source-1')
+            return {'payload': copy.deepcopy(source), 'retired': False}
+
+    if fault:
+        with pytest.raises(ValueError):
+            flash.bind_source(ReadOnlyStore(), 'source-1', tmp_path/'flash')
+        assert not (tmp_path/'flash'/'source-version.json').exists()
+    else:
+        binding = flash.bind_source(ReadOnlyStore(), 'source-1', tmp_path/'flash')
+        assert binding == {'source_id': 'source-1', **transition.file_binding(path)}
+        snapshot = evidence.source_snapshot(flash.source_binding(source), source=source)
+        assert snapshot['body_sha256'] == source['source_body_sha256']
+        assert source['source_file_sha256'] != snapshot['file']['file_sha256']
+
+
 def test_invalid_original_registered_body_cannot_make_proof(sample):
     sample[3]['source_body_sha256'] = '0'*64
     with pytest.raises(ValueError, match='registered source'):
@@ -230,3 +261,25 @@ def test_repeated_original_ids_preserved_exactly_without_renumbering(sample, dup
         assert transition.verify_current_source_binding(old_binding, root=root) == transition.file_binding(path)
         assert [row for row in json.loads(path.read_bytes())['script']
                 if row.get('type') != 'subtitle'] == original['script']
+
+
+@pytest.mark.parametrize('fault',[None,'wrong_binding','no_proof','changed_body'])
+def test_flash_claim_occurrences_consume_explicit_exact_binding(sample,monkeypatch,fault):
+    from backend.pipeline import claim_refresh as c
+    original,after,path,source,root=sample
+    if fault!='no_proof':publish(sample)
+    if fault=='changed_body':after['script'][1]['text']='改變原意。'
+    path.write_bytes(encode(after));monkeypatch.setattr(transition,'transition_root',lambda root=None:sample[-1])
+    binding=transition.file_binding(path)
+    if fault=='wrong_binding':binding={**binding,'file_sha256':'invented'}
+    records={'source_documents/source-1':{'payload':source},'evidence_steps/E':{'payload':{'source_fragment_ids':['F']}},
+             'source_fragments/F':{'payload':{'source_id':'source-1','paragraph_key':'S0001','verbatim_excerpt':'教授的原話。'}}}
+    candidate={'evidence_step_ids':['E']}
+    if fault:
+        with pytest.raises(ValueError):c.candidate_occurrences(candidate,records,'source-1',source_binding=binding)
+    else:
+        result=c.candidate_occurrences(candidate,records,'source-1',source_binding=binding)
+        assert result[0]['anchors'][0]['proposed_highlight']['text']=='教授的原話。'
+        assert c.refresh_occurrences({'occurrences':[]},['E'],records,'source-1',source_binding=binding)==result
+        # Legacy callers do not silently acquire transition authority.
+        with pytest.raises(ValueError):c.candidate_occurrences(candidate,records,'source-1')

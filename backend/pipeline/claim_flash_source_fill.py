@@ -150,3 +150,28 @@ def run(store, source_id, report_path, root, *, apply=False):
         e.save(root/'before.json', {'sources':sources,'records':{k:records[k] for k in result['read_keys']}})
         e.save(root/'verification.json', result)
         return e.commit_verified(store, root, source_fragments_only=True) if apply else e.publish(root, result)
+
+
+def fill_inventory_handoff(store,source_id,findings,previous,root,*,apply=False):
+    """Compile uncovered literal inventory units; no new semantic verdict."""
+    from backend.pipeline.claim_flash_evidence import inventory
+    root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
+    with (root/'source-fill.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        records,sources=f.load_source(store,source_id,visual_context=True)
+        units=inventory(previous,sources,source_id)
+        if any(p.get('reason')!='important_unit_not_covered_by_verified_fragments'
+                or p.get('layer')!='source' or p.get('unit') not in units for p in findings):
+            raise ValueError('literal completion requires an exact saved source inventory unit')
+        e.save(root/'intent.json',{'version':VERSION,'source':sources[source_id]['file'],
+            'basis':'mechanical_inventory_span_union_gap','findings':findings,'previous':str(Path(previous).resolve())})
+        if (root/'verification.json').exists():
+            return e.commit_verified(store,root,source_fragments_only=True) if apply else json.loads((root/'verification.json').read_text())
+        report={'source_id':source_id,'contract':coverage.CONTRACT,'findings':[{'findings':[
+            {**item['unit'],'verdict':'missing_source_binding','candidate_ids':['inventory-'+e.digest(item['unit'])]}
+            for item in findings]}]}
+        result=plan(records,sources,source_id,report)
+        result['basis']='mechanical_inventory_span_union_gap'
+        e.save(root/'before.json',{'sources':sources,'records':{k:records[k] for k in result['read_keys']}})
+        e.save(root/'verification.json',result)
+        return e.commit_verified(store,root,source_fragments_only=True) if apply else e.publish(root,result)

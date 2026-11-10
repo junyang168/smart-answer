@@ -66,7 +66,7 @@ def _reference_ids(row: dict[str, Any], field: str, owner: str) -> set[str]:
     return set(values)
 
 
-def validate_merged_package(package: dict[str, Any]) -> None:
+def validate_merged_package(package: dict[str, Any], *, native_relations: bool = False) -> None:
     ids = {
         name: _ids(list(package.get(name) or []), field, name)
         for name, field in ID_FIELDS.items()
@@ -274,8 +274,9 @@ def validate_merged_package(package: dict[str, Any]) -> None:
         from_id, to_id = validate_edge_identity(
             "knowledge_relations", relation_id, row
         )
-        missing_from = {str(row.get("from_id") or "")} - (evidence_ids | observation_ids)
-        missing_to = {str(row.get("to_id") or "")} - evidence_ids
+        native_nodes = evidence_ids | observation_ids | claim_ids | position_ids | ids["questions"]
+        missing_from = {str(row.get("from_id") or "")} - (native_nodes if native_relations else evidence_ids | observation_ids)
+        missing_to = {str(row.get("to_id") or "")} - (native_nodes if native_relations else evidence_ids)
         if missing_from or missing_to:
             raise KnowledgePackageMergeError(
                 f"knowledge_relations/{row[ID_FIELDS['knowledge_relations']]}: "

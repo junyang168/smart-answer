@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import urllib.request
+from urllib.error import HTTPError
 import fcntl
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,12 +34,40 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2))
 
 
-def recorded_call(root, role, request, function, *, preflight=None):
+REJECTED_HTTP_STATUSES={400,401,403,404,413,415,422,429}
+
+
+class RecordedCallRejected(ValueError):
+    """A saved definitive refusal, never permission to send the same call again."""
+    def __init__(self, folder, receipt):
+        self.receipt=receipt
+        super().__init__(f"saved HTTP {receipt['http_status']} rejection; no automatic retry: {folder}")
+
+
+def rejection_receipt(folder,request):
+    folder=Path(folder);path=folder/'rejection.json'
+    if not path.exists():return None
+    receipt=json.loads(path.read_text());body=folder/'rejection-body.bin'
+    if (receipt.get('contract')!='definitive_http_rejection_v1'
+            or folder.parent.name!='jev' or receipt.get('retry_authorized') is not False
+            or receipt.get('http_status') not in REJECTED_HTTP_STATUSES
+            or receipt.get('request_sha256')!=digest(request) or folder.name!=digest(request)
+            or json.loads((folder/'request.json').read_text())!=request
+            or json.loads((folder/'started.json').read_text()).get('request_sha256')!=digest(request)
+            or hashlib.sha256(body.read_bytes()).hexdigest()!=receipt.get('body_sha256')
+            or (folder/'response.json').exists()):
+        raise ValueError('saved HTTP rejection binding differs; no resend')
+    return receipt
+
+
+def recorded_call(root, role, request, function, *, preflight=None, gpt_max_bytes=80000, jev_max_bytes=40000):
     """Reuse exact replies; never silently retry an unknown call."""
-    if len(json.dumps(request, ensure_ascii=False).encode()) > (40000 if role == 'jev' else 80000):
+    if len(json.dumps(request, ensure_ascii=False).encode()) > (jev_max_bytes if role == 'jev' else gpt_max_bytes):
         raise ValueError('model input exceeds the bounded request size; do not truncate evidence')
     folder = Path(root) / role / digest(request)
     save(folder / 'request.json', request)
+    rejected=rejection_receipt(folder,request)
+    if rejected:raise RecordedCallRejected(folder,rejected)
     if (folder / 'response.json').exists():
         return json.loads((folder / 'response.json').read_text())
     if (folder / 'started.json').exists():
@@ -47,7 +76,19 @@ def recorded_call(root, role, request, function, *, preflight=None):
         preflight()
     with (folder / 'started.json').open('x') as stream:
         json.dump({'request_sha256': digest(request)}, stream)
-    response = function(request)
+    try:
+        response = function(request)
+    except HTTPError as exc:
+        # A transport timeout or server error can still hide an answer. Only
+        # documented client refusals are classified as definitive rejections.
+        if role=='jev' and exc.code in REJECTED_HTTP_STATUSES:
+            body=exc.read();(folder/'rejection-body.bin').write_bytes(body)
+            save(folder/'rejection.json',{'contract':'definitive_http_rejection_v1',
+                'request_sha256':digest(request),'http_status':exc.code,
+                'body_sha256':hashlib.sha256(body).hexdigest(),
+                'retry_after':exc.headers.get('Retry-After') if exc.headers else None,
+                'retry_authorized':False,'usage':None})
+        raise
     save(folder / 'response.json', response)
     return response
 
@@ -389,6 +430,7 @@ def commit_verified(store, root, *, source_fragments_only=False):
             **({'expected_current_human_source_scope':result['human_source_guard']} if result.get('human_source_guard') is not None else {}),
             expected_current_source_claims=result.get('source_claim_index'),
             **({'expected_current_claim_sampling_markers':result['review_sampling_markers']} if result.get('review_sampling_markers') else {}),
+            **({'expected_current_claim_legacy_ai_findings':result['legacy_ai_findings_markers']} if result.get('legacy_ai_findings_markers') else {}),
             metadata={'actor': source_kind, 'reason': result.get('commit_reason', 'Bottom-up semantic decisions and program-verified postimages'),
                       'verification_path': str(root / 'verification.json')})
         save(root / 'commit.json', receipt)

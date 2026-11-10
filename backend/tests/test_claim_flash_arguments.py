@@ -48,6 +48,8 @@ def test_new_argument_and_zero_model_replay(ready):
     rel=[p for k,p in result['updates'].items() if k.startswith('knowledge_relations/')]
     assert len(rel)==1 and (rel[0]['from_id'],rel[0]['to_id'],rel[0]['relation_type'])==('O','E','supports')
     assert store.get_record_state('evidence_steps','E')['payload']==old
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert f.RELATION_REASON_RULES in request['system']
     assert not any('record_fidelity' in r.get('questions',{}) or 'statement_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
     replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
     assert replay.calls==[]
@@ -164,3 +166,93 @@ def test_saved_plan_cannot_silently_shrink_or_change_source(ready):
     store,root,plan,eroot,sroot=ready;plan=deepcopy(plan);plan['groups'][0]['lower_record_keys']=['evidence_steps/E'];ports=Ports()
     with pytest.raises(ValueError,match='differs'):stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
     assert ports.calls==[]
+
+
+@pytest.fixture
+def ready_pair(sample,tmp_path):
+    store,root,_=sample
+    ev=store.get_record_state('evidence_steps','E')['payload'];ev.update(statement='沒有聽從祂的話，顯明沒有真正相信祂。',produced_claim_ids=['C','D'])
+    claim=store.get_record_state('claims','C')['payload'];claim['statement']=ev['statement']
+    second={**deepcopy(claim),'claim_id':'D','statement':'教授以有沒有聽從耶穌的話判斷是否真正相信祂。'}
+    store.apply_plan(store.plan_package({'package_id':'two-final-checks','evidence_steps':[ev],'claims':[claim,second],
+        'observations':[{'observation_id':'O','statement':'教授以沒有聽從的行為說明沒有真正相信。','source_fragment_id':'F'}]}))
+    _,sources=f.load_source(store,'S');plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],
+        'groups':[{'group_id':'G','title':'one','paragraph_keys':list(sources['S']['paragraphs']),'claim_ids':['C','D'],
+                   'lower_record_keys':['evidence_steps/E','observations/O'],'reference_record_keys':[]}]}
+    eroot=root/'evidence';prior=saved_inventory(tmp_path/'prior-pair',sources)
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),prior,apply=True)['status']=='completed'
+    sroot=root/'statements';assert statements.run(store,'S',['C','D'],eroot,sroot,BasePorts(),apply=True)['status']=='verified'
+    return store,root,plan,eroot,sroot
+
+
+def test_two_changed_claim_support_checks_share_one_call_and_replay(ready_pair):
+    store,root,plan,eroot,sroot=ready_pair
+    ports=Ports([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'行為觀察支持判斷。'}],choices={'support':'partial'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='applied'
+    requests=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_final_support']
+    assert len(requests)==1 and [j['job_id'] for j in requests[0]['input']['jobs']]==['claims/C','claims/D']
+    assert '每個job_id獨立判定' in requests[0]['system']
+    outcomes=[v for v in result['outcomes'] if v['basis']=='gpt_final_support']
+    assert {v['object_key'] for v in outcomes}=={'claims/C','claims/D'} and len(outcomes)==2
+    replay=Ports();assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',replay,apply=True)['status']=='applied'
+    assert replay.calls==[]
+
+
+def test_batch_keeps_unresolved_claim_separate_and_does_not_commit(ready_pair):
+    store,root,plan,eroot,sroot=ready_pair;old={k:store.get_record_state('claims',k) for k in ['C','D']}
+    class Mixed(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            if request['input']['task']=='argument_final_support':
+                for item in result['items']:
+                    if item['job_id']=='claims/D':item.update(action='needs_connection',reason='D仍缺少連接。')
+            return result
+    ports=Mixed([{'a':'observations/O','b':'evidence_steps/E','fragment_ids':['F'],'reason':'行為觀察支持判斷。'}],choices={'support':'partial'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+    assert result['status']=='needs_attention'
+    assert [v['object_key'] for v in result['pending'] if v.get('reason')=='D仍缺少連接。']==['claims/D']
+    assert {k:store.get_record_state('claims',k) for k in old}==old
+    assert not (root/'arguments/commit.json').exists()
+
+
+def _final_jobs():
+    return [{'job_id':'claims/'+k,'material':{'claim':{'statement':k}},'findings':{'support':'partial'}} for k in ['C','D']]
+
+
+def test_saved_legacy_single_answer_is_reused_only_unsolved_claim_sent(tmp_path):
+    jobs=_final_jobs();ports=Ports();root=tmp_path/'final'
+    list(f.gpt(root,ports,'argument_final_support',jobs[:1],statements.Edits.model_json_schema(),stage.FINAL_SUPPORT_PROMPT,semantic_review=False))
+    ports.calls=[];result=stage.final_support_decisions(root,ports,jobs)
+    assert [v.job_id for v in result]==['claims/C','claims/D']
+    assert len(ports.calls)==1 and [j['job_id'] for j in ports.calls[0][1]['input']['jobs']]==['claims/D']
+
+
+def test_unknown_legacy_single_call_cannot_be_reissued_as_batch(tmp_path):
+    jobs=_final_jobs();ports=Ports();root=tmp_path/'final'
+    request={'identity':ports.identity['gpt'],'system':stage.FINAL_SUPPORT_PROMPT,
+        'input':{'task':'argument_final_support','jobs':jobs[:1]},'schema':statements.Edits.model_json_schema()}
+    e.save(root/'gpt'/e.digest(request)/'request.json',request);e.save(root/'gpt'/e.digest(request)/'started.json',{'request_sha256':e.digest(request)})
+    with pytest.raises(ValueError,match='no saved reply'):stage.final_support_decisions(root,ports,jobs)
+    assert ports.calls==[]
+
+
+@pytest.mark.parametrize('defect',['duplicate','foreign'])
+def test_invalid_batched_final_answer_cannot_assign_a_verdict_to_another_claim(tmp_path,defect):
+    class Bad(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            result['items'][1]['job_id']='claims/C' if defect=='duplicate' else 'claims/OTHER'
+            return result
+    with pytest.raises(ValueError):stage.final_support_decisions(tmp_path,Bad(),_final_jobs())
+
+
+def test_omitted_job_only_receives_one_bounded_correction(tmp_path):
+    class Omit(Ports):
+        def repair(self,request):
+            result=super().repair(request)
+            if len(request['input']['jobs'])==2:result['items']=result['items'][:1]
+            return result
+    ports=Omit();result=stage.final_support_decisions(tmp_path,ports,_final_jobs())
+    assert [v.job_id for v in result]==['claims/C','claims/D']
+    assert [[j['job_id'] for j in req['input']['jobs']] for _,req in ports.calls]==[['claims/C','claims/D'],['claims/D']]
