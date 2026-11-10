@@ -73,6 +73,31 @@ def test_no_missing_material_does_not_force_gpt_review(tmp_path):
     assert replay.calls==[]
 
 
+def test_inventory_restores_unique_near_literal_without_recalling_model(tmp_path):
+    quote='馬太說六天以後，馬可說六天以後，路加說：「說了這話以後，大約有八天。」不是矛盾嗎？沒有。你要了解猶太人算日子。'
+    exact='馬太說六天以後，馬可說六天以後，路加說什麼？「耶穌說了這話以後，大約有八天。」不是矛盾嗎？沒有。你要了解猶太人算日子。'
+    text='路加說：「說了這話以後，大約有八天。」「耶穌帶著門徒上山。」'+exact
+    records,sources=fixture(tmp_path,[text],[('S0001',exact)])
+    ports=Ports(units=[{'paragraph_key':'S0001','quote':quote,'statement':'六天與八天並不矛盾。'}])
+    root=tmp_path/'run'
+    result=coverage.check(records,sources,'S',plan(sources),root,ports)
+    saved=list((root/'source-inventory/gpt').glob('*/response.json'))
+    assert len(saved)==1
+    assert json.loads(saved[0].read_text())['items'][0]['units'][0]['quote']==quote
+    replay=Ports(fail='source_preservation_inventory')
+    assert coverage.check(records,sources,'S',plan(sources),root,replay)==result
+    assert replay.calls==[]
+    assert result['quote_projection']==[{'paragraph_key':'S0001','supplied':quote,'exact':exact}]
+
+
+def test_inventory_never_projects_a_different_sentence_or_foreign_paragraph():
+    paragraphs={'S0001':{'text':'耶穌不是普通先知，而是神的兒子。'}}
+    with pytest.raises(ValueError,match='not literal'):
+        coverage.literal({'paragraph_key':'S0001','quote':'神的國已經完全實現，不再有任何未來。'},paragraphs,[])
+    with pytest.raises(ValueError,match='unprovided'):
+        coverage.literal({'paragraph_key':'S0002','quote':paragraphs['S0001']['text']},paragraphs,[])
+
+
 def test_compact_bindings_preserve_every_literal_and_invalid_binding_without_mutation():
     original={'job_id':'G','existing_details':{'R':{'scripture_refs':['Matt.5.16'],'bindings':[
         {'paragraph_key':'S0001','quote':'完整原文，沒有刪節。','binding_verified':True},
