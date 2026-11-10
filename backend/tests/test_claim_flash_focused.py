@@ -67,6 +67,51 @@ def test_successful_legacy_reply_is_reused_before_focusing_new_requests(tmp_path
     assert run()==original and ports.calls==1
 
 
+@pytest.mark.parametrize('defect',[None,'timeout','no_authority','tampered','other_failure','answer','retry_fails'])
+def test_explicit_refusal_retry_keeps_wire_and_never_loops(tmp_path,defect):
+    class Ports:
+        identity={'gpt':{'backend':'test','model':'test','effort':'medium'}}
+        focus_evidence_findings=True
+        focused_review_instruction='只查疑點'
+        def __init__(self):self.root=tmp_path/'provider';self.calls=[]
+        def repair(self,req):
+            self.calls.append(deepcopy(req))
+            if len(self.calls)==1 or defect=='retry_fails':raise RuntimeError('generation refused')
+            return {'items':[{'job_id':job()['job_id'],'action':'repair','stance':'quoted','reason':'引述。'}]}
+    ports=Ports();root=tmp_path/'fidelity'
+    def run():return list(f.gpt(root,ports,'evidence_fidelity_repair',[job()],eo.Edits.model_json_schema(),eo.PROMPT,semantic_review=False))
+    with pytest.raises(RuntimeError):run()
+    old=next(root.glob('gpt/*/started.json')).parent;key=old.name
+    transport=ports.root/'gpt'/key/'transport';transport.mkdir(parents=True)
+    stdout=transport/'stdout.log';stderr=transport/'stderr.log'
+    message='Invalid prompt: your prompt was flagged as potentially violating our usage policy.'
+    stdout.write_text(json.dumps({'type':'turn.failed','error':{'message':message if defect!='other_failure' else 'network failure'}}))
+    stderr.write_text('diagnostic')
+    receipt={'returncode':1,'files':{p.name:f.hashlib.sha256(p.read_bytes()).hexdigest() for p in (stdout,stderr)}}
+    if defect=='timeout':receipt={'error_type':'TimeoutExpired','returncode':None}
+    e.save(transport/'exit.json',receipt)
+    if defect!='no_authority':
+        e.save(old/'owner-recovery.json',{**({} if defect=='timeout' else {'kind':'owner_retry_confirmed_prompt_refusal_v1'}),
+            'owner_direction':'再試一次看看','max_reissues':1,'original_request_sha256':key,
+            'exit_path':str(transport/'exit.json'),'exit_sha256':e.digest(receipt)})
+    if defect=='tampered':stdout.write_text('changed')
+    if defect=='answer':(transport/'response.json').write_text('{}')
+    if defect in {'no_authority','tampered','other_failure','answer'}:
+        with pytest.raises(ValueError):run()
+        assert len(ports.calls)==1
+        return
+    if defect=='retry_fails':
+        with pytest.raises(RuntimeError):run()
+        with pytest.raises(ValueError):run()
+        assert len(ports.calls)==2
+        return
+    result=run()
+    assert len(ports.calls)==2
+    assert {k:v for k,v in ports.calls[-1].items() if k!='execution_recovery'}==ports.calls[0]
+    assert run()==result and len(ports.calls)==2
+    assert (old/'started.json').exists() and not (old/'response.json').exists()
+
+
 def test_outer_evidence_runner_admits_only_the_authorized_timeout_then_commits(sample):
     from backend.tests.test_claim_flash_evidence import Ports as BasePorts,saved_inventory
     store,root,_=sample;records,sources=f.load_source(store,'S')

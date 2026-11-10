@@ -31,6 +31,29 @@ def test_decomposition_is_source_blind_bounded_cached_and_shared_only_by_text(tm
     assert parts.decompose(tmp_path,ports,texts)==result and len(ports.calls)==n
 
 
+@pytest.mark.parametrize('mistyped',[False,True])
+def test_decomposition_recovers_only_missing_record_and_keeps_original_answer(tmp_path,mistyped):
+    import json
+    class Once(Ports):
+        def repair(self,req):
+            value=super().repair(req)
+            if len([q for role,q in self.calls if role=='gpt'])==1:
+                if mistyped:value['items'][0]['items'][0]['object_key']='truncated-id'
+                else:value['items'][0]['items'].pop(0)
+            return value
+    ports=Once();texts={'A':'第一個判斷。','B':'第二個判斷。','C':'第三個判斷。'}
+    result=parts.decompose(tmp_path,ports,texts)
+    requests=[q for role,q in ports.calls if role=='gpt']
+    assert len(requests)==2 and set(result)==set(texts)
+    assert requests[1]['input']['jobs'][0]['records']==[{'object_key':'A','statement':texts['A']}]
+    assert requests[1]['schema']['$defs']['Parts']['properties']['object_key']['enum']==['A']
+    original=next((tmp_path/'components/gpt').glob('*/response.json'))
+    raw=json.loads(original.read_text())
+    assert ('truncated-id' in str(raw))==mistyped
+    assert parts.decompose(tmp_path,ports,texts)==result
+    assert len([q for role,q in ports.calls if role=='gpt'])==2
+
+
 @pytest.mark.parametrize('key,value',[('component_0','unsupported'),('component_0','uncertain'),
                                     ('decomposition_fidelity','changed'),('speaker_classification','audience')])
 def test_component_or_role_problem_routes_to_gpt_despite_whole_record_no_issue(sample,key,value):
