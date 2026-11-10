@@ -40,6 +40,12 @@ DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 MOST_POINTS = 4
 FEWEST_POINTS = 2
 
+SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之前的完整原文範圍及全部要點命名，涵蓋整張的共同主題，不只取開頭、最後一句、某一條 Claim 或其中一個子段。
+- 講背景和整體結構、列出多段或比較多部分時，標題寫「背景與分段」「整體結構」或相應的共同主題；不能用「第一段」等局部名稱代替整體。
+- 只有這一張確實專講某一段，才以該段命名；不因下一張繼續講第二段，就把本張已講的整體分段縮成第一段。
+- 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
+
+
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
 使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
@@ -61,6 +67,7 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 短句，是重點，不是逐字稿的句子。
 
 title：這一張在講什麼，不超過 14 字，不加引號。
+〈標題規則〉
 
 scriptures：這一張裡教授（或會眾）讀出來、或幾乎逐字引用的每一處經文，一處都不能少——包括馬太福音第 〈章〉 章本身和別卷書，按出現順序。
 - sentence 寫開始讀它的那一句；ref 寫書卷全名加章節，寫他實際讀的那幾節，如「以賽亞書 61:1-2」。
@@ -97,7 +104,7 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
-    prompt = _SYSTEM_TEMPLATE.replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    prompt = _SYSTEM_TEMPLATE.replace("〈標題規則〉", SLIDE_TITLE_RULES).replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
     return for_lecture(prompt, lecture)
 
 
@@ -113,6 +120,8 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                     "title": {"type": "string"},
                     "points": {
                         "type": "array",
+                        "minItems": FEWEST_POINTS,
+                        "maxItems": MOST_POINTS,
                         "items": {
                             "type": "object",
                             "properties": {"sentence": {"type": "string"}, "text": {"type": "string"}},
@@ -175,7 +184,7 @@ def _clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
 
-def user_prompt(lecture: str, decisions_record: dict[str, Any]) -> str:
+def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: dict[str, Any] | None = None) -> str:
     position = {piece["id"]: index for index, piece in enumerate(decisions_record["pieces"])}
     kept = kept_pieces(decisions_record)
     by_piece: dict[str, list[dict[str, Any]]] = {}
@@ -189,6 +198,12 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any]) -> str:
         lines.append(f"〔{_clock(piece['start'])}〕")
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
+    if claim_context is not None:
+        lines += ["", "# 本堂主張與證據步驟（編輯提示，逐字稿為準）",
+                  "依照逐字稿分張、定時。主張不決定分張，不是原話；候選主張不是已批准教導。",
+                  "逐項核對本堂保留句子中的問題、理由、結論與限定，勿漏重點。",
+                  "不把未保留片段或別堂的內容補入；原文不支持的提示不得採用。",
+                  json.dumps(claim_context, ensure_ascii=False)]
     return f"課程：{lecture}\n\n" + "\n".join(lines)
 
 
@@ -361,6 +376,7 @@ def decide(
     data_base_dir: Path,
     client: Any,
     force: bool = False,
+    claim_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     decisions_path = chapter_exposition.record_path(data_base_dir, chapter.passage, lecture)
     if not decisions_path.exists():
@@ -372,9 +388,13 @@ def decide(
     if not kept:
         # 这一堂没有讲这一章（太 8–15 按念到的章连同前后一堂先跑留不留）。
         return {"lecture": lecture, "status": "nothing_kept"}
-    prompt = user_prompt(lecture, decisions_record)
+    if claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import validate_context
+        validate_context(claim_context, chapter.passage, lecture, decisions_record,
+                         decisions_sha(data_base_dir, chapter.passage, lecture))
+    prompt = user_prompt(lecture, decisions_record, claim_context)
     response = client.generate_json(system_prompt(chapter, lecture), prompt, RESPONSE_SCHEMA)
-    return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""))
+    return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
 
 
 def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str, Any]:
@@ -397,13 +417,15 @@ def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str,
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
     )
-    prompt = user_prompt(lecture, decisions_record)
+    from backend.pipeline.chapter_slide_claims import saved_context
+    context = saved_context(rejected, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
+    prompt = user_prompt(lecture, decisions_record, context)
     prompt_sha = hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest()
     if rejected.get("prompt_sha256") != prompt_sha:
         return {"lecture": lecture, "status": "prompt_changed"}
     kept = kept_pieces(decisions_record)
     return save(chapter, lecture, data_base_dir, {"slides": rejected.get("raw_slides") or []}, prompt, kept,
-                rejected.get("model", ""))
+                rejected.get("model", ""), rejected.get("claim_context"))
 
 
 def save(
@@ -414,6 +436,7 @@ def save(
     prompt: str,
     kept: list[dict[str, Any]],
     model: str,
+    claim_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
     record = {
@@ -428,6 +451,10 @@ def save(
         "unshown_references": unshown,
         "raw_slides": response.get("slides") or [],
     }
+    if claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import digest
+        record["claim_context"] = claim_context
+        record["claim_context_sha256"] = digest(claim_context)
     target = record_path(data_base_dir, chapter.passage, lecture)
     target.parent.mkdir(parents=True, exist_ok=True)
     if problems:
@@ -463,6 +490,12 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 2. 完整：他這一段的問題、理由、結論、勸告都在；問題和它的答案在同一張；例子和它說明的道理在同一張；沒有只留鋪陳、漏了結論。
 3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
 4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
+
+每張另查標題範圍：
+〈標題規則〉
+把只涵蓋子段的標題列為「跟得上」問題，指出原文中標題沒有涵蓋的部分，並給出能涵蓋整張的具體新標題；不要只看標題是否和某一條要點相符。
+
+每張只有二到四條要點。改法也必須符合這個上限；新增會超過時，明確說明合併、刪除或分張，不能要求其餘要點不動而超限。
 
 只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
 
@@ -554,8 +587,14 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
     )
-    prompt = user_prompt(lecture, decisions_record) + "\n\n投影片：\n" + show_slides(record["slides"])
-    answer = client.generate_json(for_lecture(REVIEW_PROMPT, lecture), prompt, REVIEW_SCHEMA)
+    from backend.pipeline.chapter_slide_claims import saved_context, review_contract, check_review
+    context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
+    extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
+    prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
+    review_system = REVIEW_PROMPT.replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
+    if context is not None:
+        check_review(answer, context, record["slides"])
     out = {
         "slides_sha256": slides_sha,
         "revision": revision,
@@ -589,13 +628,18 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
     )
+    from backend.pipeline.chapter_slide_claims import saved_context
+    context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     kept = kept_pieces(decisions_record)
     findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in verdict["findings"])
     prompt = (
-        user_prompt(lecture, decisions_record)
+        user_prompt(lecture, decisions_record, context)
         + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
         + "\n\n審稿人的意見：\n" + findings
     )
+    rejected_attempt = path.with_suffix(f".revision-{revision + 1}.rejected.json")
+    if context is not None and rejected_attempt.exists():
+        return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
     response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
     if problems:
@@ -622,6 +666,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lecture", action="append", default=[], help="只跑这几堂，如 （二）1")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
+    parser.add_argument("--claims-context", type=Path, help="本堂凍結的主張提示包；只可選一堂")
     parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
     parser.add_argument(
         "--recheck", action="store_true",
@@ -639,18 +685,27 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if not lectures:
         parser.error("没有符合的讲道")
+    data_root = args.data_dir or Path(DATA_BASE_PATH)
+    context = json.loads(args.claims_context.read_text(encoding="utf-8")) if args.claims_context else None
+    if context is not None and (args.review or args.recheck):
+        parser.error("审阅与重核自动读取存档里的提示包，不接受新的 --claims-context")
+    if context is not None and len(lectures) != 1:
+        parser.error("主張提示包只可用於一堂")
     if args.recheck:
         failed = False
         for lecture in lectures:
-            report = recheck(chapter, lecture, data_base_dir=Path(DATA_BASE_PATH))
+            report = recheck(chapter, lecture, data_base_dir=data_root)
             print(json.dumps(report, ensure_ascii=False))
             failed = failed or report["status"] not in {"saved", "nothing_rejected", "already_saved"}
         return 1 if failed else 0
     client = ClaudeSubscriptionClient(model=args.model)
+    if args.data_dir:
+        from backend.pipeline.chapter_slide_claims import RecordedClient
+        client = RecordedClient(client, data_root.parent / "calls")
     failed = False
     for lecture in lectures:
         if args.review:
-            data = Path(DATA_BASE_PATH)
+            data = data_root
             while True:
                 report = review(chapter, lecture, data_base_dir=data, client=client)
                 print(json.dumps(report, ensure_ascii=False))
@@ -661,7 +716,7 @@ def main(argv: list[str] | None = None) -> int:
                 if report["status"] != "revised":
                     break
             continue
-        report = decide(chapter, lecture, data_base_dir=Path(DATA_BASE_PATH), client=client, force=args.force)
+        report = decide(chapter, lecture, data_base_dir=data_root, client=client, force=args.force, claim_context=context)
         print(json.dumps(report, ensure_ascii=False))
         failed = failed or report["status"] not in {"saved", "unchanged"}
     return 1 if failed else 0

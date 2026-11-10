@@ -274,3 +274,47 @@ def test_a_rejected_answer_is_not_rechecked_after_the_keep_decisions_change(tmp_
     record["decisions"][0]["keep"] = False
     path.write_text(json.dumps(record, ensure_ascii=False))
     assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "decisions_changed"
+
+
+def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path):
+    """Regression for the shared policy and normal correction path, not a model eval."""
+    from pathlib import Path
+    fixture = json.loads((Path(__file__).parent / 'fixtures/chapter_slides/title_scope_owner_case.json').read_text())
+    pieces = [{'id': 'U001', 'start': fixture['sentences'][0]['start'],
+               'end': fixture['sentences'][-1]['end'],
+               'text': ''.join(s['text'] for s in fixture['sentences'])}]
+    decisions = {'pieces': pieces, 'decisions': [
+        {'id': 'U001', 'keep': True, 'verses': ['mat-5-1-48'], 'kind': '釋經'}]}
+    path = chapter_exposition.record_path(tmp_path, CHAPTER.passage, 'L')
+    path.parent.mkdir(parents=True); path.write_text(json.dumps(decisions, ensure_ascii=False))
+    wrong = {'slides': [slide('S0001', title=fixture['rejected_title'])]}
+    finding = {'grade': 'B', 'blocking': False, 'findings': [
+        {'slide': 'S0001', 'kind': '跟得上', 'problem': fixture['reason'],
+         'fix': '標題改為「' + fixture['reference_title'] + '」，保留內容與分張。'}]}
+    corrected = {'slides': [slide('S0001', title=fixture['reference_title'])]}
+
+    class Capture(FakeClient):
+        def __init__(self, answers):
+            super().__init__(answers)
+            self.systems = []
+
+        def generate_json(self, system, user, schema):
+            self.systems.append(system)
+            return super().generate_json(system, user, schema)
+
+    author, reviewer, reviser = Capture([wrong]), Capture([finding]), Capture([corrected])
+    chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=author)
+    chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=reviewer)
+    chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
+    # All three real pipeline calls receive the same range rule, including revisions.
+    for client in (author, reviewer, reviser):
+        assert chapter_slides.SLIDE_TITLE_RULES in client.systems[0]
+        assert '〈標題規則〉' not in client.systems[0]
+    assert '原文中標題沒有涵蓋的部分' in reviewer.systems[0]
+    assert fixture['reason'] in reviser.prompts[0]
+    assert fixture['reference_title'] in reviser.prompts[0]
+    record = chapter_slides.load_record(tmp_path, CHAPTER.passage, 'L')
+    assert record['slides'][0]['title'] == fixture['reference_title']
+    assert record['revision'] == 1
+    previous = json.loads(chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').with_suffix('.revision-0.json').read_text())
+    assert previous['slides'][0]['title'] == fixture['rejected_title']
