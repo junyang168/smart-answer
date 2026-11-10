@@ -242,3 +242,35 @@ def test_the_cuv_spelling_of_kings_is_read():
 
     assert reference_slugs("列王紀上 1:32-33") == ["1ki-1-32-33"]
     assert reference_slugs("列王紀下 2:11") == ["2ki-2-11"]
+
+
+def test_a_rejected_answer_is_rechecked_without_calling_the_model(tmp_path, monkeypatch):
+    record = {"pieces": KEPT, "decisions": [
+        {"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    path = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    answer = {"slides": [slide("S0001", "5:1-48", points=("一", "二"))]}
+    # 程序先拒收（像书名表不认得的写法），修好后同一份回答重核就过。
+    real_check = chapter_slides.check
+    monkeypatch.setattr(chapter_slides, "check", lambda *a: (["書名讀不出來"], [], []))
+    assert chapter_slides.decide(CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([answer]))["status"] == "rejected"
+    monkeypatch.setattr(chapter_slides, "check", real_check)
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "saved"
+    assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")["slides"][0]["points"][1]["text"] == "二"
+    # 存过之后，旧的拒收稿不再重核，免得盖掉审过、修过的那一份。
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "already_saved"
+
+
+def test_a_rejected_answer_is_not_rechecked_after_the_keep_decisions_change(tmp_path, monkeypatch):
+    record = {"pieces": KEPT, "decisions": [
+        {"id": u["id"], "keep": True, "verses": ["mat-5-3"], "kind": "釋經"} for u in KEPT]}
+    path = chapter_exposition.record_path(tmp_path, "mat-5-1-48", "L")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    monkeypatch.setattr(chapter_slides, "check", lambda *a: (["x"], [], []))
+    chapter_slides.decide(CHAPTER, "L", data_base_dir=tmp_path,
+                          client=FakeClient([{"slides": [slide("S0001", "5:1-48")]}]))
+    record["decisions"][0]["keep"] = False
+    path.write_text(json.dumps(record, ensure_ascii=False))
+    assert chapter_slides.recheck(CHAPTER, "L", data_base_dir=tmp_path)["status"] == "decisions_changed"
