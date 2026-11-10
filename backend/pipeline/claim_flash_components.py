@@ -68,8 +68,30 @@ def decompose(root, ports, statements):
         f.exactly([x.model_dump() for x in replies], [j['job_id'] for j in batch], 'job_id')
         for reply in replies:
             job = next(j for j in batch if j['job_id'] == reply.job_id)
-            f.exactly([x.model_dump() for x in reply.items],
-                      [n['object_key'] for n in job['records']], 'object_key')
+            expected=[n['object_key'] for n in job['records']]
+            actual=[x.object_key for x in reply.items]
+            if len(set(actual))!=len(actual):
+                raise ValueError('GPT must dispose every job exactly once')
+            missing=set(expected)-set(actual)
+            if missing:
+                # Never infer a mistyped ID or reuse its decomposition. Retain
+                # exact returned records, and ask only for the omitted inputs.
+                correction={**job,'records':[n for n in job['records'] if n['object_key'] in missing]}
+                work=Path(root)/'missing-records'/e.digest([job,raw])
+                e.save(work/'recovery.json',{'original_answer_sha256':e.digest(raw),
+                    'retained_ids':[key for key in actual if key in expected],
+                    'rejected_ids':[key for key in actual if key not in expected],
+                    'missing_ids':[n['object_key'] for n in correction['records']], 'max_additional_calls':1})
+                schema=Bundles.model_json_schema()
+                schema['$defs']['Parts']['properties']['object_key']['enum']=[n['object_key'] for n in correction['records']]
+                _,fixed=next(f.gpt(work,ports,'lower_decomposition',[correction],schema,
+                    PROMPT+'前次部分object_key缺漏或抄錯；本次只拆給定記錄，不重做其他記錄。',semantic_review=False))
+                fixed=Bundles.model_validate(fixed).items
+                f.exactly([x.model_dump() for x in fixed],[job['job_id']],'job_id')
+                f.exactly([x.model_dump() for x in fixed[0].items],
+                    [n['object_key'] for n in correction['records']],'object_key')
+                reply.items=[x for x in reply.items if x.object_key in expected]+fixed[0].items
+            f.exactly([x.model_dump() for x in reply.items],expected,'object_key')
             for item in reply.items:
                 parts = [c.model_dump() for c in item.components]
                 if any(not c['text'].strip() for c in parts) or len({c['text'] for c in parts}) != len(parts):
