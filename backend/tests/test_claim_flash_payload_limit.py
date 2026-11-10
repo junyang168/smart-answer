@@ -37,3 +37,13 @@ def test_flash_jev_batches_questions_above_old_byte_guard_without_changing_legac
     with pytest.raises(ValueError,match='bounded request size'):
         e.recorded_call(tmp_path/'legacy-jev','jev',calls[0],judge)
     assert len(calls)==1
+
+
+def test_creation_flash_uses_the_same_128k_transport_limit(tmp_path):
+    from backend.pipeline import claim_creation_flash as creation
+    calls=[]
+    def repair(request):calls.append(request);return {'ok':True}
+    ports=SimpleNamespace(identity={'gpt':{'model':'test'}},repair=repair)
+    contract={'schema':{'type':'object','properties':{'ok':{'type':'boolean'}},'required':['ok']}}
+    result=creation.call(tmp_path,ports,'test',{'text':'x'*90000},contract,'one task',lambda:None)
+    assert result=={'ok':True} and len(calls)==1

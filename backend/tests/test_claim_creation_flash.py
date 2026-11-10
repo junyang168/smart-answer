@@ -321,7 +321,7 @@ def test_unknown_reply_is_not_resent(tmp_path):
 
 
 def test_payload_limit_precedes_model_call(tmp_path):
-    source=_transcript();source['script'][0]['text']='長'*30000
+    source=_transcript();source['script'][0]['text']='長'*creation.f.GPT_BYTES
     p=tmp_path/'source.json';p.write_text(json.dumps(source));ports=Ports(source)
     with pytest.raises(ValueError,match='payload limit'):creation.run('T',p,tmp_path/'run',ports,groups=groups())
     assert not ports.calls

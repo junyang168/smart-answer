@@ -188,7 +188,13 @@ def load_group_source(store, sid, group):
     from backend.pipeline import claim_human_source as human
     records, sources = load_source(store, sid)
     keys = set(group['paragraph_keys'])
-    for key in group.get('lower_record_keys', []) + group.get('reference_record_keys', []):
+    material_keys=set(group.get('lower_record_keys', [])+group.get('reference_record_keys', []))
+    # These direct references are already read by Claim tasks. Carry their
+    # source interpretations too, without following another Claim neighbour.
+    material_keys.update('evidence_steps/'+eid for key in list(material_keys)
+        if key.startswith('claims/') and key in records
+        for eid in records[key]['payload'].get('evidence_step_ids',[]))
+    for key in material_keys:
         if key in records:
             keys.update(records['source_fragments/'+fid]['payload']['paragraph_key']
                         for fid in e.evidence_fragment_ids(records[key]['payload'])
@@ -252,11 +258,15 @@ def jev(root, ports, state, questions, *, reuse_roots=()):
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
     own = Path(root)/'jev'/e.digest(request)
     if (own/'started.json').exists() and not (own/'response.json').exists():
+        rejected=e.rejection_receipt(own,request)
+        if rejected:raise e.RecordedCallRejected(own,rejected)
         raise ValueError('Jev call has no saved reply; inspect before retrying')
     reply = None
     for previous in reuse_roots:
         folder = Path(previous)/'jev'/e.digest(request)
         if (folder/'started.json').exists() and not (folder/'response.json').exists():
+            rejected=e.rejection_receipt(folder,request)
+            if rejected:raise e.RecordedCallRejected(folder,rejected)
             raise ValueError('matching prior Jev call has no saved reply; no resend')
         if (folder/'response.json').exists():
             if json.loads((folder/'request.json').read_text()) != request:

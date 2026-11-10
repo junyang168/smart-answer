@@ -15,6 +15,7 @@ from backend.pipeline import claim_flash_coverage as coverage, claim_flash_sourc
 from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
 from backend.pipeline import claim_flash_missing as missing
+from backend.pipeline import claim_flash_recovery as recovery
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError
 
@@ -142,7 +143,8 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
                 return saved
-            if saved.get('pending') and saved['pending'][0].get('layer') in {'evidence','claims'}:
+            if (not (root/'claim-progress.json').exists() and saved.get('pending')
+                    and saved['pending'][0].get('layer') in {'evidence','claims'}):
                 pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
                 if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
                     raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
@@ -152,6 +154,9 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('pending Flash stage evidence changed')
                 checkpoint=saved['stages']
                 resume_claims=saved['pending'][0]['layer']=='claims'
+        if (root/'claim-progress.json').exists():
+            checkpoint=recovery.restore(store,root,intent,records,sources)
+            resume_claims=True
         if (root/'before.json').exists():before=read(root/'before.json')
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
@@ -218,6 +223,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
         stages.setdefault('claims',{})
+        lower_sha=recovery.lower_checkpoint(root,intent,stages)
         tasks=claim_tasks(plan)
         for group,ids,batch_number in tasks:
             gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
@@ -228,6 +234,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                     if e.digest(read(gr/'missing/result.json'))!=e.digest(old):
                         raise ValueError('completed Claim checkpoint stage differs')
                     continue
+                recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':'missing'},lower_sha)
                 value=missing.run(store,source_id,None,gr/'missing',ports,apply=True,
                     max_new_claims=2,empty_group=group,evidence_root=root/'evidence')
                 stages['claims'][gid]={'missing':value}
@@ -244,6 +251,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                     if e.digest(read(gr/name/'result.json'))!=e.digest(outputs[name]):
                         raise ValueError('completed Claim checkpoint stage differs')
                     continue
+                recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
                 value=fn();outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
         return finish(stages,[])

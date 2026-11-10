@@ -243,7 +243,7 @@ def test_invalid_completed_type_repairs_only_that_pair_without_jev(ready):
     third={**deepcopy(store.get_record_state('claims','C')['payload']),'claim_id':'X'}
     store.apply_plan(store.plan_package({'package_id':'invalid-type-third','claims':[third]}))
     records,sources=f.load_source(store,'S');ports=Ports()
-    result=pairs.review(records,sources,[],[],root/'invalid-type',ports,kind='claim',completed_proposals=[
+    result=pairs.review(records,sources,[],[],root/'invalid-type',ports,kind='claim',repair_invalid_completed=True,completed_proposals=[
         {'a':'claims/C','b':'claims/D','relation_type':'applies','direction':'a_to_b','reason':'原判定的理由。'},
         {'a':'claims/D','b':'claims/X','relation_type':'supports','direction':'a_to_b','reason':'另一條已完成判定。'}])
     assert not result['pending'] and len(result['new_relations'])==2

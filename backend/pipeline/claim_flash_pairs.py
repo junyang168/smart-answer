@@ -89,7 +89,7 @@ def forbidden(src,dst,typ,records):
     return False
 
 
-def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False,completed_proposals=()):
+def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adjudicate_proposed_none=False,completed_proposals=(),repair_invalid_completed=False):
     cases=[];seen=set()
     def find(oid):
         matches=[k for k in records if k.split('/')[0] in f.LOWER|{'claims'} and k.split('/',1)[1]==oid]
@@ -121,6 +121,8 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
         if a==b or a not in records or b not in records or not allowed_pair(a,b,kind):
             raise ValueError('completed relation has unprovided or illegal endpoints')
         choice=pair['direction']+'_'+pair['relation_type']
+        if choice not in options(a,b,kind) and not repair_invalid_completed:
+            raise ValueError('completed relation has illegal type or direction')
         src,dst=(a,b) if pair['direction']=='a_to_b' else (b,a)
         signature=(src,dst,pair['relation_type']);key=frozenset([a,b])
         if key in completed_seen:
@@ -158,7 +160,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
                           **({'candidate_reason':pair['candidate_reason']} if pair.get('candidate_reason') else {})})
             seen.add(frozenset([a,b]))
     updates={};retiring=[];new=[];pending=conflicts;outcomes=[];jobs=[];resolved=completed;implicit_changes=[]
-    for case in cases:
+    for case in sorted(cases,key=lambda case:case['job_id']):
         a,b=case['a'],case['b'];original=case['original'];opts=options(a,b,kind)
         state={'A':node(a,records,sources),'B':node(b,records,sources),'existing_relation':original}
         case['state']=state

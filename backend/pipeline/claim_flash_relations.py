@@ -163,7 +163,8 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
                 pending.extend({'object_key': k, 'reason': item.reason} for k in item.unresolved_keys)
                 discoveries.append(item.model_dump())
         result = pairs.review(records, sources, sorted(edges), proposed, root/'pairs', ports,
-                              kind='claim', adjudicate_proposed_none=True,completed_proposals=completed)
+                              kind='claim', adjudicate_proposed_none=True,completed_proposals=completed,
+                              repair_invalid_completed=True)
         updates = deepcopy(result['updates'])
         for post in result['new_relations']:
             oid = 'CR-FLA-'+e.digest([source_id, post['from_id'], post['to_id'], post['relation_type']])[:24]

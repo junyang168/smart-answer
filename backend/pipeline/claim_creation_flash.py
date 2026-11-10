@@ -243,7 +243,7 @@ def call(root, ports, task, content, contract, prompt, source_check):
     if len(json.dumps(request, ensure_ascii=False).encode()) > f.GPT_BYTES:
         raise ValueError('complete creation task exceeds payload limit; split source group, never truncate')
     result = e.recorded_call(root, 'gpt', request, ports.repair,
-                             preflight=getattr(ports, 'preflight', None))
+                             preflight=getattr(ports, 'preflight', None),gpt_max_bytes=f.GPT_BYTES)
     source_check(); check_shape(result, contract['schema'])
     return deepcopy(result)
 
@@ -359,7 +359,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             if len(json.dumps(request,ensure_ascii=False).encode()) > f.GPT_BYTES:
                 raise ValueError('grouping input exceeds payload; supply a reviewed source grouping plan')
             source_check()
-            answer = e.recorded_call(root/'grouping','gpt',request,ports.repair,preflight=getattr(ports,'preflight',None))
+            answer = e.recorded_call(root/'grouping','gpt',request,ports.repair,preflight=getattr(ports,'preflight',None),gpt_max_bytes=f.GPT_BYTES)
             source_check(); groups = [g.model_dump() for g in SemanticGroups.model_validate(answer).groups]
         all_owned = [pk for g in groups for pk in ranges(g['paragraph_ranges'], keys)]
         if len(set(all_owned)) != len(all_owned) or set(all_owned) != set(keys):

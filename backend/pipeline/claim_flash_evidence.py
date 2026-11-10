@@ -504,6 +504,10 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
+                if (started.parent.parent.name=='jev' and (started.parent/'rejection.json').exists()
+                        and e.rejection_receipt(started.parent,
+                        json.loads((started.parent/'request.json').read_text()))):
+                    continue  # Retained refusal; a different corrected input may proceed.
                 if started.parent.parent.name=='gpt' and (started.parent/'owner-recovery.json').exists():
                     f.stopped_gpt_authority(started.parent.parent.parent,ports,
                         json.loads((started.parent/'request.json').read_text()))

@@ -153,7 +153,7 @@ def test_claim_checkpoint_skips_completed_stages_and_refuses_drift(candidate,tmp
     for module in (flow.source,flow.coverage,flow.eo,flow.statements,flow.arguments):
         monkeypatch.setattr(module,'run',lambda *a,**k:pytest.fail('completed layer/stage repeated'))
     if fault:
-        with pytest.raises(ValueError,match='checkpoint input changed|stage evidence changed'):
+        with pytest.raises(ValueError,match='checkpoint input changed|stage evidence changed|outside write'):
             flow.run_candidate(path,tmp_path/'resume',FlowPorts())
     else:
         result=flow.run_candidate(path,tmp_path/'resume',FlowPorts())

@@ -105,7 +105,14 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             **({'empty_group_contract':'claim_flash_empty_group_v1','evidence_root':str(relation_root)} if empty_group is not None else {}),
             'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema(),pairs.COMPLETED_CONTRACT,flash.CompleteDiscoveries.model_json_schema()])})
         if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
-        records,sources=f.load_group_source(store,source_id,group)
+        load_group=group
+        if empty_group is None:
+            # Consume the relationship stage's exact direct-reference scope,
+            # including current human interpretations of those references.
+            prior_result=json.loads((relation_root/'result.json').read_text())
+            load_group={**group,'reference_record_keys':sorted(set(group.get('reference_record_keys',[]))
+                |set(prior_result.get('readonly_endpoint_keys',[])))}
+        records,sources=f.load_group_source(store,source_id,load_group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
         if empty_group is None:read=consume(store,relation_root,records,sources)
         else:
