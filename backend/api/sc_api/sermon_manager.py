@@ -752,6 +752,7 @@ class SermonManager:
         ).publish(
             sermon.assigned_to,
             expected_review_sha256=expected_review_sha256,
+            published_by=user_id,
         )
         before_snapshot = self._snapshot_sermon_meta(sermon)
         sermon.status = 'published'
@@ -974,7 +975,7 @@ class SermonManager:
     
     def get_sermon_series(self):
         from .series_review_catalog import SeriesReviewCatalog
-        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'))
+        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'),user_getter=self._acl.get_user)
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
         if not os.path.exists(series_meta_file):
             return []

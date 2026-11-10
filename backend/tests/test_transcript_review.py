@@ -318,6 +318,7 @@ def test_scoped_confirmation_invalidation_history_and_public_stability(setup):
     published_path = root / "script_published" / f"{item}.json"
     before = published_path.read_bytes()
     published = read(published_path)
+    assert published["metadata"]["published_by"] == "a"
     assert set(published) == {"metadata", "script"}
     assert (
         "review_public/%E8%AC%9B%E9%81%93%20test/assets/"

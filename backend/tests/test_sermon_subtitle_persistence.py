@@ -65,10 +65,14 @@ def test_publish_is_atomic_and_bound_to_the_exact_review_snapshot(
     assert not (tmp_path / "script_published" / f"{item}.json").exists()
 
     published_sha = delta.publish(
-        "editor@example.org", expected_review_sha256=review_sha
+        "editor@example.org", expected_review_sha256=review_sha,
+        published_by="publisher@example.org",
     )
     published_path = tmp_path / "script_published" / f"{item}.json"
     assert hashlib.sha256(published_path.read_bytes()).hexdigest() == published_sha
+    metadata = json.loads(published_path.read_text(encoding="utf-8"))["metadata"]
+    assert metadata["author"] == "editor@example.org"
+    assert metadata["published_by"] == "publisher@example.org"
     assert json.loads(published_path.read_text(encoding="utf-8"))["script"] == [
         {"index": "subtitle-1", "type": "subtitle", "text": "## 图示"}
     ]

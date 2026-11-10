@@ -469,19 +469,20 @@ class ScriptDelta:
         return { 'metadata': metadata, 'script': sermon_detail}
 
 
-    def publish(self,author,*,expected_review_sha256=None):
+    def publish(self,author,*,expected_review_sha256=None,published_by=None):
         from .transcript_review import ReviewStore
         store=ReviewStore(Path(self.base_folder))
         with store.lock(self.item_name):
             if store.enabled(self.item_name):
                 raise ScriptConflictError('Use the transcript review workflow for this sermon')
-            return self._publish_legacy(author,expected_review_sha256=expected_review_sha256)
+            return self._publish_legacy(author,expected_review_sha256=expected_review_sha256,published_by=published_by)
 
     def _publish_legacy(
         self,
         author: str,
         *,
         expected_review_sha256: str | None = None,
+        published_by: str | None = None,
     ) -> str:
         """Atomically publish one exact review snapshot.
 
@@ -536,6 +537,8 @@ class ScriptDelta:
                 },
                 "script": published_script,
             }
+            if published_by:
+                published["metadata"]["published_by"] = published_by
             encoded = json.dumps(
                 published, ensure_ascii=False, indent=4
             ).encode("UTF-8")

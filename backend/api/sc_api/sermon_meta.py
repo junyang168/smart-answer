@@ -21,6 +21,8 @@ class Sermon(BaseModel):
     title: Optional[str] = None
     deliver_date: Optional[str] = None
     published_date: Optional[str] = None
+    published_by: Optional[str] = None
+    published_by_name: Optional[str] = None
     summary: Optional[str] = None
     type: Optional[str] = None
     theme: Optional[str] = None
