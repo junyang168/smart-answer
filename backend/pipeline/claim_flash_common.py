@@ -408,7 +408,10 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete authorized retry exceeds payload limit; no call made')
             stopped=Path(root)/'gpt'/e.digest(req)
-        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
+        from backend.pipeline.claim_flash_answer_reuse import returned_answer
+        reply=returned_answer(root,ports,req)
+        if reply is None:
+            reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
