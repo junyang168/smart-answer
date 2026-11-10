@@ -432,3 +432,37 @@ def test_material_and_reference_tasks_do_not_repeat_each_others_work(tmp_path):
     assert 'all_sermon_statements' not in tasks['reverse_scripture_coverage']
     assert 'existing_scripture_index' not in tasks['reverse_coverage_adjudication']
     assert len(result['findings'])==1 and len(result['findings'][0]['findings'])==2
+
+@pytest.mark.parametrize('verdict',['not_required','needs_context','wrong_candidate'])
+def test_context_continuation_only_resolves_pending_and_keeps_original(tmp_path,verdict):
+    text='不要為肉體預備什麼東西。'
+    records,sources=fixture(tmp_path,[text],[('S0001',text)])
+    original=coverage.check(records,sources,'S',plan(sources),tmp_path/'base',
+        Ports(units=[],citations=[{'paragraph_key':'S0001','quote':text,'reference':'未明說章節'}],
+              disposition='needs_context'))
+    before=deepcopy(original)
+    class Context(Ports):
+        def repair(self,request):
+            self.calls.append(request['input']['task'])
+            assert request['input']['task']=='reverse_coverage_context'
+            assert len(request['input']['jobs'])==1
+            job=request['input']['jobs'][0];item=deepcopy(job['original_finding'])
+            item.pop('existing_record_keys',None)
+            item.update(verdict='not_required' if verdict=='wrong_candidate' else verdict,reason='原文未明說章節，不猜補。')
+            if verdict=='wrong_candidate':item['candidate_ids']=['other']
+            return {'items':[{'job_id':job['job_id'],'findings':[item]}]}
+    p=Context();root=tmp_path/'context'
+    if verdict=='wrong_candidate':
+        with pytest.raises(ValueError,match='candidate identity'):
+            coverage.clarify_context(records,sources,'S',plan(sources),original,root,p)
+        assert not (root/'result.json').exists()
+        return
+    result=coverage.clarify_context(records,sources,'S',plan(sources),original,root,p)
+    assert result['status']==('checked' if verdict=='not_required' else 'needs_attention')
+    assert original==before and json.loads(Path(original['report_path']).read_text())==before
+    replay=Context()
+    assert coverage.clarify_context(records,sources,'S',plan(sources),original,root,replay)==result
+    assert not replay.calls  # Still-unresolved context cannot trigger a retry loop.
+    changed=deepcopy(records);changed['evidence_steps/E']['payload']['statement']='資料改動。'
+    with pytest.raises(ValueError,match='saved input differs'):
+        coverage.clarify_context(changed,sources,'S',plan(sources),original,root,Context())

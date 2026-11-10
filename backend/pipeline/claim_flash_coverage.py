@@ -370,7 +370,55 @@ def check(records, sources, source_id, plan, root, ports):
     return result
 
 
-def run(store, source_id, root, ports, *, plan=None, max_claims=8):
+
+def clarify_context(records, sources, source_id, plan, result, root, ports):
+    """One focused continuation, retaining the original report and all settled findings."""
+    pending=[(row['job_id'],i,v) for row in result['findings'] for i,v in enumerate(row['findings'])
+             if v['verdict']=='needs_context']
+    if not pending:return result
+    root=Path(root);paragraphs=sources[source_id]['paragraphs']
+    prompt=(DISPOSITION_PROMPT+'本次只澄清原needs_context項。原文未明說、上下文亦不能確定的經文章節不算漏記，'
+        '用not_required保留未知範圍，不用外部聖經猜補。只有確定存在且影響覆蓋判定的材料歧義才保留needs_context。'
+        '既有通過項不重審；不要把內容已保存但出處未明說當成人工問題。')
+    e.save(root/'intent.json',{'parent_report_sha256':e.digest(result),'source':sources[source_id]['file'],
+        'records_sha256':e.digest(records),'models':ports.identity,'policy_sha256':e.digest(prompt)})
+    aliases={key:'R'+e.digest(key)[:8] for key in sorted(records) if key.split('/')[0] in COLLECTIONS and not records[key].get('retired')}
+    if len(set(aliases.values()))!=len(aliases):raise ValueError('coverage reference collision')
+    reverse={v:k for k,v in aliases.items()};material={k:records[k]['payload'] for k in aliases}
+    jobs=[];slots={}
+    for gid,index,item in pending:
+        job_id=gid+'-context-'+str(index);slots[job_id]=(gid,index)
+        group=next(g for g in plan['groups'] if g['group_id']==gid)
+        jobs.append({'job_id':job_id,'original_finding':item,
+            'source_paragraphs':{pk:paragraphs[pk]['text'] for pk in group['paragraph_keys']},
+            'existing_details':details(set(item.get('existing_record_keys',[])),material,records,sources,aliases)})
+    merged=json.loads(json.dumps(result));receipts=[]
+    for batch,raw in f.gpt(root,ports,'reverse_coverage_context',jobs,Dispositions.model_json_schema(),prompt,
+                           shared={'existing_scripture_index':scripture_index(material,aliases)},semantic_review=False):
+        rows=Dispositions.model_validate(raw).model_dump()['items']
+        f.exactly(rows,[j['job_id'] for j in batch],'job_id')
+        for row in rows:
+            job=next(j for j in batch if j['job_id']==row['job_id']);old=job['original_finding']
+            if len(row['findings'])!=1:raise ValueError('context continuation must resolve exactly its original finding')
+            item=row['findings'][0]
+            if set(item['candidate_ids'])!=set(old['candidate_ids']) or item['paragraph_key']!=old['paragraph_key']:
+                raise ValueError('context continuation changed candidate identity')
+            literal(item,{pk:paragraphs[pk] for pk in job['source_paragraphs']},receipts)
+            if not set(item['record_refs'])<=set(reverse):raise ValueError('coverage finding invented a record')
+            item['existing_record_keys']=[reverse[r] for r in item['record_refs']]
+            if old.get('candidate_sources'):item['candidate_sources']=old['candidate_sources']
+            gid,index=slots[row['job_id']]
+            next(r for r in merged['findings'] if r['job_id']==gid)['findings'][index]=item
+    f.source_unchanged(sources)
+    unresolved=any(v['verdict'] in {'missing_material','missing_source_binding','missing_scripture_reference','needs_context'}
+                   for row in merged['findings'] for v in row['findings'])
+    merged.update(status='needs_attention' if unresolved else 'checked',
+        parent_report={'path':result['report_path'],'sha256':e.digest(result)},report_path=str(root/'result.json'),
+        quote_projection=merged['quote_projection']+receipts)
+    e.save(root/'result.json',merged)
+    return merged
+
+def run(store, source_id, root, ports, *, plan=None, max_claims=8, resolve_context=False):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with (root/'coverage.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -383,4 +431,8 @@ def run(store, source_id, root, ports, *, plan=None, max_claims=8):
             plan = json.loads(saved_groups.read_text()) if saved_groups.exists() else grouping.build(records, sources, source_id, max_claims=max_claims)
         validate_groups(plan, source_id, sources[source_id])
         e.save(saved_groups, plan)
-        return check(records, sources, source_id, plan, root, ports)
+        result=check(records, sources, source_id, plan, root, ports)
+        continuation=root/'context-clarification'/e.digest(result)
+        if resolve_context or (continuation/'intent.json').exists():
+            return clarify_context(records,sources,source_id,plan,result,continuation,ports)
+        return result
