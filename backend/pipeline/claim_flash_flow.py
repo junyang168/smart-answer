@@ -197,7 +197,12 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
                 return saved
-            if (not (root/'claim-progress.json').exists() and saved.get('pending')
+            if (saved.get('pending') and saved['pending'][0].get('layer')=='evidence'
+                    and not (root/'claim-layer-input.json').exists()):
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
+                    raise ValueError('pending Flash output package changed')
+                recovery.verify_pending_refs(root,saved)
+            if (not any((root/name).exists() for name in ('claim-progress.json','claim-layer-input.json','source-layer-input.json')) and saved.get('pending')
                     and saved['pending'][0].get('layer') in {'evidence','claims'}):
                 pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
                 if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
@@ -207,9 +212,13 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 recovery.verify_pending_refs(root,saved)
                 checkpoint=saved['stages']
                 resume_claims=saved['pending'][0]['layer']=='claims'
-        if (root/'claim-progress.json').exists():
+        if (root/'claim-progress.json').exists() and not (root/'claim-layer-input.json').exists():
+            raise ValueError('Flash recovery is missing its completed lower-layer checkpoint')
+        if (root/'claim-layer-input.json').exists():
             checkpoint=recovery.restore(store,root,intent,records,sources)
             resume_claims=True
+        elif (root/'source-layer-input.json').exists():
+            checkpoint=recovery.restore(store,root,intent,records,sources,source_only=True)
         if (root/'before.json').exists():before=read(root/'before.json')
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
@@ -249,6 +258,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
                 stages['scripture_bindings']=bound
                 if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
+            recovery.lower_checkpoint(root,intent,stages,source_only=True)
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
         for path in sorted((root/'source-handoffs').glob('*/intent.json')):
@@ -290,8 +300,8 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
-        stages.setdefault('claims',{})
         lower_sha=recovery.lower_checkpoint(root,intent,stages)
+        stages.setdefault('claims',{})
         tasks=claim_tasks(plan)
         for group,ids,batch_number in tasks:
             gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
@@ -322,6 +332,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
                 value=fn();outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
+        recovery.start_stage(root,intent,stages,None,lower_sha)
         return finish(stages,[])
 
 
