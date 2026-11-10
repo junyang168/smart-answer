@@ -111,12 +111,12 @@ def test_unclaim_preserves_latest_publication_and_clears_owner(tmp_path,has_draf
     assert before==file_hash(prod/'config/sermon.json')
 
 
-def test_publication_history_time_wins_over_older_catalog_date(tmp_path):
+def test_series_reads_normalized_catalog_date_without_reinterpreting_history(tmp_path):
     prod=tmp_path/'prod';draft(prod,status='ready',published_date='2025-01-01')
     atomic(prod/'script_published'/f'{ITEM}.json',{'metadata':{'status':'published','review_revision':8,'review_operation_id':'release-8'}})
     atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json',
            {'kind':'publish','revision':8,'operation_id':'release-8','time':'2026-11-09T18:49:00+00:00'})
-    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2026-11-09T18:49:00+00:00'
+    assert SeriesReviewCatalog(prod).for_item(ITEM)['published_date']=='2025-01-01'
 
 
 @pytest.mark.parametrize('kind,operation',[('unclaim','release-8'),('publish','another-operation')])
@@ -154,52 +154,27 @@ def test_beta_only_release_is_not_a_publication_in_production(tmp_path):
 
 def test_publication_actor_is_independent_of_current_draft_owner(tmp_path):
     prod, beta = tmp_path/'prod', tmp_path/'beta'
-    catalog(prod, status='ready')
+    catalog(prod, status='ready', published_by='publisher', published_by_name='發佈同工')
     draft(beta, assigned_to='new-editor', assigned_to_name='新認領人')
-    atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {
-        'status': 'published', 'reviewed_by': 'publisher',
-        'review_revision': 8, 'review_operation_id': 'release-8',
-    }})
-    atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json', {
-        'kind': 'publish', 'revision': 8, 'operation_id': 'release-8', 'actor': 'publisher',
-    })
-    result = SeriesReviewCatalog(prod, beta, user_getter=lambda actor: {'name': '發佈同工'} if actor == 'publisher' else {}).for_item(ITEM)
+    atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {'status': 'published'}})
+    result = SeriesReviewCatalog(prod, beta).for_item(ITEM)
     assert result['published_by'] == 'publisher'
     assert result['published_by_name'] == '發佈同工'
     assert result['assigned_to'] == 'new-editor'
 
 
-@pytest.mark.parametrize('history_matches', [False, True])
-def test_only_matching_publication_history_can_supply_actor(tmp_path, history_matches):
+@pytest.mark.parametrize('has_draft', [False, True])
+def test_series_never_infers_publisher_from_snapshot_or_owner(tmp_path, has_draft):
     prod = tmp_path/'prod'
-    catalog(prod, status='published')
+    create = draft if has_draft else catalog
+    create(prod, status='published', assigned_to='owner', assigned_to_name='認領人')
     atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {
-        'status': 'published', 'review_revision': 8, 'review_operation_id': 'release-8',
+        'status': 'published', 'author': 'author', 'published_by': 'snapshot-actor',
+        'reviewed_by': 'reviewer', 'review_revision': 8, 'review_operation_id': 'release-8',
     }})
     atomic(prod/'transcript_review'/ITEM/'revisions/00000008.json', {
-        'kind': 'publish', 'revision': 8, 'operation_id': 'release-8' if history_matches else 'another-release',
-        'actor': 'publisher',
+        'kind': 'publish', 'revision': 8, 'operation_id': 'release-8', 'actor': 'history-actor',
     })
-    result = SeriesReviewCatalog(prod, user_getter=lambda _: {'name': '發佈同工'}).for_item(ITEM)
-    assert result['published_by'] == ('publisher' if history_matches else None)
-    assert result['published_by_name'] == ('發佈同工' if history_matches else None)
-
-
-@pytest.mark.parametrize('metadata,expected', [
-    ({'author': 'publisher'}, None),
-    ({'author': '王守仁'}, None),
-    ({'author': 'publisher', 'review_revision': 8}, None),
-    ({'author': 'someone-else', 'published_by': 'publisher'}, 'publisher'),
-    ({'reviewed_by': 'publisher', 'review_revision': 8}, 'publisher'),
-    ({}, None),
-])
-def test_saved_publication_identity_and_legacy_account_lookup(tmp_path, metadata, expected):
-    prod = tmp_path/'prod'
-    catalog(prod, status='published', assigned_to='current-owner', assigned_to_name='認領人')
-    atomic(prod/'script_published'/f'{ITEM}.json', {'metadata': {'status': 'published', **metadata}})
-    path = prod/'script_published'/f'{ITEM}.json'
-    before = file_hash(path)
-    result = SeriesReviewCatalog(prod, user_getter=lambda actor: {'name': '發佈同工'} if actor == 'publisher' else {}).for_item(ITEM)
-    assert result['published_by'] == expected
-    assert result['published_by_name'] == ('發佈同工' if expected else None)
-    assert file_hash(path) == before
+    result = SeriesReviewCatalog(prod).for_item(ITEM)
+    assert result['published_by'] is None
+    assert result['published_by_name'] is None
