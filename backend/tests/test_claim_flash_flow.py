@@ -184,3 +184,20 @@ def test_unresolved_prepared_source_is_not_sent_for_another_gpt(candidate,tmp_pa
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert result['status']=='needs_attention'
     assert result['pending'][0]['findings'][0]['source_completion_attempted']
+
+@pytest.mark.parametrize('status,applied,recover',[
+    ('verified',False,True),('applied',True,False),('needs_attention',False,False)])
+def test_saved_source_preview_finishes_before_lower_review(candidate,tmp_path,monkeypatch,status,applied,recover):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    handoff=tmp_path/'flow/flash/source-handoffs/prepared'
+    flow.e.save(handoff/'intent.json',{'findings':[{'object_key':'evidence_steps/E','layer':'source'}],'models':{}})
+    flow.e.save(handoff/'result.json',{'status':status,'applied':applied,'pending':[] if status!='needs_attention' else ['unresolved']})
+    calls=[]
+    def resume(store,sid,findings,root,ports,*,apply):
+        assert apply and root==handoff
+        calls.append('saved-preview')
+        return {'status':'applied','applied':True,'pending':[]}
+    monkeypatch.setattr(flow.source,'repair_bindings',resume)
+    result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert result['status']=='completed'
+    assert calls==(['saved-preview'] if recover else [])

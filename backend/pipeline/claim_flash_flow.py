@@ -212,7 +212,9 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
         for path in sorted((root/'source-handoffs').glob('*/intent.json')):
-            if (path.parent/'result.json').exists():continue
+            if (path.parent/'result.json').exists():
+                receipt=read(path.parent/'result.json')
+                if receipt.get('applied') or not complete(receipt):continue
             saved=read(path)
             if 'findings' in saved and 'models' in saved:
                 source.repair_bindings(store,source_id,saved['findings'],path.parent,ports,apply=True)
