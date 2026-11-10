@@ -285,11 +285,13 @@ def yn(text):
 def stopped_gpt_authority(root,ports,request):
     key=e.digest(request);old=Path(root)/'gpt'/key
     if (request.get('input',{}).get('task')!='evidence_fidelity_repair'
-            or request.get('execution_recovery') or not getattr(ports,'focus_evidence_findings',False)
+            or not getattr(ports,'focus_evidence_findings',False)
             or not (old/'started.json').exists() or (old/'response.json').exists()
             or not (old/'owner-recovery.json').exists()):
         raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
     authority=json.loads((old/'owner-recovery.json').read_text())
+    if request.get('execution_recovery') and authority.get('kind')!='owner_additional_stopped_retry_v1':
+        raise ValueError('another stopped retry requires a new explicit bounded owner recovery')
     expected=Path(ports.root)/'gpt'/key/'transport'/'exit.json'
     receipt=json.loads(expected.read_text())
     if (authority.get('original_request_sha256')!=key or not authority.get('owner_direction')
@@ -394,14 +396,18 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             continue
         if task=='argument_completeness':
             req=reuse_argument_edge_order(root,req)
+        # Follow only separately authorized stopped attempts. Each immutable
+        # authority binds its immediate predecessor, with one new dispatch.
+        # No authority is created here; an unknown successor still stops.
         stopped=Path(root)/'gpt'/e.digest(req)
-        if ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
-                and (stopped/'owner-recovery.json').exists() and not req.get('execution_recovery')):
+        while ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
+                and (stopped/'owner-recovery.json').exists()):
             authority=stopped_gpt_authority(root,ports,req)
             req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
                 'authority_sha256':e.digest(authority)}}
             if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete authorized retry exceeds payload limit; no call made')
+            stopped=Path(root)/'gpt'/e.digest(req)
         reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
