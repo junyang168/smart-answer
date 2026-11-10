@@ -1,4 +1,4 @@
-"""Grouped Evidence/Observation refresh using verified fragments, never raw-source lookup."""
+"""Grouped lower verification with source-prepared candidates for flagged records."""
 from copy import deepcopy
 import fcntl
 import json
@@ -47,10 +47,50 @@ FOCUSED_PROMPT=(
     '只用已掛SourceFragments；缺必要上下文用needs_source交回原文層，不自行借鄰段。'
     '不審Claim、論證或節點關係。keep表示原值可保留。只輸出必要修改和針對疑點的簡短理由，'
     '每個job_id恰好一次；未改欄位用null。保留教授的經文引用。'+f.KNOWLEDGE_TEXT_RULES)
+COMPLETION_CONTRACT='claim_flash_evidence_source_completion_v1'
+COMPLETION_RULES=(
+    '本次來源層已先提供候選原文：source_paragraphs按段落ID共用，'
+    '每項只能選source_candidates.nearby_paragraph_keys列出的段落；候選不是支持成立的結論。'
+    '一次處置指定Jev疑點：keep保留；repair可修改摘要／獲准欄位、補充quotes，或兩者同時做。'
+    'quotes是需補充的完整逐字原文，含paragraph_key與quote；原有效片段由程式保留。'
+    '若判定依賴尚未掛載的候選原文，必須repair並輸出quotes；不得只保留或改摘要卻漏掛所需原文。'
+    '若候選仍不能解決必要來源缺口，才用needs_source。'
+    'keep及needs_source不得夾帶修改或quotes；不為支持摘要借用無關原文。'
+    '不審Claim、論證關係或其他已通過記錄。')
+
+
+def completion_prompt(focused=False):
+    base=FOCUSED_PROMPT if focused else PROMPT
+    base=base.replace('只用已掛SourceFragments；缺必要上下文用needs_source交回原文層，不自行借鄰段。','')
+    base=base.replace('sources只包含已驗證的SourceFragments；不查整篇原文、不補未掛片段作為自身支持。','')
+    base=base.replace('缺少來源用needs_source交回原文層，','')
+    base=base.replace('缺上下文時保留並交接，','必要上下文先核對所給候選，')
+    return base+COMPLETION_RULES
+
+
+def completion_input(data):
+    paragraphs={}
+    for job in data['jobs']:
+        value=job['source_candidates'];keys=[]
+        for paragraph in value.pop('nearby_paragraphs'):
+            pk=paragraph['paragraph_key']
+            if pk in paragraphs and paragraphs[pk]!=paragraph:raise ValueError('conflicting source candidate paragraph')
+            paragraphs[pk]=paragraph;keys.append(pk)
+        job['source_candidates']={'nearby_paragraph_keys':keys,'source_lookup':value['source_lookup']}
+    data['source_paragraphs']=paragraphs
+    data['source_completion_contract']=COMPLETION_CONTRACT
+    return data
+
+
+def assert_candidate_context(decision,all_decisions):
+    context=decision.get('source_context')
+    if context and human.scoped(all_decisions,context['paragraphs'])!=context['entries']:
+        raise ValueError('Evidence candidate source interpretation changed; explicit continuation required')
 
 
 def focused_request(request):
-    result=deepcopy(request);result['system']=FOCUSED_PROMPT
+    result=deepcopy(request)
+    result['system']=completion_prompt(True) if result['input'].get('source_completion_contract')==COMPLETION_CONTRACT else FOCUSED_PROMPT
     result['focused_contract']=FOCUSED_CONTRACT
     for job in result['input']['jobs']:
         issues={k:v for k,v in job['jev'].items() if not k.endswith('_classification')
@@ -67,7 +107,8 @@ def focused_request(request):
 
 def validate_focused_reply(request,reply):
     jobs={j['job_id']:j for j in request['input']['jobs']}
-    for edit in Edits.model_validate(reply).items:
+    schema=CompletionEdits if request['input'].get('source_completion_contract')==COMPLETION_CONTRACT else Edits
+    for edit in schema.model_validate(reply).items:
         if edit.action!='repair':continue
         job=jobs[edit.job_id]
         changed={field for field in FIELDS if getattr(edit,field) is not None
@@ -91,6 +132,15 @@ class Edit(BaseModel):
 class Edits(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     items: list[Edit]
+
+
+class CompletionEdit(Edit):
+    quotes: list[e.Quote] | None = None
+
+
+class CompletionEdits(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    items: list[CompletionEdit]
 
 
 class Missing(Edit):
@@ -302,11 +352,12 @@ def coverage_state(catalog):
         **{field:p[field] for field in ('speaker','stance') if p.get(field)}} for k,p in catalog.items()}}
 
 
-def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply):
-    sid = next(iter(sources)); working = dict(records); updates = {}; outcomes = []; pending = []; values = {}; ready = {}
+def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False):
+    sid = next(iter(sources)); working = dict(records); updates = {}; generated = {}; outcomes = []; pending = []; values = {}; ready = {}
     pool, _ = group_records(group, records, targets)
     paragraphs = {sid: sorted(set(group['paragraph_keys']) | {p['paragraph_key'] for p in pool.values()})}
-    decisions = human.scoped(store.read_human_source_decisions([sid]), paragraphs) if store is not None else []
+    all_decisions=store.read_human_source_decisions([sid]) if store is not None else sources[sid].get('human_source_guard',{}).get('entries',[])
+    decisions = human.scoped(all_decisions, paragraphs)
     guard = {'paragraphs': paragraphs, 'entries': decisions}
     for key in targets:
         try:
@@ -318,9 +369,11 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             proof=json.loads(accepted.read_text());decision=json.loads(Path(proof['decision_path']).read_text())
             if proof['decision_sha256']!=e.digest(decision) or proof['fingerprint']!=fp:
                 raise ValueError('Evidence acceptance proof differs')
+            assert_candidate_context(decision,all_decisions)
             outcomes.append({'object_key':key,'basis':'reused_accepted_input'});continue
         path=root/'decisions'/fp/'result.json'
-        if path.exists():ready[key]=json.loads(path.read_text())
+        if path.exists():
+            ready[key]=json.loads(path.read_text());assert_candidate_context(ready[key],all_decisions)
     todo={k:working[k]['payload']['statement'] for k in values if k not in ready and not any(x.get('object_key')==k for x in outcomes)}
     parts=decompose(root,ports,todo);jobs=[]
     for key in todo:
@@ -330,20 +383,56 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                          'components':parts[key],'jev':answers,
                          **{k:values[key][k] for k in ('human_source_decisions','source_interpretation') if k in values[key]}})
         else:ready[key]={'patch':{},'basis':'jev_precheck','reason':'本層逐項檢查無異議。'}
-    for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
-        replies=Edits.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
+    candidates={}
+    if complete_source and jobs:
+        candidates=source.binding_candidates(jobs,working,sources,group['paragraph_keys'],
+            root/'fidelity-source'/e.digest(jobs),ports)
+        paragraphs[sid]=sorted(set(paragraphs[sid])|{p['paragraph_key'] for value in candidates.values() for p in value['nearby_paragraphs']})
+        decisions=human.scoped(all_decisions,paragraphs);guard={'paragraphs':paragraphs,'entries':decisions}
+        for job in jobs:
+            value=candidates[job['job_id']];job['source_candidates']=value
+            scope={sid:[p['paragraph_key'] for p in value['nearby_paragraphs']]}
+            facts=human.scoped(all_decisions,scope)
+            projected=deepcopy(sources);human.project(projected,facts)
+            facts=projected[sid].get('human_source_decisions',[])
+            if any(fact['applicability']!='current' for fact in facts):
+                raise ValueError('human source clarification needs reconfirmation for candidate paragraph')
+            if facts:job.update(human_source_decisions=facts,source_interpretation=SOURCE_INTERPRETATION)
+    schema=CompletionEdits if complete_source else Edits
+    for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,schema.model_json_schema(),
+            completion_prompt() if complete_source else PROMPT,semantic_review=False,
+            project_input=completion_input if complete_source else None,
+            size_only=complete_source):
+        replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
+            quotes=getattr(edit,'quotes',None)
+            changed=any(getattr(edit,k) is not None and getattr(edit,k)!=working[edit.job_id]['payload'].get(k) for k in FIELDS)
+            if complete_source and edit.action!='repair' and (quotes or changed):
+                raise ValueError('non-repair disposition contains modifications')
             if edit.action=='needs_source':
-                pending.append({'object_key':edit.job_id,'layer':'source','reason':edit.reason});continue
-            ready[edit.job_id]={'patch':patch_for(edit.job_id,working[edit.job_id]['payload'],edit),
-                               'basis':'gpt_'+edit.action,'reason':edit.reason}
+                pending.append({'object_key':edit.job_id,'layer':'source','reason':edit.reason,
+                    **({'source_completion_attempted':True} if complete_source else {})});continue
+            key=edit.job_id;p=working[key]['payload'];patch=patch_for(key,p,edit);fragments={}
+            if quotes:
+                post,fragments=source.supplement_binding(key,{**p,**patch},[q.model_dump() for q in quotes],
+                    candidates[key],working,sources)
+                post=KNOWLEDGE_COLLECTIONS[key.split('/')[0]][0].model_validate(post).model_dump(mode='json')
+                patch={k:v for k,v in post.items() if p.get(k)!=v}
+            ready[key]={'patch':patch,'basis':'gpt_'+edit.action,'reason':edit.reason,
+                        **({'new_fragments':fragments} if fragments else {})}
+            if complete_source:
+                scope={sid:sorted({p['paragraph_key'] for p in candidates[key]['nearby_paragraphs']})}
+                ready[key]['source_context']={'paragraphs':scope,'entries':human.scoped(all_decisions,scope)}
     for key,decision in ready.items():
         p=working[key]['payload'];fp=fingerprint(key,p,values[key]);path=root/'decisions'/fp/'result.json'
         e.save(path,decision)
         if decision['patch'] and p.get('review_status') in f.PROTECTED:
             pending.append({'object_key':key,'layer':'evidence','reason':'protected_record'});continue
+        fragments=decision.get('new_fragments',{})
+        generated.update(fragments);working=f.apply_overlay(working,{},fragments)
         post={**p,**decision['patch']}
         if post!=p:updates[key]=post;working[key]={**working[key],'payload':post}
+        values[key]=material(key,working,sources,decisions)
         accepted=root/'accepted'/(fingerprint(key,post,values[key])+'.json')
         proof={'fingerprint':fingerprint(key,post,values[key]),'decision_path':str(path.resolve()),'decision_sha256':e.digest(decision)}
         if not accepted.exists():e.save(accepted,proof)
@@ -476,9 +565,12 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
         read_keys.update('source_fragments/'+fid for fid in e.evidence_fragment_ids(records[key]['payload']))
     frozen={k:records[k] for k in read_keys if k in records}
     result={'version':VERSION,'status':'needs_attention' if pending else 'verified','source_id':sid,'group_id':group['group_id'],
-        'updates':{k:p for k,p in updates.items() if k not in records or p!=records[k]['payload']},'new_fragments':{},
+        'updates':{k:p for k,p in updates.items() if k not in records or p!=records[k]['payload']},'new_fragments':generated,
         'outcomes':outcomes,'pending':pending,'applied':False,'claim_qualification':'not_granted',
         'commit_reason':'Grouped fragment-bound Evidence/Observation dispositions only'}
+    if complete_source:
+        result.update(source_completion_contract=COMPLETION_CONTRACT,
+            commit_reason='Evidence/Observation dispositions with program-compiled literal source supplements')
     if store is not None:result['human_source_guard']=guard
     stage=root/'groups'/group['group_id']/e.digest({'before':{k:(v.get('revision'),v.get('content_sha256'),v['payload']) for k,v in frozen.items()},'result':result})
     if any(k.split('/')[0] not in COLLECTIONS for k in result['updates']):raise ValueError('Evidence layer write scope expanded')
@@ -496,11 +588,14 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         selected=group_ids or [g['group_id'] for g in plan['groups']]
         if len(selected)!=len(set(selected)) or not set(selected)<={g['group_id'] for g in plan['groups']}:raise ValueError('invalid Evidence group selection')
         saved_intent=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
+        complete_source=not saved_intent or saved_intent.get('source_completion_contract')==COMPLETION_CONTRACT
         authorized=saved_intent['selected'] if saved_intent else selected
         if not set(selected)<=set(authorized):raise ValueError('Evidence group selection expands frozen scope')
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':authorized,'models':ports.identity,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None),
             'policy':e.digest([PROMPT,COVERAGE_PROMPT,components.PROMPT,Edits.model_json_schema(),MissingEdits.model_json_schema()]),
+            **({'source_completion_contract':COMPLETION_CONTRACT,
+                'source_completion_policy':e.digest([completion_prompt(),completion_prompt(True),CompletionEdits.model_json_schema()])} if complete_source else {}),
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
@@ -517,11 +612,14 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         for intent in sorted((root/'groups').glob('*/*/commit-intent.json')):
             if (intent.parent/'commit.json').exists():continue
             saved=json.loads((intent.parent/'verification.json').read_text())
-            if saved.get('version')!=VERSION or saved.get('new_fragments') or any(k.split('/')[0] not in COLLECTIONS for k in saved['updates']):
+            if (saved.get('version')!=VERSION or any(k.split('/')[0] not in COLLECTIONS for k in saved['updates'])
+                    or saved.get('new_fragments') and (saved.get('source_completion_contract')!=COMPLETION_CONTRACT
+                        or any(not k.startswith('source_fragments/') for k in saved['new_fragments']))):
                 raise ValueError('Evidence recovery write scope differs')
             recovered=e.commit_verified(store,intent.parent)
             if recovered.get('applied'):
                 for key in recovered['updates']:records[key]=store.get_record_state(*key.split('/',1))
+                for key in recovered['new_fragments']:records[key]=store.get_record_state(*key.split('/',1))
         units=inventory(previous,sources,source_id);owners={}
         for g in plan['groups']:
             for key in g.get('lower_record_keys',[]):
@@ -549,13 +647,15 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         for group in plan['groups']:
             if group['group_id'] not in selected:continue
             targets=sorted(k for k,gid in owners.items() if gid==group['group_id'] and k in records)
-            result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply)
+            result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply,
+                complete_source=complete_source)
             results.append(result)
             if result.get('applied'):
                 for key in result['updates']:
                     if key in records and visible(records[key]['payload'])!=visible(result['updates'][key]):
                         affected.update((readers.get(key,set())&finished)-{group['group_id']})
                     records[key]=store.get_record_state(*key.split('/',1))
+                for key in result['new_fragments']:records[key]=store.get_record_state(*key.split('/',1))
             elif result['updates'] or result['pending']:break  # No later group consumes an unapplied draft.
             if not result['pending']:finished.add(group['group_id']);affected.discard(group['group_id'])
         return e.publish(root,{'version':VERSION,'source_id':source_id,'groups':results,

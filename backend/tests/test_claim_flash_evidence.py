@@ -13,6 +13,7 @@ from backend.tests.test_claim_management_postgres import postgres_store, _tempor
 
 class Ports(OriginalPorts):
     def judge(self,request):
+        if 'current_paragraphs' in request['state']:return super().judge(request)
         if 'record' in request['state']:
             bad='拒絕明白' in request['state']['record']['statement']
             self.choices={'record_fidelity':'changed' if bad else 'faithful'}

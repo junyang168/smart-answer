@@ -156,7 +156,7 @@ def test_batch_rejects_quote_from_other_jobs_allowed_paragraph_without_any_write
     with pytest.raises(ValueError,match='unprovided source repair paragraph'):
         source.repair_bindings(store,'S',findings,root/'batch',Ports(),apply=True)
     after=store.compile_package()
-    after.pop('compiled_at');before.pop('compiled_at')
+    after.pop('compiled_at');before.pop('compiled_at');after.pop('package_id');before.pop('package_id')
     assert after==before
 
 

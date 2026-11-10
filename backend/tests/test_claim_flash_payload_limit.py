@@ -63,17 +63,17 @@ def test_binding_batch_sizes_actual_shared_wire_and_splits_without_losing_paragr
     ports=SimpleNamespace(identity={'gpt':{'model':'test'}},repair=repair)
     schema={'type':'object','properties':{'items':{'type':'array'}}}
     common={'paragraph_key':'S0001','text':'x'*4000}
-    jobs=[{'job_id':str(i),'material':{'nearby_paragraphs':[common]}} for i in range(3)]
-    monkeypatch.setattr(f,'GPT_BYTES',5000)
+    jobs=[{'job_id':str(i),'material':{'nearby_paragraphs':[common]}} for i in range(7)]
+    monkeypatch.setattr(f,'GPT_BYTES',6000)
     result=list(f.gpt(tmp_path/'shared',ports,'source_binding_completion',jobs,schema,'find bindings',
-        semantic_review=False,project_input=shared_binding_input))
-    assert len(calls)==1 and len(result[0][0])==3
+        semantic_review=False,project_input=shared_binding_input,size_only=True))
+    assert len(calls)==1 and len(result[0][0])==7
     jobs=[{'job_id':str(i),'material':{'nearby_paragraphs':[{'paragraph_key':f'S{i}','text':'x'*3000}]}} for i in range(3)]
     result=list(f.gpt(tmp_path/'split',ports,'source_binding_completion',jobs,schema,'find bindings',
-        semantic_review=False,project_input=shared_binding_input))
+        semantic_review=False,project_input=shared_binding_input,size_only=True))
     assert len(result)==3 and [j['job_id'] for batch,reply in result for j in batch]==['0','1','2']
     jobs.append({'job_id':'too-big','material':{'nearby_paragraphs':[{'paragraph_key':'S9','text':'x'*6000}]}})
     with pytest.raises(ValueError,match='payload limit'):
         list(f.gpt(tmp_path/'reject',ports,'source_binding_completion',jobs,schema,'find bindings',
-            semantic_review=False,project_input=shared_binding_input))
+            semantic_review=False,project_input=shared_binding_input,size_only=True))
     assert len(calls)==4  # Oversized late job rejected before any partial call.

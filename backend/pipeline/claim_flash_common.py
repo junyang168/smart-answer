@@ -346,8 +346,8 @@ def reuse_argument_edge_order(root,request):
     return request
 
 
-def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None):
-    """Split BEFORE calling by both complete wire size and task count. No truncation."""
+def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None, size_only=False):
+    """Split BEFORE calling by complete wire size and optional task count. No truncation."""
     def request(batch):
         data={'task': task, 'jobs': batch, **(shared or {})}
         if project_input:data=project_input(deepcopy(data))
@@ -357,7 +357,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
     batches, batch = [], []
     for job in jobs:
         trial = batch+[job]
-        if batch and (len(trial) > GPT_JOBS or len(json.dumps(request(trial), ensure_ascii=False).encode()) > GPT_BYTES):
+        if batch and ((not size_only and len(trial) > GPT_JOBS) or len(json.dumps(request(trial), ensure_ascii=False).encode()) > GPT_BYTES):
             batches.append(batch); batch=[]
         batch.append(job)
         if len(json.dumps(request(batch), ensure_ascii=False).encode()) > GPT_BYTES:
@@ -376,7 +376,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             if not direction:raise ValueError('focused Evidence continuation requires its owner direction')
             e.save(Path(root)/'focused-review-admission.json',{'contract':eo.FOCUSED_CONTRACT,
                 'owner_direction':direction,'legacy_prompt_sha256':e.digest(instruction),
-                'focused_prompt_sha256':e.digest(eo.FOCUSED_PROMPT),'models':ports.identity})
+                'focused_prompt_sha256':e.digest(eo.focused_request(req)['system']),'models':ports.identity})
             old_key=e.digest(req);old=Path(root)/'gpt'/old_key
             if not (old/'response.json').exists():
                 if (old/'started.json').exists():

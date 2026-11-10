@@ -46,6 +46,37 @@ def shared_binding_input(data):
     return data
 
 
+def binding_candidates(jobs,records,sources,paragraph_keys,root,ports):
+    """Source preparation before one lower disposition; candidates are not approval."""
+    locator=source_lookup.Locator(sources);prepared=[]
+    allowed=set(paragraph_keys)
+    for job in jobs:
+        value,_=locator.prepare(job['job_id'],records,sources)
+        allowed.update(p['paragraph_key'] for p in value['fragments'])
+        prepared.append({**job,'material':value,'verdict':job['jev']})
+    for job in prepared:
+        job['material']['nearby_paragraphs']=[p for p in job['material']['nearby_paragraphs'] if p['paragraph_key'] in allowed]
+    scoped={sid:{**s,'paragraphs':{pk:p for pk,p in s['paragraphs'].items() if pk in allowed}} for sid,s in sources.items()}
+    found=source_lookup.lookup(prepared,scoped,Path(root)/'group',ports)
+    missing=[{**j,'material':found[j['job_id']]} for j in prepared
+             if not found[j['job_id']]['source_lookup']['candidate_paragraph_keys']]
+    if missing and any(len(s['paragraphs'])>len(scoped[sid]['paragraphs']) for sid,s in sources.items()):
+        found.update(source_lookup.lookup(missing,sources,Path(root)/'sermon',ports))
+    return found
+
+
+def supplement_binding(key,payload,quotes,value,records,sources):
+    """Compile selected exact spans and retain every previously valid attachment."""
+    allowed={p['paragraph_key'] for p in value['nearby_paragraphs']}
+    if any(q['paragraph_key'] not in allowed for q in quotes):
+        raise ValueError('unprovided source repair paragraph')
+    quotes=list({(q['paragraph_key'],q['quote']):q for q in quotes}.values())
+    post,fragments,_=binding_postimage(key,payload,quotes,value,records,sources)
+    post['source_fragment_ids']=list(dict.fromkeys(
+        [p['fragment_id'] for p in value['fragments']]+post['source_fragment_ids']))
+    return post,fragments
+
+
 def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
     """Consume lower-layer handoffs; change only literal source attachments."""
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
@@ -95,7 +126,7 @@ def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
             prompt+='各項獨立判定；共用原文在source_paragraphs，本項只能選material.nearby_paragraph_keys列出的段落。'
         for batch,raw in f.gpt(root/'selection',ports,'source_binding_completion',jobs,
                 BindingDecisions.model_json_schema(),prompt,semantic_review=False,
-                project_input=shared_binding_input if batched else None):
+                project_input=shared_binding_input if batched else None,size_only=batched):
             decisions=BindingDecisions.model_validate(raw).items
             f.exactly([x.model_dump() for x in decisions],[j['job_id'] for j in batch],'job_id')
             for decision in decisions:

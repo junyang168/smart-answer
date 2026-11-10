@@ -40,11 +40,10 @@ def source_handoff_batches(result,root):
             key=item['object_key'];legacy=Path(root)/e.digest(key)
             if (legacy/'intent.json').exists():yield [item],legacy
             else:fresh.append(item)
-        for n in range(0,len(fresh),f.GPT_JOBS):
-            batch=fresh[n:n+f.GPT_JOBS]
-            keys=[p['object_key'] for p in batch]
+        if fresh:
+            keys=[p['object_key'] for p in fresh]
             token=e.digest(keys[0]) if len(keys)==1 else 'batch-'+e.digest(keys)
-            yield batch,Path(root)/token
+            yield fresh,Path(root)/token
 
 
 def claim_tasks(plan):
@@ -222,6 +221,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
             handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
             if complete(er) or not handoffs or any(p.get('layer')!='source' for p in handoffs):break
+            if any(p.get('source_completion_attempted') for p in handoffs):break
             units=[p for p in handoffs if p.get('unit')]
             if units:
                 token='units-'+e.digest(units)
