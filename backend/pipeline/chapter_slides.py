@@ -40,6 +40,12 @@ DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 MOST_POINTS = 4
 FEWEST_POINTS = 2
 
+SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之前的完整原文範圍及全部要點命名，涵蓋整張的共同主題，不只取開頭、最後一句、某一條 Claim 或其中一個子段。
+- 講背景和整體結構、列出多段或比較多部分時，標題寫「背景與分段」「整體結構」或相應的共同主題；不能用「第一段」等局部名稱代替整體。
+- 只有這一張確實專講某一段，才以該段命名；不因下一張繼續講第二段，就把本張已講的整體分段縮成第一段。
+- 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
+
+
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
 使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
@@ -61,6 +67,7 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 短句，是重點，不是逐字稿的句子。
 
 title：這一張在講什麼，不超過 14 字，不加引號。
+〈標題規則〉
 
 scriptures：這一張裡教授（或會眾）讀出來、或幾乎逐字引用的每一處經文，一處都不能少——包括馬太福音第 〈章〉 章本身和別卷書，按出現順序。
 - sentence 寫開始讀它的那一句；ref 寫書卷全名加章節，寫他實際讀的那幾節，如「以賽亞書 61:1-2」。
@@ -97,7 +104,7 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
-    prompt = _SYSTEM_TEMPLATE.replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    prompt = _SYSTEM_TEMPLATE.replace("〈標題規則〉", SLIDE_TITLE_RULES).replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
     return for_lecture(prompt, lecture)
 
 
@@ -484,6 +491,10 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
 4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
 
+每張另查標題範圍：
+〈標題規則〉
+把只涵蓋子段的標題列為「跟得上」問題，指出原文中標題沒有涵蓋的部分，並給出能涵蓋整張的具體新標題；不要只看標題是否和某一條要點相符。
+
 每張只有二到四條要點。改法也必須符合這個上限；新增會超過時，明確說明合併、刪除或分張，不能要求其餘要點不動而超限。
 
 只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
@@ -580,7 +591,8 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
     prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
-    answer = client.generate_json(for_lecture(REVIEW_PROMPT, lecture) + extra, prompt, schema)
+    review_system = REVIEW_PROMPT.replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
     out = {
