@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from backend.api.sc_api.script_delta import ScriptConflictError, ScriptDelta
+from backend.api.sc_api.sermon_publication import publication_fields
 from backend.pipeline import detailed_knowledge_extraction_runner as runner
 from backend.pipeline.detailed_knowledge_extraction_runner import SectionSettings
 from backend.pipeline.extraction_sections import FROM_SOURCE
@@ -66,7 +67,9 @@ def test_publish_is_atomic_and_bound_to_the_exact_review_snapshot(
 
     published_sha = delta.publish(
         "editor@example.org", expected_review_sha256=review_sha,
-        published_by="publisher@example.org",
+        publication=publication_fields(
+            "publisher@example.org", "Publisher", "2026-11-10T18:00:00Z"
+        ),
     )
     published_path = tmp_path / "script_published" / f"{item}.json"
     assert hashlib.sha256(published_path.read_bytes()).hexdigest() == published_sha

@@ -720,6 +720,10 @@ class ReviewStore:
                     )
                 if visuals:
                     row["text"] = "\n\n".join(visuals) + "\n\n" + row["text"]
+            from .sermon_publication import publication_fields
+            config = read(self.permission_root / "config/config.json", {})
+            user = next((u for u in config.get("users", []) if u.get("id") == actor), {})
+            publication = publication_fields(actor, user.get("name"), datetime.now(timezone.utc))
             revision = c["revision"] + 1
             pub = {
                 "metadata": {
@@ -729,7 +733,7 @@ class ReviewStore:
                     or c.get("source_metadata", {}).get("author")
                     or "王守仁",
                     "reviewed_by": actor,
-                    "published_by": actor,
+                    **publication,
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                     "status": "published",
                     "title": c["editorial_metadata"].get("title") or item,
@@ -747,7 +751,7 @@ class ReviewStore:
                 metadata, meta = self.meta(item)
                 meta.update(c["editorial_metadata"])
                 meta["status"] = "published"
-                meta["published_date"] = datetime.now(timezone.utc).isoformat()
+                meta.update(publication)
                 return self.commit(
                     item,
                     actor,

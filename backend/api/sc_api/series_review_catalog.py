@@ -10,11 +10,10 @@ from .transcript_review import ReviewStore,read,file_hash,ReviewError
 
 
 class SeriesReviewCatalog:
-    def __init__(self, production_root, beta_root=None, *, user_getter=None):
+    def __init__(self, production_root, beta_root=None):
         self.production=Path(production_root).resolve()
         self.beta=Path(beta_root).resolve() if beta_root else None
         self.catalogs={root:self._catalog(root) for root in {self.production,self.beta} if root}
-        self.user_getter = user_getter or (lambda _: {})
 
     @staticmethod
     def _catalog(root):
@@ -46,20 +45,11 @@ class SeriesReviewCatalog:
         published=snapshot.get('metadata',{}) if isinstance(snapshot,dict) else {}
         if (meta.get('status')!='published' and published.get('status')!='published'
                 and published.get('review_revision') is None):return {}
-        date=meta.get('published_date') or published.get('published_date')
-        publisher = published.get('published_by') or published.get('reviewed_by')
-        # Legacy author was the assigned editor, which may differ from the
-        # account that actually published. Never infer a publisher from it.
-        revision=published.get('review_revision')
-        if type(revision) is int and revision>=0:
-            history=read(self.production/'transcript_review'/item/'revisions'/f'{revision:08}.json',{})
-            if (history.get('kind')=='publish' and history.get('revision')==revision
-                    and history.get('operation_id')==published.get('review_operation_id')):
-                date=history.get('time') or date
-                publisher=history.get('actor') or publisher
-        user = self.user_getter(publisher) if publisher else {}
-        return dict(status='published',published_date=date,
-                    published_by=publisher,published_by_name=user.get('name'))
+        # Both editors and the one-time migration write this same catalog
+        # record. Runtime never interprets historical authors or audit logs.
+        return dict(status='published', published_date=meta.get('published_date'),
+                    published_by=meta.get('published_by'),
+                    published_by_name=meta.get('published_by_name'))
 
     def for_item(self,item):
         try:

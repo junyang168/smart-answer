@@ -1,6 +1,6 @@
 from backend.sunday_data_lock import sunday_write
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -31,6 +31,7 @@ from .image_to_text import ImageToText
 from .script_delta import ScriptConflictError, ScriptDelta
 from .sermon_comment import SermonCommentManager
 from .sermon_meta import Sermon, SermonMetaManager
+from .sermon_publication import FIELDS as PUBLICATION_FIELDS, publication_fields
 
 env_file = os.getenv("ENV_FILE")
 if env_file:
@@ -77,6 +78,9 @@ class SermonManager:
             "author_name",
             "last_updated",
             "published_date",
+            "published_by",
+            "published_by_name",
+            "publication_schema_version",
             "title",
             "summary",
             "keypoints",
@@ -747,17 +751,19 @@ class SermonManager:
         sermon = self._sm.get_sermon_metadata(user_id, item)
         if not sermon:
             return {"message": "sermon not found"}
+        publication = publication_fields(user_id, self._acl.get_user(user_id).get("name"), datetime.now(timezone.utc))
         published_script_sha256 = ScriptDelta(
             self.base_folder, item
         ).publish(
             sermon.assigned_to,
             expected_review_sha256=expected_review_sha256,
-            published_by=user_id,
+            publication=publication,
         )
         before_snapshot = self._snapshot_sermon_meta(sermon)
         sermon.status = 'published'
-        sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.now())
-        self._sm.save_sermon_metadata()
+        for field in PUBLICATION_FIELDS:
+            setattr(sermon, field, publication[field])
+        self._sm.save_sermon_metadata(publication_item=item)
         self._log_sermon_meta_change(
             user_id,
             item,
@@ -975,7 +981,7 @@ class SermonManager:
     
     def get_sermon_series(self):
         from .series_review_catalog import SeriesReviewCatalog
-        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'),user_getter=self._acl.get_user)
+        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'))
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
         if not os.path.exists(series_meta_file):
             return []
