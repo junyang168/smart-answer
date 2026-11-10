@@ -107,3 +107,20 @@ def test_fused_gpt_uses_shared_jev_role_definitions_and_legacy_prompt_is_unchang
     assert '共用定義測試' in eo.completion_prompt(True)
     legacy={'system':eo.PROMPT,'identity':{},'input':{'task':'evidence_fidelity_repair','jobs':[job()]},'schema':{}}
     assert eo.focused_request(legacy)['system']==eo.FOCUSED_PROMPT
+
+
+@pytest.mark.parametrize('mode',['joint_repair','speaker_only','stance_only_scope','legacy_scope'])
+def test_statement_subject_repair_can_update_its_dependent_role_only_when_authorized(mode):
+    value=job();value['record'].update(statement='教授承認自己先前沒有想到。',speaker='professor',stance='asserted')
+    value['jev']={'record_fidelity':'unsupported','component_0':'partial','speaker_classification':'professor',
+                  'speaker_consistency':'matched','stance_classification':'asserted','stance_consistency':'matched'}
+    if mode=='stance_only_scope':value['jev']={'stance_consistency':'different'}
+    data={'task':'evidence_fidelity_repair','jobs':[value]}
+    if mode!='legacy_scope':data['source_completion_contract']=eo.COMPLETION_CONTRACT
+    request=eo.focused_request({'input':data,'schema':{}})
+    item={'job_id':value['job_id'],'action':'repair','statement':'聽眾表示自己先前沒有想到。',
+          'speaker':'audience','reason':'原文的說話者標記明確，摘要與角色須一致修正。'}
+    if mode=='speaker_only':item.pop('statement')
+    if mode=='joint_repair':eo.validate_focused_reply(request,{'items':[item]})
+    else:
+        with pytest.raises(ValueError,match='outside'):eo.validate_focused_reply(request,{'items':[item]})

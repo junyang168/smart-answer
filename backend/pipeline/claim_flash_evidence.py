@@ -56,6 +56,8 @@ COMPLETION_RULES=(
     '若判定依賴尚未掛載的候選原文，必須repair並輸出quotes；不得只保留或改摘要卻漏掛所需原文。'
     '若候選仍不能解決必要來源缺口，才用needs_source。'
     'keep及needs_source不得夾帶修改或quotes；不為支持摘要借用無關原文。'
+    '若實際修改statement改變內容歸屬或命題，須在同一答覆同步修正statement_change_fields所列的相關分類；'
+    '原分類只對舊摘要成立。未改statement時，仍只准修改writable_fields，不重判已通過欄位。'
     '不審Claim、論證關係或其他已通過記錄。')
 
 
@@ -112,6 +114,8 @@ def focused_request(request):
         if 'stance_consistency' in issues:fields.add('stance')
         if not issues:raise ValueError('focused GPT job has no Jev finding')
         job.update(review_focus=issues,writable_fields=sorted(fields))
+        if result['input'].get('source_completion_contract')==COMPLETION_CONTRACT and 'statement' in fields:
+            job['statement_change_fields']=['speaker','stance','attribution']
     return result
 
 
@@ -123,7 +127,10 @@ def validate_focused_reply(request,reply):
         job=jobs[edit.job_id]
         changed={field for field in FIELDS if getattr(edit,field) is not None
                  and getattr(edit,field)!=job['record'].get(field)}
-        if not changed<=set(job['writable_fields']):
+        allowed=set(job['writable_fields'])
+        if 'statement' in changed and 'statement' in allowed:
+            allowed.update(job.get('statement_change_fields',[]))
+        if not changed<=allowed:
             raise ValueError('focused Evidence repair changed a field outside the Jev findings')
 
 
