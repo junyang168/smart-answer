@@ -63,6 +63,49 @@ def test_complete_layered_candidate_and_zero_model_replay(candidate,tmp_path):
     assert again==result and not replay.calls
 
 
+@pytest.mark.parametrize('changed',[False,True,'retired'])
+def test_source_export_resolves_external_claim_identity_without_expanding_review(candidate,tmp_path,monkeypatch,changed):
+    package,_=candidate;local=package['claims'][0]['claim_id']
+    external={**deepcopy(package['claims'][0]),'claim_id':'EXTERNAL-REFERENCE',
+              'occurrences':[{'transcript_id':'legacy-transcript','anchors':[]}]}
+    package['claims'].append(external)
+    for row in package['evidence_steps']:
+        if row['evidence_step_id'] in external['evidence_step_ids']:
+            row.setdefault('produced_claim_ids',[]).append('EXTERNAL-REFERENCE')
+    path=tmp_path/'candidate.json';path.write_text(json.dumps(package));ports=FlowPorts()
+    result=flow.run_candidate(path,tmp_path/'flow',ports)
+    assert result['status']=='completed'
+    assert set(result['external_reference_pins'])=={'claims/EXTERNAL-REFERENCE'}
+    plan=flow.read(tmp_path/'flow/flash/grouping/shared-groups.json')
+    assert plan['target_claim_ids']==[local]
+    final=flow.read(result['package']['path'])
+    assert 'EXTERNAL-REFERENCE' not in {p['claim_id'] for p in final['claims']}
+    assert final['flash_application']['external_reference_pins']==result['external_reference_pins']
+    # Embedded declarations never let an ordinary package bypass closure.
+    with pytest.raises(flow.KnowledgePackageMergeError,match='unknown produced claims'):
+        flow.validate_merged_package(final,native_relations=True)
+    with workspace.open_candidate(package,tmp_path/'flow/workspace') as store:
+        expected=normalize_package(package)['claims']['EXTERNAL-REFERENCE']
+        assert store.get_record_state('claims','EXTERNAL-REFERENCE')['payload']==expected
+        if changed=='retired':
+            # Deliberate private-DB fault injection: a referenced node must
+            # never be accepted merely because a historical pin exists.
+            with store.connect() as conn:
+                conn.execute("UPDATE wang_knowledge.objects SET retired_at=now() WHERE collection='claims' AND object_id='EXTERNAL-REFERENCE'")
+            records,_=flow.snapshot(store,package['source_documents'][0]['source_id'])
+            with pytest.raises(flow.KnowledgePackageMergeError,match='unknown produced claims'):
+                flow.export(store,package['source_documents'][0]['source_id'],tmp_path/'retired-export',records,None,{},[],0,'candidate_workspace')
+    replay=FlowPorts()
+    if changed:
+        if changed is True:
+            pins=deepcopy(result['external_reference_pins']);pins['claims/EXTERNAL-REFERENCE']['revision']+=1
+            monkeypatch.setattr(flow,'external_reference_pins',lambda *a:pins)
+        with pytest.raises(ValueError,match='external references changed'):
+            flow.run_candidate(path,tmp_path/'flow',replay)
+    else:assert flow.run_candidate(path,tmp_path/'flow',replay)==result
+    assert not replay.calls
+
+
 def test_indivisible_source_group_uses_two_upper_batches_and_one_lower_review(candidate,tmp_path):
     package,_=candidate
     original=package['claims'][0]
