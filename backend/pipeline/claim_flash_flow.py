@@ -40,10 +40,11 @@ def source_handoff_batches(result,root):
             key=item['object_key'];legacy=Path(root)/e.digest(key)
             if (legacy/'intent.json').exists():yield [item],legacy
             else:fresh.append(item)
-        if fresh:
-            keys=[p['object_key'] for p in fresh]
+        for n in range(0,len(fresh),f.GPT_JOBS):
+            batch=fresh[n:n+f.GPT_JOBS]
+            keys=[p['object_key'] for p in batch]
             token=e.digest(keys[0]) if len(keys)==1 else 'batch-'+e.digest(keys)
-            yield fresh,Path(root)/token
+            yield batch,Path(root)/token
 
 
 def claim_tasks(plan):

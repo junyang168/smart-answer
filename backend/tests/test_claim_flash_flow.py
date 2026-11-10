@@ -166,13 +166,13 @@ def test_source_handoff_batches_keep_group_boundaries_and_existing_singletons(tm
     second=[finding(n) for n in range(6,8)]
     result={'groups':[{'group_id':'G1','pending':first},{'group_id':'G2','pending':second}]}
     batches=list(flow.source_handoff_batches(result,tmp_path))
-    assert [len(items) for items,path in batches]==[6,2]
+    assert [len(items) for items,path in batches]==[4,2,2]
     assert [p['object_key'] for items,path in batches for p in items]==[p['object_key'] for p in first+second]
     legacy=tmp_path/flow.e.digest(first[0]['object_key']);legacy.mkdir()
     (legacy/'intent.json').write_text('{}')
     batches=list(flow.source_handoff_batches(result,tmp_path))
     assert batches[0]==([first[0]],legacy)
-    assert [len(items) for items,path in batches]==[1,5,2]
+    assert [len(items) for items,path in batches]==[1,4,1,2]
     assert list(flow.source_handoff_batches({'groups':[{'pending':list(reversed(first))},{'pending':second}]},tmp_path))==batches
 
 

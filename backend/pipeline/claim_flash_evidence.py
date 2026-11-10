@@ -401,8 +401,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     schema=CompletionEdits if complete_source else Edits
     for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,schema.model_json_schema(),
             completion_prompt() if complete_source else PROMPT,semantic_review=False,
-            project_input=completion_input if complete_source else None,
-            size_only=complete_source):
+            project_input=completion_input if complete_source else None):
         replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
             quotes=getattr(edit,'quotes',None)

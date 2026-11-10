@@ -318,7 +318,7 @@ def test_keep_with_identical_echoed_fields_is_not_an_extra_correction_round(camp
     assert len(fidelity_calls(ports))==1
 
 
-def test_small_seven_record_packet_is_not_split_at_four(campaign):
+def test_seven_small_records_split_into_four_and_three_despite_fitting_bytes(campaign):
     store,root,_,plan,previous=campaign
     original=store.get_record_state('evidence_steps','KEEP')['payload']
     extra=[{**deepcopy(original),'evidence_step_id':'EXTRA'+str(i)} for i in range(3)]
@@ -327,5 +327,5 @@ def test_small_seven_record_packet_is_not_split_at_four(campaign):
     ports=Ports();result=eo.run(store,'S',plan,root/'seven',ports,previous,apply=True)
     assert result['status']=='completed'
     requests=fidelity_calls(ports)
-    assert len(requests)==1 and len(requests[0]['input']['jobs'])==7
-    assert len(requests[0]['input']['source_paragraphs'])==1
+    assert [len(req['input']['jobs']) for req in requests]==[4,3]
+    assert all(len(req['input']['source_paragraphs'])==1 for req in requests)

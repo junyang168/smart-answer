@@ -126,7 +126,7 @@ def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
             prompt+='各項獨立判定；共用原文在source_paragraphs，本項只能選material.nearby_paragraph_keys列出的段落。'
         for batch,raw in f.gpt(root/'selection',ports,'source_binding_completion',jobs,
                 BindingDecisions.model_json_schema(),prompt,semantic_review=False,
-                project_input=shared_binding_input if batched else None,size_only=batched):
+                project_input=shared_binding_input if batched else None):
             decisions=BindingDecisions.model_validate(raw).items
             f.exactly([x.model_dump() for x in decisions],[j['job_id'] for j in batch],'job_id')
             for decision in decisions:
