@@ -428,7 +428,7 @@ def clarify_context(records, sources, source_id, plan, result, root, ports):
     e.save(root/'result.json',merged)
     return merged
 
-def run(store, source_id, root, ports, *, plan=None, max_claims=8, resolve_context=False):
+def run(store, source_id, root, ports, *, plan=None, max_claims=grouping.DEFAULT_MAX_CLAIMS, resolve_context=False):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with (root/'coverage.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

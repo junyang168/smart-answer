@@ -63,7 +63,9 @@ def _headings(records, source, sid):
             for h in projection.headings]
 
 
-def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic_groups=None, allow_claim_batches=False):
+DEFAULT_MAX_CLAIMS = 10
+
+def build(records, sources, source_id, *, claim_ids=None, max_claims=DEFAULT_MAX_CLAIMS, semantic_groups=None, allow_claim_batches=False):
     """Partition one sermon, minimizing cross-group resources and direct links.
 
     Use heading cuts first; add paragraph cuts only where the Claim limit
@@ -296,8 +298,12 @@ def build(records, sources, source_id, *, claim_ids=None, max_claims=8, semantic
         for field in ['claim_ids', 'lower_record_keys', 'relation_keys', 'external_reference_ids']:
             group[field] = sorted(set(group[field]))
         if len(group['claim_ids']) > max_claims:
-            group['sequential_claim_batches'] = [group['claim_ids'][n:n+max_claims]
-                for n in range(0, len(group['claim_ids']), max_claims)]
+            count=len(group['claim_ids']);parts=(count+max_claims-1)//max_claims
+            width,extra=divmod(count,parts);offset=0;batches=[]
+            for part in range(parts):
+                stop=offset+width+(part<extra)
+                batches.append(group['claim_ids'][offset:stop]);offset=stop
+            group['sequential_claim_batches']=batches
         group['record_keys'] = sorted(own | ref | set(group['fragment_keys']) | set(group['relation_keys']))
     # Read/read overlap also forbids independent execution. Dependencies are
     # listed as earlier groups to await; this module starts no workers.
@@ -498,7 +504,7 @@ def refine(records, sources, plan, root, ports):
     return result
 
 
-def save(store, source_id, root, *, claim_ids=None, max_claims=8, ports=None, allow_claim_batches=False):
+def save(store, source_id, root, *, claim_ids=None, max_claims=DEFAULT_MAX_CLAIMS, ports=None, allow_claim_batches=False):
     """Read the existing source-local census; write only a reviewable plan."""
     records, sources = f.load_source(store, source_id)
     plan = build(records, sources, source_id, claim_ids=claim_ids, max_claims=max_claims,

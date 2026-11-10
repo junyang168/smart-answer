@@ -78,7 +78,7 @@ def test_indivisible_source_group_uses_two_upper_batches_and_one_lower_review(ca
     assert result['status']=='completed',result.get('pending')
     plan=flow.read(tmp_path/'many-flow/flash/shared-groups.json')
     assert len(plan['groups'])==1
-    assert [len(batch) for batch in plan['groups'][0]['sequential_claim_batches']]==[8,3]
+    assert [len(batch) for batch in plan['groups'][0]['sequential_claim_batches']]==[6,5]
     assert set(result['stages']['claims'])=={'FG001-batch-1','FG001-batch-2'}
     assert len(result['stages']['evidence']['groups'])==1
 
