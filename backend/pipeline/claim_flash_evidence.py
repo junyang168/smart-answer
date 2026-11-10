@@ -622,6 +622,11 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
                         and e.rejection_receipt(started.parent,
                         json.loads((started.parent/'request.json').read_text()))):
                     continue  # Retained refusal; a different corrected input may proceed.
+                if started.parent.parent.name=='gpt' and (started.parent/'returned-answer-admission.json').exists():
+                    from backend.pipeline.claim_flash_answer_reuse import returned_answer
+                    returned_answer(started.parent.parent.parent,ports,
+                        json.loads((started.parent/'request.json').read_text()))
+                    continue  # Same exact successful answer; old timeout remains unknown.
                 if started.parent.parent.name=='gpt' and (started.parent/'owner-recovery.json').exists():
                     f.stopped_gpt_authority(started.parent.parent.parent,ports,
                         json.loads((started.parent/'request.json').read_text()))

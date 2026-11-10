@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 from backend.pipeline import claim_flash_answer_reuse as reuse,claim_flash_common as f,claim_flash_evidence as eo,evidence_refresh as e
 from backend.tests.test_claim_flash_focused import job
+from backend.tests.test_evidence_refresh import sample
+from backend.tests.test_claim_management_postgres import postgres_store, _temporary_postgres
 
 
 def fixture(tmp_path):
@@ -116,3 +118,55 @@ def test_normal_flash_consumes_admitted_answer_and_still_validates_it(tmp_path):
     assert len(result)==1 and result[0][1]==x.answer
     eo.validate_focused_reply(target,result[0][1])
     assert not (target_folder/'response.json').exists()
+
+
+@pytest.mark.parametrize('tampered',[False,True])
+def test_outer_evidence_recovery_uses_verified_answer_then_normal_sql_commit(sample,tampered):
+    from backend.tests.test_claim_flash_evidence import Ports as BasePorts,saved_inventory
+    store,base,_=sample;records,sources=f.load_source(store,'S')
+    plan={'source_id':'S','source_body_sha256':sources['S']['body_sha256'],'groups':[{
+        'group_id':'G','paragraph_keys':['S0001'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}]}
+    previous=saved_inventory(base/'previous',sources)
+    class Ports(BasePorts):
+        def __init__(self):super().__init__();self.root=base/'providers';self.fail=True
+        def repair(self,request):
+            if request['input']['task']=='evidence_fidelity_repair':
+                if self.fail:raise TimeoutError('lost reply')
+                pytest.fail('completed saved adjudication must not run again')
+            return super().repair(request)
+    ports=Ports();root=base/'evidence'
+    with pytest.raises(TimeoutError):eo.run(store,'S',plan,root,ports,previous,apply=True)
+    old=next(p.parent for p in root.rglob('started.json') if not (p.parent/'response.json').exists())
+    target=reuse.read(old/'request.json');source={**deepcopy(target),'diagnostic_scope':{'production_admission':False}}
+    answer=BasePorts().repair(target)
+    source_folder=ports.root/'diagnostic/gpt'/e.digest(source)
+    def transport(request,folder,success):
+        t=ports.root/'gpt'/e.digest(request)/'transport'
+        e.save(folder/'request.json',request);e.save(folder/'started.json',{'request_sha256':e.digest(request)})
+        e.save(t/'response-schema.json',request['schema']);(t/'stdout.log').write_text('stdout');(t/'stderr.log').write_text('stderr')
+        if success:e.save(folder/'response.json',answer);e.save(t/'response.json',answer)
+        command=['codex','exec','--model',request['identity']['model'],'--config','model_reasoning_effort="'+request['identity']['effort']+'"',
+            '--output-schema',str(t/'response-schema.json'),'--output-last-message',str(t/'response.json'),'--json','-']
+        e.save(t/'invocation.json',{'input_sha256':'same','executable_sha256':'same',
+            'command_sha256':reuse.hashlib.sha256(json.dumps(command).encode()).hexdigest()})
+        receipt={'returncode':0 if success else None,'files':{p.name:reuse.hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in t.iterdir() if p.name in {'stdout.log','stderr.log','response.json'}}}
+        if not success:receipt['error_type']='TimeoutExpired'
+        e.save(t/'exit.json',receipt)
+        return t,receipt,command
+    src,src_exit,src_cmd=transport(source,source_folder,True);dst,dst_exit,dst_cmd=transport(target,old,False)
+    e.save(old/'returned-answer-admission.json',{'contract':reuse.CONTRACT,'owner_direction':'继续跑',
+        'target_request_sha256':e.digest(target),'source_request_path':str(source_folder/'request.json'),
+        'source_request_sha256':e.digest(source),'source_exit_sha256':e.digest(src_exit),'target_exit_sha256':e.digest(dst_exit),
+        'response_sha256':e.digest(answer),'source_command':src_cmd,'target_command':dst_cmd})
+    if tampered:(source_folder/'response.json').write_text('{}')
+    calls=len(ports.calls);ports.fail=False
+    if tampered:
+        with pytest.raises(ValueError,match='saved response differs'):eo.run(store,'S',plan,root,ports,previous,apply=True)
+        assert len(ports.calls)==calls
+        return
+    result=eo.run(store,'S',plan,root,ports,previous,apply=True)
+    assert result['status']=='completed'
+    assert store.get_record_state('evidence_steps','E')['payload']['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
+    assert not (old/'response.json').exists()
+    assert reuse.read(dst/'exit.json')['error_type']=='TimeoutExpired'
