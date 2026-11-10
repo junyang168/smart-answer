@@ -29,6 +29,24 @@ def complete(result):
     return result.get('status') in {'verified','applied','completed'} and not result.get('pending')
 
 
+def source_handoff_batches(result,root):
+    """Keep group boundaries and previously started singleton request identities."""
+    # Ungrouped diagnostics do not prove a shared boundary.
+    groups=[[p] for p in result.get('pending',[])]+[g.get('pending',[]) for g in result.get('groups',[])]
+    for findings in groups:
+        fresh=[]
+        for item in sorted(findings,key=lambda x:x.get('object_key','')):
+            if item.get('unit'):continue
+            key=item['object_key'];legacy=Path(root)/e.digest(key)
+            if (legacy/'intent.json').exists():yield [item],legacy
+            else:fresh.append(item)
+        for n in range(0,len(fresh),f.GPT_JOBS):
+            batch=fresh[n:n+f.GPT_JOBS]
+            keys=[p['object_key'] for p in batch]
+            token=e.digest(keys[0]) if len(keys)==1 else 'batch-'+e.digest(keys)
+            yield batch,Path(root)/token
+
+
 def claim_tasks(plan):
     tasks=[]
     for group in plan['groups']:
@@ -191,6 +209,13 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             if any(v['verdict'] in fill.MISSING for v in findings):
                 fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
                 if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
+        # Finish the original batch after a crash, before EO can change which
+        # records it hands back. Reuse the original saved requests and answers.
+        for path in sorted((root/'source-handoffs').glob('*/intent.json')):
+            if (path.parent/'result.json').exists():continue
+            saved=read(path)
+            if 'findings' in saved and 'models' in saved:
+                source.repair_bindings(store,source_id,saved['findings'],path.parent,ports,apply=True)
         attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
                    for item in read(p).get('outcomes',[])}
         while not resume_claims:
@@ -209,10 +234,10 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             if any(not p.get('object_key') or p['object_key'] in attempted for p in handoffs):break
             # One source completion per object in this operation. Previously
             # accepted lower judgments are consumed by EO's existing cache.
-            for item in handoffs:
-                key=item['object_key'];attempted.add(key)
-                repaired=source.repair_bindings(store,source_id,[item],root/'source-handoffs'/e.digest(key),ports,apply=True)
-                stages.setdefault('source_handoffs',{})[key]=repaired
+            for batch,path in source_handoff_batches(er,root/'source-handoffs'):
+                attempted.update(item['object_key'] for item in batch)
+                repaired=source.repair_bindings(store,source_id,batch,path,ports,apply=True)
+                stages.setdefault('source_handoffs',{})[path.name]=repaired
                 if not complete(repaired) or not repaired['updates']:break
             else:continue
             break

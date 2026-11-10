@@ -158,3 +158,19 @@ def test_claim_checkpoint_skips_completed_stages_and_refuses_drift(candidate,tmp
     else:
         result=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
         assert result['status']=='completed'
+
+
+def test_source_handoff_batches_keep_groups_limits_and_existing_singletons(tmp_path):
+    def finding(n):return {'object_key':f'evidence_steps/E{n}','layer':'source','reason':'缺原文。'}
+    first=[finding(n) for n in range(6)]
+    second=[finding(n) for n in range(6,8)]
+    result={'groups':[{'group_id':'G1','pending':first},{'group_id':'G2','pending':second}]}
+    batches=list(flow.source_handoff_batches(result,tmp_path))
+    assert [len(items) for items,path in batches]==[4,2,2]
+    assert [p['object_key'] for items,path in batches for p in items]==[p['object_key'] for p in first+second]
+    legacy=tmp_path/flow.e.digest(first[0]['object_key']);legacy.mkdir()
+    (legacy/'intent.json').write_text('{}')
+    batches=list(flow.source_handoff_batches(result,tmp_path))
+    assert batches[0]==([first[0]],legacy)
+    assert [len(items) for items,path in batches]==[1,4,1,2]
+    assert list(flow.source_handoff_batches({'groups':[{'pending':list(reversed(first))},{'pending':second}]},tmp_path))==batches

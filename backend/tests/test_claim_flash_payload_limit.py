@@ -47,3 +47,33 @@ def test_creation_flash_uses_the_same_128k_transport_limit(tmp_path):
     contract={'schema':{'type':'object','properties':{'ok':{'type':'boolean'}},'required':['ok']}}
     result=creation.call(tmp_path,ports,'test',{'text':'x'*90000},contract,'one task',lambda:None)
     assert result=={'ok':True} and len(calls)==1
+
+
+def test_binding_batch_sizes_actual_shared_wire_and_splits_without_losing_paragraphs(tmp_path,monkeypatch):
+    import json
+    from backend.pipeline.claim_flash_source import shared_binding_input
+    calls=[]
+    def repair(req):
+        calls.append(req)
+        assert len(json.dumps(req,ensure_ascii=False).encode())<=f.GPT_BYTES
+        for job in req['input']['jobs']:
+            for key in job['material']['nearby_paragraph_keys']:
+                assert req['input']['source_paragraphs'][key]['text']
+        return {'items':[{'job_id':j['job_id']} for j in req['input']['jobs']]}
+    ports=SimpleNamespace(identity={'gpt':{'model':'test'}},repair=repair)
+    schema={'type':'object','properties':{'items':{'type':'array'}}}
+    common={'paragraph_key':'S0001','text':'x'*4000}
+    jobs=[{'job_id':str(i),'material':{'nearby_paragraphs':[common]}} for i in range(3)]
+    monkeypatch.setattr(f,'GPT_BYTES',5000)
+    result=list(f.gpt(tmp_path/'shared',ports,'source_binding_completion',jobs,schema,'find bindings',
+        semantic_review=False,project_input=shared_binding_input))
+    assert len(calls)==1 and len(result[0][0])==3
+    jobs=[{'job_id':str(i),'material':{'nearby_paragraphs':[{'paragraph_key':f'S{i}','text':'x'*3000}]}} for i in range(3)]
+    result=list(f.gpt(tmp_path/'split',ports,'source_binding_completion',jobs,schema,'find bindings',
+        semantic_review=False,project_input=shared_binding_input))
+    assert len(result)==3 and [j['job_id'] for batch,reply in result for j in batch]==['0','1','2']
+    jobs.append({'job_id':'too-big','material':{'nearby_paragraphs':[{'paragraph_key':'S9','text':'x'*6000}]}})
+    with pytest.raises(ValueError,match='payload limit'):
+        list(f.gpt(tmp_path/'reject',ports,'source_binding_completion',jobs,schema,'find bindings',
+            semantic_review=False,project_input=shared_binding_input))
+    assert len(calls)==4  # Oversized late job rejected before any partial call.

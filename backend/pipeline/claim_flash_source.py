@@ -30,6 +30,22 @@ class BindingDecisions(BaseModel):
     items:list[BindingDecision]
 
 
+def shared_binding_input(data):
+    """Transmit each paragraph once; each job retains its exact allowed keys."""
+    paragraphs={}
+    for job in data['jobs']:
+        material=job['material']
+        keys=[]
+        for paragraph in material.pop('nearby_paragraphs'):
+            key=paragraph['paragraph_key']
+            if key in paragraphs and paragraphs[key]!=paragraph:
+                raise ValueError('conflicting shared source paragraph')
+            paragraphs[key]=paragraph;keys.append(key)
+        material['nearby_paragraph_keys']=keys
+    data['source_paragraphs']=paragraphs
+    return data
+
+
 def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
     """Consume lower-layer handoffs; change only literal source attachments."""
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
@@ -74,8 +90,12 @@ def repair_bindings(store,source_id,findings,root,ports,*,apply=False):
             '保留完整有意義的語句，不只取「這種文法」「所以如此」等失去指代的短句；原有有效片段會由程式保留。'
             'quotes只列需要補充的原文；找不到就needs_source，說明具體缺口，不為維持摘要而借其他主題。'
             'Jev只提供候選位置，不是支持成立的判決。')
+        batched=len(jobs)>1
+        if batched:
+            prompt+='各項獨立判定；共用原文在source_paragraphs，本項只能選material.nearby_paragraph_keys列出的段落。'
         for batch,raw in f.gpt(root/'selection',ports,'source_binding_completion',jobs,
-                BindingDecisions.model_json_schema(),prompt,semantic_review=False):
+                BindingDecisions.model_json_schema(),prompt,semantic_review=False,
+                project_input=shared_binding_input if batched else None):
             decisions=BindingDecisions.model_validate(raw).items
             f.exactly([x.model_dump() for x in decisions],[j['job_id'] for j in batch],'job_id')
             for decision in decisions:

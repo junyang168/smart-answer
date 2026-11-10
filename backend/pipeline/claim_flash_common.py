@@ -346,12 +346,14 @@ def reuse_argument_edge_order(root,request):
     return request
 
 
-def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True):
+def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None):
     """Split BEFORE calling by both complete wire size and task count. No truncation."""
     def request(batch):
+        data={'task': task, 'jobs': batch, **(shared or {})}
+        if project_input:data=project_input(deepcopy(data))
         return {'identity': ports.identity['gpt'],
                 'system': instruction+('\n'+SEMANTIC_REVIEW if semantic_review else ''),
-                'input': {'task': task, 'jobs': batch, **(shared or {})}, 'schema': schema}
+                'input': data, 'schema': schema}
     batches, batch = [], []
     for job in jobs:
         trial = batch+[job]

@@ -92,3 +92,101 @@ def test_changed_diagnostic_wording_reuses_same_saved_source_answer_after_progra
     assert result['status']=='applied' and ports.calls==['jev','gpt']
     import json
     assert json.loads((root/'repair/intent.json').read_text())['findings']==first
+
+
+def add_targets(store, count=3):
+    original=store.get_record_state('evidence_steps','E')['payload']
+    targets=[{**deepcopy(original),'evidence_step_id':f'E{i}'} for i in range(count)]
+    store.apply_plan(store.plan_package({'package_id':'batch-targets','evidence_steps':targets}))
+    return [{'object_key':'evidence_steps/'+p['evidence_step_id'],'layer':'source','reason':'補足後半句。'} for p in targets]
+
+
+def test_source_handoffs_share_paragraphs_in_one_call_and_replay_without_calls(sample):
+    store,root,_=sample;findings=add_targets(store);ports=Ports()
+    before={p['object_key']:deepcopy(store.get_record_state(*p['object_key'].split('/'))['payload']) for p in findings}
+    requests=[];repair=ports.repair
+    def capture(req):
+        requests.append(req)
+        data=req['input']
+        assert len(data['jobs'])==3 and list(data['source_paragraphs'])==['S0001']
+        for job in data['jobs']:
+            assert 'nearby_paragraphs' not in job['material']
+            assert job['material']['nearby_paragraph_keys']==['S0001']
+        return repair(req)
+    ports.repair=capture
+    result=source.repair_bindings(store,'S',findings,root/'batch',ports,apply=True)
+    assert result['status']=='applied' and ports.calls==['jev','gpt']
+    assert {x['job_id'] for x in result['outcomes']}==set(before)
+    for key,old in before.items():
+        current=store.get_record_state(*key.split('/'))['payload']
+        excluded={'revision','source_fragment_id','source_fragment_ids'}
+        assert {k:v for k,v in old.items() if k not in excluded}=={k:v for k,v in current.items() if k not in excluded}
+        assert len(current['source_fragment_ids'])==2
+    replay=Ports()
+    assert source.repair_bindings(store,'S',findings,root/'batch',replay,apply=True)['status']=='applied'
+    assert replay.calls==[]
+
+
+def test_batch_program_failure_prevents_every_write_and_reuses_saved_reply(sample,monkeypatch):
+    store,root,_=sample;findings=add_targets(store);ports=Ports()
+    before={p['object_key']:store.get_record_state(*p['object_key'].split('/')) for p in findings}
+    original=source.binding_postimage;seen=[]
+    def fail_second(key,*args,**kwargs):
+        seen.append(key)
+        if len(seen)==2:raise ValueError('program defect in batch')
+        return original(key,*args,**kwargs)
+    monkeypatch.setattr(source,'binding_postimage',fail_second)
+    with pytest.raises(ValueError,match='program defect'):
+        source.repair_bindings(store,'S',findings,root/'batch',ports,apply=True)
+    assert all(store.get_record_state(*key.split('/'))==row for key,row in before.items())
+    monkeypatch.setattr(source,'binding_postimage',original)
+    assert source.repair_bindings(store,'S',findings,root/'batch',ports,apply=True)['status']=='applied'
+    assert ports.calls==['jev','gpt']
+
+
+def test_batch_rejects_quote_from_other_jobs_allowed_paragraph_without_any_write(sample,monkeypatch):
+    store,root,_=sample;findings=add_targets(store,2);before=store.compile_package()
+    prepare=source.source_lookup.Locator.prepare
+    def restricted(self,key,*args):
+        material,quotes=prepare(self,key,*args)
+        if key.endswith('/E1'):material['nearby_paragraphs']=[]
+        return material,quotes
+    monkeypatch.setattr(source.source_lookup.Locator,'prepare',restricted)
+    monkeypatch.setattr(source.source_lookup,'lookup',lambda jobs,*a:{j['job_id']:j['material'] for j in jobs})
+    with pytest.raises(ValueError,match='unprovided source repair paragraph'):
+        source.repair_bindings(store,'S',findings,root/'batch',Ports(),apply=True)
+    after=store.compile_package()
+    after.pop('compiled_at');before.pop('compiled_at')
+    assert after==before
+
+
+def test_flow_recovers_original_batch_after_commit_crash_without_new_model_call(sample,monkeypatch):
+    from backend.pipeline import claim_flash_flow as flow
+    from backend.tests.test_claim_flash_flow import FlowPorts
+    store,root,_=sample;findings=add_targets(store)
+    bindings=Ports()
+    class Combined(FlowPorts):
+        def judge(self,request):
+            if 'current_paragraphs' in request['state']:return bindings.judge(request)
+            return super().judge(request)
+        def repair(self,request):
+            if request['input']['task']=='source_binding_completion':return bindings.repair(request)
+            return super().repair(request)
+    def lower(*a,**kw):
+        needs=any(len(store.get_record_state(*p['object_key'].split('/'))['payload']['source_fragment_ids'])==1 for p in findings)
+        return {'status':'needs_attention','groups':[{'group_id':'FG001','pending':findings if needs else [{'layer':'test_stop','reason':'end of source test'}]}]}
+    monkeypatch.setattr(flow.eo,'run',lower)
+    publish=e.publish
+    def crash(path,result):
+        if path.name.startswith('batch-') and result.get('applied'):raise RuntimeError('crash after batch commit')
+        return publish(path,result)
+    monkeypatch.setattr(e,'publish',crash)
+    with pytest.raises(RuntimeError,match='crash after batch commit'):
+        flow.run(store,'S',root/'flow',Combined())
+    assert bindings.calls==['jev','gpt']
+    revisions={p['object_key']:store.get_record_state(*p['object_key'].split('/'))['revision'] for p in findings}
+    monkeypatch.setattr(e,'publish',publish)
+    result=flow.run(store,'S',root/'flow',Combined())
+    assert result['status']=='needs_attention' and bindings.calls==['jev','gpt']
+    assert all(store.get_record_state(*key.split('/'))['revision']==revision for key,revision in revisions.items())
+    assert len(list((root/'flow/source-handoffs').glob('batch-*/result.json')))==1
