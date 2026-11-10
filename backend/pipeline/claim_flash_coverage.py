@@ -189,6 +189,25 @@ def details(keys, material, records, sources, aliases):
     return result
 
 
+def compact_bindings(job):
+    """Lossless wire table for repeated field names, not a semantic summary."""
+    from copy import deepcopy
+    result=deepcopy(job)
+    columns=['paragraph_key','quote','binding_verified']
+    changed=False
+    for detail in result.get('existing_details',{}).values():
+        bindings=[]
+        for binding in detail['bindings']:
+            if set(binding)==set(columns):
+                bindings.append([binding[field] for field in columns]);changed=True
+            else:
+                bindings.append(binding)
+        detail['bindings']=bindings
+    if changed:
+        result['binding_columns']=columns
+    return result
+
+
 def check(records, sources, source_id, plan, root, ports):
     """No store reference: this stage cannot submit any knowledge changes."""
     root = Path(root); source = source_stage.current_source(records, sources, source_id)
@@ -303,6 +322,14 @@ def check(records, sources, source_id, plan, root, ports):
              {'all_sermon_statements':statements,'position_attributions':attributions}),
             ('reverse_scripture_coverage', citation_jobs, CITATION_PROMPT,
              {'existing_scripture_index':scripture_index(material,aliases)})]:
+            # Keep saved ordinary requests identical. Only a previously
+            # unsendable job uses a lossless table; every quote, position and
+            # verification value remains present and the complete wire is
+            # still checked by the common dispatcher before any call.
+            schema=Dispositions.model_json_schema()
+            selected=[compact_bindings(job) if len(json.dumps({'identity':ports.identity['gpt'],
+                'system':prompt,'input':{'task':task,'jobs':[job],**shared},'schema':schema},ensure_ascii=False).encode())>f.GPT_BYTES
+                else job for job in selected]
             yield from f.gpt(root/'dispositions', ports, task, selected,
                 Dispositions.model_json_schema(), prompt, shared=shared, semantic_review=False)
     for batch,raw in replies():

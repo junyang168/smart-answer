@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Sequence
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.claim_anchor_roles import source_roles
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.base_contract_coverage import sentence_spans
@@ -1756,8 +1757,11 @@ def compile_package(
     exclusions: list[dict[str, Any]] | None = None,
     complete: bool = True,
     visual_source_attestations: Mapping[str, str] | None = None,
+    additional_relations: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     projection = project_script(transcript.get("script"))
+    if additional_relations:
+        validate_response(response, transcript, additional_relations=additional_relations)
     try:
         validate_visual_source_attestations(
             projection, visual_source_attestations
@@ -1843,7 +1847,7 @@ def compile_package(
     )
     model_output_sha256 = hashlib.sha256(
         json.dumps(
-            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ({"response": response, "additional_relations": additional_relations} if additional_relations else response), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     ).hexdigest()
     namespace = generation_namespace(
@@ -1891,6 +1895,16 @@ def compile_package(
         row["claim_relation_id"] = id_maps["claim_relation"][row["claim_relation_id"]]
         row["from_id"] = id_maps["claim"][row["from_id"]]
         row["to_id"] = id_maps["claim"][row["to_id"]]
+
+    native_ids = {old: new for kind in ("question", "position", "observation", "evidence", "claim")
+                  for old, new in id_maps[kind].items()}
+    extra_relations = []
+    for i, edge in enumerate(additional_relations, 1):
+        if edge.get("from_id") not in native_ids or edge.get("to_id") not in native_ids:
+            raise DetailedExtractionValidationError("additional relation has unknown endpoint")
+        extra_relations.append({"relation_id": f"{namespace}-XR{i:04d}",
+            "from_id": native_ids[edge["from_id"]], "to_id": native_ids[edge["to_id"]],
+            "relation_type": edge["relation_type"], "reason": edge["reason"]})
 
     source_id = published_source_id(transcript_id, source_descriptor)
     source_sha256 = expected_body_sha256
@@ -1998,10 +2012,9 @@ def compile_package(
                     "media_time": paragraph.get("start_time"),
                     "evidence_id": evidence_id,
                     "evidence_type": evidence["step_type"],
-                    "speaker": evidence["speaker"],
-                    "stance": evidence["stance"],
+                    **source_roles(
+                        {'verbatim_excerpt': highlight}, str(paragraph.get('text') or '')),
                     "discourse_role": evidence["discourse_role"],
-                    "assertive": evidence["speaker"] == "professor" and evidence["stance"] == "asserted",
                     "proposed_highlight": {"text": highlight, "status": "proposed"},
                     **visual_fields,
                 })
@@ -2087,7 +2100,7 @@ def compile_package(
         "observations": observations,
         "evidence_steps": evidence_steps,
         "claims": claims,
-        "knowledge_relations": response["evidence_relations"],
+        "knowledge_relations": response["evidence_relations"] + extra_relations,
         "claim_relations": response["claim_relations"],
         "extraction": {
             **extraction,

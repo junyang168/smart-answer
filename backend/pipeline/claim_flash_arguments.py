@@ -18,7 +18,8 @@ PROMPT=(flash.PROMPT+'只檢查指定Claim的論證路線是否完整，不重�
  '每條缺少連接一次給齊兩端object_key、relation_type、direction、直接相關fragment_ids及簡短reason。'
  '這是該連接的完整處置；依教授原文決定最合適的直接類型與方向，同一端點組合不要重複提出。'
  '不改既有邊或文字，已有的直接或間接路線作唯讀參考。'
- '缺材料本身用needs_material，缺來源用needs_source；每項恰好一次。')
+ '缺材料本身用needs_material，缺來源用needs_source；每項恰好一次。'
+ + f.RELATION_REASON_RULES)
 class Proposed(pairs.CompletedProposal):
     fragment_ids:list[str]=Field(min_length=1)
 class Route(BaseModel):
@@ -30,6 +31,31 @@ class Route(BaseModel):
 class Routes(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     items:list[Route]
+
+
+FINAL_SUPPORT_PROMPT='只判斷最終論據集合是否仍完整支持此Claim及關鍵經文。keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
+
+FINAL_SUPPORT_BATCH_PROMPT=FINAL_SUPPORT_PROMPT+'每個job_id獨立判定且恰好一次；只用該job材料，不將其他job的論據視為它的支持。'
+
+
+def final_support_decisions(root,ports,jobs):
+    """Reuse exact legacy single-job replies; batch only unanswered checks."""
+    root=Path(root);schema=statements.Edits.model_json_schema();answers={};remaining=[]
+    def consume(batches):
+        for batch,raw in batches:
+            edits=statements.Edits.model_validate(raw).items
+            f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
+            for edit in edits:answers[edit.job_id]=edit
+    for job in jobs:
+        legacy={'identity':ports.identity['gpt'],'system':FINAL_SUPPORT_PROMPT,
+                'input':{'task':'argument_final_support','jobs':[job]},'schema':schema}
+        saved=root/'gpt'/e.digest(legacy)
+        if (saved/'response.json').exists() or (saved/'started.json').exists():
+            # Unknown earlier calls still fail closed in the common recorder.
+            consume(f.gpt(root,ports,'argument_final_support',[job],schema,FINAL_SUPPORT_PROMPT,semantic_review=False))
+        else:remaining.append(job)
+    consume(f.gpt(root,ports,'argument_final_support',remaining,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    return [answers[j['job_id']] for j in jobs]
 
 
 def statement_proof(root,claim_ids,records,sources):
@@ -56,13 +82,18 @@ def statement_proof(root,claim_ids,records,sources):
     return result,before,prepared
 
 
-def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,apply=False):
+def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,apply=False,claim_ids=None):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     group=next(g for g in plan['groups'] if g['group_id']==group_id);ids=group['claim_ids']
+    if claim_ids is not None:
+        if claim_ids not in group.get('sequential_claim_batches', []):
+            raise ValueError('Claim batch is not frozen in the completed Evidence plan')
+        ids=claim_ids
     if not ids or len(ids)>10 or len(ids)!=len(set(ids)):raise ValueError('one nonempty existing Claim group required')
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'group':group,'models':ports.identity,
+            **({'claim_ids':ids} if claim_ids is not None else {}),
             'evidence_root':str(Path(evidence_root).resolve()),'statement_root':str(Path(statement_root).resolve()),
             'policy_sha256':e.digest([PROMPT,Routes.model_json_schema()])})
         if (root/'verification.json').exists():return statements.finish(store,root) if apply else json.loads((root/'verification.json').read_text())
@@ -72,8 +103,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             raise ValueError('argument group/source differs from completed Evidence plan')
         if any(not f.belongs_to_source(records['claims/'+cid]['payload'],records,source_id) for cid in ids):
             raise ValueError('argument target belongs to another source')
-        if any(records['claims/'+cid]['payload'].get('review_status')=='human_review_required' for cid in ids):
-            raise ValueError('Claim hold requires its existing handoff')
+        markers=f.legacy_ai_findings(store,records,ids,ports)
         old_checks,old_before,statement_updates=statement_proof(statement_root,ids,records,sources)
         records=f.apply_overlay(records,statement_updates)
         targets={'claims/'+cid for cid in ids}
@@ -94,10 +124,13 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'existing_edges':[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason','')} for p in edges.values()]
                  +[{'a':by_id[p['from_id']],'b':by_id[p['to_id']],'relation_type':p['relation_type'],'reason':p.get('reason',''),'read_only':True} for p in claim_edges.values()]
                  +[{**p,'relation_type':'supports','reason':'Claim.evidence_step_ids'} for p in implicit]}
+        shared['existing_edges']=sorted(shared['existing_edges'],key=e.digest)
         shared.update(f.source_interpretation(sources,{source_id:group['paragraph_keys']}))
         proposals=[];pending=[];routes=[];claim_handoffs={}
-        jobs=[{'job_id':k} for k in sorted(targets)]
-        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),PROMPT,shared=shared,semantic_review=False):
+        notes=getattr(ports,'legacy_ai_findings_notes',{})
+        jobs=[{'job_id':k,**({'legacy_ai_finding':notes[k]} if k in notes else {})} for k in sorted(targets)]
+        prompt=PROMPT+('逐項據當前材料處置job中的legacy_ai_finding；reason須說明舊異議如何解決或為何不成立，不能只略過。無法解決就返回對應缺口，不得complete。' if any(k in notes for k in targets) else '')
+        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),prompt,shared=shared,semantic_review=False):
             replies=Routes.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
             for item in replies:
                 routes.append(item.model_dump())
@@ -131,7 +164,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 and 'evidence_steps/'+r['payload']['from_id'] in pool]
             p['evidence_step_ids']=list(dict.fromkeys([x for x in p.get('evidence_step_ids',[]) if x not in removed]+sorted(supported)))
             if p!=records[key]['payload']:
-                p['occurrences']=c.refresh_occurrences(p,p['evidence_step_ids'],working,source_id)
+                p['occurrences']=c.refresh_occurrences(p,p['evidence_step_ids'],working,source_id,source_binding=sources[source_id]['file'])
                 updates[key]=flash.current_claim_payload(p)
         working=f.apply_overlay(working,updates)
         # Reciprocal owner fields are structural writes, not a lower content re-review.
@@ -144,6 +177,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if set(owners)!=set(p.get('produced_claim_ids',[])):
                 p['produced_claim_ids']=list(dict.fromkeys(owners));updates[key]=p
         # Reuse unchanged whole-support/scripture decisions; only changed argument sets need those tasks.
+        final_jobs=[]
         for key in sorted(targets):
             if (not working[key]['payload'].get('evidence_step_ids') and not any(
                     k.startswith('knowledge_relations/') and r['payload']['to_id']==key.split('/',1)[1]
@@ -157,16 +191,16 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             state=flash.claim_material(key,working,sources,source_id)
             if state==prior and not any(x['object_key']==key for x in old_checks['pending']):
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
-            answers=f.jev(root/'postimage-support',ports,state,{k:q.claim()[k] for k in ['support','scripture']})
+            answers=f.jev(root/'postimage-support',ports,state,{k:q.claim(with_references=bool(state.get('claim_references')))[k] for k in ['support','scripture']})
             issues={k:v for k,v in answers.items() if v!=('supported' if k=='support' else 'complete')}
-            if issues:
-                job={'job_id':key,'material':state,'findings':issues}
-                for _,raw in f.gpt(root/'postimage-disposition',ports,'argument_final_support',[job],statements.Edits.model_json_schema(),
-                    '只判斷最終論據集合是否仍完整支持此Claim及關鍵經文。keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。',semantic_review=False):
-                    edit=statements.Edits.model_validate(raw).items
-                    f.exactly([x.model_dump() for x in edit],[key],'job_id')
-                    if edit[0].action!='keep':pending.append({'object_key':key,'layer':'claim_connections','reason':edit[0].reason})
-                    outcomes.append({'object_key':key,'basis':'gpt_final_support','action':edit[0].action,'reason':edit[0].reason})
+            if issues:final_jobs.append({'job_id':key,'material':state,'findings':issues})
+        for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
+            if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})
+            outcomes.append({'object_key':edit.job_id,'basis':'gpt_final_support','action':edit.action,'reason':edit.reason})
+        if markers and not pending:
+            for cid in markers:
+                key='claims/'+cid
+                updates[key]=flash.current_claim_payload(updates.get(key,records[key]['payload']),verified_ai_findings=True)
         read=set(nodes)|set(edges)|set(claim_edges)|{'source_fragments/'+fid for fid in fragments}|{'source_documents/'+source_id}
         read.update(k for k,r in records.items() if k.startswith('claim_relation_constraints/') and {r['payload']['source_id'],r['payload']['target_id']}&set(by_id))
         allowed=targets|pool|set(edges)|{k for k in updates if k.startswith('knowledge_relations/') and k not in records}
@@ -180,6 +214,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             'completion_scope':'group_lower_argument_routes_only','claim_qualification':'not_granted','applied':False,
             'resolved_statement_handoffs':[x for x in old_checks['pending'] if x['object_key'] in targets and not pending],
             'commit_reason':'Group argument completeness and typed pairs; preserve lower content and Claim statements'}
+        if markers:result['legacy_ai_findings_markers']=markers
         e.save(root/'before.json',{'records':{k:original[k] for k in read if k in original},'sources':sources});e.save(root/'consumed-evidence.json',proof)
         e.save(root/'verification.json',result)
         return statements.finish(store,root) if apply else e.publish(root,result)

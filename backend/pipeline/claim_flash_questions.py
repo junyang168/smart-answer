@@ -3,13 +3,14 @@
 Guidance: https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md
 Question ids are invisible to Jev. Each instruction names its own subject.
 """
+import json
 
-CONTRACT = 'claim_flash_classification_v2'
+CONTRACT = 'claim_flash_classification_v4'
 LOOKUP_UNCERTAINTY_FLOOR = .25  # Existing routing policy; not tuned by this change.
 
 FIDELITY = {'faithful':'實質意思有來源支持，沒有改義。',
             'unsupported':'增添原文沒有的內容，但沒有改變原有判斷。',
-            'changed':'改變條件、範圍、程度、模態或因果；兼有添加也選此項。',
+            'changed':'改變主詞、動作對象、條件、範圍、程度、模態或因果；兼有添加也選此項。',
             'contradicted':'與來源明確相反；兼有其他問題也選此項。','uncertain':'材料不足或含混。'}
 SUPPORT = {'supported':'所有實質成分有據。','partial':'部分成分有據，另有成分無據。',
            'unsupported':'實質成分均缺少支持。','contradicted':'有明確相反的原文；兼有缺據也選此項。',
@@ -29,12 +30,26 @@ ROLES = {
                     'mixed':'多方共同提出，不能歸一位。','uncertain':'無法確定。'})}
 
 
+def gpt_role_rules():
+    """One option vocabulary for Jev and the GPT disposition, not two taxonomies."""
+    options={field:{'question':ROLES[field][0],'choices':ROLES[field][1]} for field in ('speaker','stance')}
+    return ('分類選項與Jev共用，按以下定義選擇，不另造標籤：'
+            +json.dumps(options,ensure_ascii=False,separators=(',',':'))+
+            'stance針對record.statement所表達的完整判斷，不按原文問句句型、問號或個別否定詞分類。'
+            '「描述教授發問的陳述」不同於「記錄本身提出問題」：肯定地描述其發問行為可為asserted；'
+            '只有記錄本身保存材料中尚未回答的疑問才是questioned。'
+            '摘要若表達教授否定某推論，教授採納這個否定判斷，應為asserted，不能因否定詞選opposed。'
+            '發言者是quoted_source或audience時，stance按該發言來源的立場理解，不作平台的神學判斷。')
+
+
 def choice(instruction, criteria):
     return {'type':'choice','instructions':instruction,'criteria':criteria}
 
 
 def record_fidelity():
-    return choice('這項記錄的實質內容與完整原文清單的對應情況是哪種？問題記錄只核對提問本身。',FIDELITY)
+    return choice('這項記錄的實質內容與完整原文清單的對應情況是哪種？問題記錄只核對提問本身。'
+                  '摘要添加來源沒有的「本組尚未解釋」「本批未核對」等系統處理說明，屬unsupported；'
+                  '若同時改變教授判斷，按changed或contradicted處置，不把處理說明當教授的話。',FIDELITY)
 
 
 def decomposition():
@@ -60,10 +75,12 @@ def component(item):
                   '保留原有條件與語氣。`source_context` 只消歧，不補未掛載的論據。\n判斷：'+item['text'],SUPPORT)
 
 
-def claim():
+def claim(*,with_references=False):
     return {
         'statement_fidelity':choice('`claim.statement` 與教授原意的對應情況是哪種？保留原有條件、否定、對象與歸屬。',FIDELITY),
-        'support':choice('完整 `evidence` 合起來對 `claim.statement` 的支持程度是哪種？單項可只支持部分。',SUPPORT),
+        'support':choice(('完整 `evidence` 與直接 `claim_references` 所綁的 `source_paragraphs`，合起來對 `claim.statement` 的支持程度是哪種？'
+                         '單項可只支持部分；參考Claim只讀，不假設其文字已獲批准，須依實際來源。' if with_references else
+                         '完整 `evidence` 合起來對 `claim.statement` 的支持程度是哪種？單項可只支持部分。'),SUPPORT),
         'scripture':choice('教授用於本主張的關鍵經文及其作用，在目前記錄中是哪種情況？不要求抄入 statement。',SCRIPTURE)}
 
 

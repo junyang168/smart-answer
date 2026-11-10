@@ -13,12 +13,29 @@ from backend.api.canonical_repository.source_claim_membership import belongs_to_
 VERSION = 'claim_update_flash_v1'
 LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}
 PROTECTED = {'approved', 'human_approved', 'human_hold', 'rejected', 'superseded'}
-GPT_BYTES = 60000
+GPT_BYTES = 128000
 GPT_JOBS = 4
-JEV_BYTES = 40000
+JEV_BYTES = 128000  # Wire-size guard, not the provider's 64k/32k token limits.
 JEV_CONTRACT = jevq.CONTRACT
 MATERIAL_CONTRACT = 'claim_flash_same_paragraph_spans_v1'
-REVIEW_CONTRACT = 'claim_flash_semantic_review_v3'
+REVIEW_CONTRACT = 'claim_flash_semantic_review_v5'
+KNOWLEDGE_TEXT_RULES = (
+    '知識內容欄位（statement、text、title、attribution）只保存來源內容與必要歸屬，'
+    '逐個動作保留原文的主詞和對象；多個人物共同出現，不代表他們都做了每個動作或具有相同狀態。'
+    '合併句子時不得擴大或轉移主詞；指涉不明就保留不確定，不自行補人物。'
+    '不得混入「本組尚未解釋」「本批未核對」「尚未接入路線」等生成或審閱過程。'
+    '處置過程只寫本次決定的reason／outcomes，不當作教授的教導。'
+    '單純「接下來看馬可」的講課轉場不當作實質論據；保留轉場中實際的經文出處、'
+    '比較及判斷，不能因含轉場語就丟掉整句重要內容。')
+CLAIM_DISCOVERY_RULES = (
+    '除具體釋經結論，也檢查教授明說且另給論據的解經原則，例如以字義用例說明主觀讀法造成誤解。'
+    '原則不是必建配額：已有Claim承載就引用；只有支持上層的一句斷言、沒有另外論據時保留Evidence，'
+    '不從單一例子自行擴張成教授未說的普遍原則。')
+RELATION_REASON_RULES = (
+    '寫入關係的reason只用簡短文字說明教授如何從此端點支持、解釋或限定另一端點，'
+    '區分實質支持與背景確認，不整段重抄兩端statement。'
+    '不得寫「尚未接入既有路線」「本輪補建」「審閱通過」等系統處理過程；'
+    '這些處置說明只放本次決定／outcomes，不寫入關係reason。')
 SEMANTIC_REVIEW = (
     '只審本次 task 指定的本層目標；其他層的材料僅作依據或上下文，不審閱下一層內容，'
     '不替參考物件作完整審閱，不因發現一句判斷便要求建立下一層記錄。'
@@ -39,20 +56,49 @@ SEMANTIC_REVIEW = (
     '不因局部片段未重述就刪除。無法核實時先明示所缺上下文，不能以刪去已有論據代替查證。'
     '沿用現有 reason 欄位，簡短指出實際影響判斷的限定和來源短句或位置；'
     'keep 也須解釋為何現有表述保留了該意思，不能只說整體有支持。'
-    '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。')
+    '仍可有據保留，不能為符合另一模型的意見而強制修改；修訂只輸出必要差異。'
+    + KNOWLEDGE_TEXT_RULES)
+
+
+def source_binding(doc):
+    """Resolve only an exact, proven editorial transition; never infer equivalence."""
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    try:
+        return verify_current_source_binding({'path': doc['source_path'],
+                                             'file_sha256': doc['source_file_sha256']})
+    except ValueError as exc:
+        raise ValueError('registered source file changed without a usable exact editorial proof: '+str(exc)) from exc
+
+
+def legacy_ai_findings(store, records, claim_ids, ports):
+    """Admit only explicitly authorized legacy AI findings, never human holds."""
+    from types import SimpleNamespace
+    from backend.pipeline.claim_legacy_ai_reopen import authorized_markers
+    keys=['claims/'+cid for cid in claim_ids
+          if records['claims/'+cid]['payload'].get('review_status')=='human_review_required']
+    if not keys:return {}
+    grant=getattr(ports,'legacy_ai_findings_refresh',None)
+    notes=getattr(ports,'legacy_ai_findings_notes',{})
+    if not grant:raise ValueError('Claim hold requires its existing authorized handoff')
+    scoped={**grant,'claims':{k:v for k,v in grant['claims'].items() if k in keys}}
+    if any(not isinstance(proof,dict) or set(proof)!={'before_pin','events_sha256'}
+           for proof in scoped['claims'].values()):
+        raise ValueError('legacy AI handoff requires a verified provenance marker')
+    request=SimpleNamespace(operation='Update',target_keys=keys,permissions=[SimpleNamespace(key=k) for k in keys])
+    with store.connect() as conn,conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION READ ONLY')
+        markers=authorized_markers(cursor,request,records,{'legacy_ai_findings_refresh':scoped,
+            'review_questions':[notes[k] for k in keys if k in notes]})
+    if set(markers)!=set(keys):raise ValueError('unrecognized legacy AI or human hold remains protected')
+    return {key.split('/',1)[1]:proof for key,proof in markers.items()}
 
 
 def bind_source(store,sid,root):
     """A completed root belongs to one source version, not just a reusable source ID."""
-    import hashlib
     state=store.get_record_state('source_documents',sid)
     if not state or state['retired']:
         raise ValueError('missing source: '+sid)
-    doc=state['payload'];path=doc['source_path']
-    actual=hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    if actual!=doc['source_file_sha256']:
-        raise ValueError('registered source file changed; run source migration first')
-    pin={'source_id':sid,'path':path,'file_sha256':actual}
+    pin={'source_id':sid,**source_binding(state['payload'])}
     e.save(Path(root)/'source-version.json',pin)
     return pin
 
@@ -133,8 +179,7 @@ def load_source(store, sid, *, visual_context=False):
         for field in ['from_id', 'to_id', 'source_id', 'target_id']:
             query('collection=ANY(%s) AND payload->>%s=ANY(%s)',
                   (['knowledge_relations', 'claim_relations', 'claim_relation_constraints'], field, ids))
-    sources = {sid: e.source_snapshot({'path': doc['source_path'],
-                    'file_sha256': doc['source_file_sha256']}, source=doc, visual_context=visual_context)}
+    sources = {sid: e.source_snapshot(source_binding(doc), source=doc, visual_context=visual_context)}
     return records, sources
 
 
@@ -143,7 +188,13 @@ def load_group_source(store, sid, group):
     from backend.pipeline import claim_human_source as human
     records, sources = load_source(store, sid)
     keys = set(group['paragraph_keys'])
-    for key in group.get('lower_record_keys', []) + group.get('reference_record_keys', []):
+    material_keys=set(group.get('lower_record_keys', [])+group.get('reference_record_keys', []))
+    # These direct references are already read by Claim tasks. Carry their
+    # source interpretations too, without following another Claim neighbour.
+    material_keys.update('evidence_steps/'+eid for key in list(material_keys)
+        if key.startswith('claims/') and key in records
+        for eid in records[key]['payload'].get('evidence_step_ids',[]))
+    for key in material_keys:
         if key in records:
             keys.update(records['source_fragments/'+fid]['payload']['paragraph_key']
                         for fid in e.evidence_fragment_ids(records[key]['payload'])
@@ -207,11 +258,15 @@ def jev(root, ports, state, questions, *, reuse_roots=()):
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
     own = Path(root)/'jev'/e.digest(request)
     if (own/'started.json').exists() and not (own/'response.json').exists():
+        rejected=e.rejection_receipt(own,request)
+        if rejected:raise e.RecordedCallRejected(own,rejected)
         raise ValueError('Jev call has no saved reply; inspect before retrying')
     reply = None
     for previous in reuse_roots:
         folder = Path(previous)/'jev'/e.digest(request)
         if (folder/'started.json').exists() and not (folder/'response.json').exists():
+            rejected=e.rejection_receipt(folder,request)
+            if rejected:raise e.RecordedCallRejected(folder,rejected)
             raise ValueError('matching prior Jev call has no saved reply; no resend')
         if (folder/'response.json').exists():
             if json.loads((folder/'request.json').read_text()) != request:
@@ -223,7 +278,7 @@ def jev(root, ports, state, questions, *, reuse_roots=()):
             break
     if reply is None:
         reply = e.recorded_call(root, 'jev', request, ports.judge,
-                                preflight=getattr(ports, 'judge_preflight', None))
+                                preflight=getattr(ports, 'judge_preflight', None),jev_max_bytes=JEV_BYTES)
     if set(reply.get('answers', {})) != set(questions):
         raise ValueError('Jev question set differs')
     choices = {}
@@ -250,12 +305,60 @@ def yn(text):
     return c.question(text, {'yes': '有此問題。', 'no': '沒有此問題。', 'uncertain': '無法確定。'})
 
 
-def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True):
-    """Split BEFORE calling by both complete wire size and task count. No truncation."""
+def stopped_gpt_authority(root,ports,request):
+    key=e.digest(request);old=Path(root)/'gpt'/key
+    if (request.get('input',{}).get('task')!='evidence_fidelity_repair'
+            or request.get('execution_recovery') or not getattr(ports,'focus_evidence_findings',False)
+            or not (old/'started.json').exists() or (old/'response.json').exists()
+            or not (old/'owner-recovery.json').exists()):
+        raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
+    authority=json.loads((old/'owner-recovery.json').read_text())
+    expected=Path(ports.root)/'gpt'/key/'transport'/'exit.json'
+    receipt=json.loads(expected.read_text())
+    if (authority.get('original_request_sha256')!=key or not authority.get('owner_direction')
+            or authority.get('max_reissues')!=1 or authority.get('exit_path')!=str(expected)
+            or authority.get('exit_sha256')!=e.digest(receipt) or receipt.get('error_type')!='TimeoutExpired'
+            or e.digest(json.loads((old/'request.json').read_text()))!=key):
+        raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+    return authority
+
+
+def reuse_argument_edge_order(root,request):
+    """Reuse only an exact saved answer with a permutation of the same edge list."""
+    def normalized(req):
+        copy=deepcopy(req)
+        copy['input']['existing_edges']=sorted(copy['input']['existing_edges'],key=e.digest)
+        return copy
+    if request['input']['task']!='argument_completeness' or 'existing_edges' not in request['input']:
+        return request
+    expected=normalized(request)
+    for path in sorted((Path(root)/'gpt').glob('*/request.json')):
+        if not (path.parent/'response.json').exists():continue
+        prior=json.loads(path.read_text())
+        if (prior.get('input',{}).get('task')!='argument_completeness'
+                or 'existing_edges' not in prior['input'] or e.digest(prior)!=path.parent.name):continue
+        if normalized(prior)==expected:
+            if prior!=request:
+                e.save(Path(root)/'edge-order-reuse'/(e.digest(request)+'.json'),
+                    {'requested_sha256':e.digest(request),'saved_request_sha256':e.digest(prior),
+                     'normalized_sha256':e.digest(expected),'rule':'only existing_edges permutation; duplicates retained'})
+            return prior
+    return request
+
+
+def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None):
+    """Split BEFORE calling by complete wire size and task count. No truncation."""
     def request(batch):
-        return {'identity': ports.identity['gpt'],
+        data={'task': task, 'jobs': batch, **(shared or {})}
+        if project_input:data=project_input(deepcopy(data))
+        result={'identity': ports.identity['gpt'],
                 'system': instruction+('\n'+SEMANTIC_REVIEW if semantic_review else ''),
-                'input': {'task': task, 'jobs': batch, **(shared or {})}, 'schema': schema}
+                'input': data, 'schema': schema}
+        if task=='evidence_fidelity_repair' and data.get('source_completion_contract'):
+            from backend.pipeline import claim_flash_evidence as eo
+            if data['source_completion_contract']==eo.COMPLETION_CONTRACT:
+                result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
+        return result
     batches, batch = [], []
     for job in jobs:
         trial = batch+[job]
@@ -272,13 +375,31 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if prepare:
             batch=prepare(deepcopy(batch))
         req=request(batch)
+        if task=='evidence_fidelity_repair' and getattr(ports,'focus_evidence_findings',False):
+            from backend.pipeline import claim_flash_evidence as eo
+            direction=getattr(ports,'focused_review_instruction','')
+            if not direction:raise ValueError('focused Evidence continuation requires its owner direction')
+            e.save(Path(root)/'focused-review-admission.json',{'contract':eo.FOCUSED_CONTRACT,
+                'owner_direction':direction,'legacy_prompt_sha256':e.digest(instruction),
+                'focused_prompt_sha256':e.digest(eo.focused_request(req)['system']),'models':ports.identity})
+            old_key=e.digest(req);old=Path(root)/'gpt'/old_key
+            if not (old/'response.json').exists():
+                if (old/'started.json').exists():
+                    authority=stopped_gpt_authority(root,ports,req)
+                    req=eo.focused_request(req)
+                    req['execution_recovery']={'original_request_sha256':old_key,'authority_sha256':e.digest(authority)}
+                else:req=eo.focused_request(req)
         if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
+            if req.get('execution_recovery'):
+                raise ValueError('authorized complete recovery exceeds payload limit; no split or call made')
             if len(batch)==1:
                 raise ValueError('one complete GPT job exceeds Flash payload limit; no truncation')
             middle=len(batch)//2
             batches[:0]=[batch[:middle],batch[middle:]]
             continue
-        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None))
+        if task=='argument_completeness':
+            req=reuse_argument_edge_order(root,req)
+        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
@@ -292,7 +413,10 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if (schema.get('properties',{}).get('items',{}).get('type')=='array'
                 and ids is not None and len(set(ids))==len(ids) and set(ids)<set(expected)):
             missing=[job for job in batch if job['job_id'] not in ids]
+            if req.get('execution_recovery'):
+                raise ValueError('bounded owner recovery omitted jobs; saved reply retained, no automatic extra call')
             correction=request(missing)
+            if req.get('focused_contract'):correction=eo.focused_request(correction)
             correction['system']+='\n前次漏答；本次只處置這些未答工作，每個 ID 恰好一次，不重做已答項。'
             correction['schema']=deepcopy(schema)
             array=correction['schema'].get('properties',{}).get('items',{})
@@ -308,10 +432,12 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             e.save(recovery/'recovery.json',{'original_request_sha256':e.digest(req),
                 'original_answer_sha256':e.digest(reply),'retained_ids':ids,
                 'missing_ids':[j['job_id'] for j in missing],'max_additional_calls':1})
-            extra=e.recorded_call(recovery,'gpt',correction,ports.repair,preflight=getattr(ports,'preflight',None))
+            extra=e.recorded_call(recovery,'gpt',correction,ports.repair,preflight=getattr(ports,'preflight',None),gpt_max_bytes=GPT_BYTES)
             exactly(extra.get('items',[]),[j['job_id'] for j in missing],field)
             byid={item[field]:item for item in items+extra['items']}
             reply={**reply,'items':[byid[job['job_id']] for job in batch]}
+        if req.get('focused_contract'):
+            eo.validate_focused_reply(req,reply)
         yield batch,reply
 
 

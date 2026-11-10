@@ -146,8 +146,17 @@ class ClaimModelCapacity:
             if len(matches) != 1:
                 raise ValueError('quarantine requires its exact active slot journal')
             transport = Path(artifacts)
-            if not (transport / 'invocation.json').is_file() or (transport / 'exit.json').exists():
-                raise ValueError('quarantine requires an interrupted invocation without an exit receipt')
+            if not (transport / 'invocation.json').is_file():
+                raise ValueError('quarantine requires an interrupted invocation')
+            exit_receipt=transport/'exit.json'
+            if exit_receipt.exists():
+                saved=_read(exit_receipt,{})
+                actual={name:hashlib.sha256((transport/name).read_bytes()).hexdigest()
+                        for name in ('stdout.log','stderr.log','response.json') if (transport/name).is_file()}
+                if (saved.get('error_type')!='TimeoutExpired' or saved.get('returncode') is not None
+                        or not saved.get('finished_at') or (transport/'response.json').exists()
+                        or saved.get('files')!=actual):
+                    raise ValueError('quarantine requires no exit or an exact ended timeout without a response')
             reasons = ('unsettled transport: ', 'unsettled previous transport: ')
             blocked = state.get('blocked')
             if blocked and not any(blocked.startswith(prefix) and

@@ -13,6 +13,7 @@ from backend.tests.test_claim_management_postgres import postgres_store, _tempor
 
 class Ports(OriginalPorts):
     def judge(self,request):
+        if 'current_paragraphs' in request['state']:return super().judge(request)
         if 'record' in request['state']:
             bad='拒絕明白' in request['state']['record']['statement']
             self.choices={'record_fidelity':'changed' if bad else 'faithful'}
@@ -47,6 +48,21 @@ def setup(tmp_path):
     return records,sources,plan
 
 
+@pytest.mark.parametrize('fault',[None,'same_record','conflicting','missing','unknown'])
+def test_one_unit_can_repair_two_distinct_records_without_duplicate_disposition(fault):
+    def item(key):return stage.Missing(job_id='U8',action='enrich',record_key=key,
+        record_type='evidence_steps',fragment_ids=['F'],reason='保留本項的不同實質部分。')
+    edits=[item('evidence_steps/A'),item('evidence_steps/B')]
+    if fault=='same_record':edits[1].record_key=edits[0].record_key
+    if fault=='conflicting':edits[1].action='keep'
+    if fault=='missing':edits=[]
+    if fault=='unknown':edits[1].job_id='unknown'
+    if fault:
+        with pytest.raises(ValueError):stage.coverage_edits(edits,[{'job_id':'U8'}])
+    else:
+        assert stage.coverage_edits(edits,[{'job_id':'U8'}])==edits
+
+
 def saved_inventory(tmp_path,sources,units=()):
     previous=tmp_path/'coverage';rows=[];jobs=[]
     for i,pk in enumerate(sources['S']['paragraphs']):
@@ -73,6 +89,53 @@ def test_fidelity_uses_only_complete_actual_fragments_and_source_blind_split(tmp
         elif req['input']['task']=='lower_decomposition':assert 'sources' not in json.dumps(req)
     post=result['updates']['evidence_steps/E']
     assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
+
+
+def test_process_commentary_repair_stays_within_lower_statement_task(tmp_path):
+    records,sources,plan=setup(tmp_path)
+    records['evidence_steps/E']['payload']['statement']='沒有聽從祂的話，顯明沒有真正相信祂；本組尚未解釋。'
+    before=deepcopy(records)
+    class CommentaryPorts(Ports):
+        def judge(self,request):
+            if 'record' in request['state']:
+                self.choices={'record_fidelity':'changed'}
+                return OriginalPorts.judge(self,request)
+            return super().judge(request)
+    ports=CommentaryPorts();previous=saved_inventory(tmp_path/'prior',sources)
+    result=stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[],tmp_path/'run',ports,previous,apply=False)
+    assert result['status']=='verified' and set(result['updates'])=={'evidence_steps/E'}
+    post=result['updates']['evidence_steps/E']
+    assert post['statement']=='沒有聽從祂的話，顯明沒有真正相信祂。'
+    assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
+    requests=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='evidence_fidelity_repair']
+    assert len(requests)==1 and f.KNOWLEDGE_TEXT_RULES in requests[0]['system']
+    screening=next(r for role,r in ports.calls if role=='jev' and 'record_fidelity' in r['questions'])
+    assert '本組尚未解釋' in screening['questions']['record_fidelity']['instructions']
+    assert 'unsupported' in screening['questions']['record_fidelity']['criteria']
+    assert records==before and result['new_fragments']=={}
+
+
+@pytest.mark.parametrize('changed',[True,False])
+def test_action_subject_is_repaired_without_touching_other_layers(tmp_path,changed):
+    text='他們從伯大尼出來，耶穌餓了。'
+    records,sources=fixture(tmp_path,[text],[('S0001',text)])
+    records['evidence_steps/E']['payload']['statement']='耶穌與門徒從伯大尼出來時餓了。' if changed else text
+    before=deepcopy(records)
+    def repair(request):
+        assert request['input']['task']=='evidence_fidelity_repair'
+        assert '不得擴大或轉移主詞' in request['system']
+        return {'items':[{'job_id':j['job_id'],'action':'repair','statement':text,'reason':'只有耶穌是飢餓的主體。'}
+                         for j in request['input']['jobs']]}
+    ports=OriginalPorts(choices={'record_fidelity':'changed' if changed else 'faithful'},reply=repair)
+    group={'group_id':'A','paragraph_keys':['S0001'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}
+    result=stage.run_group(None,records,sources,group,['evidence_steps/E'],[],tmp_path/'run',ports,saved_inventory(tmp_path/'prior',sources),apply=False)
+    assert result['status']=='verified' and result['new_fragments']=={} and records==before
+    calls=[r for role,r in ports.calls if role=='gpt' and r['input']['task']=='evidence_fidelity_repair']
+    assert len(calls)==int(changed)
+    if changed:
+        post=result['updates']['evidence_steps/E'];assert post['statement']==text
+        assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
+    else:assert result['updates']=={}
 
 
 def test_complete_bound_cross_group_fragments_are_not_truncated(tmp_path):
@@ -383,3 +446,22 @@ def test_new_record_with_omitted_optional_fields_keeps_acceptance_after_sql(seed
     assert len(created)==1 and created[0]['scripture_refs']==[]
     replay=WithoutOptionals();second=stage.run(store,'S',plan,root,replay,previous,apply=True)
     assert second['status']=='completed' and replay.calls==[]
+
+
+@pytest.mark.parametrize('key',['evidence_steps/E','', 'evidence_steps/OUTSIDE'])
+def test_coverage_source_handoff_keeps_exact_writable_target(tmp_path,key):
+    records,sources,plan=setup(tmp_path)
+    unit={'paragraph_key':'S0001','quote':sources['S']['paragraphs']['S0001']['text'],'statement':'待核定的重要意思。'}
+    class SourceHandoff(Ports):
+        def repair(self,request):
+            if request['input']['task']!='evidence_coverage_repair':return super().repair(request)
+            return {'items':[{'job_id':'A','items':[{'job_id':'U0','action':'needs_source','record_key':key,
+                'record_type':'evidence_steps','fragment_ids':['F0'],'reason':'須補充已知記錄的來源。'}]}]}
+    def run():return stage.run_group(None,records,sources,plan['groups'][0],['evidence_steps/E'],[unit],
+        tmp_path/'run',SourceHandoff(),saved_inventory(tmp_path/'prior',sources,[unit]),apply=False)
+    if key.endswith('OUTSIDE'):
+        with pytest.raises(ValueError,match='other-group target'):run()
+    else:
+        result=run();assert result['status']=='needs_attention'
+        finding=next(p for p in result['pending'] if p.get('unit_id')=='U0')
+        assert finding.get('object_key')==(key or None)

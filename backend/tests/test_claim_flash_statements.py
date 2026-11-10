@@ -58,6 +58,17 @@ def test_lower_drift_blocks_before_models(ready):
     assert ports.calls==[]
 
 
+def test_changed_prompt_does_not_silently_upgrade_a_saved_stage(ready,monkeypatch):
+    store,root,eroot=ready;folder=root/'claims'
+    first=stage.run(store,'S',['C'],eroot,folder,Ports(),apply=True)
+    saved=(folder/'verification.json').read_bytes()
+    monkeypatch.setattr(stage,'PROMPT',stage.PROMPT+'新的內容規則。')
+    ports=Ports()
+    with pytest.raises(ValueError):stage.run(store,'S',['C'],eroot,folder,ports,apply=True)
+    assert ports.calls==[] and (folder/'verification.json').read_bytes()==saved
+    assert first['status']=='verified'
+
+
 def test_unrelated_unfinished_group_does_not_block(ready):
     store,root,eroot=ready;intent=json.loads((eroot/'intent.json').read_text())
     intent['groups']['groups'].append({'group_id':'H','lower_record_keys':['observations/PENDING']})
@@ -142,3 +153,89 @@ def test_missing_or_duplicate_disposition_cannot_write(ready):
     with pytest.raises(ValueError,match='scope|job_id|missing|exact'):
         stage.run(store,'S',['C'],eroot,root/'claims',Ports(choices={'statement_fidelity':'changed'},reply=lambda r:{'items':[]}),apply=True)
     assert store.get_record_state('claims','C')==before
+
+
+def test_native_upstream_material_keeps_route_without_other_claim_expansion(ready):
+    from backend.pipeline import claim_update_flash as flash
+    store,_,_=ready
+    records,sources=f.load_source(store,'S')
+    def observation(oid):
+        return {'payload':{'observation_id':oid,'statement':'詞義與紙草例子。',
+                           'source_fragment_ids':['F'],'speaker':'professor','stance':'asserted'}}
+    records['observations/O']=observation('O')
+    records['observations/UNRELATED']=observation('UNRELATED')
+    records['claims/B']={'payload':{'claim_id':'B','statement':'旁支。','occurrences':[{'source_id':'S','anchors':[]}]}}
+    for rid,src,dst in [('R','O','E'),('CYCLE','E','O'),('OTHER','UNRELATED','B'),('CLAIM','B','E')]:
+        records['knowledge_relations/'+rid]={'payload':{'relation_id':rid,'from_id':src,'to_id':dst,'relation_type':'supports','reason':'實際論證。'}}
+    material=flash.claim_material('claims/C',records,sources,'S')
+    assert [x['object_key'] for x in material['evidence']]==['evidence_steps/E']
+    context=material['argument_context']
+    assert [x['object_key'] for x in context['records']]==['observations/O']
+    assert context['records'][0]['original_text_excerpts']
+    assert {x['object_key'] for x in context['relations']}=={'knowledge_relations/R','knowledge_relations/CYCLE'}
+    assert 'UNRELATED' not in json.dumps(material) and 'claims/B' not in json.dumps(material)
+
+
+def test_upstream_lower_must_have_existing_completed_evidence_proof(ready):
+    store,root,eroot=ready
+    store.apply_plan(store.plan_package({'package_id':'upstream-premise',
+      'observations':[{'observation_id':'O','statement':'另有詞義論據。','source_fragment_ids':['F'],
+                       'argument_role':'background','speaker':'professor','stance':'asserted'}],
+      'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'詞義支持。'}]}))
+    ports=Ports()
+    with pytest.raises(ValueError,match='required Evidence group not completed: observations/O'):
+        stage.run(store,'S',['C'],eroot,root/'claims',ports)
+    assert ports.calls==[]
+
+
+def test_direct_claim_premise_brings_source_once_without_following_next_claim(tmp_path):
+    from backend.tests.test_claim_flash_source import fixture
+    from backend.pipeline import claim_update_flash as flash
+    records,sources=fixture(tmp_path,['目標原話。','直接前提的字義例子。','第三條的另一主題。'],
+        [('S0001','目標原話。'),('S0002','直接前提的字義例子。'),('S0003','第三條的另一主題。')])
+    records['evidence_steps/E']['payload']['source_fragment_ids']=['F0']
+    for cid,eid,fid in [('A','E','F0'),('B','D','F1'),('C','G','F2')]:
+        records['claims/'+cid]={'payload':{'claim_id':cid,'statement':cid+'的判斷','attribution':'professor',
+            'evidence_step_ids':[eid],'occurrences':[{'source_id':'S','anchors':[]}]}}
+        if eid!='E':records['evidence_steps/'+eid]={'payload':{'evidence_step_id':eid,'statement':cid+'的論據',
+            'source_fragment_ids':[fid],'speaker':'professor','stance':'asserted'}}
+    for rid,src,dst in [('R1','B','A'),('R2','C','B')]:
+        records['claim_relations/'+rid]={'payload':{'claim_relation_id':rid,'from_id':src,'to_id':dst,'relation_type':'supports','reason':'直接前提。'}}
+    material=flash.claim_material('claims/A',records,sources,'S')
+    assert set(material['source_paragraphs'])=={'S0001','S0002'}
+    ref,=material['claim_references']
+    assert ref['object_key']=='claims/B' and ref['supporting_material_keys']==['evidence_steps/D']
+    assert ref['relations'][0]['object_key']=='claim_relations/R1'
+    assert '第三條的另一主題' not in json.dumps(material,ensure_ascii=False)
+    assert 'claims/C' not in json.dumps(material,ensure_ascii=False)
+
+
+def test_direct_claim_reference_cannot_bypass_completed_lower_proof(ready):
+    store,root,eroot=ready
+    store.apply_plan(store.plan_package({'package_id':'direct-premise',
+      'claims':[{'claim_id':'B','statement':'直接前提。','claim_type':'reasoning_conclusion','attribution':'professor',
+                 'evidence_step_ids':['D'],'occurrences':[{'source_id':'S','anchors':[]}]}],
+      'evidence_steps':[{'evidence_step_id':'D','statement':'尚未完成的下層。','source_fragment_ids':['F']}],
+      'claim_relations':[{'claim_relation_id':'R','from_id':'B','to_id':'C','relation_type':'supports','reason':'直接論據。'}]}))
+    ports=Ports()
+    with pytest.raises(ValueError,match='required Evidence group not completed: evidence_steps/D'):
+        stage.run(store,'S',['C'],eroot,root/'claims',ports)
+    assert ports.calls==[]
+
+
+def test_oversized_jev_precheck_goes_to_gpt_with_full_material_without_faking_verdict(ready,monkeypatch):
+    store,root,_=ready;records,sources=f.load_source(store,'S');calls=[]
+    class FullInput(Ports):
+        def judge(self,request):pytest.fail('oversized Jev must not be called')
+        def repair(self,request):
+            calls.append(request)
+            return {'items':[{'job_id':j['job_id'],'action':'keep','reason':'完整材料足以支持原主張。'} for j in request['input']['jobs']]}
+    monkeypatch.setattr(f,'JEV_BYTES',1)
+    result=stage.review(records,sources,['claims/C'],'S',root/'oversized-precheck',FullInput())
+    assert not result['pending'] and not result['updates'] and len(calls)==3
+    expected=stage.flash.claim_material('claims/C',records,sources,'S')
+    for request in calls:
+        job=request['input']['jobs'][0]
+        assert job['material']==expected and job['jev']=='not_run_input_limit'
+    receipts=list((root/'oversized-precheck/precheck-unavailable').glob('*.json'))
+    assert len(receipts)==1 and json.loads(receipts[0].read_text())['model_calls']==0
