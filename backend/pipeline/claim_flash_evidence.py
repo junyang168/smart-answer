@@ -57,7 +57,8 @@ COMPLETION_RULES=(
     '若候選仍不能解決必要來源缺口，才用needs_source。'
     'keep及needs_source不得夾帶修改或quotes；不為支持摘要借用無關原文。'
     '若實際修改statement改變內容歸屬或命題，須在同一答覆同步修正statement_change_fields所列的相關分類；'
-    '原分類只對舊摘要成立。未改statement時，仍只准修改writable_fields，不重判已通過欄位。'
+    '原分類只對舊摘要成立。由「教授承認」改為「聽眾表示」時，speaker也須明確輸出audience，'
+    '不能只在statement或reason說已修正歸屬，卻漏改speaker。未改statement時，仍只准修改writable_fields，不重判已通過欄位。'
     '不審Claim、論證關係或其他已通過記錄。')
 
 
@@ -67,6 +68,8 @@ def completion_prompt(focused=False):
     base=base.replace('sources只包含已驗證的SourceFragments；不查整篇原文、不補未掛片段作為自身支持。','')
     base=base.replace('缺少來源用needs_source交回原文層，','')
     base=base.replace('缺上下文時保留並交接，','必要上下文先核對所給候選，')
+    base=base.replace('只准改writable_fields列出的欄位；',
+        '未改statement時，只准改writable_fields；實際修改statement時，也准同步修正statement_change_fields所列的相關分類；')
     return base+COMPLETION_RULES+q.gpt_role_rules()
 
 

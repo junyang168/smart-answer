@@ -121,6 +121,10 @@ def test_statement_subject_repair_can_update_its_dependent_role_only_when_author
     item={'job_id':value['job_id'],'action':'repair','statement':'聽眾表示自己先前沒有想到。',
           'speaker':'audience','reason':'原文的說話者標記明確，摘要與角色須一致修正。'}
     if mode=='speaker_only':item.pop('statement')
-    if mode=='joint_repair':eo.validate_focused_reply(request,{'items':[item]})
+    if mode=='joint_repair':
+        assert '也准同步修正statement_change_fields' in request['system']
+        assert '只准改writable_fields列出的欄位；' not in request['system']
+        assert 'speaker也須明確輸出audience' in request['system']
+        eo.validate_focused_reply(request,{'items':[item]})
     else:
         with pytest.raises(ValueError,match='outside'):eo.validate_focused_reply(request,{'items':[item]})
