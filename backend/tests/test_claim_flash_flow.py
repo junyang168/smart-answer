@@ -201,3 +201,24 @@ def test_saved_source_preview_finishes_before_lower_review(candidate,tmp_path,mo
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert result['status']=='completed'
     assert calls==(['saved-preview'] if recover else [])
+
+
+def test_confirmed_citation_is_attached_before_evidence_verification(candidate,tmp_path,monkeypatch):
+    package,_=candidate;target=package['evidence_steps'][0];target['scripture_refs']=[]
+    path=tmp_path/'candidate.json';path.write_text(json.dumps(package));original=flow.coverage.run
+    def coverage_result(*a,**kw):
+        result=deepcopy(original(*a,**kw))
+        fragment=package['source_fragments'][0]
+        result['findings']=[{'job_id':'test','findings':[{'verdict':'missing_scripture_reference',
+            'reference':'馬太福音16:18','quote':fragment['verbatim_excerpt'],'paragraph_key':fragment['paragraph_key'],
+            'existing_record_keys':['evidence_steps/'+target['evidence_step_id']]}]}]
+        return result
+    monkeypatch.setattr(flow.coverage,'run',coverage_result)
+    lower=flow.eo.run
+    def check_before_lower(store,*a,**kw):
+        assert store.get_record_state('evidence_steps',target['evidence_step_id'])['payload']['scripture_refs']==['馬太福音 16:18']
+        return lower(store,*a,**kw)
+    monkeypatch.setattr(flow.eo,'run',check_before_lower)
+    result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+    assert result['stages']['scripture_bindings']['applied']

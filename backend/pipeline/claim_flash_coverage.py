@@ -22,6 +22,12 @@ INVENTORY_PROMPT = (
     'citations另列當下實際引用或講解的經文出處，同組同出處可合併，不因units過濾而漏掉；'
     '未明說章節就保留已知範圍，不從外部聖經猜補或糾正教授口誤。'
     'quote須連續逐字出自paragraph_key，勿抄無關文字。每個job_id恰好一次，允許空清單。')
+LEGACY_INVENTORY_PROMPT = INVENTORY_PROMPT
+INVENTORY_PROMPT = INVENTORY_PROMPT.replace(
+    '未明說章節就保留已知範圍，不從外部聖經猜補或糾正教授口誤。',
+    '明確的經文引句可辨識其標準出處，即使教授未口述章節；reference_basis用quote_identified。'
+    '教授口述的出處用spoken；只泛指主題、無法確認引句出處用unresolved，不猜章節或糾正教授口誤。')
+INVENTORY_PROMPTS = {INVENTORY_PROMPT, LEGACY_INVENTORY_PROMPT}
 DISPOSITION_PROMPT = (
     '只做反向查漏，不修改資料，不新建記錄，不審Claim或論證關係。每個candidate_id至少處置一次，'
     '合併同一疑點須列齊ID。all_sermon_statements是本講全部現有材料摘要，供跨組已有承載核對，'
@@ -41,6 +47,9 @@ CITATION_PROMPT = (
     '原文省略書名或程序未能解析，不代表資料不存在；用提供的原文上下文核對已有範圍，'
     '無法確定就needs_context，不能猜補書名、章節或將解析失敗當漏記。'
     '只保存原文明說或上下文明確的範圍，不要求無關經文分句。'
+    '清單reference_basis為quote_identified時，是從引句辨識的標準出處，不聲稱教授口述章節；須按其引句核對，不能只因未口述而當未知。'
+    '原文未明說且引句亦不能確認章節，而引用原話已由核實片段保存時，用not_required保留未知出處；'
+    '不能只因未知章節返回needs_context。已知出處未存才是missing_scripture_reference。'
     '每個candidate_id至少處置一次，合併同一疑點列齊ID；quote逐字出自所給原文，'
     'record_refs只用提供的R代號，理由簡短；原文與記錄不一致寫source_notes，不自動改原文。')
 
@@ -69,6 +78,7 @@ class Citation(Strict):
     paragraph_key: str
     quote: str = Field(min_length=1)
     reference: str = Field(min_length=1)
+    reference_basis: Literal['spoken','quote_identified','unresolved'] | None = None
 
 
 class Inventory(Strict):

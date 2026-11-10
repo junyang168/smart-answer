@@ -15,7 +15,7 @@ from backend.pipeline import claim_flash_coverage as coverage, claim_flash_sourc
 from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
 from backend.pipeline import claim_flash_missing as missing
-from backend.pipeline import claim_flash_recovery as recovery
+from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError
 
@@ -209,6 +209,11 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             if any(v['verdict'] in fill.MISSING for v in findings):
                 fr=fill.run(store,source_id,cv['report_path'],root/'fill',apply=True);stages['fill']=fr
                 if not complete(fr):return finish(stages,[{'layer':'source','findings':fr.get('pending',[])}])
+            citation_jobs=scripture.coverage_jobs(findings)
+            if citation_jobs:
+                bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
+                stages['scripture_bindings']=bound
+                if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
         for path in sorted((root/'source-handoffs').glob('*/intent.json')):

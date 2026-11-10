@@ -250,7 +250,15 @@ owners、revision等記帳變化不重做內容審閱。拆分按statement快取
 判缺前帶上相關 Position 及完整已綁片段，參考 Claim 不作審閱目標。
 經文出處疑點另作單一task：提供本講全部既有材料的`scripture_refs`索引，按出處去重並保留記錄ID，
 不受同段／同組限制。它取代內容查漏使用的全講statement目錄，不與該大目錄疊加。
-原文省略書名或程序解析失敗仍交GPT核對索引及原文；無法確定用`needs_context`，不能自動判漏記。
+原文清單可從明確經文引句辨識標準出處，用 `reference_basis=quote_identified` 區分教授口述的 `spoken`；
+僅泛指主題、無法辨識時用 `unresolved`，不猜章節。新入口仍可消費已凍結的舊清單，不重寫舊答覆。
+原文明說的範圍、引句所辨識的出處及程序解析失敗須分開處理；引用原話已保存而章節未知，不單因此用 `needs_context` 阻擋整篇。
+已確認缺出處且有明確既有 Evidence／Observation 目標時，完整 Flash 入口在 Evidence 檢查前使用 `claim_flash_scripture.run`：
+先以逐字、繁簡／格式規範化及連續片段覆蓋匹配既有 SourceFragment，不能匹配才用 Jev 定位。
+缺片段時沿同講現版原文作程序定位，再以 Jev 選擇程序提供的逐字語句；程式編譯片段、保留既有綁定並追加去重後的 `scripture_refs`。
+只定位及補書目資料，不修改 statement、Claim 或論證關係，不另調 GPT 定位。查找只限當前來源及已知引用段落；來源變更仍走 migration。
+已確認的出處是入口先決條件；匹配片段不等於辨識出處。未知出處、無匹配及 Jev 不確定不強填，保留具體結果。
+操作沿既有 pins、ChangeSet、回讀及同 root 答覆復用；受保護目標與失效／刪除來源不藉引用匹配放行。
 這個入口只報告，不修改資料，不啟動下文歷史 lower 的補建、連接或 Claim 流程。
 原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。
 
