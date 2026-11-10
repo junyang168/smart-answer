@@ -121,6 +121,51 @@ def test_pending_evidence_checkpoint_does_not_repeat_completed_source_layers(can
     assert result['status']=='completed',result.get('pending')
 
 
+@pytest.mark.parametrize('tamper_review',[False,True])
+def test_pending_evidence_allows_index_progress_but_keeps_review_receipts_strict(candidate,tmp_path,monkeypatch,tamper_review):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    original=flow.eo.run
+    def pending(*args,**kwargs):
+        value=original(*args,**kwargs)
+        value={**value,'status':'needs_attention','affected_prior_group_ids':[value['groups'][0]['group_id']]}
+        return flow.e.publish(args[3],value)
+    monkeypatch.setattr(flow.eo,'run',pending)
+    first=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    assert first['pending'][0]['layer']=='evidence'
+    root=tmp_path/'resume/flash'
+    old=first['stages']['evidence']
+    # A lawful same-root subset continuation updates the progress index, with
+    # no knowledge write and no replacement of any per-group judgment.
+    flow.e.publish(root/'evidence',{**old,'status':'completed','affected_prior_group_ids':[]})
+    frozen=root/'evidence/reports'/(flow.e.digest(old)+'.json')
+    assert flow.read(frozen)==old
+    if tamper_review:
+        review=next((root/'evidence/groups').glob('*/*/result.json'));review.write_text('{}')
+    monkeypatch.setattr(flow.eo,'run',original)
+    monkeypatch.setattr(flow.source,'run',lambda *a,**k:pytest.fail('source repeated'))
+    monkeypatch.setattr(flow.coverage,'run',lambda *a,**k:pytest.fail('coverage repeated'))
+    if tamper_review:
+        with pytest.raises(ValueError,match='stage evidence changed'):
+            flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    else:
+        result=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+        assert result['status']=='completed',result.get('pending')
+
+
+@pytest.mark.parametrize('bad',[False,True])
+def test_legacy_pending_index_uses_only_its_exact_embedded_original(tmp_path,bad):
+    old={'status':'needs_attention','affected_prior_group_ids':['G']}
+    index=tmp_path/'evidence/result.json';flow.e.save(index,{'status':'completed'})
+    saved={'pending':[{'layer':'evidence'}],'stages':{'evidence':old},
+        'evidence_refs':[{'path':str(index),'sha256':flow.e.digest(old)}]}
+    if bad:saved['stages']['evidence']={'status':'different'}
+    if bad:
+        with pytest.raises(ValueError,match='stage evidence changed'):flow.recovery.verify_pending_refs(tmp_path,saved)
+    else:
+        flow.recovery.verify_pending_refs(tmp_path,saved)
+        assert flow.read(tmp_path/'evidence/reports'/(flow.e.digest(old)+'.json'))==old
+
+
 def test_material_only_source_gets_real_missing_claim_disposition(candidate,tmp_path):
     package,_=candidate;package['claims']=[]
     for p in package['evidence_steps']:p['produced_claim_ids']=[]

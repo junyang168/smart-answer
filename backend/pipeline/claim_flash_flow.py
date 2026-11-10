@@ -129,7 +129,7 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'legacy_qualification':'not_granted','wall_seconds_this_invocation':round(time.monotonic()-started,3)}
     if validation_errors:result['package_validation_errors']=validation_errors
     # Bind exact saved stage outputs; no second model-generated report.
-    result['evidence_refs']=[{'path':str(p.resolve()),'sha256':e.digest(read(p))} for p in sorted(root.rglob('result.json'))
+    result['evidence_refs']=[recovery.result_ref(root,p) for p in sorted(root.rglob('result.json'))
         if p.parent!=root and 'postimages' not in p.parts]
     e.save(root/'exports'/(e.digest(result)+'.json'),result)
     return e.publish(root,result)
@@ -168,8 +168,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                     raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
                 if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
                     raise ValueError('pending Flash output package changed')
-                for ref in saved['evidence_refs']:
-                    if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('pending Flash stage evidence changed')
+                recovery.verify_pending_refs(root,saved)
                 checkpoint=saved['stages']
                 resume_claims=saved['pending'][0]['layer']=='claims'
         if (root/'claim-progress.json').exists():
