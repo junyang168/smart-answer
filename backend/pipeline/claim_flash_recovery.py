@@ -11,11 +11,35 @@ VERSION='claim_flash_progress_v1'
 def read(path):return json.loads(Path(path).read_text())
 
 
+def result_ref(root,path):
+    """Freeze the EO progress index; per-group review receipts stay strict."""
+    root=Path(root);path=Path(path);value=read(path)
+    if path.resolve()==(root/'evidence/result.json').resolve():
+        path=root/'evidence/reports'/(e.digest(value)+'.json')
+        e.save(path,value)
+    return {'path':str(path.resolve()),'sha256':e.digest(value)}
+
+
+def verify_pending_refs(root,saved):
+    for ref in saved['evidence_refs']:
+        if e.digest(read(ref['path']))==ref['sha256']:continue
+        # Old exports bound this mutable index. Its exact original value is
+        # embedded in the SHA-bound parent export; never trust a new index as
+        # review approval. The runner still revalidates EO normally.
+        old=saved.get('stages',{}).get('evidence')
+        if (Path(ref['path']).resolve()==(Path(root)/'evidence/result.json').resolve()
+                and saved['pending'][0]['layer']=='evidence' and old
+                and e.digest(old)==ref['sha256']):
+            e.save(Path(root)/'evidence/reports'/(ref['sha256']+'.json'),old)
+            continue
+        raise ValueError('pending Flash stage evidence changed')
+
+
 def lower_checkpoint(root,intent,stages):
     path=Path(root)/'claim-layer-input.json'
     if not path.exists():
         # Written once at the layer boundary, not another sermon snapshot per task.
-        refs=[{'path':str(p.resolve()),'sha256':e.digest(read(p))}
+        refs=[result_ref(root,p)
               for p in sorted(Path(root).rglob('result.json'))
               if p.parent!=Path(root) and 'claims' not in p.relative_to(root).parts
               and 'exports' not in p.relative_to(root).parts and 'postimages' not in p.relative_to(root).parts]
