@@ -377,6 +377,35 @@ def decide(
     return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""))
 
 
+def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str, Any]:
+    """把程序拒收的那一份回答，用现在的核对再过一遍，不调用模型。
+
+    拒收的原因常在程序这边：太 12 的「約翰壹書」、太 21 的「列王紀上」都是书名表
+    不认得和合本的写法。修好代码后重跑 `decide` 会再调一次模型、拿到另一份回答；
+    这里只认同一份：留不留的决定和提示词都没变，才能重核。
+    """
+    target = record_path(data_base_dir, chapter.passage, lecture)
+    rejected_path = target.with_suffix(".rejected.json")
+    if not rejected_path.exists():
+        return {"lecture": lecture, "status": "nothing_rejected"}
+    # 后来已经存过（多半还审过、修过）的那一份不能被旧的拒收稿盖掉。
+    if load_record(data_base_dir, chapter.passage, lecture):
+        return {"lecture": lecture, "status": "already_saved"}
+    rejected = json.loads(rejected_path.read_text(encoding="utf-8"))
+    if rejected.get("decisions_sha256") != decisions_sha(data_base_dir, chapter.passage, lecture):
+        return {"lecture": lecture, "status": "decisions_changed"}
+    decisions_record = json.loads(
+        chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
+    )
+    prompt = user_prompt(lecture, decisions_record)
+    prompt_sha = hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest()
+    if rejected.get("prompt_sha256") != prompt_sha:
+        return {"lecture": lecture, "status": "prompt_changed"}
+    kept = kept_pieces(decisions_record)
+    return save(chapter, lecture, data_base_dir, {"slides": rejected.get("raw_slides") or []}, prompt, kept,
+                rejected.get("model", ""))
+
+
 def save(
     chapter: Chapter,
     lecture: str,
@@ -594,6 +623,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
+    parser.add_argument(
+        "--recheck", action="store_true",
+        help="被程序拒收的那一份回答，用现在的核对再过一遍；不调用模型",
+    )
     args = parser.parse_args(argv)
 
     from backend.api.config import DATA_BASE_PATH
@@ -606,6 +639,13 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if not lectures:
         parser.error("没有符合的讲道")
+    if args.recheck:
+        failed = False
+        for lecture in lectures:
+            report = recheck(chapter, lecture, data_base_dir=Path(DATA_BASE_PATH))
+            print(json.dumps(report, ensure_ascii=False))
+            failed = failed or report["status"] not in {"saved", "nothing_rejected", "already_saved"}
+        return 1 if failed else 0
     client = ClaudeSubscriptionClient(model=args.model)
     failed = False
     for lecture in lectures:

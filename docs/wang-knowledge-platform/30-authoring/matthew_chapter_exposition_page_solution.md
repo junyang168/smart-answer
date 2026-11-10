@@ -2,7 +2,7 @@
 
 > **读者**：Solution architect、神学编辑
 > **类型**：规范
-> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15、太 6–7；2026-11-09 加太 21）
+> **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15、太 6–7；2026-11-09 加太 21；2026-11-10 加 skill `chapter-slides`）
 > **与代码对齐**：2026-11-05（核对到 #637 太 6–7 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`、`backend/api/original_audio.py`、`backend/api/public_repository.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
 > **权威范围**：马太福音按章释经页由哪几部分组成；一章的材料从哪几篇讲道取、哪些段落算释经；神学、个人经历、生活应用与问答怎样取舍；同步幻灯上放什么。只管 NYSC 马太福音系列讲座这一个来源；母本与文章都不在本文范围。
 
@@ -132,6 +132,8 @@ flowchart LR
 3. 跑 `chapter_slides`、`chapter_slides --review`、`chapter_title`。
 
 页面下一个请求就有这一章，不用改代码，不用部署。
+
+按次序跑完这几步、怎样报告与记录，写成了 skill：`.claude/skills/chapter-slides/SKILL.md`（Claude Code 与 Codex 共用，`.agents/skills/chapter-slides` 指向同一份）。幻灯被程序拒收而原因在程序这边时，修好后用 `chapter_slides --recheck` 拿同一份回答重核，不再调用模型；已经存过的那一堂不会被旧拒收稿盖掉。
 
 **系列之内，哪些段落是这一章的释经，由模型按定义判断**（4.2）。先前的做法是从数据推：经文引用落在这一章的主张为起点，再沿主张关系往外走一步、限 10 分钟以内。量下来推不全，原因在数据本身：
 
