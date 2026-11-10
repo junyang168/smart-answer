@@ -315,7 +315,7 @@ def inventory(previous, sources, source_id):
     rows = {}; paragraphs = sources[source_id]['paragraphs']
     for request_path in sorted((previous/'source-inventory'/'gpt').glob('*/request.json')):
         req = json.loads(request_path.read_text())
-        if req['input']['task'] != 'source_preservation_inventory' or req['system'] != coverage.INVENTORY_PROMPT:
+        if req['input']['task'] != 'source_preservation_inventory' or req['system'] not in coverage.INVENTORY_PROMPTS:
             raise ValueError('source inventory extraction contract differs')
         answer_path = request_path.parent/'response.json'
         if not answer_path.exists():

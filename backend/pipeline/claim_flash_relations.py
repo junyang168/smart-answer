@@ -112,8 +112,6 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         records, sources = f.load_group_source(store, source_id, prior['group']); c.fetch_claims(store, ids)
         if prior['source'] != pin or any(not f.belongs_to_source(records['claims/'+cid]['payload'], records, source_id) for cid in ids):
             raise ValueError('Claim relation group/source differs')
-        if any(records['claims/'+cid]['payload'].get('review_status') == 'human_review_required' for cid in ids):
-            raise ValueError('Claim hold requires its existing handoff')
         read = consume_arguments(store, argument_root, ids, records, sources)
         targets = {'claims/'+cid for cid in ids}
         edges = owned_edges(records,ids,scope['groups'] if scope is not None else None)
@@ -135,8 +133,6 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
         # One bounded group, one discovery task; no Cartesian candidate enumeration.
         shared = {'claims': {k:pairs.node(k, records, sources) for k in sorted(targets)},
                   'existing_edges': {k:p for k,p in edges.items() if {p['from_id'],p['to_id']}<=set(ids)}}
-        notes={k:v for k,v in getattr(ports,'legacy_ai_findings_notes',{}).items() if k in targets}
-        if notes:shared['legacy_ai_findings']=notes
         handoffs=json.loads((argument_root/'result.json').read_text()).get('claim_pair_handoffs',[])
         if any(p['a'] not in targets or p['b'] not in targets or p['a']==p['b'] for p in handoffs):
             raise ValueError('argument Claim handoff exceeded group')

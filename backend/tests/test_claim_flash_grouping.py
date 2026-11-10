@@ -246,7 +246,7 @@ def test_indivisible_paragraph_can_have_sequential_claim_tasks_without_duplicate
     lower(records, 'E', [0])
     result=plan(records, sources, max_claims=8, allow_claim_batches=True)
     group=next(g for g in result['groups'] if g['claim_ids'])
-    assert [len(x) for x in group['sequential_claim_batches']] == [8,3]
+    assert [len(x) for x in group['sequential_claim_batches']] == [6,5]
     assert sum('S0001' in g['paragraph_keys'] for g in result['groups']) == 1
     assert sum('evidence_steps/E' in g['lower_record_keys'] for g in result['groups']) == 1
     tasks=[t for t in claim_tasks(result) if t[1]]
@@ -495,3 +495,30 @@ def test_unknown_semantic_call_is_not_automatically_resent(tmp_path, monkeypatch
         grouping.save(None, 'S', tmp_path/'plan', ports=port)
     assert len(port.calls) == 1
     assert not (tmp_path/'plan/shared-groups.json').exists()
+
+
+@pytest.mark.parametrize('count',[9,10])
+def test_default_keeps_nine_or_ten_claims_in_one_complete_task(tmp_path,count):
+    from backend.pipeline.claim_flash_flow import claim_tasks
+    records,sources=source(tmp_path,count=1,headings={0:'本題'})
+    for n in range(count):claim(records,f'C{n:02d}',0)
+    result=plan(records,sources,allow_claim_batches=True)
+    assert result['max_claims']==10 and len(result['groups'])==1
+    assert 'sequential_claim_batches' not in result['groups'][0]
+    assert len(claim_tasks(result))==1 and len(claim_tasks(result)[0][1])==count
+
+@pytest.mark.parametrize('count,sizes',[(11,[6,5]),(12,[6,6]),(21,[7,7,7]),(22,[8,7,7])])
+def test_indivisible_large_groups_do_not_emit_count_based_tiny_tails(tmp_path,count,sizes):
+    records,sources=source(tmp_path,count=1,headings={0:'本題'})
+    for n in range(count):claim(records,f'C{n:02d}',0)
+    result=plan(records,sources,allow_claim_batches=True);group=result['groups'][0]
+    assert [len(x) for x in group['sequential_claim_batches']]==sizes
+    assert [cid for batch in group['sequential_claim_batches'] for cid in batch]==group['claim_ids']
+
+def test_saved_eight_plus_tail_plan_is_consumed_without_rewriting():
+    from backend.pipeline.claim_flash_flow import claim_tasks
+    group={'claim_ids':[f'C{n}' for n in range(10)]}
+    group['sequential_claim_batches']=[group['claim_ids'][:8],group['claim_ids'][8:]]
+    frozen={'groups':[group]};before=deepcopy(frozen)
+    assert [len(ids) for _,ids,_ in claim_tasks(frozen)]==[8,2]
+    assert frozen==before

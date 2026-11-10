@@ -78,7 +78,7 @@ def test_indivisible_source_group_uses_two_upper_batches_and_one_lower_review(ca
     assert result['status']=='completed',result.get('pending')
     plan=flow.read(tmp_path/'many-flow/flash/shared-groups.json')
     assert len(plan['groups'])==1
-    assert [len(batch) for batch in plan['groups'][0]['sequential_claim_batches']]==[8,3]
+    assert [len(batch) for batch in plan['groups'][0]['sequential_claim_batches']]==[6,5]
     assert set(result['stages']['claims'])=={'FG001-batch-1','FG001-batch-2'}
     assert len(result['stages']['evidence']['groups'])==1
 
@@ -184,3 +184,41 @@ def test_unresolved_prepared_source_is_not_sent_for_another_gpt(candidate,tmp_pa
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert result['status']=='needs_attention'
     assert result['pending'][0]['findings'][0]['source_completion_attempted']
+
+@pytest.mark.parametrize('status,applied,recover',[
+    ('verified',False,True),('applied',True,False),('needs_attention',False,False)])
+def test_saved_source_preview_finishes_before_lower_review(candidate,tmp_path,monkeypatch,status,applied,recover):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    handoff=tmp_path/'flow/flash/source-handoffs/prepared'
+    flow.e.save(handoff/'intent.json',{'findings':[{'object_key':'evidence_steps/E','layer':'source'}],'models':{}})
+    flow.e.save(handoff/'result.json',{'status':status,'applied':applied,'pending':[] if status!='needs_attention' else ['unresolved']})
+    calls=[]
+    def resume(store,sid,findings,root,ports,*,apply):
+        assert apply and root==handoff
+        calls.append('saved-preview')
+        return {'status':'applied','applied':True,'pending':[]}
+    monkeypatch.setattr(flow.source,'repair_bindings',resume)
+    result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert result['status']=='completed'
+    assert calls==(['saved-preview'] if recover else [])
+
+
+def test_confirmed_citation_is_attached_before_evidence_verification(candidate,tmp_path,monkeypatch):
+    package,_=candidate;target=package['evidence_steps'][0];target['scripture_refs']=[]
+    path=tmp_path/'candidate.json';path.write_text(json.dumps(package));original=flow.coverage.run
+    def coverage_result(*a,**kw):
+        result=deepcopy(original(*a,**kw))
+        fragment=package['source_fragments'][0]
+        result['findings']=[{'job_id':'test','findings':[{'verdict':'missing_scripture_reference',
+            'reference':'馬太福音16:18','quote':fragment['verbatim_excerpt'],'paragraph_key':fragment['paragraph_key'],
+            'existing_record_keys':['evidence_steps/'+target['evidence_step_id']]}]}]
+        return result
+    monkeypatch.setattr(flow.coverage,'run',coverage_result)
+    lower=flow.eo.run
+    def check_before_lower(store,*a,**kw):
+        assert store.get_record_state('evidence_steps',target['evidence_step_id'])['payload']['scripture_refs']==['馬太福音 16:18']
+        return lower(store,*a,**kw)
+    monkeypatch.setattr(flow.eo,'run',check_before_lower)
+    result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+    assert result['stages']['scripture_bindings']['applied']

@@ -338,7 +338,7 @@ def current_claim_payload(payload,*,verified_ai_sampling=False,verified_ai_findi
     """A changed Flash candidate cannot inherit another pipeline's AI approval."""
     if (not str(payload.get('review_status','')).startswith('ai_')
             and payload.get('review_status')!='independent_terminal_reviewed'
-            and not ((verified_ai_sampling or verified_ai_findings) and payload.get('review_status')=='human_review_required')):
+            and payload.get('review_status')!='human_review_required'):
         return deepcopy(payload)
     from backend.pipeline.claim_metadata_projection import RESET
     # Store packages merge payload fields, so absence would retain an old seal.
@@ -430,7 +430,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
             'claim_ids':claim_ids,'lower_root':str(Path(lower_root).resolve()),'max_new_claims':max_new_claims,
             'gpt_review_contract':f.REVIEW_CONTRACT,'jev_contract':f.JEV_CONTRACT,
             'material_contract':f.MATERIAL_CONTRACT,'discovery_contract':DISCOVERY_CONTRACT,
-            'review_marker_contract':'verified_legacy_ai_sampling_v1','models':ports.identity})
+            'review_marker_contract':'ignore_legacy_human_review_required_v1','models':ports.identity})
         required_questions=[]
         if (root/'draft.json').exists():
             previous=json.loads((root/'draft.json').read_text())
@@ -469,17 +469,6 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
                         if state and not state['retired']:records['claims/'+cid]=state
         original=deepcopy(records);pending=[];updates={};findings=[];outcomes=[];candidates=[];links=[]
         sampling={}
-        from backend.pipeline.claim_metadata_projection import sampling_marker
-        with store.connect() as conn,conn.cursor() as cursor:
-            cursor.execute('SET TRANSACTION READ ONLY')
-            for key in target_keys:
-                if records[key]['payload'].get('review_status')!='human_review_required':continue
-                cid=key.split('/',1)[1];marker=sampling_marker(cursor,cid,records[key])
-                if marker:
-                    sampling[cid]=marker
-                    updates[key]=current_claim_payload(records[key]['payload'],verified_ai_sampling=True)
-                else:
-                    pending.append({'claim_id':cid,'reason':'review_hold_not_verified_as_AI_sampling'})
         e.save(root/'legacy-ai-sampling.json',sampling)
         records=f.apply_overlay(records,updates)
         excluded=proof.get('excluded_context_keys',[])

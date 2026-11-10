@@ -70,29 +70,6 @@ def source_binding(doc):
         raise ValueError('registered source file changed without a usable exact editorial proof: '+str(exc)) from exc
 
 
-def legacy_ai_findings(store, records, claim_ids, ports):
-    """Admit only explicitly authorized legacy AI findings, never human holds."""
-    from types import SimpleNamespace
-    from backend.pipeline.claim_legacy_ai_reopen import authorized_markers
-    keys=['claims/'+cid for cid in claim_ids
-          if records['claims/'+cid]['payload'].get('review_status')=='human_review_required']
-    if not keys:return {}
-    grant=getattr(ports,'legacy_ai_findings_refresh',None)
-    notes=getattr(ports,'legacy_ai_findings_notes',{})
-    if not grant:raise ValueError('Claim hold requires its existing authorized handoff')
-    scoped={**grant,'claims':{k:v for k,v in grant['claims'].items() if k in keys}}
-    if any(not isinstance(proof,dict) or set(proof)!={'before_pin','events_sha256'}
-           for proof in scoped['claims'].values()):
-        raise ValueError('legacy AI handoff requires a verified provenance marker')
-    request=SimpleNamespace(operation='Update',target_keys=keys,permissions=[SimpleNamespace(key=k) for k in keys])
-    with store.connect() as conn,conn.cursor() as cursor:
-        cursor.execute('SET TRANSACTION READ ONLY')
-        markers=authorized_markers(cursor,request,records,{'legacy_ai_findings_refresh':scoped,
-            'review_questions':[notes[k] for k in keys if k in notes]})
-    if set(markers)!=set(keys):raise ValueError('unrecognized legacy AI or human hold remains protected')
-    return {key.split('/',1)[1]:proof for key,proof in markers.items()}
-
-
 def bind_source(store,sid,root):
     """A completed root belongs to one source version, not just a reusable source ID."""
     state=store.get_record_state('source_documents',sid)
