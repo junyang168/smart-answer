@@ -398,11 +398,10 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
                 and (stopped/'owner-recovery.json').exists() and not req.get('execution_recovery')):
             authority=stopped_gpt_authority(root,ports,req)
-            if authority.get('kind')=='owner_retry_confirmed_prompt_refusal_v1':
-                req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
-                    'authority_sha256':e.digest(authority)}}
-                if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
-                    raise ValueError('complete refusal retry exceeds payload limit; no call made')
+            req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
+                'authority_sha256':e.digest(authority)}}
+            if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
+                raise ValueError('complete authorized retry exceeds payload limit; no call made')
         reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),

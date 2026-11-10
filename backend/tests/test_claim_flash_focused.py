@@ -67,7 +67,7 @@ def test_successful_legacy_reply_is_reused_before_focusing_new_requests(tmp_path
     assert run()==original and ports.calls==1
 
 
-@pytest.mark.parametrize('defect',[None,'no_authority','tampered','other_failure','answer','retry_fails'])
+@pytest.mark.parametrize('defect',[None,'timeout','no_authority','tampered','other_failure','answer','retry_fails'])
 def test_explicit_refusal_retry_keeps_wire_and_never_loops(tmp_path,defect):
     class Ports:
         identity={'gpt':{'backend':'test','model':'test','effort':'medium'}}
@@ -88,9 +88,10 @@ def test_explicit_refusal_retry_keeps_wire_and_never_loops(tmp_path,defect):
     stdout.write_text(json.dumps({'type':'turn.failed','error':{'message':message if defect!='other_failure' else 'network failure'}}))
     stderr.write_text('diagnostic')
     receipt={'returncode':1,'files':{p.name:f.hashlib.sha256(p.read_bytes()).hexdigest() for p in (stdout,stderr)}}
+    if defect=='timeout':receipt={'error_type':'TimeoutExpired','returncode':None}
     e.save(transport/'exit.json',receipt)
     if defect!='no_authority':
-        e.save(old/'owner-recovery.json',{'kind':'owner_retry_confirmed_prompt_refusal_v1',
+        e.save(old/'owner-recovery.json',{**({} if defect=='timeout' else {'kind':'owner_retry_confirmed_prompt_refusal_v1'}),
             'owner_direction':'再試一次看看','max_reissues':1,'original_request_sha256':key,
             'exit_path':str(transport/'exit.json'),'exit_sha256':e.digest(receipt)})
     if defect=='tampered':stdout.write_text('changed')
