@@ -52,7 +52,7 @@ def discovery_schema(contract=None):
 
 
 def consume_arguments(store, root, ids, records, sources):
-    root = Path(root).resolve()
+    root = arguments.active_root(root)
     result = json.loads((root/'result.json').read_text())
     frozen = json.loads((root/'before.json').read_text())
     if (result.get('version') != arguments.VERSION or result.get('pending')
@@ -85,7 +85,7 @@ def consume_arguments(store, root, ids, records, sources):
 
 def run(store, source_id, argument_root, root, ports, *, apply=False):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
-    argument_root = Path(argument_root).resolve()
+    argument_root = arguments.active_root(argument_root)
     prior = json.loads((argument_root/'intent.json').read_text())
     ids = prior.get('claim_ids', prior['group']['claim_ids'])
     if 'claim_ids' in prior and ids not in prior['group'].get('sequential_claim_batches', []):
