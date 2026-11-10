@@ -729,6 +729,7 @@ class ReviewStore:
                     or c.get("source_metadata", {}).get("author")
                     or "王守仁",
                     "reviewed_by": actor,
+                    "published_by": actor,
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                     "status": "published",
                     "title": c["editorial_metadata"].get("title") or item,
