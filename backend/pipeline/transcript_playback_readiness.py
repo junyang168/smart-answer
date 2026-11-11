@@ -208,10 +208,12 @@ def run(evidence,workers=2):
     if plan['cases']:
         require_control(one(0),plan['cases'][0])
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:list(pool.map(one,range(1,len(plan['cases']))))
+    from backend.pipeline.playback_range_recovery import run as recover_ranges
+    recover_ranges(evidence)
     return assess(evidence)
 
 
-def assess(evidence,*,write=True):
+def assess(evidence,*,write=True,include_recovery=True):
     from backend.pipeline.slide_pilot_models import VisionReviewer
     folder=evidence/'playback-readiness';snapshot=read_json(folder/'input.json');plan=read_json(folder/'plan.json')
     if plan['policy']!=POLICY or plan['input_sha256']!=file_sha(folder/'input.json') or current_snapshot(evidence)!=snapshot:raise ValueError('Playback eligibility belongs to changed source evidence')
@@ -253,6 +255,9 @@ def assess(evidence,*,write=True):
                 for r in (left,right):r.update(status='blocked',reason='候選範圍明顯倒退或與鄰段重疊超過少量上下文')
     result=dict(policy=POLICY,source_plan_sha256=snapshot['source_plan_sha256'],input_sha256=file_sha(folder/'input.json'),plan_sha256=file_sha(folder/'plan.json'),paragraphs=rows,
                 ready=sum(r['status']!='blocked' for rs in rows.values() for r in rs),warnings=sum(r['status']=='ready_with_context' for rs in rows.values() for r in rs),blocked=sum(r['status']=='blocked' for rs in rows.values() for r in rs),human_approved=False,word_timestamps_verified=False)
+    if include_recovery:
+        from backend.pipeline.playback_range_recovery import apply
+        result=apply(evidence,result)
     if write:save_json(folder/'assessment.json',result)
     return result
 
@@ -282,6 +287,7 @@ def qualify_record(out,record,evidence,*,saved_only=False):
     certificate=dict(policy=POLICY,fingerprint=timing_fingerprint(record),evidence_root=str(evidence.relative_to(out)),
         source_plan_sha256=result['source_plan_sha256'],input_sha256=result['input_sha256'],review_plan_sha256=result['plan_sha256'],
         word_timestamps_verified=False,original_strict_verdicts_unchanged=True,source_holds=holds)
+    if result.get('recovery_plan_sha256'):certificate['recovery_plan_sha256']=result['recovery_plan_sha256']
     path=evidence/'playback-readiness/certificate.json';save_json(path,certificate)
     record['timing_quality']=dict(policy=POLICY,status='editor_draft_only' if holds else 'qualified',precision='paragraph_playback',certificate_path=str(path.relative_to(out)),certificate_sha256=file_sha(path),context_warnings=len(warnings),source_holds=holds)
     return record
@@ -318,6 +324,7 @@ def require_record(source,record,*,allow_editor_draft=False):
     if (certificate.get('policy')!=POLICY or not evidence.is_relative_to(root) or certificate.get('fingerprint')!=timing_fingerprint(record)):
         raise ValueError('Playback certificate belongs to other text/times/source')
     result=assess(evidence,write=False)
+    if certificate.get('recovery_plan_sha256')!=result.get('recovery_plan_sha256'):raise ValueError('Playback range recovery certificate changed')
     holds=editor_source_holds(evidence,result)
     if (result['blocked'] and (not allow_editor_draft or len(holds)!=result['blocked'])) or certificate.get('source_holds',{})!=holds or quality.get('source_holds',{})!=holds or any(certificate[k]!=result[v] for k,v in [('source_plan_sha256','source_plan_sha256'),('input_sha256','input_sha256'),('review_plan_sha256','plan_sha256')]):raise ValueError('Playback eligibility is unverified')
     snapshot=read_json(evidence/'playback-readiness/input.json');rows={r['id']:r for r in result['paragraphs']['source']}
