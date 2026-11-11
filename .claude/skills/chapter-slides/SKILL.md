@@ -110,6 +110,8 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 报告披露旧稿／试稿、重点回查、剩余意见和是否替换线上稿；逐条回查不冒充已建立正式 eval，也不以幻灯数量增加断言效果改善。单堂试验不重写整章标题。
 
+**隔离试稿与正式数据是两个步骤。** 负责人要求把试稿放到正式页时，运行 `PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides_publish <试跑目录>`；有负责人逐字指定的标题修订时另加 `--owner-corrections <修订.json>`。入口核对选材、实际逐字稿、原稿和最新非阻断审阅的 SHA，备份原正式资料，再写入同一堂的正式数据；保留模型原答、审阅及负责人修订的区别。不调用模型、不重置轮次、不因部署代码就声称数据也已发布。必须从正式网页实际请求的 `/api/public/original-audio/<passage>` 核对标题和要点。
+
 标题须涵盖每张完整原文与全部要点的共同主题（方案 §4.6），不能只取一条 Claim 或一个子段。负责人指出这类问题时，修生成、修订、审阅共用规则并保存原文反例，不以预览标题替换表充当系统修复；不因此自动增加原试跑的调用轮次。
 
 ## 4. 审阅、修正、章标题
