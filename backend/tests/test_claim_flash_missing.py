@@ -267,3 +267,27 @@ def test_observation_only_candidate_keeps_real_support_after_temporary_preview(s
     assert any(k.startswith('knowledge_relations/') and r['payload']['from_id']=='O'
         and r['payload']['to_id']==cid and r['payload']['relation_type']=='supports' for k,r in records.items())
     assert any(a.get('observation_id')=='O' for o in claim['occurrences'] for a in o['anchors'])
+
+
+def test_existing_claim_handoff_updates_only_the_verified_target(ready):
+    store, root, relation_root = ready
+    target = root / 'missing'
+    old = store.get_record_state('claims', 'C')['payload']
+    other = store.get_record_state('claims', 'D')
+    evidence = store.get_record_state('evidence_steps', 'E')
+    proposed = candidate(action='needs_update', claim_id='C', statement='沒有聽從顯明沒有真正相信。')
+    assert stage.run(store, 'S', relation_root, target, Ports([proposed]), apply=True)['status'] == 'needs_attention'
+    draft = json.loads((target / 'draft.json').read_text())
+    before = json.loads((target / 'before.json').read_text())
+    eo.e.save(target / 'existing-claim-continuation.json', {'owner_direction': 'Update the one pending Claim',
+        'draft_sha256': eo.e.digest(draft), 'before_sha256': eo.e.digest(before)})
+    ports = Ports()
+    result = stage.run(store, 'S', relation_root, target, ports, apply=True)
+    assert result['status'] == 'applied' and set(result['updates']) == {'claims/C'}
+    assert result['updates']['claims/C']['statement'] == proposed['statement']
+    assert result['updates']['claims/C']['evidence_step_ids'] == old['evidence_step_ids']
+    assert store.get_record_state('claims', 'D') == other and store.get_record_state('evidence_steps', 'E') == evidence
+    assert json.loads((target / 'draft.json').read_text()) == draft
+    replay = Ports()
+    assert stage.run(store, 'S', relation_root, target, replay, apply=True) == result
+    assert replay.calls == []

@@ -83,8 +83,95 @@ def consume_arguments(store, root, ids, records, sources):
     return consumed - set(result.get('retiring_keys', []))
 
 
+def active_root(root):
+    root = Path(root).resolve()
+    path = root / 'conflict-continuation.json'
+    if not path.exists():
+        return root
+    authority = json.loads(path.read_text())
+    before = json.loads((root / 'before.json').read_text())
+    parent = json.loads((root / 'verification.json').read_text())
+    if (not authority.get('owner_direction') or authority.get('parent_sha256') != e.digest(parent)
+            or authority.get('before_sha256') != e.digest(before) or parent['status'] != 'needs_attention'
+            or not parent['pending'] or any(p.get('reason') != 'conflicting_completed_relation_proposals' for p in parent['pending'])
+            or (root / 'commit-intent.json').exists()):
+        raise ValueError('Claim relation conflict continuation differs from its stopped parent')
+    return root / 'conflict-continuations' / e.digest(parent)
+
+
+def resolve_conflicts(store, source_id, parent_root, root, ports, *, apply):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / 'run.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if (root / 'verification.json').exists():
+            return statements.finish(store, root) if apply else json.loads((root / 'verification.json').read_text())
+        before = json.loads((parent_root / 'before.json').read_text())
+        result = json.loads((parent_root / 'verification.json').read_text())
+        intent = json.loads((parent_root / 'intent.json').read_text())
+        if result['source_id'] != source_id or intent['models'] != ports.identity:
+            raise ValueError('Claim relation conflict model or source changed')
+        records, sources = before['records'], before['sources']
+        f.source_unchanged(sources)
+        for key, old in records.items():
+            current = store.get_record_state(*key.split('/', 1))
+            if not current or any(current[field] != old[field] for field in ('revision', 'content_sha256', 'retired')):
+                raise ValueError('Claim relation conflict input changed: ' + key)
+        proposals = result['consumed_argument_claim_handoffs'] + [
+            p for item in result['discoveries'] for p in item['pairs']]
+        for finding in result['pending']:
+            a, b = sorted([finding['a'], finding['b']])
+            endpoint_ids = {a.split('/', 1)[1], b.split('/', 1)[1]}
+            if any(k.startswith('claim_relations/') and {row['payload']['from_id'], row['payload']['to_id']} == endpoint_ids
+                   for k, row in records.items()):
+                raise ValueError('Conflict continuation requires a new Claim relation pair')
+            candidates = []
+            for pair in proposals:
+                if {pair['a'], pair['b']} != {a, b}:
+                    continue
+                src = pair['a'] if pair['direction'] == 'a_to_b' else pair['b']
+                candidates.append({'a': a, 'b': b, 'direction': 'a_to_b' if src == a else 'b_to_a',
+                                   'relation_type': pair['relation_type'], 'reason': pair['reason']})
+            choices = {(p['direction'], p['relation_type']) for p in candidates}
+            if len(choices) < 2:
+                raise ValueError('No conflicting relation proposals for the saved pair')
+            job = {'job_id': e.digest([a, b]), 'A': pairs.node(a, records, sources),
+                   'B': pairs.node(b, records, sources), 'candidates': candidates}
+            _, reply = next(f.gpt(root / 'adjudication', ports, 'claim_relation_conflict', [job],
+                                  pairs.Decisions.model_json_schema(),
+                                  '只處置這一對主張。用原文判斷兩種提案，若一條成立，選set並照該提案的方向和類型。若都不成立選remove。'
+                                  + f.RELATION_REASON_RULES, semantic_review=False))
+            decision, = pairs.Decisions.model_validate(reply).items
+            f.exactly([decision.model_dump()], [job['job_id']], 'job_id')
+            if decision.action not in {'set', 'remove'} or (decision.action == 'set' and
+                    (decision.direction, decision.relation_type) not in choices):
+                raise ValueError('Claim relation conflict reply did not choose a supplied option')
+            result['updates'] = {key: row for key, row in result['updates'].items()
+                                 if {row['from_id'], row['to_id']} != endpoint_ids}
+            if decision.action == 'set':
+                selected = {'a': a, 'b': b, 'direction': decision.direction,
+                            'relation_type': decision.relation_type, 'reason': decision.reason}
+                checked = pairs.review(records, sources, [], [], root / 'pair-validation', ports,
+                                       kind='claim', completed_proposals=[selected])
+                if checked['pending']:
+                    raise ValueError('Selected Claim relation failed validation')
+                post, = checked['new_relations']
+                oid = 'CR-FLA-' + e.digest([source_id, post['from_id'], post['to_id'], post['relation_type']])[:24]
+                if store.get_record_state('claim_relations', oid):
+                    raise ValueError('Selected Claim relation ID is already occupied')
+                result['updates']['claim_relations/' + oid] = {'claim_relation_id': oid, **post}
+            result['outcomes'].append({'a': a, 'b': b, 'basis': 'gpt_conflict_resolution', **decision.model_dump()})
+        result.update(status='verified', pending=[])
+        e.save(root / 'intent.json', intent)
+        e.save(root / 'before.json', before)
+        e.save(root / 'verification.json', result)
+        return statements.finish(store, root) if apply else e.publish(root, result)
+
+
 def run(store, source_id, argument_root, root, ports, *, apply=False):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
+    successor = active_root(root)
+    if successor != root:
+        return e.publish(root, resolve_conflicts(store, source_id, root, successor, ports, apply=apply))
     argument_root = arguments.active_root(argument_root)
     prior = json.loads((argument_root/'intent.json').read_text())
     ids = prior.get('claim_ids', prior['group']['claim_ids'])

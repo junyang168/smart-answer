@@ -81,6 +81,62 @@ def finish(store,root):
     return flash.commit_group(store,root)
 
 
+def continue_existing_claim(store, source_id, root, ports, *, apply):
+    """Resolve a discovery handoff for a single Claim already in the group."""
+    read = lambda path: json.loads(path.read_text())
+    authority = read(root / 'existing-claim-continuation.json')
+    draft = read(root / 'draft.json')
+    before = read(root / 'before.json')
+    finding, = draft['pending']
+    if (not authority.get('owner_direction') or authority['draft_sha256'] != e.digest(draft)
+            or authority['before_sha256'] != e.digest(before)
+            or finding['reason'] != 'existing_claim_update_required'
+            or any(draft[key] for key in ('updates', 'new_claim_candidates', 'new_relation_specs', 'new_knowledge_relation_specs'))):
+        raise ValueError('Existing Claim continuation differs from its saved discovery handoff')
+    candidate = Candidate.model_validate(finding['candidate'])
+    claim_id = candidate.claim_id.removeprefix('claims/')
+    key = 'claims/' + claim_id
+    if claim_id not in draft['claim_ids'] or key not in before['records'] or candidate.answer_question_ids:
+        raise ValueError('Existing Claim continuation exceeds its completed group')
+    child = root / 'existing-claim-continuations' / e.digest(draft)
+    if (child / 'verification.json').exists():
+        result = statements.finish(store, child) if apply else read(child / 'verification.json')
+        return e.publish(root, result)
+    intent = read(root / 'intent.json')
+    records, sources = f.load_group_source(store, source_id, intent['group'])
+    if any(records.get(k) != v for k, v in before['records'].items()):
+        raise ValueError('Existing Claim continuation input changed')
+    if before['sources'] != sources or intent['models'] != ports.identity or records[key]['payload'].get('review_status') in f.PROTECTED:
+        raise ValueError('Existing Claim continuation source, model or protection differs')
+    original = deepcopy(records)
+    for support in candidate.support_keys:
+        if support not in before['records']:
+            raise ValueError('Existing Claim continuation lacks verified support')
+    post = flash.current_claim_payload({**records[key]['payload'], 'statement': candidate.statement,
+                                        'scripture_refs': candidate.scripture_refs})
+    records = f.apply_overlay(records, {key: post})
+    checked = statements.review(records, sources, [key], source_id, child / 'statement', ports)
+    records = f.apply_overlay(records, checked['updates'])
+    pending = list(checked['pending'])
+    updates = {key: records[key]['payload']}
+    for kind, collection in [('claim', 'claim_relations'), ('attachment', 'knowledge_relations')]:
+        edges = [k for k, row in records.items() if k.startswith(collection + '/')
+                 and claim_id in (row['payload']['from_id'], row['payload']['to_id'])]
+        if not edges or pending:
+            continue
+        review = pairs.review(records, sources, edges, [], child / kind, ports, kind=kind)
+        pending.extend(review['pending'])
+        if review['retiring_keys'] or review['updates'] or review['new_relations']:
+            pending.append({'object_key': key, 'reason': 'existing_claim_revision_requires_relation_changes'})
+    # Pin the same source-local snapshot that supplied the statement and direct-edge checks.
+    result = {**draft, 'version': VERSION, 'status': 'needs_attention' if pending else 'verified',
+              'updates': updates, 'new_fragments': {}, 'pending': pending, 'statement_checks': checked}
+    e.save(child / 'before.json', {'records': original, 'sources': sources})
+    e.save(child / 'verification.json', result)
+    result = statements.finish(store, child) if apply else e.publish(child, result)
+    return e.publish(root, result)
+
+
 def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=None,empty_group=None,evidence_root=None):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     if empty_group is not None:
@@ -92,7 +148,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         group=empty_group;ids=[];relation_root=Path(evidence_root).resolve()
         previous={'source':f.bind_source(store,source_id,root)}
     else:
-        relation_root=Path(relation_root).resolve()
+        relation_root=relations.active_root(relation_root)
         previous=json.loads((relation_root/'intent.json').read_text());ids=previous['claim_ids']
         group=json.loads((Path(previous['argument_root'])/'intent.json').read_text())['group']
     room=10-len(ids) if max_new_claims is None else max_new_claims
@@ -104,7 +160,10 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             'relation_root':str(relation_root),'max_new_claims':room,'models':ports.identity,
             **({'empty_group_contract':'claim_flash_empty_group_v1','evidence_root':str(relation_root)} if empty_group is not None else {}),
             'policy_sha256':e.digest([PROMPT,Discovery.model_json_schema(),pairs.COMPLETED_CONTRACT,flash.CompleteDiscoveries.model_json_schema()])})
-        if (root/'draft.json').exists():return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
+        if (root/'draft.json').exists():
+            if (root/'existing-claim-continuation.json').exists():
+                return continue_existing_claim(store, source_id, root, ports, apply=apply)
+            return finish(store,root) if apply else json.loads((root/'draft.json').read_text())
         load_group=group
         if empty_group is None:
             # Consume the relationship stage's exact direct-reference scope,
