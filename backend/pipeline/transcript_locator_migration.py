@@ -68,7 +68,7 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
                          instruction=Path(instruction_file).read_text(), calibration_path=calibration_path,
                          jev_impact=jev_impact)
         report = m.read(root / 'evidence/comparison.json')
-        exceptions = [row for row in report['fragments'] if row['status'] not in RESOLVED]
+        exceptions = [row for row in report['fragments'] if row['status'] not in RESOLVED] + report.get('consumer_exceptions', [])
         preview = {'source_id': source_id, 'phase': 'evidence_preview',
                    'evidence_updates': len(report['updates']), 'exceptions': exceptions,
                    'claim_preview': 'prepared_after_verified_evidence_commit', 'model_calls': report.get('model_calls', 0)}
