@@ -720,6 +720,10 @@ class ReviewStore:
                     )
                 if visuals:
                     row["text"] = "\n\n".join(visuals) + "\n\n" + row["text"]
+            from .sermon_publication import publication_fields
+            config = read(self.permission_root / "config/config.json", {})
+            user = next((u for u in config.get("users", []) if u.get("id") == actor), {})
+            publication = publication_fields(actor, user.get("name"), datetime.now(timezone.utc))
             revision = c["revision"] + 1
             pub = {
                 "metadata": {
@@ -729,7 +733,7 @@ class ReviewStore:
                     or c.get("source_metadata", {}).get("author")
                     or "王守仁",
                     "reviewed_by": actor,
-                    "published_by": actor,
+                    **publication,
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                     "status": "published",
                     "title": c["editorial_metadata"].get("title") or item,
@@ -747,7 +751,7 @@ class ReviewStore:
                 metadata, meta = self.meta(item)
                 meta.update(c["editorial_metadata"])
                 meta["status"] = "published"
-                meta["published_date"] = datetime.now(timezone.utc).isoformat()
+                meta.update(publication)
                 return self.commit(
                     item,
                     actor,
@@ -1051,7 +1055,7 @@ class ReviewStore:
             )
             from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
             try:
-                editorial_paragraphs, hidden_insertions = editor_paragraphs(record)
+                editorial_paragraphs, hidden_insertions = editor_paragraphs(record, source)
             except ValueError as error:
                 raise ReviewError(409, "自動軟刪除與原文不符，拒絕採用") from error
             mapping = {p["id"]: str(i + 1) for i, p in enumerate(editorial_paragraphs)}
@@ -1089,6 +1093,9 @@ class ReviewStore:
                 }
                 for p in editorial_paragraphs
             }
+            for p in editorial_paragraphs:
+                if p.get('excluded_source_context'):
+                    bindings[mapping[p['id']]]['excluded_source_context'] = p['excluded_source_context']
             if any(
                 p["start_ms"] is None or p["end_ms"] is None
                 for p in record["paragraphs"]

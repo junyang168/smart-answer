@@ -145,7 +145,7 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
     assert len(list((tmp_path / 'calls').glob('*/state.json'))) == 1
 
 
-@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json', 'unlocatable_old'])
+@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json', 'unlocatable_old', 'blocked'])
 @pytest.mark.parametrize('use_vocabulary', [False, True])
 def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed, use_vocabulary):
     import json
@@ -174,7 +174,9 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
         def count(self, parts): return 100
         def generate(self, parts):
             self.calls += 1
-            response = {'proposals': answer['proposals'] * 2} if repair_needed is True and self.calls == 1 else answer
+            if repair_needed == 'blocked' and self.calls == 2:
+                return {'candidates': [], 'prompt_feedback': {'block_reason': 'PROHIBITED_CONTENT'}}
+            response = {'proposals': answer['proposals'] * 2} if repair_needed in (True, 'blocked') and self.calls == 1 else answer
             if repair_needed == 'unlocatable_old' and self.calls == 2:
                 response = {'proposals': answer['proposals'] + [{**answer['proposals'][0], 'old': '不存在的原文'}]}
             return {'answer': response, 'bad_prefix': repair_needed in ('malformed_json', 'unlocatable_old') and self.calls == 1,
@@ -197,8 +199,13 @@ def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatc
         assert 'Possible confusions are NOT automatic replacements' in result['prompt']
     else:
         assert 'vocabulary_hint' not in result
-    assert result['status_counts'] == {'machine_supported': 1}
-    assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
+    if repair_needed == 'blocked':
+        assert result['status_counts'] == {}
+        assert result['corrected_paragraphs'][0]['text'] == p['text']
+        assert result['blocked_repairs'][0]['paragraph_ids'] == [p['id']]
+    else:
+        assert result['status_counts'] == {'machine_supported': 1}
+        assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
     assert result['independent_asr_calls'] == 0
     if repair_needed == 'unlocatable_old':
         assert len(result['withheld_proposals']) == 1

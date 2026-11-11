@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,14 @@ SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之�
 - 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
 
 
+POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這一點的句子，按這一張完整原文由前往後找。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
+- 介紹一段或提出一個問題時，從開始介紹、開始提問的那一句出現，不等到後面再把問題說完整。
+- 術語定義的要點從教授明確說出術語名稱的句子開始。若接著問「是什麼」再給定義，這幾句是同一段引入，sentence 標在命名句。
+- 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
+- 不要把 sentence 綁到這一點講完後的歸納句。以開始引入這一點的位置為準。一條要點含幾個相隔較遠的新意思時，重新組織要點，使每條各有自己的開始位置。
+- 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
+
+
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
 使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
@@ -56,7 +65,8 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
 
 要點（points，2 到 4 條，每條不超過 28 字）：
-- 每條寫 sentence：教授講到這一點的那一句（他說出這個問題、理由或結論的那一句）。要點在那一句才出現在螢幕上，所以按他講的次序排，sentence 遞增。
+- 每條寫 sentence，按他講的次序排，sentence 遞增。
+〈要點時間規則〉
 - 每條一個意思；同一張裡兩條不可說同一件事（例如「全與天國有關」和「都與天國有關係」只留一條）。
 - 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
 - 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
@@ -104,7 +114,12 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
-    prompt = _SYSTEM_TEMPLATE.replace("〈標題規則〉", SLIDE_TITLE_RULES).replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    prompt = (
+        _SYSTEM_TEMPLATE.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+        .replace("〈整章〉", f"{number}:{start}-{end}")
+        .replace("〈章〉", str(number))
+    )
     return for_lecture(prompt, lecture)
 
 
@@ -199,11 +214,20 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
     if claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import claim_source_ranges
+
+        ranges = claim_source_ranges(claim_context, decisions_record)
+        if claim_context.get("claim_source_ranges", ranges) != ranges:
+            raise ValueError("Claim source ranges differ from retained evidence anchors")
+        model_context = {**claim_context, "claim_source_ranges": ranges}
         lines += ["", "# 本堂主張與證據步驟（編輯提示，逐字稿為準）",
+                  "claim_source_ranges 是程序從 SourceFragment 逐字摘錄定位出的保留句範圍，按證據作用分開。",
+                  "先從各自的問題、理由、結論範圍找同一要點的原文，再查看相鄰保留句，選教授開始引入這一點的句子。",
+                  "一條主張可包含多個要點或分散範圍。分開判斷各要點的開始位置，保留片段間的省略。",
                   "依照逐字稿分張、定時。主張不決定分張，不是原話；候選主張不是已批准教導。",
                   "逐項核對本堂保留句子中的問題、理由、結論與限定，勿漏重點。",
                   "不把未保留片段或別堂的內容補入；原文不支持的提示不得採用。",
-                  json.dumps(claim_context, ensure_ascii=False)]
+                  json.dumps(model_context, ensure_ascii=False)]
     return f"課程：{lecture}\n\n" + "\n".join(lines)
 
 
@@ -221,6 +245,35 @@ def _title(text: str) -> str:
     while len(text) >= 2 and text[0] in "「『\"“" and text[-1] in "」』\"”":
         text = text[1:-1].strip()
     return text
+
+
+# A named term immediately followed by its definition gives a checkable anchor.
+# Other semantic timing decisions still use the full transcript and editorial review.
+_TERM_POINT = re.compile(r"^(?:「([^」]+)」|([A-Za-z][A-Za-z0-9'-]*(?: [A-Za-z][A-Za-z0-9'-]*)*))\s*[:：]")
+_TERM_QUESTION = re.compile(r"^(?:其實)?(?:那麼|那|這)?[，、 ]*(?:是|到底是|意思是)什[麼麽](?:東西|意思)?(?:呢|啊|嗎)?[？?]$")
+_TERM_DEFINITION = re.compile(r"^(?:也?就是(?:說)?|意思是|是指|指的就是)[，： ]*")
+
+
+def _earlier_term_introduction(
+    point: dict[str, str], lines: list[dict[str, Any]], index: int
+) -> str | None:
+    term_point = _TERM_POINT.match(point["text"])
+    if not term_point or not index or not _TERM_DEFINITION.match(lines[index]["text"]):
+        return None
+    term = term_point.group(1) or term_point.group(2)
+    first = index - 1
+    if first > 0 and _TERM_QUESTION.fullmatch(lines[first]["text"]):
+        first -= 1
+    for before, after in zip(lines[first:index], lines[first + 1:index + 1]):
+        if abs(before["end"] - after["start"]) > 0.001:
+            return None
+    naming = re.compile(
+        r"(?:叫做|叫作|稱為|稱作)\s*[「『“\"]?" + re.escape(term) + r"(?=[」』”\"\s，。；、！？,:;.!?]|$)",
+        re.IGNORECASE,
+    )
+    if naming.search(lines[first]["text"]):
+        return lines[first]["id"]
+    return None
 
 
 def check(
@@ -276,7 +329,14 @@ def check(
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
                 continue
-            points.append({"sentence": item["sentence"], "text": text})
+            point = {"sentence": item["sentence"], "text": text}
+            earlier = _earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+            if earlier:
+                problems.append(
+                    f"{title}: 要點「{text}」在 {earlier} 已明確引入術語，"
+                    f"應從該句開始，現在綁在 {point['sentence']} 的定義句"
+                )
+            points.append(point)
         if any(own_ids.index(b["sentence"]) < own_ids.index(a["sentence"]) for a, b in zip(points, points[1:])):
             problems.append(f"{title}: 要點沒有按他講的次序")
         if not title:
@@ -483,13 +543,17 @@ MOST_ROUNDS = 2
 
 REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音的同步投影片。聽眾一邊聽錄音，一邊看投影片。
 
-使用者給你：保留的逐字稿（每句有編號 S0001 起），以及投影片（每張的第一句、標題、要點與它出現的那一句、顯示的經文與讀到的那一句）。要點在它標的那一句才出現；經文在讀到的那一句才出現。
+使用者給你：保留的逐字稿（每句有編號 S0001 起），以及投影片（每張的第一句、標題、要點與它出現的那一句、顯示的經文與讀到的那一句）。要點在它標的實際講述錨點之前短暫預顯，讓聽眾先讀再聽；經文在讀到的那一句出現。
 
 逐張對照逐字稿檢查：
 1. 忠實：要點只寫他講的，沒有加入他沒講的解釋、評論；沒有把「很好的證據」寫成「證明」；沒有把會眾的話當成他的話；沒有搞錯誰說的、在講哪一卷書。
 2. 完整：他這一段的問題、理由、結論、勸告都在；問題和它的答案在同一張；例子和它說明的道理在同一張；沒有只留鋪陳、漏了結論。
 3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
 4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
+
+每條另查出現時間
+〈要點時間規則〉
+確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文。此類問題未修正前不可發布。
 
 每張另查標題範圍：
 〈標題規則〉
@@ -499,7 +563,7 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
 
-grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、或漏了他讀的經文時為 true。
+grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、漏了他讀的經文、或仍有出現時間問題時為 true。
 
 用繁體中文。"""
 
@@ -514,7 +578,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "slide": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文"]},
+                    "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文", "出現時間"]},
                     "problem": {"type": "string"},
                     "fix": {"type": "string"},
                 },
@@ -565,6 +629,12 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def review_blocks_publication(review: dict[str, Any]) -> bool:
+    return review.get("blocking") is not False or any(
+        finding.get("kind") == "出現時間" for finding in review["findings"]
+    )
+
+
 def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) -> Path:
     return record_path(data_base_dir, passage, lecture).with_suffix(f".review-{revision}.json")
 
@@ -591,7 +661,10 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
     prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
-    review_system = REVIEW_PROMPT.replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    review_system = (
+        REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    )
     answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
@@ -604,7 +677,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     }
     target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
-            "blocking": answer["blocking"], "findings": len(answer["findings"]), "file": str(target)}
+            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]), "file": str(target)}
 
 
 def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:

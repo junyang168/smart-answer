@@ -319,6 +319,9 @@ def test_scoped_confirmation_invalidation_history_and_public_stability(setup):
     before = published_path.read_bytes()
     published = read(published_path)
     assert published["metadata"]["published_by"] == "a"
+    from backend.api.sc_api.sermon_publication import FIELDS
+    catalog_publication = read(root / "config/sermon.json")[0]
+    assert {k: published['metadata'][k] for k in FIELDS} == {k: catalog_publication[k] for k in FIELDS}
     assert set(published) == {"metadata", "script"}
     assert (
         "review_public/%E8%AC%9B%E9%81%93%20test/assets/"

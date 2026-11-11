@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import ChapterSlide from "./ChapterSlide";
+import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
 import ScriptureSlide from "./ScriptureSlide";
 import {
   citedAt,
@@ -64,6 +64,17 @@ const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 const RESTART_GRACE = 3;
 /** 讀者自己捲逐字稿之後，這麼久不自動捲回目前那一句。 */
 const HANDS_OFF_MS = 6000;
+const SEEK_TOLERANCE = 0.35;
+const SEEK_TIMEOUT_MS = 10000;
+
+type SeekRequest = {
+  src: string;
+  time: number;
+  play: boolean;
+  attempts: number;
+  warming: boolean;
+  deadline: number;
+};
 
 export default function ChapterListener({
   passage,
@@ -87,8 +98,11 @@ export default function ChapterListener({
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const media = useRef<HTMLAudioElement | null>(null);
-  // 換錄音檔時，等新檔載入再跳、再播。
-  const pending = useRef<{ time: number; play: boolean } | null>(null);
+  const [seekError, setSeekError] = useState("");
+  const pending = useRef<SeekRequest | null>(null);
+  const seekTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(seekTimer.current), []);
 
   const clips = useMemo(() => (sections ? playlist(sections, showLeftOut) : []), [sections, showLeftOut]);
   const clip: Clip | undefined = clips[position.clip];
@@ -108,8 +122,7 @@ export default function ChapterListener({
         const first = Math.max(0, list.findIndex((item) => item.section === wanted));
         setSections(loaded);
         if (list[first]) {
-          setPosition({ clip: first, time: list[first].start });
-          pending.current = { time: list[first].start, play: false };
+          requestSeek(list[first], first, list[first].start, false);
         }
       })
       .catch(() => alive && setError("讀不到這一章的錄音。"));
@@ -122,20 +135,95 @@ export default function ChapterListener({
 
   // ---- 跳轉 ----------------------------------------------------------------
 
+  function requestSeek(target: Clip, index: number, time: number, play?: boolean) {
+    const url = target.sermon.media_url;
+    if (!url) return;
+    const element = media.current;
+    window.clearTimeout(seekTimer.current);
+    const wanted: SeekRequest = {
+      src: new URL(mediaSrc(url), document.baseURI).href,
+      time,
+      play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
+      attempts: 0,
+      warming: false,
+      deadline: 0,
+    };
+    pending.current = wanted;
+    setSeekError("");
+    setPosition({ clip: index, time });
+    setPlaying(wanted.play);
+    if (element) {
+      element.pause();
+      element.muted = false;
+    }
+    applySeek();
+  }
+
+  function playMedia(element: HTMLAudioElement) {
+    void element.play().catch((error) => {
+      if (error.name === "NotAllowedError" && !pending.current) {
+        setPlaying(false);
+        setSeekError("請按播放繼續聆聽。");
+      }
+    });
+  }
+
+  function applySeek() {
+    const wanted = pending.current;
+    if (!wanted) return;
+    const element = media.current;
+    // iOS may enter a stalled seek if currentTime is assigned while only metadata is loaded.
+    const ready = element && element.currentSrc === wanted.src && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= SEEK_TOLERANCE) {
+      pending.current = null;
+      window.clearTimeout(seekTimer.current);
+      setPosition((position) => ({ ...position, time: element.currentTime }));
+      setSeekError("");
+      if (!wanted.play) element.pause();
+      element.muted = false;
+      if (wanted.play && element.paused) playMedia(element);
+      return;
+    }
+    if (wanted.deadline === 0) {
+      if (!ready && !wanted.play) return;
+      wanted.deadline = Date.now() + SEEK_TIMEOUT_MS;
+    }
+    if (Date.now() >= wanted.deadline) {
+      // Keep the target available for retry and leave playback paused at an unconfirmed position.
+      wanted.play = false;
+      if (element) {
+        element.pause();
+        element.muted = false;
+      }
+      window.clearTimeout(seekTimer.current);
+      setPlaying(false);
+      setSeekError("錄音未能跳到指定位置，請再試一次。");
+      return;
+    }
+    // Some mobile browsers require play() before they will load or honor a seek.
+    if (element?.src === wanted.src && wanted.play && !wanted.warming) {
+      wanted.warming = true;
+      element.muted = true;
+      playMedia(element);
+    }
+    const ranges = ready ? element.seekable : null;
+    const canSeek = ranges && Array.from({ length: ranges.length }, (_, i) => i)
+      .some((i) => ranges.start(i) <= wanted.time && wanted.time <= ranges.end(i));
+    if (ready && canSeek && !element.seeking && wanted.attempts < 2) {
+      wanted.attempts += 1;
+      try {
+        element.currentTime = wanted.time;
+      } catch {
+        // The retry timer can run after the range loads.
+      }
+    }
+    window.clearTimeout(seekTimer.current);
+    seekTimer.current = window.setTimeout(applySeek, 800);
+  }
+
   function seekTo(index: number, time: number, play?: boolean) {
     const target = clips[index];
-    const element = media.current;
-    if (!target) return;
-    const wantPlay = play ?? (element ? !element.paused : false);
-    const sameFile = clip?.sermon.media_url === target.sermon.media_url;
-    setPosition({ clip: index, time });
-    if (element && sameFile && element.readyState > 0) {
-      element.currentTime = time;
-      if (wantPlay) void element.play();
-    } else {
-      // 換檔：src 換了之後 loadedmetadata 再跳。
-      pending.current = { time, play: wantPlay };
-    }
+    if (target) requestSeek(target, index, time, play);
   }
 
   /** 跳到整章播放清單的第幾秒。 */
@@ -164,17 +252,13 @@ export default function ChapterListener({
     if (!element) return;
     element.defaultPlaybackRate = rate;
     element.playbackRate = rate;
-    const wanted = pending.current;
-    if (!wanted) return;
-    pending.current = null;
-    element.currentTime = wanted.time;
-    if (wanted.play) void element.play();
+    applySeek();
   }
 
   function advance() {
     const element = media.current;
     const next = clips[position.clip + 1];
-    if (!element || !clip) return;
+    if (!element || !clip || pending.current || element.currentSrc !== element.src) return;
     if (!next) {
       element.pause();
       return;
@@ -190,12 +274,9 @@ export default function ChapterListener({
   function onTimeUpdate() {
     const element = media.current;
     if (!element || !clip) return;
-    // 該跳而還沒跳的，錄音一能定位就跳，不只等 loadedmetadata：那個事件一個檔
-    // 只來一次，錯過了，時間就永遠不更新，逐字稿的高亮停在第一句。
-    if (pending.current) {
-      if (element.readyState > 0) onLoaded();
-      return;
-    }
+    // Queued events from the previous position must not advance the playlist.
+    if (pending.current || element.seeking) return;
+    if (element.currentSrc !== element.src) return;
     if (element.currentTime >= clip.end) {
       advance();
       return;
@@ -206,8 +287,25 @@ export default function ChapterListener({
   function toggle() {
     const element = media.current;
     if (!element) return;
-    if (element.paused) void element.play();
-    else element.pause();
+    const wanted = pending.current;
+    if (wanted) {
+      if (wanted.deadline > 0 && Date.now() >= wanted.deadline && clip) {
+        requestSeek(clip, position.clip, wanted.time, true);
+      } else {
+        wanted.play = !wanted.play;
+        setPlaying(wanted.play);
+        if (!wanted.play) {
+          element.pause();
+          wanted.warming = false;
+        }
+        applySeek();
+      }
+      return;
+    }
+    if (element.paused) {
+      setSeekError("");
+      playMedia(element);
+    } else element.pause();
   }
 
   function changeRate(value: number) {
@@ -239,12 +337,7 @@ export default function ChapterListener({
     const target = list[index];
     if (!target) return;
     const inside = target.start <= time && time < target.end;
-    setPosition({ clip: index, time: inside ? time : target.start });
-    const element = media.current;
-    if (!inside && element) {
-      if (target.sermon.media_url === clip.sermon.media_url) element.currentTime = target.start;
-      else pending.current = { time: target.start, play: !element.paused };
-    }
+    requestSeek(target, index, inside ? time : target.start);
   }
 
   // ---- 此刻在哪 ------------------------------------------------------------
@@ -366,7 +459,8 @@ export default function ChapterListener({
     : null;
   const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
   const slides = clip?.sermon.slides ?? [];
-  const slide = [...slides].reverse().find((item) => item.at <= time) ?? slides[0];
+  const clipEnd = clip?.end ?? time;
+  const slide = [...slides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? slides[0];
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
   const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
   const sectionSeconds = (index: number) =>
@@ -460,6 +554,7 @@ export default function ChapterListener({
             <ChapterSlide
               slide={slide}
               seconds={time}
+              clipEnd={clipEnd}
               className="min-h-full"
               sentence={lineIndex >= 0 ? lines[lineIndex].text : undefined}
             />
@@ -530,6 +625,7 @@ export default function ChapterListener({
       </div>
 
       <footer className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6">
+        {seekError && <p role="status" className="text-center text-xs text-rose-800">{seekError}</p>}
         <div className="flex items-center gap-3 font-mono text-xs text-stone-500">
           <span className="w-12 text-right">{clock(sectionTime)}</span>
           <div
@@ -629,11 +725,17 @@ export default function ChapterListener({
           ref={media}
           src={mediaSrc(clip.sermon.media_url)}
           preload="auto"
+          onLoadStart={applySeek}
           onLoadedMetadata={onLoaded}
+          onCanPlay={applySeek}
+          onSeeked={applySeek}
           onTimeUpdate={onTimeUpdate}
           onEnded={advance}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPlay={(event) => {
+            if (!pending.current) setPlaying(true);
+            else if (!event.currentTarget.muted) event.currentTarget.pause();
+          }}
+          onPause={() => setPlaying(Boolean(pending.current?.play))}
         />
       )}
     </div>

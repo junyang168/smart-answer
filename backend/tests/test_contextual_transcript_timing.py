@@ -25,6 +25,22 @@ def test_ownership_passes_cover_every_source_paragraph_once():
     for offset in [0,1]:assert [i for a,b in paragraph_groups(rows,offset) for i in range(a,b)]==list(range(7))
 
 
+def test_unresolved_alignment_uses_actual_clip_only_for_acoustic_search(tmp_path):
+    from backend.pipeline.contextual_transcript_timing import prepare, candidate_bounds
+    rows=[dict(id='a',text='甲',start_ms=1000,end_ms=2000),
+          dict(id='b',text='乙',start_ms=None,end_ms=None,
+               alignment_clip_origin_sample=3000*16,alignment_clip_samples=2000*16)]
+    before=copy.deepcopy(rows)
+    save_json(tmp_path/'full_transcript.json',dict(paragraphs=rows))
+    save_json(tmp_path/'master.json',dict(source_sha256='source',duration_ms=8000))
+    write_audio(tmp_path/'master.wav',np.zeros(8000*16,dtype=np.int16))
+    result=prepare({'source':tmp_path},tmp_path/'evidence')
+    assert result['paragraphs']==2 and candidate_bounds(rows[1])==(3000,5000)
+    assert rows==before and rows[1]['start_ms'] is None
+    with pytest.raises(ValueError,match='source-bound'):
+        candidate_bounds(dict(start_ms=None,end_ms=None))
+
+
 def certified(tmp_path):
     evidence=tmp_path/'evidence';evidence.mkdir();chunks=[]
     record={'schema_version':'full-illustrated-corrected-transcript.v1','source_sha256':'a'*64,'paragraphs':[{'id':'p1','text':'所以','start_ms':380,'end_ms':1020}]}

@@ -309,6 +309,8 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
     # All three real pipeline calls receive the same range rule, including revisions.
     for client in (author, reviewer, reviser):
         assert chapter_slides.SLIDE_TITLE_RULES in client.systems[0]
+        assert chapter_slides.POINT_TIMING_RULES in client.systems[0]
+        assert "〈要點時間規則〉" not in client.systems[0]
         assert '〈標題規則〉' not in client.systems[0]
     assert '原文中標題沒有涵蓋的部分' in reviewer.systems[0]
     assert fixture['reason'] in reviser.prompts[0]
@@ -318,3 +320,30 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
     assert record['revision'] == 1
     previous = json.loads(chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').with_suffix('.revision-0.json').read_text())
     assert previous['slides'][0]['title'] == fixture['rejected_title']
+
+
+def test_a_named_term_is_anchored_to_its_introduction_before_the_definition():
+    kept = [
+        {"id": "U004", "start": 324.722, "end": 344.95, "text": (
+            "這裡啊，大概各位可以看到，聖經的這些結構裡面啊，常常有一種結構，"
+            "英文叫做 inclusio，中文我還沒有看到人家怎麼翻呢，inclusio。其實是什麼東西呢？"
+        )},
+        {"id": "U005", "start": 344.95, "end": 365.0, "text": (
+            "就是一段聖經啊，它的開頭跟它的最後，或者是字完全一樣，或者是觀念完全一樣。"
+        )},
+    ]
+    point = {"sentence": "S0003", "text": "inclusio：一段經文開頭和結尾字或觀念相同"}
+    answer = [slide("S0001", points=("八福的結構", point))]
+    problems, _, _ = chapter_slides.check(answer, kept, CHAPTER)
+    assert len(problems) == 1
+    assert "S0001 已明確引入術語" in problems[0]
+    assert "S0003 的定義句" in problems[0]
+
+    for earlier in (
+        [dict(kept[0], text=kept[0]["text"].replace("英文叫做", "也有人提到")), kept[1]],
+        [kept[0], dict(kept[1], start=350.0)],
+    ):
+        assert chapter_slides.check(answer, earlier, CHAPTER)[0] == []
+
+    point["sentence"] = "S0001"
+    assert chapter_slides.check(answer, kept, CHAPTER)[0] == []

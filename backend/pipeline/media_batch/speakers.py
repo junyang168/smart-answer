@@ -78,7 +78,7 @@ def enrich_existing_draft(store,item,out,actor,*,expected_version,expected_epoch
     from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
     out=Path(out);record=json.loads((out/'full_transcript.json').read_text())
     require_candidate(out,record)
-    editorial,hidden=editor_paragraphs(record)
+    editorial,hidden=editor_paragraphs(record,out)
     with store.lock(item):
         store.require(actor,item,write=True,epoch=expected_epoch)
         prior=store.receipt(item,operation_id,actor,{'version':expected_version,'source_candidate_sha256':file_sha(out/'speaker-candidate.json')})

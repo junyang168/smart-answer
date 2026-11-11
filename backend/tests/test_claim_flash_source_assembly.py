@@ -74,3 +74,26 @@ def test_deleted_or_cross_source_bindings_are_not_rehabilitated_by_assembly(tmp_
     sources['OTHER']=deepcopy(sources['S']);records['source_fragments/F1']['payload']['source_id']='OTHER'
     with pytest.raises(ValueError,match='one source'):
         f.value('evidence_steps/E',records,sources)
+
+
+def test_migration_repairs_question_references_with_the_flash_binding_validator(tmp_path):
+    from backend.pipeline import transcript_consumer_binding as binding
+
+    text = "寫離婚書可以防止輕易離婚。還有什麼？也保護被離婚的女子。"
+    records, sources = scene(tmp_path, [text], [("S0001", "還有什麼？"), ("S0001", text)])
+    records.pop("evidence_steps/E")
+    records["source_fragments/F0"]["payload"]["anchor_state"] = "context_only"
+    for key, ids in (("questions/Q1", ["F0"]), ("questions/Q2", ["F0", "F1"])):
+        records[key] = {"retired": False, "revision": 1, "content_sha256": key,
+                        "payload": {"text": "休書有什麼作用？", "source_fragment_ids": ids}}
+    updates, created, missing = binding.project(records, {}, sources["S"], "S", {})
+    assert set(updates) == {"questions/Q2"} and not created
+    assert [row["record_key"] for row in missing] == ["questions/Q1"]
+    rule = {"before_pin": [1, "questions/Q1"], "target_source_sha256": sources["S"]["body_sha256"],
+            "segments": [{"paragraph_key": "S0001", "verbatim_excerpt": text}]}
+    updates, created, missing = binding.project(records, {}, sources["S"], "S", {"questions/Q1": rule})
+    assert not missing and len(created) == 1
+    for key, value in {**updates, **created}.items():
+        records[key] = {"retired": False, "payload": value}
+    for key in updates:
+        assert f.value(key, records, sources)["original_text_excerpts"] == [text]

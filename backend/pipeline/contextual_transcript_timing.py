@@ -21,13 +21,25 @@ class TimingReviewRequired(ValueError):
     """Completed acoustic checks left genuine unresolved source boundaries."""
 
 
+def candidate_bounds(paragraph):
+    """Locate review audio without assigning timing to an unresolved paragraph."""
+    start, end = paragraph.get('start_ms'), paragraph.get('end_ms')
+    if start is not None and end is not None and 0 <= start < end:
+        return start, end
+    origin = paragraph.get('alignment_clip_origin_sample')
+    size = paragraph.get('alignment_clip_samples')
+    if origin is None or size is None or origin < 0 or size <= 0:
+        raise ValueError('Unresolved paragraph has no source-bound acoustic clip')
+    return origin // 16, (origin + size) // 16
+
+
 def paragraph_groups(rows,offset):
     owned=[]
     if offset:owned.append((0,1))
     owned += [(i,min(i+2,len(rows))) for i in range(offset,len(rows),2)]
     result=[]
     for a,b in owned:
-        span=max(p['end_ms'] for p in rows[a:b])-min(p['start_ms'] for p in rows[a:b])
+        span=max(candidate_bounds(p)[1] for p in rows[a:b])-min(candidate_bounds(p)[0] for p in rows[a:b])
         result.extend([(i,i+1) for i in range(a,b)] if span>130000 else [(a,b)])
     return result
 
@@ -45,8 +57,8 @@ def prepare(sources:dict[str,Path],out:Path):
                 left,right=max(0,a-1),min(len(rows),b+1);pad=1000*(pass_id+1)
                 def bounds():
                     selected=rows[left:right]
-                    lo=max(0,min(min(p['start_ms'],p.get('prior_start_ms') or p['start_ms']) for p in selected)-pad)
-                    hi=min(master['duration_ms'],max(max(p['end_ms'],(p.get('alignment_clip_origin_sample',0)+p.get('alignment_clip_samples',0))//16) for p in selected)+pad)
+                    lo=max(0,min(min(candidate_bounds(p)[0],p.get('prior_start_ms') if p.get('prior_start_ms') is not None else candidate_bounds(p)[0]) for p in selected)-pad)
+                    hi=min(master['duration_ms'],max(max(candidate_bounds(p)[1],(p.get('alignment_clip_origin_sample',0)+p.get('alignment_clip_samples',0))//16) for p in selected)+pad)
                     return lo,hi
                 lo,hi=bounds()
                 while hi-lo>180000 and (left<a or right>b):
@@ -255,8 +267,8 @@ def add_recovery_contexts(out:Path):
             left,right=max(0,index-1),min(len(rows),index+2)
             def bounds():
                 selected=rows[left:right]
-                return (max(0,min(min(x['start_ms'],x.get('prior_start_ms') or x['start_ms']) for x in selected)-3000),
-                        min(record['duration_ms'],max(x['end_ms'] for x in selected)+3000))
+                return (max(0,min(min(candidate_bounds(x)[0],x.get('prior_start_ms') if x.get('prior_start_ms') is not None else candidate_bounds(x)[0]) for x in selected)-3000),
+                        min(record['duration_ms'],max(candidate_bounds(x)[1] for x in selected)+3000))
             lo,hi=bounds()
             while hi-lo>180000 and (left<index or right>index+1):
                 if right>index+1:right-=1
@@ -352,7 +364,11 @@ def qualify_staged_record(out:Path,record:dict,aligner_python:Path|None,*,playba
         archive=out/'withheld-handoffs'/uuid.uuid4().hex
         archive.parent.mkdir(exist_ok=True)
         shutil.move(str(out/'handoff'),str(archive))
-    signature=timing_fingerprint(record)[:20];base=out/'contextual-timing'/signature
+    signature=timing_fingerprint(record)[:20]
+    unresolved_clips = [{'id': p['id'], 'clip': candidate_bounds(p)} for p in record['paragraphs'] if p['start_ms'] is None]
+    if unresolved_clips:
+        signature = object_sha({'timing': timing_fingerprint(record), 'unresolved_source_clips': unresolved_clips})[:20]
+    base=out/'contextual-timing'/signature
     input_root=base/'input';evidence=base/'evidence';input_root.mkdir(parents=True,exist_ok=True)
     source_copy=input_root/'full_transcript.json'
     if source_copy.exists() and read_json(source_copy)!=record:

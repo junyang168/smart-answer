@@ -11,11 +11,19 @@ import { load, plain } from "./ScriptureSlide";
  * 经文是和合本全文，按出处去取，不经模型。
  */
 
+// Let listeners read the next point before the professor starts expanding it.
+const POINT_PREVIEW_SECONDS = 1;
+
+export function shouldShowSlideItem(at: number, seconds: number, clipEnd: number) {
+  // A chapter can jump over the next sentence even when it starts at the clip boundary.
+  return at < clipEnd && at <= seconds + POINT_PREVIEW_SECONDS;
+}
+
 export type ChapterSlideData = {
   at: number;
   seconds: number;
   title: string;
-  /** 每条要点在他讲到的那一句才出现（at）。 */
+  /** at 是他开始讲这条要点的时间。 */
   points: { at: number; text: string }[];
   verses: string[];
   scriptures: { at: number; scripture: string; label: string }[];
@@ -133,25 +141,28 @@ function Verse({
 export default function ChapterSlide({
   slide,
   seconds,
+  clipEnd,
   className = "min-h-[20rem]",
   sentence,
 }: {
   slide: ChapterSlideData;
   seconds: number;
+  clipEnd: number;
   /** 聆听模式：逐字稿此刻这一句，投影片跟着他念到的经节走。 */
   sentence?: string;
   /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
   className?: string;
 }) {
-  // 要点和经文都是他讲到、读到了才出现。新读的经文放在最上面、亮着。
-  const points = slide.points.filter((item) => item.at <= seconds + 1);
+  // The speech anchor stays exact while points get a short reading lead.
+  const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
+  const activePoint = points.filter((item) => item.at <= seconds).at(-1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
   const shown = [...read].reverse();
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
-    if (points.length > 0) bringIntoView(newestPoint.current);
-  }, [points.length, slide.at]);
+    if (activePoint) bringIntoView(newestPoint.current);
+  }, [activePoint, slide.at]);
   return (
     <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6`}>
       <header>
@@ -161,8 +172,8 @@ export default function ChapterSlide({
             {points.map((point, index) => (
               <li
                 key={point.text}
-                ref={index === points.length - 1 ? newestPoint : undefined}
-                className={`flex gap-3 ${index === points.length - 1 ? "text-white" : "text-slate-400"}`}
+                ref={point === activePoint ? newestPoint : undefined}
+                className={`flex gap-3 ${point === activePoint ? "text-white" : "text-slate-400"}`}
               >
                 <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
                   {index + 1}

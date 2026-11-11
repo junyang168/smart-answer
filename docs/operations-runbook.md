@@ -216,6 +216,28 @@ out, including requests with `remove_tags=false`; public Markdown copy and model
 consumers receive that same clean payload. Full edit markup remains available
 through the authenticated editor/history, not the reader endpoint.
 
+### Unified sermon publication records
+
+Both transcript editors write `sermon-publication.v1` through the same builder.
+`config/sermon.json` is the catalog authority for `published_by`,
+`published_by_name` and timezone-aware `published_date`; the series reader uses
+these fields directly. Changing draft ownership does not change publication.
+
+Normalize historical catalog records once, after deploying the shared writer:
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.sermon_publication_migration --data-root DATA
+backend/.venv/bin/python -m backend.pipeline.sermon_publication_migration --data-root DATA --apply --receipt-dir PRIVATE_RECEIPTS
+```
+
+The migration reads explicit publication metadata, bound publish revisions and
+matching legacy publish audits. It leaves unverifiable publishers explicitly
+unknown. It locks and verifies its inputs, saves the original catalog and a
+receipt outside the data root, and verifies manuscript bytes and hashes are
+unchanged. It does not republish or rewrite any manuscript. Promoted Beta
+archives retain their production authority; for private active Beta data, use
+`--users-root DATA` to resolve names from the central account configuration.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from
