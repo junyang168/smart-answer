@@ -464,6 +464,27 @@ def validate_plan(plan, report, records):
     return expected
 
 
+def validate_fragment_locations(updates, snapshot):
+    """Check migrated live fragments against the authoritative published rows."""
+    for key, fragment in updates.items():
+        if not key.startswith('source_fragments/') or fragment.get('anchor_state') != 'source_version_bound':
+            continue
+        paragraph = snapshot['paragraphs'].get(fragment.get('paragraph_key'))
+        quote = fragment.get('verbatim_excerpt')
+        if (
+            not paragraph
+            or not isinstance(quote, str) or not quote.strip()
+            or '~~' in quote or quote not in paragraph['text']
+            or str(fragment.get('source_segment_index')) != str(paragraph['index'])
+            or fragment.get('source_sha256') != snapshot['body_sha256']
+            or fragment.get('paragraph_text_sha256') != m.sha(paragraph['text'].encode())
+            or fragment.get('verbatim_excerpt_sha256') != m.sha(quote.encode())
+            or fragment.get('media_time') != paragraph.get('start_time')
+            or fragment.get('media_end_time') != paragraph.get('end_time')
+        ):
+            raise ValueError('Migrated fragment differs from the published source: ' + key)
+
+
 def apply(store, root):
     root = Path(root).resolve(); p = m.read(root/'plan.json')
     if p['schema_version'] != VERSION:
@@ -477,6 +498,7 @@ def apply(store, root):
         verify(store, root)
         return {'status': 'already_applied', 'change_set_id': p['change_set_id']}
     source_files_current(p)
+    validate_fragment_locations(report['updates'], snap(p['published_path']))
     if report.get('impact_review'):
         from backend.pipeline.transcript_migration_impact import verified_preserved
         verified_preserved(report, records, snap(p['published_path']))
@@ -528,6 +550,8 @@ def verify(store, root):
         if not actual or actual['revision'] != 1 or actual['payload'] != report['updates'][key]:
             raise ValueError('created atomic source fragment readback differs: '+key)
     source_files_current(p)
+    validate_fragment_locations({key: current[cm.source.split_key(key)]['payload']
+                                 for key in report['updates']}, snap(p['published_path']))
     result = {'status': 'verified', 'change_set_id': p['change_set_id'] if report['updates'] else None,
               'summary': report['summary'], 'updated_records': len(report['updates']),
               'model_calls': p.get('model_calls', 0), 'claim_prose_changed': False,
