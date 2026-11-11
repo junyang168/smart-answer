@@ -101,11 +101,8 @@ def select_fragments(anchor, evidence, records, prior, source, snapshot):
         return chosen, 'historical_fragment_handoff', inactive
     if historical and inactive:
         return [], 'source_deleted' if 'source_deleted' in inactive else 'context_only', inactive
-    if valid:
-        # The Evidence owns these already-persisted quotations. Projection
-        # supplies locators only; it is not a ruling that their meaning still
-        # supports this Claim. Qualification remains a separate Update step.
-        return [fid for fid in ids if fid in valid], 'linked_evidence_projection', []
+    if historical:
+        return [], 'historical_fragment_pending_location', inactive
     states = {records.get('source_fragments/'+fid,{}).get('payload',{}).get('anchor_state') for fid in ids}
     return [], ('source_deleted' if 'source_deleted' in states or evidence.get('source_binding_status') == 'source_deleted'
                 else 'context_only' if evidence.get('source_binding_status') == 'context_only'
@@ -164,6 +161,7 @@ def group_overlaps(anchors, snapshot):
 
 def compile_projection(records, prior, *, source_id, snapshot, preserved_evidence=()):
     source=records['source_documents/'+source_id]['payload'];updates={};rows=[];skipped=[]
+    source_order = {key: i for i, key in enumerate(snapshot['paragraphs'])}
     for key,state in sorted(records.items()):
         if not key.startswith('claims/') or state['retired']:continue
         before=state['payload']
@@ -184,6 +182,7 @@ def compile_projection(records, prior, *, source_id, snapshot, preserved_evidenc
                     ids,reason,inactive=select_fragments(anchor,evidence,records,prior,source,snapshot)
                 made=[projected_anchor(anchor,records['source_fragments/'+fid]['payload'],evidence,snapshot,
                     impact_preserved='evidence_steps/'+str(eid) in preserved_evidence) for fid in ids]
+                made.sort(key=lambda anchor: source_order[anchor['paragraph_key']])
                 result.extend(made)
                 if not made:
                     note={'old_anchor_sha256':cm.sha256_json(anchor),'evidence_id':eid,
@@ -196,6 +195,7 @@ def compile_projection(records, prior, *, source_id, snapshot, preserved_evidenc
             for anchor in result:
                 token=cm.sha256_json(anchor)
                 if token not in seen:unique.append(anchor);seen.add(token)
+            unique.sort(key=lambda anchor: source_order[anchor['paragraph_key']])
             group_overlaps(unique,snapshot)
             occurrence['anchors']=unique
             if notes:occurrence['anchor_migration_notes']=notes
