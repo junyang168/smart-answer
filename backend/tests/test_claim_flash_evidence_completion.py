@@ -55,7 +55,8 @@ class Ports(BasePorts):
         assert set(request['input']['source_paragraphs'])=={'S0001'}
         for job in request['input']['jobs']:
             oid=job['job_id'].split('/')[1]
-            item={'job_id':job['job_id'],'action':'keep' if oid=='KEEP' else 'repair','reason':'逐項處置本項疑點。'}
+            action='keep' if oid=='KEEP' or oid.startswith('EXTRA') else 'repair'
+            item={'job_id':job['job_id'],'action':action,'reason':'逐項處置本項疑點。'}
             if oid=='E':item['statement']='不知道神的旨意就無法遵行。'
             if oid in {'BIND','BOTH','O'}:item['quotes']=[{'paragraph_key':'S0001','quote':QUOTE}]
             if oid in {'BOTH','O'}:item['statement']=STATEMENT
@@ -114,6 +115,22 @@ def test_invalid_or_protected_combined_disposition_never_partially_commits(campa
         with pytest.raises(ValueError):eo.run(store,'S',plan,root/'run',ports,previous,apply=True)
     after=store.compile_package();before.pop('compiled_at');after.pop('compiled_at');before.pop('package_id');after.pop('package_id')
     assert after==before
+
+
+@pytest.mark.parametrize('same_value',[False,True])
+def test_empty_evidence_repairs_are_rejected_before_acceptance(campaign,same_value):
+    store,root,_,plan,previous=campaign;ports=Ports()
+    def empty_repairs(request,reply):
+        reply['items']=[{'job_id':job['job_id'],'action':'repair','reason':'已補掛原文。',
+                         'statement':job['record']['statement'] if same_value else None}
+                        for job in request['input']['jobs']]
+    ports.mutate=empty_repairs
+    before=store.get_record_state('evidence_steps','E')
+    with pytest.raises(ValueError,match='Evidence repair has no effective changes'):
+        eo.run(store,'S',plan,root/'run',ports,previous,apply=True)
+    assert store.get_record_state('evidence_steps','E')==before
+    assert not list((root/'run'/'accepted').glob('*.json'))
+    assert not list((root/'run').rglob('commit-intent.json'))
 
 
 @pytest.mark.parametrize('where',['compile','sql','receipt'])

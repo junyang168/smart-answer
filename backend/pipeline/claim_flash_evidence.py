@@ -442,6 +442,10 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if complete_source:
                 scope={sid:sorted({p['paragraph_key'] for p in candidates[key]['nearby_paragraphs']})}
                 ready[key]['source_context']={'paragraphs':scope,'entries':human.scoped(all_decisions,scope)}
+    # Check the compiled changes before accepting any disposition in this group.
+    for key,decision in ready.items():
+        if decision['basis']=='gpt_repair' and not decision['patch']:
+            raise ValueError('Evidence repair has no effective changes: '+key)
     for key,decision in ready.items():
         p=working[key]['payload'];fp=fingerprint(key,p,values[key]);path=root/'decisions'/fp/'result.json'
         e.save(path,decision)
