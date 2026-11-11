@@ -4,6 +4,7 @@ import fcntl
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.error import HTTPError
 from pydantic import BaseModel,ConfigDict,Field
 from backend.pipeline import claim_flash_common as f,claim_flash_statements as statements
 from backend.pipeline import claim_update_flash as flash,claim_flash_pairs as pairs,claim_flash_questions as q
@@ -247,6 +248,30 @@ def clarify_route_source(store, source_id, group, parent_root, root, ports, auth
         e.save(root / 'intent.json', json.loads((parent_root / 'intent.json').read_text()))
         e.save(root / 'verification.json', result)
         return statements.finish(store, root) if apply else e.publish(root, result)
+
+
+def argument_support_issues(root, ports, material):
+    questions = {key: q.claim(with_references=bool(material.get('claim_references')))[key]
+                 for key in ('support', 'scripture')}
+    request = {'model': e.MODEL, 'state': material, 'questions': questions}
+    if len(json.dumps(request, ensure_ascii=False).encode()) > f.JEV_BYTES:
+        return {key: 'not_run_input_limit' for key in questions}
+    try:
+        answers = f.jev(root, ports, material, questions)
+    except (HTTPError, e.RecordedCallRejected):
+        folder = Path(root)/'jev'/e.digest(request)
+        refusal = e.rejection_receipt(folder, request)
+        if not refusal or refusal['http_status'] != 400:
+            raise
+        try:
+            detail = json.loads((folder/'rejection-body.bin').read_text()).get('detail')
+        except (OSError, ValueError):
+            raise ValueError('invalid Jev rejection receipt') from None
+        if not isinstance(detail, dict) or detail.get('error_type') != 'max_tokens_exceeded':
+            raise
+        return {key: 'not_run_provider_token_limit' for key in questions}
+    return {key: value for key, value in answers.items()
+            if value != ('supported' if key=='support' else 'complete')}
 
 
 def final_support_decisions(root,ports,jobs):
@@ -522,8 +547,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if (state==prior and not any(x['object_key']==key for x in old_checks['pending'])
                     and not (parent is not None and key in remaining)):
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
-            answers=f.jev(root/'postimage-support',ports,state,{k:q.claim(with_references=bool(state.get('claim_references')))[k] for k in ['support','scripture']})
-            issues={k:v for k,v in answers.items() if v!=('supported' if k=='support' else 'complete')}
+            issues=argument_support_issues(root/'postimage-support',ports,state)
             if issues:final_jobs.append({'job_id':key,'material':state,'findings':issues})
         for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
             if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})

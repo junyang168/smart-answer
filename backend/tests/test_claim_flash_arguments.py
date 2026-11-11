@@ -403,3 +403,28 @@ def test_route_context_can_clarify_a_source_request_after_wording_review(tmp_pat
     (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'previous_reason': '另一項'}))
     with pytest.raises(ValueError, match='verified wording'):
         stage.active_root(root)
+
+
+@pytest.mark.parametrize('error_type', ['max_tokens_exceeded', 'invalid_request'])
+def test_final_argument_support_recognizes_only_the_recorded_token_limit(tmp_path, error_type):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    class Reject(Ports):
+        def judge(self, request):
+            self.calls.append(('jev', request))
+            body = json.dumps({'detail': {'error_type': error_type}}).encode()
+            raise HTTPError('https://example.invalid', 400, 'Bad Request', {}, BytesIO(body))
+
+    material = {'claim': {'statement': '保存完整的待查內容。'}}
+    ports = Reject()
+    if error_type == 'max_tokens_exceeded':
+        expected = {'support': 'not_run_provider_token_limit', 'scripture': 'not_run_provider_token_limit'}
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+    else:
+        with pytest.raises(HTTPError):
+            stage.argument_support_issues(tmp_path, ports, material)
+        with pytest.raises(e.RecordedCallRejected):
+            stage.argument_support_issues(tmp_path, ports, material)
+    assert len(ports.calls) == 1
