@@ -465,3 +465,36 @@ def test_coverage_source_handoff_keeps_exact_writable_target(tmp_path,key):
         result=run();assert result['status']=='needs_attention'
         finding=next(p for p in result['pending'] if p.get('unit_id')=='U0')
         assert finding.get('object_key')==(key or None)
+
+
+@pytest.mark.parametrize('count', [1, 2])
+def test_coverage_group_id_is_corrected_only_for_one_candidate(tmp_path, count):
+    records, sources, plan = setup(tmp_path)
+    group = plan['groups'][0]
+    units = [
+        {'paragraph_key': 'S0001', 'quote': sources['S']['paragraphs']['S0001']['text'],
+         'statement': f'重要觀察 {i}。'}
+        for i in range(count)
+    ]
+
+    class GroupIdReply(Ports):
+        def repair(self, request):
+            reply = super().repair(request)
+            if request['input']['task'] == 'evidence_coverage_repair':
+                reply['items'][0]['items'][0]['job_id'] = group['group_id']
+            return reply
+
+    root = tmp_path / 'run'
+    previous = saved_inventory(tmp_path, sources, units)
+
+    def run():
+        return stage.run_group(None, records, sources, group, ['evidence_steps/E'], units,
+                               root, GroupIdReply(), previous, apply=False)
+
+    if count == 1:
+        assert run()['status'] == 'verified'
+        assert len(list((root / 'coverage-id-corrections').glob('*.json'))) == 1
+    else:
+        with pytest.raises(ValueError, match='coverage disposition must address every unit'):
+            run()
+        assert not (root / 'coverage-id-corrections').exists()

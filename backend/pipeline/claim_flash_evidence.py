@@ -558,7 +558,14 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),instruction,
         shared=shared,semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
-        edits=coverage_edits(bundles[0].items,jobs)
+        edits = bundles[0].items
+        if len(jobs) == len(edits) == 1 and edits[0].job_id == group['group_id']:
+            # The reply used the enclosing group ID for its only candidate.
+            unit_id = jobs[0]['job_id']
+            e.save(root / 'coverage-id-corrections' / (e.digest(raw) + '.json'),
+                   {'group_id': group['group_id'], 'unit_id': unit_id})
+            edits = [edits[0].model_copy(update={'job_id': unit_id})]
+        edits = coverage_edits(edits, jobs)
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:
