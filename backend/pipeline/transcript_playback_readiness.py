@@ -74,6 +74,49 @@ def choose_compatible_ranges(rows):
             row['program_selection_note']='候選皆已有完整內容的聽音肯定；程式選擇與鄰段重疊較少的範圍，模型原先偏好仍保留於原始答覆'
 
 
+def repair_range_conflicts(rows):
+    """Find a compatible combination of already approved ranges after a greedy conflict."""
+    def compatible(left, right):
+        return (left['start_ms'] <= right['start_ms']
+                and left['end_ms'] - right['start_ms'] <= MAX_CONTEXT_MS)
+
+    group = []
+    for row in [*rows, {'status': 'blocked'}]:
+        if row['status'] != 'blocked':
+            group.append(row)
+            continue
+        if not any(not compatible(a, b) for a, b in zip(group, group[1:])):
+            group = []
+            continue
+        paths = [((0, 0), [])]
+        for current in group:
+            choices = current.get('complete_options') or [current]
+            next_paths = []
+            for choice in choices:
+                possible = []
+                change = int((choice['start_ms'], choice['end_ms']) != (current['start_ms'], current['end_ms']))
+                for (changes, overlap), path in paths:
+                    if path and not compatible(path[-1], choice):
+                        continue
+                    extra = max(0, path[-1]['end_ms'] - choice['start_ms']) if path else 0
+                    possible.append(((changes + change, overlap + extra), [*path, choice]))
+                if possible:
+                    next_paths.append(min(possible, key=lambda p: p[0]))
+            paths = next_paths
+            if not paths:
+                break
+        if paths:
+            _, chosen = min(paths, key=lambda p: p[0])
+            for current, choice in zip(group, chosen, strict=True):
+                if (current['start_ms'], current['end_ms']) == (choice['start_ms'], choice['end_ms']):
+                    continue
+                judgment = choice['judgment']
+                current.update(start_ms=choice['start_ms'], end_ms=choice['end_ms'], selected_id=choice['id'],
+                               context=judgment, status='ready_with_context' if any(judgment[k]=='brief' for k in ('leading_context','trailing_context')) else 'ready',
+                               program_selection_note='以已通過聽音的候選範圍消除與鄰段的衝突，保留原始模型判定')
+        group = []
+
+
 def require_control(answer,case):
     selected=usable(answer,case)
     cut=next((c for c in answer['candidates'] if c['id']=='c0'),None)
@@ -251,6 +294,7 @@ def assess(evidence,*,write=True,include_recovery=True):
     # Mechanical source bounds, order and substantial overlaps remain blockers.
     for lecture,rs in rows.items():
         choose_compatible_ranges(rs)
+        repair_range_conflicts(rs)
         for left,right in zip(rs,rs[1:]):
             if left['status']=='blocked' or right['status']=='blocked':continue
             if right['start_ms']<left['start_ms'] or left['end_ms']-right['start_ms']>MAX_CONTEXT_MS:

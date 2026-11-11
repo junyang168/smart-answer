@@ -54,6 +54,22 @@ def test_joint_selection_reuses_complete_candidates_without_rewriting_model_pref
     assert 'program_selection_note' in rows[1]
 
 
+def test_complete_alternative_repairs_a_greedy_overlap_without_new_audio():
+    from backend.pipeline.transcript_playback_readiness import choose_compatible_ranges, repair_range_conflicts
+    judgment=dict(leading_context='brief',trailing_context='none')
+    def candidate(id, start, end):
+        return dict(id=id,start_ms=start,end_ms=end,judgment=judgment)
+    rows=[dict(status='ready',start_ms=0,end_ms=11240),
+          dict(status='ready',start_ms=12440,end_ms=22840,model_selected_id='preferred',selected_id='preferred',
+               complete_options=[candidate('earlier',10160,22000),candidate('preferred',12440,22840)]),
+          dict(status='ready',start_ms=19070,end_ms=28910)]
+    choose_compatible_ranges(rows)
+    assert rows[1]['selected_id']=='preferred'
+    repair_range_conflicts(rows)
+    assert rows[1]['selected_id']=='earlier' and rows[1]['model_selected_id']=='preferred'
+    assert rows[1]['end_ms']-rows[2]['start_ms']==2930
+
+
 def test_brief_overlap_does_not_erase_strict_verdict_or_omit_content_gate():
     rows=[dict(id='a',status='qualified',start_ms=1000,end_ms=5000),dict(id='b',status='withheld',start_ms=4800,end_ms=8000)]
     before=copy.deepcopy(rows);lecture=dict(paragraphs=rows,duration_ms=10000)
