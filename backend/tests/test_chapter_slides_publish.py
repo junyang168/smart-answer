@@ -61,3 +61,19 @@ def test_publish_refuses_drift_without_overwriting_live(tmp_path,monkeypatch,dri
     before=target.read_bytes()
     with pytest.raises(ValueError): publish(trial,live)
     assert target.read_bytes()==before
+
+
+def test_publish_blocks_confirmed_timing_findings_even_if_reviewer_flag_is_false(tmp_path, monkeypatch):
+    live, trial = setup_trial(tmp_path, monkeypatch)
+    target = cs.record_path(live, CHAPTER.passage, "L")
+    before = target.read_bytes()
+    path = cs.review_path(trial / "data", CHAPTER.passage, "L", 0)
+    review = json.loads(path.read_text())
+    review["findings"] = [{
+        "slide": "S0001", "kind": "出現時間", "problem": "要點標在 S0002",
+        "fix": "移到 S0001，原文「耶穌上了山」",
+    }]
+    path.write_text(json.dumps(review))
+    with pytest.raises(ValueError, match="no matching nonblocking review"):
+        publish(trial, live)
+    assert target.read_bytes() == before

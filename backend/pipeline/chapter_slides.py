@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +49,7 @@ SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之�
 
 POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這一點的句子，按這一張完整原文由前往後找。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
 - 介紹一段或提出一個問題時，從開始介紹、開始提問的那一句出現，不等到後面再把問題說完整。
+- 術語定義的要點從教授明確說出術語名稱的句子開始。若接著問「是什麼」再給定義，這幾句是同一段引入，sentence 標在命名句。
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
 - 不要把 sentence 綁到這一點講完後的歸納句。以開始引入這一點的位置為準。一條要點含幾個相隔較遠的新意思時，重新組織要點，使每條各有自己的開始位置。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
@@ -245,6 +247,35 @@ def _title(text: str) -> str:
     return text
 
 
+# A named term immediately followed by its definition gives a checkable anchor.
+# Other semantic timing decisions still use the full transcript and editorial review.
+_TERM_POINT = re.compile(r"^(?:「([^」]+)」|([A-Za-z][A-Za-z0-9'-]*(?: [A-Za-z][A-Za-z0-9'-]*)*))\s*[:：]")
+_TERM_QUESTION = re.compile(r"^(?:其實)?(?:那麼|那|這)?[，、 ]*(?:是|到底是|意思是)什[麼麽](?:東西|意思)?(?:呢|啊|嗎)?[？?]$")
+_TERM_DEFINITION = re.compile(r"^(?:也?就是(?:說)?|意思是|是指|指的就是)[，： ]*")
+
+
+def _earlier_term_introduction(
+    point: dict[str, str], lines: list[dict[str, Any]], index: int
+) -> str | None:
+    term_point = _TERM_POINT.match(point["text"])
+    if not term_point or not index or not _TERM_DEFINITION.match(lines[index]["text"]):
+        return None
+    term = term_point.group(1) or term_point.group(2)
+    first = index - 1
+    if first > 0 and _TERM_QUESTION.fullmatch(lines[first]["text"]):
+        first -= 1
+    for before, after in zip(lines[first:index], lines[first + 1:index + 1]):
+        if abs(before["end"] - after["start"]) > 0.001:
+            return None
+    naming = re.compile(
+        r"(?:叫做|叫作|稱為|稱作)\s*[「『“\"]?" + re.escape(term) + r"(?=[」』”\"\s，。；、！？,:;.!?]|$)",
+        re.IGNORECASE,
+    )
+    if naming.search(lines[first]["text"]):
+        return lines[first]["id"]
+    return None
+
+
 def check(
     slides: list[dict[str, Any]],
     kept: list[dict[str, Any]],
@@ -298,7 +329,14 @@ def check(
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
                 continue
-            points.append({"sentence": item["sentence"], "text": text})
+            point = {"sentence": item["sentence"], "text": text}
+            earlier = _earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+            if earlier:
+                problems.append(
+                    f"{title}: 要點「{text}」在 {earlier} 已明確引入術語，"
+                    f"應從該句開始，現在綁在 {point['sentence']} 的定義句"
+                )
+            points.append(point)
         if any(own_ids.index(b["sentence"]) < own_ids.index(a["sentence"]) for a, b in zip(points, points[1:])):
             problems.append(f"{title}: 要點沒有按他講的次序")
         if not title:
@@ -515,6 +553,7 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 每條另查出現時間
 〈要點時間規則〉
+確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文。此類問題未修正前不可發布。
 
 每張另查標題範圍：
 〈標題規則〉
@@ -524,7 +563,7 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
 
-grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、或漏了他讀的經文時為 true。
+grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、漏了他讀的經文、或仍有出現時間問題時為 true。
 
 用繁體中文。"""
 
@@ -539,7 +578,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                 "type": "object",
                 "properties": {
                     "slide": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文"]},
+                    "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文", "出現時間"]},
                     "problem": {"type": "string"},
                     "fix": {"type": "string"},
                 },
@@ -590,6 +629,12 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def review_blocks_publication(review: dict[str, Any]) -> bool:
+    return review.get("blocking") is not False or any(
+        finding.get("kind") == "出現時間" for finding in review["findings"]
+    )
+
+
 def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) -> Path:
     return record_path(data_base_dir, passage, lecture).with_suffix(f".review-{revision}.json")
 
@@ -632,7 +677,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     }
     target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
-            "blocking": answer["blocking"], "findings": len(answer["findings"]), "file": str(target)}
+            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]), "file": str(target)}
 
 
 def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
