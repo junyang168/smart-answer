@@ -37,21 +37,28 @@ def derive(out):
         if stage not in ('propose','review') or stage in calls:raise ValueError('Changed seam call scope')
         prompt,schema=(audio.PROMPT,audio.SCHEMA) if stage=='propose' else (audio.REVIEW,audio.REVIEW_SCHEMA)
         if request['model']!='gemini-3.8-flash' or request['prompt']!=prompt or request['config'].get('response_json_schema')!=schema or request['input_sha256']!=file_sha(root/'input.json'):raise ValueError('Seam call changed')
-        parser=object.__new__(VisionReviewer);parser.provider='gemini';answer=json.loads(parser.text(raw));check_schema(answer,schema)
+        if not raw.get('candidates') and (raw.get('prompt_feedback') or {}).get('block_reason') == 'PROHIBITED_CONTENT':
+            # A terminal provider block contains no decision. Keep both source edges.
+            answer = None
+        else:
+            parser=object.__new__(VisionReviewer);parser.provider='gemini';answer=json.loads(parser.text(raw));check_schema(answer,schema)
         calls[stage]=(request,answer)
         for p in (path,path.with_name('response.json'),path.with_name('state.json')):proof_bindings[str(p.relative_to(out))]=file_sha(p)
     if 'propose' not in calls or len(calls)>2:raise ValueError('Missing bounded seam proposal')
     material=[{k:v for k,v in p.items() if k in ('id','left_text','right_text','overlap_in_clip_ms')} for p in frozen['pairs']]
     proposal=calls['propose'][1]
     if calls['propose'][0]['material']!={'sources':material}:raise ValueError('Proposal material changed')
-    if [r['id'] for r in proposal['pairs']]!=[p['id'] for p in frozen['pairs']]:raise ValueError('Proposal scope changed')
+    if proposal is not None and [r['id'] for r in proposal['pairs']]!=[p['id'] for p in frozen['pairs']]:raise ValueError('Proposal scope changed')
     review=calls.get('review')
     if review:
+        if proposal is None:raise ValueError('Review without an actionable proposal')
         wanted={'sources':material,'proposal':{'pairs':[{k:r[k] for k in ('id','decision','right_prefix')} for r in proposal['pairs']]}}
-        if review[0]['material']!=wanted or [r['id'] for r in review[1]['pairs']]!=[p['id'] for p in frozen['pairs']]:raise ValueError('Review material changed')
+        if review[0]['material']!=wanted or (review[1] is not None and [r['id'] for r in review[1]['pairs']]!=[p['id'] for p in frozen['pairs']]):raise ValueError('Review material changed')
     overrides={};notices=[];approved=[];by_id={c['id']:c for c in asr['chunks']}
     for i,p in enumerate(frozen['pairs']):
         try:
+            if proposal is None or (review is not None and review[1] is None):
+                raise ValueError('Provider returned no seam decision; original words retained')
             if review is None:raise ValueError('No approval; original words retained')
             local,accepted=audio.decisions(asr,[p],{'pairs':[proposal['pairs'][i]]},{'pairs':[review[1]['pairs'][i]]})
         except ValueError as error:
