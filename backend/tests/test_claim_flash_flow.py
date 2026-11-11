@@ -139,6 +139,32 @@ def test_export_pending_is_not_approval_and_tracks_real_changes(candidate,tmp_pa
         assert final['source_fragments']==[v['payload'] for k,v in sorted(before.items()) if k.startswith('source_fragments/')]
 
 
+@pytest.mark.parametrize('referenced',[False,True])
+def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced):
+    package,_=candidate
+    with workspace.open_candidate(package,tmp_path/'private') as store:
+        sid=package['source_documents'][0]['source_id']
+        records,sources=flow.snapshot(store,sid)
+        historical={**deepcopy(package['source_fragments'][0]),'fragment_id':'OLD-FRAGMENT',
+                    'source_sha256':'0'*64,'anchor_state':'replaced_by_precise_fragments'}
+        records['source_fragments/OLD-FRAGMENT']={'payload':historical,'content_sha256':'historical',
+                                                  'revision':1,'retired':False}
+        if referenced:
+            evidence=next(row for key,row in records.items() if key.startswith('evidence_steps/'))
+            evidence['payload']['source_fragment_ids'].append('OLD-FRAGMENT')
+        monkeypatch.setattr(flow,'snapshot',lambda *_:(records,sources))
+        args=(store,sid,tmp_path/'export',records,None,{},[],0,'canonical_refresh')
+        if referenced:
+            with pytest.raises(flow.KnowledgePackageMergeError,match='fragment source generation'):
+                flow.export(*args)
+        else:
+            result=flow.export(*args)
+            output=flow.read(result['package']['path'])
+            assert result['status']=='completed'
+            assert output['flash_application']['historical_source_fragments']==[historical]
+            assert historical not in output['source_fragments']
+
+
 def test_completed_output_drift_is_rejected_without_new_calls(candidate,tmp_path):
     package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())

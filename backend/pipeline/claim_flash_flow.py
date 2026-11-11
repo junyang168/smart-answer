@@ -126,6 +126,23 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
     for col in KNOWLEDGE_COLLECTIONS:
         if col in result_package or any(k.startswith(col+'/') for k in records):
             result_package[col]=[deepcopy(v['payload']) for k,v in sorted(records.items()) if k.startswith(col+'/')]
+    historical_fragments=[]
+    if mode=='canonical_refresh':
+        live_fragment_ids={fid for key,row in records.items() if key.split('/')[0] in f.LOWER
+                           for fid in e.evidence_fragment_ids(row['payload'])}
+        generations={doc['source_id']:doc.get('source_body_sha256') or doc.get('source_sha256')
+                     for doc in result_package.get('source_documents',[])}
+        live_fragments=[]
+        for fragment in result_package.get('source_fragments',[]):
+            generation=generations.get(fragment['source_id'])
+            if (generation and fragment.get('source_sha256')!=generation
+                    and fragment.get('anchor_state') in source.HISTORICAL
+                    and fragment['fragment_id'] not in live_fragment_ids):
+                historical_fragments.append(fragment)
+            else:
+                live_fragments.append(fragment)
+        if historical_fragments:
+            result_package['source_fragments']=live_fragments
     changed={'created':[],'updated':[],'retired':[]};retired=[]
     for key,row in records.items():
         if key not in before:changed['created'].append(key)
@@ -141,6 +158,8 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'initial_package_sha256':e.digest(original) if original else None,
         'source_file':sources[sid]['file'],'retired_records':retired,
         'completion':'needs_attention' if pending else 'completed'}
+    if historical_fragments:
+        result_package['flash_application']['historical_source_fragments']=historical_fragments
     external,external_records=external_reference_pins(store,records,include_records=True)
     if external:result_package['flash_application']['external_reference_pins']=external
     validation_errors=[]
