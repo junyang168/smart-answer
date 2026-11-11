@@ -29,6 +29,8 @@ export interface Sermon {
   speaker: string;
   date: string;       // e.g., "2024年12月25日"
   published_date?: string; // 可選的發布日期
+  published_by?: string | null;
+  published_by_name?: string | null;
   assigned_to_date?: string;
   completed_date?: string;
   last_updated?: string;

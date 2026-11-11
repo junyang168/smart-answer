@@ -45,14 +45,11 @@ class SeriesReviewCatalog:
         published=snapshot.get('metadata',{}) if isinstance(snapshot,dict) else {}
         if (meta.get('status')!='published' and published.get('status')!='published'
                 and published.get('review_revision') is None):return {}
-        date=meta.get('published_date') or published.get('published_date')
-        revision=published.get('review_revision')
-        if type(revision) is int and revision>=0:
-            history=read(self.production/'transcript_review'/item/'revisions'/f'{revision:08}.json',{})
-            if (history.get('kind')=='publish' and history.get('revision')==revision
-                    and history.get('operation_id')==published.get('review_operation_id')):
-                date=history.get('time') or date
-        return dict(status='published',published_date=date)
+        # Both editors and the one-time migration write this same catalog
+        # record. Runtime never interprets historical authors or audit logs.
+        return dict(status='published', published_date=meta.get('published_date'),
+                    published_by=meta.get('published_by'),
+                    published_by_name=meta.get('published_by_name'))
 
     def for_item(self,item):
         try:
@@ -82,6 +79,7 @@ class SeriesReviewCatalog:
                             assigned_to_date=legacy.get('assigned_to_date'))
             return dict(status='published' if publication else 'assigned' if meta.get('assigned_to') else 'ready',
                         editor_href=href,assigned_to=meta.get('assigned_to'),assigned_to_name=meta.get('assigned_to_name'),
-                        assigned_to_date=meta.get('assigned_to_date'),published_date=publication.get('published_date'))
+                        assigned_to_date=meta.get('assigned_to_date'),published_date=publication.get('published_date'),
+                        published_by=publication.get('published_by'),published_by_name=publication.get('published_by_name'))
         except (OSError,ValueError,TypeError,KeyError,ReviewError):
             return {}

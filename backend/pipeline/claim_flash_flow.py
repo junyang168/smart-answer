@@ -17,7 +17,7 @@ from backend.pipeline import claim_flash_arguments as arguments, claim_flash_rel
 from backend.pipeline import claim_flash_missing as missing
 from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
-from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError
+from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError, ID_FIELDS
 
 VERSION='claim_flash_layered_flow_v1'
 
@@ -65,6 +65,37 @@ def snapshot(store,sid):
     return records,sources
 
 
+def external_reference_pins(store,records,*,include_records=False):
+    """Resolve direct export endpoints only; never expand their private graph."""
+    wanted=set()
+    for key,row in records.items():
+        col=key.split('/',1)[0];p=row['payload']
+        for field in ({'evidence_steps':['produced_claim_ids'], 'questions':['answer_claim_ids'],
+                       'claims':['evidence_step_ids','opposed_position_ids']}.get(col,[])):
+            wanted.update(p.get(field) or [])
+        if col=='claims' and p.get('superseded_by'):wanted.add(p['superseded_by'])
+        if col in {'claim_relations','knowledge_relations','claim_relation_constraints'}:
+            wanted.update(p.get(field) for field in ('from_id','to_id','source_id','target_id') if p.get(field))
+    wanted-={key.split('/',1)[1] for key in records}
+    if not wanted:return ({},{}) if include_records else {}
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        cursor.execute('SET LOCAL statement_timeout=5000')
+        cursor.execute('''SELECT collection,object_id,revision,content_sha256,
+            payload->'evidence_step_ids',payload->'produced_claim_ids'
+            FROM wang_knowledge.objects WHERE retired_at IS NULL
+            AND collection=ANY(%s) AND object_id=ANY(%s)''',
+            (['claims','evidence_steps','observations','questions','position_nodes'],sorted(wanted)))
+        pins={};projections={}
+        for col,oid,rev,sha,eids,cids in cursor.fetchall():
+            pins[col+'/'+oid]={'revision':rev,'content_sha256':sha}
+            node={ID_FIELDS[col]:oid}
+            if col=='claims':node['evidence_step_ids']=[eid for eid in eids or [] if 'evidence_steps/'+eid in records]
+            if col=='evidence_steps':node['produced_claim_ids']=[cid for cid in cids or [] if 'claims/'+cid in records]
+            projections.setdefault(col,[]).append(node)
+        return (pins,projections) if include_records else pins
+
+
 def accounting(root,provider_root=None):
     """Actual saved receipts only; cached/reasoning tokens are reported subsets."""
     result={}
@@ -110,9 +141,11 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'initial_package_sha256':e.digest(original) if original else None,
         'source_file':sources[sid]['file'],'retired_records':retired,
         'completion':'needs_attention' if pending else 'completed'}
+    external,external_records=external_reference_pins(store,records,include_records=True)
+    if external:result_package['flash_application']['external_reference_pins']=external
     validation_errors=[]
     try:
-        validate_merged_package(result_package,native_relations=True)
+        validate_merged_package(result_package,native_relations=True,external_reference_records=external_records)
     except KnowledgePackageMergeError as exc:
         # A pending report must preserve the real SQL snapshot even when an
         # untouched legacy row is invalid. It grants no package admission.
@@ -127,9 +160,10 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'mode':mode,'canonical_committed':mode=='canonical_refresh' and any(root.rglob('commit.json')),
         'production_writes':0 if mode=='candidate_workspace' else None,
         'legacy_qualification':'not_granted','wall_seconds_this_invocation':round(time.monotonic()-started,3)}
+    if external:result['external_reference_pins']=external
     if validation_errors:result['package_validation_errors']=validation_errors
     # Bind exact saved stage outputs; no second model-generated report.
-    result['evidence_refs']=[{'path':str(p.resolve()),'sha256':e.digest(read(p))} for p in sorted(root.rglob('result.json'))
+    result['evidence_refs']=[recovery.result_ref(root,p) for p in sorted(root.rglob('result.json'))
         if p.parent!=root and 'postimages' not in p.parts]
     e.save(root/'exports'/(e.digest(result)+'.json'),result)
     return e.publish(root,result)
@@ -157,24 +191,34 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
             if saved['status']=='completed':
                 pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
                 if pins!=saved['final_pins']:raise ValueError('completed Flash input changed; explicit affected-stage continuation required')
+                if saved.get('external_reference_pins',{})!=external_reference_pins(store,records):
+                    raise ValueError('completed Flash external references changed; explicit continuation required')
                 if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:raise ValueError('Flash output package changed')
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
                 return saved
-            if (not (root/'claim-progress.json').exists() and saved.get('pending')
+            if (saved.get('pending') and saved['pending'][0].get('layer')=='evidence'
+                    and not (root/'claim-layer-input.json').exists()):
+                if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
+                    raise ValueError('pending Flash output package changed')
+                recovery.verify_pending_refs(root,saved)
+            if (not any((root/name).exists() for name in ('claim-progress.json','claim-layer-input.json','source-layer-input.json')) and saved.get('pending')
                     and saved['pending'][0].get('layer') in {'evidence','claims'}):
                 pins={k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()}
                 if pins!=saved['final_pins'] or saved['source_file']!=sources[source_id]['file']:
                     raise ValueError('pending Evidence checkpoint input changed; explicit continuation required')
                 if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
                     raise ValueError('pending Flash output package changed')
-                for ref in saved['evidence_refs']:
-                    if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('pending Flash stage evidence changed')
+                recovery.verify_pending_refs(root,saved)
                 checkpoint=saved['stages']
                 resume_claims=saved['pending'][0]['layer']=='claims'
-        if (root/'claim-progress.json').exists():
+        if (root/'claim-progress.json').exists() and not (root/'claim-layer-input.json').exists():
+            raise ValueError('Flash recovery is missing its completed lower-layer checkpoint')
+        if (root/'claim-layer-input.json').exists():
             checkpoint=recovery.restore(store,root,intent,records,sources)
             resume_claims=True
+        elif (root/'source-layer-input.json').exists():
+            checkpoint=recovery.restore(store,root,intent,records,sources,source_only=True)
         if (root/'before.json').exists():before=read(root/'before.json')
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
@@ -214,6 +258,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
                 stages['scripture_bindings']=bound
                 if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
+            recovery.lower_checkpoint(root,intent,stages,source_only=True)
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
         for path in sorted((root/'source-handoffs').glob('*/intent.json')):
@@ -255,8 +300,8 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         if not complete(er):return finish(stages,[{'layer':'evidence','findings':er.get('pending',[]) +
             [p for g in er.get('groups',[]) for p in g.get('pending',[])],
             'affected_prior_group_ids':er.get('affected_prior_group_ids',[])}])
-        stages.setdefault('claims',{})
         lower_sha=recovery.lower_checkpoint(root,intent,stages)
+        stages.setdefault('claims',{})
         tasks=claim_tasks(plan)
         for group,ids,batch_number in tasks:
             gid=group['group_id'];task_id=gid+(f'-batch-{batch_number}' if group.get('sequential_claim_batches') else '')
@@ -287,6 +332,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
                 value=fn();outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
+        recovery.start_stage(root,intent,stages,None,lower_sha)
         return finish(stages,[])
 
 

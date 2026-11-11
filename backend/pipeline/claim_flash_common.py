@@ -294,8 +294,26 @@ def stopped_gpt_authority(root,ports,request):
     receipt=json.loads(expected.read_text())
     if (authority.get('original_request_sha256')!=key or not authority.get('owner_direction')
             or authority.get('max_reissues')!=1 or authority.get('exit_path')!=str(expected)
-            or authority.get('exit_sha256')!=e.digest(receipt) or receipt.get('error_type')!='TimeoutExpired'
+            or authority.get('exit_sha256')!=e.digest(receipt)
             or e.digest(json.loads((old/'request.json').read_text()))!=key):
+        raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+    if authority.get('kind')=='owner_retry_confirmed_prompt_refusal_v1':
+        import hashlib
+        transport=expected.parent
+        files=receipt.get('files',{})
+        if (receipt.get('returncode')!=1 or (transport/'response.json').exists()
+                or not {'stdout.log','stderr.log'}<=set(files)
+                or any(name not in {'stdout.log','stderr.log'} for name in files)
+                or any(hashlib.sha256((transport/name).read_bytes()).hexdigest()!=sha
+                       for name,sha in files.items())):
+            raise ValueError('owner retry requires a complete, unchanged refusal receipt')
+        events=[json.loads(line) for line in (transport/'stdout.log').read_text().splitlines()]
+        message='Invalid prompt: your prompt was flagged as potentially violating our usage policy.'
+        if (not events or events[-1].get('type')!='turn.failed'
+                or not events[-1].get('error',{}).get('message','').startswith(message)
+                or any(x.get('type') not in {'thread.started','turn.started','error','turn.failed'} for x in events)):
+            raise ValueError('owner retry cannot reinterpret another failure or generated answer')
+    elif receipt.get('error_type')!='TimeoutExpired':
         raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
     return authority
 
@@ -376,6 +394,14 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             continue
         if task=='argument_completeness':
             req=reuse_argument_edge_order(root,req)
+        stopped=Path(root)/'gpt'/e.digest(req)
+        if ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
+                and (stopped/'owner-recovery.json').exists() and not req.get('execution_recovery')):
+            authority=stopped_gpt_authority(root,ports,req)
+            req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
+                'authority_sha256':e.digest(authority)}}
+            if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
+                raise ValueError('complete authorized retry exceeds payload limit; no call made')
         reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),

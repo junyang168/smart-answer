@@ -4,12 +4,11 @@
 import Link from "next/link";
 import { notFound, useParams, useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Check, Clipboard } from "lucide-react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
 import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, day, deliveredOn, seriesName, sermonEditorHref, seriesIdFromRoute } from "./progress";
 
 /**
- * 同工的系列校對頁：按系列次序列出每篇講道的講道日期、狀態、認領人與發佈日期。
+ * 同工的系列校對頁：按系列次序列出講道日期、狀態、認領人、發佈人與發佈日期。
  * 點講道進編輯器（在那裡認領、校對、發佈），不進給讀者的講道頁。
  */
 
@@ -25,7 +24,6 @@ export const SeriesPlayerView = () => {
   const [series, setSeries] = useState<SermonSeries | null>(null);
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState("");
-  const [copy, setCopy] = useState<"idle" | "busy" | "done">("idle");
 
   useEffect(() => {
     fetch("/api/sc_api/sermon_series", { cache: "no-store" })
@@ -51,25 +49,6 @@ export const SeriesPlayerView = () => {
   const choose = (status: string) =>
     router.replace(status ? `${pathname}?status=${status}` : pathname, { scroll: false });
 
-  const copyMarkdown = async () => {
-    setCopy("busy");
-    try {
-      const res = await fetch(`/api/sc_api/series/${encodeURIComponent(series.id)}/markdown`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: "" }),
-      });
-      const data = res.ok ? await res.json() : null;
-      if (!data?.markdownContent) throw new Error("empty");
-      await navigator.clipboard.writeText(data.markdownContent);
-      setCopy("done");
-      setTimeout(() => setCopy("idle"), 2000);
-    } catch {
-      setCopy("idle");
-      console.error("複製系列 Markdown 失敗");
-    }
-  };
-
   const chip = (status: string, label: string) => (
     <button
       key={status || "all"}
@@ -91,15 +70,6 @@ export const SeriesPlayerView = () => {
           <h1 className="text-3xl font-bold text-stone-950">{name}</h1>
           {subtitle ? <p className="mt-1 text-stone-600">{subtitle}</p> : null}
         </div>
-        <button
-          type="button"
-          onClick={copyMarkdown}
-          disabled={copy === "busy"}
-          className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50"
-        >
-          {copy === "done" ? <Check className="h-4 w-4 text-emerald-600" /> : <Clipboard className="h-4 w-4 text-stone-500" />}
-          {copy === "done" ? "已複製" : copy === "busy" ? "處理中…" : "複製 Markdown"}
-        </button>
       </header>
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="按狀態篩選">
@@ -108,7 +78,7 @@ export const SeriesPlayerView = () => {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-stone-200 bg-white">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[800px] text-left text-sm">
           <thead className="bg-stone-50 text-stone-600">
             <tr>
               <th className="px-4 py-3 font-medium">#</th>
@@ -116,6 +86,7 @@ export const SeriesPlayerView = () => {
               <th className="px-4 py-3 font-medium">講道日期</th>
               <th className="px-4 py-3 font-medium">狀態</th>
               <th className="px-4 py-3 font-medium">認領人</th>
+              <th className="px-4 py-3 font-medium">發佈人</th>
               <th className="px-4 py-3 font-medium">最近發佈日期</th>
             </tr>
           </thead>
@@ -138,6 +109,7 @@ export const SeriesPlayerView = () => {
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.assigned_to_name || "未認領"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.published_by_name || "—"}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-stone-700">
                   {day(sermon.published_date) || "—"}
                 </td>

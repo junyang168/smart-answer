@@ -63,6 +63,49 @@ def test_complete_layered_candidate_and_zero_model_replay(candidate,tmp_path):
     assert again==result and not replay.calls
 
 
+@pytest.mark.parametrize('changed',[False,True,'retired'])
+def test_source_export_resolves_external_claim_identity_without_expanding_review(candidate,tmp_path,monkeypatch,changed):
+    package,_=candidate;local=package['claims'][0]['claim_id']
+    external={**deepcopy(package['claims'][0]),'claim_id':'EXTERNAL-REFERENCE',
+              'occurrences':[{'transcript_id':'legacy-transcript','anchors':[]}]}
+    package['claims'].append(external)
+    for row in package['evidence_steps']:
+        if row['evidence_step_id'] in external['evidence_step_ids']:
+            row.setdefault('produced_claim_ids',[]).append('EXTERNAL-REFERENCE')
+    path=tmp_path/'candidate.json';path.write_text(json.dumps(package));ports=FlowPorts()
+    result=flow.run_candidate(path,tmp_path/'flow',ports)
+    assert result['status']=='completed'
+    assert set(result['external_reference_pins'])=={'claims/EXTERNAL-REFERENCE'}
+    plan=flow.read(tmp_path/'flow/flash/grouping/shared-groups.json')
+    assert plan['target_claim_ids']==[local]
+    final=flow.read(result['package']['path'])
+    assert 'EXTERNAL-REFERENCE' not in {p['claim_id'] for p in final['claims']}
+    assert final['flash_application']['external_reference_pins']==result['external_reference_pins']
+    # Embedded declarations never let an ordinary package bypass closure.
+    with pytest.raises(flow.KnowledgePackageMergeError,match='unknown produced claims'):
+        flow.validate_merged_package(final,native_relations=True)
+    with workspace.open_candidate(package,tmp_path/'flow/workspace') as store:
+        expected=normalize_package(package)['claims']['EXTERNAL-REFERENCE']
+        assert store.get_record_state('claims','EXTERNAL-REFERENCE')['payload']==expected
+        if changed=='retired':
+            # Deliberate private-DB fault injection: a referenced node must
+            # never be accepted merely because a historical pin exists.
+            with store.connect() as conn:
+                conn.execute("UPDATE wang_knowledge.objects SET retired_at=now() WHERE collection='claims' AND object_id='EXTERNAL-REFERENCE'")
+            records,_=flow.snapshot(store,package['source_documents'][0]['source_id'])
+            with pytest.raises(flow.KnowledgePackageMergeError,match='unknown produced claims'):
+                flow.export(store,package['source_documents'][0]['source_id'],tmp_path/'retired-export',records,None,{},[],0,'candidate_workspace')
+    replay=FlowPorts()
+    if changed:
+        if changed is True:
+            pins=deepcopy(result['external_reference_pins']);pins['claims/EXTERNAL-REFERENCE']['revision']+=1
+            monkeypatch.setattr(flow,'external_reference_pins',lambda *a:pins)
+        with pytest.raises(ValueError,match='external references changed'):
+            flow.run_candidate(path,tmp_path/'flow',replay)
+    else:assert flow.run_candidate(path,tmp_path/'flow',replay)==result
+    assert not replay.calls
+
+
 def test_indivisible_source_group_uses_two_upper_batches_and_one_lower_review(candidate,tmp_path):
     package,_=candidate
     original=package['claims'][0]
@@ -105,7 +148,8 @@ def test_completed_output_drift_is_rejected_without_new_calls(candidate,tmp_path
     assert not p.calls
 
 
-def test_pending_evidence_checkpoint_does_not_repeat_completed_source_layers(candidate,tmp_path,monkeypatch):
+@pytest.mark.parametrize('legacy',[False,True])
+def test_pending_evidence_checkpoint_does_not_repeat_completed_source_layers(candidate,tmp_path,monkeypatch,legacy):
     package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
     original=flow.eo.run
     def paused(*args,**kwargs):
@@ -114,11 +158,57 @@ def test_pending_evidence_checkpoint_does_not_repeat_completed_source_layers(can
     monkeypatch.setattr(flow.eo,'run',paused)
     first=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert first['status']=='needs_attention'
+    if legacy:(tmp_path/'flow/flash/source-layer-input.json').unlink()
     monkeypatch.setattr(flow.eo,'run',original)
     monkeypatch.setattr(flow.source,'run',lambda *a,**k:pytest.fail('completed source verification repeated'))
     monkeypatch.setattr(flow.coverage,'run',lambda *a,**k:pytest.fail('completed source coverage repeated'))
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert result['status']=='completed',result.get('pending')
+
+
+@pytest.mark.parametrize('tamper_review',[False,True])
+def test_pending_evidence_allows_index_progress_but_keeps_review_receipts_strict(candidate,tmp_path,monkeypatch,tamper_review):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    original=flow.eo.run
+    def pending(*args,**kwargs):
+        value=original(*args,**kwargs)
+        value={**value,'status':'needs_attention','affected_prior_group_ids':[value['groups'][0]['group_id']]}
+        return flow.e.publish(args[3],value)
+    monkeypatch.setattr(flow.eo,'run',pending)
+    first=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    assert first['pending'][0]['layer']=='evidence'
+    root=tmp_path/'resume/flash'
+    old=first['stages']['evidence']
+    # A lawful same-root subset continuation updates the progress index, with
+    # no knowledge write and no replacement of any per-group judgment.
+    flow.e.publish(root/'evidence',{**old,'status':'completed','affected_prior_group_ids':[]})
+    frozen=root/'evidence/reports'/(flow.e.digest(old)+'.json')
+    assert flow.read(frozen)==old
+    if tamper_review:
+        review=next((root/'evidence/groups').glob('*/*/result.json'));review.write_text('{}')
+    monkeypatch.setattr(flow.eo,'run',original)
+    monkeypatch.setattr(flow.source,'run',lambda *a,**k:pytest.fail('source repeated'))
+    monkeypatch.setattr(flow.coverage,'run',lambda *a,**k:pytest.fail('coverage repeated'))
+    if tamper_review:
+        with pytest.raises(ValueError,match='stage evidence changed'):
+            flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    else:
+        result=flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+        assert result['status']=='completed',result.get('pending')
+
+
+@pytest.mark.parametrize('bad',[False,True])
+def test_legacy_pending_index_uses_only_its_exact_embedded_original(tmp_path,bad):
+    old={'status':'needs_attention','affected_prior_group_ids':['G']}
+    index=tmp_path/'evidence/result.json';flow.e.save(index,{'status':'completed'})
+    saved={'pending':[{'layer':'evidence'}],'stages':{'evidence':old},
+        'evidence_refs':[{'path':str(index),'sha256':flow.e.digest(old)}]}
+    if bad:saved['stages']['evidence']={'status':'different'}
+    if bad:
+        with pytest.raises(ValueError,match='stage evidence changed'):flow.recovery.verify_pending_refs(tmp_path,saved)
+    else:
+        flow.recovery.verify_pending_refs(tmp_path,saved)
+        assert flow.read(tmp_path/'evidence/reports'/(flow.e.digest(old)+'.json'))==old
 
 
 def test_material_only_source_gets_real_missing_claim_disposition(candidate,tmp_path):
@@ -132,7 +222,7 @@ def test_material_only_source_gets_real_missing_claim_disposition(candidate,tmp_
     assert flow.read(result['package']['path'])['claims']==[]
 
 
-@pytest.mark.parametrize('fault',[None,'database','receipt'])
+@pytest.mark.parametrize('fault',[None,'database','receipt','legacy'])
 def test_claim_checkpoint_skips_completed_stages_and_refuses_drift(candidate,tmp_path,monkeypatch,fault):
     package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
     original=flow.relations.run
@@ -149,10 +239,17 @@ def test_claim_checkpoint_skips_completed_stages_and_refuses_drift(candidate,tmp
             store.apply_plan(store.plan_package({'package_id':'outside-change','claims':[p]}))
     elif fault=='receipt':
         stage=next((root/'claims').glob('*/statements/result.json'));stage.write_text('{}')
+    elif fault=='legacy':
+        lower=flow.read(root/'claim-layer-input.json')
+        for key in ('checkpoint_sha256','before_sha256'):lower.pop(key,None)
+        (root/'claim-layer-input.json').write_text(json.dumps(lower))
+        progress=flow.read(root/'claim-progress.json');progress['lower_sha256']=flow.e.digest(lower)
+        (root/'claim-progress.json').write_text(json.dumps(progress))
+        (root/'source-layer-input.json').unlink()
     monkeypatch.setattr(flow.relations,'run',original)
     for module in (flow.source,flow.coverage,flow.eo,flow.statements,flow.arguments):
         monkeypatch.setattr(module,'run',lambda *a,**k:pytest.fail('completed layer/stage repeated'))
-    if fault:
+    if fault in {'database','receipt'}:
         with pytest.raises(ValueError,match='checkpoint input changed|stage evidence changed|outside write'):
             flow.run_candidate(path,tmp_path/'resume',FlowPorts())
     else:
@@ -222,3 +319,95 @@ def test_confirmed_citation_is_attached_before_evidence_verification(candidate,t
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
     assert result['status']=='completed',result.get('pending')
     assert result['stages']['scripture_bindings']['applied']
+
+
+@pytest.mark.parametrize('boundary',['source','evidence','claims'])
+def test_exception_after_completed_layer_resumes_without_repeating_it(candidate,tmp_path,monkeypatch,boundary):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    root=tmp_path/'resume'
+    # Fail at the next layer's entry, before it can publish a flow result.
+    owner,name={'source':(flow.eo,'run'),'evidence':(flow,'claim_tasks'),'claims':(flow,'export')}[boundary]
+    original=getattr(owner,name)
+    def crash(*a,**k):raise RuntimeError('injected next-layer failure')
+    monkeypatch.setattr(owner,name,crash)
+    with pytest.raises(RuntimeError,match='injected next-layer failure'):
+        flow.run_candidate(path,root,FlowPorts())
+    assert not (root/'flash/result.json').exists()
+    assert (root/'flash/source-layer-input.json').exists()
+    if boundary!='source':assert (root/'flash/claim-layer-input.json').exists()
+    if boundary=='claims':assert flow.read(root/'flash/claim-progress.json')['active'] is None
+    monkeypatch.setattr(owner,name,original)
+    completed=[flow.source,flow.coverage]
+    if boundary!='source':completed.append(flow.eo)
+    if boundary=='claims':completed.extend([flow.statements,flow.arguments,flow.relations,flow.missing])
+    for module in completed:
+        monkeypatch.setattr(module,'run',lambda *a,**k:pytest.fail('completed layer/task repeated'))
+    result=flow.run_candidate(path,root,FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+
+
+@pytest.mark.parametrize('fault',['checkpoint','original_input','receipt','source','database','orphan_cursor','model','scope'])
+def test_source_checkpoint_refuses_changed_inputs_before_new_calls(candidate,tmp_path,monkeypatch,fault):
+    package,source_path=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    root=tmp_path/'resume';original=flow.eo.run
+    def crash(*a,**k):raise RuntimeError('lower layer interrupted')
+    monkeypatch.setattr(flow.eo,'run',crash)
+    with pytest.raises(RuntimeError):flow.run_candidate(path,root,FlowPorts())
+    checkpoint=root/'flash/source-layer-input.json';saved=flow.read(checkpoint)
+    if fault=='checkpoint':
+        saved['stages']['source']['status']='changed';checkpoint.write_text(json.dumps(saved))
+    elif fault=='original_input':(root/'flash/before.json').write_text('{}')
+    elif fault=='receipt':__import__('pathlib').Path(saved['refs'][0]['path']).write_text('{}')
+    elif fault=='source':source_path.write_text(source_path.read_text()+' ')
+    elif fault=='orphan_cursor':(root/'flash/claim-progress.json').write_text('{}')
+    elif fault=='database':
+        with workspace.open_candidate(package,root/'workspace') as store:
+            cid=package['claims'][0]['claim_id'];p=store.get_record_state('claims',cid)['payload'];p['statement']='外部改動。'
+            store.apply_plan(store.plan_package({'package_id':'outside-change','claims':[p]}))
+    monkeypatch.setattr(flow.eo,'run',original)
+    ports=FlowPorts();options={}
+    if fault=='model':ports.identity={**ports.identity,'gpt':{'backend':'changed','model':'changed'}}
+    if fault=='scope':options['plan']=flow.read(root/'flash/shared-groups.json')
+    with pytest.raises((ValueError,PostgresKnowledgeStoreError)):
+        flow.run_candidate(path,root,ports,**options)
+    assert not ports.calls
+
+
+def test_source_checkpoint_accepts_only_receipted_partial_lower_commits(candidate,tmp_path,monkeypatch):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    root=tmp_path/'resume';original=flow.eo.run
+    def committed_then_crashed(store,sid,plan,folder,*a,**kw):
+        # Exercise the real SQL commit and readback path, then lose the caller's
+        # result. This write is private test data, not a production correction.
+        records,sources=flow.snapshot(store,sid)
+        key=next(k for k in records if k.startswith('evidence_steps/'))
+        payload=deepcopy(records[key]['payload']);payload['statement']+='（隔離測試修訂）'
+        work=folder/'interrupted-group'
+        flow.e.save(work/'before.json',{'records':records,'sources':sources})
+        flow.e.save(work/'verification.json',{'version':'test_partial_evidence','status':'verified',
+            'updates':{key:payload},'new_fragments':{},'pending':[]})
+        assert flow.e.commit_verified(store,work)['applied']
+        raise RuntimeError('SQL committed before caller failed')
+    monkeypatch.setattr(flow.eo,'run',committed_then_crashed)
+    with pytest.raises(RuntimeError,match='SQL committed'):
+        flow.run_candidate(path,root,FlowPorts())
+    monkeypatch.setattr(flow.eo,'run',original)
+    for module in (flow.source,flow.coverage):
+        monkeypatch.setattr(module,'run',lambda *a,**k:pytest.fail('source repeated after owned SQL write'))
+    result=flow.run_candidate(path,root,FlowPorts())
+    assert result['status']=='completed',result.get('pending')
+    assert len(result['changes']['updated'])==1
+
+
+def test_checkpoint_must_be_saved_before_entering_next_layer(candidate,tmp_path,monkeypatch):
+    package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    from pathlib import Path
+    replace=Path.replace
+    def interrupted_replace(self,target):
+        if Path(target).name=='source-layer-input.json':raise OSError('checkpoint disk failure')
+        return replace(self,target)
+    monkeypatch.setattr(Path,'replace',interrupted_replace)
+    monkeypatch.setattr(flow.eo,'run',lambda *a,**k:pytest.fail('entered lower layer without durable source checkpoint'))
+    with pytest.raises(OSError,match='checkpoint disk failure'):
+        flow.run_candidate(path,tmp_path/'resume',FlowPorts())
+    assert not (tmp_path/'resume/flash/source-layer-input.json').exists()
