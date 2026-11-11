@@ -372,7 +372,7 @@ def subscription_ports(root, capacity, executable=None):
 
     evidence = make('gpt-6-sol')
     evidence.gpt.cache_usage_events = True
-    evidence.evidence_fidelity_limits = (120, 2500)
+    evidence.evidence_fidelity_limits = (180, 2500)
     return make('gpt-6.1-sol'), evidence
 
 

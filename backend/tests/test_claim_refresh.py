@@ -449,9 +449,9 @@ def test_explicit_relation_constraint_is_not_overridden(group):
 
 
 @pytest.mark.parametrize(('task', 'usage', 'timeout', 'error'), [
-    ('evidence_fidelity_repair', {'output_tokens': 2500}, 120, None),
-    ('evidence_fidelity_repair', {'output_tokens': 2501}, 120, 'exceeded output token'),
-    ('evidence_fidelity_repair', None, 120, 'no output token receipt'),
+    ('evidence_fidelity_repair', {'output_tokens': 2500}, 180, None),
+    ('evidence_fidelity_repair', {'output_tokens': 2501}, 180, 'exceeded output token'),
+    ('evidence_fidelity_repair', None, 180, 'no output token receipt'),
     ('argument_completeness', {'output_tokens': 3000}, None, None),
 ])
 def test_flash_evidence_limits_keep_raw_provider_receipt(tmp_path, task, usage, timeout, error):
@@ -468,7 +468,7 @@ def test_flash_evidence_limits_keep_raw_provider_receipt(tmp_path, task, usage, 
                           reasoning_effort='medium', last_usage=usage,
                           last_raw_response={'items': []}, generate_json=reply)
     ports = claim_refresh.Models(gpt, tmp_path)
-    ports.evidence_fidelity_limits = (120, 2500)
+    ports.evidence_fidelity_limits = (180, 2500)
     request = {'system': 'Check the evidence', 'input': {'task': task}, 'schema': {}}
     if error:
         with pytest.raises(ValueError, match=error):
