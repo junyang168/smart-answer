@@ -411,3 +411,61 @@ def test_checkpoint_must_be_saved_before_entering_next_layer(candidate,tmp_path,
     with pytest.raises(OSError,match='checkpoint disk failure'):
         flow.run_candidate(path,tmp_path/'resume',FlowPorts())
     assert not (tmp_path/'resume/flash/source-layer-input.json').exists()
+
+
+def test_subscription_flash_routes_models_by_layer(candidate, tmp_path, monkeypatch):
+    from backend.pipeline import claim_refresh, codex_subscription_client
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.model = kwargs['model']
+
+    class Ports(FlowPorts):
+        def __init__(self, client, root, *, capacity):
+            super().__init__()
+            self.identity = {**self.identity, 'gpt': {'model': client.model}}
+            self.capacity = capacity
+
+    monkeypatch.setattr(codex_subscription_client, 'CodexSubscriptionClient', Client)
+    monkeypatch.setattr(claim_refresh, 'Models', Ports)
+    capacity = object()
+    normal, evidence = flow.subscription_ports(tmp_path, capacity)
+    assert normal.capacity is evidence.capacity is capacity
+    package, _ = candidate
+    path = tmp_path / 'candidate.json'
+    path.write_text(json.dumps(package))
+
+    observed = {}
+    for module, name in [(flow.coverage, 'source'), (flow.eo, 'evidence'), (flow.statements, 'claim')]:
+        original = module.run
+
+        def record(*args, _name=name, _original=original, **kwargs):
+            ports = args[4] if _name == 'evidence' else args[-1]
+            observed[_name] = ports.identity['gpt']['model']
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, 'run', record)
+
+    root = tmp_path / 'flow'
+    result = flow.run_candidate(path, root, normal, evidence_ports=evidence)
+    assert result['status'] == 'completed'
+    assert observed == {'source': 'gpt-6.1-sol', 'evidence': 'gpt-6-sol', 'claim': 'gpt-6.1-sol'}
+    normal.calls.clear()
+    evidence.calls.clear()
+    observed.clear()
+    assert flow.run_candidate(path, root, normal, evidence_ports=evidence) == result
+    assert not observed and not normal.calls and not evidence.calls
+
+
+def test_legacy_evidence_keeps_saved_identity_and_routes_new_calls(tmp_path):
+    from types import SimpleNamespace
+
+    normal = SimpleNamespace(identity={'gpt': {'model': 'gpt-6.1-sol'}, 'jev': {}})
+    evidence = SimpleNamespace(identity={'gpt': {'model': 'gpt-6-sol'}, 'jev': {}})
+    root = tmp_path / 'evidence'
+    root.mkdir()
+    (root / 'intent.json').write_text(json.dumps({'models': normal.identity}))
+    assert flow.bind_evidence_ports(tmp_path, normal, evidence) is evidence
+    assert evidence.identity == normal.identity
+    assert evidence.new_gpt_identity == {'model': 'gpt-6-sol'}
+    assert flow.bind_evidence_ports(tmp_path, normal, evidence).new_gpt_identity == {'model': 'gpt-6-sol'}
