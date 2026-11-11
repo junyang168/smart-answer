@@ -127,7 +127,9 @@ def prepare(out:Path):
         for row in lec['paragraphs']:
             if row['status']=='qualified' and not needs_coherence(row):continue
             p=original[row['id']];ranges=[]
-            starts={p['start_ms']};ends={p['end_ms']}
+            from backend.pipeline.contextual_transcript_timing import candidate_bounds
+            proposed_start, proposed_end = candidate_bounds(p)
+            starts={proposed_start};ends={proposed_end}
             if row.get('start_ms') is not None:starts.add(row['start_ms'])
             if row.get('end_ms') is not None:ends.add(row['end_ms'])
             for start in sorted(starts):
@@ -229,8 +231,10 @@ def recovery_cases(source,assessment,parent):
             ranges=observed_ranges(row,record['duration_ms'])
             # A newly exposed neighbour conflict has not had a whole-span check.
             p=original[row['id']]
-            if (lecture,row['id']) not in old and 0<=p['start_ms']<p['end_ms']<=record['duration_ms'] and p['end_ms']-p['start_ms']<=180000:
-                ranges=list(dict.fromkeys([(p['start_ms'],p['end_ms'])]+ranges))
+            from backend.pipeline.contextual_transcript_timing import candidate_bounds
+            start, end = candidate_bounds(p)
+            if (lecture,row['id']) not in old and 0<=start<end<=record['duration_ms'] and end-start<=180000:
+                ranges=list(dict.fromkeys([(start,end)]+ranges))
             ranges=[r for r in ranges if r not in old.get((lecture,row['id']),set())]
             if ranges:
                 cases.append(dict(id=f'L{lecture}-{row["id"]}-omitted-observations',lecture=lecture,

@@ -275,8 +275,8 @@ def proposal_response(adapter, parts, request: dict, out: Path) -> tuple[dict, f
     raw = saved_call(out, request, (count * .75 * 1.2 + adapter.config.get('max_output_tokens', 8192) * 3.75) / 1_000_000,
                      lambda: adapter.generate(parts), max_calls=48, budget_usd=3)
     cost = adapter.usage(raw)['estimated_usd_upper']
-    reason = raw.get('candidates', [{}])[0].get('finish_reason')
     candidates=raw.get('candidates',[])
+    reason = candidates[0].get('finish_reason') if candidates else None
     empty_stop=(len(candidates)==1 and reason=='STOP' and 'content' in candidates[0]
         and not candidates[0].get('content',{}).get('parts')
         and not raw.get('prompt_feedback',{}).get('block_reason'))
@@ -339,6 +339,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path, *, vocabulary: dict | None
             raise ValueError('Original slide image changed')
     all_proposals, proposal_cost = [], 0.0
     withheld=[]
+    blocked_repairs = []
     for batch_id in range(5):
         batch = [p for p in paragraphs if p['start_ms'] is not None and min(p['start_ms'] // 180000, 4) == batch_id]
         if not batch:
@@ -386,9 +387,21 @@ def run(source_dir: Path, audio_dir: Path, out: Path, *, vocabulary: dict | None
             repair_request = {**request, 'stage': 'proposal_structure_repair_once',
                 'parent_response_sha256': object_sha(raw), 'repair_prompt': repair_text}
             repaired, repair_cost, request_sha = proposal_response(adapter, repair_parts, repair_request, out)
-            repaired_answer=json.loads(adapter.text(repaired))
-            proposals,rejected=validate_completed_repair(repaired_answer,batch,{s['event_id'] for s in occurrences})
-            withheld += [{**r,'batch_id':batch_id,'proposal_request_sha256':request_sha} for r in rejected]
+            if not repaired.get('candidates') and (repaired.get('prompt_feedback') or {}).get('block_reason') == 'PROHIBITED_CONTENT':
+                # The invalid proposal received no usable repair. Preserve this group's ASR text.
+                blocked_repairs.append({
+                    'batch_id': batch_id,
+                    'paragraph_ids': sorted(ids),
+                    'proposal_response_sha256': object_sha(raw),
+                    'repair_request_sha256': request_sha,
+                    'repair_response_sha256': object_sha(repaired),
+                    'status': 'retained_original_after_provider_block',
+                })
+                proposals = []
+            else:
+                repaired_answer=json.loads(adapter.text(repaired))
+                proposals,rejected=validate_completed_repair(repaired_answer,batch,{s['event_id'] for s in occurrences})
+                withheld += [{**r,'batch_id':batch_id,'proposal_request_sha256':request_sha} for r in rejected]
             cost += repair_cost
         all_proposals += [{**p, 'id': f'c{len(all_proposals)+i:03d}', 'proposal_request_sha256': request_sha,
                            'batch_id': batch_id} for i, p in enumerate(proposals)]
@@ -413,6 +426,7 @@ def run(source_dir: Path, audio_dir: Path, out: Path, *, vocabulary: dict | None
         'word_times_recomputed': False, 'production_sources_written': 0}
     record['correction_offset_space'] = 'original_formatted_paragraph_unicode_codepoints'
     if withheld:record['withheld_proposals']=withheld
+    if blocked_repairs:record['blocked_repairs'] = blocked_repairs
     record['reconciliation_rounds_per_batch'] = 0
     save_json(out / 'correction_trial.json', record)
     render_review(source, source_dir, out, record)

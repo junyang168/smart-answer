@@ -76,6 +76,14 @@ def test_corrected_text_alignment_is_bound_to_exact_revision_and_clip_origin():
     invalid=copy.deepcopy(raw)
     invalid['items']=[{'text':'原','start_ms':11000,'end_ms':12000}]
     assert resolve_final_paragraph(p,clip,invalid)['timing_precision']=='unresolved'
+    reversed_words=copy.deepcopy(raw)
+    reversed_words['items']=[{'text':'原','start_ms':3000,'end_ms':3200},
+                             {'text':'文','start_ms':1000,'end_ms':1100},
+                             {'text':'是','start_ms':1100,'end_ms':1200}]
+    pending=resolve_final_paragraph(p,clip,reversed_words)
+    assert pending['start_ms'] is None and pending['end_ms'] is None
+    assert pending['timing_precision']=='unresolved' and pending['text']==p['text']
+    assert pending['alignment_issue']=='non_increasing_isolated_word_predictions'
 
 
 def test_zero_time_long_silence_and_invalid_predictions_are_not_interpolated():
@@ -351,6 +359,17 @@ def test_conservative_cleanup_supports_restart_and_aside_without_rewriting():
     assert all(not r['human_confirmed'] for r in rows)
     for old in ['。','因為受達爾文影響，達爾文進化論影響。']:
         with pytest.raises(ValueError):apply_exclusions(paragraphs,{'deletions':[dict(paragraph_id='p',old=old,reason='bad',kind='speech_restart')]})
+
+
+def test_cleanup_withholds_negation_even_if_model_calls_it_a_restart():
+    from backend.pipeline.full_video_transcript import apply_exclusions
+
+    rows = [{'id': 'p', 'text': '不會不不談話。這話不是那個意思。'}]
+    for old in ('不會', '不是'):
+        with pytest.raises(ValueError, match='negation requires review'):
+            apply_exclusions(rows, {'deletions': [
+                dict(paragraph_id='p', old=old, reason='疑似重啟', kind='speech_restart'),
+            ]})
 
 
 def test_overlapping_whole_lecture_proposals_keep_disjoint_valid_deletions(tmp_path,monkeypatch):

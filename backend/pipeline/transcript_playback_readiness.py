@@ -74,6 +74,49 @@ def choose_compatible_ranges(rows):
             row['program_selection_note']='候選皆已有完整內容的聽音肯定；程式選擇與鄰段重疊較少的範圍，模型原先偏好仍保留於原始答覆'
 
 
+def repair_range_conflicts(rows):
+    """Find a compatible combination of already approved ranges after a greedy conflict."""
+    def compatible(left, right):
+        return (left['start_ms'] <= right['start_ms']
+                and left['end_ms'] - right['start_ms'] <= MAX_CONTEXT_MS)
+
+    group = []
+    for row in [*rows, {'status': 'blocked'}]:
+        if row['status'] != 'blocked':
+            group.append(row)
+            continue
+        if not any(not compatible(a, b) for a, b in zip(group, group[1:])):
+            group = []
+            continue
+        paths = [((0, 0), [])]
+        for current in group:
+            choices = current.get('complete_options') or [current]
+            next_paths = []
+            for choice in choices:
+                possible = []
+                change = int((choice['start_ms'], choice['end_ms']) != (current['start_ms'], current['end_ms']))
+                for (changes, overlap), path in paths:
+                    if path and not compatible(path[-1], choice):
+                        continue
+                    extra = max(0, path[-1]['end_ms'] - choice['start_ms']) if path else 0
+                    possible.append(((changes + change, overlap + extra), [*path, choice]))
+                if possible:
+                    next_paths.append(min(possible, key=lambda p: p[0]))
+            paths = next_paths
+            if not paths:
+                break
+        if paths:
+            _, chosen = min(paths, key=lambda p: p[0])
+            for current, choice in zip(group, chosen, strict=True):
+                if (current['start_ms'], current['end_ms']) == (choice['start_ms'], choice['end_ms']):
+                    continue
+                judgment = choice['judgment']
+                current.update(start_ms=choice['start_ms'], end_ms=choice['end_ms'], selected_id=choice['id'],
+                               context=judgment, status='ready_with_context' if any(judgment[k]=='brief' for k in ('leading_context','trailing_context')) else 'ready',
+                               program_selection_note='以已通過聽音的候選範圍消除與鄰段的衝突，保留原始模型判定')
+        group = []
+
+
 def require_control(answer,case):
     selected=usable(answer,case)
     cut=next((c for c in answer['candidates'] if c['id']=='c0'),None)
@@ -163,7 +206,9 @@ def prepare(evidence):
             for c in old_cases.get((lecture,row['id']),[]):
                 if file_sha(evidence/c['audio'])!=c['audio_sha256']:raise ValueError('Saved whole-paragraph clip changed')
                 ranges.append((c['start_ms'],c['end_ms']))
-            if not ranges:ranges=[(p['start_ms'],p['end_ms'])]+observed_ranges(strict[row['id']],record['duration_ms'])
+            if not ranges:
+                from backend.pipeline.contextual_transcript_timing import candidate_bounds
+                ranges=[candidate_bounds(p)]+observed_ranges(strict[row['id']],record['duration_ms'])
             ranges=list(dict.fromkeys(ranges));ranges=list(dict.fromkeys(ranges+[(max(0,a-2000),min(record['duration_ms'],b+2000)) for a,b in ranges]))
             if len(ranges)>12:raise ValueError('Playback candidate ambiguity exceeds bounded review')
             candidates=[];key=f'L{lecture}-{row["id"]}'
@@ -208,10 +253,12 @@ def run(evidence,workers=2):
     if plan['cases']:
         require_control(one(0),plan['cases'][0])
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:list(pool.map(one,range(1,len(plan['cases']))))
+    from backend.pipeline.playback_range_recovery import run as recover_ranges
+    recover_ranges(evidence)
     return assess(evidence)
 
 
-def assess(evidence,*,write=True):
+def assess(evidence,*,write=True,include_recovery=True):
     from backend.pipeline.slide_pilot_models import VisionReviewer
     folder=evidence/'playback-readiness';snapshot=read_json(folder/'input.json');plan=read_json(folder/'plan.json')
     if plan['policy']!=POLICY or plan['input_sha256']!=file_sha(folder/'input.json') or current_snapshot(evidence)!=snapshot:raise ValueError('Playback eligibility belongs to changed source evidence')
@@ -247,12 +294,18 @@ def assess(evidence,*,write=True):
     # Mechanical source bounds, order and substantial overlaps remain blockers.
     for lecture,rs in rows.items():
         choose_compatible_ranges(rs)
+        repair_range_conflicts(rs)
         for left,right in zip(rs,rs[1:]):
             if left['status']=='blocked' or right['status']=='blocked':continue
             if right['start_ms']<left['start_ms'] or left['end_ms']-right['start_ms']>MAX_CONTEXT_MS:
-                for r in (left,right):r.update(status='blocked',reason='候選範圍明顯倒退或與鄰段重疊超過少量上下文')
+                for r in (left,right):
+                    r.update(status='blocked', prior_range_status=r['status'],
+                             reason='候選範圍明顯倒退或與鄰段重疊超過少量上下文')
     result=dict(policy=POLICY,source_plan_sha256=snapshot['source_plan_sha256'],input_sha256=file_sha(folder/'input.json'),plan_sha256=file_sha(folder/'plan.json'),paragraphs=rows,
                 ready=sum(r['status']!='blocked' for rs in rows.values() for r in rs),warnings=sum(r['status']=='ready_with_context' for rs in rows.values() for r in rs),blocked=sum(r['status']=='blocked' for rs in rows.values() for r in rs),human_approved=False,word_timestamps_verified=False)
+    if include_recovery:
+        from backend.pipeline.playback_range_recovery import apply
+        result=apply(evidence,result)
     if write:save_json(folder/'assessment.json',result)
     return result
 
@@ -273,25 +326,51 @@ def qualify_record(out,record,evidence,*,saved_only=False):
     for p in record['paragraphs']:
         row=rows[p['id']]
         if p['id'] in holds:
-            warnings.append(dict(kind='unintelligible_recording_noise',start_ms=p['start_ms'],end_ms=p['end_ms'],paragraph_ids=[p['id']],status='source_unclear',note='音源噪聲過大，粗稿未確認；播放位置僅供找尋原聲，不是已核準邊界。保留原音與粗稿，不能確認、發佈或作為 Claim 證據。'))
+            kind = holds[p['id']]['kind']
+            note = ('音源噪聲過大，粗稿未確認；播放位置僅供找尋原聲，不是已核準邊界。'
+                    if kind == 'unintelligible_recording_noise' else holds[p['id']]['note'])
+            if p['start_ms'] is None or p['end_ms'] is None:
+                from backend.pipeline.contextual_transcript_timing import candidate_bounds
+                p['start_ms'], p['end_ms'] = candidate_bounds(p)
+            warnings.append(dict(kind=kind,start_ms=p['start_ms'],end_ms=p['end_ms'],paragraph_ids=[p['id']],
+                                 status='source_unclear',note=note+'保留原音與粗稿，不能確認、發佈或作為 Claim 證據。'))
             p.update(timing_precision='unverified_source',word_timing_valid=False)
             continue
         p.update(start_ms=row['start_ms'],end_ms=row['end_ms'],timing_precision='complete_paragraph_playback',word_timing_valid=False)
         if row['status']=='ready_with_context':warnings.append(dict(kind='brief_playback_context',start_ms=row['start_ms'],end_ms=row['end_ms'],paragraph_ids=[p['id']],status='context_warning',note='本段內容完整，可用於校對；前後可能帶有少量鄰段聲音，毋須逐字切齊'))
-    record['source_notices']=[n for n in record.get('source_notices',[]) if n.get('kind') not in ('brief_playback_context','unintelligible_recording_noise')]+warnings
+    record['source_notices']=[n for n in record.get('source_notices',[]) if n.get('kind') not in ('brief_playback_context','unintelligible_recording_noise','unresolved_source_playback')]+warnings
     certificate=dict(policy=POLICY,fingerprint=timing_fingerprint(record),evidence_root=str(evidence.relative_to(out)),
         source_plan_sha256=result['source_plan_sha256'],input_sha256=result['input_sha256'],review_plan_sha256=result['plan_sha256'],
         word_timestamps_verified=False,original_strict_verdicts_unchanged=True,source_holds=holds)
+    if result.get('recovery_plan_sha256'):certificate['recovery_plan_sha256']=result['recovery_plan_sha256']
     path=evidence/'playback-readiness/certificate.json';save_json(path,certificate)
     record['timing_quality']=dict(policy=POLICY,status='editor_draft_only' if holds else 'qualified',precision='paragraph_playback',certificate_path=str(path.relative_to(out)),certificate_sha256=file_sha(path),context_warnings=len(warnings),source_holds=holds)
     return record
 
 
 def editor_source_holds(evidence,result):
-    """Only exact owner-reported noisy sources can enter an unconfirmed Editor draft."""
+    """An explicit, bound hold admits only an unconfirmed proofreading draft."""
     from backend.pipeline.transcript_source_observations import load_observations
     observations=load_observations(evidence)
-    return {r['id']:observations[r['id']] for r in result['paragraphs']['source'] if r['status']=='blocked' and r['id'] in observations}
+    blocked = {r['id']: r for r in result['paragraphs']['source'] if r['status']=='blocked'}
+    holds = {pid: observations[pid] for pid in blocked if pid in observations}
+    path = evidence/'playback-readiness/editor-source-holds.json'
+    if not path.exists():
+        return holds
+    plan = read_json(path)
+    ids = plan['paragraph_ids']
+    if (plan['schema_version'] != 'playback-editor-source-holds.v1'
+            or plan['assessment_sha256'] != object_sha(result)
+            or len(ids) != len(set(ids)) or not set(ids) <= set(blocked) - set(holds)):
+        raise ValueError('Editor source hold does not match current blocked playback evidence')
+    snapshot = read_json(evidence/'playback-readiness/input.json')
+    source = read_json(evidence/'plan.json')['records']['source']
+    for pid in ids:
+        holds[pid] = dict(kind='unresolved_source_playback', paragraph_id=pid,
+                          source_sha256=source['source_sha256'], text_sha256=snapshot['text_sha256']['source'][pid],
+                          assessment_sha256=plan['assessment_sha256'], text_confirmed=False,
+                          note=blocked[pid]['reason']+' 播放位置僅供找尋原聲。')
+    return holds
 
 
 def withhold_knowledge_exports(out):
@@ -318,6 +397,7 @@ def require_record(source,record,*,allow_editor_draft=False):
     if (certificate.get('policy')!=POLICY or not evidence.is_relative_to(root) or certificate.get('fingerprint')!=timing_fingerprint(record)):
         raise ValueError('Playback certificate belongs to other text/times/source')
     result=assess(evidence,write=False)
+    if certificate.get('recovery_plan_sha256')!=result.get('recovery_plan_sha256'):raise ValueError('Playback range recovery certificate changed')
     holds=editor_source_holds(evidence,result)
     if (result['blocked'] and (not allow_editor_draft or len(holds)!=result['blocked'])) or certificate.get('source_holds',{})!=holds or quality.get('source_holds',{})!=holds or any(certificate[k]!=result[v] for k,v in [('source_plan_sha256','source_plan_sha256'),('input_sha256','input_sha256'),('review_plan_sha256','plan_sha256')]):raise ValueError('Playback eligibility is unverified')
     snapshot=read_json(evidence/'playback-readiness/input.json');rows={r['id']:r for r in result['paragraphs']['source']}

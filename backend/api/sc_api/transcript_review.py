@@ -1055,7 +1055,7 @@ class ReviewStore:
             )
             from backend.pipeline.transcript_editorial_soft_deletions import editor_paragraphs
             try:
-                editorial_paragraphs, hidden_insertions = editor_paragraphs(record)
+                editorial_paragraphs, hidden_insertions = editor_paragraphs(record, source)
             except ValueError as error:
                 raise ReviewError(409, "自動軟刪除與原文不符，拒絕採用") from error
             mapping = {p["id"]: str(i + 1) for i, p in enumerate(editorial_paragraphs)}
@@ -1093,6 +1093,9 @@ class ReviewStore:
                 }
                 for p in editorial_paragraphs
             }
+            for p in editorial_paragraphs:
+                if p.get('excluded_source_context'):
+                    bindings[mapping[p['id']]]['excluded_source_context'] = p['excluded_source_context']
             if any(
                 p["start_ms"] is None or p["end_ms"] is None
                 for p in record["paragraphs"]

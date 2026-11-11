@@ -8,9 +8,28 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
+from pathlib import Path
 
 
-def editor_paragraphs(record):
+def excluded_playback_context(record, source, paragraph_id):
+    """Return original ASR audio context for a fully excluded, untimed row."""
+    from backend.pipeline.full_video_transcript import original_paragraph_clip
+    from backend.pipeline.slide_change_pilot import read_json
+
+    source = Path(source)
+    master = read_json(source/'master.json')
+    if master['source_sha256'] != record['source_sha256']:
+        raise ValueError('Excluded paragraph source identity changed')
+    window_id, local_id = paragraph_id.split('-', 1)
+    window = next((w for w in master['windows'] if w['id'] == window_id), None)
+    if window is None:
+        raise ValueError('Excluded paragraph source window is missing')
+    begin, end, binding = original_paragraph_clip(source/'windows'/window_id, {'id': local_id}, window, max_seconds=None)
+    return dict(start_ms=begin//16, end_ms=end//16, timing_precision='excluded_original_asr_context',
+                word_timing_valid=False, excluded_source_context=binding)
+
+
+def editor_paragraphs(record, source=None):
     exclusions = record.get("editorial_exclusions", [])
     if not exclusions:
         return record["paragraphs"], {}
@@ -75,6 +94,8 @@ def editor_paragraphs(record):
             raise ValueError("Excluded paragraph contains unaccounted retained speech")
         p = dict(visible.get(pid, original), text="".join(marked))
         if pid not in visible:
+            if (p.get('start_ms') is None or p.get('end_ms') is None) and source is not None:
+                p.update(excluded_playback_context(record, source, pid))
             if not (
                 type(p.get("start_ms")) is int
                 and type(p.get("end_ms")) is int

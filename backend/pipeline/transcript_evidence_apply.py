@@ -259,13 +259,31 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         if state.get('retired') or key.split('/',1)[0] not in {'evidence_steps','questions','observations','position_nodes'}:
             continue
         f = state['payload']; old_ids = evidence_fragment_ids(f); result_ids = []
+        slots = f.get('source_fragment_ids') or []
+        occurrence_maps = {
+            fid: rules.get('source_fragments/'+fid, {}).get('consumer_occurrence_segments', {}).get(key)
+            for fid in old_ids if 'source_fragments/'+fid in replacements
+        }
+        occurrence_maps = {fid: indexes for fid, indexes in occurrence_maps.items() if indexes is not None}
+        if occurrence_maps:
+            for fid, indexes in occurrence_maps.items():
+                if (len(indexes) != slots.count(fid)
+                        or indexes != list(range(len(replacements['source_fragments/'+fid])))):
+                    raise ValueError('consumer occurrence selection does not match citation slots')
+            old_ids = [fid for fid in old_ids if fid not in slots] + list(slots)
+        consumed = {}
         touched = False
         for fid in old_ids:
             fk = 'source_fragments/'+fid
             if fk not in replacements:
                 result_ids.append(fid); continue
             touched = True; rule = rules.get(fk, {})
-            indexes = rule.get('consumer_segments',{}).get(key,list(range(len(replacements[fk]))))
+            if fid in occurrence_maps:
+                position = consumed.get(fid, 0)
+                indexes = [occurrence_maps[fid][position]]
+                consumed[fid] = position + 1
+            else:
+                indexes = rule.get('consumer_segments',{}).get(key,list(range(len(replacements[fk]))))
             if not indexes or any(i < 0 or i >= len(replacements[fk]) for i in indexes):
                 raise ValueError('consumer split selection is invalid')
             result_ids.extend(replacements[fk][i] for i in indexes)
@@ -464,6 +482,27 @@ def validate_plan(plan, report, records):
     return expected
 
 
+def validate_fragment_locations(updates, snapshot):
+    """Check migrated live fragments against the authoritative published rows."""
+    for key, fragment in updates.items():
+        if not key.startswith('source_fragments/') or fragment.get('anchor_state') != 'source_version_bound':
+            continue
+        paragraph = snapshot['paragraphs'].get(fragment.get('paragraph_key'))
+        quote = fragment.get('verbatim_excerpt')
+        if (
+            not paragraph
+            or not isinstance(quote, str) or not quote.strip()
+            or '~~' in quote or quote not in paragraph['text']
+            or str(fragment.get('source_segment_index')) != str(paragraph['index'])
+            or fragment.get('source_sha256') != snapshot['body_sha256']
+            or fragment.get('paragraph_text_sha256') != m.sha(paragraph['text'].encode())
+            or fragment.get('verbatim_excerpt_sha256') != m.sha(quote.encode())
+            or fragment.get('media_time') != paragraph.get('start_time')
+            or fragment.get('media_end_time') != paragraph.get('end_time')
+        ):
+            raise ValueError('Migrated fragment differs from the published source: ' + key)
+
+
 def apply(store, root):
     root = Path(root).resolve(); p = m.read(root/'plan.json')
     if p['schema_version'] != VERSION:
@@ -477,6 +516,7 @@ def apply(store, root):
         verify(store, root)
         return {'status': 'already_applied', 'change_set_id': p['change_set_id']}
     source_files_current(p)
+    validate_fragment_locations(report['updates'], snap(p['published_path']))
     if report.get('impact_review'):
         from backend.pipeline.transcript_migration_impact import verified_preserved
         verified_preserved(report, records, snap(p['published_path']))
@@ -528,6 +568,8 @@ def verify(store, root):
         if not actual or actual['revision'] != 1 or actual['payload'] != report['updates'][key]:
             raise ValueError('created atomic source fragment readback differs: '+key)
     source_files_current(p)
+    validate_fragment_locations({key: current[cm.source.split_key(key)]['payload']
+                                 for key in report['updates']}, snap(p['published_path']))
     result = {'status': 'verified', 'change_set_id': p['change_set_id'] if report['updates'] else None,
               'summary': report['summary'], 'updated_records': len(report['updates']),
               'model_calls': p.get('model_calls', 0), 'claim_prose_changed': False,

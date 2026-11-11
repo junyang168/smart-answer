@@ -7,7 +7,7 @@ from backend.pipeline.slide_change_pilot import save_json,read_json
 from backend.pipeline.transcript_text_layout import SeamCoverageError
 
 
-def fixture(tmp_path,monkeypatch,verdict='pass'):
+def fixture(tmp_path,monkeypatch,verdict='pass',blocked_prompt=None):
     case(tmp_path)
     save_json(tmp_path/'seam-recovery/original/proof.json',{'pairs':[],'status':'needs_audio_review','reason':'No exact edge'})
     called=[]
@@ -16,9 +16,14 @@ def fixture(tmp_path,monkeypatch,verdict='pass'):
             self.provider=provider;self.prompt=prompt;self.model='gemini-3.8-flash';self.config={'response_json_schema':schema}
         def generate(self,contents):
             called.append(self.prompt)
+            if self.prompt == blocked_prompt:
+                return {'prompt_feedback': {'block_reason': 'PROHIBITED_CONTENT'}}
             answer={'pairs':[dict(id='s000',decision='remove_duplicate',right_prefix='乙丙丁戊',audio_quote='乙丙丁戊',reason='fixture')]} if self.prompt==seams.PROMPT else {'pairs':[dict(id='s000',verdict=verdict,audio_quote='乙丙丁戊',reason='fixture')]}
             return dict(candidates=[dict(finish_reason='STOP',content={'parts':[{'text':json.dumps(answer)}]})])
-        def text(self,raw):return raw['candidates'][0]['content']['parts'][0]['text']
+        def text(self,raw):
+            if not raw.get('candidates'):
+                raise ValueError('Incomplete Gemini response saved; no automatic retry')
+            return raw['candidates'][0]['content']['parts'][0]['text']
     monkeypatch.setattr(seams,'VisionReviewer',Adapter)
     return called
 
@@ -77,3 +82,17 @@ def test_uncertain_audio_keeps_all_words_and_a_notice_without_new_calls(tmp_path
     assert stitch(tmp_path)['text']==result['text']
     proof['source_notices']=[];save_json(tmp_path/'seam-retention-proof.json',proof)
     with pytest.raises(ValueError,match='proof changed'):load(tmp_path,tmp_path/'seam-retention-proof.json')
+
+
+@pytest.mark.parametrize('blocked_prompt', [seams.PROMPT, seams.REVIEW])
+def test_blocked_seam_keeps_both_edges_without_another_call(tmp_path,monkeypatch,blocked_prompt):
+    from backend.pipeline.transcript_seam_retention import recover
+    calls = fixture(tmp_path, monkeypatch, blocked_prompt=blocked_prompt)
+    with pytest.raises(SeamCoverageError, match='Incomplete Gemini response'):
+        seams.recover(tmp_path, tmp_path/'capacity')
+    before = list(calls)
+    result = recover(tmp_path)
+    proof = read_json(tmp_path/'seam-retention-proof.json')
+    assert result['text'] == '甲乙丙丁戊\n乙丙丁戊己庚'
+    assert calls == before and not proof['approved'] and not proof['human_confirmed']
+    assert 'Provider returned no seam decision' in proof['source_notices'][0]['reason']
