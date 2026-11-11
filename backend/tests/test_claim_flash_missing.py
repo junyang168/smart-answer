@@ -291,3 +291,24 @@ def test_existing_claim_handoff_updates_only_the_verified_target(ready):
     replay = Ports()
     assert stage.run(store, 'S', relation_root, target, replay, apply=True) == result
     assert replay.calls == []
+
+
+def test_joint_discovery_refuses_changed_saved_draft_before_model_calls(tmp_path):
+    root = tmp_path / 'missing'
+    proposed = candidate(action='needs_update', claim_id='C', answer_question_ids=['Q'])
+    draft = {'pending': [{'reason': 'existing_claim_update_required', 'candidate': proposed}],
+             'new_claim_candidates': [{'statement': '已審的另一條。'}]}
+    before = {'records': {'claims/C': {}}}
+    eo.e.save(root/'draft.json', draft)
+    eo.e.save(root/'before.json', before)
+    eo.e.save(root/'intent.json', {})
+    eo.e.save(root/'joint-discovery-continuation.json', {
+        'owner_direction': 'Complete the saved handoff', 'draft_sha256': eo.e.digest(draft),
+        'before_sha256': eo.e.digest(before),
+    })
+    (root/'draft.json').write_text(json.dumps({**draft, 'new_claim_candidates': []}))
+    ports = Ports()
+    with pytest.raises(ValueError, match='differs from its saved handoff'):
+        stage.continue_joint_discovery(None, 'S', root, ports, apply=True)
+    assert not ports.calls
+    assert not (root/'joint-discovery-continuations').exists()
