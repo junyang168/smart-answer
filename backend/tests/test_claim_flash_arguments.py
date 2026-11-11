@@ -375,3 +375,31 @@ def test_route_context_continuation_binds_the_saved_connection_finding(tmp_path)
     (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'finding': 'Different finding'}))
     with pytest.raises(ValueError, match='saved source clarification'):
         stage.active_root(root)
+
+
+def test_route_context_can_clarify_a_source_request_after_wording_review(tmp_path):
+    root = tmp_path / 'arguments'
+    key = 'claims/C'
+    before = {'records': {}, 'sources': {}}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention',
+              'pending': [{'object_key': key, 'layer': 'claim_connections'}]}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct wording',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': key},
+    })
+    first = stage.active_root(root)
+    reason = '需要獨立的語法證明。'
+    review = {**parent, 'pending': [{'object_key': key, 'layer': 'source', 'reason': reason}]}
+    e.save(first/'verification.json', review)
+    e.save(first/'statement-correction.json', {'pending': [], 'updates': {}})
+    followup = {'owner_direction': 'Check attribution',
+                'review_sha256': e.digest(review), 'previous_reason': reason,
+                'finding': '只核對講者原話是否支持此歸屬。'}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == first/'route-context'/e.digest(followup)
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'previous_reason': '另一項'}))
+    with pytest.raises(ValueError, match='verified wording'):
+        stage.active_root(root)

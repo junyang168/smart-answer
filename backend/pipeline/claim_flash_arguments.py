@@ -80,15 +80,22 @@ def active_root(root):
         raise ValueError('argument material correction differs from its uncommitted parent')
     original_child = root/'material-scope-continuations'/e.digest(parent)
     followup = root/'route-context-continuation.json'
-    if authority.get('source_context_keys') and followup.exists():
+    if followup.exists() and (authority.get('source_context_keys') or authority.get('statement_correction')):
         scoped = json.loads(followup.read_text())
         review = json.loads((original_child/'verification.json').read_text())
-        if (scoped.get('review_sha256') != e.digest(review) or not scoped.get('owner_direction')
-                or len(review['pending']) != 1
-                or not any(item.get('basis') == 'route_source_clarification'
-                           and item.get('action') == 'needs_connection'
-                           and item['object_key'] == review['pending'][0]['object_key']
-                           and item['reason'] == scoped.get('finding') for item in review['outcomes'])):
+        pending = review['pending']
+        if scoped.get('review_sha256') != e.digest(review) or not scoped.get('owner_direction') or len(pending) != 1:
+            raise ValueError('argument route context differs from the saved source clarification')
+        if authority.get('statement_correction'):
+            checked = json.loads((original_child/'statement-correction.json').read_text())
+            if (pending[0]['object_key'] != authority['statement_correction']['object_key']
+                    or pending[0]['layer'] != 'source' or scoped.get('previous_reason') != pending[0]['reason']
+                    or checked['pending'] or checked['updates'] or not scoped.get('finding')):
+                raise ValueError('argument clarification differs from its verified wording and pending source finding')
+        elif not any(item.get('basis') == 'route_source_clarification'
+                     and item.get('action') == 'needs_connection'
+                     and item['object_key'] == pending[0]['object_key']
+                     and item['reason'] == scoped.get('finding') for item in review['outcomes']):
             raise ValueError('argument route context differs from the saved source clarification')
         return original_child/'route-context'/e.digest(scoped)
     return original_child
