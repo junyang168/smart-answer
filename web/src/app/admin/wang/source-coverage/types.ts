@@ -103,6 +103,13 @@ export type Node = {
   scripture_refs: string[];
   fragment_ids: string[];
   claim_ids: string[];
+  related_material?: {
+    id: string;
+    node_id: string;
+    direction: "incoming" | "outgoing";
+    relation_type: string;
+    reason: string;
+  }[];
 };
 
 export type Claim = {
