@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import ScriptureSlide, { type OriginalLanguageEvent, type SlidePoint } from "./ScriptureSlide";
-import ChapterSlide, { POINT_PREVIEW_SECONDS, type ChapterSlideData } from "./ChapterSlide";
+import ChapterSlide, { shouldShowSlideItem, type ChapterSlideData } from "./ChapterSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -622,8 +622,9 @@ export default function OriginalAudio({
                     </div>
                   ) : sermon.slides && sermon.slides.length > 0 ? (
                     (() => {
-                      const slide = [...sermon.slides].reverse().find((item) => item.at <= seconds + POINT_PREVIEW_SECONDS) ?? sermon.slides[0];
-                      return slide ? <ChapterSlide slide={slide} seconds={seconds} /> : null;
+                      const clipEnd = shown[playing?.index ?? 0]?.end ?? seconds;
+                      const slide = [...sermon.slides].reverse().find((item) => shouldShowSlideItem(item.at, seconds, clipEnd)) ?? sermon.slides[0];
+                      return <ChapterSlide slide={slide} seconds={seconds} clipEnd={clipEnd} />;
                     })()
                   ) : sermon.media_kind === "audio" && (
                     <ScriptureSlide
