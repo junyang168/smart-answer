@@ -163,7 +163,9 @@ def prepare(evidence):
             for c in old_cases.get((lecture,row['id']),[]):
                 if file_sha(evidence/c['audio'])!=c['audio_sha256']:raise ValueError('Saved whole-paragraph clip changed')
                 ranges.append((c['start_ms'],c['end_ms']))
-            if not ranges:ranges=[(p['start_ms'],p['end_ms'])]+observed_ranges(strict[row['id']],record['duration_ms'])
+            if not ranges:
+                from backend.pipeline.contextual_transcript_timing import candidate_bounds
+                ranges=[candidate_bounds(p)]+observed_ranges(strict[row['id']],record['duration_ms'])
             ranges=list(dict.fromkeys(ranges));ranges=list(dict.fromkeys(ranges+[(max(0,a-2000),min(record['duration_ms'],b+2000)) for a,b in ranges]))
             if len(ranges)>12:raise ValueError('Playback candidate ambiguity exceeds bounded review')
             candidates=[];key=f'L{lecture}-{row["id"]}'

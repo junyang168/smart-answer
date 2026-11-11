@@ -789,6 +789,8 @@ def finish(out: Path, video: Path, aligner_python: Path | None = None, *, playba
                 resolved.pop(k,None)
             result = {**resolved, 'id': w['id']+'-'+p['id'], 'window_id': w['id'],
                 'original_text': source[p['id']]['text'], 'source_window_origin_sample': w['origin_sample'],
+                'alignment_clip_origin_sample': clip['source_origin_sample'],
+                'alignment_clip_samples': clip['sample_count'],
                 'prior_start_ms': None if p['start_ms'] is None else w['start_ms']+p['start_ms']}
             paragraphs.append(result)
             if result['start_ms'] is None:
