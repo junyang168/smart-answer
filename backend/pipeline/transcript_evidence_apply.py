@@ -259,13 +259,31 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         if state.get('retired') or key.split('/',1)[0] not in {'evidence_steps','questions','observations','position_nodes'}:
             continue
         f = state['payload']; old_ids = evidence_fragment_ids(f); result_ids = []
+        slots = f.get('source_fragment_ids') or []
+        occurrence_maps = {
+            fid: rules.get('source_fragments/'+fid, {}).get('consumer_occurrence_segments', {}).get(key)
+            for fid in old_ids if 'source_fragments/'+fid in replacements
+        }
+        occurrence_maps = {fid: indexes for fid, indexes in occurrence_maps.items() if indexes is not None}
+        if occurrence_maps:
+            for fid, indexes in occurrence_maps.items():
+                if (len(indexes) != slots.count(fid)
+                        or indexes != list(range(len(replacements['source_fragments/'+fid])))):
+                    raise ValueError('consumer occurrence selection does not match citation slots')
+            old_ids = [fid for fid in old_ids if fid not in slots] + list(slots)
+        consumed = {}
         touched = False
         for fid in old_ids:
             fk = 'source_fragments/'+fid
             if fk not in replacements:
                 result_ids.append(fid); continue
             touched = True; rule = rules.get(fk, {})
-            indexes = rule.get('consumer_segments',{}).get(key,list(range(len(replacements[fk]))))
+            if fid in occurrence_maps:
+                position = consumed.get(fid, 0)
+                indexes = [occurrence_maps[fid][position]]
+                consumed[fid] = position + 1
+            else:
+                indexes = rule.get('consumer_segments',{}).get(key,list(range(len(replacements[fk]))))
             if not indexes or any(i < 0 or i >= len(replacements[fk]) for i in indexes):
                 raise ValueError('consumer split selection is invalid')
             result_ids.extend(replacements[fk][i] for i in indexes)

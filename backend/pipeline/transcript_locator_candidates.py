@@ -8,10 +8,15 @@ from backend.pipeline.transcript_evidence_migration import literal_layout
 from backend.pipeline.slide_visual_evidence import obj
 
 PROMPT = """Locate the same occurrence in the new transcript. Use the old quotation,
-surrounding speech, saved playback range and speaker turns. The new transcript is
+surrounding speech, saved playback range and speaker turns. Consult the direct
+consumer's statement and ordered citations, especially the resolved citations
+immediately before and after the target. Repeated target IDs can refer to
+separate spoken occurrences. Use the surrounding citations to distinguish them.
+The new transcript is
 authoritative. Differences in wording, speaker labels or scripture references
-do not rule out a location. Select only supplied paragraph IDs and only consecutive
-paragraphs needed to cover that occurrence. If no candidate is convincing or two
+do not rule out a location. Select only supplied paragraph IDs. For a single
+occurrence select consecutive paragraphs. For separately evidenced repeated
+occurrences, select one distinct paragraph per occurrence in playback order. If no candidate is convincing or two
 occurrences cannot be distinguished, select an empty list. Return one decision
 per fragment. Do not write a quotation or decide what a Claim means."""
 SCHEMA = obj({"decisions": {"type": "array", "items": obj({
@@ -19,6 +24,62 @@ SCHEMA = obj({"decisions": {"type": "array", "items": obj({
     "paragraph_keys": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     "reason": {"type": "string"},
 })}})
+
+
+def consumer_context(row, records, resolved):
+    """Preserve citation slots, including repeated references to the same ID."""
+    target = row["record_key"]
+    consumers = []
+    for key in row.get("direct_consumers", ()):
+        state = records.get(key)
+        if not state or state.get("retired"):
+            continue
+        payload = state["payload"]
+        fragment_ids = payload.get("source_fragment_ids") or [payload.get("source_fragment_id")]
+        citations = []
+        for fragment_id in fragment_ids:
+            fragment_key = f"source_fragments/{fragment_id}"
+            fragment = records.get(fragment_key, {}).get("payload")
+            if fragment is None:
+                continue
+            location = resolved.get(fragment_key, {})
+            paragraph_keys = location.get("target_paragraphs") or [location.get("target_paragraph")]
+            citations.append({
+                "target": fragment_key == target,
+                "old_quote": fragment.get("verbatim_excerpt", ""),
+                "resolved_paragraphs": [key for key in paragraph_keys if key],
+            })
+        if any(citation["target"] for citation in citations):
+            consumers.append({
+                "record_key": key,
+                "statement": payload.get("statement") or payload.get("text") or "",
+                "citations": citations,
+            })
+    return consumers
+
+
+def ordered_repeat_selection(packet, selected, allowed):
+    """Accept distinct literal occurrences only when citation slots agree."""
+    counts = {
+        sum(citation["target"] for citation in consumer["citations"])
+        for consumer in packet.get("consumers", ())
+    }
+    quote = literal_layout(packet["old_quote"])[0]
+    if not quote or counts != {len(selected)} or len(selected) < 2:
+        return False
+    for consumer in packet["consumers"]:
+        remaining = iter(selected)
+        for i, citation in enumerate(consumer["citations"]):
+            if not citation["target"]:
+                continue
+            key = next(remaining)
+            if quote not in literal_layout(allowed[key]["text"])[0]:
+                return False
+            preceding = {k for c in consumer["citations"][:i] for k in c["resolved_paragraphs"]}
+            following = {k for c in consumer["citations"][i + 1:] for k in c["resolved_paragraphs"]}
+            if any(k > key for k in preceding) or any(k < key for k in following):
+                return False
+    return True
 
 
 def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
@@ -88,7 +149,15 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
             unresolved[key] = "no_valid_candidate_selection"
             continue
         ordinals = [allowed[k]["ordinal"] for k in selected]
-        if ordinals != list(range(ordinals[0], ordinals[0] + len(ordinals))):
+        repeated = any(
+            sum(citation["target"] for citation in consumer["citations"]) > 1
+            for consumer in packet.get("consumers", ())
+        )
+        if repeated:
+            if ordinals != sorted(set(ordinals)) or not ordered_repeat_selection(packet, selected, allowed):
+                unresolved[key] = "unverified_repeated_occurrences"
+                continue
+        elif ordinals != list(range(ordinals[0], ordinals[0] + len(ordinals))):
             unresolved[key] = "nonconsecutive_candidate_selection"
             continue
         state = records[key]
@@ -116,6 +185,11 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
                 "reason": reason, "segments": segments}
         if proof is not None:
             rule["legacy_clock"] = proof
+        if repeated:
+            rule["consumer_occurrence_segments"] = {
+                consumer["record_key"]: list(range(len(selected)))
+                for consumer in packet["consumers"]
+            }
         rules[key] = rule
     return rules, unresolved
 
@@ -133,10 +207,14 @@ def review_packets(packets):
     return raw, answer
 
 
-def prepare_packets(preview, records, old, new, legacy_proof):
+def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None):
     """Scope every unresolved fragment from fresh alignment and the old clock."""
     from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
 
+    resolved = {
+        row["record_key"]: row for row in (comparison or {}).get("fragments", ())
+        if row["status"] in {"auto_rebind", "already_current", "relocate_changed_quote"}
+    }
     packets, proofs, unscoped = [], {}, []
     for row in preview["exceptions"]:
         key = row["record_key"]
@@ -159,12 +237,27 @@ def prepare_packets(preview, records, old, new, legacy_proof):
                 proofs[key] = legacy_proof
         else:
             scope = clock
-        packet = candidate_packet(row, old["paragraphs"], new["paragraphs"], scope)
+        consumers = consumer_context(row, records, resolved)
+        source_order = list(new["paragraphs"])
+        neighbors = set(row.get("target_paragraphs") or ())
+        for consumer in consumers:
+            for citation in consumer["citations"]:
+                if citation["target"]:
+                    continue
+                for paragraph in citation["resolved_paragraphs"]:
+                    if paragraph in new["paragraphs"]:
+                        i = source_order.index(paragraph)
+                        neighbors.update(source_order[max(0, i - 1):i + 2])
+        packet = candidate_packet(
+            {**row, "target_paragraphs": sorted(neighbors)},
+            old["paragraphs"], new["paragraphs"], scope,
+        )
         if packet is None:
             unscoped.append(key)
             continue
         packet["search_interval"] = packet["old_interval"]
         packet["old_interval"] = [clock.get("media_time"), clock.get("media_end_time")]
+        packet["consumers"] = consumers
         packets.append(packet)
     return {"packets": packets, "clock_proofs": proofs, "unscoped": unscoped}
 
@@ -201,7 +294,11 @@ def main():
         "backup_manifest": migration.binding(backup),
         "timeline_file": migration.binding(backup.parent / "production/script" / f"{item}.json"),
     }
-    result = prepare_packets(migration.read(root / "preview.json"), records, old, new, proof)
+    migration.cm.source.verify_file(plan["report"])
+    result = prepare_packets(
+        migration.read(root / "preview.json"), records, old, new, proof,
+        comparison=migration.read(plan["report"]["path"]),
+    )
     migration.immutable(args.output, result)
     print(json.dumps({"packets": len(result["packets"]), "unscoped": len(result["unscoped"])}))
 

@@ -38,3 +38,36 @@ def test_approximate_candidate_without_verified_clock_stays_unresolved():
     answer = {"decisions": [{"record_key": "fragment", "paragraph_keys": ["S0002"], "reason": "候選"}]}
     rules, pending = calibration_rules([packet], answer, records, {"paragraphs": live}, {})
     assert not rules and pending == {"fragment": "no_verified_clock_match"}
+
+
+def test_repeated_reference_uses_consumer_slots_and_rejects_wrong_order():
+    from backend.pipeline.transcript_locator_candidates import consumer_context
+
+    key = "source_fragments/f"
+    clock = {"media_time": 0, "media_end_time": 70}
+    records = {
+        key: {"revision": 1, "content_sha256": "old",
+              "payload": {"verbatim_excerpt": "對啊。", **clock}},
+        "source_fragments/m": {"payload": {"verbatim_excerpt": "中間的引文"}},
+        "evidence_steps/e": {"payload": {
+            "statement": "教授確認兩個問題。", "source_fragment_ids": ["f", "m", "f"]}},
+    }
+    row = {"record_key": key, "old_paragraph": "S0001", "quote": "對啊。",
+           "direct_consumers": ["evidence_steps/e"]}
+    live = {
+        f"S{i:04d}": {"text": text, "start_time": i * 10, "end_time": i * 10 + 5}
+        for i, text in enumerate(("問題一？對啊。", "中間的引文", "問題二？對啊。", "別句。"), 1)
+    }
+    packet = candidate_packet(row, {}, live, clock)
+    packet["consumers"] = consumer_context(row, records, {
+        "source_fragments/m": {"target_paragraph": "S0002"},
+    })
+    assert [c["target"] for c in packet["consumers"][0]["citations"]] == [True, False, True]
+    new = {"paragraphs": live, "body_sha256": "new"}
+    for selected, expected in [(["S0001", "S0003"], True), (["S0003", "S0001"], False),
+                               (["S0001"], False), (["S0001", "S0004"], False)]:
+        answer = {"decisions": [{"record_key": key, "paragraph_keys": selected, "reason": "問答"}]}
+        rules, pending = calibration_rules([packet], answer, records, new, {})
+        assert bool(rules) == expected and bool(pending) != expected
+        if expected:
+            assert rules[key]["consumer_occurrence_segments"] == {"evidence_steps/e": [0, 1]}
