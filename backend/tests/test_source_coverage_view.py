@@ -356,6 +356,28 @@ def test_build_places_the_claim_layer_on_the_source_text(tmp_path: Path, transcr
     assert detail["nodes"]["E1"]["kind"] == "step"
 
 
+def test_coverage_omits_only_unreferenced_superseded_fragments(tmp_path: Path, transcript: Path) -> None:
+    rows = _corpus_rows(transcript)
+    for fragment_id, excerpt in (("OLD-PLACED", "這一段有人抽過。"),
+                                 ("OLD-MISSING", "舊稿中的文字。"),
+                                 ("OLD-REFERENCED", "仍被引用的舊稿文字。")):
+        rows.append(("source_fragments", fragment_id, "candidate", {
+            "fragment_id": fragment_id, "source_id": "SRC-T1", "paragraph_key": "S0003",
+            "verbatim_excerpt": excerpt, "anchor_state": "replaced_by_precise_fragments",
+        }))
+    rows.append(("questions", "Q1", "candidate", {
+        "question_id": "Q1", "source_fragment_id": "OLD-REFERENCED", "answer_claim_ids": ["CL1"],
+    }))
+
+    detail = SourceCoverageReader(FakeStore(rows), tmp_path).build("SRC-T1")
+
+    assert set(detail["fragments"]) == {"FR-1", "OLD-REFERENCED"}
+    assert detail["fragments"]["OLD-REFERENCED"]["anchor_method"] == "excerpt_moved"
+    assert detail["source"]["stats"]["fragments"] == 2
+    assert detail["source"]["stats"]["fragments_placed"] == 1
+    assert detail["segments"][2]["runs"] == [{"start": 0, "end": 8, "fragment_ids": ["FR-1"]}]
+
+
 def test_a_claim_reaches_the_source_through_a_question_that_answers_with_it(tmp_path: Path, transcript: Path) -> None:
     """A claim is not anchored only through its own `evidence_step_ids`.
 
