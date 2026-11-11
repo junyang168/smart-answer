@@ -415,6 +415,35 @@ def coverage_state(catalog):
         **{field:p[field] for field in ('speaker','stance') if p.get(field)}} for k,p in catalog.items()}}
 
 
+def missing_quote_only(job, reason):
+    """Recognize explicit source-only repairs; ambiguous decisions stay pending."""
+    import re
+
+    text = reason.strip()
+    if any(job['jev'].get(field) == 'different' for field in ('speaker_consistency', 'stance_consistency')):
+        return False
+    return (
+        re.match(r'^(?:應|应|需|請|请|只需|只要)?(?:補|补)(?:上|入|掛|挂|引|充|足)', text) is not None
+        and re.search(r'原文|引文|原句|[前後后][一兩两]?(?:句|段)|上文|下文|前文|後文|后文|上下文|開場|开场', text) is not None
+        and re.search(r'改|更正|調整|调整|刪|删|重寫|重写|重述摘要|應為|应为', text) is None
+    )
+
+
+def select_missing_quotes(root, ports, jobs):
+    """Use the source-only reply contract with the already scoped candidates."""
+    prompt = ('只處理上一份答覆所指出的補引文缺口。每項先確認原因只是缺逐字引文，'
+              '且補入後能支持未改的摘要、說話者與立場。若仍需改內容、分類，或找不到唯一的原文位置，'
+              '選needs_source並說明，禁止以原文補綁代替內容修訂。'
+              '能補時選bind，quotes只列必要的新逐字片段。原文共用於source_paragraphs，'
+              '每項只可用material.nearby_paragraph_keys，每個job_id恰好一次。')
+    for batch, raw in f.gpt(root, ports, 'source_binding_completion', jobs,
+                            source.BindingDecisions.model_json_schema(), prompt,
+                            project_input=source.shared_binding_input, semantic_review=False):
+        edits = source.BindingDecisions.model_validate(raw).items
+        f.exactly([edit.model_dump() for edit in edits], [job['job_id'] for job in batch], 'job_id')
+        yield from edits
+
+
 def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False, program_validated=False):
     sid = next(iter(sources)); working = dict(records); updates = {}; generated = {}; outcomes = []; pending = []; values = {}; ready = {}
     pool, _ = group_records(group, records, targets)
@@ -493,6 +522,37 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
 
     for batch, raw in repair_batches(root / 'fidelity-edits', jobs):
         consume(batch, raw)
+    def bind_empty_repairs():
+        quote_jobs = []
+        for job in jobs:
+            key = job['job_id']
+            decision = ready.get(key, {})
+            if (decision.get('basis') == 'gpt_repair' and not decision['patch']
+                    and working[key]['payload'].get('review_status') not in f.PROTECTED
+                    and missing_quote_only(job, decision['reason'])):
+                quote_jobs.append({'job_id': key, 'record': job['record'], 'material': candidates[key],
+                                   'reason': decision['reason'],
+                                   **{field: job[field] for field in ('human_source_decisions', 'source_interpretation')
+                                      if field in job}})
+        for selection in select_missing_quotes(root/'empty-repair-source-bindings', ports, quote_jobs):
+            key = selection.job_id
+            if selection.action == 'bind' and selection.quotes:
+                try:
+                    consume([{'job_id': key}], {'items': [{'job_id': key, 'action': 'repair',
+                        'reason': selection.reason, 'quotes': [quote.model_dump() for quote in selection.quotes]}]})
+                except ValueError as exc:
+                    reason = str(exc)
+                else:
+                    if ready[key]['patch']:
+                        ready[key]['basis'] = 'gpt_source_binding_for_empty_repair'
+                        continue
+                    reason = 'Selected source quote did not add a binding.'
+            else:
+                reason = selection.reason
+            ready.pop(key)
+            pending.append({'object_key': key, 'layer': 'evidence', 'reason': reason})
+    if complete_source:
+        bind_empty_repairs()
     if getattr(ports, 'correct_empty_evidence_once', False):
         invalid = [job for job in jobs if ready.get(job['job_id'], {}).get('basis') == 'gpt_repair'
                    and not ready[job['job_id']]['patch']]
@@ -505,7 +565,9 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                     + (' 保留原摘要，只補所需原文。' if key in getattr(ports, 'preserve_evidence_statements', ()) else '')}})
         for batch, raw in repair_batches(root / 'empty-repair-corrections', corrections):
             consume(batch, raw)
-    # Check the compiled changes before accepting any disposition in this group.
+        if complete_source:
+            bind_empty_repairs()
+    # Unclassified empty repairs retain the existing rejection and Agent handoff.
     for key,decision in ready.items():
         if decision['basis']=='gpt_repair' and not decision['patch']:
             raise ValueError('Evidence repair has no effective changes: '+key)

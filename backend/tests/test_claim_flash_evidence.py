@@ -519,3 +519,94 @@ def test_coverage_split_checks_only_authorized_saved_units_and_replays(tmp_path)
     ports.calls.clear()
     assert check() == edits
     assert not ports.calls
+
+
+@pytest.mark.parametrize('mode', ['literal', 'after_retry', 'stance', 'invalid_quote'])
+def test_empty_repair_uses_only_verified_source_bindings(postgres_store, tmp_path, monkeypatch, mode):
+    preceding = '那尼哥丁姆這個人，他來找耶穌的時候，他有很多很好的資格，很好的背景。'
+    existing = '因為聖經說他是法利賽人。'
+    records, sources = fixture(tmp_path, [preceding + existing], [('S0001', existing)])
+    doc = deepcopy(records['source_documents/S']['payload'])
+    doc.pop('source_body_sha256')
+    doc.pop('source_sha256')
+    payload = records['evidence_steps/E']['payload']
+    payload.update(statement='尼哥丁姆有很好的資格和背景，因為他是法利賽人。', stance='asserted')
+    package = {'package_id': 'nicodemus-empty-repair', 'source_documents': [doc],
+               'source_fragments': [records['source_fragments/F0']['payload']], 'evidence_steps': [payload]}
+    if mode == 'literal':
+        package['observations'] = [{'observation_id': 'O', 'statement': '尼哥丁姆是法利賽人。',
+                                    'source_fragment_id': 'F0'}]
+    postgres_store.apply_plan(postgres_store.plan_package(package))
+    before = postgres_store.get_record_state('evidence_steps', 'E')
+    plan = {'source_id': 'S', 'source_body_sha256': sources['S']['body_sha256'], 'groups': [
+        {'group_id': 'A', 'title': '尼哥丁姆', 'paragraph_keys': ['S0001'],
+         'lower_record_keys': ['evidence_steps/E'], 'reference_record_keys': []}]}
+    if mode == 'literal':
+        plan['groups'][0]['lower_record_keys'].append('observations/O')
+        observation_before = postgres_store.get_record_state('observations', 'O')
+    monkeypatch.setattr(stage.components, 'check', lambda *a, **kw: {
+        'record_fidelity': 'partial',
+        'stance_consistency': 'different' if mode == 'stance' else 'matched',
+        'speaker_consistency': 'matched',
+    })
+
+    class Repair(Ports):
+        correct_empty_evidence_once = mode == 'after_retry'
+
+        def repair(self, request):
+            task = request['input']['task']
+            if task not in {'source_binding_completion', 'evidence_fidelity_repair'}:
+                return super().repair(request)
+            self.calls.append(('gpt', request))
+            jobs = request['input']['jobs']
+            if task == 'source_binding_completion':
+                job, = jobs
+                assert job['job_id'] == 'evidence_steps/E'
+                assert job['material']['nearby_paragraph_keys'] == ['S0001']
+                quote = '不存在的引文。' if mode == 'invalid_quote' else preceding
+                return {'items': [{'job_id': job['job_id'], 'action': 'bind', 'reason': '前句支持原摘要。',
+                                   'quotes': [{'paragraph_key': 'S0001', 'quote': quote}]}]}
+            if mode == 'stance':
+                reason = '補上前句，並將立場改為轉述。'
+            elif mode == 'after_retry' and 'previous_empty_repair' not in jobs[0]:
+                reason = '前句交代尼哥丁姆的背景。'
+            else:
+                reason = '補上前句，與現有引文中的「因為」合讀，可確認教授以法利賽人身分說明尼哥丁姆的資格和背景。'
+            return {'items': [
+                {'job_id': job['job_id'], 'action': 'repair', 'reason': reason}
+                if job['job_id'] == 'evidence_steps/E' else
+                {'job_id': job['job_id'], 'action': 'keep', 'reason': '原引文已直接支持。'}
+                for job in jobs]}
+
+    ports = Repair()
+    previous = saved_inventory(tmp_path/'inventory', sources)
+    root = tmp_path/'run'
+    if mode == 'stance':
+        with pytest.raises(ValueError, match='Evidence repair has no effective changes'):
+            stage.run(postgres_store, 'S', plan, root, ports, previous, apply=True)
+        assert postgres_store.get_record_state('evidence_steps', 'E') == before
+        assert not any(req['input']['task'] == 'source_binding_completion'
+                       for role, req in ports.calls if role == 'gpt')
+        return
+    result = stage.run(postgres_store, 'S', plan, root, ports, previous, apply=True)
+    post = postgres_store.get_record_state('evidence_steps', 'E')
+    selection_calls = [req for role, req in ports.calls if role == 'gpt'
+                       and req['input']['task'] == 'source_binding_completion']
+    if mode in {'literal', 'after_retry'}:
+        assert result['status'] == 'completed', result['groups']
+        assert len(selection_calls) == 1
+        a, b = before['payload'], post['payload']
+        assert a['statement'] == b['statement'] and a['stance'] == b['stance'] and a['speaker'] == b['speaker']
+        assert b['source_fragment_ids'][0] == 'F0'
+        fragment = postgres_store.get_record_state('source_fragments', b['source_fragment_ids'][1])['payload']
+        assert fragment['verbatim_excerpt'] == preceding
+        if mode == 'literal':
+            assert postgres_store.get_record_state('observations', 'O') == observation_before
+            assert sum(req['input']['task'] == 'evidence_fidelity_repair' for role, req in ports.calls if role == 'gpt') == 1
+    else:
+        assert result['status'] == 'needs_attention'
+        assert post == before
+        assert bool(selection_calls) == (mode == 'invalid_quote')
+    replay = Repair()
+    assert stage.run(postgres_store, 'S', plan, root, replay, previous, apply=True)['status'] == result['status']
+    assert not replay.calls
