@@ -80,13 +80,24 @@ def active_root(root):
         raise ValueError('argument material correction differs from its uncommitted parent')
     original_child = root/'material-scope-continuations'/e.digest(parent)
     followup = root/'route-context-continuation.json'
-    if followup.exists() and (authority.get('source_context_keys') or authority.get('statement_correction')):
+    if followup.exists():
         scoped = json.loads(followup.read_text())
         review = json.loads((original_child/'verification.json').read_text())
         pending = review['pending']
-        if scoped.get('review_sha256') != e.digest(review) or not scoped.get('owner_direction') or len(pending) != 1:
+        if scoped.get('review_sha256') != e.digest(review) or not scoped.get('owner_direction') or not pending:
             raise ValueError('argument route context differs from the saved source clarification')
-        if authority.get('statement_correction'):
+        if 'findings' in scoped:
+            routes = {route['job_id']: route for route in review['routes']}
+            expected = {finding['object_key'] for finding in parent['pending']}
+            notes = scoped['findings']
+            if (set(notes) != expected or {finding['object_key'] for finding in pending} != expected
+                    or any(routes.get(key, {}).get('action') != 'needs_source'
+                           or routes[key]['reason'] != note.get('previous_reason') or not note.get('reason')
+                           for key, note in notes.items())):
+                raise ValueError('argument route context differs from the pending source routes')
+        elif len(pending) != 1:
+            raise ValueError('argument route context differs from the saved source clarification')
+        elif authority.get('statement_correction'):
             checked = json.loads((original_child/'statement-correction.json').read_text())
             if (pending[0]['object_key'] != authority['statement_correction']['object_key']
                     or pending[0]['layer'] != 'source' or scoped.get('previous_reason') != pending[0]['reason']
@@ -97,7 +108,19 @@ def active_root(root):
                      and item['object_key'] == pending[0]['object_key']
                      and item['reason'] == scoped.get('finding') for item in review['outcomes']):
             raise ValueError('argument route context differs from the saved source clarification')
-        return original_child/'route-context'/e.digest(scoped)
+        route_root = original_child/'route-context'/e.digest(scoped)
+        final = root/'route-final-clarification.json'
+        if final.exists():
+            check = json.loads(final.read_text())
+            reviewed = json.loads((route_root/'verification.json').read_text())
+            pending_keys = {finding['object_key'] for finding in reviewed['pending']}
+            completed = {route['job_id'] for route in reviewed['routes'] if route['action']=='complete'}
+            if (check.get('review_sha256') != e.digest(reviewed) or not check.get('owner_direction')
+                    or not pending_keys or pending_keys != set(check['source_context_keys'])
+                    or not pending_keys <= completed):
+                raise ValueError('final clarification differs from the completed routes with pending support')
+            return route_root/'final-clarification'/e.digest(check)
+        return route_root
     return original_child
 
 
@@ -276,7 +299,12 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         stopped=json.loads((root/'result.json').read_text())
         if stopped.get('pending'):e.save(root/'stopped-results'/(e.digest(stopped)+'.json'),stopped)
         authority = json.loads((root / 'material-scope-continuation.json').read_text())
-        if authority.get('source_context_keys') and not (root/'route-context-continuation.json').exists():
+        if (root/'route-final-clarification.json').exists():
+            child = active_root(root)
+            group = next(g for g in plan['groups'] if g['group_id'] == group_id)
+            final = json.loads((root/'route-final-clarification.json').read_text())
+            result = clarify_route_source(store, source_id, group, child.parent.parent, child, ports, final, apply=apply)
+        elif authority.get('source_context_keys') and not (root/'route-context-continuation.json').exists():
             group = next(g for g in plan['groups'] if g['group_id'] == group_id)
             result = clarify_route_source(store, source_id, group, root, active_root(root), ports, authority, apply=apply)
         elif authority.get('final_support_request_path'):
@@ -294,7 +322,11 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         route_path = Path(_parent_root)/'route-context-continuation.json'
         if route_path.exists():
             route_context = json.loads(route_path.read_text())
-            parent['pending'][0]['reason'] = route_context['finding']
+            if 'findings' in route_context:
+                for finding in parent['pending']:
+                    finding['reason'] = route_context['findings'][finding['object_key']]['reason']
+            else:
+                parent['pending'][0]['reason'] = route_context['finding']
     group=next(g for g in plan['groups'] if g['group_id']==group_id);ids=group['claim_ids']
     if claim_ids is not None:
         if claim_ids not in group.get('sequential_claim_batches', []):
