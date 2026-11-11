@@ -1,5 +1,6 @@
+from backend.sunday_data_lock import sunday_write
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -30,6 +31,7 @@ from .image_to_text import ImageToText
 from .script_delta import ScriptConflictError, ScriptDelta
 from .sermon_comment import SermonCommentManager
 from .sermon_meta import Sermon, SermonMetaManager
+from .sermon_publication import FIELDS as PUBLICATION_FIELDS, publication_fields
 
 env_file = os.getenv("ENV_FILE")
 if env_file:
@@ -76,6 +78,9 @@ class SermonManager:
             "author_name",
             "last_updated",
             "published_date",
+            "published_by",
+            "published_by_name",
+            "publication_schema_version",
             "title",
             "summary",
             "keypoints",
@@ -112,6 +117,7 @@ class SermonManager:
             observer.schedule(event_handler, catalog_dir, recursive=False)
         observer.start()
 
+    @sunday_write
     def get_next_fellowship(self):
         entries = load_fellowship_entries(self.fellowship_file)
         next_date, updated_entries, changed = compute_next_fellowship(entries)
@@ -236,6 +242,8 @@ class SermonManager:
             write_back_generated_subtitles,
         )
 
+        if (Path(self.base_folder)/'transcript_review'/item/'context.json').is_file():
+            raise PermissionError('此講道請透過圖文審核修改；不在背景改寫人工稿')
         source_path = self.authoritative_transcript_path(item)
         report = write_back_generated_subtitles(
             source_path,
@@ -743,16 +751,19 @@ class SermonManager:
         sermon = self._sm.get_sermon_metadata(user_id, item)
         if not sermon:
             return {"message": "sermon not found"}
+        publication = publication_fields(user_id, self._acl.get_user(user_id).get("name"), datetime.now(timezone.utc))
         published_script_sha256 = ScriptDelta(
             self.base_folder, item
         ).publish(
             sermon.assigned_to,
             expected_review_sha256=expected_review_sha256,
+            publication=publication,
         )
         before_snapshot = self._snapshot_sermon_meta(sermon)
         sermon.status = 'published'
-        sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.now())
-        self._sm.save_sermon_metadata()
+        for field in PUBLICATION_FIELDS:
+            setattr(sermon, field, publication[field])
+        self._sm.save_sermon_metadata(publication_item=item)
         self._log_sermon_meta_change(
             user_id,
             item,
@@ -770,6 +781,20 @@ class SermonManager:
         if not permissions.canRead:
             return  {"message": "You don't have permission to update this item"}
 
+        from backend.pipeline.media_batch.publication import media_only_payload
+        pending = media_only_payload(Path(self.base_folder), item)
+        if pending is not None:
+            return pending
+
+        if (Path(self.base_folder)/'transcript_review'/item/'context.json').is_file():
+            from .transcript_review import read
+            published = read(Path(self.base_folder)/'script_published'/f'{item}.json')
+            if published is not None:
+                from backend.pipeline.source_projection import live_script
+                # Publication keeps the reviewed source intact for history.
+                # Reader/model consumers always receive the live projection;
+                # raw revisions are available through authenticated history.
+                return {**published, 'script': live_script(published.get('script', []))}
         sermon = self._sm.get_sermon_metadata(user_id, item)
         status = sermon.status
         sd = ScriptDelta(self.base_folder, item)
@@ -955,6 +980,8 @@ class SermonManager:
         return copilot.chat(docs, history)
     
     def get_sermon_series(self):
+        from .series_review_catalog import SeriesReviewCatalog
+        review_catalog=SeriesReviewCatalog(self.base_folder,os.getenv('TRANSCRIPT_REVIEW_BETA_DATA_DIR'))
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
         if not os.path.exists(series_meta_file):
             return []
@@ -965,7 +992,7 @@ class SermonManager:
             for item in series.get('sermons', []):
                 sermon_meta = self._sm.get_sermon_metadata('junyang168@gmail.com', item)
                 if sermon_meta:
-                    sermons.append(sermon_meta)
+                    sermons.append(sermon_meta.model_copy(update=review_catalog.for_item(item)))
             series['sermons'] = sermons
         return series_meta
 

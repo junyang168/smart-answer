@@ -245,6 +245,28 @@ def test_transport_failure_has_no_api_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert len(calls) == 2
 
 
+def test_cache_usage_is_observed_without_api_and_missing_usage_is_not_reused(tmp_path, monkeypatch):
+    directories=[]
+    def fake_run(command, **kwargs):
+        if command[1:3] == ['login', 'status']:
+            return _completed(command, stdout='Logged in using ChatGPT\n')
+        assert '--json' in command
+        assert not API_BILLING_ENV_VARS.intersection(kwargs['env'])
+        directories.append(kwargs['cwd'])
+        Path(command[command.index('--output-last-message')+1]).write_text('{}')
+        event={'type':'turn.completed','usage':{'input_tokens':2000,'cached_input_tokens':1500,'output_tokens':5}}
+        return _completed(command, stdout=json.dumps(event) if len(directories)==1 else '')
+    monkeypatch.setattr('backend.pipeline.codex_subscription_client.subprocess.run',fake_run)
+    client=CodexSubscriptionClient(model='gpt-5.6-sol',executable='codex')
+    client.cache_usage_events=True
+    client.cache_working_directory=tmp_path/'shared-context'
+    assert client.generate_json('system','user',{'type':'object'})=={}
+    assert client.last_raw_response['usage']['cached_input_tokens']==1500
+    assert client.generate_json('system','user2',{'type':'object'})=={}
+    assert client.last_raw_response['usage'] is None
+    assert directories==[tmp_path/'shared-context']*2
+
+
 def test_visual_source_image_is_attached_to_codex_exec(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

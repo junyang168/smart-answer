@@ -1,0 +1,305 @@
+"""Independent, non-LLM incident monitor with a private durable admin outbox."""
+from __future__ import annotations
+
+from contextlib import closing, contextmanager
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import sqlite3
+import time
+import uuid
+
+from .task_audit import read_events, incident_detail, group_summary, completed_summary, incident_resolution, latest_attempts
+
+import httpx
+
+PREFIX = "【主日助理系統求助】"
+LINK = "https://dallas-hlc.org/admin/sunday-assistant"
+INCIDENTS = "SELECT i.*,COALESCE(c.details,'[]') details,COALESCE(c.resolution,'unverified') resolution FROM incidents i LEFT JOIN incident_context c ON c.incident=i.id"
+
+
+class AdminMonitor:
+    def __init__(self, root: Path, env=None, client=None, started=None):
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.path = root / "admin-monitor.sqlite3"
+        self.env = env if env is not None else os.environ
+        self.client = client or httpx
+        self.started = time.time() if started is None else started
+        with self.db() as db:
+            db.executescript("""
+              CREATE TABLE IF NOT EXISTS incidents(id TEXT PRIMARY KEY, kind TEXT, label TEXT,
+                active INTEGER, count INTEGER, first_seen REAL, last_seen REAL);
+              CREATE TABLE IF NOT EXISTS notices(key TEXT PRIMARY KEY, incident TEXT, phase TEXT,
+                group_id TEXT, text TEXT, status TEXT, updated REAL, remote_id TEXT);
+              CREATE TABLE IF NOT EXISTS monitor_kv(key TEXT PRIMARY KEY, value TEXT);
+            """)
+            db.execute("CREATE TABLE IF NOT EXISTS incident_context(incident TEXT PRIMARY KEY, details TEXT NOT NULL, resolution TEXT NOT NULL)")
+        self.path.chmod(0o600)
+
+    @contextmanager
+    def db(self):
+        with closing(sqlite3.connect(self.path, timeout=2)) as db, db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA journal_mode=WAL")
+            yield db
+
+    def settings_snapshot(self):
+        with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db, db:
+            row = db.execute("SELECT value FROM kv WHERE key='settings'").fetchone()
+            settings = json.loads(row[0]) if row else {}
+            row = db.execute("SELECT value FROM kv WHERE key='worker'").fetchone()
+            worker = json.loads(row[0]) if row else {}
+            errors = db.execute("SELECT COUNT(*) FROM messages WHERE status='error'").fetchone()[0]
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ppt_jobs'").fetchone():
+                errors += db.execute("SELECT COUNT(*) FROM ppt_jobs WHERE status='error' AND day>=date('now','-1 day')").fetchone()[0]
+            ppt = db.execute("SELECT value FROM kv WHERE key='ppt_readiness'").fetchone()
+            if ppt and json.loads(ppt[0]).get('status') == 'error':
+                errors += 1
+        with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db:
+            row = db.execute("SELECT value FROM kv WHERE key='fellowship_email'").fetchone()
+            if settings.get('fellowship_enabled') and row and json.loads(row[0]).get('status') == 'error':
+                errors += 1
+        # A mail ambiguity or pending OAuth connection is not an internal error.
+        config_file = Path(self.env.get('SUNDAY_GMAIL_CONFIG') or self.root.parent / 'config/sunday_gmail.json')
+        mail_db = self.root / 'gmail/mail.sqlite3'
+        mail_enabled = False
+        if settings.get('enabled') and config_file.exists():
+            try:
+                mail_enabled = bool(json.loads(config_file.read_text()).get('enabled'))
+            except (ValueError, OSError):
+                errors += 1
+        if mail_enabled and mail_db.exists():
+            with closing(sqlite3.connect(f"file:{mail_db}?mode=ro", uri=True, timeout=2)) as db, db:
+                errors += db.execute("SELECT COUNT(*) FROM mail_kv WHERE key LIKE 'status:%' AND json_extract(value,'$.status')='error'").fetchone()[0]
+                errors += db.execute("SELECT COUNT(*) FROM mail_messages m WHERE m.status='error' OR EXISTS (SELECT 1 FROM mail_files f WHERE f.message_key=m.key AND f.status='error')").fetchone()[0]
+            with closing(sqlite3.connect(f"file:{self.root / 'assistant.sqlite3'}?mode=ro", uri=True, timeout=2)) as db, db:
+                row = db.execute("SELECT value FROM kv WHERE key='gmail_worker'").fetchone()
+                mail_worker = json.loads(row[0]) if row else {}
+            if mail_worker.get('status') == 'error':
+                errors += 1
+            elif mail_worker.get('status') == 'processing':
+                try:
+                    errors += int(time.time() - datetime.fromisoformat(mail_worker['at']).timestamp() > 300)
+                except (ValueError, KeyError):
+                    errors += 1
+        with self.db() as db:
+            row=db.execute("SELECT value FROM monitor_kv WHERE key='task_cursors'").fetchone()
+        self.audit_events,self.audit_cursors=read_events(self.root,json.loads(row[0]) if row else {})
+        return settings, worker, errors
+
+    def record_exit(self, now=None):
+        now = time.time() if now is None else now
+        with self.db() as db:
+            row = db.execute("SELECT value FROM monitor_kv WHERE key='exits'").fetchone()
+            exits = [stamp for stamp in json.loads(row[0]) if now - stamp < 600] if row else []
+            db.execute("INSERT OR REPLACE INTO monitor_kv VALUES('exits',?)", (json.dumps([*exits, now][-20:]),))
+
+    def conditions(self, worker, errors, bridge, backend_ok, now):
+        # waiting_reply/review are intentionally absent: no input/clarification alerts.
+        found = {}
+        if errors:
+            found["task_errors"] = ("內部任務執行失敗", errors, 0)
+        if worker.get("status") == "error":
+            found["worker"] = ("工作程序執行失敗", 1, 0)
+        elif now - self.started >= 60:
+            try:
+                stale = now - datetime.fromisoformat(worker["at"]).timestamp() >= 300
+            except (KeyError, ValueError, TypeError):
+                stale = True
+            if stale:
+                found["worker"] = ("工作程序超過五分鐘沒有更新進度", 1, 0)
+        if not bridge or bridge.get("state") != "ready" or bridge.get("error") or not bridge.get("synced"):
+            found["transport"] = ("WhatsApp 連線或群消息同步持續異常", 1, 120)
+        if not backend_ok:
+            found["backend"] = ("網站後台連線持續異常", 1, 60)
+        with self.db() as db:
+            row = db.execute("SELECT value FROM monitor_kv WHERE key='exits'").fetchone()
+        if row and sum(now - stamp < 600 for stamp in json.loads(row[0])) >= 3:
+            found["restart_loop"] = ("助理程序十分鐘內異常退出至少三次", 1, 0)
+        return found
+
+    def observe(self, conditions, settings, now):
+        events=getattr(self,'audit_events',[])
+        updates={event['ref']:event for event in events if event['phase']!='failure'}
+        failures=[event for event in events if event['phase']=='failure']
+        # Failure and recovery may both happen between two monitor polls. Retain
+        # one historical notice instead of losing the task or fabricating activity.
+        conditions=dict(conditions)
+        historical=set()
+        for kind in ('worker','task_errors'):
+            selected=[e for e in failures if ('worker' if e['task_type']=='worker' else 'task_errors')==kind]
+            if selected and kind not in conditions:
+                attempts=[]
+                for event in selected:
+                    item=incident_detail(event)
+                    if event['ref'] in updates:item['phase']=updates[event['ref']]['phase']
+                    attempts.append(item)
+                latest=latest_attempts(attempts)
+                if all(e['phase'] in {'health_only','completed'} for e in latest):
+                    historical.add(kind)
+                conditions[kind]=('內部任務執行失敗',len(latest),0)
+        with self.db() as db:
+            # Update even a closed incident when a later receipt proves completion.
+            for row in db.execute(INCIDENTS).fetchall():
+                details=json.loads(row['details'])
+                for item in details:
+                    update=updates.get(item['ref'])
+                    if update:
+                        item.update(phase=update['phase'],outcome_at=update['at'],outcome=update['detail'])
+                resolution=incident_resolution(details,row['count'])
+                db.execute('INSERT OR REPLACE INTO incident_context VALUES(?,?,?)',(row['id'],json.dumps(details,ensure_ascii=False),resolution))
+            active={row['kind']:row for row in db.execute(INCIDENTS+' WHERE i.active=1')}
+            for kind,old in active.items():
+                if kind not in conditions and any(d['phase']=='resumed' for d in latest_attempts(json.loads(old['details']))):
+                    conditions[kind]=(old['label'],old['count'],0)
+                if kind not in conditions:
+                    db.execute('UPDATE incidents SET active=0,last_seen=? WHERE id=?',(now,old['id']))
+                    db.execute("UPDATE notices SET status='cancelled',updated=? WHERE incident=? AND phase='open' AND status='queued'",(now,old['id']))
+            for kind,(label,count,delay) in conditions.items():
+                old=active.get(kind);incident=old['id'] if old else uuid.uuid4().hex[:12]
+                first=old['first_seen'] if old else now
+                count=max(count,old['count']) if old else count
+                details=json.loads(old['details']) if old else []
+                refs={d['ref'] for d in details}
+                for event in failures:
+                    if ('worker' if event['task_type']=='worker' else 'task_errors')!=kind or event['ref'] in refs:continue
+                    item=incident_detail(event)
+                    update=updates.get(event['ref'])
+                    if update:item.update(phase=update['phase'],outcome_at=update['at'],outcome=update['detail'])
+                    details.append(item);refs.add(event['ref'])
+                resolution=incident_resolution(details,count)
+                db.execute('INSERT OR REPLACE INTO incidents(id,kind,label,active,count,first_seen,last_seen) VALUES(?,?,?,?,?,?,?)',
+                    (incident,kind,label,int(kind not in historical),count,first,now))
+                db.execute('INSERT OR REPLACE INTO incident_context VALUES(?,?,?)',(incident,json.dumps(details,ensure_ascii=False),resolution))
+                summary=group_summary(details)
+                if kind in historical:
+                    phase='completed' if resolution=='completed' else 'recovered'
+                    result='已取得該任務的完成回執。' if resolution=='completed' else '目前故障條件已解除，但任務是否補做完成仍待核實。'
+                    text=f"{PREFIX}\n事件 {incident}：已記錄{count}項短暫任務故障。\n{summary}\n{result}原始錯誤與處理紀錄已保留於管理頁；未因告警自動重寄郵件。\n{LINK}"
+                    self._queue(db,incident,phase,settings['admin_group'],text,now)
+                elif now-first>=delay:
+                    text=f"{PREFIX}\n事件 {incident}：{label}（{count}項）。\n{summary}\n請管理員在管理頁核對已寫入部分與回執，再處理或重試。這是內部故障，不是等待群員補資料；告警本身不會重做任務或重寄郵件。\n{LINK}"
+                    self._queue(db,incident,'open',settings['admin_group'],text,now)
+            for row in db.execute(INCIDENTS+" WHERE i.active=0 AND EXISTS(SELECT 1 FROM notices n WHERE n.incident=i.id AND n.status='sent')").fetchall():
+                if row['resolution']=='completed':
+                    text=f"{PREFIX}\n事件 {row['id']}：已取得失敗任務的完成回執，補做結果已核實。\n{completed_summary(json.loads(row['details']))}\n原始錯誤與完成回執仍保留於管理頁。\n{LINK}"
+                    phase='completed'
+                else:
+                    text=f"{PREFIX}\n事件 {row['id']}：故障條件已解除；任務是否補做完成仍待核實。\n{group_summary(json.loads(row['details']))}\n這只表示目前檢查未再報錯，不代表郵件已寄出或資料已登記。請核對管理頁的原始錯誤、已完成步驟與回執。\n{LINK}"
+                    phase='recovered'
+                self._queue(db,row['id'],phase,settings['admin_group'],text,now)
+            if hasattr(self,'audit_cursors'):
+                db.execute("INSERT OR REPLACE INTO monitor_kv VALUES('task_cursors',?)",(json.dumps(self.audit_cursors),))
+        self.audit_events=[]
+
+    @staticmethod
+    def _queue(db, incident, phase, group, text, now):
+        db.execute("INSERT OR IGNORE INTO notices VALUES(?,?,?,?,?,'queued',?,NULL)", (f"admin-help:{incident}:{phase}", incident, phase, group, text, now))
+
+    def queue_test(self, settings, now=None):
+        if not settings.get("admin_help_enabled") or not settings.get("admin_group"):
+            raise ValueError("網站管理員求助群尚未啟用")
+        now = time.time() if now is None else now
+        incident = uuid.uuid4().hex[:12]
+        text = f"{PREFIX}\n【上線測試，無需處理】此訊息確認內部故障可通知網站管理員；沒有實際故障，也未轉發原群內容。\n{LINK}"
+        with self.db() as db:
+            self._queue(db, incident, "test", settings["admin_group"], text, now)
+        return f"admin-help:{incident}:test"
+
+    def request(self, method, path, body=None):
+        base = self.env.get("SUNDAY_WHATSAPP_BRIDGE_URL", "http://127.0.0.1:8766")
+        return self.client.request(method, base + path, json=body, headers={"Authorization": "Bearer " + self.env["SUNDAY_ASSISTANT_SECRET"]}, timeout=3)
+
+    def deliver(self, now):
+        with self.db() as db:
+            db.execute("UPDATE notices SET status='unknown' WHERE status='sending' AND updated<?", (now - 30,))
+            rows = db.execute("SELECT * FROM notices WHERE status IN ('queued','unknown') ORDER BY updated LIMIT 3").fetchall()
+        for row in rows:
+            status = "unknown"
+            remote = None
+            try:
+                if row["status"] == "queued":
+                    with self.db() as db:
+                        claimed = db.execute("UPDATE notices SET status='sending',updated=? WHERE key=? AND status='queued'", (now, row["key"])).rowcount
+                    if not claimed:
+                        continue
+                    response = self.request("POST", "/send", {"key": row["key"], "group_id": row["group_id"], "text": row["text"]})
+                    if response.status_code in {409, 503}:
+                        status = "queued"  # Explicitly not submitted to WhatsApp.
+                    elif response.status_code == 403:
+                        status = "held"  # Destination/settings changed; no rerouting.
+                    else:
+                        response.raise_for_status()
+                        data = response.json()
+                        status = data.get("status") if data.get("status") in {"sent", "held"} else "unknown"
+                        remote = data.get("message_id")
+                else:
+                    from urllib.parse import quote
+                    response = self.request("GET", "/outbox/" + quote(row["key"], safe=""))
+                    response.raise_for_status()
+                    data = response.json()
+                    status = "sent" if data.get("status") == "sent" else "unknown"
+                    remote = data.get("message_id")
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                status = "queued" if row["status"] == "queued" else "unknown"
+            except Exception:
+                pass  # Unknown outcomes are queried, never blindly resent.
+            with self.db() as db:
+                db.execute("UPDATE notices SET status=?,updated=?,remote_id=? WHERE key=?", (status, now, remote, row["key"]))
+
+    def tick(self, now=None):
+        now = time.time() if now is None else now
+        database_ok = True
+        try:
+            settings, worker, errors = self.settings_snapshot()
+            cached = {key: settings.get(key) for key in ["enabled", "admin_help_enabled", "admin_group"]}
+            with self.db() as db:
+                db.execute("INSERT OR REPLACE INTO monitor_kv VALUES('last_settings',?)", (json.dumps(cached),))
+        except Exception:
+            database_ok = False
+            with self.db() as db:
+                row = db.execute("SELECT value FROM monitor_kv WHERE key='last_settings'").fetchone()
+            settings, worker, errors = (json.loads(row[0]) if row else {}), {}, 0
+        if not settings.get("admin_help_enabled") or not settings.get("admin_group"):
+            return
+        if settings.get("enabled"):
+            try:
+                response = self.request("GET", "/status")
+                response.raise_for_status()
+                bridge = response.json()
+            except Exception:
+                bridge = None
+            try:
+                response = self.client.request("GET", self.env["FULL_ARTICLE_SERVICE_URL"] + "/healthz", timeout=2)
+                backend_ok = response.status_code == 200
+            except Exception:
+                backend_ok = False
+            if database_ok:
+                conditions = self.conditions(worker, errors, bridge, backend_ok, now)
+            else:
+                # Do not report another incident recovered while its state is unreadable.
+                with self.db() as db:
+                    conditions = {row["kind"]: (row["label"], row["count"], 0) for row in db.execute("SELECT * FROM incidents WHERE active=1")}
+                conditions["database"] = ("執行資料庫持續無法讀取", 1, 60)
+            self.observe(conditions, settings, now)
+        self.deliver(now)
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO monitor_kv VALUES('last_check',?)", (json.dumps(now),))
+
+
+def monitor_state(root):
+    path = Path(root) / "admin-monitor.sqlite3"
+    if not path.exists():
+        return {"incidents": [], "notices": [], "last_check": None}
+    try:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db, db:
+            db.row_factory = sqlite3.Row
+            row = db.execute("SELECT value FROM monitor_kv WHERE key='last_check'").fetchone()
+            query=INCIDENTS if db.execute("SELECT 1 FROM sqlite_master WHERE name='incident_context'").fetchone() else 'SELECT * FROM incidents'
+            return {"incidents": [{**dict(r), 'details':json.loads(dict(r).get('details') or '[]')} for r in db.execute(query+" ORDER BY first_seen DESC LIMIT 30")],
+                    "notices": [dict(r) for r in db.execute("SELECT key,phase,status,updated FROM notices ORDER BY updated DESC LIMIT 30")],
+                    "last_check": json.loads(row[0]) if row else None}
+    except sqlite3.Error:
+        return {"incidents": [], "notices": [], "last_check": None, "error": "監測狀態暫時無法讀取"}

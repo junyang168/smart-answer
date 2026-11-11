@@ -1,0 +1,151 @@
+{
+  "schema_version": "full-video-production-trial-summary.v1",
+  "checked_at_utc": "2026-10-28T19:48:46.720971+00:00",
+  "code_sha": "3c9fa5c27e372132934f8dc085964db3200aa8a2",
+  "lecture_id": "S 201011 林前2 屬靈人看透",
+  "source_sha256": "212ee21a7974fe9b0062d2d9a8f0ee988d4d37ec8b0ff0a212f7e03203bb8bba",
+  "source_selection_sha256": "9c3752605020e9ae4b16f1a3fa85851b7f5a4b4d4b10d8e9e906349b85f32db1",
+  "source_classification": "Production ready/unassigned, patched and review bodies identical, automatic headings present; no recorded human body edits, not proof of complete historical absence.",
+  "source_video_dimensions": [
+    854,
+    480
+  ],
+  "source_video_duration_seconds": 4098.560998,
+  "working_audio_duration_ms": 4098577,
+  "window_count": 5,
+  "fresh_asr_calls": 23,
+  "vocabulary_id": "wang-professor.v1",
+  "vocabulary_sha256": "612c1c756438f4ef6a521034904e57aa50caab145f1b41f881a2d6188bc65bf6",
+  "original_paragraphs": 190,
+  "reading_paragraphs": 188,
+  "correction_status_counts": {
+    "machine_supported": 110
+  },
+  "withheld_correction_counts": {
+    "withheld_invalid_exact_range": 3
+  },
+  "editorial_exclusions": [
+    {
+      "paragraph_id": "w00-p0000",
+      "old": "奇怪。呃，好，那關掉，重新開始。對，我現在大概要把那個關……我看，我這裡出來，出來，出來，可以，出來了。好，沒有問題。",
+      "reason": "講員在開場時調整投影片與螢幕顯示的現場操作雜音，與講道內容無關。",
+      "kind": "technical_setup",
+      "start": 0,
+      "end": 59,
+      "source_text_sha256": "b67ebde4f97cb8704787c584bd743dbe42242435c72eae2107a6a9f683ccd36b",
+      "derivation": "model_selected_non_sermon_exclusion",
+      "human_confirmed": false
+    },
+    {
+      "paragraph_id": "w04-p0015",
+      "old": "講清楚了。我還有五分鐘，我要講了，趕快。",
+      "reason": "講員查看講道剩餘時間的口頭現場事務催促，與講道解經無關。",
+      "kind": "logistics",
+      "start": 0,
+      "end": 20,
+      "source_text_sha256": "b3ce43b53df47810928a97125891f7d229609898c7b0efd0c477c982eb36eb81",
+      "derivation": "model_selected_non_sermon_exclusion",
+      "human_confirmed": false
+    },
+    {
+      "paragraph_id": "w04-p0024",
+      "old": "我講時間差不多，我受時間的控制。",
+      "reason": "講員提及講道時間掌控的現場過渡語，與講道信息無關。",
+      "kind": "logistics",
+      "start": 22,
+      "end": 38,
+      "source_text_sha256": "b3c48104145a76a02b99bc9c75b22843b4292fd092771fb416313c20c41181e2",
+      "derivation": "model_selected_non_sermon_exclusion",
+      "human_confirmed": false
+    }
+  ],
+  "withheld_editorial_deletions": 0,
+  "slide_states": 61,
+  "visual_assets": 61,
+  "visual_text_regions": 403,
+  "uncertain_text_regions": 0,
+  "diagram_assets": 1,
+  "svg_reconstructions": 1,
+  "visibility_ms": {
+    "no_slide": 30680,
+    "visible": 4066337,
+    "unknown": 1560
+  },
+  "timing_issue_count": 0,
+  "mechanical_errors": 0,
+  "untimed_reading_paragraphs": 0,
+  "native_frame_pts": {
+    "sample_count": 7882,
+    "native_frame_count": 102464,
+    "time_base": "1/12800",
+    "max_sample_rounding_delta_ms": 0.0,
+    "errors": []
+  },
+  "discarded_submillisecond_tail_samples": 7,
+  "recovered_paragraph_reviews": 0,
+  "model_call_states": {
+    "complete": 115
+  },
+  "model_call_stages": {
+    "whole_video_non_sermon_exclusions": 1,
+    "full_video_slide_classification": 9,
+    "slide_json_repair_once": 1,
+    "audio_correction_proposals": 23,
+    "proposal_structure_repair_once": 14,
+    "asr": 23,
+    "punctuation_layout_repair": 2,
+    "punctuation_layout": 5,
+    "slide_visual_structure_repair_once": 6,
+    "slide_visual_extraction": 31
+  },
+  "estimated_usd": 1.2974902750000008,
+  "cost_is_invoice": false,
+  "pricing_as_of": "2026-10-27, existing pipeline rates",
+  "handoff_visual_blocks": 61,
+  "handoff_readable_visual_blocks": 61,
+  "compiled_visual_sentence_count": 61,
+  "compiled_prompt_sha256": "d8ed20210addb4bec07b2d6aa858cc1bf23cf6c7dbf38f15e2921525d3708a37",
+  "spoken_text_unchanged_in_handoff": true,
+  "unapproved_visual_sources_rejected": true,
+  "knowledge_store_writes": 0,
+  "production_stage_files_unchanged": true,
+  "production_status_after": "ready",
+  "production_assignee_after": null,
+  "repeat_asr_veto_calls": 0,
+  "automated_tests_passed": 110,
+  "frontend_typecheck_passed": true,
+  "artifact_sha256s": {
+    "full_transcript.json": "038d530734e74d9d63265695869d5054ec8affd99211bfc1061d2097f45c134a",
+    "timing_audit.json": "6c644c4de7d1014d8d23636176e7cd8e2fa6a4ef84c5f2396988ed78cd158e69",
+    "frame_pts_audit.json": "1c684caa91877ce61a8cd94109b71ae60f27ddb253bde44c3c98f37d0f37934d",
+    "argument_source_packet.json": "cc48566c9be20c1806069dba11531ef6b524ee5ee006e33b41dbe8954dbfc950",
+    "handoff/extraction_handoff.json": "2cf0659c7008c7f9199725a096621446b4d02b010851f9ae0e2766c8614f679c",
+    "engineering_recovery.json": "03f3ec83f3d0184f5442520d0fe0ea548952a86f2d00696c4f123c68b7697102",
+    "engineering_recovery_02.json": "07639e31d2c3f57ca86658d2b45eabc5a102246fce1f041bef482f0ee9ac8aa6"
+  },
+  "preview_url": "http://127.0.0.1:4499/",
+  "human_confirmed": false,
+  "transcription_accuracy_measured": false,
+  "slide_precision_recall_measured": false,
+  "preview_verification": {
+    "url": "http://127.0.0.1:4499/",
+    "title": "S 201011 林前2 屬靈人看透 完整圖文校對稿",
+    "paragraph_sections": 188,
+    "late_seek_requested_seconds": 3602.0,
+    "late_seek_observed_seconds": 3602.151228,
+    "media_duration_seconds": 4098.560998,
+    "media_ready_state": 4,
+    "media_error": null,
+    "paused_after_test": true,
+    "paused_at_seconds": 3614.936108,
+    "diagram_slide_expanded": true,
+    "diagram_image_complete": true,
+    "diagram_image_dimensions": [
+      642,
+      480
+    ],
+    "diagram_ocr_text": "心(לֵב, καρδία)\n理性\n情感\n意志\n心=裡面的 人=隱藏的人=靈\n=mind",
+    "svg_display_inspected": true,
+    "audio_content_accuracy_certified": false
+  }
+}

@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 import git
+from backend.sunday_data_lock import sunday_write
 from typing import BinaryIO, Iterable, List, Optional
 from collections.abc import Sequence
 
@@ -451,6 +452,7 @@ class ArticleRepository:
         )
 
 
+    @sunday_write
     def create_fellowship(self, entry: FellowshipEntry) -> FellowshipEntry:
         entries = self._load_fellowship_entries()
         if any(existing.date == entry.date for existing in entries):
@@ -459,6 +461,7 @@ class ArticleRepository:
         self._save_fellowship_entries(entries)
         return entry
 
+    @sunday_write
     def update_fellowship(self, date: str, entry: FellowshipEntry) -> FellowshipEntry:
         entries = self._load_fellowship_entries()
         target = None
@@ -474,6 +477,7 @@ class ArticleRepository:
         self._save_fellowship_entries(entries)
         return entry
 
+    @sunday_write
     def delete_fellowship(self, date: str) -> None:
         entries = self._load_fellowship_entries()
         new_entries = [entry for entry in entries if entry.date != date]
@@ -481,6 +485,7 @@ class ArticleRepository:
             raise ValueError(f"Fellowship date {date} not found")
         self._save_fellowship_entries(new_entries)
 
+    @sunday_write
     def set_fellowship_email_content(
         self,
         date: str,
@@ -567,6 +572,7 @@ class ArticleRepository:
         if unavailable:
             raise ValueError(f"以下同工於 {date_text} 無法服事：{', '.join(unavailable)}")
 
+    @sunday_write
     def create_sunday_service(self, entry: SundayServiceEntry) -> SundayServiceEntry:
         entry = self._apply_hymn_indices(entry)
         self._ensure_worker_availability(entry)
@@ -584,6 +590,7 @@ class ArticleRepository:
                 return entry
         raise ValueError(f"Sunday service date {date} not found")
 
+    @sunday_write
     def update_sunday_service(self, date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
         entry = self._apply_hymn_indices(entry)
         self._ensure_worker_availability(entry)
@@ -604,6 +611,7 @@ class ArticleRepository:
         self._save_sunday_service_entries(entries)
         return entry
 
+    @sunday_write
     def delete_sunday_service(self, date: str) -> None:
         entries = self._load_sunday_service_entries()
         new_entries = [entry for entry in entries if entry.date != date]
@@ -611,6 +619,7 @@ class ArticleRepository:
             raise ValueError(f"Sunday service date {date} not found")
         self._save_sunday_service_entries(new_entries)
 
+    @sunday_write
     def set_sunday_service_final_ppt(self, date: str, filename: Optional[str]) -> SundayServiceEntry:
         entries = self._load_sunday_service_entries()
         for index, existing in enumerate(entries):
@@ -621,6 +630,7 @@ class ArticleRepository:
                 return updated
         raise ValueError(f"Sunday service date {date} not found")
 
+    @sunday_write
     def set_sunday_service_email_body(self, date: str, html: Optional[str]) -> SundayServiceEntry:
         entries = self._load_sunday_service_entries()
         for index, existing in enumerate(entries):
@@ -746,6 +756,7 @@ class ArticleRepository:
         workers = sorted(self._load_sunday_workers(), key=lambda worker: worker.name.casefold())
         return [SundayWorker.model_validate(worker.model_dump()) for worker in workers]
 
+    @sunday_write
     def create_sunday_worker(self, worker: SundayWorker) -> SundayWorker:
         name = worker.name.strip()
         workers = self._load_sunday_workers()
@@ -763,6 +774,7 @@ class ArticleRepository:
         self._save_sunday_workers(workers)
         return new_worker
 
+    @sunday_write
     def update_sunday_worker(self, current_name: str, worker: SundayWorker) -> SundayWorker:
         target = current_name.strip()
         if not target:
@@ -811,6 +823,7 @@ class ArticleRepository:
 
         return updated_worker
 
+    @sunday_write
     def delete_sunday_worker(self, name: str) -> None:
         target = name.strip()
         if not target:
@@ -887,6 +900,7 @@ class ArticleRepository:
     def list_sunday_songs(self) -> list[SundaySong]:
         return self._load_sunday_songs()
 
+    @sunday_write
     def create_sunday_song(self, payload: SundaySongCreate) -> SundaySong:
         title = payload.title.strip()
         if not title:
@@ -911,6 +925,7 @@ class ArticleRepository:
         self._save_sunday_songs(songs)
         return new_song
 
+    @sunday_write
     def update_sunday_song(self, song_id: str, payload: SundaySongCreate) -> SundaySong:
         songs = self._load_sunday_songs()
         target = None
@@ -964,6 +979,7 @@ class ArticleRepository:
 
         return updated_song
 
+    @sunday_write
     def delete_sunday_song(self, song_id: str) -> None:
         songs = self._load_sunday_songs()
         target = None

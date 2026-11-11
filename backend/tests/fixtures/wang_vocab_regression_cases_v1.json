@@ -1,0 +1,86 @@
+{
+  "schema_version": "wang-vocabulary-regression-cases.v1",
+  "source_sha256": "160d6288bc20b518d64fbdde789d2eb2a6b2db400cde47b90b22a1123f5251c1",
+  "source_classification": "Published sermon, known-error development sample, not an unedited or blind holdout.",
+  "evaluation": "Target-presence screening against published references; no word accuracy or human audio confirmation claimed. All output must also be read for collateral changes.",
+  "cases": [
+    {
+      "id": "speaker_self",
+      "paragraph_number": 14,
+      "target_groups": [
+        "speaker"
+      ]
+    },
+    {
+      "id": "seminary_history",
+      "paragraph_number": 27,
+      "target_groups": [
+        "seminary"
+      ]
+    },
+    {
+      "id": "speaker_students",
+      "paragraph_number": 40,
+      "target_groups": [
+        "speaker"
+      ]
+    },
+    {
+      "id": "jesus_sons",
+      "paragraph_number": 31,
+      "target_groups": [
+        "jesus"
+      ]
+    },
+    {
+      "id": "jesus_exorcism",
+      "paragraph_number": 98,
+      "target_groups": [
+        "jesus"
+      ]
+    },
+    {
+      "id": "seminary_students",
+      "paragraph_number": 142,
+      "target_groups": [
+        "seminary"
+      ]
+    },
+    {
+      "id": "speaker_quoted",
+      "paragraph_number": 145,
+      "target_groups": [
+        "speaker"
+      ]
+    },
+    {
+      "id": "jesus_predestined",
+      "paragraph_number": 154,
+      "target_groups": [
+        "jesus"
+      ]
+    },
+    {
+      "id": "seminary_career",
+      "paragraph_number": 206,
+      "target_groups": [
+        "seminary"
+      ]
+    },
+    {
+      "id": "control_near_death",
+      "paragraph_number": 191,
+      "target_groups": []
+    },
+    {
+      "id": "control_dictionary",
+      "paragraph_number": 120,
+      "target_groups": []
+    },
+    {
+      "id": "control_faith",
+      "paragraph_number": 156,
+      "target_groups": []
+    }
+  ]
+}

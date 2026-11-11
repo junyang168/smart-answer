@@ -15,6 +15,8 @@ BACKEND_PLIST="${SMART_ANSWER_BACKEND_PLIST:-$HOME/Library/LaunchAgents/com.smar
 FELLOWSHIP_REMINDER_PLIST="${SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fellowshipreminder.plist}"
 REFERENCE_INBOX_PLIST="${SMART_ANSWER_REFERENCE_INBOX_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.referencecommentaryinbox.plist}"
 REFERENCE_INBOX_JOB="backend/reference_commentary_inbox_job.py"
+SUNDAY_ASSISTANT_PLIST="${SMART_ANSWER_SUNDAY_ASSISTANT_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.sundayassistant.plist}"
+SUNDAY_ASSISTANT_JOB="scripts/run-sunday-assistant.py"
 PLIST_BUDDY="${SMART_ANSWER_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 BACKEND_HEALTH="${SMART_ANSWER_BACKEND_HEALTH:-http://127.0.0.1:8555/healthz}"
 FRONTEND_HEALTH="${SMART_ANSWER_FRONTEND_HEALTH:-http://127.0.0.1:3000/}"
@@ -246,6 +248,30 @@ activate_reference_inbox() {
     "$REFERENCE_INBOX_PLIST" "$REFERENCE_INBOX_JOB" "$release" || return 1
 }
 
+# Stop the old worker before switching API code; rollback starts the matching pair.
+activate_sunday_assistant() {
+  local release="$1" started config health_script
+  started="$(date -u +%s)"
+  if [[ ! -f "$release/$SUNDAY_ASSISTANT_JOB" ]]; then
+    [[ ! -f "$SUNDAY_ASSISTANT_PLIST" ]] || launchctl unload "$SUNDAY_ASSISTANT_PLIST" 2>/dev/null || true
+    return 0
+  fi
+  [[ -d "$release/services/whatsapp-bridge/node_modules/whatsapp-web.js" ]] || return 1
+  set_job_release "$SUNDAY_ASSISTANT_PLIST" "$SUNDAY_ASSISTANT_JOB" "$release" || return 1
+  restart_job "$SUNDAY_ASSISTANT_PLIST" || return 1
+  assert_job_release "Sunday assistant" "Sunday assistant" \
+    "$SUNDAY_ASSISTANT_PLIST" "$SUNDAY_ASSISTANT_JOB" "$release" || return 1
+  config="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:3' "$SUNDAY_ASSISTANT_PLIST")" || return 1
+  if [[ -n "${SMART_ANSWER_SUNDAY_HEALTH_CHECK:-}" ]]; then
+    "$SMART_ANSWER_SUNDAY_HEALTH_CHECK" "$config" "$started" || return 1
+  else
+    health_script="$release/scripts/check-sunday-assistant.py"
+    [[ -f "$health_script" ]] || health_script="$SOURCE_REPO/scripts/check-sunday-assistant.py"
+    "$release/backend/.venv/bin/python3" "$health_script" \
+      --config "$config" --since "$started" || return 1
+  fi
+}
+
 validate_job_plist() {
   local name="$1" plist="$2" key
   shift 2
@@ -412,6 +438,7 @@ switch_services() {
   }
   link_web_runtime_data "$release" || return 1
 
+  [[ ! -f "$SUNDAY_ASSISTANT_PLIST" ]] || launchctl unload "$SUNDAY_ASSISTANT_PLIST" 2>/dev/null || true
   set_backend_release "$release" || return 1
   restart_backend || return 1
   wait_for_health backend "$BACKEND_HEALTH" || return 1
@@ -419,6 +446,7 @@ switch_services() {
 
   activate_fellowship_reminder "$release" || return 1
   activate_reference_inbox "$release" || return 1
+  activate_sunday_assistant "$release" || return 1
 
   restart_frontend "$release" || return 1
   verify_and_persist_frontend || return 1
@@ -529,6 +557,11 @@ if [[ "$ALLOW_NON_MAIN" != true ]] && ! git -C "$SOURCE_REPO" merge-base --is-an
   fail "$TARGET_SHA is not contained in origin/main; merge it first or explicitly use --allow-non-main"
 fi
 
+if git -C "$SOURCE_REPO" cat-file -e "$TARGET_SHA:$SUNDAY_ASSISTANT_JOB" 2>/dev/null; then
+  [[ -f "$SUNDAY_ASSISTANT_PLIST" ]] || fail "Sunday assistant LaunchAgent missing; run scripts/install-sunday-assistant-agent.py first"
+  validate_job_plist "Sunday assistant" "$SUNDAY_ASSISTANT_PLIST" :KeepAlive :ProgramArguments:2 :ProgramArguments:3 \
+    || fail "Sunday assistant LaunchAgent is incomplete"
+fi
 RELEASE_DIR="$RELEASES_DIR/$TARGET_SHA"
 PREVIOUS_RELEASE=""
 if [[ -f "$ACTIVE_RELEASE_FILE" ]]; then
@@ -628,6 +661,11 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   printf '{"release": "%s", "deployed_at": "%s"}\n' \
     "$TARGET_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RELEASE_DIR/release.json"
 
+  if [[ -f "$RELEASE_DIR/$SUNDAY_ASSISTANT_JOB" ]]; then
+    log "Installing WhatsApp bridge runtime"
+    PUPPETEER_SKIP_DOWNLOAD=1 npm --prefix "$RELEASE_DIR/services/whatsapp-bridge" ci --omit=dev --omit=optional
+  fi
+
   log "Installing and building frontend"
   npm --prefix "$RELEASE_DIR/web" ci
   npm --prefix "$RELEASE_DIR/web" run build
@@ -661,6 +699,7 @@ if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
   fi
   activate_fellowship_reminder "$RELEASE_DIR"
   activate_reference_inbox "$RELEASE_DIR"
+  activate_sunday_assistant "$RELEASE_DIR"
   wait_for_health backend "$BACKEND_HEALTH"
   verify_and_persist_frontend
   exit 0

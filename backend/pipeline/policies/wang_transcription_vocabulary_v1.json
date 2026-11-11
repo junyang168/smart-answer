@@ -1,0 +1,105 @@
+{
+  "schema_version": "transcription-vocabulary.v1",
+  "id": "wang-professor.v1",
+  "speaker": "王守仁",
+  "authority": "User-confirmed speaker, seminary and Jesus names; common Bible vocabulary is spelling guidance only. No published sermon prose is included.",
+  "entries": [
+    {
+      "id": "speaker",
+      "term": "王守仁",
+      "alternatives": [
+        "王教授"
+      ],
+      "possible_confusions": [
+        "黃教授",
+        "黃先生"
+      ],
+      "context": "教授自述或他人稱呼講者時可參照；仍可能談到另一位黃教授。"
+    },
+    {
+      "id": "seminary",
+      "term": "Asbury 神學院",
+      "alternatives": [
+        "Asbury",
+        "阿斯伯里神學院"
+      ],
+      "possible_confusions": [
+        "安息神學院",
+        "阿特蘭大"
+      ],
+      "context": "教授就學及任教的學校；城市名稱仍可能真的指阿特蘭大。"
+    },
+    {
+      "id": "jesus",
+      "term": "耶穌",
+      "alternatives": [
+        "耶穌基督"
+      ],
+      "possible_confusions": [],
+      "context": "按原聲保留短稱或全稱，不擅自擴寫。"
+    },
+    {
+      "id": "spirit",
+      "term": "聖靈",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "paul",
+      "term": "保羅",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "ephesians",
+      "term": "以弗所書",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "romans",
+      "term": "羅馬書",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "colossians",
+      "term": "歌羅西書",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "matthew",
+      "term": "馬太福音",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "luke",
+      "term": "路加福音",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "john_baptist",
+      "term": "施洗約翰",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    },
+    {
+      "id": "sanctification",
+      "term": "成聖",
+      "alternatives": [],
+      "possible_confusions": [],
+      "context": ""
+    }
+  ]
+}

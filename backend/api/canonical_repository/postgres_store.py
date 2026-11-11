@@ -2810,6 +2810,9 @@ def build_change_set_plan(
     source_kind: str = "knowledge_package",
     existing_review_authorities: Mapping[tuple[str, str], str] | None = None,
 ) -> ChangeSetPlan:
+    if ((package.get('source_repair_application') or {}).get('schema_version') == 'wang_transcript_claim_anchor_sync_v1'
+            and source_kind != 'wang_transcript_claim_anchor_sync_v1'):
+        raise ValueError('anchor synchronization cannot borrow another source authority')
     try:
         validate_store_package_authorization(package)
     except ConsensusApplicationError as exc:
@@ -3305,6 +3308,13 @@ class PostgresKnowledgeStore:
                 goal = {**expected_goal, 'source_transition_context': context}
             from backend.pipeline.claim_joint_update import admission_error
             refusal = admission_error(request, policy, before, goal)
+            if not refusal and request.operation == 'Update':
+                from backend.pipeline.claim_metadata_projection import compile_projection, sampling_keys
+                projection = compile_projection(cursor, request, before, policy)
+                released = sampling_keys(request, before, projection)
+                writable = {p.key for p in request.permissions}
+                if any(k in writable and before[k]['payload'].get('review_status') in cm.HELD and k not in released for k in request.target_keys):
+                    refusal = 'Claim write target has a protected review hold; no model call is authorized'
             value = {**identity, "original_goal": goal, "latest_rounds": {},
                      "source_baselines": source_baselines,
                      "call_reservations": {}, "findings": {}, "created_keys": [],
@@ -3320,11 +3330,28 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
-                if continuation.get('human_source_verification') and before != prior['original_goal']['original_objects']:
+                stopped_resume = continuation.get('owner_stopped_resume')
+                if stopped_resume:
+                    from backend.pipeline.claim_stopped_resume import verify_migrations
+                    verify_migrations(prior, before, stopped_resume,
+                        {cid: self.get_change_history(cid) for cid in stopped_resume['migrations']})
+                if continuation.get('subscription_refusal_retry'):
+                    if goal['original_objects'] != prior['original_goal']['original_objects']:
+                        raise ChangeSetConflict('same-task refusal retry input changed')
+                    from backend.pipeline.claim_human_source import assert_current as assert_human_current
+                    assert_human_current(cursor, request.source_bindings, prior.get('human_source_decisions', []), request=request)
+                opus_handoff = continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption')
+                # Human answers bind the original review scope. The locked
+                # transaction readset also contains downstream consumers that
+                # were never source evidence; keep their current pins without
+                # mistaking their presence for a change to the question.
+                if (continuation.get('human_source_verification')
+                        and goal['original_objects'] != prior['original_goal']['original_objects']):
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
                 refresh = continuation.get('qualification_refresh', False)
                 extension = continuation.get('owner_call_extension')
-                if extension and extension.get('basis', 'unknown_call') != 'unknown_call':
+                if extension and (extension.get('basis', 'unknown_call') != 'unknown_call'
+                        or 'current_objects_sha256' in extension):
                     if extension['current_objects_sha256'] != sha256_json(before):
                         raise ChangeSetConflict('owner follow-up current transaction scope differs from its explicit binding')
                     related = extension['related_action_metadata_sha256']
@@ -3345,7 +3372,7 @@ class PostgresKnowledgeStore:
                     # object; the complete transaction snapshot below must
                     # still match the predecessor exactly.
                     permission_follow_up = extension.get('basis') == 'permission_required'
-                    if (not permission_follow_up or any(goal['original_objects'].get(key) != state
+                    if (not (permission_follow_up or continuation.get('related_owner_target_extension')) or any(goal['original_objects'].get(key) != state
                             for key, state in prior['original_goal']['original_objects'].items())):
                         raise ChangeSetConflict('owner call extension original content scope drifted')
                 target_baseline = {key:(value['revision'],value['content_sha256'],value['retired'])
@@ -3353,6 +3380,11 @@ class PostgresKnowledgeStore:
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (prior_rounds,)).fetchall():
+                    quote_repair = continuation.get('source_quote_highlight_repair')
+                    if quote_repair and child['materials']['round_id'] == quote_repair['round_id']:
+                        if (sha256_json(child) != quote_repair['round_metadata_sha256']
+                                or sha256_json(before) != quote_repair['before_sha256']):
+                            raise ChangeSetConflict('saved highlight repair round or full current input drift')
                     if (continuation.get('human_source_verification')
                             and child['materials']['round_id'] in prior['latest_rounds'].values()):
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
@@ -3376,20 +3408,68 @@ class PostgresKnowledgeStore:
                                 continuation['prior_findings'] = {**candidate_findings, **continuation['prior_findings']}
                             continuation.setdefault('previous_candidates', {})[child['unit_id']] = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         continue
-                    if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
+                    if (continuation.get('owner_call_extension') or opus_handoff) and child['materials']['round_id'] in prior['latest_rounds'].values():
                         if before != child['materials'].get('transaction_before',child['materials']['before']):
-                            raise ChangeSetConflict('owner call extension full transaction scope drifted')
+                            # Explicitly current-bound remaining-findings follow-ups,
+                            # like API transitions, can refresh transaction-only
+                            # consumers. Their Claim audit scope and saved candidate
+                            # must remain exactly unchanged. Legacy unknown-call
+                            # extensions without a current binding stay strict.
+                            current_bound_follow_up = (extension
+                                and (extension.get('basis') in {'remaining_findings','api_output_limit','subscription_output_limit'}
+                                     or extension.get('basis') == 'unknown_call' and 'current_objects_sha256' in extension
+                                     or extension.get('basis') == 'permission_required' and (
+                                         continuation.get('source_support_creation') or continuation.get('related_owner_target_extension'))))
+                            if (not (opus_handoff or current_bound_follow_up)
+                                    or (goal['original_objects'] != child['materials']['before']
+                                        and not (continuation.get('related_owner_target_extension') and all(
+                                            goal['original_objects'].get(k)==state for k,state in child['materials']['before'].items())))):
+                                raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
+                        if (not candidate and extension and extension.get('basis') == 'subscription_output_limit'
+                                and continuation.get('subscription_output_limit_recovery')):
+                            # A first proposal may fail before any candidate exists.
+                            # Keep current SQL as the baseline; the truncated text
+                            # never becomes an accepted candidate.
+                            candidate = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         if not candidate:
-                            raise ChangeSetConflict('owner call extension requires its saved preceding candidate')
-                        continuation.setdefault('previous_candidates', {})[child['unit_id']] = candidate
+                            # A returned rejected GPT proposal deliberately has
+                            # no accepted candidate. Preserve it as input, never
+                            # promote invalid content to the previous candidate.
+                            key = child['materials']['round_id'] + ':gpt'
+                            rejection = prior['call_reservations'].get(key, {}).get('rejection')
+                            if not (extension and extension.get('basis') == 'remaining_findings' and rejection):
+                                raise ChangeSetConflict('owner call extension requires its saved preceding candidate')
+                            from backend.pipeline.claim_review_recovery import rejected_model_input
+                            entry = rejected_model_input(child, prior, 'gpt', error=rejection['detail'])
+                            continuation.setdefault('unaccepted_returned_proposals', {})[key] = entry
+                        else:
+                            continuation.setdefault('previous_candidates', {})[child['unit_id']] = candidate
                     if continuation['completed_context_cleanup']:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
-                    elif child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
+                    elif continuation.get('completed_no_write_binding_repair'):
+                        if (child['materials']['round_id'] not in prior['latest_rounds'].values()
+                                or child.get('outcome') != 'completed' or child.get('change_set_ids')
+                                or not child.get('opus_approved') or not child.get('program_readback_complete')
+                                or child.get('candidate', {}).get('records')
+                                or any(d['action'] != 'retain' for d in child['candidate']['dispositions'])
+                                or before != child['materials'].get('transaction_before',child['materials']['before'])):
+                            raise ChangeSetConflict('binding repair cannot replay committed data or cross SQL input drift')
+                        self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
+                    elif child.get('change_set_ids') or (child.get('checkpoint') in {'reviewed','applied','audited'} and not opus_handoff):
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
-                if any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
+                if continuation.get('related_owner_target_extension'):
+                    # Adding the explicitly authorized owner changes the joint
+                    # unit identity. Carry the saved candidate into that same
+                    # single successor unit, without rewriting its content.
+                    candidates = continuation.get('previous_candidates', {})
+                    if len(candidates) != 1 or len(goal['units']) != 1:
+                        raise ChangeSetConflict('owner target follow-up requires one saved joint candidate')
+                    continuation['previous_candidates'] = {
+                        next(iter(goal['units'])): next(iter(candidates.values()))}
+                if not stopped_resume and any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
                 if prior.get('continued_by'):
                     raise ChangeSetConflict('original Claim action already has a continuation; no budget fork')
@@ -3485,10 +3565,10 @@ class PostgresKnowledgeStore:
                 entries = human.confirmation_entries(authority['human_source_verification'],
                     request.model_dump(mode='json')['source_bindings'], sources)
                 human.register(cursor, entries, origin=run_id)
-                active_ids = {d['decision_id'] for d in human.snapshot(cursor, request.source_bindings)}
+                active_ids = {d['decision_id'] for d in human.snapshot(cursor, request.source_bindings, request=request)}
                 if any(d['decision_id'] not in active_ids for d in entries):
                     raise ChangeSetConflict('new action explicitly supplied a replaced human source decision')
-            value['human_source_decisions'] = human.snapshot(cursor, request.source_bindings)
+            value['human_source_decisions'] = human.snapshot(cursor, request.source_bindings, request=request)
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
                               (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
                               VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
@@ -3515,6 +3595,14 @@ class PostgresKnowledgeStore:
             policy = Policy.model_validate(parent["policy"])
             request = parent["request"]
             needed = set(required_roles(Request.model_validate(request), round_number, policy))
+            from backend.pipeline.claim_source_binding_projection import FIELD as BINDING_REPAIR, round_repair
+            binding_repair = round_repair(parent, round_number)
+            if binding_repair:
+                if frozen.get(BINDING_REPAIR) != binding_repair:
+                    raise ChangeSetConflict('source-binding repair omitted its saved-candidate proof')
+                from backend.pipeline.claim_source_binding_projection import initial_candidate
+                initial_candidate(frozen)
+                needed = {'opus'}
             if request["operation"] == "Read" or set(roles) != needed:
                 raise ChangeSetConflict("Claim round must reserve every required role; Read has no model round")
             identity = {"kind": "claim_management_round", "schema_version": VERSION,
@@ -3535,7 +3623,10 @@ class PostgresKnowledgeStore:
                     expected_decisions = [d for d in parent['human_source_decisions'] if d['source_id'] in frozen['unit_request']['source_bindings']]
                     if frozen.get('human_source_decisions') != expected_decisions:
                         raise ChangeSetConflict('Claim round omitted its frozen human source decisions')
-                    assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions)
+                    assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions, request=frozen['unit_request'])
+                if 'program_metadata_projection' in frozen:
+                    from backend.pipeline.claim_metadata_projection import assert_current
+                    assert_current(cursor, Request.model_validate(frozen['unit_request']), frozen['before'], policy, frozen['program_metadata_projection'])
                 from backend.pipeline.claim_management import unit_goal
                 unit_request = Request.model_validate(frozen['unit_request'])
                 original = parent['original_goal']
@@ -3553,11 +3644,15 @@ class PostgresKnowledgeStore:
                         or frozen['created_keys'] != parent['created_keys']
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
-                if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension')) and (
-                        frozen.get('continuation') != parent['continuation']
-                        or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
-                        or (round_number == 0 and frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id])):
-                    raise ChangeSetConflict('human source follow-up omitted its evidence or saved candidate')
+                continuation = parent.get('continuation', {})
+                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension') or continuation.get('opus_api_transition') or continuation.get('opus_subscription_resumption') or continuation.get('source_quote_highlight_repair')):
+                    candidate = continuation.get('previous_candidates', {}).get(unit_id)
+                    rejected_proposal = (continuation.get('owner_call_extension', {}).get('basis') == 'remaining_findings'
+                        and bool(continuation.get('unaccepted_returned_proposals')) and candidate is None)
+                    if (frozen.get('continuation') != continuation
+                            or not candidate and not rejected_proposal
+                            or round_number == 0 and frozen.get('previous_candidate') != candidate):
+                        raise ChangeSetConflict('Claim follow-up omitted its evidence or saved candidate')
             previous_id = parent["latest_rounds"].get(unit_id)
             if previous_id:
                 previous = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (previous_id,)).fetchone()[0]
@@ -3567,6 +3662,15 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('owner follow-up revision must retain its immediate preceding candidate')
             elif round_number != 0:
                 raise ChangeSetConflict("first Claim round must have ordinal zero")
+            if policy.retry_context_contract:
+                from backend.pipeline.claim_database_retry import unresolved_for_retry
+                pending = {**parent.get('context_findings', {}), **parent['findings']}
+                pending = {k: v for k, v in pending.items()
+                           if v['target_key'] in frozen['before'] or k in parent['findings']}
+                expected = unresolved_for_retry(parent['policy'], pending,
+                    previous if previous_id else None)
+                if frozen.get('unresolved') != expected:
+                    raise ChangeSetConflict('database retry omitted an unwritten repair obligation')
             used_revisions = sum(bool(v) for v in parent["revision_rounds"].values())
             if round_number and used_revisions >= policy.budget.max_revisions:
                 raise ChangeSetConflict("original Claim action revision budget exhausted")
@@ -3605,7 +3709,7 @@ class PostgresKnowledgeStore:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
                            (canonical_json(value), action_run_id))
 
-    def record_claim_management_returned_rejection(self, round_id, *, role, detail):
+    def record_claim_management_returned_rejection(self, round_id, *, role, detail, repair_recorded_detail=False):
         """Record an authenticated returned answer that was NOT accepted.
 
         This changes call accounting only: no stage approval, finding resolution,
@@ -3645,9 +3749,24 @@ class PostgresKnowledgeStore:
             rejection = {'response_state': 'returned_rejected', 'raw': binding(root / (role + '.raw.json')), 'detail': detail,
                          'accepted': False, 'automatic_retry': False}
             if slot.get('rejection'):
-                if slot['rejection'] != rejection:
+                if slot['rejection'] == rejection:
+                    return rejection
+                # An older executor appended a failed attempt to authenticate a
+                # superseded call to the next call's real validation error.
+                # Repair accounting only after reproducing the precise error
+                # against the same authenticated raw; keep the old diagnostic.
+                old_rejection = slot['rejection']
+                suffix = '; returned-answer authentication failed: '
+                if (not repair_recorded_detail
+                        or {**old_rejection, 'detail': detail} != rejection
+                        or not old_rejection['detail'].startswith(detail + suffix)):
                     raise ChangeSetConflict('returned rejection already recorded differently')
-                return rejection
+                from copy import deepcopy
+                from backend.pipeline.claim_review_recovery import rejected_model_input
+                authenticated_parent = deepcopy(parent)
+                authenticated_parent['call_reservations'][round_id + ':' + role]['rejection'] = rejection
+                rejected_model_input(value, authenticated_parent, role, error=detail)
+                slot.setdefault('rejection_history', []).append(old_rejection)
             # Keep the original spent reservation and remaining role slots.
             # Reply acceptance is separate from call intent; existing exact
             # recovery can consume this same raw without inventing a new call.
@@ -3670,7 +3789,7 @@ class PostgresKnowledgeStore:
         from backend.pipeline import claim_management as cm
         from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
         from backend.pipeline.source_reconciliation_runner import read, body
-        from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins
+        from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, pins
         check_binding(receipt_binding)
         receipt = body(read(Path(receipt_binding['path'])))
         materials, candidate, review, passed = validate_claim_stage_receipt(receipt)
@@ -3716,9 +3835,9 @@ class PostgresKnowledgeStore:
                     judged = parent.setdefault('clarified_finding_ids', [])
                     ids = [r.finding_id for r in decisions]
                     if (not cm.Policy.model_validate(materials['policy']).all_findings_to_gpt
-                            or not ids or set(ids) & set(judged)):
+                            or not set(ids) - set(judged)):
                         raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
-                    judged.extend(ids)
+                    judged.extend(sorted(set(ids) - set(judged)))
                 prior.append(fingerprint)
                 parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
                 value['candidate'] = candidate.model_dump(mode='json')
@@ -3744,6 +3863,11 @@ class PostgresKnowledgeStore:
                                 'content_sha256':op['after_sha256'], 'retired':op['operation']=='retire'}
                         if any(k not in expected or v != expected[k] for k,v in actual.items()):
                             raise ChangeSetConflict('program readback differs from approved SQL postimages')
+                        from backend.pipeline.claim_direct_scope import owner_context_enabled, assert_current
+                        unit = cm.Request.model_validate(materials['unit_request'])
+                        if owner_context_enabled(unit):
+                            assert_current(self, cursor, unit, observed, include_write_context=False,
+                                actual_write_keys=[d.record_key for d in candidate.dispositions if d.action != 'retain'])
                         value['program_readback_complete'] = bool(passed)
                         value['validation_kind'] = 'opus_and_program_readback'
                     value['audited_pins'] = report['read_pins']
@@ -3791,10 +3915,16 @@ class PostgresKnowledgeStore:
                 unit_request = cm.Request.model_validate(materials['unit_request'])
                 pending = cm.review_findings(parent['action_id'], materials['unresolved'], candidate)
                 unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review,
-                    request=unit_request, candidate=candidate)
+                    request=unit_request, candidate=candidate, records=materials['before'])
                 context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
-                    request=unit_request, candidate=candidate)
+                    request=unit_request, candidate=candidate, records=materials['before'])
                 qualification_findings = dict(context_findings)
+                if cm.Policy.model_validate(materials['policy']).review_unit_contract:
+                    # A deferred reference lead has not undergone GPT
+                    # adjudication or a full review of that Claim. Preserve
+                    # the lead without revoking its old qualification by
+                    # treating this contextual observation as a new verdict.
+                    qualification_findings = {}
                 adjudicating = cm.Policy.model_validate(materials['policy']).all_findings_to_gpt and not cm.is_source_impact(materials['request'])
                 if adjudicating:
                     pending_context = cm.pending_context_adjudications(pending, candidate, context_findings,
@@ -3805,6 +3935,14 @@ class PostgresKnowledgeStore:
                         passed = False
                 if stage == 'opus':
                     value['opus_approved'] = passed
+                    from backend.pipeline.claim_quote_projection import selected as quote_contract, project_review
+                    if contract := quote_contract(materials):
+                        source_raw = body(read(Path(receipt['materials']['path']).parent/'opus.raw.json'))
+                        _,corrections = project_review(source_raw['response'],materials['sources'],contract=contract)
+                        if corrections:
+                            value.setdefault('source_quote_corrections',{})['opus'] = {
+                                'original_raw':binding(Path(receipt['materials']['path']).parent/'opus.raw.json'),
+                                'corrections':corrections,'verdicts_unchanged':True}
                 # Every prior issue in this unit is explicitly reconciled;
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
@@ -3931,12 +4069,20 @@ class PostgresKnowledgeStore:
                     from backend.pipeline.claim_qualification_reuse import current_pins
                     if 'human_source_decisions' in child['materials']:
                         from backend.pipeline.claim_human_source import assert_current
-                        assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'])
+                        assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'], request=child['materials']['unit_request'])
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'])
+                    self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'],
+                        actual_write_keys=[d['record_key'] for d in child['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
+                    from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                    if own_evidence_enabled(child['materials']['policy']):
+                        own_keys = set(child['materials']['unit_request']['target_keys']) | {
+                            d['record_key'] for d in child['candidate']['dispositions']
+                            if d['action'] == 'create' and d['record_key'].startswith('claims/')}
+                        active = {k:s['payload'] for k,s in observed.items() if not s['retired']}
+                        assert_current_fragments(active, child['materials']['sources'], own_keys & active.keys())
                 if not report_only:
                     from backend.pipeline.claim_joint_update import verify_completion
                     verify_completion(value['original_goal'], child, observed)
@@ -4002,17 +4148,18 @@ class PostgresKnowledgeStore:
                          (canonical_json(value), action_run_id))
         return value['result']
 
-    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None):
+    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None, actual_write_keys=(), postimage=False):
         """New shared owners/relations must not hide behind unchanged row pins."""
         from backend.pipeline.claim_management import CLAIM_COLLECTIONS
         if records is None:
             records = self._assert_transaction_read_pins(cursor, read_pins)
         if request is not None:
-            from backend.pipeline.claim_direct_scope import enabled, assert_current
+            from backend.pipeline.claim_direct_scope import enabled, assert_current, owner_context_enabled
             from backend.pipeline.claim_management import Request
             request = Request.model_validate(request)
             if enabled(request):
-                return assert_current(self, cursor, request, records)
+                return assert_current(self, cursor, request, records, actual_write_keys=actual_write_keys,
+                    include_write_context=not (postimage and owner_context_enabled(request)))
         payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
         keys = {key for key in read_pins if key[0] in CLAIM_COLLECTIONS}
         for col, oid in self._claim_reference_consumers(cursor, keys):
@@ -4026,7 +4173,7 @@ class PostgresKnowledgeStore:
         reads necessary current pins, not an ancestor chain or whole Registry.
         """
         from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
-        from backend.pipeline.claim_management import is_source_impact, Policy
+        from backend.pipeline.claim_management import is_source_impact, Policy, Request
         from backend.pipeline.source_editorial_transition import verify_current_source_binding
         with self.connect() as conn, conn.cursor() as cursor:
             rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
@@ -4039,11 +4186,23 @@ class PostgresKnowledgeStore:
             rows = [(rid, value) for rid, value in rows if
                 claim_id in value.get('blocked_current_claim_ids', [])
                 or 'claims/' + claim_id in value['materials']['original_goal']['target_keys']
+                or claim_id in value.get('readonly_claim_qualifications', {})
                 or any(d['record_key'] == 'claims/' + claim_id and d['action'] != 'retain'
                        for d in value.get('candidate', {}).get('dispositions', []))]
             if not rows:
                 return None
             for rid, value in rows:
+                reused = value.get('readonly_claim_qualifications', {}).get(claim_id)
+                if reused is not None:
+                    from backend.pipeline.claim_review_reuse import verify
+                    try:
+                        if reused.get('review_run_id') != rid:
+                            raise ValueError('review reuse round identity drift')
+                        return verify(self, cursor, claim_id, reused)
+                    except (ValueError, OSError, KeyError, ChangeSetConflict):
+                        # Retain the old record as history, never upgrade a
+                        # changed or newly contradicted bystander from it.
+                        continue
                 if claim_id in value.get('blocked_current_claim_ids', []):
                     # The formal finding was registered against exact current
                     # inputs. A later content change needs its own qualification.
@@ -4059,7 +4218,7 @@ class PostgresKnowledgeStore:
                     if 'human_source_decisions' in value['materials']:
                         from backend.pipeline.claim_human_source import assert_current
                         try:
-                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'], request=value['materials']['unit_request'])
                         except ChangeSetConflict:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     if not revalidation:
@@ -4096,12 +4255,13 @@ class PostgresKnowledgeStore:
                     if 'human_source_decisions' in value['materials']:
                         from backend.pipeline.claim_human_source import assert_current
                         try:
-                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'], request=value['materials']['unit_request'])
                         except ChangeSetConflict:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'])
+                    self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'],
+                        actual_write_keys=[d['record_key'] for d in value['candidate']['dispositions'] if d['action'] != 'retain'], postimage=True)
                 except (ValueError, OSError, KeyError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))
@@ -4111,6 +4271,15 @@ class PostgresKnowledgeStore:
                         'human_hold','withheld_unreviewed','rejected','superseded'} or (
                         state['payload'].get('review_status') == 'human_review_required' and not replaced_spot_check):
                     continue
+                from backend.pipeline.claim_evidence_review import enabled as own_evidence_enabled, assert_current_fragments
+                if own_evidence_enabled(value['materials']['policy']):
+                    try:
+                        assert_current_fragments({col+'/'+oid:s['payload'] for (col,oid),s in records.items()
+                                                  if s['retired_at'] is None},
+                                                 value['materials']['sources'], ['claims/'+claim_id])
+                    except (ValueError, KeyError) as exc:
+                        return {'ready': False, 'reason': 'current_own_source_bindings_invalid',
+                                'run_id': rid, 'detail': str(exc)}
                 result = {'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': proof,
                         'question_scope': value['materials']['original_goal']['required_questions']}
@@ -4118,6 +4287,23 @@ class PostgresKnowledgeStore:
                     result.update(validation_kind='opus_and_program_readback', independent_audit_complete=False)
                 if replaced_spot_check:
                     result['legacy_ai_spot_check_replaced_by_current_review'] = True
+                from backend.pipeline.claim_review_reuse import assert_no_newer_rejection
+                try:
+                    protected = ['claims/'+claim_id]
+                    if Policy.model_validate(value['materials']['policy']).review_unit_contract:
+                        from backend.pipeline.claim_direct_scope import scope
+                        own = Request.model_validate(value['materials']['unit_request']).model_copy(
+                            update={'target_keys':['claims/'+claim_id], 'permissions':[]})
+                        protected = scope(own, {col+'/'+oid:state for (col,oid),state in records.items()},
+                                          include_write_context=False, include_impact_evidence=False,
+                                          include_contextual_evidence=False)['writable_record_keys']
+                except ValueError as exc:
+                    return {'ready': False, 'reason': 'current_own_evidence_scope_incomplete',
+                            'run_id': rid, 'detail': str(exc)}
+                try:
+                    assert_no_newer_rejection(cursor, claim_id, rid, protected)
+                except ValueError:
+                    return {'ready': False, 'reason': 'newer_formal_review_objection', 'run_id': rid}
                 return result
         reason = ('current_program_readback_required' if any(
             not Policy.model_validate(v['materials']['policy']).independent_audit_required for _,v in rows)
@@ -5778,9 +5964,11 @@ class PostgresKnowledgeStore:
                     result[col,oid] = {"revision":revision,"content_sha256":content_sha,"payload":payload,
                                        "retired_at":retired,"retired":retired is not None}
                     if not historical_pins_only:
-                        ids.update(self._record_reference_ids(payload))
+                        ids.update(self._record_reference_ids(payload,
+                            include_predecessor=col=='argument_route_revisions'))
                     else:
-                        ids.update(self._record_reference_ids(payload,exclude_provenance=True))
+                        ids.update(self._record_reference_ids(payload,exclude_provenance=True,
+                            include_predecessor=col=='argument_route_revisions'))
                         historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
                     if col == "canonical_viewpoints" and retired is None: views.add(oid)
                 new_views = sorted(views - expanded_views)
@@ -5993,18 +6181,23 @@ class PostgresKnowledgeStore:
                 (list(viewpoint_ids),list(viewpoint_ids))).fetchall()
         return self.read_current_records([('viewpoint_relations',r[0]) for r in rows])
 
-    def read_cvp_heads(self):
-        """Current active index cut only: one query, no members or historical chains."""
+    def read_cvp_heads(self, *, viewpoint_ids=None):
+        """Current active cut; optionally only known update identities."""
+        if viewpoint_ids is not None and not viewpoint_ids:return []
         with self.connect() as conn:
-            rows=conn.execute("""SELECT v.object_id,v.payload,v.revision,v.content_sha256,
+            query="""SELECT v.object_id,v.payload,v.revision,v.content_sha256,
                                        r.object_id,r.payload,r.revision,r.content_sha256,r.retired_at
                                 FROM wang_knowledge.objects v
                                 LEFT JOIN wang_knowledge.objects r
                                   ON r.collection='viewpoint_revisions'
                                  AND r.object_id=v.payload->>'current_revision_id'
                                 WHERE v.collection='canonical_viewpoints' AND v.retired_at IS NULL
-                                  AND v.payload->>'identity_status'='active'
-                                ORDER BY v.object_id""").fetchall()
+                                  AND v.payload->>'identity_status'='active'"""
+            if viewpoint_ids is not None:
+                query+=" AND v.object_id=ANY(%s)"
+            query+=" ORDER BY v.object_id"
+            rows=(conn.execute(query,(list(viewpoint_ids),)) if viewpoint_ids is not None
+                  else conn.execute(query)).fetchall()
         result=[]
         for vid,view,vrev,vsha,rid,head,rrev,rsha,retired in rows:
             if (head is None or retired is not None or view.get('viewpoint_id')!=vid
@@ -6242,6 +6435,9 @@ class PostgresKnowledgeStore:
         """
 
         claim_writes = None
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_transcript_claim_anchor_sync_v1':
+            if source_kind != 'wang_transcript_claim_anchor_sync_v1' or not transactional or retiring_keys:
+                raise ValueError('Claim anchor synchronization requires its exact guarded metadata plan')
         if source_kind == 'wang_cvp_contextual_summary_v1' or package.get('contextual_summary_application') is not None:
             if source_kind != 'wang_cvp_contextual_summary_v1' or not transactional or retiring_keys:
                 raise ValueError('reviewed contextual summary requires its exact SQL transaction')
@@ -7790,17 +7986,27 @@ class PostgresKnowledgeStore:
         expected_registry_fingerprint_sha256: Optional[str] = None,
         registry_collections: Sequence[str] = (),
         expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
+        expected_current_record_pins: Optional[
+            Mapping[tuple[str, str], tuple[int, str, bool] | None]
+        ] = None,
         expected_current_route_material_pins: Optional[Mapping[tuple[str, str], tuple[int, str, bool]]] = None,
         expected_route_scope_sets: Optional[Mapping[str, Any]] = None,
         expected_current_claim_related_records: Optional[
             Mapping[str, Sequence[tuple[str, str, int, str]]]
         ] = None,
+        expected_current_source_claims: Optional[Mapping[str, Mapping[str, dict[str, Any]]]] = None,
+        expected_current_claim_sampling_markers: Optional[Mapping[str, dict[str, Any]]] = None,
+        expected_current_claim_legacy_ai_findings: Optional[Mapping[str, dict[str, Any]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
+        expected_current_human_source_scope: Optional[Mapping[str, Any]] = None,
         transaction_context: Any = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
+        if plan.source_kind == 'wang_transcript_claim_anchor_sync_v1':
+            from backend.pipeline.transcript_claim_anchor_sync import validate_apply_plan
+            validate_apply_plan(plan, metadata, expected_current_record_pins)
         if plan.source_kind == 'argument_route_resolution_v2' and (
             expected_current_route_material_pins is None or expected_route_scope_sets is None
         ):
@@ -7903,6 +8109,38 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                if expected_current_record_pins is not None:
+                    # A code-only migration may read unchanged shared records
+                    # as well as its write targets. Protect that complete read
+                    # set in the same short, advisory-locked transaction.
+                    self._assert_transaction_read_pins(cursor, expected_current_record_pins)
+                if expected_current_human_source_scope is not None:
+                    from backend.pipeline.claim_human_source import assert_scope_current
+                    assert_scope_current(cursor, expected_current_human_source_scope)
+                if expected_current_claim_sampling_markers:
+                    if plan.source_kind!='claim_bottom_up_refresh_v1' or expected_current_record_pins is None:
+                        raise ValueError('AI sampling projection requires guarded bottom-up Claim writes')
+                    from backend.pipeline.claim_metadata_projection import sampling_marker
+                    writes={(op.collection,op.object_id) for op in plan.operations}
+                    for cid,expected in expected_current_claim_sampling_markers.items():
+                        if ('claims',cid) not in writes:raise ValueError('AI sampling marker lacks its Claim write')
+                        cursor.execute("SELECT revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s FOR UPDATE",(cid,))
+                        row=cursor.fetchone()
+                        state=(dict(revision=row[0],content_sha256=row[1],payload=row[2],retired=row[3] is not None) if row else None)
+                        if not state or sampling_marker(cursor,cid,state)!=expected:
+                            raise ChangeSetConflict('AI sampling marker or review history changed before commit')
+                if expected_current_claim_legacy_ai_findings:
+                    if plan.source_kind!='claim_flash_arguments_v1' or expected_current_record_pins is None:
+                        raise ValueError('legacy AI refresh requires guarded Flash argument writes')
+                    from backend.pipeline.claim_legacy_ai_reopen import marker
+                    writes={(op.collection,op.object_id) for op in plan.operations}
+                    for cid,expected in expected_current_claim_legacy_ai_findings.items():
+                        if ('claims',cid) not in writes:raise ValueError('legacy AI finding lacks its Claim write')
+                        cursor.execute("SELECT revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s FOR UPDATE",(cid,))
+                        row=cursor.fetchone()
+                        state=(dict(revision=row[0],content_sha256=row[1],payload=row[2],retired=row[3] is not None) if row else None)
+                        if not state or marker(cursor,cid,state)!=expected:
+                            raise ChangeSetConflict('legacy AI finding or human review history changed before commit')
                 if expected_current_route_material_pins is not None:
                     self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
                     viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
@@ -7952,13 +8190,21 @@ class PostgresKnowledgeStore:
                         human_scope = sql_group.get('reviewed', {}).get('evidence', {}).get('claim_management_scope', {})
                         if 'human_source_decisions' in human_scope:
                             from backend.pipeline.claim_human_source import assert_current
-                            assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'])
+                            assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'],
+                                           request=human_scope.get('claim_scope_request'))
                         if sql_group['checkpoint']!='reviewed':
                             raise ChangeSetConflict('no-content completion requires exact reviewed state')
                         if plan.source_kind=='wang_cvp_management_v2':
                             from .cvp_management_authority import validate_sql_review
                             validate_sql_review(self,cursor,sql_group,sql_group['reviewed']['evidence'],plan)
-                        self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
+                        observed = self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
+                        if 'metadata_projection' in human_scope:
+                            from backend.pipeline import claim_management as cm
+                            from backend.pipeline.claim_metadata_projection import assert_current
+                            projection = human_scope['metadata_projection']
+                            assert_current(cursor, cm.Request.model_validate(projection['request']),
+                                {cm.source.key(*k):cm.model_state(v) for k,v in observed.items()},
+                                cm.Policy.model_validate(projection['policy']), projection['projection'])
                         if plan.review_events:raise ChangeSetConflict('empty business plan cannot write review events')
                         sql_group.update(checkpoint='applied',no_content_write_reviewed_sha256=transaction_context.reviewed_sha256)
                         cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(sql_group),transaction_context.run_id))
@@ -8017,14 +8263,23 @@ class PostgresKnowledgeStore:
                     if plan.source_kind == 'wang_claim_management_v2':
                         scope = sql_group['reviewed']['evidence'].get('claim_management_scope')
                     if scope:
+                        if 'metadata_projection' in scope:
+                            from backend.pipeline import claim_management as cm
+                            from backend.pipeline.claim_metadata_projection import assert_current
+                            projection = scope['metadata_projection']
+                            assert_current(cursor, cm.Request.model_validate(projection['request']),
+                                {cm.source.key(*k):cm.model_state(v) for k,v in transaction_before.items()},
+                                cm.Policy.model_validate(projection['policy']), projection['projection'])
                         if 'human_source_decisions' in scope:
                             from backend.pipeline.claim_human_source import assert_current
-                            assert_current(cursor, scope['source_ids'], scope['human_source_decisions'])
+                            assert_current(cursor, scope['source_ids'], scope['human_source_decisions'],
+                                           request=scope.get('claim_scope_request'))
                         if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1' or scope.get('claim_scope_request'):
                             audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
                             scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}
                             self._assert_claim_management_scope(cursor, scope_pins,
-                                records={k: v for k, v in transaction_before.items() if k in audited}, request=scope.get('claim_scope_request'))
+                                records={k: v for k, v in transaction_before.items() if k in audited}, request=scope.get('claim_scope_request'),
+                                actual_write_keys=[op.collection+'/'+op.object_id for op in plan.operations])
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
                         if not set(affected)<=set(transaction_context.read_pins):
                             raise ChangeSetConflict('transaction omitted a current affected consumer')
@@ -8072,6 +8327,18 @@ class PostgresKnowledgeStore:
                         raise ChangeSetConflict(
                             f"Source generation changed before apply: {source_id}"
                         )
+                if expected_current_source_claims is not None:
+                    if plan.source_kind != 'claim_bottom_up_refresh_v1':
+                        raise ValueError('source Claim identity guard requires bottom-up Claim refresh')
+                    for source_id, expected in expected_current_source_claims.items():
+                        from .source_claim_membership import load_source_claims
+                        actual = {key.split('/',1)[1]: {'statement': row['payload']['statement'],
+                                  'attribution': row['payload'].get('attribution')}
+                                  for key,row in load_source_claims(cursor,source_id).items()
+                                  if row['payload'].get('review_status') not in {'superseded', 'retired'}
+                                  and not row['payload'].get('superseded_by')}
+                        if actual != expected:
+                            raise ChangeSetConflict('source Claim identities or statements changed: ' + source_id)
                 if expected_current_claim_related_records is not None:
                     if plan.source_kind not in {
                         "legacy_adjudicated_withdrawn_review_reconciliation_v1",
@@ -8270,19 +8537,28 @@ class PostgresKnowledgeStore:
                 )
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
-                self._assert_edge_integrity(cursor, plan)
+                retirement_package = None
+                pending_edges = None
+                if plan.source_kind == 'wang_claim_management_v2':
+                    if transaction_context is None:
+                        raise ChangeSetConflict('Claim management lacks transaction authority')
+                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
+                    pending_edges = self._assert_no_uncoordinated_semantic_references(
+                        cursor, plan, scoped=True, retirement_package=retirement_package)
+                if pending_edges:
+                    self._assert_edge_integrity(cursor, plan, historical_pending_edges=pending_edges)
+                else:
+                    self._assert_edge_integrity(cursor, plan)
                 self._assert_no_dangling_package_references(
                     cursor, plan, scoped=(transaction_context is not None
                                           or plan.source_kind == 'argument_route_resolution_v2')
                 )
-                retirement_package = None
                 if plan.source_kind == 'wang_claim_sql_retirement_v1':
                     if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
                     retirement_package = sql_group['reviewed']['evidence']['package']['payload']
-                if plan.source_kind == 'wang_claim_management_v2':
-                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
-                self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
-                                                                 retirement_package=retirement_package)
+                if plan.source_kind != 'wang_claim_management_v2':
+                    self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
+                                                                     retirement_package=retirement_package)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -8627,7 +8903,7 @@ class PostgresKnowledgeStore:
                 )
 
     @classmethod
-    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan) -> None:
+    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan, *, historical_pending_edges=None) -> None:
         """Validate every arriving edge against the transaction's final graph.
 
         Model validators are useful early feedback, but the database write is
@@ -8715,6 +8991,13 @@ class PostgresKnowledgeStore:
                         key[0], stored_operation_payload(planned)
                     )
                 if str(from_id) in retiring_ids or str(to_id) in retiring_ids:
+                    # Only the exact existing assertion authenticated by the
+                    # common pending-consumer validator may remain as history.
+                    # No edge payload/state is rewritten, and arriving edges
+                    # still require current endpoints below.
+                    if (planned is None and getattr(plan, 'source_kind', None) == 'wang_claim_management_v2'
+                            and (historical_pending_edges or {}).get(key) == (str(from_id), str(to_id))):
+                        continue
                     surviving_references.append(
                         (key[0], key[1], str(from_id), str(to_id))
                     )
@@ -8757,7 +9040,25 @@ class PostgresKnowledgeStore:
         }
         final_owners = {**current_owners, **arriving_owners}
         for collection, edge_id, from_id, to_id, relation_type in incoming_edges:
-            missing = {from_id, to_id} - set(final_owners)
+            owners = final_owners
+            missing = {from_id, to_id} - set(owners)
+            payload = incoming_payloads[collection, edge_id]
+            if (missing == {to_id} and collection == 'viewpoint_claim_links'
+                    and getattr(plan, 'source_kind', None) == 'wang_cvp_management_v2'
+                    and payload.get('schema_version') == 'wang_viewpoint_claim_link_v2'
+                    and payload.get('effective_state') in {'retired', 'invalidated'}):
+                # An authenticated CVP2 withdrawal asserts no current support.
+                # Keep its exact old source assertion after upstream retirement;
+                # this is never permission for an active edge to use that Claim.
+                old = cursor.execute("SELECT payload FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s",
+                                     (collection, edge_id)).fetchone()
+                historical = cursor.execute("SELECT collection FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s AND retired_at IS NOT NULL",
+                                            (to_id,)).fetchone()
+                mutable = {'schema_version','revision','effective_state','decision_id'}
+                if old and historical and {k:v for k,v in old[0].items() if k not in mutable} == {
+                        k:v for k,v in payload.items() if k not in mutable}:
+                    owners = {**final_owners, to_id:'claims'}
+                    missing = set()
             if missing:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} has non-current endpoints: "
@@ -8765,16 +9066,17 @@ class PostgresKnowledgeStore:
                 )
             allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
             if collection == 'knowledge_relations':
-                allowed_from, allowed_to = knowledge_relation_endpoints(relation_type)
-            if final_owners[from_id] not in allowed_from:
+                allowed_from, allowed_to = knowledge_relation_endpoints(
+                    relation_type, flash=payload.get('record_namespace') == 'claim_update_flash_v1')
+            if owners[from_id] not in allowed_from:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "
-                    f"{final_owners[from_id]}, expected {sorted(allowed_from)}"
+                    f"{owners[from_id]}, expected {sorted(allowed_from)}"
                 )
-            if final_owners[to_id] not in allowed_to:
+            if owners[to_id] not in allowed_to:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} to endpoint {to_id} belongs to "
-                    f"{final_owners[to_id]}, expected {sorted(allowed_to)}"
+                    f"{owners[to_id]}, expected {sorted(allowed_to)}"
                 )
 
         signatures = sorted(incoming_signatures)
@@ -8871,7 +9173,7 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _assert_no_uncoordinated_semantic_references(
         cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False, retirement_package=None
-    ) -> None:
+    ) -> dict[tuple[str, str], tuple[str, str]] | None:
         """Do not retire extraction identity under current CVR records.
 
         Model-local ordinals are not semantic identity. Re-extraction therefore
@@ -8881,6 +9183,10 @@ class PostgresKnowledgeStore:
         silently leaving them attached to retired content is forbidden. An
         ``update`` preserves the same object id and is therefore deliberately
         not included: references to an identity-preserving update remain valid.
+        Authenticated Claim pending consumers may instead remain exact historical
+        assertions, protected by the durable management obligation and retired
+        Claim eligibility. Return only their checked existing endpoint pairs to
+        the common edge validator; this does not withdraw or approve any link.
         """
 
         if not any(
@@ -8905,6 +9211,7 @@ class PostgresKnowledgeStore:
                 (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
             )
             rows = cursor.fetchall()
+        historical_edges = {}
         if retirement_package is not None and plan.source_kind == 'wang_claim_management_v2':
             from backend.pipeline.cvp_sql_actions import validate_claim_management_package, pending_consumer_validation_payload
             from backend.pipeline.source_reconciliation_runner import body, read
@@ -8922,6 +9229,10 @@ class PostgresKnowledgeStore:
                 if key in pending:
                     if key not in before or before[key]['payload'] != payload:
                         raise ChangeSetConflict('pending historical consumer current payload drift')
+                    if col in EDGE_COLLECTIONS:
+                        start, end, _ = PostgresKnowledgeStore._edge_values(col, payload)
+                        if {start, end} & retired_ids:
+                            historical_edges[col, oid] = (start, end)
                     payload = pending_consumer_validation_payload(col, payload, retired_ids)
                 checked.append((col, oid, payload))
             rows = checked
@@ -8952,6 +9263,7 @@ class PostgresKnowledgeStore:
                 "master data still references the predecessor: "
                 + " | ".join(sorted(blockers)[:20])
             )
+        return historical_edges or None
 
     @staticmethod
     def _assert_obsolete_candidate_retirement(

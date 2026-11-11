@@ -356,6 +356,8 @@ class ViewpointRuntimeCompiler:
                 continue
             revision = self.index["argument_route_revisions"].get(route.current_revision_id)
             viewpoint = self.index["canonical_viewpoints"].get(route.conclusion_viewpoint_id)
+            if viewpoint and viewpoint.identity_status != "active":
+                continue
             if not revision or not viewpoint or revision.validated_against_conclusion_viewpoint_revision_id != viewpoint.current_revision_id:
                 raise ViewpointRuntimeProjectionError([f"{route.argument_route_id}: stale or missing current revision"])
             attestations = sorted([

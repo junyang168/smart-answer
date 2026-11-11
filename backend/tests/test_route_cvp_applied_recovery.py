@@ -102,6 +102,57 @@ def test_exact_job_recovery_cannot_retry_another_exception(tmp_path):
     assert json.loads((q.states/(jobs[0]['job_id']+'.json')).read_text())['status']=='exception'
 
 
+@pytest.mark.parametrize('defect', [None, 'packet', 'response', 'other_job'])
+def test_original_saved_review_source_is_authenticated_without_copying_a_call(tmp_path, monkeypatch, defect):
+    from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
+    from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteProposalV3Response
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    from backend.pipeline.cvp_sql_commit import binding
+    packet = build_route_review_batches(proposal=ArgumentRouteProposalV3Response.model_validate(
+        observation_proposal(fixture_packet())), route_packet=fixture_packet(),
+        route_proposal_sha256='proposal', whole_cvp=True)[0]
+    response = approved(packet)
+    reviewer = Answer(response, model_id='opus')
+    actual = tmp_path/'raw-trial-review.json'
+    call_model(reviewer, packet, actual)
+    monkeypatch.setattr(worker, 'build_route_reviewer', lambda *a, **kw: reviewer)
+    (tmp_path/'route-review-packet-004.json').write_text(json.dumps(packet))
+    source_packet = tmp_path/'trial-review-packet.json'
+    source_packet.write_text(json.dumps(packet))
+    auth = tmp_path/'commit-authorization.json'; auth.write_text('{"owner_direction":"继续"}')
+    final = {'review': response, 'saved_model_response_source': {
+        'request': binding(source_packet), 'response': binding(actual), 'authorization': binding(auth)}}
+    if defect == 'packet':
+        source_packet.write_text('{}');final['saved_model_response_source']['request'] = binding(source_packet)
+    elif defect == 'response': actual.write_text('{}')
+    elif defect == 'other_job':
+        foreign = tmp_path/'another-job';foreign.mkdir()
+        p = foreign/'request.json';p.write_text(json.dumps(packet))
+        final['saved_model_response_source']['request'] = binding(p)
+    if defect:
+        with pytest.raises(ValueError):
+            worker.authenticate_saved_route_review(tmp_path, 4, final, worker.DEFAULT_POLICY)
+    else:
+        worker.authenticate_saved_route_review(tmp_path, 4, final, worker.DEFAULT_POLICY)
+    assert reviewer.calls == 1
+
+
+def test_recovery_binds_saved_review_source_to_the_actual_change_history(saved):
+    store, root, history, _, _, _ = saved
+    path = root/'route-review-001.json'
+    final = json.loads(path.read_text())
+    final['saved_model_response_source'] = {'source': 'actual provider receipt'}
+    path.write_text(json.dumps(final))
+    run_path = root/'route-cvp-run.json';run = json.loads(run_path.read_text())
+    run.pop('artifact_sha256');run['saved_review_source_sha256'] = sha256_json(final['saved_model_response_source'])
+    run['artifact_sha256'] = sha256_json(run);run_path.write_text(json.dumps(run))
+    with pytest.raises(ValueError, match='recorded approval'):
+        worker.resume_applied_cvp_route(store, 'V1', root)
+    history['metadata']['route_approval_source_sha256'] = run['saved_review_source_sha256']
+    assert worker.resume_applied_cvp_route(store, 'V1', root)['status'] == 'applied_readback_verified'
+
+
 def test_saved_retired_route_head_is_history_not_an_extra_active_route(saved):
     store,root,_,rows,_,_=saved
     rows['argument_routes','old-route']={'payload':{'route_status':'retired'}}

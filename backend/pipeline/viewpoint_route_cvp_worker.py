@@ -70,7 +70,24 @@ def authenticate_saved_route_review(output_dir, round_number, final, policy_path
         timeout_seconds=float(policy['call_timeout_seconds']), whole_cvp=True, observations=policy["schema_version"] == "wang_route_resolution_policy_v8")
     model.max_request_bytes = int(policy['max_request_bytes'])
     packet = json.loads((output_dir / f'route-review-packet-{round_number:03d}.json').read_text())
-    raw = read_saved_model_response(model, packet, output_dir / f'raw-route-review-{round_number:03d}.json')
+    response_path = output_dir / f'raw-route-review-{round_number:03d}.json'
+    source = final.get('saved_model_response_source')
+    if source is not None:
+        from backend.pipeline.cvp_sql_commit import check_binding
+        if set(source) != {'request', 'response', 'authorization'}:
+            raise ValueError('saved Route review source bindings are incomplete')
+        for pin in source.values():
+            if Path(pin['path']).resolve().parent != output_dir.resolve():
+                raise ValueError('saved Route review source belongs to another job')
+            check_binding(pin)
+        if json.loads(Path(source['request']['path']).read_text()) != packet:
+            raise ValueError('saved Route review source request differs from final packet')
+        response_path = Path(source['response']['path'])
+    from backend.pipeline.viewpoint_route_validation_repair import (
+        read_validated_changes, REVIEW_REPAIR_INSTRUCTION,
+    )
+    raw, _ = read_validated_changes(model, packet, response_path,
+        repair_instruction=REVIEW_REPAIR_INSTRUCTION)
     from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReviewV3Response
     review_model = ArgumentRouteReviewV3Response if policy['schema_version'] == 'wang_route_resolution_policy_v8' else ArgumentRouteReviewV2Response
     review = review_model.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')
@@ -97,6 +114,16 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
     material = sealed('cvp-route-materials.json', 'artifact_sha256')
     packet = sealed('route-packet.json', 'packet_sha256')
     run = sealed('route-cvp-run.json', 'artifact_sha256')
+    if run.get('continued_execution_bindings'):
+        from backend.pipeline.cvp_sql_commit import check_binding
+        for pin in run['continued_execution_bindings']:
+            check_binding(pin)
+    if run.get('correction_round_extension_sha256'):
+        from backend.pipeline.viewpoint_route_round_extension import round_extension, FILENAME
+        extension = json.loads((output_dir/FILENAME).read_text())
+        extension = round_extension(output_dir, extension['job'], load_route_policy(policy_path))
+        if extension['artifact_sha256'] != run['correction_round_extension_sha256']:
+            raise ValueError('committed Route round extension differs from its reservation')
     package = json.loads((output_dir / 'route-change-package.json').read_text())
     metadata = history.get('metadata', {})
     if (material['viewpoint_id'] != viewpoint_id
@@ -111,6 +138,11 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
             or not run['rounds'] or run['rounds'][-1]['outcome'] != 'pass'):
         raise ValueError('committed Route recovery differs from its original approval')
     final = json.loads((output_dir / f"route-review-{run['rounds'][-1]['round']:03d}.json").read_text())
+    if final.get('saved_model_response_source') is not None:
+        source_sha = sha256_json(final['saved_model_response_source'])
+        if (run.get('saved_review_source_sha256') != source_sha
+                or metadata.get('route_approval_source_sha256') != source_sha):
+            raise ValueError('committed Route review source differs from recorded approval')
     if (final['review_sha256'] != run['review_sha256']
             or sha256_json(final['review']) != run['review_sha256']
             or final['validation']['outcome'] != 'pass'
@@ -118,7 +150,7 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
         raise ValueError('committed Route recovery lacks its exact passing review')
     authenticate_saved_route_review(output_dir, run['rounds'][-1]['round'], final, policy_path)
     store.verify_current_read_pins({(r['collection'],r['object_id']):
-        (r['revision'],r['content_sha256'],False) for r in material['record_pins']
+        (r['revision'],r['content_sha256'],bool(r.get('retired'))) for r in material['record_pins']
         if r['collection'] not in ROUTE_COLLECTIONS})
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
     for source in material['physical_sources']:
@@ -187,51 +219,146 @@ def enqueue_current_cvp_routes(
 def route_affected_viewpoints(package: dict[str, Any]) -> list[str]:
     """CVPs whose head, revision or active member link was written."""
 
-    ids = {row["viewpoint_id"] for row in package.get("viewpoint_revisions", [])}
+    ids = {row["viewpoint_id"] for col in ("canonical_viewpoints", "viewpoint_revisions")
+           for row in package.get(col, [])}
     ids.update(row["viewpoint_id"] for row in package.get("viewpoint_claim_links", []))
     return sorted(ids)
 
 
 def handoff_cvp_route_jobs(
     store: PostgresKnowledgeStore, package: dict[str, Any],
-    queue_dir: Path, issue_dir: Path,
+    queue_dir: Path, issue_dir: Path, *, update_viewpoint_ids=(),
 ) -> dict[str, Any]:
     """Keep a committed CVP independent from later Route material failures."""
 
     jobs = []
     issues = {}
-    for viewpoint_id in route_affected_viewpoints(package):
+    inactive = {}
+    dependencies = {}
+    ids = set(route_affected_viewpoints(package)) | set(update_viewpoint_ids)
+    # A moved link affects both old and new targets. The complete update scope
+    # carries the old endpoint even when it has no business writes.
+    previous_path = issue_dir / 'route-handoff.json'
+    previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
+    if previous and previous.get('artifact_sha256') != sha256_json({
+            k:v for k,v in previous.items() if k!='artifact_sha256'}):
+        raise ValueError('saved Route handoff changed')
+    pending = sorted(ids)
+    while pending:
+        viewpoint_id = pending.pop(0)
         try:
-            jobs.extend(enqueue_current_cvp_routes(store, [viewpoint_id], queue_dir))
+            if not update_viewpoint_ids:
+                jobs.extend(enqueue_current_cvp_routes(store, [viewpoint_id], queue_dir))
+                continue
+            row = store.get_record_state('canonical_viewpoints', viewpoint_id)
+            if not row or row.get('retired'):
+                raise ValueError('Route handoff current viewpoint is missing or retired')
+            view = row['payload']
+            if update_viewpoint_ids and view['identity_status'] != 'active':
+                # Existing runtime projection excludes inactive conclusions.
+                # Close their current use, retaining historical route records;
+                # never send them to the active-CVP model worker.
+                inactive[viewpoint_id] = {'identity_status':view['identity_status'],
+                    'revision':row['revision'], 'content_sha256':row['content_sha256'],
+                    'current_use':'closed_by_inactive_conclusion'}
+                survivor = view.get('redirect_to_viewpoint_id')
+                if survivor and survivor not in ids:
+                    ids.add(survivor);pending.append(survivor)
+                continue
+            policy = load_route_policy(DEFAULT_POLICY)
+            policy_sha = route_policy_fingerprint(policy, prompt_sha256s=route_policy_prompt_sha256s(
+                policy, prompt_dir=Path(__file__).resolve().parent/'prompts'))
+            material = prepare_cvp_route_materials(store, viewpoint_id,
+                include_context=policy['schema_version']=='wang_route_resolution_policy_v8',
+                include_connection_judgments=True)
+            # Route writes change their own baseline. They must not create a
+            # new update job when the CVP/Claim/source dependencies are intact.
+            basis = sha256_json({'policy_sha256':policy_sha, 'current_input':{
+                field:material.get(field) for field in ('viewpoint','revision','links','claims',
+                    'source_sections','physical_sources','unavailable_evidence','approved_connection_judgments')}})
+            old = previous.get('dependencies',{}).get(viewpoint_id)
+            queue = CvpRouteQueue(queue_dir)
+            state_path = queue.states / (old['job_id']+'.json') if old else None
+            if old and old['dependency_sha256']==basis and state_path.exists():
+                job_id=old['job_id']
+                visited=set()
+                while True:
+                    if job_id in visited:
+                        raise ValueError('Route handoff supersession cycle')
+                    visited.add(job_id)
+                    state=json.loads((queue.states/(job_id+'.json')).read_text())
+                    if state['status']!='superseded':break
+                    detail=state.get('detail') or ''
+                    if not detail.startswith('replaced by CRJ-'):
+                        raise ValueError('superseded Route job lacks its replacement identity')
+                    successor=detail.removeprefix('replaced by ')
+                    next_job=json.loads((queue.jobs/(successor+'.json')).read_text())
+                    if (next_job.get('viewpoint_id')!=viewpoint_id or next_job.get('policy_sha256')!=policy_sha
+                            or next_job.get('job_id')!=successor or next_job.get('artifact_sha256')!=sha256_json({
+                                k:v for k,v in next_job.items() if k!='artifact_sha256'})):
+                        raise ValueError('Route replacement differs from the bound handoff')
+                    job_id=successor
+            else:
+                job=make_cvp_route_job(viewpoint_id,material['artifact_sha256'],policy_sha)
+                queue.enqueue(job);job_id=job['job_id']
+            jobs.append(job_id)
+            dependencies[viewpoint_id]={'dependency_sha256':basis,'job_id':job_id}
         except Exception as exc:
             issues[viewpoint_id] = str(exc)
     report = {"schema_version": "wang_cvp_route_handoff_v2",
-              "viewpoint_ids": route_affected_viewpoints(package),
-              "job_ids": sorted(jobs), "issues": issues}
-    write_derived(issue_dir / "route-handoff.json",
-                  report | {"artifact_sha256": sha256_json(report)})
+              "viewpoint_ids": sorted(ids), "job_ids": sorted(set(jobs)), "issues": issues}
+    if update_viewpoint_ids:
+        report.update(dependencies=dependencies,inactive_viewpoints=inactive)
+    write_derived(previous_path, report | {"artifact_sha256": sha256_json(report)})
     return report
 
 
-def handoff_completed_cvp_groups(store: PostgresKnowledgeStore, parent: dict[str, Any], root: Path) -> None:
+def handoff_completed_cvp_groups(store: PostgresKnowledgeStore, parent: dict[str, Any], root: Path, *, track_dependencies=False) -> None:
     """Retry the idempotent Route handoff after a completed CVP action resumes."""
 
     for unit in parent.get("units", {}).values():
         if unit.get("status") != "completed" or not unit.get("completed_step"):
             continue
         step = store.get_cvp_group(unit["completed_step"])
+        package = step["reviewed"]["evidence"]["package"]["payload"]
         handoff_cvp_route_jobs(
             store,
-            step["reviewed"]["evidence"]["package"]["payload"],
+            package,
             root / "route-queue-v2",
             Path(step["materials"]["step_root"]),
+            update_viewpoint_ids=(route_affected_viewpoints(package) if track_dependencies else
+                parent["request"]["input"].get("update",{}).get("viewpoint_ids",())),
         )
+
+
+def cvp_update_completion(store, parent, root):
+    """Report both stages without relabeling a CVP-only completion as finished."""
+    if parent['result'].get('status')!='completed':
+        return {'status':'cvp_pending','cvp_status':parent['result'].get('status')}
+    states={};issues={};inactive={}
+    for unit in parent['units'].values():
+        step=store.get_cvp_group(unit['completed_step'])
+        path=Path(step['materials']['step_root'])/'route-handoff.json'
+        if not path.exists():
+            issues[unit['completed_step']]='missing Route handoff'
+            continue
+        report=json.loads(path.read_text())
+        if report.get('artifact_sha256')!=sha256_json({k:v for k,v in report.items() if k!='artifact_sha256'}):
+            raise ValueError('Route handoff report changed')
+        issues.update(report['issues']);inactive.update(report.get('inactive_viewpoints',{}))
+        for job_id in report['job_ids']:
+            path=Path(root)/'route-queue-v2'/'states'/(job_id+'.json')
+            states[job_id]=json.loads(path.read_text())['status'] if path.exists() else 'missing'
+    complete=not issues and all(state=='complete' for state in states.values())
+    return {'status':'completed' if complete else 'arguments_pending', 'cvp_status':'completed',
+            'argument_jobs':states, 'issues':issues, 'inactive_viewpoints':inactive}
 
 
 def process_cvp_route(
     *, store: PostgresKnowledgeStore, viewpoint_id: str, output_dir: Path,
     proposer: Any, reviewer: Any, reconsiderer: Any,
     max_correction_rounds: int, apply: bool = False,
+    round_extension: dict[str, Any] | None = None,
     ownership_guard: Callable[[], None] | None = None,
     repair_evidence_input: bool = False,
     repair_connection_context: bool = False,
@@ -286,6 +413,9 @@ def process_cvp_route(
         unavailable_evidence=materials.get('unavailable_evidence'),
         claim_evidence_for_intermediate_steps=use_claim_evidence,
         observation_supports=observations_enabled,
+        program_bound_observation_retirements=observations_enabled and (
+            not saved_packet_path.exists()
+            or 'observation_retirement_binding' in json.loads(saved_packet_path.read_text())),
         existing_observation_supports=materials.get('existing_observation_supports'),
         unusable_context_claims=materials.get('unusable_context_claims'),
         approved_connection_judgments=materials.get('approved_connection_judgments'),
@@ -311,6 +441,7 @@ def process_cvp_route(
         reconsiderer=reconsiderer, max_correction_rounds=max_correction_rounds,
         recovery_seed=recovery_seed,
         connection_seed=connection_seed,
+        **({'round_extension':round_extension} if round_extension else {}),
     )
     if result["cvp_re_review_exceptions"]:
         raise CvpRouteReviewIncomplete("route review raised CVP identity exceptions")
@@ -326,7 +457,7 @@ def process_cvp_route(
                               retiring_keys=retiring, transactional=True)
     plan_context = store.read_package_cvp_context(package, retiring=retiring)
     material_pins = {(row["collection"], row["object_id"]):
-                     (row["revision"], row["content_sha256"], False)
+                     (row["revision"], row["content_sha256"], bool(row.get("retired")))
                      for row in materials["record_pins"]}
     for key, row in plan_context.items():
         pin = (row["revision"], row["content_sha256"],
@@ -395,12 +526,17 @@ def main() -> int:
                         help="Continue the saved initial review after the Claim-evidence boundary fix")
     parser.add_argument('--repair-connection-context', action='store_true',
                         help='Continue the exact saved CVP exception with approved connection context')
+    parser.add_argument('--round-extension', type=Path,
+                        help='Owner authorization for one extra correction/review in this exact saved job')
     args = parser.parse_args()
     if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
         parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
     if args.repair_connection_context and (args.action != 'run' or not args.job_id
                                           or not args.retry_exceptions or args.repair_evidence_input):
         parser.error('connection continuation requires run, exact job ID, --retry-exceptions and no other repair')
+    if args.round_extension and (args.action != 'run' or not args.job_id or not args.retry_exceptions
+                                or args.repair_evidence_input or args.repair_connection_context):
+        parser.error('round extension requires run, exact job ID, --retry-exceptions and no input repair')
     policy = load_route_policy(args.route_policy)
     if policy["schema_version"] not in {"wang_route_resolution_policy_v5", "wang_route_resolution_policy_v8"}:
         parser.error("whole-CVP worker requires Route policy v5 or v8")
@@ -511,13 +647,17 @@ def main() -> int:
         }
         for adapter in adapters.values():
             adapter.max_request_bytes = int(policy["max_request_bytes"])
+        from backend.pipeline.viewpoint_route_round_extension import round_extension
+        extension = round_extension(active_output, job, policy, args.round_extension)
         result = process_cvp_route(
             store=store, viewpoint_id=job["viewpoint_id"],
             output_dir=args.output_dir / job["job_id"],
             proposer=OwnershipGuardedAdapter(adapters["proposal"], guard),
             reviewer=OwnershipGuardedAdapter(adapters["review"], guard),
             reconsiderer=OwnershipGuardedAdapter(adapters["correction"], guard),
-            max_correction_rounds=int(policy["max_correction_rounds"]),
+            max_correction_rounds=(extension['effective_max_correction_rounds'] if extension
+                                   else int(policy["max_correction_rounds"])),
+            round_extension=extension,
             apply=args.apply, ownership_guard=guard,
             repair_evidence_input=args.repair_evidence_input, policy_path=args.route_policy,
             repair_connection_context=args.repair_connection_context,

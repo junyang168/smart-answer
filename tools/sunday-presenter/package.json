@@ -1,0 +1,25 @@
+{
+  "name": "sunday-presenter",
+  "version": "0.4.1",
+  "private": true,
+  "description": "Sunday Presenter Phase 1: persistent presentations and paired local slide control",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "smoke": "electron . --smoke",
+    "icons": "node build-icons.cjs",
+    "package:mac": "node package-mac.cjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.2.1"
+  },
+  "overrides": {
+    "glob": "14.0.3",
+    "minimatch": "11.0.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

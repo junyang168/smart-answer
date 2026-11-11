@@ -271,6 +271,9 @@ def _readback(store,evidence):
     keys={(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]) for col,rows in package.items()
           if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
     context.update(store.read_current_records(keys))
+    if evidence['bundle'].get('update') is not None:
+        context.update(store.read_current_records(('claims',cid) for cid in
+            evidence['bundle']['update']['unavailable_claim_ids']))
     vids=set(evidence['bundle'].get('candidate_viewpoint_ids',[]))
     vids.update(row['viewpoint_id'] for col in ('canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links')
                 for row in package.get(col,[]))
@@ -321,7 +324,7 @@ def _same_material_inputs(current,saved):
         if current.get('human_source_decisions')!=[d for d in saved.get('human_source_decisions',[])
                                                   if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
-        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract','summary_enrichment_contract'))
+        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract','summary_enrichment_contract','update'))
 
 
 def _omitted_duplicate_relations(store,step):
@@ -430,6 +433,31 @@ def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
         max_request_bytes=request.budget.max_request_bytes,probe=probe)
 
 
+def _refresh_program_diagnostics(request,bundle,previous,prior_findings,*,resolved=False):
+    """Reproduce an old exact rejection, adding only concrete program diagnostics."""
+    feedback=bundle.get('program_validation_feedback')
+    if not feedback:return bundle
+    if resolved:
+        return seal({k:v for k,v in bundle.items()
+                     if k not in {'artifact_sha256','program_validation_feedback'}})
+    try:
+        domain.compile_candidate(request,bundle,feedback['raw_response']['candidate'],
+            previous=previous,prior_findings=prior_findings)
+    except domain.CandidateValidationError as exc:
+        if feedback['findings']!=[str(exc)] or 'diagnostics' in feedback:return bundle
+        return seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
+            'program_validation_feedback':{**feedback,'diagnostics':exc.details}})
+    except ValueError:
+        return bundle
+    else:
+        # A successfully accepted candidate already resolved this rejected
+        # delta. Its later semantic revision must not receive obsolete repair
+        # instructions. The original rejection and call SHAs stay in history.
+        return seal({k:v for k,v in bundle.items()
+                     if k not in {'artifact_sha256','program_validation_feedback'}})
+    return bundle
+
+
 def run(store,request,*,root,execute=False,clients=None):
     request=domain.Request.model_validate(request);root=Path(root).resolve()
     validate_authorization(request)
@@ -439,9 +467,10 @@ def run(store,request,*,root,execute=False,clients=None):
             from backend.api.canonical_repository.postgres_store import ChangeSetConflict
             raise ChangeSetConflict('CVP2 original root/request/policy cannot reset')
         if saved.get('result',{}).get('status')=='completed':
+            _guard_completed_update(store,saved)
             from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
             handoff_completed_cvp_groups(store,saved,root)
-            return saved['result']
+            return _result(store,saved,root)
     preflight=prepare_recall(store,request.input,allow_unqualified=True,defer_index=execute)
     if not execute:return {'status':'preflight','preflight':preflight,'model_calls':0,'semantic_writes':0}
     with exclusive(root):
@@ -449,9 +478,10 @@ def run(store,request,*,root,execute=False,clients=None):
         parent_id=parent['run_id'];call=_transport(store,parent_id,root,request)
         _reconcile_capacity_refusals(store,parent_id)
         if parent['result'].get('status')=='completed':
+            _guard_completed_update(store,parent)
             from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
             handoff_completed_cvp_groups(store,parent,root)
-            return parent['result']
+            return _result(store,parent,root)
         from backend.pipeline.viewpoint_resolution_runtime import subscription_client
         proposer=clients['gpt'] if clients else subscription_client('codex','gpt-6.1-sol','high')
         reviewer=clients['opus'] if clients else subscription_client('claude','claude-opus-5-5','high')
@@ -475,7 +505,8 @@ def run(store,request,*,root,execute=False,clients=None):
                 from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
                 route_package=completed['reviewed']['evidence']['package']['payload']
                 handoff_cvp_route_jobs(store,route_package,root/'route-queue-v2',
-                                       Path(completed['materials']['step_root']))
+                                       Path(completed['materials']['step_root']),
+                                       update_viewpoint_ids=request.input.get('update',{}).get('viewpoint_ids',()))
                 if not domain.statement_recall(request):
                     approved_cards.extend(_completed_summary_proofs(store,completed))
                 previous_index_root=completed['materials'].get('index_root',previous_index_root)
@@ -501,7 +532,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     handoff_cvp_route_jobs(store,
                                            store.get_cvp_group(latest['run_id'])['reviewed']['evidence']['package']['payload'],
                                            root/'route-queue-v2',
-                                           Path(latest['materials']['step_root']))
+                                           Path(latest['materials']['step_root']),
+                                           update_viewpoint_ids=request.input.get('update',{}).get('viewpoint_ids',()))
                     completed=store.get_cvp_group(latest['run_id'])
                     if not domain.statement_recall(request):
                         approved_cards.extend(_completed_summary_proofs(store,completed))
@@ -517,7 +549,8 @@ def run(store,request,*,root,execute=False,clients=None):
                        and not Path(slot['intent']['cache_path']).exists()
                        for slot in parent['call_reservations'].values()):
                     raise ValueError('unknown original unit call; resume its exact dispatch only')
-                heads=store.read_cvp_heads();index_root=root/('index-'+sha256_json(heads)[:24])
+                heads=preflight['heads'] if 'update' in request.input else store.read_cvp_heads()
+                index_root=root/('index-'+sha256_json(heads)[:24])
                 remaining=_stage_call_budget(parent,index_root,request)
                 # A changed head cannot bypass an unknown original index call.
                 for slot in parent['call_reservations'].values():
@@ -562,7 +595,15 @@ def run(store,request,*,root,execute=False,clients=None):
                         [raw['claims',cid]['payload'] for cid in group['claim_ids']],current['claim_input_policy'])['claims']]
                 recall_root=unit_root/'recall'
                 previous_recall=Path(latest['materials']['recall_root']) if latest else None
-                if (recall_root/'recall-authentication.json').exists():
+                if request.input.get('update') is not None:
+                    # Known affected identities and current existing ownership;
+                    # no model recall or top-K over required update members.
+                    recall=combine_recall_candidates(group_plan,
+                        {cid:set(group_plan['viewpoint_refs'].values()) for cid in group['claim_ids']},
+                        existing_links=current['existing_links'])
+                    write_immutable(recall_root/'recall-result.json',recall)
+                    metrics={'current_plan':group_plan,'model_calls':0}
+                elif (recall_root/'recall-authentication.json').exists():
                     from backend.pipeline.cvp_recall import _authenticate_recall_root
                     authenticated,_=_authenticate_recall_root(recall_root,client=proposer,previous_index=index)
                     if authenticated['claims']!=cards or authenticated['plan']!=group_plan:
@@ -617,7 +658,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     unit_root=root/('unit-'+sha256_json(key)[:16])/generation
                     bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
                         'material':{**bundle['material'],'input_repair':repair}})
-                if not latest and not filtered_path.exists() and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                if not latest and not filtered_path.exists() and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE and 'update' not in request.input:
                     initial_packet=domain.proposal_packet(request,bundle)
                     initial_adapter=adapter('proposal',request,bundle,initial_packet,client=proposer)
                     if initial_adapter.request_bytes(initial_packet)>request.budget.max_request_bytes:
@@ -638,6 +679,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     initial_packet=domain.proposal_packet(request,bundle)
                     initial_adapter=adapter('proposal',request,bundle,initial_packet,client=proposer)
                     if initial_adapter.request_bytes(initial_packet)>request.budget.max_request_bytes:
+                        if 'update' in request.input:
+                            raise ValueError('complete CVP update material exceeds request capacity; required members cannot be screened or split')
                         plan=_capacity_plan(store,request,current,group,recall,index,proposer,parent_id)
                         plan=seal({k:v for k,v in plan.items() if k!='artifact_sha256'}|{'origin_recall_root':str(recall_root)})
                         persistence.register_work_units(store,parent_id,group_key=key,plan=plan,
@@ -645,6 +688,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         position-=1
                         continue
                 previous=None;prior_findings=[];ordinal=0;revision=False;seen=set();proposal_origin=None
+                feedback_resolved=False
                 if latest:
                     oldroot=Path(latest['materials']['step_root'])
                     oldbundle=latest['materials']['bundle']
@@ -665,6 +709,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     else:
                         if (oldroot/'candidate.json').exists():
                             previous=read_artifact(oldroot/'candidate.json')
+                            feedback_resolved=True
                             prior_findings=list(previous['prior_findings'])
                             if has_approval:prior_findings=_all_findings(previous,read_artifact(oldroot/'approval.json'))
                             if not same:
@@ -695,6 +740,22 @@ def run(store,request,*,root,execute=False,clients=None):
                             seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                 while True:
                     step_root=unit_root/f'step-{ordinal:04d}'
+                    if (proposal_origin is None and bundle.get('program_validation_feedback')
+                            and not (step_root/'proposal.json').exists()
+                            and all(slot['state']=='returned' for slot in
+                                store.get_cvp_group(parent_id)['call_reservations'].values())):
+                        # Only an undispatched next step receives improved
+                        # diagnostics. Preserve frozen steps and every answer;
+                        # never alter an uncertain invocation.
+                        refreshed=_refresh_program_diagnostics(request,bundle,previous,prior_findings,
+                                                               resolved=feedback_resolved)
+                        if refreshed['artifact_sha256']!=bundle['artifact_sha256']:
+                            if previous is not None:
+                                previous=_rebase_previous(request,bundle,refreshed,previous,
+                                                          prior_findings=prior_findings)
+                            bundle=refreshed;revision=False
+                            if (step_root/'materials.json').exists():
+                                ordinal+=1;step_root=unit_root/f'step-{ordinal:04d}'
                     materials={'bundle':bundle,'previous':previous,'prior_findings':prior_findings,
                                'step_root':str(step_root),'recall_root':str(recall_root),'index_root':str(index_root)}
                     if proposal_origin is not None:
@@ -715,7 +776,46 @@ def run(store,request,*,root,execute=False,clients=None):
                             newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                             if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
                             bundle=newbundle;ordinal+=1;revision=False;continue
-                        candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                        try:
+                            candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                            feedback_resolved=True
+                        except ValueError as exc:
+                            feedback_resolved=False
+                            failed_sha=sha256_json(raw)
+                            failures=bundle.get('program_validation_response_shas',[])
+                            if failed_sha in failures:
+                                raise ValueError('proposal program validation made no progress: '+str(exc)) from exc
+                            feedback={'raw_response':raw,'raw_artifact':binding(step_root/'proposal.json'),
+                                'findings':[str(exc)],'content_approval':False}
+                            feedback_path=step_root/'proposal-program-validation.json'
+                            if feedback_path.exists():
+                                # Authenticate the old rejection without rewriting
+                                # history when diagnostics improve in newer code.
+                                saved_feedback=read_artifact(feedback_path)
+                                if {k:v for k,v in saved_feedback.items() if k!='diagnostics'}!=feedback:
+                                    raise ValueError('saved proposal validation feedback differs from exact rejection')
+                                feedback=saved_feedback
+                            elif getattr(exc,'details',None) is not None:
+                                feedback['diagnostics']=exc.details
+                            write_immutable(step_root/'proposal-program-validation.json',feedback)
+                            # Keep the failed call in its original step. The
+                            # next ordinary proposal uses the same records,
+                            # permissions and SQL call budget plus exact errors.
+                            newbundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'} | {
+                                'program_validation_feedback':feedback,
+                                'program_validation_response_shas':[*failures,failed_sha]})
+                            if previous is not None:
+                                if previous.get('material_sha256')!=bundle['artifact_sha256']:
+                                    # A legacy frozen step may already carry an
+                                    # unrebound previous frame. Normalize only
+                                    # the exact program-metadata preimage before
+                                    # adding another genuine validation finding.
+                                    previous=domain.compile_candidate(request,bundle,{},previous=previous,
+                                                                      prior_findings=prior_findings)
+                                previous=_rebase_previous(request,bundle,newbundle,previous,
+                                                          prior_findings=prior_findings)
+                            bundle=newbundle
+                            ordinal+=1;revision=False;continue
                         proposal_path=step_root/'proposal.json'
                     else:
                         origin=proposal_origin
@@ -727,6 +827,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         candidate=previous
                         if candidate['material_sha256']!=bundle['artifact_sha256']:
                             raise ValueError('review-only candidate differs from expanded material')
+                        feedback_resolved=True
                     from backend.pipeline import cvp_candidate_screening as screening
                     detail_recall=screening.effective_recall(recall,bundle,current,key)
                     missing=action_member_requests(bundle,detail_recall,candidate)
@@ -750,7 +851,7 @@ def run(store,request,*,root,execute=False,clients=None):
                             packet=domain.review_packet(request,material,prior,prior_findings=prior_findings)
                             return adapter('review',request,material,packet,client=reviewer).request_bytes(packet)
                         next_bytes=next_request_bytes(newbundle,rebound)
-                        if next_bytes>request.budget.max_request_bytes and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                        if next_bytes>request.budget.max_request_bytes and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE and 'update' not in request.input:
                             target_claims={ref:cid for cid,ref in bundle['references']['claims'].items()}
                             component_claims={part['component_ref']:target_claims[part['claim_ref']]
                                               for part in candidate['component_plan']['components']}
@@ -831,14 +932,15 @@ def run(store,request,*,root,execute=False,clients=None):
                     package=validate_evidence(evidence);_guard(store,bundle)
                     commit_package(store,step_id,package=package,approval=binding(step_root/'review.json'),
                         authorization=request.authorization.model_dump(),backup={},sources=bundle['sources'],
-                        read_pins={(r['collection'],r['object_id']):(r['revision'],r['content_sha256'],False) for r in bundle['records']},
+                        read_pins={(r['collection'],r['object_id']):(r['revision'],r['content_sha256'],bool(r.get('retired'))) for r in bundle['records']},
                         reason='CVP2 exact final Opus candidate',actor=domain.VERSION,source_kind=domain.VERSION,
                         management_evidence=evidence)
                     readback,rpins=_readback(store,evidence)
                     persistence.complete_step(store,step_id,readback=readback,read_pins=rpins)
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=step_id)
                     from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
-                    handoff_cvp_route_jobs(store,package,root/'route-queue-v2',step_root)
+                    handoff_cvp_route_jobs(store,package,root/'route-queue-v2',step_root,
+                        update_viewpoint_ids=request.input.get('update',{}).get('viewpoint_ids',()))
                     from backend.pipeline.cvp_management_index import write_committed_summary_proofs
                     if not domain.statement_recall(request):
                         approved_cards.extend(write_committed_summary_proofs(evidence,proposal_path,
@@ -852,4 +954,47 @@ def run(store,request,*,root,execute=False,clients=None):
                     'resource_hold' if any(s in text.lower() for s in ('budget','capacity','exceeds','unknown','uncertain','progress','oscillation'))
                     else 'engineering_required')
                 persistence.progress(store,parent_id,group_key=key,status=status,detail=text)
-        return store.get_cvp_group(parent_id)['result']
+        return _result(store,store.get_cvp_group(parent_id),root)
+
+
+def _result(store, parent, root):
+    result=parent['result']
+    if 'update' not in parent['request']['input']:
+        return result
+    from backend.pipeline.viewpoint_route_cvp_worker import cvp_update_completion
+    update=cvp_update_completion(store,parent,root)
+    return {**result, 'cvp_status':result['status'], 'status':update['status'], 'update':update}
+
+
+def _guard_completed_update(store,parent):
+    """Reuse the audited afterimage; check necessary current dependencies only.
+
+    Route workers do not modify these CVP/Claim/source inputs. A later upstream
+    change needs its own update, never a new argument job under this old pass.
+    """
+    if 'update' not in parent['request']['input']:
+        return
+    verify_completed_action(store,parent)
+
+
+def verify_completed_action(store,parent):
+    """Authenticate a completed CVP postimage without enqueueing Route work."""
+    if parent.get('result',{}).get('status')!='completed':
+        raise ValueError('CVP action has not completed')
+    for unit in parent['units'].values():
+        if unit.get('status')!='completed':
+            continue
+        step=store.get_cvp_group(unit['completed_step'])
+        bundle=step['materials']['bundle']
+        records={(r['collection'],r['object_id']):r for r in bundle['records']}
+        package=step['reviewed']['evidence']['package']['payload']
+        for col,rows in package.items():
+            if col not in domain.KNOWLEDGE_COLLECTIONS:
+                continue
+            model,id_field=domain.KNOWLEDGE_COLLECTIONS[col]
+            for raw in rows:
+                payload=model.model_validate(raw).model_dump(mode='json')
+                records[col,payload[id_field]]={'collection':col,'object_id':payload[id_field],
+                    'payload':payload,'revision':payload['revision'],
+                    'content_sha256':record_content_sha(payload),'retired':False}
+        _guard(store,{**bundle,'records':list(records.values())})

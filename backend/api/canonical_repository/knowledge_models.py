@@ -196,10 +196,14 @@ def evidence_fragment_ids(value: Mapping[str, Any] | EvidenceStepRecord) -> list
     return sorted({str(item) for item in [singular, *plural] if item})
 
 
-def knowledge_relation_endpoints(relation_type: str) -> tuple[set[str], set[str]]:
+def knowledge_relation_endpoints(relation_type: str, *, flash: bool = False) -> tuple[set[str], set[str]]:
     """Answers can address a Question; ordinary evidence edges cannot."""
-    return ({'evidence_steps', 'observations'},
-            {'evidence_steps', 'questions'} if relation_type == 'answers' else {'evidence_steps'})
+    if relation_type == 'answers':
+        return {'evidence_steps', 'observations'}, {'evidence_steps', 'questions'}
+    if flash and relation_type in {'supports', 'explains', 'qualifies', 'refutes', 'contrasts',
+                         'contextualizes', 'corroborates', 'applies'}:
+        return {'evidence_steps', 'observations', 'claims'}, {'evidence_steps', 'observations', 'claims'}
+    return {'evidence_steps', 'observations'}, {'evidence_steps'}
 
 
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
@@ -1431,10 +1435,10 @@ class ViewpointRelationRecord(StrictViewpointRecord):
 
 class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
     identity_candidate_id: str
-    schema_version: Literal["wang_viewpoint_identity_candidate_v1"] = (
+    schema_version: Literal["wang_viewpoint_identity_candidate_v1", "wang_viewpoint_identity_candidate_v2"] = (
         "wang_viewpoint_identity_candidate_v1"
     )
-    candidate_claim_ids: list[str] = Field(min_length=1)
+    candidate_claim_ids: list[str]
     candidate_viewpoint_ids: list[str] = Field(default_factory=list)
     seed_relation_ids: list[str] = Field(default_factory=list)
     proposed_action: Literal["match_existing", "create_new", "defer"]
@@ -1447,6 +1451,11 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
 
     @model_validator(mode="after")
     def validate_candidate(self) -> "ViewpointIdentityCandidateRecord":
+        if not self.candidate_claim_ids and not (
+                self.schema_version == "wang_viewpoint_identity_candidate_v2"
+                and self.proposed_action == "match_existing" and self.candidate_viewpoint_ids
+                and self.scope_manifest_sha256):
+            raise ValueError("empty Claim cohort is only valid for scoped existing-CVP maintenance")
         if self.candidate_claim_ids != sorted(set(self.candidate_claim_ids)):
             raise ValueError("candidate_claim_ids must be sorted and unique")
         if self.candidate_viewpoint_ids != sorted(set(self.candidate_viewpoint_ids)):

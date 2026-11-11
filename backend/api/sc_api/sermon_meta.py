@@ -21,6 +21,9 @@ class Sermon(BaseModel):
     title: Optional[str] = None
     deliver_date: Optional[str] = None
     published_date: Optional[str] = None
+    publication_schema_version: Optional[str] = None
+    published_by: Optional[str] = None
+    published_by_name: Optional[str] = None
     summary: Optional[str] = None
     type: Optional[str] = None
     theme: Optional[str] = None
@@ -31,6 +34,8 @@ class Sermon(BaseModel):
     series_id: Optional[str] = None
     series_title: Optional[str] = None
     series_order: Optional[int] = None
+    rough_href: Optional[str] = None
+    editor_href: Optional[str] = None
     organization_mode: Optional[str] = None
     organization_mode_label: Optional[str] = None
     classification_confidence: Optional[str] = None
@@ -151,14 +156,18 @@ class SermonMetaManager:
                                        deliver_date=m.get('deliver_date'),
                                        last_updated= m.get('last_updated') if m.get('last_updated') else '2025-03-01 17:33',
                                        type=m.get('type'),
-                                       published_date=  m.get('published_date'),
+                                       published_date=m.get('published_date'),
+                                       publication_schema_version=m.get('publication_schema_version'),
+                                       published_by=m.get('published_by'),
+                                       published_by_name=m.get('published_by_name'),
                                        thumbnail= '/web/data/thumbnail/' + m.get('item') + '.jpg',
                                        keypoints= self.kps_to_str(m.get('keypoints')),
                                        core_bible_verse=m.get('core_bible_verse', []),
                                        source=m.get('source'),
                                        series_id=(catalog_by_id.get(m.get('item')) or {}).get('series_id') or m.get('series_id'),
-                                       series_title=(catalog_by_id.get(m.get('item')) or {}).get('series_title'),
-                                       series_order=(catalog_by_id.get(m.get('item')) or {}).get('series_order'),
+                                       series_title=(catalog_by_id.get(m.get('item')) or {}).get('series_title') or m.get('series_title'),
+                                       series_order=(catalog_by_id.get(m.get('item')) or {}).get('series_order') or m.get('series_order'),
+                                       rough_href=m.get('rough_href'),
                                        organization_mode=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode'),
                                        organization_mode_label=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode_label'),
                                        classification_confidence=(catalog_by_id.get(m.get('item')) or {}).get('classification_confidence'),
@@ -220,9 +229,29 @@ class SermonMetaManager:
         if core_bible_verse is not None:
             sermon.core_bible_verse = core_bible_verse
 
-    def save_sermon_metadata(self):
-        with open(self.metadata_file_path, "w") as f:
-            json.dump([s.dict() for s in self.sermons], f, ensure_ascii=False, indent=4)
+    def save_sermon_metadata(self, *, publication_item=None):
+        # A legacy edit of another sermon must not overwrite review assignments
+        # from this long-lived manager's stale in-memory catalog.
+        import fcntl
+        from .transcript_review import atomic, read
+        from .sermon_publication import FIELDS as PUBLICATION_FIELDS
+        with (Path(self.config_folder)/'.sermon-review.lock').open('a+b') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            current = {row['item']: row for row in read(Path(self.metadata_file_path), [])}
+            rows = []
+            for sermon in self.sermons:
+                row = sermon.model_dump()
+                if sermon.item != publication_item:
+                    saved = current.get(sermon.item, {})
+                    for field in PUBLICATION_FIELDS:
+                        if field in saved:
+                            row[field] = saved[field]
+                if (Path(self.base_folder)/'transcript_review'/sermon.item/'context.json').is_file() or (Path(self.base_folder)/'transcript_candidates'/f'{sermon.item}.json').is_file():
+                    row = current.get(sermon.item, row)
+                rows.append(row)
+            known = {row['item'] for row in rows}
+            rows.extend(row for item, row in current.items() if item not in known)
+            atomic(Path(self.metadata_file_path), rows)
 
     def generate_sitemap(self, sermons, domain):
         urlset = ET.Element('urlset', xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")

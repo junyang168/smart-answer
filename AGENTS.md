@@ -92,7 +92,13 @@ a session switched HEAD and two commits landed on another card's branch, and a
 `git stash` on a clean tree saved nothing, returned 0, and the `pop` after it
 restored a three-day-old stash belonging to someone else over twenty files.
 
-So the primary checkout is for reading. Work happens in a worktree of its own:
+So the primary checkout is for reading. Work happens in an isolated worktree.
+For follow-up work on the same objective, reuse that chat's existing card,
+branch and worktree; do not create one per revision, recovery, test or refactor.
+Before creating another worktree, inspect `git worktree list` and reuse the
+matching one when it is available and not owned by another active chat.
+An extra worktree is justified only by real concurrent ownership or a necessary
+isolated version test; remove a temporary one when that purpose is finished.
 
 ```bash
 scripts/work-on.sh 116 worktree-per-session   # prints the path to cd into
@@ -141,10 +147,9 @@ that fails there costs minutes and touches nothing, because the deploy builds
 before it switches.
 
 Run tests with `backend/.venv`, which is the version `.python-version` pins and
-the one production runs. The root `.venv` is an older 3.11 that survives for
-whatever still points at it, and it does not agree with production: a
-fellowship-documents test fails there and passes on 3.13, so a suite run
-against it can report a failure production does not have.
+the one production runs. The root `.venv` is only a compatibility symlink to
+`backend/.venv`; the old Python 3.11 development environment was removed in
+#591. Do not recreate a separate environment with an unpinned interpreter.
 
 Git enforces the part that matters — one branch cannot be checked out in two
 worktrees — so parallel sessions cannot take each other's floor away. Two
@@ -163,6 +168,12 @@ immediately. A GitHub-side close cannot delete local files, so `work-on.sh`
 also reconciles closed card worktrees before opening the next one. Cleanup is
 fail-closed: dirty worktrees are reported and preserved, unmerged branches are
 preserved, and no caller may use force or stash to bypass those decisions.
+Remove clean temporary worktrees after their purpose ends, once their commits
+are retained on the working branch or another durable Git ref and no running
+process, active chat or saved runtime depends on the directory. This does not
+close an unrelated ticket or discard an unmerged branch. Report any remaining
+dirty or still-needed worktree with its concrete reason; age alone is not a
+reason to delete it.
 
 # Operating the production machine
 
@@ -185,7 +196,16 @@ reports only real links, so a ticket connected after the fact is invisible.
 
 # Tracking work
 
-Open the ticket before you start, not after the code exists.
+Work must be attached to the appropriate existing ticket before code changes.
+**Creating a new ticket requires the user's explicit agreement. Authorization
+to implement a change does not authorize opening a new ticket.** First reuse
+the current ticket and PR for work toward the same objective, including bug
+fixes, tests, cleanup, recovery and improvements requested during that work.
+Do not split those into new cards just to track implementation steps. When a
+genuinely independent objective needs a new ticket, explain its concrete scope
+and why the existing card does not fit, then obtain agreement before creating
+it. If the user names an existing ticket, use it. The script below is how to
+create an approved ticket, not permission to create one automatically.
 
 ```bash
 scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md

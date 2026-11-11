@@ -1106,9 +1106,9 @@ def validate_foundation_change_set(
             and viewpoints.get(viewpoint_id, {}).get("current_revision_id") != revision_id
         ):
             findings.append(f"{link_id}: active link is not validated against current revision")
-        if not claim:
+        if not claim and not historical_withdrawal:
             findings.append(f"{link_id}: missing claim {claim_id}")
-        elif not historical_withdrawal and int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
+        elif claim and not historical_withdrawal and int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
             findings.append(f"{link_id}: pinned Claim revision mismatch")
         if str(link["decision_id"]) not in decisions:
             findings.append(f"{link_id}: missing decision {link['decision_id']}")

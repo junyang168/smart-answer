@@ -7,6 +7,147 @@ import json
 from pathlib import Path
 
 CONTRACT = 'claim_direct_neighbours_v1'
+EVIDENCE_OWNER_NOTE = (
+    'Exact frozen same-source Claim records explicitly named by Evidence.produced_claim_ids but absent from before. '
+    'Use only to check existing ownership and duplicate judgments before approving Claim creation. '
+    'They are reference facts, not new review roots, writable objects or approvals. '
+    'Compare the full statement, attribution and limitations against the professor source; existence alone '
+    'does not prove an equivalent judgment. '
+    'Do not infer absence from this unit or from a missing owner payload; do not recreate a judgment '
+    'already stated by a listed active Claim.')
+
+RETIREMENT_REFERENCE_NOTE = (
+    'Explicit current Claim snapshots for comparing preservation of the retired teaching. '
+    'They are read-only transaction pins, not additional review targets, write permissions '
+    'or new approvals. Compare the full judgments, attribution and limitations against the '
+    'complete professor sources. Existence or topical similarity alone is insufficient.')
+
+
+def retirement_reference_keys(request):
+    """An opt-in Retire comparison never expands write or review authority."""
+    from backend.pipeline import claim_management as cm
+    bound = request.authorization
+    if request.operation != 'Retire' or bound.file_sha256 == '0' * 64 or not Path(bound.path).is_file():
+        return []
+    keys = json.loads(cm.source.verify_file(bound).read_text()).get('retirement_reference_keys', [])
+    if (not isinstance(keys, list) or any(not isinstance(k, str) or k.count('/') != 1
+            or not k.startswith('claims/') or not k.split('/', 1)[1].strip()
+            or k.split('/', 1)[1] != k.split('/', 1)[1].strip() for k in keys)
+            or len(keys) != len(set(keys))):
+        raise ValueError('retirement references require distinct explicit Claim keys')
+    if set(keys) & (set(request.target_keys) | {p.key for p in request.permissions}):
+        raise ValueError('retirement references must remain outside targets and write permissions')
+    return keys
+
+
+def retirement_references(request, transaction_before):
+    """Use actual frozen SQL rows, including their exact versions; never prose snapshots."""
+    from backend.pipeline import claim_management as cm
+    keys = retirement_reference_keys(request)
+    if not keys:
+        return {}
+    rows = {k:v['payload'] for k,v in transaction_before.items()}
+    result = {}
+    for key in keys:
+        state = transaction_before.get(key)
+        if state:
+            state = cm.model_state(state)
+        if (not state or state['retired'] or state['payload'].get('superseded_by')
+                or state['payload'].get('review_status') in cm.HELD):
+            raise ValueError('retirement reference must be an active unheld frozen Claim: ' + key)
+        own = cm.own_source_ids(state['payload'], rows)
+        if len(own) != 1 or not own <= set(request.source_bindings):
+            raise ValueError('retirement reference requires its complete authorized own source: ' + key)
+        result[key] = state
+    return result
+
+
+def owner_context_enabled(request):
+    """New authorizations opt in; frozen packets retain their exact table."""
+    from backend.pipeline import claim_management as cm
+    bound = request.authorization
+    return (bound.file_sha256 != '0' * 64 and Path(bound.path).is_file()
+        and json.loads(cm.source.verify_file(bound).read_text()).get('include_evidence_owner_context') is True)
+
+
+def evidence_owner_references(request, before, transaction_before):
+    """Resolve declared owners for duplicate checks, without traversing Claims."""
+    from copy import deepcopy
+    from backend.pipeline import claim_management as cm
+    if owner_context_enabled(request):
+        # Provided Evidence owners are already in the resolvable table.
+        # Do not discover further Claims from their private reference Evidence.
+        return {}
+    rows = {k:v['payload'] for k,v in transaction_before.items()}
+    ids = {cid for key,state in before.items() if key.startswith('evidence_steps/')
+           for cid in state['payload'].get('produced_claim_ids', [])}
+    result = {}
+    for cid in sorted(ids):
+        key = cm.source.key('claims', cid)
+        if key in before:
+            continue
+        if key not in transaction_before:
+            raise ValueError('declared Evidence owner missing from frozen transaction context: ' + key)
+        own = cm.own_source_ids(rows[key], rows)
+        if own and own <= set(request.source_bindings):
+            result[key] = deepcopy(transaction_before[key])
+    return result
+
+
+def shared_support_owner_references(request, before, writable_keys):
+    """Find consumers of writable support, stopping at every Claim boundary.
+
+    Follow source bindings and directed knowledge relations through the
+    existing argument graph. Claim relations, private support of discovered
+    Claims and downstream consumers of those Claims are never traversed.
+    Only new intake uses this discovery; old frozen owner lists stay exact.
+    """
+    from collections import defaultdict
+    from copy import deepcopy
+    from backend.pipeline import claim_management as cm
+    support = {'evidence_steps', 'observations', 'source_fragments', 'position_nodes', 'questions'}
+    seeds = {k for k in writable_keys if k.split('/', 1)[0] in support}
+    if not seeds:
+        return {}
+    rows = {k:v['payload'] for k,v in before.items() if not v.get('retired', False)}
+    all_rows = {k:v['payload'] for k,v in before.items()}
+    by_id, consumers = defaultdict(list), defaultdict(set)
+    for key in rows:
+        if key.split('/', 1)[0] in cm.CLAIM_COLLECTIONS:
+            by_id[key.split('/', 1)[1]].append(key)
+    for key, payload in rows.items():
+        col = key.split('/', 1)[0]
+        if col in support | {'claims'}:
+            for dependency in cm.domain_dependencies(col, payload, rows):
+                if dependency.split('/', 1)[0] in support:
+                    consumers[dependency].add(key)
+            field = {'evidence_steps':'produced_claim_ids', 'questions':'answer_claim_ids'}.get(col)
+            if field:
+                consumers[key].update(cm.source.key('claims', cid) for cid in payload.get(field, []))
+        elif col == 'knowledge_relations':
+            start = by_id.get(payload.get('from_id') or payload.get('source_id'), [])
+            end = by_id.get(payload.get('to_id') or payload.get('target_id'), [])
+            if len(start) == len(end) == 1 and start[0].split('/', 1)[0] in support:
+                consumers[start[0]].add(end[0])
+    found, pending, owners = set(), list(seeds), set()
+    while pending:
+        key = pending.pop()
+        if key in found:
+            continue
+        found.add(key)
+        if key.startswith('claims/'):
+            if key not in before:
+                raise ValueError('shared support owner missing from frozen transaction context: ' + key)
+            if key in rows:
+                owners.add(key)
+            continue
+        pending.extend(consumers.get(key, set()) - found)
+    result = {}
+    for key in sorted(owners - set(request.target_keys)):
+        own = cm.own_source_ids(rows[key], all_rows)
+        if own and own <= set(request.source_bindings):
+            result[key] = deepcopy(before[key])
+    return result
 
 
 def enabled(request, policy=None):
@@ -25,17 +166,44 @@ def enabled(request, policy=None):
     return policy.claim_scope_contract == CONTRACT
 
 
-def scope(request, before, candidate=None):
+def review_roots(request, *, actual_write_keys=(), bounded=None):
+    """The same semantic frontier for packets, guards, commits and readback."""
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    if bounded is None:
+        bounded = bounded_unit(request)
+    targets = set(request.target_keys)
+    if bounded:
+        from backend.pipeline.claim_joint_update import required_keys
+        maintenance = (set() if request.authorization.file_sha256 == '0' * 64 else {
+            k for k in required_keys(request, strict=False) if not k.startswith('claims/')})
+    else:
+        maintenance = {p.key for p in request.permissions} - targets
+    return targets | maintenance | set(actual_write_keys)
+
+
+def scope(request, before, candidate=None, *, include_write_context=True, include_owner_context=True,
+          include_impact_evidence=True, include_contextual_evidence=True, include_maintenance=True,
+          obligation_only=False):
     from backend.pipeline import claim_management as cm
-    payloads = {k: v['payload'] for k, v in before.items()}
+    # A completed readback includes tombstones for reviewed retirements.
+    # They are history, not active incident edges in a read-only footprint.
+    # Live proposals retain the entire pre/post scope and write protections.
+    payloads = {k: v['payload'] for k, v in before.items()
+                if include_write_context or candidate is not None or not v.get('retired', False)}
     old = dict(payloads)
     if candidate:
         payloads.update(cm.source.index(candidate.records))
     targets = set(request.target_keys)
-    maintenance = {p.key for p in request.permissions} - targets
-    roots = targets | maintenance
-    if candidate:
-        roots.update(d.record_key for d in candidate.dispositions if d.action != 'retain')
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    bounded = bounded_unit(request)
+    writes = [d.record_key for d in candidate.dispositions if d.action != 'retain'] if candidate else []
+    base_roots = review_roots(request, bounded=bounded) if include_maintenance else targets
+    if obligation_only:
+        from backend.pipeline.claim_joint_update import required_keys
+        base_roots = targets | ({k for k in required_keys(request, strict=False)
+                                 if not k.startswith('claims/')} if include_maintenance else set())
+    roots = base_roots | set(writes)
+    maintenance = base_roots - targets
     def named(col, oid):
         key = cm.source.key(col, oid)
         if key not in payloads:
@@ -77,6 +245,11 @@ def scope(request, before, candidate=None):
             elif col in cm.RELATION_COLLECTIONS:
                 impact_claims.update(k for k in deps(key, rows) if k.startswith('claims/'))
     content_claims = targets | impact_claims | {k for k in roots if k.startswith('claims/')}
+    if bounded or obligation_only:
+        # An affected owner is inspected for the shared delta, not assigned
+        # another complete Claim review or a new qualification by proximity.
+        content_claims = targets | {k for k in roots if k.startswith('claims/')}
+        impact_context.update(impact_claims)
     core = set()
     support_indexes = {}
     def evidence_chain(seeds, rows, *, leaf_claims=False):
@@ -91,7 +264,14 @@ def scope(request, before, candidate=None):
                 destination = value.get('to_id') or value.get('target_id')
                 for endpoint in ends:
                     if endpoint.split('/', 1)[1] == destination:
-                        incoming.setdefault(endpoint, set()).update(ends | {relation})
+                        # Background remains visible in ordinary packets. For
+                        # mandatory maintenance, the edge itself is still our
+                        # relation, but its contextual source is not a premise.
+                        # A direct/shared binding or another support path still
+                        # reaches that source independently.
+                        upstream = (ends if include_contextual_evidence
+                                    or value.get('relation_type') != 'contextualizes' else set())
+                        incoming.setdefault(endpoint, set()).update(upstream | {relation})
             support_indexes[id(rows)] = incoming
         incoming = support_indexes[id(rows)]
         found = set(); pending = list(seeds)
@@ -113,7 +293,11 @@ def scope(request, before, candidate=None):
             pending.extend(incoming.get(key, set()))
         return found
     for rows in [old, payloads]:
-        seeds = (roots | impact_claims | impact_context) & set(rows)
+        # Shared owners' evidence must remain available for reviewing the
+        # actual delta, but their private defects do not become a full Update
+        # obligation. Finding classification can ask for roots' own complete
+        # support only; normal packets/transactions keep the full impact scope.
+        seeds = (roots | impact_claims | impact_context if include_impact_evidence else roots) & set(rows)
         # Evidence whose explicit owner is the target is also its evidence,
         # even if an older Claim omitted its forward evidence_step_ids.
         seeds.update(k for k, p in rows.items() if k.startswith('evidence_steps/')
@@ -139,6 +323,58 @@ def scope(request, before, candidate=None):
                 questions.add(key)
     neighbours = {k for k in endpoints if k.startswith('claims/')} - content_claims
     context = (endpoints | questions) - core
+    writable = core | relations | questions
+    if bounded and include_write_context:
+        # Potential shared consumers are reference material, not more review
+        # roots or capabilities. Freeze their necessary evidence before a
+        # proposal can change a shared fragment/step; do not wait until after
+        # GPT to discover that its old owners were missing from the packet.
+        possible = {p.key for p in request.permissions}
+        if not possible and not owner_context_enabled(request):
+            # Historical packets used a hypothetical full write frontier.
+            # New bound empty grants mean read-only, including admission's
+            # natural-closure probe; do not invent fragment write impacts.
+            possible = writable
+        for rows in [old, payloads]:
+            owners = set()
+            for owner, value in rows.items():
+                col = owner.split('/', 1)[0]
+                if col in cm.CLAIM_COLLECTIONS and col not in {'claims', 'source_fragments'} and deps(owner, rows) & possible:
+                    owners.add(owner)
+                    if col in cm.RELATION_COLLECTIONS:
+                        # A read-only shared-use edge still needs both typed
+                        # endpoints. Otherwise projecting the frozen packet
+                        # again cannot resolve this edge at commit/readback.
+                        owners.update(deps(owner, rows))
+                    elif col == 'evidence_steps':
+                        owners.update(named('claims', cid) for cid in value.get('produced_claim_ids', []))
+                    elif col == 'questions':
+                        owners.update(named('claims', cid) for cid in value.get('answer_claim_ids', []))
+                elif col == 'claims' and deps(owner, rows) & possible:
+                    owners.add(owner)
+            context.update(evidence_chain(owners, rows))
+        neighbours.update(k for k in context if k.startswith('claims/') and k not in content_claims)
+    if bounded and include_write_context and include_owner_context and owner_context_enabled(request):
+        # Resolve the exact owner facts supplied by the original reference
+        # table. Freeze discovery at the pre-proposal frontier: adding their
+        # own support must not discover owners-of-owners or Claim neighbours.
+        frontier = scope(request, before, include_write_context=include_write_context,
+                         include_owner_context=False)['record_keys']
+        authority = json.loads(cm.source.verify_file(request.authorization).read_text())
+        fixed = authority.get('evidence_owner_context_keys')
+        if fixed is not None:
+            if not isinstance(fixed, list) or len(fixed) != len(set(fixed)) or any(
+                    not isinstance(k, str) or not k.startswith('claims/') for k in fixed):
+                raise ValueError('owner context requires exact frozen Claim keys')
+            owners = {named(*k.split('/', 1)) for k in fixed}
+        else:
+            # Compatibility for the first frozen packets of this opt-in.
+            owners = {named('claims', cid) for k in frontier if k.startswith('evidence_steps/')
+                for cid in old[k].get('produced_claim_ids', [])} - set(frontier)
+        owners = {k for k in owners
+            if (own := cm.own_source_ids(old[k], old)) and own <= set(request.source_bindings)}
+        context.update(evidence_chain(owners, old))
+        neighbours.update(owners)
     for rows in [old, payloads]:
         context.update(evidence_chain(context & set(rows), rows, leaf_claims=True))
     keys = core | relations | context
@@ -164,17 +400,33 @@ def scope(request, before, candidate=None):
         if any(payloads[k]['source_id'] not in own for k in chain if k.startswith('source_fragments/')):
             raise ValueError('Claim evidence crosses its own source boundary')
     keys.update(named('source_documents', sid) for sid in source_ids)
-    return {'contract': CONTRACT, 'record_keys': sorted(keys),
+    result = {'contract': CONTRACT, 'record_keys': sorted(keys),
             'content_claim_keys': sorted(content_claims), 'neighbour_claim_keys': sorted(neighbours),
             'relation_keys': sorted(relations), 'source_ids': sorted(source_ids),
             'maintenance_keys': sorted(maintenance)}
+    if bounded or obligation_only:
+        result['impact_claim_keys'] = sorted(impact_claims - content_claims)
+        result['writable_record_keys'] = sorted(writable)
+    return result
 
 
-def assert_current(store, cursor, request, records):
+def obligation_keys(request, before, candidate=None):
+    """Own complete support and explicit maintenance, excluding spare grants."""
+    return set(scope(request, before, candidate, include_write_context=False,
+        include_owner_context=False, include_impact_evidence=False,
+        include_contextual_evidence=False, obligation_only=True)['writable_record_keys'])
+
+
+def assert_current(store, cursor, request, records, *, actual_write_keys=(), include_write_context=True,
+                   include_maintenance=True):
     """Check adjacency at roots, not reverse closure at every read endpoint."""
     from backend.pipeline import claim_management as cm
-    roots = {cm.source.split_key(k) for k in request.target_keys}
-    roots.update((p.collection, p.object_id) for p in request.permissions)
+    from backend.pipeline.claim_review_units import enabled as bounded_unit
+    bounded = bounded_unit(request)
+    roots = {cm.source.split_key(k) for k in review_roots(request,
+        actual_write_keys=actual_write_keys if bounded else (), bounded=bounded)}
+    if not include_maintenance:
+        roots = {cm.source.split_key(k) for k in set(request.target_keys) | set(actual_write_keys)}
     consumers = store._claim_reference_consumers(cursor, roots)
     # New incoming non-Claim support can change the target's argument even
     # when no root row changed. Other Claims sharing evidence stay outside.
@@ -192,6 +444,7 @@ def assert_current(store, cursor, request, records):
     if consumers - set(records):
         from backend.api.canonical_repository.postgres_store import ChangeSetConflict
         raise ChangeSetConflict('direct Claim scope omitted a current neighbour or maintenance owner')
-    selected = scope(request, {cm.source.key(*k): v for k, v in records.items()})
+    selected = scope(request, {cm.source.key(*k): v for k, v in records.items()},
+                     include_write_context=include_write_context, include_maintenance=include_maintenance)
     if not set(selected['record_keys']) <= {cm.source.key(*k) for k in records}:
         raise ValueError('direct Claim scope has incomplete current evidence')

@@ -20,8 +20,10 @@ import traceback
 
 from backend.pipeline.source_reconciliation_runner import binding, body, read, write
 from backend.pipeline.cvp_sql_commit import check_binding
+from backend.pipeline import source_execution_locks as execution_locks
 
 MODULE = 'backend.pipeline.claim_management_batch'
+REFILL_POLL_SECONDS = 5
 
 
 def progress(path, value):
@@ -65,8 +67,10 @@ def load(manifest, root, *, store=None):
         action_root = Path(job['root'])
         if not action_root.is_absolute() or request.action_id in jobs or str(action_root.resolve()) in roots:
             raise ValueError('duplicate action/root or relative execution root')
-        if request.operation != 'Update' or len(request.target_keys) > 2 or targets & set(request.target_keys):
-            raise ValueError('batch requires disjoint Update targets, maximum two per action')
+        from backend.pipeline.claim_review_units import enabled as bounded_unit
+        maximum = 10 if bounded_unit(request) else 2
+        if request.operation != 'Update' or len(request.target_keys) > maximum or targets & set(request.target_keys):
+            raise ValueError('batch requires disjoint Update targets within its explicitly bound capacity')
         # Authenticate original authorization/policy without changing either.
         if store is None:
             from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
@@ -78,11 +82,37 @@ def load(manifest, root, *, store=None):
                 raise ValueError('batch source metadata is missing or retired: ' + sid)
             documents[sid] = state['payload']
         cm.load_authority(request, source_documents=documents)
+        from backend.pipeline.claim_topic_units import unit
+        topic = unit(request)
+        if topic is not None:
+            from backend.pipeline.claim_joint_update import context_roots
+            records = store.read_claim_context(context_roots(request))
+            actual = {cm.source.key(*k) for k in records if k[0] != 'source_documents'}
+            if not actual <= set(topic['record_keys']):
+                raise ValueError('topic transaction dependencies expanded; replan before dispatch')
         jobs[request.action_id] = (request, action_root.resolve())
         roots.add(str(action_root.resolve())); targets.update(request.target_keys)
     write(Path(root) / 'plan.json', {'manifest': binding(manifest), 'jobs': plan['jobs'],
                                     'max_workers': plan['max_workers']})
     return plan, jobs
+
+
+def worker_jobs(manifest, root, *, store=None):
+    """Authenticate refill membership without replacing the coordinator plan."""
+    manifest, root = Path(manifest).resolve(), Path(root).resolve()
+    original = json.loads((root / 'plan.json').read_text())['manifest']
+    check_binding(original)
+    supplied = binding(manifest)
+    if supplied == original:
+        plan_root = root
+    else:
+        admitted = [json.loads(p.read_text()) for p in
+                    sorted((root / 'dispatch-inputs').glob('*.json'))]
+        if supplied not in admitted:
+            raise ValueError('worker manifest was not admitted by this coordinator')
+        # append_manifest freezes this per-input plan before dispatching.
+        plan_root = manifest.parent / 'batch'
+    return load(manifest, plan_root, store=store)
 
 
 def worker(manifest, root, key):
@@ -94,23 +124,12 @@ def worker(manifest, root, key):
     descriptors = [int(v) for v in os.environ.get('WKP_CLAIM_BATCH_LOCK_FDS', '').split(',') if v]
     if len(descriptors) != 3:
         raise ValueError('worker requires inherited coordinator locks')
-    data = Path(os.environ['DATA_BASE_DIR'])
-    paths = [Path(root) / 'controller.lock',
-        Path(os.environ.get('WANG_CVP_RECOVERY_ROOT', str(data / 'wang-knowledge-platform/staging/cvp-production-357/immediate-recovery-20261002-v1'))) / 'recovery.lock',
-        data / 'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock']
-    for fd, path in zip(descriptors, paths):
-        info = os.fstat(fd)
-        # A separately opened descriptor must be unable to acquire this lock.
-        with path.open('a') as probe:
-            if (os.fstat(probe.fileno()).st_dev, os.fstat(probe.fileno()).st_ino) != (info.st_dev, info.st_ino):
-                raise ValueError('inherited lock identity drift')
-            try:
-                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                continue
-            raise ValueError('worker inherited an unlocked descriptor')
-    _, jobs = load(manifest, root)
+    execution_locks.verify_inherited(descriptors[:1], [Path(root) / 'controller.lock'], exclusive=True)
+    execution_locks.verify_inherited(descriptors[1:], execution_locks.gate_paths(), exclusive=False)
+    _, jobs = worker_jobs(manifest, root)
     request, action_root = jobs[key]
+    scoped = [int(v) for v in os.environ.get('WKP_CLAIM_SOURCE_LOCK_FDS', '').split(',') if v]
+    execution_locks.verify_claim_locks(scoped, request)
     store = PostgresKnowledgeStore()
     ports = ProductionPorts(store)
     ports._environment_guard(require_backup=False)
@@ -131,21 +150,61 @@ def worker(manifest, root, key):
             'qualifications': {k: store.claim_management_qualification(k.split('/', 1)[1]) for k in request.target_keys}}
 
 
-def run(manifest, root):
+def run(manifest, root, *, model_capacity=None, refill=None):
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
-    from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline import claim_management as cm
+    manifest = Path(manifest).resolve()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         lock = stack.enter_context((root / 'controller.lock').open('a'))
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        maintenance = stack.enter_context(maintenance_lock())
-        registry = stack.enter_context(exclusive_cvp_run_lock({'global_lock_path': str(Path(os.environ['DATA_BASE_DIR']) /
-            'wang-knowledge-platform/staging/cvp-production-357/registry-cvp.lock')}))
+        maintenance, registry = stack.enter_context(execution_locks.shared_maintenance_gates())
         plan, jobs = load(manifest, root)
+        job_manifests = {key: manifest for key in jobs}
         store = PostgresKnowledgeStore()
         pending, active, results = list(jobs), {}, {}
+        if refill and model_capacity is None:
+            raise ValueError('continuous refill requires explicit model capacity')
+        additions = root / 'dispatch-inputs'
+        additions.mkdir(exist_ok=True)
+        def append_manifest(bound, *, remember):
+            check_binding(bound)
+            supplied = Path(bound['path'])
+            _, incoming = load(supplied, supplied.parent / 'batch', store=store)
+            targets = {k for request, _ in jobs.values() for k in request.target_keys}
+            roots = {str(path) for _, path in jobs.values()}
+            for key, (request, output) in incoming.items():
+                if key in jobs or targets & set(request.target_keys) or str(output) in roots:
+                    raise ValueError('continuous refill duplicates an action, target or root')
+                targets.update(request.target_keys); roots.add(str(output))
+            if remember:
+                from backend.pipeline.claim_management_intake import immutable
+                immutable(additions / ('%06d.json' % len(list(additions.glob('*.json')))), bound)
+            jobs.update(incoming)
+            job_manifests.update({key: supplied for key in incoming})
+            pending.extend(incoming)
+        for saved in sorted(additions.glob('*.json')):
+            append_manifest(json.loads(saved.read_text()), remember=False)
+        source_locks = {}
+        capacity = None
+        blocked = {}
+        opus_api = all(cm.Policy.model_validate_json(cm.source.verify_file(request.policy).read_text()).models['opus']['backend'] == 'anthropic_api'
+                       for request, _ in jobs.values())
+        if model_capacity is not None:
+            from backend.pipeline.claim_model_capacity import ClaimModelCapacity
+            from backend.pipeline.claim_management_intake import immutable
+            capacity = ClaimModelCapacity(model_capacity)
+            immutable(root / 'dispatch-capacity.json', {'manifest': binding(manifest), 'capacity': model_capacity})
+            # Existing roots retain their SQL request, budget and outcome.
+            # Neither completed nor paused actions are automatically restarted.
+            for key, (request, action_root) in jobs.items():
+                parent = store.get_cvp_group('CMA-' + cm.sha256_json(key))
+                if parent:
+                    if parent['request'] != request.model_dump(mode='json') or parent['execution_root'] != str(action_root):
+                        raise ValueError('capacity dispatch cannot replace an existing action/root')
+                    if parent['result'].get('status') in {'completed', 'paused'}:
+                        results[key] = {'action_id': key, 'result': parent['result']}
+                        pending.remove(key)
         (root / 'result.json').unlink(missing_ok=True)
         log = stack.enter_context((root / 'events.jsonl').open('a', buffering=1))
         def event(**value):
@@ -155,30 +214,72 @@ def run(manifest, root):
             # A running job keeps the footprint it was launched with; pending
             # footprints are re-read only when a job exits. Re-reading every
             # job on every one-second poll raced the worker's own commit.
-            scopes, stale = {}, True
-            while pending or active:
+            scopes, stale, refill_ready = {}, True, True
+            next_refill = 0.0
+            while pending or active or refill:
                 if stale:
                     for key in pending:
                         request, _ = jobs[key]
-                        records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
-                        # Separate actions in one sermon lock overlapping read
-                        # pins even when their content writes look disjoint.
-                        # Keep the existing scheduler; serialize its own-source
-                        # lanes as well as actual record write conflicts.
                         sources = {'claim_source_execution/' + sid for sid in request.source_bindings}
-                        scopes[key] = ({cm.source.key(*k) for k in records} | sources,
-                                       {p.key for p in request.permissions} | sources)
+                        writes = execution_locks.request_write_keys(request)
+                        if capacity:
+                            scopes[key] = (sources | writes, writes)
+                        else:
+                            records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
+                            scopes[key] = ({cm.source.key(*k) for k in records} | sources,
+                                           writes)
                     stale = False
-                for key in selection(pending, active, scopes, plan['max_workers']):
+                blocked = {role: capacity.block_reason(json.loads((capacity.root / role / 'state.json').read_text()),
+                                                     opus_api=opus_api and role == 'opus')
+                           for role in ('gpt', 'opus') if capacity and (capacity.root / role / 'state.json').exists()}
+                blocked = {role: reason for role, reason in blocked.items() if reason}
+                # The Agent can prepare an independent source after the last
+                # exit callback. Notice it while other workers are still live;
+                # an empty/finished batch retains its prompt return boundary.
+                if refill and active and time.monotonic() >= next_refill:
+                    refill_ready = True
+                if refill and refill_ready and not blocked:
+                    room = model_capacity['action_window'] - len(active) - len(pending)
+                    if room > 0:
+                        occupied_sources = {sid for key in [*active, *pending]
+                                            for sid in jobs[key][0].source_bindings}
+                        supplied = refill(occupied_sources, room, jobs)
+                        refill_ready = False
+                        next_refill = time.monotonic() + REFILL_POLL_SECONDS
+                        for bound in supplied:
+                            append_manifest(bound, remember=True)
+                        if supplied:
+                            stale = True
+                            continue
+                if not pending and not active:
+                    break
+                ready = [] if blocked else selection(pending, active, scopes,
+                    model_capacity['action_window'] if capacity else plan['max_workers'])
+                for key in ready:
+                    job_scope = ExitStack()
+                    request = jobs[key][0]
+                    try:
+                        held = job_scope.enter_context(execution_locks.claim_execution_locks(request))
+                    except BlockingIOError:
+                        job_scope.close()
+                        continue
+                    except BaseException:
+                        job_scope.close()
+                        raise
+                    stack.callback(job_scope.close)
+                    source_locks[key] = job_scope
                     token = cm.sha256_json(key)
                     output = root / (token + '.result.json')
                     output.unlink(missing_ok=True)  # derived worker receipt, never model/action artifacts
                     out = (root / (token + '.stdout.log')).open('a')
                     err = (root / (token + '.stderr.log')).open('a')
-                    command = [sys.executable, '-m', MODULE, '--manifest', str(manifest), '--root', str(root), '--job', key]
+                    command = [sys.executable, '-m', MODULE, '--manifest', str(job_manifests[key]), '--root', str(root), '--job', key]
                     environment = dict(os.environ, WKP_CLAIM_BATCH_LOCK_FDS=','.join(str(h.fileno()) for h in (lock, maintenance, registry)))
+                    environment['WKP_CLAIM_SOURCE_LOCK_FDS'] = ','.join(str(h.fileno()) for h in held)
+                    if capacity:
+                        environment['WKP_CLAIM_CAPACITY_CONFIG'] = str(capacity.root / 'configuration.json')
                     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=environment,
-                        pass_fds=(lock.fileno(), maintenance.fileno(), registry.fileno()))
+                        pass_fds=(lock.fileno(), maintenance.fileno(), registry.fileno(), *(h.fileno() for h in held)))
                     active[key] = (process, out, err, output)
                     pending.remove(key); event(stage='job_started', action_id=key, pid=process.pid)
                 for key, (process, out, err, output) in list(active.items()):
@@ -190,16 +291,24 @@ def run(manifest, root):
                         {'action_id': key, 'result': {'status': 'paused', 'reason': 'worker_exited', 'returncode': code}})
                     event(stage='job_finished', action_id=key, result=results[key]['result'])
                     del active[key]
+                    source_locks.pop(key).close()
                     stale = True
+                    refill_ready = True
                 progress(root / 'status.json', {'controller_pid': os.getpid(), 'active': {k: p[0].pid for k,p in active.items()},
-                    'pending': pending, 'results': results, 'heartbeat': datetime.now(timezone.utc).isoformat()})
-                if active:
+                    'pending': pending, 'results': results, 'provider_blocks': blocked, 'heartbeat': datetime.now(timezone.utc).isoformat()})
+                if not active and blocked:
+                    event(stage='provider_dispatch_paused', reasons=blocked)
+                    break
+                if pending or active:
                     time.sleep(1)
-            current = {key: {k: store.claim_management_qualification(k.split('/', 1)[1])
-                              for k in request.target_keys} for key, (request, _) in jobs.items()}
             completion = _paragraph_results(store, jobs)
+            current = {key: {k: completion['current_qualifications'][k] for k in request.target_keys}
+                       for key, (request, _) in jobs.items()}
             progress(root / 'result.json', {'results': results, 'current_qualifications': current,
                 'created_keys': completion['created_keys'], 'retired_keys': completion.get('retired_keys', []),
+                'unfinished_claims': completion['unfinished_claims'],
+                'unfinished_actions': completion['unfinished_actions'],
+                'pending': pending, 'provider_blocks': blocked,
                 'all_actions_completed': completion['all_actions_completed']})
         except BaseException as exc:
             event(stage='controller_failed', error=repr(exc))
@@ -299,6 +408,53 @@ def _paragraph_guard(plan, store):
         raise ValueError('paragraph source registration changed during sequence')
 
 
+def completed_results(store, jobs):
+    """Reconcile recorded group completions, without replaying qualification.
+
+    Each action already passed its own review, commit and readback boundary.
+    This summary neither grants current qualification nor closes a live action.
+    """
+    from backend.pipeline import claim_management as cm
+    results, processed, created, retired = {}, set(), set(), set()
+    for action_id, (request, action_root) in jobs.items():
+        parent = store.get_cvp_group('CMA-' + cm.sha256_json(action_id))
+        if parent and (parent['request'] != request.model_dump(mode='json')
+                       or parent['execution_root'] != str(action_root)):
+            raise ValueError('completion summary cannot change the original action/root/budget')
+        result = (parent or {}).get('result', {'status': 'not_started'})
+        results[action_id] = result
+        new = {k for k in (parent or {}).get('created_keys', []) if k.startswith('claims/')}
+        created.update(new)
+        if result.get('status') != 'completed':continue
+        keys = set(request.target_keys) | new
+        covered, action_retired = set(), set()
+        rounds = parent.get('latest_rounds', {})
+        for rid in rounds.values():
+            child = store.get_cvp_group(rid)
+            if (not child or child.get('parent_run_id') != parent['run_id']
+                    or child.get('outcome') != 'completed' or not child.get('opus_approved')
+                    or not child.get('program_readback_complete') or child.get('revisit_required')):
+                results[action_id] = {'status': 'paused', 'reason': 'incomplete_group_completion', 'round_id': rid}
+                break
+            covered.update(child['materials']['unit_request']['target_keys'])
+            covered.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'create')
+            action_retired.update(d['record_key'] for d in child['candidate']['dispositions'] if d['action'] == 'retire')
+        else:
+            if rounds and keys <= covered:
+                processed.update(keys);created.update(keys - set(request.target_keys))
+                retired.update(keys & action_retired)
+                continue
+            results[action_id] = {'status': 'paused', 'reason': 'missing_group_completion_coverage',
+                                  'missing_keys': sorted(keys - covered)}
+    expected = {k for request, _ in jobs.values() for k in request.target_keys} | created
+    return {'results': results, 'completion_basis': 'recorded_group_completions',
+            'processed_claim_keys': sorted(processed), 'created_keys': sorted(created),
+            'retired_keys': sorted(retired),
+            'unfinished_claims': {k: {'reason': 'group_not_completed'} for k in sorted(expected - processed)},
+            'unfinished_actions': {k: v for k, v in results.items() if v.get('status') != 'completed'},
+            'all_actions_completed': all(v.get('status') == 'completed' for v in results.values())}
+
+
 def _paragraph_results(store, jobs):
     """SQL is the completion authority, including new Claims, not a saved flag."""
     from backend.pipeline import claim_management as cm
@@ -330,7 +486,9 @@ def _paragraph_results(store, jobs):
                     results[action_id] = {'status': 'paused', 'reason': 'retirement_readback_changed', 'detail': str(exc)}
     for key in set(k for request, _ in jobs.values() for k in request.target_keys) | created:
         qualifications[key] = store.claim_management_qualification(key.split('/', 1)[1])
+    from backend.pipeline.claim_refresh_handoff import completion_details
     return {'results': results, 'current_qualifications': qualifications, 'created_keys': sorted(created),
+            **completion_details(qualifications, results, retired),
             **({'retired_keys': sorted(retired)} if retired else {}),
             'all_actions_completed': all(result.get('status') == 'completed' for result in results.values())
             and all(key in retired or (q and q.get('ready')) for key, q in qualifications.items())}
@@ -371,10 +529,10 @@ def run_paragraphs(manifest, root, *, store=None):
                 checkpoint(passed,identity,current,store=store,jobs=all_jobs)
                 completed.append(paragraph)
             _paragraph_guard(plan, store)
-            result = _paragraph_results(store, all_jobs)
+            result = completed_results(store, all_jobs)
             result.update(status='claims_completed' if result['all_actions_completed'] else 'paused',
                           completed_paragraphs=completed,
-                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['current_qualifications']),
+                          downstream_handoff={'claim_ids': sorted(key.split('/', 1)[1] for key in result['processed_claim_keys']),
                                               'action_ids': list(all_jobs), 'status': 'not_executed'})
             if result.get('retired_keys'):
                 result['downstream_handoff']['retired_claim_ids'] = [key.split('/', 1)[1] for key in result['retired_keys']]
@@ -424,14 +582,32 @@ def main():
     parser.add_argument('--claim-ids', type=Path, help='JSON list of Claim IDs; prepares and runs ordinary Updates')
     parser.add_argument('--instruction', help='the actual owner direction for the Claim ID list')
     parser.add_argument('--max-workers', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--creation-count',type=int,default=1,help='explicit number of source-scoped Claim identities to reserve per list action')
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--detach', action='store_true')
     parser.add_argument('--status', action='store_true')
+    parser.add_argument('--inspect', action='store_true', help='read saved batch inputs, SQL stop details and current qualifications; no calls or repairs')
+    parser.add_argument('--resume', action='store_true', help='reuse this batch root\'s saved manifest and capacity; no new intake or budget')
     parser.add_argument('--job')
+    parser.add_argument('--model-capacity', type=Path, help='explicit shared GPT/Opus capacity configuration; legacy batches unchanged')
     parser.add_argument('--paragraphs', action='store_true', help='call ordinary batches in source paragraph order')
     args = parser.parse_args()
+    if args.inspect or args.resume:
+        if (args.inspect and args.resume or args.manifest or args.claim_ids or args.instruction or args.job
+                or args.paragraphs or args.detach or args.status or args.model_capacity or args.creation_count != 1
+                or args.max_workers != 1):
+            parser.error('--inspect/--resume use only --root pointing at an existing batch directory')
+    if args.creation_count<1 or args.creation_count!=1 and not args.claim_ids:
+        parser.error('--creation-count must be positive and requires --claim-ids')
     from dotenv import load_dotenv
     load_dotenv('backend/.env'); load_dotenv('.env')
+    if args.inspect or args.resume:
+        from backend.pipeline.claim_refresh_handoff import inspect, resume
+        print(json.dumps((resume if args.resume else inspect)(args.root), ensure_ascii=False))
+        return
+    model_capacity = json.loads(args.model_capacity.read_text()) if args.model_capacity else None
+    if model_capacity and (args.detach or args.paragraphs or args.job):
+        parser.error('--model-capacity requires direct batch or Claim list execution')
     if args.status:
         print(json.dumps(status(args.root), ensure_ascii=False)); return
     if args.claim_ids:
@@ -443,16 +619,17 @@ def main():
         args.root = args.root.resolve()
         ids = json.loads(args.claim_ids.read_text())
         if args.detach:
-            prepared = prepare(ids, args.root, instruction=args.instruction, max_workers=args.max_workers)
+            prepared = prepare(ids, args.root, instruction=args.instruction, max_workers=args.max_workers,creation_count=args.creation_count)
             # Child consumes frozen normalized IDs; caller may move its original file.
             ids_path = args.root / 'claim-ids.json'
             from backend.pipeline.claim_management_intake import immutable
             immutable(ids_path, prepared['claim_ids'])
             detach([sys.executable, '-m', MODULE, '--claim-ids', str(ids_path), '--root', str(args.root),
-                    '--instruction', args.instruction, '--max-workers', str(args.max_workers)], args.root)
+                    '--instruction', args.instruction, '--max-workers', str(args.max_workers),
+                    *(['--creation-count',str(args.creation_count)] if args.creation_count!=1 else [])], args.root)
             return
         result = run_claim_ids(ids, args.root,
-                               instruction=args.instruction, max_workers=args.max_workers)
+                               instruction=args.instruction, max_workers=args.max_workers, model_capacity=model_capacity,creation_count=args.creation_count)
         print(json.dumps(result, ensure_ascii=False)); return
     if not args.manifest:
         parser.error('--manifest required')
@@ -475,7 +652,7 @@ def main():
         if args.paragraphs:
             print(json.dumps(run_paragraphs(args.manifest, args.root), ensure_ascii=False))
         else:
-            run(args.manifest, args.root)
+            run(args.manifest, args.root, model_capacity=model_capacity)
 
 
 if __name__ == '__main__':

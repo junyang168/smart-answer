@@ -23,7 +23,7 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
     verify(request,VERSION)
     fields={'schema_version','claim_ids','grouping','cvp_policy','claim_input_policy','index_root',
             'recall_request_bytes','recall_max_calls','artifact_sha256'}
-    if set(request)-{'recall_profile','contextual_summary_root'}!=fields:
+    if set(request)-{'recall_profile','contextual_summary_root','update'}!=fields:
         raise ValueError('recall preflight manifest fields differ')
     summary_root=request.get('contextual_summary_root')
     if summary_root is not None and (not isinstance(summary_root,str) or not Path(summary_root).is_absolute()):
@@ -31,7 +31,18 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
     profile=request.get('recall_profile')
     if profile not in (None, STATEMENT_SCOPE_PROFILE):
         raise ValueError('unknown recall input profile')
-    groups=work_groups(request['grouping'],request['claim_ids'])
+    update=request.get('update')
+    if 'update' in request and update is None:
+        raise ValueError('update scope cannot be null')
+    update_scope=None
+    if update is not None:
+        if profile != STATEMENT_SCOPE_PROFILE:
+            raise ValueError('CVP update requires the current statement/summary contract')
+        from backend.pipeline.cvp_update_preparation import current_update_scope
+        update_scope=current_update_scope(store,update)
+        if request['claim_ids'] != update_scope['claim_ids']:
+            raise ValueError('superseded_input: update must include every current member and replacement candidate')
+    groups=work_groups(request['grouping'],request['claim_ids'],update=update is not None)
     limit=request['recall_request_bytes'];cap=request['recall_max_calls']
     if type(limit) is not int or limit<1 or type(cap) is not int or cap<0:
         raise ValueError('explicit recall byte/call budgets required')
@@ -110,7 +121,6 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
         authority.append({'claim_id':cid,'qualification':q})
         read_pins['claims',cid]=(row['revision'],row['content_sha256'],False)
         cards[cid]={'claim_id':cid,**projection}
-    heads=store.read_cvp_heads()
     link_records=store.read_cvp_links(claim_ids=request['claim_ids'])
     for key,row in link_records.items():
         if row.get('retired') or record_content_sha(row['payload'])!=row['content_sha256']:
@@ -118,6 +128,12 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
         read_pins[key]=(row['revision'],row['content_sha256'],False)
     existing_links=[row['payload'] for row in link_records.values()
                     if row['payload'].get('effective_state')=='active']
+    head_scope=sorted(set(update['viewpoint_ids']) | {l['viewpoint_id'] for l in existing_links}) if update is not None else None
+    def current_heads():
+        return store.read_cvp_heads(viewpoint_ids=head_scope) if head_scope is not None else store.read_cvp_heads()
+    heads=current_heads()
+    if head_scope is not None and {h['viewpoint_id'] for h in heads}!=set(head_scope):
+        raise ValueError('superseded_input: update CVP is no longer active/current')
     if any(l['viewpoint_id'] not in {h['viewpoint_id'] for h in heads} for l in existing_links):
         raise ValueError('existing active connection has no active CVP head')
     base={'schema_version':VERSION,'request_sha256':request['artifact_sha256'],
@@ -125,6 +141,8 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
           'role_policy_sha256':sha256_json(policy),
           'claim_projection_fields':{cid:sorted(c) for cid,c in cards.items()},
           'existing_links':existing_links,'model_calls':0,'semantic_writes':0}
+    if update_scope is not None:
+        base['update']={**update, 'unavailable_claim_ids':update_scope['unavailable_claim_ids']}
     if allow_unqualified:
         blocked_ids={r['claim_id'] for r in blocked}
         admitted_groups=[{'group_key':g['group_key'],
@@ -142,7 +160,7 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
     elif index is not None and index.get('input_profile') is not None:
         raise ValueError('index profile differs from bound recall request')
     if index is None and (request['index_root'] is None or defer_index) and heads:
-        if store.read_cvp_heads()!=heads:
+        if current_heads()!=heads:
             raise ValueError('active CVP set or current head changed during preflight')
         store.verify_current_read_pins(read_pins)
         return seal({**base,'status':'index_required','recall_plans':[]})
@@ -159,11 +177,16 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
     for group in groups:
         if allow_unqualified and any(cid not in cards for cid in group['claim_ids']):
             continue
-        plan=recall_plan(index,[cards[cid] for cid in group['claim_ids']],max_request_bytes=limit,
-            measure=lambda payload:recall_adapter(proposer,payload,max_request_bytes=limit).request_bytes(payload))
+        if update is not None:
+            from backend.api.canonical_repository.cvp_recall import update_recall_plan
+            vids=set(update['viewpoint_ids']) | {l['viewpoint_id'] for l in existing_links}
+            plan=update_recall_plan(index,[cards[cid] for cid in group['claim_ids']],vids,max_request_bytes=limit)
+        else:
+            plan=recall_plan(index,[cards[cid] for cid in group['claim_ids']],max_request_bytes=limit,
+                measure=lambda payload:recall_adapter(proposer,payload,max_request_bytes=limit).request_bytes(payload))
         plans.append({'group_key':group['group_key'],'plan':plan})
     if sum(len(p['plan']['shards']) for p in plans)>cap:
         raise ValueError('all groups and CVP shards exceed the configured recall budget')
-    assert_current_index(index,store.read_cvp_heads())
+    assert_current_index(index,current_heads())
     store.verify_current_read_pins(read_pins)
     return seal({**base,'status':'prepared','index_sha256':index['artifact_sha256'],'recall_plans':plans})

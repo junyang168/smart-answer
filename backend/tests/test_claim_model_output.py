@@ -212,6 +212,19 @@ def test_v3_creates_one_claim_and_program_expands_every_retain(material):
     assert proof['changed_keys']==['claims/C2','evidence_steps/E']
 
 
+@pytest.mark.parametrize('field,value',[('visibility','internal'),('maturity','candidate'),('corpus_scope',None)])
+def test_creation_cannot_copy_ungranted_default_metadata(material,field,value):
+    material=creating(material)
+    grant=material['unit_request']['creation_permissions'][0]
+    grant['fields']=[k for k in grant['fields'] if k not in {'visibility','maturity','corpus_scope'}]
+    row=creation();payload=json.loads(row['fields_json']);payload[field]=value
+    row['fields_json']=json.dumps(payload)
+    raw={**empty(),'creations':[row],'changes':[change('evidence_steps/E',{'produced_claim_ids':['C','C2']})]}
+    candidate,_=wire.candidate(raw,material)
+    with pytest.raises(ValueError,match='created fields exceed creation permission'):
+        cm.validate_candidate(cm.Request.model_validate(material['unit_request']),material['before'],candidate,material['sources'])
+
+
 @pytest.mark.parametrize('bad',['v2','no_grant','existing','identity'])
 def test_v3_creation_needs_grant_and_a_new_identity(material,bad):
     material=creating(material);raw={**empty(),'creations':[creation()]}
@@ -226,12 +239,15 @@ def test_v3_creation_needs_grant_and_a_new_identity(material,bad):
         cm.validate_candidate(cm.Request.model_validate(material['unit_request']),material['before'],candidate,material['sources'])
 
 
-def test_joint_scope_caps_creation_at_one_claim(material,monkeypatch):
+def test_joint_scope_caps_creation_at_one_claim(material,monkeypatch,tmp_path):
     from backend.pipeline import claim_joint_update as joint
     monkeypatch.setattr(joint,'required_keys',lambda request,strict=True:[])
     material=creating(material);request=cm.Request.model_validate(material['unit_request'])
+    authorization=tmp_path/'authorization.json';authorization.write_text('{"claim_creation_allocations":{}}')
+    from backend.pipeline.cvp_sql_commit import binding
+    request.authorization=cm.source.FileBinding.model_validate(binding(authorization))
     one,_=wire.candidate({**empty(),'creations':[creation()]},material)
     joint.validate_candidate_scope(request,material['before'],one)
     two,_=wire.candidate({**empty(),'creations':[creation(),creation('C3')]},material)
-    with pytest.raises(ValueError,match='at most one'):
+    with pytest.raises(ValueError,match='exact granted Claim identities'):
         joint.validate_candidate_scope(request,material['before'],two)

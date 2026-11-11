@@ -1,0 +1,36 @@
+{
+  "schema_version": "audio-slide-transcript-correction.v2",
+  "source_sha256": "43443ed0c1c0c25cc25378379fca26cfc53e1aafaedee1f4b8f0fab20419fe72",
+  "illustrated_source_sha256": "6b67bef95612d7e3d16e9ab2211dc7c735406671f7b548c32d8f81e8b50f65ab",
+  "audio_manifest_sha256": "d265aed5ac7fbbb78e4092bf9174efa22f2b2bd79f802113afff1e2f9e4dadb7",
+  "audio_sha256": "fdb1bc2fde9178682b78ac5e5aeb8990e5361542f882b7829d0db07cdf05d18d",
+  "prompt_version": "audio-slide-correction.v2",
+  "proposal_model": "gemini-3.8-flash",
+  "acceptance_policy": "gemini_clear_audio_no_asr_veto",
+  "status_counts": {
+    "machine_supported": 31
+  },
+  "human_confirmed": false,
+  "proposal_estimated_usd_upper": 0.08123849999999999,
+  "independent_asr_calls": 0,
+  "independent_asr_estimated_usd": 0,
+  "word_times_recomputed": false,
+  "production_sources_written": 0,
+  "correction_offset_space": "original_formatted_paragraph_unicode_codepoints",
+  "reconciliation_rounds_per_batch": 0,
+  "lecture_id": "S 210307",
+  "trial_date": "2026-10-27",
+  "duration_ms": 900000,
+  "original_paragraph_count": 32,
+  "corrected_paragraph_count": 32,
+  "changed_paragraph_count": 18,
+  "total_decision_count": 31,
+  "paid_request_count": 7,
+  "request_stages": {
+    "proposal_structure_repair_once": 2,
+    "audio_correction_proposals": 5
+  },
+  "trial_artifact_sha256": "aac920cd7c2702060119db295aa8bfdc2fe3e80bd235bafa787cf2ac57de6c90",
+  "human_listening_quality_benchmark": false,
+  "subsumed_nested_proposals": 1
+}

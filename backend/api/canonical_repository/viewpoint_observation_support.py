@@ -12,6 +12,7 @@ from .viewpoint_batch_resolution import (
 
 COLLECTION = 'viewpoint_observation_supports'
 CONTRACT = 'wang_cvp_observation_support_v1'
+RETIREMENT_BINDING = 'wang_observation_revision_retirement_binding_v1'
 INELIGIBLE_CLAIM_STATUSES = frozenset({
     'rejected', 'human_hold', 'human_review_required', 'invalidated',
     'superseded', 'retired', 'withdrawn', 'withheld_unreviewed',
@@ -126,6 +127,69 @@ def observation_payload(item,packet):
 def observation_id(payload):return 'VOS-'+sha256_json(payload)[:24]
 
 
+def revision_retirement_binding(viewpoints, existing_supports, *, claims=(),
+                                source_revisions=None, unusable_context_claims=()):
+    """An observation pinned to an obsolete input cannot remain current.
+
+    This retires an immutable version, not its semantic observation. Models
+    still propose the complete current observations; independent review sees
+    every resulting retirement together with that complete replacement set.
+    """
+    current = {v['viewpoint_id']:v['viewpoint_revision_id'] for v in viewpoints}
+    if len(current) != len(viewpoints):
+        raise ValueError('observation retirement needs one current revision per CVP')
+    if any(o['viewpoint_id'] not in current for o in existing_supports):
+        raise ValueError('observation retirement has a foreign CVP')
+    claim_index = {c['claim_id']:c for c in claims}
+    unavailable = {c['claim_id'] for c in unusable_context_claims}
+    source_revisions = source_revisions or {}
+    def obsolete(o):
+        if o['validated_against_viewpoint_revision_id'] != current[o['viewpoint_id']]:
+            return True
+        if o['source_id'] in source_revisions and o['source_revision_sha256'] != source_revisions[o['source_id']]:
+            return True
+        for binding in o['evidence_bindings']:
+            if binding['claim_id'] in unavailable:
+                return True
+            claim = claim_index.get(binding['claim_id'])
+            if claim is not None and (binding['pinned_claim_revision'] != claim['pinned_claim_revision']
+                    or binding['claim_revision_sha256'] != claim['claim_revision_sha256']):
+                return True
+        # Missing context alone is not evidence of a retired/replaced Claim.
+        return False
+    return {'schema_version':RETIREMENT_BINDING,
+        'required_retirement_ids':sorted(o['observation_support_id'] for o in existing_supports
+            if obsolete(o)),
+        'note':('程序会将绑定已更换的 CVP、Claim 或来源版本，以及明确不可用 Claim 的观察记录列为技术退役，不要求模型抄写这些 ID。'
+                '这不表示其观察内容应删除：仍须根据全部原文提出完整的当前观察。'
+                'Opus 审核程序展开后的完整候选，包括全部旧记录、技术退役和新观察。'
+                '全部绑定仍为当前有效版本的旧观察须逐项保留或明确提出退役，不能静默省略。')}
+
+
+def bind_revision_retirements(proposal, packet):
+    """Expand forced version bookkeeping without changing raw model content."""
+    binding = packet.get('observation_retirement_binding')
+    if binding is None:
+        return proposal, None  # Historical packets retain their exact contract.
+    expected = revision_retirement_binding(packet['approved_viewpoints'],
+        packet.get('existing_observation_supports', []), claims=packet.get('claims', []),
+        source_revisions=packet.get('source_revisions', {}),
+        unusable_context_claims=packet.get('unusable_context_claims', []))
+    if binding != expected or not isinstance(proposal, ArgumentRouteProposalV3Response):
+        raise ValueError('observation retirement binding differs from current complete material')
+    supplied = set(proposal.retired_observation_support_ids)
+    added = sorted(set(expected['required_retirement_ids']) - supplied)
+    if not added:
+        return proposal, None
+    bound = proposal.model_copy(update={'retired_observation_support_ids':sorted(supplied | set(added))})
+    return bound, {'schema_version':RETIREMENT_BINDING,
+        'route_packet_sha256':packet['packet_sha256'],
+        'model_proposal_sha256':sha256_json(proposal.model_dump(mode='json')),
+        'bound_proposal_sha256':sha256_json(bound.model_dump(mode='json')),
+        'program_added_retirement_ids':added, 'observation_content_unchanged':True,
+        'requires_independent_review':True}
+
+
 def validate_observation_proposal(proposal,*,claims,components,approved_revisions,existing_supports=(),viewpoint_ids=None):
     findings=[];claimed=set();claim_index={c.claim_id:c for c in claims}
     component_index={c.claim_component_key:c for c in components}
@@ -145,7 +209,11 @@ def validate_observation_proposal(proposal,*,claims,components,approved_revision
                     or claim.source_id!=o.source_id or component.source_id!=o.source_id
                     or not any(e.evidence_step_id==b.evidence_step_id and e.source_fragment_id==b.source_fragment_id
                                and e.source_id==o.source_id and route_evidence_is_usable(e) for e in claim.evidence)):
-                findings.append(f'{o.local_observation_key}: observation evidence is not an eligible source-local Claim pair')
+                owners=[(c.claim_id,e.evidence_step_id) for c in claims if c.source_id==o.source_id
+                        for e in c.evidence if e.source_fragment_id==b.source_fragment_id]
+                findings.append(f'{o.local_observation_key}: observation evidence is not an eligible source-local Claim pair; '
+                    f'requested_component={b.claim_component_key}, evidence_step_id={b.evidence_step_id}, '
+                    f'source_fragment_id={b.source_fragment_id}; fragment_registry_pairs={owners}')
     absent={(s.viewpoint_revision_id,s.source_id) for s in proposal.sources_without_observation}
     if claimed & absent:findings.append('source both has and lacks observations')
     if claimed|absent != eligible:findings.append('observation source coverage differs from complete positive source roster')
@@ -171,7 +239,15 @@ def compile_observation_package(proposal,packet,*,review_sha256):
             'review_status':'system_approved'}).model_dump(mode='json'))
     retired=set(proposal.retired_observation_support_ids)
     if keeping & retired or set(old)-keeping!=retired:
-        raise ValueError('complete observation set must retain or explicitly retire every old support')
+        raise ValueError('complete observation set must retain or explicitly retire every old support; '
+            f'missing_retirements={sorted(set(old)-keeping-retired)}; '
+            f'still_kept_but_retired={sorted(keeping & retired)}; '
+            f'unknown_retirements={sorted(retired-set(old))}. '
+            'An edited observation has a new content identity even when its local key is unchanged; '
+            'explicitly retire its old record if replacing it. Removing a draft row alone does not retire it '
+            'or restore its original content. When the review asks to keep the original observation, '
+            'update the changed draft key back to its original content and evidence; '
+            'do not remove it or retire the original record.')
     return created,[(COLLECTION,i) for i in sorted(retired)],sorted(keeping & old.keys())
 
 

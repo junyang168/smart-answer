@@ -2,6 +2,7 @@
 import { Breadcrumb } from '@/app/components/common/Breadcrumb'; 
 import { SermonBrowser } from "@/app/components/sermons/SermonBrowser";
 import { Suspense } from 'react';
+import { StaffOnly } from '@/app/components/common/StaffOnly';
 
 // Suspense 用於在客戶端組件及其子組件加載時顯示一個回退 UI
 const SermonsPageFallback = () => <div className="text-center py-20">正在準備講道中心...</div>;
@@ -28,9 +29,12 @@ export default function SermonsPage() {
         這是推薦的做法，因為它可以讓服務器先快速渲染頁面的靜態部分（標題等），
         然後在客戶端組件加載時顯示一個加載指示器。
       */}
-      <Suspense fallback={<SermonsPageFallback />}>
-        <SermonBrowser />
-      </Suspense>
+      {/* 同工的編輯入口（負責人 2026-11-06）；普通信眾從講論文庫按書卷、章節找講道。 */}
+      <StaffOnly>
+        <Suspense fallback={<SermonsPageFallback />}>
+          <SermonBrowser />
+        </Suspense>
+      </StaffOnly>
     </div>
   );
 }

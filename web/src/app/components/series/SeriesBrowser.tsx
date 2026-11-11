@@ -1,105 +1,98 @@
 // components/series/SeriesBrowser.tsx
 "use client";
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { CheckCircle, ListMusic } from 'lucide-react';
-import { SermonSeries } from '@/app/interfaces/article';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { SermonSeries } from "@/app/interfaces/article";
+import { MyWork } from "./MyWork";
+import { STATUS_CLASS, STATUS_LABEL, STATUS_ORDER, countByStatus, seriesName } from "./progress";
 
-// 新的、在此組件內部的系列區塊組件
-const SeriesSection = ({ series }: { series: SermonSeries }) => {
-  return (
-    <section className="bg-white p-8 rounded-xl shadow-lg mb-12 border border-gray-100">
-      <div className="border-b border-gray-200 pb-6 mb-6">
-        <h2 className="text-3xl font-bold font-display text-gray-800">{series.title}</h2>
+/** 同工的系列總覽：每個系列幾篇已發佈、幾篇編輯中、幾篇待認領。 */
 
-        {/* Topics Display */}
-        {series.topics && (
-          <div className="flex flex-wrap gap-2 mt-3 mb-2">
-            {(Array.isArray(series.topics) ? series.topics : [series.topics]).map((topic, index) => (
-              <span
-                key={index}
-                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-              >
-                {topic}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <h3 className="text-xl font-bold font-display text-gray-800">{series.id}</h3>
-        {/* 使用 prose 來為 Markdown 內容應用樣式 */}
-        <div className="mt-2 text-gray-600 leading-relaxed prose prose-slate max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{series.summary}</ReactMarkdown>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* 左側：要點和行動按鈕 */}
-        <div>
-          <Link href={`/resources/series/${series.id}`} className="inline-flex items-center justify-center bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-bold">
-            <ListMusic className="w-5 h-5 mr-2" />
-            <span>進入完整系列 ({series.sermons.length}篇)</span>
-          </Link>
-        </div>
-
-      </div>
-    </section>
-  );
+const BAR_CLASS: Record<string, string> = {
+  processing: "bg-sky-300",
+  published: "bg-emerald-500",
+  assigned: "bg-amber-400",
+  ready: "bg-stone-200",
 };
 
+function Counts({ counts }: { counts: Record<string, number> }) {
+  return (
+    <span className="flex flex-wrap gap-2 text-sm">
+      {STATUS_ORDER.map((status) => (
+        <span key={status} className={`rounded-full px-2.5 py-0.5 ${STATUS_CLASS[status]}`}>
+          {STATUS_LABEL[status]} {counts[status] ?? 0}
+        </span>
+      ))}
+    </span>
+  );
+}
 
-// 主客戶端組件
+function Bar({ counts, total }: { counts: Record<string, number>; total: number }) {
+  return (
+    <span className="flex h-2 w-full overflow-hidden rounded-full bg-stone-100" aria-hidden="true">
+      {STATUS_ORDER.map((status) => (
+        <span key={status} className={BAR_CLASS[status]} style={{ width: `${total ? ((counts[status] ?? 0) / total) * 100 : 0}%` }} />
+      ))}
+    </span>
+  );
+}
+
 export const SeriesBrowser = () => {
-  // --- State Management ---
-  const [seriesList, setSeriesList] = useState<SermonSeries[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [seriesList, setSeriesList] = useState<SermonSeries[] | null>(null);
+  const [error, setError] = useState("");
 
-  // --- Data Fetching ---
   useEffect(() => {
-    const fetchSermonSeries = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/sc_api/sermon_series');
-        if (!res.ok) {
-          throw new Error(`API request failed with status ${res.status}`);
-        }
-        const allSeries: SermonSeries[] = await res.json();
+    fetch("/api/sc_api/sermon_series", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then(setSeriesList)
+      .catch((status) => setError(`讀取失敗（${status}）`));
+  }, []);
 
+  if (error) return <p className="py-20 text-center text-rose-800">{error}</p>;
+  if (!seriesList) return <p className="py-20 text-center text-stone-600" role="status">正在讀取…</p>;
 
-        setSeriesList(allSeries);
-      } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchSermonSeries();
-  }, []); // 空依賴數組確保只在客戶端首次掛載時運行
-
-  // --- Render Logic ---
-  if (isLoading) {
-    return <div className="text-center py-20">正在從 API 加載講道系列...</div>;
-  }
-
-  if (error) {
-    return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;
-  }
-
-  if (seriesList.length === 0) {
-    return <div className="text-center py-20">暫無講道系列。</div>;
-  }
+  const all = seriesList.flatMap((series) => series.sermons);
+  const totals = countByStatus(all);
 
   return (
-    <div>
-      {seriesList.map(series => (
-        <SeriesSection key={series.id} series={series} />
-      ))}
+    <div className="flex flex-col gap-6">
+      <MyWork seriesList={seriesList} />
+
+      <section className="flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-lg font-bold text-stone-900">全部 {all.length} 篇</h2>
+          <Counts counts={totals} />
+        </div>
+        <Bar counts={totals} total={all.length} />
+      </section>
+
+      <ol className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+        {seriesList.map((series) => {
+          const counts = countByStatus(series.sermons);
+          const { name, subtitle } = seriesName(series);
+          return (
+            <li key={series.id} className="border-t border-stone-100 first:border-t-0">
+              <Link
+                href={`/resources/series/${encodeURIComponent(series.id)}`}
+                className="flex flex-col gap-2 px-5 py-4 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
+              >
+                <span className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <span className="flex flex-col">
+                    <span className="font-semibold text-stone-900">
+                      {name}
+                      <span className="ml-2 font-mono text-sm font-normal text-stone-500">{series.sermons.length} 篇</span>
+                    </span>
+                    {subtitle ? <span className="text-sm text-stone-500">{subtitle}</span> : null}
+                  </span>
+                  <Counts counts={counts} />
+                </span>
+                <Bar counts={counts} total={series.sermons.length} />
+              </Link>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 };

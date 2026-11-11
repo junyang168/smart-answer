@@ -5,6 +5,7 @@ import {
   CalendarDays,
   FileText,
   Library,
+  ListVideo,
   Radio,
   Settings,
 } from "lucide-react";
@@ -31,6 +32,7 @@ const groups: AdminGroup[] = [
     icon: BookOpen,
     accent: "bg-sky-100 text-sky-700",
     items: [
+      { title: "批次轉錄", description: "查看影音檔案狀態、轉錄進度與待處理事項，並開啟完成稿校對。", href: "/admin/media-batches" },
       { title: "講道稿件", description: "管理講道逐字稿、認領狀態與發布流程。", href: "/admin/surmons" },
       { title: "講道系列", description: "建立系列並整理系列內的講道內容。", href: "/admin/surmon_series" },
       { title: "筆記與逐字稿生成講稿", description: "執行 AI 整理、審閱、合併與發布流程。", href: "/admin/notes-to-sermon/series" },
@@ -57,6 +59,7 @@ const groups: AdminGroup[] = [
     accent: "bg-emerald-100 text-emerald-700",
     items: [
       { title: "主日服事", description: "安排同工、詩歌、讀經與家事報告。", href: "/admin/sunday-service" },
+      { title: "主日資料助理", description: "從 WhatsApp 整理外出與主日資料，追蹤缺項及群提醒。", href: "/admin/sunday-assistant" },
       { title: "團契資料", description: "維護團契時間、主題與主領資訊。", href: "/admin/fellowship" },
     ],
   },
@@ -75,6 +78,7 @@ const groups: AdminGroup[] = [
 ];
 
 const quickLinks = [
+  { title: "批次轉錄", href: "/admin/media-batches", icon: ListVideo },
   { title: "王教授文庫", href: "/admin/wang", icon: BookOpen },
   { title: "講稿整理", href: "/admin/notes-to-sermon/series", icon: FileText },
   { title: "講道稿件", href: "/admin/surmons", icon: Radio },

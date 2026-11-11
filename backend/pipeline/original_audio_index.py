@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -40,6 +41,7 @@ from backend.api.scripture import (
     reference_slugs,
     spoken_references,
 )
+from backend.pipeline import chapter_material
 from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
 
 
@@ -102,6 +104,19 @@ TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
 #: `…/church/web/data`，而 mp3／mp4 在 `…/church/web/video`。拼成 `data/video`
 #: 会让 35 篇来源全部「没有媒体」，而目录里其实有 350 个 mp4、125 个 mp3。
 MEDIA_DIR_NAME = "video"
+
+
+def media_file(data_base_dir: Path, transcript_id: str) -> tuple[Path, str] | None:
+    """一堂讲道的录像或录音：先找 .mp4（视频），再找 .mp3（音频）。"""
+
+    directory = Path(data_base_dir).parent / MEDIA_DIR_NAME
+    for suffix, kind in ((".mp4", "video"), (".mp3", "audio")):
+        candidate = directory / f"{transcript_id}{suffix}"
+        if candidate.is_file():
+            return candidate, kind
+    return None
+
+
 MEDIA_URL_PREFIX = "/web/video"
 
 
@@ -111,6 +126,11 @@ class Sermons:
     def __init__(self, data_base_dir: Path) -> None:
         self.root = Path(data_base_dir)
         self._cache: dict[str, dict[str, Any]] = {}
+
+    def transcript_path(self, document: dict[str, Any]) -> Path | None:
+        """这篇讲道读的是哪个逐字稿文件。按章页面用它的 SHA 绑定存档的决定。"""
+
+        return self._transcript_path(document)
 
     def _transcript_path(self, document: dict[str, Any]) -> Path | None:
         declared = document.get("source_path")
@@ -158,27 +178,26 @@ class Sermons:
         return entry
 
     def _media_for(self, transcript_id: str) -> dict[str, Any]:
-        directory = self.root.parent / MEDIA_DIR_NAME
-        for suffix, kind in ((".mp4", "video"), (".mp3", "audio")):
-            candidate = directory / f"{transcript_id}{suffix}"
-            if candidate.is_file():
-                # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
-                # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
-                # 錯誤——產生 URL 的一方負責編碼。
-                duration: float | None = None
-                try:
-                    parsed = MP4(candidate) if suffix == ".mp4" else MP3(candidate)
-                    duration = float(parsed.info.length)
-                # 一只坏档不能让整段经文的公开接口一起 500。没有读到时前端仍可
-                # 播放，只是不在后端宣称已经验证过时长边界。
-                except Exception:
-                    pass
-                return {
-                    "media_kind": kind,
-                    "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + suffix)}",
-                    "media_duration": duration,
-                }
-        return {"media_kind": None, "media_url": None, "media_duration": None}
+        found = media_file(self.root, transcript_id)
+        if not found:
+            return {"media_kind": None, "media_url": None, "media_duration": None}
+        candidate, kind = found
+        # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
+        # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
+        # 錯誤——產生 URL 的一方負責編碼。
+        duration: float | None = None
+        try:
+            parsed = MP4(candidate) if candidate.suffix == ".mp4" else MP3(candidate)
+            duration = float(parsed.info.length)
+        # 一只坏档不能让整段经文的公开接口一起 500。没有读到时前端仍可
+        # 播放，只是不在后端宣称已经验证过时长边界。
+        except Exception:
+            pass
+        return {
+            "media_kind": kind,
+            "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + candidate.suffix)}",
+            "media_duration": duration,
+        }
 
 
 #: 教授给经文里的字作注解时的写法：中文词后面跟着括号，括号里是原文。
@@ -242,6 +261,116 @@ def _timeline(sermon: dict[str, Any]) -> list[tuple[int, float]]:
         position += len(STRIKETHROUGH.sub("", str(segment.get("text") or "")))
     sermon["_timeline"] = anchors
     return anchors
+
+
+#: 语音识别的原始输出：一条 3–5 秒，带毫秒起止。整理过的逐字稿每段记着它来自
+#: 第几条到第几条（`start_index`/`end_index`）。
+RECOGNITION_DIR = "script"
+
+
+def _recognition_timeline(sermon: dict[str, Any], data_base_dir: Path) -> list[tuple[int, float]]:
+    """把整理过的逐字稿逐字对上语音识别的原始输出，得到细的「第几个字 → 第几秒」。
+
+    `_timeline` 只有段首有时间，一段三分钟，段内按字数插值，误差约 ±15 秒——聆
+    听模式里逐字稿的高亮就跟不上他（负责人 2026-11-04：「播到下一段，高亮不
+    动」）。语音识别的原始输出每 3–5 秒一条、带毫秒；整理过的段落记着自己来自
+    哪几条。两边的字大多相同（整理只改标点、错字、删口头语），逐字比对后，每一
+    处对上的字就是一个锚点。
+
+    位置的算法与 `_timeline` 相同（删去删除线后的字数累计）。没有原始输出、或段
+    落没有记来源的，返回空。
+    """
+
+    from difflib import SequenceMatcher
+
+    transcript_id = str(sermon.get("transcript_id") or "")
+    path = Path(data_base_dir) / RECOGNITION_DIR / f"{transcript_id}.json"
+    if not transcript_id or not path.is_file():
+        return []
+    # 逐字比对一堂课要 0.1 秒；两边的文字不变，结果就不变。
+    texts = "\x00".join(str(segment.get("text") or "") for segment in sermon.get("segments") or [])
+    key = (str(path), path.stat().st_mtime_ns, hashlib.sha256(texts.encode("utf-8")).hexdigest())
+    if key in _RECOGNITION_CACHE:
+        return _RECOGNITION_CACHE[key]
+    anchors = _align_recognition(sermon, path, SequenceMatcher)
+    _RECOGNITION_CACHE[key] = anchors
+    return anchors
+
+
+_RECOGNITION_CACHE: dict[tuple[str, int, str], list[tuple[int, float]]] = {}
+
+
+def _align_recognition(sermon: dict[str, Any], path: Path, SequenceMatcher: Any) -> list[tuple[int, float]]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    entries = {
+        int(entry["index"]): entry
+        for entry in (raw.get("entries") if isinstance(raw, dict) else None) or []
+        if isinstance(entry.get("index"), int) and entry.get("start_ms") is not None
+    }
+    anchors: list[tuple[int, float]] = []
+    position = 0
+    for segment in sermon.get("segments") or []:
+        text = STRIKETHROUGH.sub("", str(segment.get("text") or ""))
+        low = segment.get("start_index", segment.get("index"))
+        high = segment.get("end_index")
+        if isinstance(low, int) and isinstance(high, int) and text:
+            heard: list[str] = []
+            times: list[float] = []
+            for number in range(low, high + 1):
+                entry = entries.get(number)
+                if not entry:
+                    continue
+                said = str(entry.get("text") or "")
+                begin, end = float(entry["start_ms"]), float(entry.get("end_ms") or entry["start_ms"])
+                for offset, character in enumerate(said):
+                    heard.append(character)
+                    times.append((begin + (end - begin) * offset / max(len(said), 1)) / 1000)
+            if heard:
+                matcher = SequenceMatcher(None, text, "".join(heard), autojunk=False)
+                for mine, theirs, size in matcher.get_matching_blocks():
+                    if size >= 2:
+                        anchors.append((position + mine, times[theirs]))
+        position += len(text)
+    # 只留两边都往前走的锚点：比对偶尔把一个常见词对到别处去。
+    kept: list[tuple[int, float]] = []
+    for item in anchors:
+        if not kept or (item[0] > kept[-1][0] and item[1] >= kept[-1][1]):
+            kept.append(item)
+    return kept
+
+
+def retimer(sermon: dict[str, Any], data_base_dir: Path) -> Any:
+    """按段首插值的秒数 → 对上语音识别的秒数。没有原始输出时原样返回。
+
+    存档的片段时间（`chapter_exposition` 的决定）是按 `_timeline` 算的，不能改；
+    这里在显示时换算。同一个字位置在两条时间线上各有一个秒数，两条都随字位置
+    递增，所以换算是单调的，在锚点之间线性插值。
+    """
+
+    fine = _recognition_timeline(sermon, data_base_dir)
+    coarse = _timeline(sermon)
+    pairs: list[tuple[float, float]] = []
+    for position, seconds in fine:
+        before = _at(coarse, position)
+        if before is None:
+            continue
+        if not pairs or (before > pairs[-1][0] and seconds >= pairs[-1][1]):
+            pairs.append((before, seconds))
+    if len(pairs) < 2:
+        return lambda seconds: seconds
+
+    def convert(seconds: float) -> float:
+        if seconds <= pairs[0][0]:
+            return pairs[0][1] + (seconds - pairs[0][0])
+        for (a0, b0), (a1, b1) in zip(pairs, pairs[1:]):
+            if seconds < a1:
+                return b0 + (seconds - a0) / (a1 - a0) * (b1 - b0)
+        return pairs[-1][1] + (seconds - pairs[-1][0])
+
+    return convert
 
 
 def _at(anchors: list[tuple[int, float]], position: int) -> float | None:
@@ -508,6 +637,21 @@ def verse_texts(data_base_dir: Path, book: str, chapter: int, low: int, high: in
 
     wanted = [f"{book}-{chapter}-{verse}" for verse in range(low, high + 1)]
     missing = [slug for slug in wanted if not cached.get(slug)]
+    if missing:
+        # 先取整章的和合本（`bible/cuv/`，查经也用它，取一次存下）。逐节去问
+        # bible-api 会被限流：太 8–15 的 285 节里 169 节一直取不到，每次请求都重
+        # 问一遍，一页要多等一秒，他念到哪一节也认不出来。
+        from backend.bible_study import cuv
+
+        try:
+            whole = cuv.chapter(book, chapter, root=Path(data_base_dir) / "bible" / "cuv")
+        except (httpx.HTTPError, RuntimeError, OSError, ValueError, KeyError):
+            whole = {}
+        for slug in missing:
+            text = str(whole.get(slug.rsplit("-", 1)[1]) or "").strip()
+            if text:
+                cached[slug] = text
+        missing = [slug for slug in wanted if not cached.get(slug)]
     if missing:
         with httpx.Client(timeout=10) as client:
             for slug in missing:
@@ -1003,6 +1147,112 @@ def build_sermon_slides(
     }
 
 
+#: 幻灯要点放哪几种证据步骤。问题本身和对话语境不是他推论的一步。
+POINT_STEP_TYPES = frozenset({
+    "reasoning",
+    "scripture_evidence",
+    "original_language",
+    "literary_context",
+    "historical_background",
+    "qualification",
+    "answer",
+    "application",
+})
+
+#: 一张幻灯最多几条要点。
+MOST_POINTS = 3
+
+
+def claim_points(
+    mark: dict[str, Any],
+    claims: dict[str, dict[str, Any]],
+    steps: dict[str, dict[str, Any]],
+    fragments: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """幻灯上的两三条要点：他怎样推到这个判断。
+
+    取这条判断的主张自己的证据步骤，按主张记下的次序，每条附他的原话。一个字都
+    不新写：要点是证据步骤的规范化表述（标为编辑整理），原话是来源片段的逐字摘
+    录。主张类型是应用的，标出来——负责人要求应用在幻灯上看得出是应用。
+    """
+
+    claim_ids = (mark.get("provenance") or {}).get("claim_ids") or []
+    claim = claims.get(str(claim_ids[0])) if claim_ids else None
+    if not claim:
+        return {"points": [], "application": False}
+    statement = str(claim.get("statement") or "").strip()
+    points: list[dict[str, Any]] = []
+    seen: set[str] = {statement}
+    for step_id in claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []:
+        step = steps.get(str(step_id)) or {}
+        text = str(step.get("statement") or "").strip()
+        if not text or text in seen or str(step.get("step_type") or "") not in POINT_STEP_TYPES:
+            continue
+        seen.add(text)
+        fragment_ids = [step["source_fragment_id"]] if step.get("source_fragment_id") else []
+        fragment_ids += list(step.get("source_fragment_ids") or [])
+        fragment = next((fragments[f] for f in map(str, fragment_ids) if f in fragments), {})
+        points.append({
+            "text": text,
+            "kind": str(step.get("step_type") or ""),
+            "quote": str(fragment.get("verbatim_excerpt") or "").strip(),
+            "evidence_step_id": str(step_id),
+            "source_fragment_id": str(fragment.get("fragment_id") or ""),
+        })
+        if len(points) == MOST_POINTS:
+            break
+    return {
+        "points": points,
+        "application": str(claim.get("claim_type") or "") in {"application", "應用"},
+    }
+
+
+class _Lazy(dict):
+    """第一次被读时才装载的字典。"""
+
+    def __init__(self, load: Any) -> None:
+        super().__init__()
+        self._load = load
+        self._loaded = False
+
+    def _ensure(self) -> None:
+        if not self._loaded:
+            self._loaded = True
+            self.update(self._load())
+
+    def __getitem__(self, key: Any) -> Any:
+        self._ensure()
+        return super().__getitem__(key)
+
+    def __contains__(self, key: object) -> bool:
+        self._ensure()
+        return super().__contains__(key)
+
+    def __iter__(self) -> Any:
+        self._ensure()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._ensure()
+        return super().__len__()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._ensure()
+        return super().get(key, default)
+
+    def items(self) -> Any:
+        self._ensure()
+        return super().items()
+
+    def keys(self) -> Any:
+        self._ensure()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._ensure()
+        return super().values()
+
+
 def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
 
@@ -1017,9 +1267,11 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     def by_id(collection: str, key: str) -> dict[str, dict[str, Any]]:
         return {str(row.get(key)): row for row in store.list_records(collection) if row.get(key)}
 
-    claims = by_id("claims", "claim_id")
-    steps = by_id("evidence_steps", "evidence_step_id")
-    fragments = by_id("source_fragments", "fragment_id")
+    # 主张、证据步骤、来源片段一共十四万多条，读一遍两秒；按章页面有投影片的讲
+    # 道根本用不到它们。用到时才读，读一次。
+    claims = _Lazy(lambda: by_id("claims", "claim_id"))
+    steps = _Lazy(lambda: by_id("evidence_steps", "evidence_step_id"))
+    fragments = _Lazy(lambda: by_id("source_fragments", "fragment_id"))
     documents = by_id("source_documents", "source_id")
     sermons = Sermons(data_base_dir)
 
@@ -1085,68 +1337,390 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     # 而且主张是**某一篇讲道里的**一句话，正是幻灯上该写的：他这一分钟说的是
     # 什么。观点是把五篇里的同一件事归成一条，那是文章层要的东西，不是听原声的
     # 人要的。
-    by_sermon: dict[str, dict[str, Any]] = {}
     # 每个判断讲的是哪一节。主张自己的 `scripture_refs` 就写着，截到本段范围内。
     verses: dict[str, str] = {}
-    for claim_id, claim in claims.items():
-        if not in_passage(claim, book, chapter, low, high):
+    # 按章的页面（`chapter_material.CHAPTERS`）不在这里选材：哪些片段是这一章
+    # 的释经，由模型逐片段决定后存档（`chapter_exposition`），见下面
+    # `_chapter_sections`。其余页面照旧只看引用。
+    whole_chapter = chapter_material.CHAPTERS.get(passage)
+    chosen = {} if whole_chapter is not None else {
+        claim_id: claim_verse(claim, book, chapter, low, high)
+        for claim_id, claim in claims.items()
+        if in_passage(claim, book, chapter, low, high)
+    }
+
+    def rows(items: Iterable[tuple[str, str]]) -> list[dict[str, Any]]:
+        """这些主张在各篇讲道里的录音，一篇讲道一行。"""
+
+        by_sermon: dict[str, dict[str, Any]] = {}
+        for claim_id, verse in items:
+            claim = claims[claim_id]
+            statement = str(claim.get("statement") or "").strip()
+            if not statement:
+                continue
+            verses.setdefault(statement, verse)
+            located, traces = spans_of(claim_id, statement)
+            for source_id, spans in located.items():
+                slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
+                slot["spans"].extend(spans)
+                target = slot["provenance"].setdefault(statement, {
+                    "claim_ids": [],
+                    "evidence_step_ids": [],
+                    "source_fragment_ids": [],
+                })
+                for key, values in traces.get(source_id, {}).items():
+                    for value in values:
+                        if value not in target[key]:
+                            target[key].append(value)
+
+        out: list[dict[str, Any]] = []
+        for source_id, slot in by_sermon.items():
+            sermon = sermons.load(source_id, documents.get(source_id) or {})
+            merged = stretch(slot["spans"], sermon.get("media_duration") if sermon else None)
+            if not merged or not sermon:
+                continue
+            out.append({
+                "source_id": source_id,
+                "transcript_id": sermon["transcript_id"],
+                "title": sermon["title"],
+                "media_kind": sermon["media_kind"],
+                "media_url": sermon["media_url"],
+                "media_duration": sermon["media_duration"],
+                "stretches": [{"start": a, "end": b} for a, b, _ in merged],
+                "judgements": [
+                    {**mark, **claim_points(mark, claims, steps, fragments)}
+                    for mark in judgement_during(
+                        slot["spans"], merged, verses, slot["provenance"]
+                    )
+                ],
+                "spoken": spoken_during(merged, sermon),
+                # 他什么时候念到哪一节。报节号是预告，念出来才算数。
+                "readings": [
+                    {"at": at, "scripture": slug}
+                    for at, slug in verse_readings(sermon, passage_verses)
+                    if any(begin <= at < finish for begin, finish, _ in merged)
+                ],
+                "original_language_events": original_language_during(merged, sermon),
+                "seconds": sum(b - a for a, b, _ in merged),
+            })
+        out.sort(key=lambda row: -row["seconds"])
+        return out
+
+    index: dict[str, Any] = {
+        "schema_version": "wang_original_audio_index_v4",
+        # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
+        # 页面地址，用的都是这一个 slug。
+        "passage": passage,
+        "label": format_chinese_reference(passage),
+        "title": passage_title(passage, data_base_dir),
+        "sermons": rows(chosen.items()),
+    }
+    if whole_chapter is not None:
+        index["sermons"] = []
+        index["sections"], index["missing_lectures"] = _chapter_sections(
+            whole_chapter,
+            claims=claims,
+            documents=documents,
+            sermons=sermons,
+            data_base_dir=data_base_dir,
+            spans_of=spans_of,
+            passage_verses=passage_verses,
+            steps=steps,
+            fragments=fragments,
+        )
+    return index
+
+
+def _chapter_slides(
+    lecture_rows: dict[str, dict[str, Any]],
+    timed_slides: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """投影片排进各段：它的时间跨到哪一段的保留片段，就出现在哪一段。
+
+    一张投影片可能在 5:17-20 的片段里开始、讲到下一个片段时归了 5:1-12（片段
+    按它第一句所在投影片的经节归段）；只按开头归段，（二）6 在 5:1-12 的那一
+    行就没有投影片。在别的段里，它从那一段第一个片段开始的时刻算起。
+    """
+
+    from backend.api.scripture import format_chinese_reference
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for slide in timed_slides:
+        until = slide["at"] + slide["seconds"]
+        for section, value in lecture_rows.items():
+            overlap = [
+                piece for piece in value["pieces"]
+                if piece["start"] < until and slide["at"] < piece["end"]
+            ]
+            if not overlap:
+                continue
+            at = max(slide["at"], min(piece["start"] for piece in overlap))
+            out.setdefault(section, []).append({
+                "at": at,
+                "seconds": until - at,
+                "title": slide["title"],
+                "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
+                "verses": slide["verses"],
+                "scriptures": [
+                    {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
+                    for item in slide["scriptures"]
+                ],
+            })
+    return out
+
+
+def _retimed(convert: Any, row: dict[str, Any]) -> dict[str, Any]:
+    """一行里所有的秒数都换到对上语音识别的时间线上。
+
+    录音的起止、投影片和要点出现的时刻、逐字稿每一句，用同一个换算，彼此仍然
+    对得上：一句话在哪一段录音里、要点在哪一句出现，都不变。
+    """
+
+    def at(items: list[dict[str, Any]] | None, *keys: str) -> list[dict[str, Any]]:
+        return [{**item, **{key: round(convert(item[key]), 2) for key in keys if key in item}} for item in items or []]
+
+    stretches = [
+        {**item, "start": round(convert(item["start"]), 2), "end": round(convert(item["end"]), 2),
+         **({"parts": at(item["parts"], "start", "end")} if "parts" in item else {})}
+        for item in row["stretches"]
+    ]
+    out = {
+        **row,
+        "stretches": stretches,
+        "judgements": [
+            {**mark, "at": round(convert(mark["at"]), 2),
+             "seconds": round(convert(mark["at"] + mark.get("seconds", 0)) - convert(mark["at"]), 2)}
+            for mark in row["judgements"]
+        ],
+        "spoken": at(row.get("spoken"), "at"),
+        "readings": at(row.get("readings"), "at"),
+        "original_language_events": at(row.get("original_language_events"), "at"),
+        "transcript": at(row.get("transcript"), "at", "end"),
+        "seconds": sum(item["end"] - item["start"] for item in stretches if not item.get("left_out")),
+        "left_out_seconds": sum(item["end"] - item["start"] for item in stretches if item.get("left_out")),
+    }
+    if "slides" in row:
+        out["slides"] = [
+            {**slide, "at": round(convert(slide["at"]), 2),
+             "seconds": round(convert(slide["at"] + slide["seconds"]) - convert(slide["at"]), 2),
+             "points": at(slide["points"], "at"),
+             "scriptures": at(slide["scriptures"], "at")}
+            for slide in row["slides"]
+        ]
+    return out
+
+
+def _transcript(lines: list[dict[str, Any]], stretches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """这一行的逐字稿：起点落在它某一段录音里的句子，标出是否属灰色片段。"""
+
+    out: list[dict[str, Any]] = []
+    for line in lines:
+        home = next(
+            (item for item in stretches if item["start"] <= line["start"] < item["end"]),
+            None,
+        )
+        if home is None:
             continue
-        statement = str(claim.get("statement") or "").strip()
-        if not statement:
+        out.append({
+            "at": round(line["start"], 2),
+            "end": round(line["end"], 2),
+            "text": line["text"],
+            **({"left_out": True} if home.get("left_out") else {}),
+        })
+    return out
+
+
+def _chapter_sections(
+    whole_chapter: Any,
+    *,
+    claims: dict[str, dict[str, Any]],
+    documents: dict[str, dict[str, Any]],
+    sermons: "Sermons",
+    data_base_dir: Path,
+    spans_of: Any,
+    passage_verses: dict[str, str],
+    steps: dict[str, dict[str, Any]],
+    fragments: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """按章页面：按经节次序分段，每段各堂课一行。
+
+    哪些片段是这一章的释经，读 `chapter_exposition` 存档的决定（模型逐片段决定、
+    程序核对过）。一行里是这一堂讲这几节的片段，以及夹在中间的灰色片段——不
+    保留的部分也在页面上，听不听由读者决定（负责人 2026-11-03）。
+
+    幻灯的标题仍是此刻占主导的主张：落在保留片段里的主张，经节用它所在片段的经
+    节，「应用」也看片段。
+    """
+
+    from backend.pipeline import chapter_exposition, chapter_slides
+
+    by_lecture = {
+        str(document.get("transcript_id") or ""): (source_id, document)
+        for source_id, document in documents.items()
+    }
+    rows_by_section: dict[str, list[dict[str, Any]]] = {s: [] for s in whole_chapter.sections}
+    missing: list[str] = []
+    for lecture in whole_chapter.lectures:
+        source_id, document = by_lecture.get(lecture, (None, None))
+        sermon = sermons.load(source_id, document) if document else None
+        path = sermons.transcript_path(document) if document else None
+        record = (
+            chapter_exposition.load_record(
+                data_base_dir,
+                whole_chapter.passage,
+                lecture,
+                chapter_exposition.file_sha256(path) if path else None,
+            )
+            if sermon and sermon.get("media_url")
+            else None
+        )
+        if record is None:
+            # 没有存档、或逐字稿变了：这一堂不上页面，页面上说明缺了哪一堂。
+            missing.append(lecture)
             continue
-        verses.setdefault(statement, claim_verse(claim, book, chapter, low, high))
-        located, traces = spans_of(claim_id, statement)
-        for source_id, spans in located.items():
-            slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
-            slot["spans"].extend(spans)
-            target = slot["provenance"].setdefault(statement, {
-                "claim_ids": [],
-                "evidence_step_ids": [],
-                "source_fragment_ids": [],
+        # 有投影片的，片段归哪一段按它所在投影片的经节：（二）1 开头讲登山宝训
+        # 结构的三分半是一张投影片，不该因为最后一个片段提到 5:13 就被拆去 5:13-16。
+        slides_record = chapter_slides.load_record(data_base_dir, whole_chapter.passage, lecture)
+        timed_slides = None
+        if slides_record:
+            slide_verses, timed_slides = chapter_slides.placed(record, slides_record)
+            record = {
+                **record,
+                "decisions": [
+                    {**decision, "verses": slide_verses.get(decision["id"], decision.get("verses"))}
+                    if decision.get("keep") else decision
+                    for decision in record["decisions"]
+                ],
+            }
+        lecture_rows = chapter_exposition.lecture_rows(whole_chapter, record)
+        # 逐字稿一句一行、带时间：听的人边听边看他此刻说的那一句，点一句跳过去。
+        # 保留的和不保留的都切——灰色片段打开时，它的逐字稿也在原来的位置。
+        lines = chapter_slides.sentences(record.get("pieces") or [])
+        # 存档的时间按段首插值，差到十几秒；显示时换成对上语音识别的时间。
+        retime = retimer(sermon, data_base_dir)
+        slides_by_section = (
+            _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else None
+        )
+
+        # 这一堂的主张：落在哪个保留片段，就讲那个片段的经节。
+        kept_pieces = [
+            (section, piece)
+            for section, value in lecture_rows.items()
+            for piece in value["pieces"]
+        ]
+        verses: dict[str, str] = {}
+        spans_by_section: dict[str, list[tuple[float, float, str]]] = {}
+        provenance_by_section: dict[str, dict[str, dict[str, list[str]]]] = {}
+        # 有投影片的讲道，幻灯的标题来自投影片，用不到主张。
+        for claim_id, claim in ({} if timed_slides is not None else claims).items():
+            if str(claim.get("review_status") or "") == "superseded":
+                continue
+            if not any(
+                str(occurrence.get("transcript_id") or "") == lecture
+                for occurrence in claim.get("occurrences") or []
+            ):
+                continue
+            statement = str(claim.get("statement") or "").strip()
+            if not statement:
+                continue
+            located, traces = spans_of(claim_id, statement)
+            spans = located.get(source_id) or []
+            if not spans:
+                continue
+            at = sorted(start for start, _, _ in spans)[len(spans) // 2]
+            home = next(
+                ((section, piece) for section, piece in kept_pieces if piece["start"] <= at < piece["end"]),
+                None,
+            )
+            if home is None:
+                continue
+            section, piece = home
+            verses.setdefault(statement, piece["verse"])
+            spans_by_section.setdefault(section, []).extend(spans)
+            target = provenance_by_section.setdefault(section, {}).setdefault(statement, {
+                "claim_ids": [], "evidence_step_ids": [], "source_fragment_ids": [],
             })
             for key, values in traces.get(source_id, {}).items():
                 for value in values:
                     if value not in target[key]:
                         target[key].append(value)
 
-    sermons_out: list[dict[str, Any]] = []
-    for source_id, slot in by_sermon.items():
-        sermon = sermons.load(source_id, documents.get(source_id) or {})
-        merged = stretch(slot["spans"], sermon.get("media_duration") if sermon else None)
-        if not merged or not sermon:
-            continue
-        sermons_out.append({
-            "source_id": source_id,
-            "transcript_id": sermon["transcript_id"],
-            "title": sermon["title"],
-            "media_kind": sermon["media_kind"],
-            "media_url": sermon["media_url"],
-            "media_duration": sermon["media_duration"],
-            "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": judgement_during(
-                slot["spans"], merged, verses, slot["provenance"]
-            ),
-            "spoken": spoken_during(merged, sermon),
-            # 他什么时候念到哪一节。报节号是预告，念出来才算数。
-            "readings": [
-                {"at": at, "scripture": slug}
-                for at, slug in verse_readings(sermon, passage_verses)
-                if any(begin <= at < finish for begin, finish, _ in merged)
-            ],
-            "original_language_events": original_language_during(merged, sermon),
-            "seconds": sum(b - a for a, b, _ in merged),
-        })
-    sermons_out.sort(key=lambda row: -row["seconds"])
+        for section, value in lecture_rows.items():
+            kept = [
+                (item["start"], item["end"], "")
+                for item in value["stretches"]
+                if not item.get("left_out")
+            ]
+            spans = spans_by_section.get(section, [])
 
-    return {
-        "schema_version": "wang_original_audio_index_v4",
-        # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
-        # 页面地址，用的都是这一个 slug。
-        "passage": passage,
-        "label": format_chinese_reference(passage),
-        "title": PASSAGE_TITLES.get(passage, ""),
-        "sermons": sermons_out,
-    }
+            def kind_at(seconds: float) -> str:
+                for piece in value["pieces"]:
+                    if piece["start"] <= seconds < piece["end"]:
+                        return piece["kind"]
+                return ""
+
+            if slides_by_section is not None:
+                # 投影片：模型读逐字稿写的要点，和他读到的经文。
+                slides = slides_by_section.get(section, [])
+                judgements = [
+                    {
+                        "at": slide["at"],
+                        "judgement": slide["title"],
+                        "seconds": slide["seconds"],
+                        "scripture": slide["verses"][0] if slide["verses"] else "",
+                        "points": [],
+                        "application": False,
+                    }
+                    for slide in slides
+                ]
+            else:
+                slides = None
+                judgements = []
+            for mark in ([] if slides is not None else judgement_during(spans, kept, verses, provenance_by_section.get(section, {}))):
+                mark = {**mark, **claim_points(mark, claims, steps, fragments)}
+                mark["application"] = kind_at(mark["at"]) == "應用"
+                if not mark.get("scripture"):
+                    mark["scripture"] = next(
+                        (piece["verse"] for piece in value["pieces"] if piece["start"] <= mark["at"] < piece["end"]),
+                        "",
+                    )
+                judgements.append(mark)
+            rows_by_section[section].append(_retimed(retime, {
+                "source_id": source_id,
+                "transcript_id": sermon["transcript_id"],
+                "title": sermon["title"],
+                "media_kind": sermon["media_kind"],
+                "media_url": sermon["media_url"],
+                "media_duration": sermon["media_duration"],
+                "stretches": value["stretches"],
+                "judgements": judgements,
+                **({"slides": slides} if slides is not None else {}),
+                "transcript": _transcript(lines, value["stretches"]),
+                "spoken": spoken_during(kept, sermon),
+                "readings": [
+                    {"at": at, "scripture": slug}
+                    for at, slug in verse_readings(sermon, passage_verses)
+                    if any(begin <= at < finish for begin, finish, _ in kept)
+                ],
+                "original_language_events": original_language_during(kept, sermon),
+                # 能听的分钟数只算保留的片段。
+                "seconds": sum(b - a for a, b, _ in kept),
+                "left_out_seconds": sum(
+                    item["end"] - item["start"] for item in value["stretches"] if item.get("left_out")
+                ),
+            }))
+
+    sections = [
+        {
+            "passage": section,
+            "label": format_chinese_reference(section),
+            "sermons": rows_by_section[section],
+        }
+        for section in whole_chapter.sections
+        # 没有材料的段不列：他在这一系列里没有单独讲这几节。
+        if rows_by_section[section]
+    ]
+    return sections, missing
 
 
 #: 有原声页面的经文段落。
@@ -1201,17 +1775,46 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
 #:   16:13-23  教會的磐石根基 · 權柄的對象：不只彼得，更是教會
 #:             彌賽亞的真諦：從身份認同到使命認知
 #:   16:24-27  何謂「捨己」？ · 何謂「背起十字架」？
+#:   5:1-48    八福與彌賽亞的身份 · 耶穌與律法——廢掉還是成全？
+#:             超越法利賽人的義（2011（二）1、2 的小标题）
 PASSAGE_TITLES: dict[str, str] = {
+    "mat-5-1-48": "八福與彌賽亞的身份，成全律法，與超越法利賽人的義",
     "mat-16-1-12": "求神蹟的試探，與防備法利賽人的酵",
     "mat-16-13-23": "認信、磐石與天國的鑰匙，到第一次預言受難",
     "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
 }
 
-PASSAGES: tuple[tuple[str, str], ...] = (
+def passage_title(passage: str, data_base_dir: Path) -> str:
+    """页面的一句话标题：按章页面用程序生成的存档（`chapter_title`），没有才用手写的。"""
+
+    from backend.pipeline import chapter_title
+
+    return chapter_title.load(data_base_dir, passage) or PASSAGE_TITLES.get(passage, "")
+
+
+def _chapter_label(passage: str) -> str:
+    _, number, start, end = chapter_material.verse_range(passage)
+    return f"太{number}:{start}–{end}"
+
+
+#: 按段落原声的三段（太 16）。按章的页面不在这里，见 `passages()`。
+FIXED_PASSAGES: tuple[tuple[str, str], ...] = (
     ("mat-16-1-12", "太16:1–12"),
     ("mat-16-13-23", "太16:13–23"),
     ("mat-16-24-27", "太16:24–27"),
 )
+
+
+def passages() -> tuple[tuple[str, str], ...]:
+    """有原声页面的经文：`chapter_material.CHAPTERS` 里的每一章，加上太 16 那三段。
+
+    每次请求现读——章的清单在 `DATA_BASE_DIR`，加一章不用部署。
+    """
+
+    return (
+        *((passage, _chapter_label(passage)) for passage in chapter_material.CHAPTERS),
+        *FIXED_PASSAGES,
+    )
 
 #: 原声页面的地址。文库落地页按这个拼链接。
 PASSAGE_URL_PREFIX = "/resources/wang-repository/audio"
@@ -1232,15 +1835,17 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
     """
 
     out: list[dict[str, Any]] = []
-    for slug, label in PASSAGES:
+    for slug, label in passages():
         index = build_index(store, data_base_dir, slug)
-        if not index["sermons"]:
+        # 按章的页面一行是「某一堂在某一段」，同一堂会在几段里各出现一次。
+        rows = [row for section in index.get("sections") or [] for row in section["sermons"]] or index["sermons"]
+        if not rows:
             continue
         reference = parse_reference(slug)
         out.append({
             "passage": slug,
             "label": label,
-            "title": PASSAGE_TITLES.get(slug, ""),
+            "title": passage_title(slug, data_base_dir),
             "scripture": {
                 "book": reference["osis_book"],
                 "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),
@@ -1250,9 +1855,103 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
                 "verse_end": reference["end"],
                 "display": label,
             },
-            "sermons": len(index["sermons"]),
-            "seconds": sum(row["seconds"] for row in index["sermons"]),
-            "topics": sum(len(row["judgements"]) for row in index["sermons"]),
+            "sermons": len({row["source_id"] for row in rows}),
+            "seconds": sum(row["seconds"] for row in rows),
+            "topics": sum(len(row["judgements"]) for row in rows),
             "href": f"{PASSAGE_URL_PREFIX}/{slug}",
         })
     return out
+
+
+def build_notes_index(data_base_dir: Path, passage: str) -> dict[str, Any] | None:
+    """教授釋經筆記的按章页：每份母本是一「堂」，录音是 AI 朗读。
+
+    存档与讲座按章页同格式（`notes_chapter.write_records`），所以归段、灰色开关、
+    幻灯照讲座的做法；不同的只是录音是合成的、每一句的时间是合成时的书签，不用对
+    语音识别，也没有主张可挂。生活應用、附錄是灰色片段，默认收起（负责人 2026-11-06）。
+    """
+
+    from backend.pipeline import chapter_exposition, chapter_slides, notes_chapter
+
+    chapter = notes_chapter.load_chapters(data_base_dir).get(passage)
+    if chapter is None:
+        return None
+    rows_by_section: dict[str, list[dict[str, Any]]] = {s: [] for s in chapter.sections}
+    missing: list[str] = []
+    for lecture in chapter.lectures:
+        project = notes_chapter.project_of(lecture)
+        audio = notes_chapter.load_audio(data_base_dir, project)
+        audio_record = notes_chapter.work_path(data_base_dir, project, "audio.json")
+        record = (
+            chapter_exposition.load_record(data_base_dir, passage, lecture, chapter_exposition.file_sha256(audio_record))
+            if audio else None
+        )
+        if record is None:
+            missing.append(notes_chapter.notes(data_base_dir, project).title)
+            continue
+        slides_record = chapter_slides.load_record(data_base_dir, passage, lecture)
+        timed_slides = None
+        if slides_record:
+            slide_verses, timed_slides = chapter_slides.placed(record, slides_record)
+            record = {
+                **record,
+                "decisions": [
+                    {**decision, "verses": slide_verses.get(decision["id"], decision.get("verses"))}
+                    if decision.get("keep") else decision
+                    for decision in record["decisions"]
+                ],
+            }
+        lecture_rows = chapter_exposition.lecture_rows(chapter, record)
+        lines = chapter_slides.sentences(record.get("pieces") or [])
+        slides_by_section = _chapter_slides(lecture_rows, timed_slides) if timed_slides is not None else {}
+        for section, value in lecture_rows.items():
+            slides = slides_by_section.get(section, [])
+            kept = [item for item in value["stretches"] if not item.get("left_out")]
+            rows_by_section[section].append({
+                "source_id": lecture,
+                "transcript_id": lecture,
+                "title": record.get("title") or project,
+                "media_kind": "audio",
+                "media_url": f"{MEDIA_URL_PREFIX}/{quote(notes_chapter.audio_path(data_base_dir, project).name)}",
+                "media_duration": audio["duration"],
+                "ai_voice": True,
+                "stretches": value["stretches"],
+                "judgements": [
+                    {"at": slide["at"], "judgement": slide["title"], "seconds": slide["seconds"],
+                     "scripture": slide["verses"][0] if slide["verses"] else "", "points": [], "application": False}
+                    for slide in slides
+                ],
+                "slides": slides,
+                # 母本的表格不念，念到那里停顿，幻灯位置整张显示（负责人 2026-11-06）。
+                # Azure 把停顿后的书签报在停顿开始处，表格的结束以停顿长度为准。
+                "tables": [
+                    {**table, "until": max(table["until"],
+                                           table["at"] + notes_chapter.table_pause_ms(len(table["rows"])) / 1000)}
+                    for piece in record.get("pieces") or []
+                    for table in piece.get("tables") or []
+                    if any(item["start"] <= table["at"] < item["end"] for item in value["stretches"])
+                ],
+                "transcript": _transcript(lines, value["stretches"]),
+                "spoken": [],
+                "readings": [],
+                "original_language_events": [],
+                "seconds": sum(item["end"] - item["start"] for item in kept),
+                "left_out_seconds": sum(
+                    item["end"] - item["start"] for item in value["stretches"] if item.get("left_out")
+                ),
+            })
+    return {
+        "schema_version": "wang_original_audio_index_v4",
+        "passage": passage,
+        "label": format_chinese_reference(passage),
+        "title": "",
+        "source": notes_chapter.NOTES_SOURCE,
+        "ai_voice": True,
+        "sermons": [],
+        "sections": [
+            {"passage": section, "label": format_chinese_reference(section), "sermons": rows_by_section[section]}
+            for section in chapter.sections
+            if rows_by_section[section]
+        ],
+        "missing_lectures": missing,
+    }

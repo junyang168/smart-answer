@@ -1,0 +1,40 @@
+{
+  "schema_version": "slide-reference-errata.v1",
+  "reference_sha256": "662685e6f7cc9339c6d6b4adc9d0f981117af056d98657011919d83bc4578164",
+  "stage": "source-frame reinspection after detector and model results; NOT held-out evaluation",
+  "human_confirmed": false,
+  "corrections": [
+    {
+      "reference_id": "r-003",
+      "action": "replace_interval",
+      "earliest_ms": 245440,
+      "latest_ms": 247520,
+      "reason": "245440ms original sample still only has Greek heading; 246480ms has Indicative text. Initial survey annotation was one cell early.",
+      "evidence": [
+        {
+          "frame_id": "f-000245440",
+          "sha256": "c1d3b34fc39af163dfd1725a775366f657e5621eaa2cf6071150907e9e596225"
+        },
+        {
+          "frame_id": "f-000246480",
+          "sha256": "f1da258a971d101b83e0aa3864100ccfffb8e5f5587814efa74ac1031dbf893f"
+        }
+      ]
+    },
+    {
+      "reference_id": "r-022",
+      "action": "remove",
+      "reason": "Both 807040ms and 809120ms show the same content ending in 人民日報; the alleged next line is outside the recorded viewport and not observable. Initial survey reading error.",
+      "evidence": [
+        {
+          "frame_id": "f-000807040",
+          "sha256": "68a427abef03b2e23fd565dda39634df42bc2a0393c2454497203af082b049d5"
+        },
+        {
+          "frame_id": "f-000809120",
+          "sha256": "5395208ce5242627f57b86148b645d5b1924fb345daf8d2c0a797e8373126deb"
+        }
+      ]
+    }
+  ]
+}

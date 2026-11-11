@@ -1,14 +1,23 @@
+import { hasEditorAccess } from "@/app/utils/roles";
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
+// This response contains only the dated OneDrive path, never file contents,
+// sharing credentials or write operations. Desktop clients have no site cookie.
+function isPresenterFolderRead(req: { method: string; nextUrl: { pathname: string } }) {
+  return req.method === "GET" && req.nextUrl.pathname === "/api/admin/sunday-services/presenter/upcoming";
+}
+
 export default withAuth(
   function middleware(req) {
+    if (isPresenterFolderRead(req)) return NextResponse.next();
     const token = req.nextauth.token;
     const pathname = req.nextUrl.pathname;
 
     const isApiRequest = pathname.startsWith("/api/");
-    const isNotesToManuscriptResources =
-      pathname.startsWith("/resources/notes_to_manuscript_series");
+    const isNotesToManuscriptResources = pathname.startsWith(
+      "/resources/notes_to_manuscript_series",
+    );
 
     if (isNotesToManuscriptResources) {
       if (!token) {
@@ -19,7 +28,7 @@ export default withAuth(
       return NextResponse.next();
     }
 
-    if (token?.role === "editor" || token?.role === "admin") {
+    if (hasEditorAccess(token?.role)) {
       return NextResponse.next();
     }
 
@@ -40,7 +49,7 @@ export default withAuth(
   },
   {
     callbacks: {
-      authorized: ({ token }) => !!token,
+      authorized: ({ token, req }) => isPresenterFolderRead(req) || !!token,
     },
   },
 );

@@ -441,7 +441,15 @@ CHINESE_BOOK_ABBREVIATIONS: Dict[str, str] = {
     "彼前": "1pe",
     "彼後": "2pe",
     "彼后": "2pe",
+    # 和合本書名作「列王紀」，全名表收的是「列王記」；（七）2 講太 21 引王上 1:32-33，
+    # 模型照和合本寫成「列王紀上」，整堂投影片作廢。
+    "列王紀上": "1ki",
+    "列王紀下": "2ki",
     "約一": "1jn",
+    # 舊版和合本的全名寫法；模型照他念的寫成「約翰壹書 1:9」，讀不出來整堂投影片作廢。
+    "約翰壹書": "1jn",
+    "約翰貳書": "2jn",
+    "約翰參書": "3jn",
     "约一": "1jn",
     "約二": "2jn",
     "约二": "2jn",
@@ -720,6 +728,24 @@ def _spoken_book(token: Optional[str]) -> Optional[str]:
         if slug:
             return slug
     return None
+
+
+def spoken_chapters(text: str) -> list[tuple[int, str]]:
+    """Literal spoken book/chapter mentions, including those without a verse.
+
+    Shares the book aliases and numeral parser with spoken_references; it does
+    not invent a verse or infer a reference from a quotation's content.
+    """
+    found: list[tuple[int, str]] = []
+    carried_book: Optional[str] = None
+    for match in _SPOKEN_REFERENCE_PATTERN.finditer(text or ""):
+        book = _spoken_book(match.group("book"))
+        if book:
+            carried_book = book
+        chapter = chinese_number(match.group("chapter"))
+        if carried_book and chapter:
+            found.append((match.start(), f"{carried_book}-{chapter}"))
+    return found
 
 
 def spoken_references(text: str) -> list[tuple[int, str]]:

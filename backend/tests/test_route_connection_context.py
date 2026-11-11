@@ -47,7 +47,7 @@ def test_current_link_uses_exact_committed_candidate_reason_and_pins_its_decisio
     with pytest.raises(Exception):verify_cvp_route_materials(store,material)
 
 
-def saved_exception(tmp_path,monkeypatch,rounds=0):
+def saved_exception(tmp_path,monkeypatch,rounds=0,original_judgments=False):
     monkeypatch.setattr(recovery,'_fixed_implementation',lambda require_committed:('test-commit',{}))
     packet=fixture_packet()
     # Material pins and membership belong to the same exact saved job.
@@ -56,6 +56,12 @@ def saved_exception(tmp_path,monkeypatch,rounds=0):
     m=seal({'viewpoint_id':'CV-1','viewpoint_revision_id':'CVR-1','links':[link],
             'record_pins':[{'collection':'claims','object_id':'C1','revision':1,'content_sha256':'claim'}],
             'viewpoint':{'current_revision_id':'CVR-1'},'claims':packet['claims'],'physical_sources':[]})
+    judgments=[{'viewpoint_claim_link_id':'L1','claim_id':'C1','link_type':'equivalent_full',
+        'viewpoint_revision_id':'CVR-1','reasons':['Same statement and same scope.']}]
+    if original_judgments:
+        packet=seal(packet|{'approved_connection_judgments':judgments,
+            'connection_judgment_note':'Actual approved rationale; not route approval.'},'packet_sha256')
+        m=seal(m|{'approved_connection_judgments':deepcopy(judgments)})
     write_immutable(tmp_path/'cvp-route-materials.json',m)
     calls=[]
     def review(p):
@@ -126,8 +132,9 @@ def test_continuation_refuses_drift_unknown_calls_and_unrelated_changes(tmp_path
     assert not (tmp_path/'connection-continuation-reservation.json').exists()
 
 
-def test_upstream_repaired_member_uses_one_original_correction_then_full_review(tmp_path,monkeypatch):
-    packet,m,p,r,c=saved_exception(tmp_path,monkeypatch)
+@pytest.mark.parametrize('original_judgments',[False,True])
+def test_upstream_repaired_member_uses_one_original_correction_then_full_review(tmp_path,monkeypatch,original_judgments):
+    packet,m,p,r,c=saved_exception(tmp_path,monkeypatch,original_judgments=original_judgments)
     added=deepcopy(m['links'][0]);added.update(viewpoint_claim_link_id='L2',link_type='extends')
     m['links'].append(added)
     m['record_pins'].append({'collection':'viewpoint_claim_links','object_id':'L2','revision':1,'content_sha256':'L2'})
@@ -151,3 +158,22 @@ def test_upstream_repaired_member_uses_one_original_correction_then_full_review(
     with pytest.raises(ValueError,match='remaining original correction'):
         recovery.prepare_connection_continuation(tmp_path,packet,m,proposer=p,reviewer=r,
             reconsiderer=c,max_correction_rounds=0)
+
+
+def test_compact_member_continuation_can_keep_valid_content_and_review_new_connection(tmp_path,monkeypatch):
+    from test_route_update_changes import Client,proposer
+    from backend.pipeline.viewpoint_route_correction_changes import PROPOSAL_VERSION
+    packet,m,p,r,c=saved_exception(tmp_path,monkeypatch,original_judgments=True)
+    added=deepcopy(m['links'][0]);added.update(viewpoint_claim_link_id='L2',link_type='extends')
+    m['links'].append(added)
+    m['record_pins'].append({'collection':'viewpoint_claim_links','object_id':'L2','revision':1,'content_sha256':'L2'})
+    judgment=deepcopy(m['approved_connection_judgments'][0]);judgment.update(viewpoint_claim_link_id='L2',link_type='extends')
+    m['approved_connection_judgments'].append(judgment);m=seal(m)
+    packet['approved_connection_judgments']=m['approved_connection_judgments'];packet=seal(packet,'packet_sha256')
+    seed=recovery.prepare_connection_continuation(tmp_path,packet,m,proposer=p,reviewer=r,reconsiderer=c,max_correction_rounds=1)
+    client=Client(lambda payload,n:{'schema_version':PROPOSAL_VERSION,'edits':[]})
+    r._response=approved
+    result=run_cvp_route_scope(route_packet=packet,existing_routes=[],output_dir=tmp_path/recovery.DIRECTORY,
+        proposer=proposer(client),reviewer=r,reconsiderer=c,max_correction_rounds=1,connection_seed=seed)
+    assert len(client.packets)==1 and p.calls==1 and c.calls==0
+    assert result['rounds'][-1]['outcome']=='pass' and result['cvp_re_review_exceptions']==[]

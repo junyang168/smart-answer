@@ -52,10 +52,49 @@ def matches_elided(quote: str, *texts: str) -> bool:
     return bool(segments) and all(any(part in text for text in texts) for part in segments)
 
 
+def source_slugs(packet: Mapping[str, Any]) -> list[str]:
+    """Every verse the sources cite, written (「再看林前10:33」) or read out (「以賽亞書第二章第二節」).
+
+    #488: 賽2:2-4 is only ever read out, so its chapter was missing from the
+    和合本 the quote check compares against, and a verbatim block failed.
+    """
+
+    from backend.api.scripture import _SPOKEN_REFERENCE_PATTERN, _spoken_book, chinese_number
+    from backend.pipeline.draft_first_source_binding import written_mentions
+
+    slugs: list[str] = []
+    for item in packet["source_originals"]["originals"]:
+        content = str(item.get("content"))
+        slugs += [slug for _, slug in written_mentions(content)]
+        # Only a reading that names book, chapter and verse: a book carried
+        # down from an earlier sentence lands on chapters that do not exist.
+        for match in _SPOKEN_REFERENCE_PATTERN.finditer(content):
+            book = _spoken_book(match.group("book"))
+            if book and match.group("verse"):
+                chapter, verse = chinese_number(match.group("chapter")), chinese_number(match.group("verse"))
+                if chapter and 0 < chapter <= CHAPTERS.get(book, 0):
+                    slugs.append(f"{book}-{chapter}-{verse}")
+    return list(dict.fromkeys(slugs))
+
+
+#: Chapters per book. He misspeaks a chapter now and then (「羅馬書二十二章」,
+#: #488), and asking bible-api about one it does not have fails every time.
+CHAPTERS = {
+    "gen": 50, "exo": 40, "lev": 27, "num": 36, "deu": 34, "jos": 24, "jdg": 21, "rut": 4,
+    "1sa": 31, "2sa": 24, "1ki": 22, "2ki": 25, "1ch": 29, "2ch": 36, "ezr": 10, "neh": 13,
+    "est": 10, "job": 42, "psa": 150, "pro": 31, "ecc": 12, "sng": 8, "isa": 66, "jer": 52,
+    "lam": 5, "ezk": 48, "dan": 12, "hos": 14, "jol": 3, "amo": 9, "oba": 1, "jon": 4,
+    "mic": 7, "nam": 3, "hab": 3, "zep": 3, "hag": 2, "zec": 14, "mal": 4,
+    "mat": 28, "mrk": 16, "luk": 24, "jhn": 21, "act": 28, "rom": 16, "1co": 16, "2co": 13,
+    "gal": 6, "eph": 6, "php": 4, "col": 4, "1th": 5, "2th": 3, "1ti": 6, "2ti": 4,
+    "tit": 3, "phm": 1, "heb": 13, "jas": 5, "1pe": 5, "2pe": 3, "1jn": 5, "2jn": 1,
+    "3jn": 1, "jud": 1, "rev": 22,
+}
+
+
 def cited_chapters(packet: Mapping[str, Any]) -> list[tuple[str, int]]:
-    corpus = "\n".join(str(item.get("content")) for item in packet["source_originals"]["originals"])
     found: list[tuple[str, int]] = []
-    for slug in reference_slugs(corpus):
+    for slug in source_slugs(packet):
         book, chapter = slug.split("-")[:2]
         key = (book.upper(), int(chapter))
         if key not in found:
@@ -75,7 +114,6 @@ def cited_verses(
     no source) -- limited, like the check, to chapters the sources cite.
     """
 
-    corpus = "\n".join(str(item.get("content")) for item in packet["source_originals"]["originals"])
     scope = " ".join(str(ref) for ref in (packet.get("scope") or {}).get("passage_refs") or [])
     taught = set(cited_chapters(packet))
     drafted = [slug for slug in reference_slugs(manuscript)
@@ -89,7 +127,7 @@ def cited_verses(
             context.append(f"{book}-{number}-{max(1, int(start) - SCENE_VERSES)}-{int(start) - 1}")
     drafted = [*context, *drafted]
     verses: list[dict[str, str]] = []
-    for slug in dict.fromkeys([*reference_slugs(scope), *reference_slugs(corpus), *drafted]):
+    for slug in dict.fromkeys([*reference_slugs(scope), *source_slugs(packet), *drafted]):
         parts = slug.split("-")
         book, number, start = parts[0].upper(), int(parts[1]), int(parts[2])
         end = int(parts[3]) if len(parts) > 3 else start

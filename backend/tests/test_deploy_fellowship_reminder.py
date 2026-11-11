@@ -259,6 +259,7 @@ else:
         "  print)\n"
         "    plist=\"$TEST_REMINDER_PLIST\"\n"
         "    [[ \"${2:-}\" != *referencecommentaryinbox ]] || plist=\"$TEST_INBOX_PLIST\"\n"
+        "    [[ \"${2:-}\" != *sundayassistant ]] || plist=\"$SMART_ANSWER_SUNDAY_ASSISTANT_PLIST\"\n"
         "    program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$plist\")\n"
         "    script=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:1' \"$plist\")\n"
         "    workdir=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :WorkingDirectory' \"$plist\")\n"
@@ -276,6 +277,7 @@ else:
         "SMART_ANSWER_BACKEND_PLIST": str(backend_plist),
         "SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST": str(reminder_plist),
         "SMART_ANSWER_REFERENCE_INBOX_PLIST": str(inbox_plist),
+        "SMART_ANSWER_SUNDAY_ASSISTANT_PLIST": str(tmp_path / "uninstalled-sunday.plist"),
         "SMART_ANSWER_PLIST_BUDDY": str(bin_dir / "plist-buddy"),
         "SMART_ANSWER_MIN_FREE_MB": "1",
         "SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE": str(google_token),
@@ -710,3 +712,85 @@ def test_deploy_fails_closed_without_a_google_token(deploy_fixture: dict[str, ob
 
     assert result.returncode == 1
     assert "Google OAuth token not found" in result.stderr
+
+
+def _sunday_fixture(f):
+    source = f["source"]
+    (source / "scripts/run-sunday-assistant.py").write_text("# supervisor\n")
+    _git(source, "add", ".")
+    _git(source, "commit", "-m", "add Sunday supervisor")
+    _git(source, "push")
+    sha = _git(source, "rev-parse", "HEAD").stdout.strip()
+    target = f["make_release"](sha)
+    (target / "scripts").mkdir()
+    (target / "scripts/run-sunday-assistant.py").write_text("# supervisor\n")
+    (target / "services/whatsapp-bridge/node_modules/whatsapp-web.js").mkdir(parents=True)
+    plist = source.parent / "sunday.plist"
+    plist.write_bytes(plistlib.dumps({
+        "Label": "com.smart_answer.sundayassistant", "KeepAlive": True,
+        "ProgramArguments": ["/old/python", "/old/supervisor", "--config", "/protected/assistant.env"],
+        "WorkingDirectory": "/old/release",
+    }))
+    env = {**f["env"], "SMART_ANSWER_SUNDAY_ASSISTANT_PLIST": str(plist), "TEST_TARGET_SHA": sha, "SMART_ANSWER_SUNDAY_HEALTH_CHECK": "/usr/bin/true"}
+    return target, plist, env
+
+
+def test_sunday_supervisor_rebinds_and_preserves_private_config(deploy_fixture):
+    f = deploy_fixture
+    target, plist, env = _sunday_fixture(f)
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 0, result.stderr
+    data = plistlib.loads(plist.read_bytes())
+    assert data["ProgramArguments"] == [str(target / "backend/.venv/bin/python3"), str(target / "scripts/run-sunday-assistant.py"), "--config", "/protected/assistant.env"]
+    assert data["WorkingDirectory"] == str(target)
+    events = f["launchctl_log"].read_text()
+    assert events.index(f"unload {plist}") < events.index(f"load {f['backend_plist']}")
+    assert "Sunday assistant is bound to" in result.stdout
+
+
+def test_sunday_rollback_to_old_release_unloads_supervisor(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    env["TEST_FAIL_TARGET_FRONTEND"] = "1"
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    events = f["launchctl_log"].read_text().splitlines()
+    assert events.count(f"load {plist}") == 1
+    assert events[-1] == f"unload {plist}"
+
+
+def test_sunday_missing_agent_fails_before_service_switch(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    plist.unlink()
+    result = _run("bash", f["deploy"], "--dry-run", cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Sunday assistant LaunchAgent missing" in result.stderr
+    assert not f["launchctl_log"].exists()
+
+
+def test_sunday_health_failure_rolls_back(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    env["SMART_ANSWER_SUNDAY_HEALTH_CHECK"] = "/usr/bin/false"
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    assert f["launchctl_log"].read_text().splitlines()[-1] == f"unload {plist}"
+
+
+def test_sunday_rollback_rebinds_previous_supervisor(deploy_fixture):
+    f = deploy_fixture
+    _, plist, env = _sunday_fixture(f)
+    previous = f["previous_release"]
+    (previous / "scripts").mkdir()
+    (previous / "scripts/run-sunday-assistant.py").write_text("# old supervisor\n")
+    (previous / "services/whatsapp-bridge/node_modules/whatsapp-web.js").mkdir(parents=True)
+    env["TEST_FAIL_TARGET_FRONTEND"] = "1"
+    result = _run("bash", f["deploy"], cwd=f["source"], env=env, check=False)
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    data = plistlib.loads(plist.read_bytes())
+    assert data["WorkingDirectory"] == str(previous)
+    assert data["ProgramArguments"][1] == str(previous / "scripts/run-sunday-assistant.py")

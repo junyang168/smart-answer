@@ -1,0 +1,53 @@
+{
+  "lecture_id": "S 210307",
+  "duration_ms": 4299703,
+  "source_sha256": "43443ed0c1c0c25cc25378379fca26cfc53e1aafaedee1f4b8f0fab20419fe72",
+  "full_transcript_sha256": "ed28125aba42849455a74447d174d286049def31dc7b88f822592df60ac408db",
+  "timing_audit_sha256": "047bbd871f98eb7f5ac6b68a734b43d511ba8410091cc76027030a69734ab9f6",
+  "argument_packet_sha256": "fbb8d608965f94c6821c6f4376d11d94f45881a22fdc159c30dc73511e60ba35",
+  "original_paragraphs": 177,
+  "reading_paragraphs": 172,
+  "slide_states": 74,
+  "slide_text_regions": 420,
+  "diagram_count": 0,
+  "corrections": {
+    "machine_supported": 150,
+    "pending": 1
+  },
+  "excluded_spans": 6,
+  "word_timestamps_published": false,
+  "timing_issues": [],
+  "mechanical_timing_errors": 0,
+  "native_pts_check": {
+    "sample_count": 8269,
+    "native_frame_count": 107492,
+    "time_base": "1/12800",
+    "max_sample_rounding_delta_ms": 0.0,
+    "errors": []
+  },
+  "incremental_paid_requests_including_invalid_completed_responses": 98,
+  "incremental_call_states": {
+    "complete": 98
+  },
+  "incremental_request_stages": {
+    "full_video_slide_classification": 12,
+    "slide_json_repair_once": 2,
+    "slide_visual_extraction": 25,
+    "slide_visual_structure_repair_once": 3,
+    "punctuation_layout": 4,
+    "asr": 19,
+    "punctuation_layout_repair": 2,
+    "audio_correction_proposals": 19,
+    "non_sermon_exclusions": 7,
+    "proposal_structure_repair_once": 5
+  },
+  "incremental_estimated_usd": 1.07947298,
+  "inherited_15minute_and_OCR_costs_included": false,
+  "human_timestamp_accuracy_benchmark": false,
+  "late_browser_seek_test_ms": 3635160,
+  "late_browser_seek_playback_error": null,
+  "repeat_asr_verification_calls": 0,
+  "originals_preserved": true,
+  "store_writes": 0,
+  "deployed": false
+}

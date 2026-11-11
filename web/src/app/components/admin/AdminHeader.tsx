@@ -1,5 +1,7 @@
 "use client";
 
+import { useSession } from "next-auth/react";
+import { hasEditorAccess, hasTranscriptBetaAccess } from "@/app/utils/roles";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,6 +15,26 @@ const navItems = [
 
 export const AdminHeader = () => {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const items = hasTranscriptBetaAccess(
+    session?.user?.email,
+    session?.user?.role,
+  )
+    ? [
+        ...navItems.slice(0, 1),
+        { href: "/admin/transcript-beta", label: "逐字稿 Beta", exact: false },
+        ...navItems.slice(1),
+      ]
+    : navItems;
+
+  const visibleItems =
+    hasEditorAccess(session?.user?.role)
+      ? [
+          ...items.slice(0, 1),
+          { href: "/admin/media-batches", label: "批次轉錄", exact: false },
+          ...items.slice(1),
+        ]
+      : items;
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
@@ -27,10 +49,19 @@ export const AdminHeader = () => {
           />
           <span className="text-sm font-semibold text-gray-700">Admin</span>
         </Link>
-        <nav aria-label="後台主導覽" className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold">
-          {navItems.map((item) => {
-            const isWangLegacy = item.href === "/admin/wang" && pathname.startsWith("/admin/canonical-repository");
-            const isActive = isWangLegacy || (item.exact ? pathname === item.href : pathname.startsWith(item.href));
+        <nav
+          aria-label="後台主導覽"
+          className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold"
+        >
+          {visibleItems.map((item) => {
+            const isWangLegacy =
+              item.href === "/admin/wang" &&
+              pathname.startsWith("/admin/canonical-repository");
+            const isActive =
+              isWangLegacy ||
+              (item.exact
+                ? pathname === item.href
+                : pathname.startsWith(item.href));
             return (
               <Link
                 key={item.href}

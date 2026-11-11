@@ -1,5 +1,6 @@
 // components/sermons/SermonDetailView.tsx
 "use client";
+import { hasEditorAccess } from "@/app/utils/roles";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, notFound, useSearchParams } from 'next/navigation';
@@ -44,7 +45,7 @@ export const SermonDetailView = () => {
   const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
   let status = sessionStatus;
   const userRole = session?.user?.role;
-  let isEditor = userRole === "editor" || userRole === "admin";
+  let isEditor = hasEditorAccess(userRole);
 
   if (process.env.NODE_ENV !== 'production') {
     status = 'authenticated';
@@ -108,6 +109,7 @@ export const SermonDetailView = () => {
           title: data.metadata.title,
           summary: data.metadata.summary,
           status: data.metadata.status,
+          transcriptPending: data.transcript_status === 'pending_review',
           date: data.metadata.deliver_date,
           assigned_to_name: data.metadata.assigned_to_name,
           speaker: data.metadata.speaker || '王守仁',
@@ -234,7 +236,8 @@ export const SermonDetailView = () => {
   const nextSermon = currentSeriesIndex >= 0 && currentSeriesIndex < seriesSermons.length - 1
     ? seriesSermons[currentSeriesIndex + 1]
     : null;
-  const seriesHref = sermon.series_id
+  // 系列的排列只給同工看（負責人 2026-11-06）；信眾從講論文庫按書卷、章節來。
+  const seriesHref = isEditor && sermon.series_id
     ? `/resources/series/${encodeURIComponent(sermon.series_id)}?sermon=${encodeURIComponent(sermon.id)}`
     : undefined;
 
@@ -333,7 +336,9 @@ export const SermonDetailView = () => {
           </nav>
         ) : null}
 
-        {status === "authenticated" ? (
+        {sermon.transcriptPending ? (
+          <p role="status" className="rounded-xl border border-slate-200 bg-white p-5 text-slate-600">逐字稿整理中，可先收聽或觀看上方影音。</p>
+        ) : status === "authenticated" ? (
           <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">
             <summary className="cursor-pointer select-none font-semibold text-slate-700">
               展開完整逐字稿（核對用）
@@ -351,6 +356,7 @@ export const SermonDetailView = () => {
       {/* 右側邊欄 */}
       <SermonDetailSidebar
         sermon={sermon}
+        showSeries={isEditor}
         authenticated={status === "authenticated"}
         canReviewRepository={isEditor}
       />

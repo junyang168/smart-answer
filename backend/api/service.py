@@ -28,6 +28,8 @@ from opencc import OpenCC
 from fastapi import HTTPException, UploadFile, status
 from pptx import Presentation
 
+from backend.sunday_data_lock import sunday_write
+
 from .gemini_client import gemini_client
 from .models import (
     ArticleDetail,
@@ -1595,16 +1597,14 @@ def email_fellowship(date: str) -> FellowshipEmailResult:
     if not EMAIL_PRODUCTION:
         recipient_list = [TEST_RECIPIENT]
     try:
-        send_email(
-            recipients=recipient_list,
-            subject=content.subject,
-            text_body=_html_to_text(content.html),
-            html_body=content.html,
-        )
+        def deliver():
+            send_email(recipients=recipient_list, subject=content.subject,
+                       text_body=_html_to_text(content.html), html_body=content.html)
         if EMAIL_PRODUCTION:
-            record_fellowship_email_sent(
-                datetime.strptime(normalized_date, "%m/%d/%Y").date(),
-            )
+            from ..fellowship_delivery import send_once
+            send_once(datetime.strptime(normalized_date, "%m/%d/%Y").date(), deliver)
+        else:
+            deliver()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     return FellowshipEmailResult(
@@ -1627,8 +1627,6 @@ def list_sunday_services() -> list[SundayServiceEntry]:
 
 
 def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
-    if not entry.scripture:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.create_sunday_service(entry)
     except ValueError as exc:
@@ -1636,8 +1634,6 @@ def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
 
 
 def update_sunday_service(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
-    if not entry.scripture:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.update_sunday_service(date, entry)
     except ValueError as exc:
@@ -1812,8 +1808,30 @@ def delete_micro_sermon(sermon_id: str) -> None:
         _raise_value_error(exc)
 
 
-def generate_sunday_service_ppt(date: str) -> Path:
+def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, require_complete: bool = False) -> Path:
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        cloud_target = cloud.generated(service_day(date)) if cloud and output_path is None else None
+        if cloud_target:
+            cloud_target.parent.mkdir(exist_ok=True)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     service = get_sunday_service(date)
+    from backend.sunday_service_skeletons import maintain_skeletons
+    from backend.sunday_assistant.store import Store
+    report_date = _parse_service_date(service.date)
+    if report_date:
+        skeletons = maintain_skeletons(repository, Store(Path(os.environ['DATA_BASE_DIR']) / 'sunday-assistant'), report_date.date())
+        incomplete = [f"{row['date']}：{'、'.join(row['missing'])}" for row in skeletons if not row['complete']]
+        if incomplete:
+            future_dates = "、".join(row["date"] for row in skeletons)
+            raise HTTPException(status_code=400, detail=(
+                f"{service.date} 的主日 PPT 尚未生成，因此沒有下載檔案。\n"
+                f"此 PPT 包含未來兩個主日（{future_dates}）的安排，目前尚缺：\n"
+                + "\n".join("• " + item for item in incomplete)
+                + "\n請補齊後重新按「生成 PPT」。"
+            ))
     songs = {song.title: song for song in repository.list_sunday_songs()}
 
     hymn = songs.get(service.hymn or "") if service.hymn else None
@@ -1828,9 +1846,16 @@ def generate_sunday_service_ppt(date: str) -> Path:
         replacements["reader"] = ""
     summary_data: list[dict[str, str]] = []
 
+    from backend.sunday_song_performance import apply_song_notes
+    def scheduled_lyrics(raw, notes):
+        try:
+            return apply_song_notes(_split_lyrics_sections(raw), notes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="當週詩歌演唱說明需核對：" + str(exc)) from exc
+
     section_configs: dict[str, dict[str, object]] = {}
-    if hymn and hymn.lyrics_markdown:
-        sections = _split_lyrics_sections(hymn.lyrics_markdown)
+    if not service.hymn_youtube_url and hymn and hymn.lyrics_markdown:
+        sections = scheduled_lyrics(hymn.lyrics_markdown, service.hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.hymn_index)
             section_configs["hymnLyrics"] = {
@@ -1840,8 +1865,8 @@ def generate_sunday_service_ppt(date: str) -> Path:
                 ],
                 "style": "lyrics",
             }
-    if response_hymn and response_hymn.lyrics_markdown:
-        sections = _split_lyrics_sections(response_hymn.lyrics_markdown)
+    if not service.response_hymn_youtube_url and response_hymn and response_hymn.lyrics_markdown:
+        sections = scheduled_lyrics(response_hymn.lyrics_markdown, service.response_hymn_notes)
         if sections:
             index_label = _format_hymn_index_label(service.response_hymn_index)
             section_configs["responseHymnLyrics"] = {
@@ -1852,7 +1877,13 @@ def generate_sunday_service_ppt(date: str) -> Path:
                 "style": "lyrics",
             }
 
+    for key, video in (("hymnLyrics", service.hymn_youtube_url), ("responseHymnLyrics", service.response_hymn_youtube_url)):
+        if video:
+            section_configs[key] = {"sections": [{"lines": ["播放 YouTube 影片"], "video_url": video}], "style": "lyrics"}
+
     scripture_sections = _fetch_scripture_sections(service.scripture)
+    if require_complete and (len(scripture_sections) != len(service.scripture) or any(not section.get('verses') for section in scripture_sections)):
+        raise HTTPException(status_code=503, detail="讀經經文內容擷取未完成，PPT 尚未準備好；請稍後重試")
     replacements["scriptureReference"] = "；".join(section["display"] for section in scripture_sections) or replacements.get("scripture", "")
 
     summary_data: list[dict[str, str]] = []
@@ -1885,7 +1916,9 @@ def generate_sunday_service_ppt(date: str) -> Path:
 
     SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
     filename = _build_ppt_filename(date, service)
-    output_path = SUNDAY_WORSHIP_DIR / filename
+    render_directory = tempfile.TemporaryDirectory(prefix="sunday-ppt-") if cloud_target else None
+    output_path = output_path or (Path(render_directory.name) / filename if render_directory else SUNDAY_WORSHIP_DIR / filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     holy_comm_config: dict[str, str] | None = None
     if getattr(service, "hold_holy_communion", False):
@@ -1900,16 +1933,28 @@ def generate_sunday_service_ppt(date: str) -> Path:
     if not _sermon_speaker_has_pastor_title(service.sermon_speaker):
         hidden_slide_numbers.append(21)
 
-    generate_presentation_from_template(
-        PPT_TEMPLATE_FILE,
-        replacements,
-        output_path,
-        section_configs=section_configs,
-        scripture_summary=summary_data,
-        holy_communion=holy_comm_config,
-        hidden_slide_numbers=hidden_slide_numbers,
-    )
-    return output_path
+    from backend.ppt_text_layout import PptTextOverflowError
+    try:
+        generate_presentation_from_template(
+            PPT_TEMPLATE_FILE,
+            replacements,
+            output_path,
+            section_configs=section_configs,
+            scripture_summary=summary_data,
+            holy_communion=holy_comm_config,
+            hidden_slide_numbers=hidden_slide_numbers,
+        )
+        if cloud_target:
+            try:
+                return cloud.publish_generated(service_day(date), output_path)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(status_code=503, detail="PPT 已生成，但無法存入 OneDrive；請重試：" + str(exc)) from exc
+        return output_path
+    except PptTextOverflowError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if render_directory:
+            render_directory.cleanup()
 
 
 def email_sunday_service(date: str):
@@ -1919,6 +1964,7 @@ def email_sunday_service(date: str):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@sunday_write
 def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServiceEntry:
     filename = file.filename or ""
     if not filename:
@@ -1929,8 +1975,13 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
 
     service = get_sunday_service(date)
     output_filename = _build_final_ppt_filename(service.date or date)
-    SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = SUNDAY_WORSHIP_DIR / output_filename
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        output_path = cloud.file(service_day(date), output_filename) if cloud else SUNDAY_WORSHIP_DIR / output_filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     temp_path = output_path.with_suffix(output_path.suffix + ".uploading")
 
     try:
@@ -1947,13 +1998,18 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
             temp_path.unlink(missing_ok=True)
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上傳的檔案內容為空")
 
-        temp_path.replace(output_path)
+        if cloud:
+            cloud.publish_final(service_day(date), temp_path)
+        else:
+            temp_path.replace(output_path)
 
 #        _sanitize_zip_file(output_path)
     except HTTPException:
         raise
     except OSError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
 
     updated = repository.set_sunday_service_final_ppt(service.date, output_filename)
     _, default_html = build_sunday_service_email_bodies(updated)
@@ -1968,7 +2024,15 @@ def get_final_sunday_service_ppt(date: str) -> Path:
     filename = service.final_ppt_filename
     if not filename:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="尚未上傳最終 PPT")
-    ppt_path = SUNDAY_WORSHIP_DIR / filename
+    from backend.sunday_presenter import OneDrivePpts, service_day
+    try:
+        cloud = OneDrivePpts.configured()
+        ppt_path = cloud.file(service_day(date), filename) if cloud else SUNDAY_WORSHIP_DIR / filename
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # Historical uploads remain downloadable; new uploads always use OneDrive.
+    if cloud and not ppt_path.exists():
+        ppt_path = SUNDAY_WORSHIP_DIR / filename
     if not ppt_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="找不到已上傳的 PPT 檔案")
     return ppt_path
@@ -2104,6 +2168,11 @@ def _build_ppt_replacements(
 
     _apply_song_replacements(replacements, "hymn", service.hymn, hymn)
     _apply_song_replacements(replacements, "hymn2", service.response_hymn, response_hymn)
+
+    for prefix, video in (("hymn", service.hymn_youtube_url), ("hymn2", service.response_hymn_youtube_url)):
+        if video:
+            replacements[prefix + "Link"] = video
+            replacements[prefix + "Lyrics"] = ""
 
     _populate_fellowship_replacements(replacements, service_date)
 
@@ -2273,7 +2342,7 @@ def _split_lyrics_sections(raw: str) -> list[list[str]]:
     text = raw.strip()
     if not text:
         return []
-    sections = re.split(r"(?:\r?\n){2,}", text)
+    sections = re.split(r"\r?\n[ \t]*(?:\r?\n[ \t]*)+", text)
     result: list[list[str]] = []
     for section in sections:
         lines = [line.strip() for line in section.splitlines() if line.strip()]
@@ -2572,21 +2641,15 @@ def _populate_future_service_tokens(replacements: dict[str, str], current_servic
             _apply_future_service_defaults(replacements, idx)
         return
 
-    future_entries: list[tuple[datetime, SundayServiceEntry]] = []
-    for entry in repository.list_sunday_services():
-        entry_date = _parse_service_date(entry.date)
-        if entry_date is None or entry_date <= current_date:
-            continue
-        future_entries.append((entry_date, entry))
-
-    future_entries.sort(key=lambda item: item[0])
-
+    entries = {entry.date: entry for entry in repository.list_sunday_services()}
     for idx in (1, 2):
-        if idx <= len(future_entries):
-            _, entry = future_entries[idx - 1]
+        target = current_date + timedelta(days=7 * idx)
+        entry = entries.get(target.strftime("%Y-%m-%d"))
+        if entry:
             _apply_future_service_values(replacements, idx, entry)
         else:
             _apply_future_service_defaults(replacements, idx)
+            replacements[f"date{idx}"] = target.strftime("%m/%d")
 
 
 def _apply_future_service_defaults(replacements: dict[str, str], position: int) -> None:

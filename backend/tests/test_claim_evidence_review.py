@@ -51,6 +51,82 @@ def test_old_compact_pass_no_longer_suffices_for_new_policy(material):
     assert output.review({'complete_review':True,'findings':[],'prior_findings':[]},m,candidate)
 
 
+def test_step_can_also_name_its_exact_bound_fragment(material):
+    m,candidate=material
+    raw=answer(evidence_keys=['evidence_steps/E','source_fragments/F'])
+    parsed=er.BindingFindingsReview.model_validate(raw)
+    er.validate_assessments(parsed,m,candidate)
+    assert parsed.binding_assessments[0].evidence_keys==raw['binding_assessments'][0]['evidence_keys']
+    assert all(v.approved for v in output.review(raw,m,candidate).verdicts)
+
+
+@pytest.mark.parametrize('problem', ['missing_paragraph', 'empty_paragraph', 'wrong_excerpt', 'empty_excerpt'])
+def test_retained_binding_cannot_borrow_a_repaired_previous_draft(material, problem):
+    m, candidate = material
+    m['previous_candidate'] = candidate.model_dump(mode='json')
+    fragment = m['before']['source_fragments/F']['payload']
+    if problem == 'missing_paragraph': fragment['paragraph_key'] = 'S9999'
+    if problem == 'empty_paragraph': m['sources']['S']['paragraphs']['S0001']['text'] = ''
+    if problem == 'wrong_excerpt': fragment['verbatim_excerpt'] = '甲是斷言。'
+    if problem == 'empty_excerpt': fragment['verbatim_excerpt'] = ' '
+    assert not candidate.records
+    with pytest.raises(ValueError, match='exact current source'):
+        output.review(answer(), m, candidate)
+
+
+def test_correct_actual_postimage_repairs_retained_binding(material):
+    m, candidate = material
+    m['before']['source_fragments/F']['payload']['paragraph_key'] = 'S9999'
+    fixed = deepcopy(m['before']['source_fragments/F']['payload'])
+    fixed['paragraph_key'] = 'S0001'
+    candidate.records = [cm.source.Row(collection='source_fragments', object_id='F', payload=fixed)]
+    er.validate_assessments(er.BindingFindingsReview.model_validate(answer()), m, candidate)
+
+
+def test_unrelated_source_change_does_not_invalidate_literal_own_binding(material):
+    m, candidate = material
+    m['before']['source_fragments/F']['payload']['source_sha256'] = 'old_whole_source_hash'
+    m['sources']['S']['body_sha256'] = 'new_whole_source_hash'
+    m['sources']['S']['paragraphs']['S0002'] = {'text': '別處改了。'}
+    er.validate_assessments(er.BindingFindingsReview.model_validate(answer()), m, candidate)
+
+
+def test_explicit_fragment_uses_candidate_binding_not_previous_binding(material):
+    m,candidate=material
+    step=deepcopy(m['before']['evidence_steps/E']['payload'])
+    fragment=deepcopy(m['before']['source_fragments/F']['payload'])
+    step.update(source_fragment_id=None,source_fragment_ids=['F2'])
+    fragment['fragment_id']='F2'
+    candidate.records=[cm.source.Row(collection='evidence_steps',object_id='E',payload=step),
+        cm.source.Row(collection='source_fragments',object_id='F2',payload=fragment)]
+    er.validate_assessments(er.BindingFindingsReview.model_validate(
+        answer(evidence_keys=['evidence_steps/E','source_fragments/F2'])),m,candidate)
+    with pytest.raises(ValueError,match='borrowed'):
+        er.validate_assessments(er.BindingFindingsReview.model_validate(
+            answer(evidence_keys=['evidence_steps/E','source_fragments/F'])),m,candidate)
+
+
+@pytest.mark.parametrize('extra',['source_fragments/FO','source_documents/S','S0001',
+    'observations/O','source_fragments/F','evidence_steps/OTHER'])
+def test_explicit_fragment_does_not_allow_borrowing_or_duplicate_keys(material,extra):
+    m,candidate=material
+    raw=answer(evidence_keys=['evidence_steps/E','source_fragments/F',extra])
+    with pytest.raises(ValueError,match='borrowed'):
+        er.validate_assessments(er.BindingFindingsReview.model_validate(raw),m,candidate)
+
+
+def test_fragment_requires_its_own_listed_parent_step(material):
+    m,candidate=material
+    second=deepcopy(m['before']['evidence_steps/E']['payload'])
+    second.update(evidence_step_id='E2',source_fragment_ids=['F2'])
+    m['before']['evidence_steps/E2']={'payload':second,'retired':False}
+    m['before']['source_fragments/F2']={'payload':{'source_id':'S'},'retired':False}
+    m['before']['claims/C']['payload']['evidence_step_ids'].append('E2')
+    for keys in [['source_fragments/F'],['evidence_steps/E','source_fragments/F2']]:
+        with pytest.raises(ValueError,match='borrowed'):
+            er.validate_assessments(er.BindingFindingsReview.model_validate(answer(evidence_keys=keys)),m,candidate)
+
+
 @pytest.mark.parametrize('problem',['context','no_fragments','foreign','wrong_owner','missing_claim','duplicate','no_finding'])
 def test_binding_counterexamples_cannot_pass(material, problem):
     m,candidate=material;raw=answer();e=m['before']['evidence_steps/E']['payload']
@@ -113,7 +189,8 @@ from backend.tests.test_claim_management_human_source_follow_up import authorize
 from backend.pipeline.cvp_sql_actions import execute_claim_management
 
 
-def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
+@pytest.mark.parametrize('explicit_fragment',[False,True])
+def test_real_sql_readback_retains_the_explicit_binding_assessment(action,explicit_fragment):
     store, _, _, _, root, _ = action
     store.apply_plan(store.plan_package({'package_id':'own-binding-case',
         'claims':[{'claim_id':'C','statement':'甲是假设。','claim_type':'exegesis',
@@ -128,7 +205,7 @@ def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
     def opus(packet):
         assert er.QUESTIONS <= set(packet['required_questions'])
         assert packet['own_evidence_bindings']['claims/C']['evidence_steps/E']['fragment_keys']==['source_fragments/F']
-        return answer()
+        return answer(evidence_keys=['evidence_steps/E','source_fragments/F'] if explicit_fragment else ['evidence_steps/E'])
     ports=SyntheticPorts(store,root,opus=opus)
     result=execute_claim_management(store,request,root=output_root,ports=ports)
     assert result['status']=='completed',result
@@ -137,6 +214,7 @@ def test_real_sql_readback_retains_the_explicit_binding_assessment(action):
     child=store.get_cvp_group(q['run_id'])
     raw=json.loads((output_root/q['run_id']/'opus.raw.json').read_text())
     assert raw['response']['binding_assessments'][0]['reason']==answer()['binding_assessments'][0]['reason']
+    assert ('source_fragments/F' in raw['response']['binding_assessments'][0]['evidence_keys'])==explicit_fragment
     assert ports.calls==['opus']
     assert execute_claim_management(store,request,root=output_root,ports=ports)==result
     assert ports.calls==['opus']
@@ -172,3 +250,30 @@ def test_insufficient_binding_accepts_only_its_claim_steps_or_bound_excerpts(mat
     else:
         with pytest.raises(ValueError,match='insufficient own Evidence'):
             er.validate_assessments(parsed,m,candidate)
+
+
+@pytest.mark.parametrize('role', ['gpt', 'opus'])
+@pytest.mark.parametrize('policy_name', [
+    'wang_claim_management_joint_update_v6.json',
+    'wang_claim_management_joint_update_v9.json',
+    'wang_claim_management_bounded_unit_v2.json',
+])
+def test_spoken_emphasis_rule_reaches_both_roles_without_losing_substantive_evidence(role, policy_name):
+    # Exercise the real prompt composer: compact mode replaces the base prompt,
+    # so a rule added only to proposal/review templates would silently disappear.
+    # These are prompt-contract checks, not a claim of live model calibration.
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent / policy_name).read_text())
+    prompt = claim_management_model_adapter(role, policy)._base_prompt
+    assert '本身不能作为支持实质主张的论据' in prompt
+    assert '重视不等于证明' in prompt
+    assert '提议者须检查并修正' in prompt
+    assert '审阅者须核对' in prompt
+    assert '「這很重要，因為保羅這裡用了……」' in prompt
+    assert '须保留后面的经文、解释或具体理由' in prompt
+    assert '「愛是最大的誡命」' in prompt
+    assert '不能因含程度词便排除' in prompt
+    assert '逐字引文保持原文' in prompt
+    assert '不使该片段整体失去支持资格' in prompt
+    # Preserve the existing positive rule: professor-adopted Scripture is evidence.
+    assert '经文若被教授用来建立或解释主张，本身就是承重证据' in prompt

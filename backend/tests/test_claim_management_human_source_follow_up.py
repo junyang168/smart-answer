@@ -20,8 +20,14 @@ def authorize(request,extra=None):
 
 
 @pytest.fixture
-def human_pending(action):
-    store,_,_,_,root,_=action;seed_claims(store,['C'])
+def human_pending(action, request):
+    with_chain = bool(getattr(request, 'param', False))
+    store,_,_,_,root,_=action;seed_claims(store,['C', 'B', 'D'] if with_chain else ['C'])
+    if with_chain:
+        store.apply_plan(store.plan_package({'package_id': 'human-source-chain', 'claim_relations': [
+            {'claim_relation_id': ident, 'from_id': left, 'to_id': right,
+             'relation_type': 'supports', 'reason': 'synthetic source reasoning'}
+            for ident, left, right in [('CB', 'C', 'B'), ('BD', 'B', 'D')]]}))
     request,output=operation_request(action,'Update',['C'])
     request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY));authorize(request)
     def opus(packet):
@@ -33,9 +39,10 @@ def human_pending(action):
         candidate=cm.existing_candidate(packet['before']);candidate.operation='Update'
         post=deepcopy(packet['before']['claims/C']['payload']);post['statement']='教授转述甲是假设。'
         candidate.records=[cm.source.Row(collection='claims',object_id='C',payload=post)]
-        candidate.dispositions[0].action='update'
-        candidate.dispositions[0].reason='synthetic attribution repair'
-        candidate.dispositions[0].citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]
+        disposition = next(d for d in candidate.dispositions if d.record_key == 'claims/C')
+        disposition.action='update'
+        disposition.reason='synthetic attribution repair'
+        disposition.citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]
         candidate.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='persistent',
             reason='source speaker uncertain',citations=[cm.Citation.model_validate(f['citations'][0])]) for fid,f in packet['unresolved'].items()]
         return candidate.model_dump(mode='json')
@@ -86,6 +93,80 @@ def test_human_answer_reaches_both_models_and_preserves_history_with_exact_new_b
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     with pytest.raises(ChangeSetConflict):
         execute_claim_management(store,fork,root=root/'fork',ports=SyntheticPorts(store,root))
+
+
+@pytest.mark.parametrize('fault', [None, 'unknown', 'other_error', 'old_round', 'gpt', 'completed'])
+def test_source_answer_after_rejected_impact_review_still_authenticates_spent_call(human_pending, monkeypatch, fault):
+    store, _, parent, request, _, _, _ = human_pending
+    parent = deepcopy(parent)
+    rid = next(iter(parent['latest_rounds'].values()))
+    key = rid + ':opus'
+    slot = {'role': 'opus', 'state': 'started', 'round_id': rid,
+            'rejection': {'detail': 'joint Update GPT/Opus impact scope disagreement'}}
+    parent['call_reservations'][key] = slot
+    parent['result'] = {'status': 'paused', 'reason': 'engineering_required',
+                        'detail': slot['rejection']['detail'], 'returned_rejected_call': key}
+    if fault == 'unknown': parent['result']['reason'] = 'call_uncertain'
+    if fault == 'other_error': parent['result']['detail'] = 'some other error'
+    if fault == 'old_round': parent['latest_rounds'] = {}
+    if fault == 'gpt': slot['role'] = 'gpt'
+    if fault == 'completed': parent['result']['status'] = 'completed'
+    calls = []
+    def authenticate(previous, actual_key, actual_slot):
+        assert previous is parent and actual_key == key and actual_slot is slot
+        calls.append(key)
+        return True
+    monkeypatch.setattr('backend.pipeline.claim_review_recovery.consumed_rejected_citations', authenticate)
+    authority = json.loads(Path(request.authorization.path).read_text())
+    if fault:
+        with pytest.raises(ValueError, match='paused original scope'):
+            cm.human_source_follow_up(parent, request, authority, parent['findings'])
+        assert calls == []
+    else:
+        before = deepcopy(parent)
+        result = cm.human_source_follow_up(parent, request, authority, parent['findings'])
+        assert result['finding_ids'] and calls == [key]
+        assert parent == before  # No status, verdict or budget rewrite.
+
+
+@pytest.mark.parametrize('human_pending', [True], indirect=True)
+@pytest.mark.parametrize('change', [None, 'transaction_consumer', 'target', 'neighbour', 'relation'])
+def test_human_follow_up_compares_the_original_model_scope_not_transaction_consumers(human_pending, change):
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store, _, parent, request, root, _, verification = human_pending
+    old = parent['original_goal']['original_objects']
+    assert {'claims/C', 'claims/B', 'claim_relations/CB'} <= set(old)
+    assert 'claims/D' not in old
+    if change:
+        collection, oid = ('claim_relations', 'CB') if change == 'relation' else (
+            'claims', {'transaction_consumer': 'D', 'target': 'C', 'neighbour': 'B'}[change])
+        payload = deepcopy(store.get_record_state(collection, oid)['payload'])
+        field = 'reason' if collection == 'claim_relations' else 'statement'
+        payload[field] += ' changed after the question'
+        store.apply_plan(store.plan_package({'package_id': 'human-follow-up-drift-' + change,
+                                             collection: [payload]}))
+    current = store.read_claim_context([('claims', 'C')])
+    assert ('claims', 'D') in current
+    def propose(packet):
+        assert packet['continuation']['human_source_verification']['record'] == verification
+        assert 'claims/D' not in packet['before']
+        candidate = cm.Candidate.model_validate(packet['previous_candidate'])
+        candidate.finding_resolutions = [cm.FindingResolution(
+            finding_id=fid, disposition='resolved', reason='the user confirmed the source meaning',
+            citations=[cm.Citation.model_validate(f['citations'][0])])
+            for fid, f in packet['unresolved'].items()]
+        return candidate.model_dump(mode='json')
+    ports = SyntheticPorts(store, root, proposal=propose, opus=passing)
+    if change in {'target', 'neighbour', 'relation'}:
+        with pytest.raises(ChangeSetConflict, match='human source follow-up current objects drifted'):
+            execute_claim_management(store, request, root=root, ports=ports)
+        assert ports.calls == []
+    else:
+        result = execute_claim_management(store, request, root=root, ports=ports)
+        assert result['status'] == 'completed', result
+        assert ports.calls == ['gpt', 'opus']
+        assert store.claim_management_qualification('C')['ready']
+    assert store.get_cvp_group(parent['run_id'])['call_reservations'] == parent['call_reservations']
 
 
 @pytest.mark.parametrize('bad',['wrong_predecessor','changed_source','unknown_finding','changed_question','approval','double_budget','repeat_answer','empty_answer','empty_confirmation','wrong_citation'])

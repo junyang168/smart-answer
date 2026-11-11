@@ -411,8 +411,26 @@ def spoken_text_without_visuals(
     """Remove visual spans while preserving a line boundary between speech."""
 
     value = str(text or "")
-    for block in sorted(blocks, key=lambda row: row.char_start, reverse=True):
-        value = value[:block.char_start] + "\n" + value[block.char_end:]
+    blocks=tuple(blocks)
+    ranges=[(block.char_start,block.char_end) for block in blocks]
+    # The review publisher wraps the original image, caption and derived SVG.
+    # Those labels are editorial UI, never professor-spoken text. Only remove a
+    # complete, versioned wrapper bound to a contained visual's source-image SHA.
+    wrapper=re.compile(
+        r'<figure data-transcript-slide="v1" data-source-image-sha256="([0-9a-f]{64})">\s*'
+        r'<img src="[^"<>]+" alt="投影片（非口述）" />\s*'
+        r'<figcaption>投影片（非口述）</figcaption>\s*'
+        r'<details><summary>投影片文字（機器重建，非口述）</summary>\s*'
+        r'<svg\b[^>]*>.*?</svg>\s*</details>\s*</figure>',re.S)
+
+    for match in wrapper.finditer(value):
+        inside=[b for b in blocks if match.start()<=b.char_start and b.char_end<=match.end()]
+        if inside and all(f'data-source-image-sha256="{match.group(1)}"' in b.raw_svg for b in inside):
+            ranges=[(start,end) for start,end in ranges if not (match.start()<=start and end<=match.end())]
+            ranges.append((match.start(),match.end()))
+    for start,end in sorted(ranges,reverse=True):
+        value=value[:start]+"\n"+value[end:]
+
     return value
 
 

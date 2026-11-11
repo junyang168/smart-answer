@@ -112,6 +112,132 @@ and checks the owner allow-list again before recording `decided_by` or
 `withdrawn_by`. A missing setting returns 503; do not bypass it by calling the
 backend endpoint directly.
 
+### Transcript proofreading beta
+
+The transcript beta is available to registered users assigned `beta_tester` in
+`DATA_BASE_DIR/config/config.json`, plus the original owner `junyang168@gmail.com`.
+Use `/admin/users` to assign the displayed **beta tester** role. It has the same
+permissions as editor, including the single-claim editing rule, and no admin
+takeover permission. The owner and admins manage users; testers cannot grant roles.
+The Next.js page/proxy and signed backend routes independently check access.
+Backend checks use the current central config on every request, including media,
+assets, history, mode probes and private publication. The beta data directory's
+old config snapshot is not authorization authority. Role removal takes effect on
+the next request; existing manuscript/history/claim data is retained. Newly
+promoted accounts may need to sign in again to refresh middleware's JWT role.
+The beta list is `/admin/transcript-beta`. Ordinary editors retain the legacy entry.
+
+The activated AI draft has a dedicated beta editor at
+`/admin/transcript-beta/S201011` and API namespace `/api/sc_api/beta/`.
+Its persistent data is selected by backend-only `TRANSCRIPT_REVIEW_BETA_DATA_DIR`,
+outside the public web/data tree (production:
+`/opt/homebrew/var/www/smart-answer-config/transcript-review-beta/`); legacy
+manuscripts, claims and publication files remain outside that root. Beta
+publication stays private at `/admin/transcript-beta/S201011/published`.
+The beta API is not mounted without the private data-root setting.
+The editor, API and publication reader all enforce the same beta-role restriction,
+and beta responses are private/no-store. The original port-8000 service was
+retired in #591; compatibility API URLs go through the modern Next.js proxy.
+
+Use `scripts/activate-transcript-beta.py --source-root <local-review-data>
+--production-root <production-data> --target-root <private-beta-data> --item S201011` with `backend/.venv/bin/python`
+to activate the owner's completed AI draft. This refuses an existing beta root,
+locks and snapshots the local draft, retains immutable history and source media,
+verifies media/assets, records an activation manifest and claims the imported
+draft for the owner without adding content review decisions. It does not replace
+the existing production manuscript or publish it publicly.
+
+For another lecture, add `--append` with its exact catalog item ID. This only
+adds an absent item; it refuses existing manuscripts or review folders. Existing
+beta claims and revisions stay intact. Additions are serialized, existing item
+workflow locks protect the shared catalog update, and the catalog row is installed
+last. Each added item keeps its activation manifest inside its review folder.
+Activation compares staged roles against the current production config rather
+than a historical beta snapshot; it never replaces existing beta manuscripts or claims.
+
+The full transcription runner also accepts audio-only sources with `--video`
+(the CLI argument name is retained for compatibility). It records the original
+audio file hash and sample clock, creates an explicitly unavailable, empty visual
+inventory, and skips frame detection/OCR. Review media retains its original bytes;
+the historical storage filename `source.mp4` does not determine its MIME type.
+The authenticated media route uses the candidate's `media_mime_type`, defaulting
+to MP4 for older video drafts, and retains HTTP byte-range seeking.
+
+Set `TRANSCRIPT_REVIEW_ACTION_SECRET` to the same randomly generated, server-only
+value in the production web `.env.local` and backend LaunchAgent environment.
+Never set `TRANSCRIPT_REVIEW_DEV_ACTOR` in production. A deployment installs code;
+it does not register, adopt or overwrite a transcript. Registration and adoption
+remain explicit, SHA-guarded operations; an existing manually edited or published
+transcript must not be replaced by a generated candidate. Before activating a
+shared production transcript, reconcile every writer with the migrated-document
+guards. Legacy nginx `/sc_api/` URLs now pass through the modern Next.js proxy;
+the former port-8000 writer was retired in #591.
+
+### Moving a reviewed Beta draft into production
+
+Use the same ticket worktree and exact catalog item. First make an independent,
+verified backup outside both data roots, then promote that snapshot:
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.transcript_review_promotion backup --beta-root BETA --production-root DATA --item ITEM --backup-root BACKUP
+backend/.venv/bin/python -m backend.pipeline.transcript_review_promotion promote --beta-root BETA --production-root DATA --item ITEM --backup-root BACKUP
+```
+
+The backup includes both catalogs, role configuration, every matching script
+variant, review sidecars, immutable revisions, operation receipts and media.
+Checksums are verified before draft migration. Promotion compares exact item
+versions and ownership against that backup, preserves unrelated catalog rows,
+and retains a durable intent for interrupted-copy recovery. A different existing
+production review draft is never overwritten.
+
+Production receives the Beta review draft, its matching editor baseline,
+complete history/media and current owner/assignment epoch. The legacy raw
+timeline and public publication stay in place. Prior production baseline and
+ownership remain in the verified backup. Review decisions and timing records
+are copied without adding approvals; promotion does not publish or update Claims.
+
+A SHA-bound `production-link.json` in the archived Beta review folder makes all
+Beta routes for that item use the production store: autosave, claims, history,
+media and publication. Other Beta items keep their storage. The backend checks
+the configured production root and promotion receipt; a bad handoff fails closed.
+A request that selected the old store before the switch is rejected inside its
+workflow lock, preserving one writable draft and the existing permission checks.
+
+Deploy router support through `scripts/deploy.sh` before installing the handoff.
+The editor URL remains `/admin/transcript-beta/ITEM`; its publish button then
+writes production's publication. Publishing still requires actual paragraph and
+slide confirmations. A timing hold belonging only to a fully soft-deleted
+paragraph does not block publication; missing or unqualified timing for surviving
+text still does. Original timing records remain unchanged.
+
+The reviewed publication JSON retains deletion marks as part of its immutable
+source snapshot. The public `final_sermon` reader always projects soft deletions
+out, including requests with `remove_tags=false`; public Markdown copy and model
+consumers receive that same clean payload. Full edit markup remains available
+through the authenticated editor/history, not the reader endpoint.
+
+### Unified sermon publication records
+
+Both transcript editors write `sermon-publication.v1` through the same builder.
+`config/sermon.json` is the catalog authority for `published_by`,
+`published_by_name` and timezone-aware `published_date`; the series reader uses
+these fields directly. Changing draft ownership does not change publication.
+
+Normalize historical catalog records once, after deploying the shared writer:
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.sermon_publication_migration --data-root DATA
+backend/.venv/bin/python -m backend.pipeline.sermon_publication_migration --data-root DATA --apply --receipt-dir PRIVATE_RECEIPTS
+```
+
+The migration reads explicit publication metadata, bound publish revisions and
+matching legacy publish audits. It leaves unverifiable publishers explicitly
+unknown. It locks and verifies its inputs, saves the original catalog and a
+receipt outside the data root, and verifies manuscript bytes and hashes are
+unchanged. It does not republish or rewrite any manuscript. Promoted Beta
+archives retain their production authority; for private active Beta data, use
+`--users-root DATA` to resolve names from the central account configuration.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from
@@ -123,7 +249,7 @@ rejected.
 
 ```
 /usr/bin/python3           3.9.6
-/usr/local/bin/python3     3.12.8   ← the test suite runs on this
+/usr/local/bin/python3     3.12.8   ← separate python.org install, not our test environment
 /opt/homebrew/bin/python3  3.13.2   ← production runs this
 ```
 
@@ -131,9 +257,44 @@ A deploy from a shell with `/usr/bin` first built a 3.9.6 venv. The build
 succeeded; the service then died at import on `MicroSermon | None`, which 3.9
 cannot evaluate. Nothing before the health check had any reason to object.
 
-Note that the test suite and production are still on different minor versions.
-Running the suite on 3.13 would settle it; until then, a green test run is not
-proof for production.
+Run tests with `backend/.venv`, the pinned 3.13 environment. Root `.venv` is a
+compatibility symlink to it; the separate 3.11 development environment was
+removed in #591. A bare `python3` still does not select the test interpreter.
+
+### Retiring the pre-release script editor
+
+The old `script_editor_api:app` on port 8000 is separate from the release-bound
+backend on 8555. Modern Next.js `/api/sc_api/…` requests already use
+`SC_API_SERVICE_URL`, falling back to `FULL_ARTICLE_SERVICE_URL` (8555 in
+production). Retiring the old process must preserve the older direct nginx
+URLs before disabling its LaunchAgent or uninstalling its Python interpreter.
+
+`config/nginx/retired-script-editor-locations.conf` provides that compatibility:
+
+- `/sc_api/…` proxies through Next.js `/api/sc_api/…`, retaining the current
+  session, origin and signed-actor checks rather than exposing the backend
+  directly;
+- `/public/<item>` redirects to `/resources/sermons/<item>` and `/public`
+  redirects to the sermon catalog;
+- the obsolete `/public/sitemap` returns 410 (retired);
+- `/static/…` serves the preserved legacy assets directly, without Python.
+
+Install this fragment under `/opt/homebrew/etc/nginx/snippets/` and include it
+in the production HTTP and HTTPS server blocks, replacing their three old
+port-8000 locations. Keep copies and hashes of the original server configs.
+Test a separate unprivileged nginx preview with the new fragment first: compare
+the API responses to the modern proxy, check redirects/410, and compare static
+asset bytes. Validate the entire configuration before reloading it.
+
+The production nginx master runs as root. Editing its user-owned config is not
+enough to apply a change: `nginx -t` and `nginx -s reload` require administrator
+authentication for its logs, PID file and master process. Until reload and live
+checks pass, leave the old 8000 process available. Then disable and unload
+`gui/501/script_editor.service`, archive its LaunchAgent plist outside
+`~/Library/LaunchAgents`, verify port 8000 and Python 3.11 processes are gone,
+and remove the retired virtual environment and Homebrew `python@3.11`. Keep
+the old API source, published manuscripts and shared data. A temporary 3.13
+replacement for the retired app is not required.
 
 ---
 
@@ -176,7 +337,7 @@ that way. `.github/pull_request_template.md` carries the rule.
 | — | Fellowship email reminder, daily schedule check at 10:00 | LaunchAgent `com.smartanswer.fellowshipreminder` | no |
 | — | Reference commentary scan inbox, every 3 minutes | LaunchAgent `com.smart_answer.referencecommentaryinbox` | no |
 | 3003 | Next.js, older build | not in any deploy path (#78) | via nginx 8888 |
-| 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
+| 8000 | retired in #591; no listener | LaunchAgent disabled and archived | compatibility URLs handled by nginx/Next.js |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
 
 Cloudflare Tunnel publishes `https://dallas-hlc.org` (and
@@ -234,6 +395,55 @@ date staging held 7.1 GB on an internal disk at 98% and blocked a deploy.
   59,549 files, 10,099 directories and 271 links with identical SHA-256, size,
   mode and link targets. Database dumps that #423 had already moved to the SSD
   stay reachable through their absolute links.
+
+### Website video migration to the Jun SSD
+
+The website media root is `/opt/homebrew/var/www/church/web/video`, alongside
+`DATA_BASE_DIR`, rather than inside it. nginx serves it at `/web/video/`;
+the canonical repository and original-audio index also read this directory.
+`/Volumes/Jun SSD/data/video` is a separate, pre-existing 110 GiB collection
+used by slide extraction. Do not overwrite it or assume matching filenames
+contain the same bytes.
+
+On 2026-11-02, #593 copied the website directory to
+`/Volumes/Jun SSD/church-website-video`: 477 files, 32,475,018,212 bytes,
+including 476 audio/video files and `.DS_Store`. Every file's SHA-256, size,
+mode, owner and modification time matched. The SSD has ownership disabled,
+so its displayed group is `staff` rather than the source's `admin` group.
+Extended attributes matched apart from macOS-managed quarantine/provenance
+changes introduced by copying; these protections were not removed.
+
+**The website now serves the SSD directory.** The original `video` path is a
+symlink to `/Volumes/Jun SSD/church-website-video`, so existing URLs and backend
+paths remain the same. The verified internal duplicate has been removed.
+The SSD must stay mounted while serving or processing website media.
+
+The first symlink probe returned HTTP 500: nginx logged `Operation not
+permitted` while reading the SSD. The owner explicitly authorized enabling
+nginx's Full Disk Access and completed the macOS administrator verification.
+The same running nginx process then served the SSD successfully, without a
+configuration reload, service restart or code deployment. This broad macOS
+privacy permission does not add any nginx URL mappings. If the permission is
+revoked, or a future nginx update changes the authorized executable, verify
+SSD access again before removing any internal fallback copy.
+
+Verification records live outside the public web tree at
+`/Volumes/Jun SSD/codex-output/ssd-migration-593/`. They include both file
+manifests, metadata differences and the successful pre-migration HTTP HEAD
+checks for all 476 media URLs before and after the switch. MP3, MP4 and
+Chinese-filename checks verified exact bytes at the beginning, middle and end
+of each sampled file (nine HTTP 206 responses). Three additional checks passed
+through the public `https://dallas-hlc.org/web/video/` URLs. The cleanup record
+confirms the verified internal duplicate was removed after the local checks.
+
+For a future relocation, stage a symlink to the verified destination, retain
+the current directory under a temporary name, then switch the original `video`
+path to the symlink. Recheck all media URLs and byte-range responses before
+removing the duplicate. On failure, restore the retained directory at the
+original path. The #593 internal copy has already been removed; reverting this
+move requires copying the SSD directory back and verifying it before replacing
+the symlink, with sufficient internal free space for the copy. Never unlink
+the working media path before the replacement is ready.
 
 ### Google OAuth token
 
@@ -296,6 +506,40 @@ launchctl print "gui/$(id -u)/com.smartanswer.fellowshipreminder" \
 
 Do not run the reminder with `--force` while diagnosing: that sends mail. The
 normal deploy path never passes `--force` and never invokes the reminder job.
+
+### Sunday WhatsApp assistant
+
+The Sunday Presenter website integration and OneDrive PPT storage configuration
+are documented in [Sunday Presenter and OneDrive](sunday-presenter.md). Its
+server-side configuration is outside Git at
+`$DATA_BASE_DIR/config/sunday_presenter.json`. Activate it alongside the reviewed
+website change; without it, existing installations retain local PPT storage.
+The host's OneDrive Mac client performs upload, so a successful local write is
+not a cloud-delivery confirmation. The presenter installer contains no Microsoft
+session or host-specific storage configuration.
+
+Prepare its protected shared secret/configuration and LaunchAgent once with
+`backend/.venv/bin/python scripts/install-sunday-assistant-agent.py`. This only
+writes configuration; it does not load the service or enable collection.
+The configuration lives in `smart-answer-config/sunday-assistant.env`; account
+state and the durable queue live under `$DATA_BASE_DIR/sunday-assistant/`.
+Never copy test forms, queues or group IDs into production.
+
+`deploy.sh` installs the pinned WhatsApp bridge dependencies with browser download
+disabled, stops the old supervisor before changing API code, and rebinds the
+interpreter, supervisor script and working directory to the active release.
+`KeepAlive` and `RunAtLoad` recover the bridge/worker pair after process failure
+or user login. Rollback starts the matching supervisor, or unloads it when the
+older release has no Sunday assistant. Group posting controls remain persistent
+settings; deployment never turns questions or reminders on.
+
+The admin page `/admin/sunday-assistant` shows account, synchronization and worker
+health. The supervisor also runs a model-independent administrator incident monitor;
+its separate `$DATA_BASE_DIR/sunday-assistant/admin-monitor.sqlite3` retains deduplicated
+alerts and delivery receipts across releases. It uses only the configured dedicated
+admin group, never a source group; see `docs/sunday-assistant.md` for thresholds.
+Log: `~/Library/Logs/smart-answer/sunday-assistant.log`. Check those after
+switching; a healthy website alone does not prove WhatsApp is connected.
 
 ### Reference commentary scan inbox
 
@@ -412,3 +656,40 @@ Under `$DATA_BASE_DIR/wang-knowledge-platform/deployment-backups/`:
 Content and knowledge-platform work uses `WKP-` and carries no label. Keeping
 them apart matters: a mixed list is unreadable, and the two have different
 reviewers and different risk.
+
+### Sunday speaker Gmail intake
+
+Speaker attachment intake runs in its own bounded thread within the existing
+Sunday worker. Configure `$DATA_BASE_DIR/config/sunday_gmail.json` using
+`scripts/configure-sunday-gmail.py`, with private per-mailbox tokens outside
+website data; authorize each mailbox with `scripts/authorize-sunday-gmail.py`.
+This never expands or replaces the shared Drive/Docs token. See
+[Sunday assistant Gmail setup](sunday-assistant.md#gmail-私有設定與授權).
+Deploying code does not grant Gmail access. The account holder must consent to
+read-only access, and the profile must match the configured mailbox before the
+worker reads messages. Internal errors join existing admin incident monitoring;
+missing consent and ambiguous mail remain setup/review states. Saturday 22:00
+Dallas speaker-PPT follow-up has an independent admin-group-only switch and does
+not enable source-group questions or Friday reminders.
+
+### Fellowship preparation in the Sunday assistant
+
+The `fellowship_enabled` setting adds the dedicated administrator group to
+`ingest_groups`, while leaving the three source-group roster/audit unchanged.
+Activation records `fellowship_since` and `fellowship_start_date`; only new
+administrator messages are eligible. The Sunday 15:00 request and the following
+Thursday 09:00 missing-information reminder use Dallas time and a separate
+admin-only `fellowship:` envelope. See [fellowship workflow](sunday-assistant.md#雙週讀經團契).
+
+A separate bounded thread runs the existing release-bound fellowship reminder
+script with `--catch-up`, borrowing only its current LaunchAgent's mail/data
+configuration and checking that data roots agree. There is no new LaunchAgent
+and the existing daily reminder schedule is retained. Catch-up stops before
+Friday 19:30. The per-event delivery ledger under
+`DATA_BASE_DIR/notification/fellowship-delivery/` is private and outside releases;
+retain it with `last_sent.json` across deploys. Do not delete a `sending` or
+`unknown` reservation to make a retry happen: SMTP may already have accepted
+mail. Verify provider-side delivery first. Administrator incident monitoring
+reports unresolved delivery failures; ordinary missing inputs are business
+pending states. Normal deploys must not interrupt an in-flight old reminder
+process before its legacy sent marker is recorded.

@@ -1,0 +1,236 @@
+{
+  "schema_version": "slide-visual-reference.v1",
+  "source_sha256": "43443ed0c1c0c25cc25378379fca26cfc53e1aafaedee1f4b8f0fab20419fe72",
+  "manifest_sha256": "2f053a107711b882af0ea052cb94701bc75459a895522f6a58704415a306da16",
+  "annotation_method": "Codex visual inspection of all 15 uniform survey pages before detection",
+  "human_confirmed": false,
+  "survey_index_sha256": "f17860e36776b0a1aa25d759d965e82063259ed19d8f60791f9f520393e8dcf9",
+  "survey_page_sha256": {
+    "survey/uniform-000.jpg": "a55ef7d029ec9c2ac08b2c14d0237c894b83b3c3644c67e3725f8667f5e12c33",
+    "survey/uniform-001.jpg": "4d4f9d7f22c0992fa485d5a69078b5a581448be6f6d2ebcace69da2bf5b5fda5",
+    "survey/uniform-002.jpg": "4492d0dfafc614cfe9558f14e329d47db871e092928e7d478391b0bf326aa625",
+    "survey/uniform-003.jpg": "5fcc6a40516715d6377aa77e5d5c94d47536a596678fed980a14732c8ae4a7d1",
+    "survey/uniform-004.jpg": "af6e1b95d61917eb7f164ab5d48f93b64f35440db32fff235e940d9798f9e867",
+    "survey/uniform-005.jpg": "fb29027cc34faa3490442925a3308a38c1fb748b2268ec35a3020767648d6203",
+    "survey/uniform-006.jpg": "1512976f7574588bbefdab32baa44f5985b949be36047fe938279f11599aefda",
+    "survey/uniform-007.jpg": "a28b2b3cca4e88b7459a8d4081ede2570004b56a5124d738bafdb01a2a0f1b63",
+    "survey/uniform-008.jpg": "a83aad298cb346a807a84e3ff3992709f3741d35fc958c4598f84ff5a58f66da",
+    "survey/uniform-009.jpg": "2d98b98cbbe6fe4525525a0480149dec39b65205ea7b7b3dea3ce6d0adce2844",
+    "survey/uniform-010.jpg": "204a3f910ac28629df791d6419e6546fbcac43acdbead0ada9a1c9ef573ae3d8",
+    "survey/uniform-011.jpg": "754cefd57f8128605ee6e78ee660ee82ce21c79f6599265d2d068586e9f5241c",
+    "survey/uniform-012.jpg": "6f2404330e118b72718bd152f6a94d3adf8e1c4461b2f9c1a491e31209c65fce",
+    "survey/uniform-013.jpg": "30e86478b3ad70aa11fe4161c15a759aa8d0b221d47d15cba424ad6d0f8b9d6e",
+    "survey/uniform-014.jpg": "5b51b377fc699142250a44bfa702e3d8b592d08f1aac3b2c35f18c2c56c67cae"
+  },
+  "limitations": [
+    "Not independently confirmed by a human coworker",
+    "Uniform survey spacing is 2080ms: short events may be missed; boundary is an interval",
+    "One selected development clip, not a held-out generalization benchmark"
+  ],
+  "excluded": [
+    "Temporary blank backgrounds without readable content",
+    "Cursor and PowerPoint navigation UI"
+  ],
+  "events": [
+    {
+      "id": "r-000",
+      "earliest_ms": 0,
+      "latest_ms": 2080,
+      "kind": "new_slide",
+      "note": "首次可見投影片，另計初始取得",
+      "initial_acquisition": true
+    },
+    {
+      "id": "r-001",
+      "earliest_ms": 214240,
+      "latest_ms": 216320,
+      "kind": "new_slide",
+      "note": "編輯模式換到 ζηλοῦτε 語氣說明",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-002",
+      "earliest_ms": 237120,
+      "latest_ms": 239200,
+      "kind": "build",
+      "note": "播放模式由空白顯示 ζηλοῦτε 標題",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-003",
+      "earliest_ms": 243360,
+      "latest_ms": 245440,
+      "kind": "build",
+      "note": "Indicative mood 記述式",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-004",
+      "earliest_ms": 262080,
+      "latest_ms": 264160,
+      "kind": "build",
+      "note": "你們切慕",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-005",
+      "earliest_ms": 274560,
+      "latest_ms": 276640,
+      "kind": "build",
+      "note": "Imperative mood 命令式",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-006",
+      "earliest_ms": 278720,
+      "latest_ms": 280800,
+      "kind": "build",
+      "note": "你們要切慕",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-007",
+      "earliest_ms": 307840,
+      "latest_ms": 309920,
+      "kind": "new_slide",
+      "note": "林前14:12 經文",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-008",
+      "earliest_ms": 322400,
+      "latest_ms": 324480,
+      "kind": "build",
+      "note": "林前14:12 標頭",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-009",
+      "earliest_ms": 397280,
+      "latest_ms": 399360,
+      "kind": "build",
+      "note": "哥林多人不會切慕聖靈和邪靈",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-010",
+      "earliest_ms": 407680,
+      "latest_ms": 409760,
+      "kind": "build",
+      "note": "πνεῦμα 靈=屬靈的恩賜",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-011",
+      "earliest_ms": 443040,
+      "latest_ms": 445120,
+      "kind": "build",
+      "note": "讓步式的命令",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-012",
+      "earliest_ms": 497120,
+      "latest_ms": 499200,
+      "kind": "new_slide",
+      "note": "林前12:1 關於屬靈的",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-013",
+      "earliest_ms": 534560,
+      "latest_ms": 536640,
+      "kind": "build",
+      "note": "χάρισμα 恩賜",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-014",
+      "earliest_ms": 596960,
+      "latest_ms": 599040,
+      "kind": "new_slide",
+      "note": "毛匪要解放台灣",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-015",
+      "earliest_ms": 688480,
+      "latest_ms": 690560,
+      "kind": "build",
+      "note": "中央日報",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-016",
+      "earliest_ms": 694720,
+      "latest_ms": 696800,
+      "kind": "build",
+      "note": "蔣總統要反攻大陸",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-017",
+      "earliest_ms": 709280,
+      "latest_ms": 711360,
+      "kind": "build",
+      "note": "人民日報",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-018",
+      "earliest_ms": 736320,
+      "latest_ms": 738400,
+      "kind": "build",
+      "note": "毛主席要解放台灣",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-019",
+      "earliest_ms": 771680,
+      "latest_ms": 773760,
+      "kind": "build",
+      "note": "另一行中央日報",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-020",
+      "earliest_ms": 775840,
+      "latest_ms": 777920,
+      "kind": "build",
+      "note": "蔣幫要反攻大陸",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-021",
+      "earliest_ms": 794560,
+      "latest_ms": 796640,
+      "kind": "build",
+      "note": "另一行人民日報",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-022",
+      "earliest_ms": 807040,
+      "latest_ms": 809120,
+      "kind": "build",
+      "note": "毛幫要解放台灣",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-023",
+      "earliest_ms": 869440,
+      "latest_ms": 871520,
+      "kind": "new_slide",
+      "note": "切慕屬靈的恩賜及黃色說明",
+      "initial_acquisition": false
+    },
+    {
+      "id": "r-024",
+      "earliest_ms": 873600,
+      "latest_ms": 875680,
+      "kind": "build",
+      "note": "林前14:1 標頭",
+      "initial_acquisition": false
+    }
+  ]
+}

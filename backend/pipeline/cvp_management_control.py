@@ -39,7 +39,12 @@ def _run(store,manifest,*,execute=False):
             raise ValueError('CVP2 call extension authority is unknown')
         if direction.get('authorized_by')=='agent_under_user_task_scope':
             expected['numerical_cap_selected_by']='agent'
-            expected['prior_cap_note']='The earlier 14 and 18 call caps were selected by the agent, not specified by the user.'
+            original=parent['request']['budget']['max_calls']
+            note=f'The original {original}-call cap was selected by the agent, not specified by the user.'
+            legacy='The earlier 14 and 18 call caps were selected by the agent, not specified by the user.'
+            # Preserve historical controls while letting a different original
+            # cap be described truthfully instead of copying one trial's note.
+            expected['prior_cap_note']=(legacy if direction.get('prior_cap_note')==legacy else note)
         if direction!=expected:raise ValueError('CVP2 call extension lacks exact owner direction')
         if manifest['group_key'] not in parent['units'] or len(parent['units'])!=1:
             raise ValueError('CVP2 call extension must name the one original group')

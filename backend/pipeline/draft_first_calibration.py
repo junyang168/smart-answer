@@ -1,12 +1,17 @@
-"""The reviewer may review only as the owner calibrated it.
+"""Whether the reviewer still finds what the owner found.
 
 A review prompt or model change makes the reviewer a different reviewer: on
 2026-10-24 the regrouped prompt still found every patterned owner finding but
-missed K5 until a general rule was added. That calibration happened because
-someone remembered to run it. Now each run of `scripts/draft-first-calibrate.py`
-is recorded under the reviewer's fingerprint -- the prompt as sent, with the
-shared two-way rules filled in, and the model -- and a review refuses to start
-without a record for its fingerprint that agrees with the owner's key.
+missed K5 until a general rule was added. Each run of
+`scripts/draft-first-calibrate.py` is recorded under the reviewer's
+fingerprint -- the prompt as sent, with the shared two-way rules filled in,
+and the model.
+
+Calibration belongs to the change that alters the reviewer, not to writing an
+essay (owner, 2026-10-28, #494): run inside the essay pipeline, a prompt
+change two lines long and unrelated to style stopped 萬人的贖價 before it was
+written. `scripts/wrap-up.sh` runs it when a branch changes the review prompt
+or model, and opens no pull request on a disagreement.
 """
 
 from __future__ import annotations

@@ -66,11 +66,25 @@ def _reference_ids(row: dict[str, Any], field: str, owner: str) -> set[str]:
     return set(values)
 
 
-def validate_merged_package(package: dict[str, Any]) -> None:
+def validate_merged_package(package: dict[str, Any], *, native_relations: bool = False,
+                            external_reference_records: dict[str, list[dict[str, Any]]] | None = None) -> None:
+    """Validate local rows; compiled views may supply SQL-resolved node identities.
+
+    External projections establish identity and reciprocal links, never content
+    review or import authority. Resolve them independently of the package;
+    ordinary merges remain closed and do not trust embedded reference metadata.
+    """
     ids = {
         name: _ids(list(package.get(name) or []), field, name)
         for name, field in ID_FIELDS.items()
     }
+    local_ids={name:set(values) for name,values in ids.items()}
+    for collection, rows in (external_reference_records or {}).items():
+        if collection not in {'claims','evidence_steps','observations','questions','position_nodes'}:
+            raise KnowledgePackageMergeError('external references must be explicit semantic node identities')
+        values=_ids(rows,ID_FIELDS[collection],collection)
+        if values & local_ids[collection]:raise KnowledgePackageMergeError('external reference duplicates a local node')
+        ids[collection] |= values
     id_owners: dict[str, str] = {}
     collisions: list[str] = []
     for collection, values in ids.items():
@@ -229,6 +243,14 @@ def validate_merged_package(package: dict[str, Any]) -> None:
         for evidence in package.get("evidence_steps", [])
         for claim_id in evidence.get("produced_claim_ids") or []
     }
+    claim_evidence_pairs.update((str(row['claim_id']),eid)
+        for row in (external_reference_records or {}).get('claims',[])
+        for eid in _reference_ids(row,'evidence_step_ids',row['claim_id'])
+        if eid in local_ids['evidence_steps'])
+    evidence_claim_pairs.update((cid,str(row['evidence_step_id']))
+        for row in (external_reference_records or {}).get('evidence_steps',[])
+        for cid in _reference_ids(row,'produced_claim_ids',row['evidence_step_id'])
+        if cid in local_ids['claims'])
     if claim_evidence_pairs != evidence_claim_pairs:
         claim_only = sorted(claim_evidence_pairs - evidence_claim_pairs)
         evidence_only = sorted(evidence_claim_pairs - claim_evidence_pairs)
@@ -274,8 +296,9 @@ def validate_merged_package(package: dict[str, Any]) -> None:
         from_id, to_id = validate_edge_identity(
             "knowledge_relations", relation_id, row
         )
-        missing_from = {str(row.get("from_id") or "")} - (evidence_ids | observation_ids)
-        missing_to = {str(row.get("to_id") or "")} - evidence_ids
+        native_nodes = evidence_ids | observation_ids | claim_ids | position_ids | ids["questions"]
+        missing_from = {str(row.get("from_id") or "")} - (native_nodes if native_relations else evidence_ids | observation_ids)
+        missing_to = {str(row.get("to_id") or "")} - (native_nodes if native_relations else evidence_ids)
         if missing_from or missing_to:
             raise KnowledgePackageMergeError(
                 f"knowledge_relations/{row[ID_FIELDS['knowledge_relations']]}: "

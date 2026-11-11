@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sunday Presenter — 控制台</title>
+  <link rel="stylesheet" href="control.css">
+  <script src="folder-wizard.js" defer></script>
+  <script src="control.js" defer></script>
+</head>
+<body>
+  <header><span class="eyebrow">SUNDAY PRESENTER · PHASE 1</span><h1>Sunday Presenter</h1><button data-action="hide-panel" id="hide-panel">返回播放</button>
+    <p><strong>⌘P</strong> 叫出設定，也可點 Dock 圖示。播放後設定窗口自動隱藏。Meet 請持續分享 <strong>Sunday Presenter — OUTPUT</strong> 視窗。</p>
+  </header>
+  <section class="sunday-folder" aria-label="本主日簡報">
+    <strong id="sunday-date">正在取得本主日資料夾…</strong>
+    <p id="sunday-status" role="status"></p>
+    <div class="transport"><button class="take" data-action="choose-week">開啟本週 PPT</button>
+      <button data-action="refresh-folder">更新連結</button></div>
+    <p id="auto-status" role="status">登入 OneDrive 後，自動識別「主日崇拜」和另一份講道 PPT。多份候選時，請在資料夾選擇要用的檔案。</p>
+  </section>
+  <section class="onair"><span id="live" role="status">尚未播放</span><div class="switches">
+    <button data-take="worship" class="take" disabled>主日崇拜</button>
+    <button data-take="sermon" class="take" disabled>講道</button>
+</div></section>
+  <p id="error" role="alert"></p>
+  <main id="decks"></main>
+  <section class="sunday-folder" aria-label="講員翻頁">
+    <strong>講員翻頁</strong><p id="remote-status" role="status">關閉</p>
+    <div class="transport"><button data-action="remote-start" id="remote-start">開啟講員翻頁</button>
+      <button data-action="remote-stop" id="remote-stop" hidden>關閉講員翻頁</button>
+      <button data-action="remote-forget">重設講員配對</button></div>
+  </section>
+  <footer><div class="transport"><button data-action="show-output">顯示輸出視窗</button></div>
+    <p>開啟本週 PPT → 在 PowerPoint 啟動投影片放映 → 在設定窗口確認畫面 → 播放。</p>
+    <p class="note">請確認播放畫面沒有筆記或控制項。切換保留已載入的頁面；背景影片與計時不會自動暫停。Meet 的加入、分享、收音與錄影請手動操作。⌘1 敬拜／⌘2 講道；方向鍵翻頁。點 Dock 圖示叫回設定。</p>
+  </footer>
+</body>
+</html>

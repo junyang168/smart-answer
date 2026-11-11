@@ -1,0 +1,1635 @@
+{
+  "source_sha256": "43443ed0c1c0c25cc25378379fca26cfc53e1aafaedee1f4b8f0fab20419fe72",
+  "review": {
+    "schema_version": "slide-change-pilot.v1",
+    "model": "gemini-3.8-flash",
+    "prompt_version": "slide-pair-review.v1",
+    "candidates_sha256": "27d8db32cd1e9d466617f6bde2cfe07ec598d05001c87ebc9b4834254db43ff4",
+    "results": [
+      {
+        "candidate_id": "c-0000",
+        "kind": "new_slide",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "黑畫面後出現第一張投影片內容"
+      },
+      {
+        "candidate_id": "c-0001",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "投影片內容相同，僅滑鼠指標移動"
+      },
+      {
+        "candidate_id": "c-0002",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "投影片內容相同，僅滑鼠指標移動"
+      },
+      {
+        "candidate_id": "c-0003",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "投影片內容相同，僅滑鼠游標位置改變"
+      },
+      {
+        "candidate_id": "c-0004",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "投影片內容相同，僅滑鼠游標位置改變"
+      },
+      {
+        "candidate_id": "c-0005",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文與希臘文分析",
+        "reason": "投影片內容相同，僅滑鼠游標移動"
+      },
+      {
+        "candidate_id": "c-0006",
+        "kind": "same_content",
+        "confidence": 0.98,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片內容相同，僅滑鼠游標移動。"
+      },
+      {
+        "candidate_id": "c-0007",
+        "kind": "same_content",
+        "confidence": 0.98,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片內容完全相同，僅游標位置改變。"
+      },
+      {
+        "candidate_id": "c-0008",
+        "kind": "same_content",
+        "confidence": 0.98,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片內容相同，僅游標移動至下方。"
+      },
+      {
+        "candidate_id": "c-0009",
+        "kind": "same_content",
+        "confidence": 0.98,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片內容完全相同，僅游標微幅移動。"
+      },
+      {
+        "candidate_id": "c-0010",
+        "kind": "same_content",
+        "confidence": 0.98,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片內容相同，僅游標移出畫面。"
+      },
+      {
+        "candidate_id": "c-0011",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "林前14:1 經文研讀",
+        "reason": "投影片文字內容相同，出現的文字游標與編輯外框依規則予以忽略。"
+      },
+      {
+        "candidate_id": "c-0012",
+        "kind": "new_slide",
+        "confidence": 1.0,
+        "label": "希臘文字詞語態說明",
+        "reason": "投影片切換至希臘文字詞 ζηλοῦτε 的語態分析內容。"
+      },
+      {
+        "candidate_id": "c-0013",
+        "kind": "not_visible",
+        "confidence": 0.95,
+        "label": "放映轉場空白畫面",
+        "reason": "進入全螢幕放映模式，畫面暫時為藍色空白無文字。"
+      },
+      {
+        "candidate_id": "c-0014",
+        "kind": "new_slide",
+        "confidence": 0.95,
+        "label": "標題 ζηλοῦτε",
+        "reason": "在空白畫面後顯現投影片標題文字。"
+      },
+      {
+        "candidate_id": "c-0015",
+        "kind": "same_content",
+        "confidence": 1.0,
+        "label": "標題 ζηλοῦτε",
+        "reason": "投影片內容未變動，僅滑鼠游標移動。"
+      },
+      {
+        "candidate_id": "c-0016",
+        "kind": "build",
+        "confidence": 1.0,
+        "label": "增現 Indicative mood",
+        "reason": "動畫逐步顯現 Indicative mood 記述式相關說明文字。"
+      },
+      {
+        "candidate_id": "c-0017",
+        "kind": "same_content",
+        "confidence": 1.0,
+        "label": "Indicative mood 說明",
+        "reason": "投影片內容完全相同，僅介面游標與控制圖示變化。"
+      },
+      {
+        "candidate_id": "c-0018",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "逐步新增「你們切慕」文字",
+        "reason": "投影片新增「你們切慕」一行文字，為內容逐步顯現。"
+      },
+      {
+        "candidate_id": "c-0019",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "逐步新增「Imperative mood 命令式」",
+        "reason": "投影片下方新增「Imperative mood 命令式」一行內容。"
+      },
+      {
+        "candidate_id": "c-0020",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "逐步新增「你們要切慕」",
+        "reason": "投影片下方新增「你們要切慕」文字。"
+      },
+      {
+        "candidate_id": "c-0021",
+        "kind": "new_slide",
+        "confidence": 0.95,
+        "label": "切換至「你們也是如此，既是切慕」投影片",
+        "reason": "投影片整體內容完全切換至經文解釋新頁面。"
+      },
+      {
+        "candidate_id": "c-0022",
+        "kind": "build",
+        "confidence": 0.9,
+        "label": "頂部新增「林前14:12」標題",
+        "reason": "在原有內容上方新增了「林前14:12」出處標題。"
+      },
+      {
+        "candidate_id": "c-0023",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "底部新增「哥林多人不會切慕聖靈和邪靈」",
+        "reason": "投影片底部新增一行補充說明文字。"
+      },
+      {
+        "candidate_id": "c-0024",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "林前14:12 屬靈的恩賜",
+        "reason": "投影片底部新增「πνεῦμα 靈=屬靈的恩賜」文字行"
+      },
+      {
+        "candidate_id": "c-0025",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "林前14:12 讓步式的命令",
+        "reason": "投影片最下方新增「這是讓步式的命令」文字行"
+      },
+      {
+        "candidate_id": "c-0026",
+        "kind": "not_visible",
+        "confidence": 0.95,
+        "label": "空白畫面",
+        "reason": "投影片文字消失，畫面呈現空白無內容狀態"
+      },
+      {
+        "candidate_id": "c-0027",
+        "kind": "new_slide",
+        "confidence": 0.95,
+        "label": "林前12:1 關於屬靈的",
+        "reason": "空白畫面後切換至「林前12:1」新投影片內容"
+      },
+      {
+        "candidate_id": "c-0028",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "林前12:1 恩賜",
+        "reason": "投影片下方新增包含希臘文恩賜字詞的列表文字"
+      },
+      {
+        "candidate_id": "c-0029",
+        "kind": "not_visible",
+        "confidence": 0.95,
+        "label": "空白畫面",
+        "reason": "投影片文字消失，畫面變為藍色空白"
+      },
+      {
+        "candidate_id": "c-0030",
+        "kind": "new_slide",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣",
+        "reason": "自空白藍底畫面切換至顯示標題「毛匪要『解放』台灣」"
+      },
+      {
+        "candidate_id": "c-0031",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣 - 中央日報",
+        "reason": "同一投影片新增一行文字「中央日報」"
+      },
+      {
+        "candidate_id": "c-0032",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣 - 蔣總統反攻大陸",
+        "reason": "同一投影片新增文字「『蔣總統』要『反攻』大陸」"
+      },
+      {
+        "candidate_id": "c-0033",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣 - 人民日報",
+        "reason": "同一投影片新增一行文字「人民日報」"
+      },
+      {
+        "candidate_id": "c-0034",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣 - 毛主席解放台灣",
+        "reason": "同一投影片新增文字「『毛主席』要『解放』台灣」"
+      },
+      {
+        "candidate_id": "c-0035",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "毛匪要「解放」台灣 - 補充中央日報",
+        "reason": "同一投影片底部新增文字「中央日報」"
+      },
+      {
+        "candidate_id": "c-0036",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "投影片文字新增",
+        "reason": "下方新增文字「蔣幫要「反攻」大陸」"
+      },
+      {
+        "candidate_id": "c-0037",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "投影片文字新增",
+        "reason": "底部新增「人民日報」文字"
+      },
+      {
+        "candidate_id": "c-0038",
+        "kind": "same_content",
+        "confidence": 0.95,
+        "label": "同一投影片內容",
+        "reason": "僅滑鼠游標與播放控制提示出現變化，投影片內容不變"
+      },
+      {
+        "candidate_id": "c-0039",
+        "kind": "new_slide",
+        "confidence": 0.98,
+        "label": "切換至新投影片",
+        "reason": "切換到討論希臘文與哥林多前書的新投影片"
+      },
+      {
+        "candidate_id": "c-0040",
+        "kind": "build",
+        "confidence": 0.95,
+        "label": "投影片標題新增",
+        "reason": "上方新增標題「林前14:1」"
+      }
+    ],
+    "calls": [
+      {
+        "id": "eaa7ed916b62248e39c6d748d0548493ac10238d08ad51a8260f4d786e786e6b",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 1143,
+          "estimated_usd_upper": 0.00937425
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 11.504427792038769
+      },
+      {
+        "id": "b5704fb6de8332fda1d4168d0c394c508b71df83710f96920ace462bfa2b8742",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 1757,
+          "estimated_usd_upper": 0.01167675
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 15.0814402080141
+      },
+      {
+        "id": "7356f25af4d7022b74e843c238d2062c287e63acd15af3fe128eac38e18b5243",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 1498,
+          "estimated_usd_upper": 0.0107055
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 14.095358374994248
+      },
+      {
+        "id": "2fb818f8140242ca052c10648d2ff987eebbf3fe03e0d078fa285dd6bce1d3c1",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 487,
+          "estimated_usd_upper": 0.00691425
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 8.777219749987125
+      },
+      {
+        "id": "a3b4df28ac0f1fde9f04e3de8fd9a33778a448e81b989ab1712b422ed1e1477e",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 980,
+          "estimated_usd_upper": 0.008763
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 9.865002874983475
+      },
+      {
+        "id": "2db4139dd38ddc42a323d5af5f8a044bc67b1b5de52ca8fac431f756dacfeb5a",
+        "usage": {
+          "input_tokens": 6784,
+          "output_including_reasoning_tokens": 1057,
+          "estimated_usd_upper": 0.00905175
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 8.946362458867952
+      },
+      {
+        "id": "ce75dfa93c4e31ac17066f4675e7bfa1a758993271c0671727a3d62e2a63b8c9",
+        "usage": {
+          "input_tokens": 5696,
+          "output_including_reasoning_tokens": 375,
+          "estimated_usd_upper": 0.00567825
+        },
+        "model_version": "gemini-3.8-flash",
+        "wall_seconds": 6.03102383390069
+      }
+    ],
+    "estimated_usd_upper": 0.062163750000000004,
+    "reserved_usd": 0.25680000000000003,
+    "wall_seconds_this_invocation": 0.05786487506702542,
+    "pricing": {
+      "date": "2026-10-27",
+      "input_usd_per_million_upper": 0.75,
+      "output_usd_per_million": 3.75,
+      "kind": "conservative token estimate, not invoice",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    }
+  },
+  "comparison_review": {
+    "schema_version": "slide-change-pilot.v1",
+    "model": "gpt-6.1-sol",
+    "prompt_version": "slide-pair-review.v1",
+    "candidates_sha256": "27d8db32cd1e9d466617f6bde2cfe07ec598d05001c87ebc9b4834254db43ff4",
+    "results": [
+      {
+        "candidate_id": "c-0000",
+        "kind": "new_slide",
+        "confidence": 1,
+        "label": "顯示林前14:1經文與希臘文對照",
+        "reason": "前畫面全黑，後畫面出現可讀的經文投影片。"
+      },
+      {
+        "candidate_id": "c-0001",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1經文對照維持不變",
+        "reason": "文字、配色與排列相同，僅滑鼠指標不同。"
+      },
+      {
+        "candidate_id": "c-0002",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1經文對照維持不變",
+        "reason": "投影片內容與格式一致，僅指標位置略變。"
+      },
+      {
+        "candidate_id": "c-0003",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1經文對照維持不變",
+        "reason": "文字及色彩強調均未改變，只有指標移動。"
+      },
+      {
+        "candidate_id": "c-0004",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1經文對照維持不變",
+        "reason": "前後內容相同，差異僅為滑鼠指標位置。"
+      },
+      {
+        "candidate_id": "c-0005",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1經文對照維持不變",
+        "reason": "文字、排列與強調色一致，僅滑鼠指標移動。"
+      },
+      {
+        "candidate_id": "c-0006",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "前後文字、配色與排列相同，僅游標顯示不同。"
+      },
+      {
+        "candidate_id": "c-0007",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "主投影片文字與強調顏色均未改變。"
+      },
+      {
+        "candidate_id": "c-0008",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "僅滑鼠指標位置不同，無文字或版面變更。"
+      },
+      {
+        "candidate_id": "c-0009",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "前後投影片內容一致，僅指標略有移動。"
+      },
+      {
+        "candidate_id": "c-0010",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "文字與配色一致，差異僅為滑鼠指標消失。"
+      },
+      {
+        "candidate_id": "c-0011",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "林前14:1內容不變",
+        "reason": "僅出現文字編輯游標與選取框，投影片內容未變。"
+      },
+      {
+        "candidate_id": "c-0012",
+        "kind": "new_slide",
+        "confidence": 0.99,
+        "label": "切換至希臘文語氣比較",
+        "reason": "經文段落改為記述式與命令式的語法比較，主要內容不同。"
+      },
+      {
+        "candidate_id": "c-0013",
+        "kind": "not_visible",
+        "confidence": 0.99,
+        "label": "進入空白藍底畫面",
+        "reason": "後圖僅有藍色背景，沒有可讀的投影片文字。"
+      },
+      {
+        "candidate_id": "c-0014",
+        "kind": "new_slide",
+        "confidence": 0.99,
+        "label": "空白後顯示希臘文字詞",
+        "reason": "前圖空白，後圖左上方出現希臘文字詞。"
+      },
+      {
+        "candidate_id": "c-0015",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "希臘文字詞維持不變",
+        "reason": "兩圖文字及位置相同，僅滑鼠位置不同。"
+      },
+      {
+        "candidate_id": "c-0016",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增記述式語氣說明",
+        "reason": "保留原有希臘文字詞，下方新增記述式及其意義說明。"
+      },
+      {
+        "candidate_id": "c-0017",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "記述式說明維持不變",
+        "reason": "文字與配置相同，僅滑鼠及導覽控制項消失。"
+      },
+      {
+        "candidate_id": "c-0018",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增記述式中文例句",
+        "reason": "原有希臘文及記述式說明保留，下方新增「你們切慕」。"
+      },
+      {
+        "candidate_id": "c-0019",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增命令式說明",
+        "reason": "原有內容保留，下方新增 Imperative mood 命令式一行。"
+      },
+      {
+        "candidate_id": "c-0020",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增命令式中文例句",
+        "reason": "命令式說明下新增「你們要切慕」，其中「要」以黃色呈現。"
+      },
+      {
+        "candidate_id": "c-0021",
+        "kind": "new_slide",
+        "confidence": 0.99,
+        "label": "切換至切慕屬靈恩賜的經文解析",
+        "reason": "語氣比較內容被整段經文及希臘文註解取代，主體內容不同。"
+      },
+      {
+        "candidate_id": "c-0022",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增經文出處",
+        "reason": "原有經文及註解不變，頂端新增「林前14:12」。"
+      },
+      {
+        "candidate_id": "c-0023",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增哥林多人切慕對象的說明",
+        "reason": "原有經文內容保留，底部新增哥林多人不會切慕聖靈和邪靈的說明。"
+      },
+      {
+        "candidate_id": "c-0024",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增靈與屬靈恩賜的說明",
+        "reason": "原有內容保留，底部新增黃色希臘文及中文說明。"
+      },
+      {
+        "candidate_id": "c-0025",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增讓步式命令說明",
+        "reason": "原有內容不變，底部新增一行綠色的讓步式命令說明。"
+      },
+      {
+        "candidate_id": "c-0026",
+        "kind": "not_visible",
+        "confidence": 1,
+        "label": "投影片轉為空白藍底",
+        "reason": "後圖僅有藍色背景，沒有可讀的投影片內容。"
+      },
+      {
+        "candidate_id": "c-0027",
+        "kind": "new_slide",
+        "confidence": 1,
+        "label": "顯示林前12:1屬靈主題",
+        "reason": "前圖為空白藍底，後圖出現林前12:1標題與希臘文。"
+      },
+      {
+        "candidate_id": "c-0028",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增恩賜用語與節數",
+        "reason": "保留原標題，下方新增節數、希臘文及恩賜文字。"
+      },
+      {
+        "candidate_id": "c-0029",
+        "kind": "not_visible",
+        "confidence": 1,
+        "label": "投影片轉為空白藍底",
+        "reason": "後圖文字全部消失，僅剩藍色背景。"
+      },
+      {
+        "candidate_id": "c-0030",
+        "kind": "new_slide",
+        "confidence": 1,
+        "label": "台灣解放議題標題出現",
+        "reason": "前圖為空白藍底，後圖出現可讀標題。"
+      },
+      {
+        "candidate_id": "c-0031",
+        "kind": "build",
+        "confidence": 1,
+        "label": "加入中央日報來源",
+        "reason": "原有標題保留，下方新增中央日報一行。"
+      },
+      {
+        "candidate_id": "c-0032",
+        "kind": "build",
+        "confidence": 1,
+        "label": "加入反攻大陸敘述",
+        "reason": "既有文字保留，新增蔣總統反攻大陸的敘述。"
+      },
+      {
+        "candidate_id": "c-0033",
+        "kind": "build",
+        "confidence": 1,
+        "label": "加入人民日報來源",
+        "reason": "原有三行保留，下方新增人民日報一行。"
+      },
+      {
+        "candidate_id": "c-0034",
+        "kind": "build",
+        "confidence": 1,
+        "label": "加入解放台灣敘述",
+        "reason": "既有內容保留，人民日報下方新增毛主席解放台灣的敘述。"
+      },
+      {
+        "candidate_id": "c-0035",
+        "kind": "build",
+        "confidence": 1,
+        "label": "底部再加入中央日報來源",
+        "reason": "原有五行保留，底部新增中央日報一行。"
+      },
+      {
+        "candidate_id": "c-0036",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增蔣幫反攻大陸一行",
+        "reason": "原有文字保留，底部新增一行蔣幫反攻大陸的文字。"
+      },
+      {
+        "candidate_id": "c-0037",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增人民日報署名",
+        "reason": "原有內容不變，最底部新增人民日報一行。"
+      },
+      {
+        "candidate_id": "c-0038",
+        "kind": "same_content",
+        "confidence": 0.99,
+        "label": "報紙用語對照內容不變",
+        "reason": "前後文字與排列相同，僅游標及導覽控制顯示不同。"
+      },
+      {
+        "candidate_id": "c-0039",
+        "kind": "new_slide",
+        "confidence": 0.99,
+        "label": "切換至屬靈恩賜的翻譯說明",
+        "reason": "報紙用語對照被希臘文、屬靈恩賜及翻譯觀點說明取代。"
+      },
+      {
+        "candidate_id": "c-0040",
+        "kind": "build",
+        "confidence": 0.99,
+        "label": "新增林前14:1經文標示",
+        "reason": "原有翻譯說明保留，頂部新增林前14:1。"
+      }
+    ],
+    "calls": [
+      {
+        "id": "f8b6a00441fc9060285c3d173fb737a8344bef2a3a98bf5266777a1c9406f1e2",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 347,
+          "estimated_usd_upper": 0.0246825
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 6.74057862511836
+      },
+      {
+        "id": "c8795339cb104a60b30b4255a8417286ca79f454d5d769a998d167d3f2a31de3",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 318,
+          "estimated_usd_upper": 0.0243925
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 7.119195791892707
+      },
+      {
+        "id": "cf140620e4a8237197d710aa9ea18867171df222c9bee73606c4934da7792e93",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 332,
+          "estimated_usd_upper": 0.0245325
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 7.942433291114867
+      },
+      {
+        "id": "e13bf72bbca5a76bec11bfb4cedae1e1d088dc4470f72a22c78a60fb1814b0d2",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 356,
+          "estimated_usd_upper": 0.0247725
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 6.984063584124669
+      },
+      {
+        "id": "c8e4c47e9398be9662c220b69516d5bbab819498bf7ca2a1e35b39f7e372b62a",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 340,
+          "estimated_usd_upper": 0.0246125
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 5.462825166992843
+      },
+      {
+        "id": "8685bb40d2905beec3ec2ab63f699395673a847fb4bb203d3286e13bc883d8ea",
+        "usage": {
+          "input_tokens": 8485,
+          "output_including_reasoning_tokens": 300,
+          "estimated_usd_upper": 0.0242125
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 4.755733917001635
+      },
+      {
+        "id": "160d5182bcb61b741cdf66cde6eba1889c1f0bfb27239bf9f33df975600b21d9",
+        "usage": {
+          "input_tokens": 7128,
+          "output_including_reasoning_tokens": 298,
+          "estimated_usd_upper": 0.0208
+        },
+        "model_version": "gpt-6.1-sol",
+        "wall_seconds": 5.951345958048478
+      }
+    ],
+    "estimated_usd_upper": 0.168005,
+    "reserved_usd": 0.747554,
+    "wall_seconds_this_invocation": 0.09384341700933874,
+    "pricing": {
+      "date": "2026-10-27",
+      "input_usd_per_million_upper": 2.5,
+      "output_usd_per_million": 10.0,
+      "kind": "conservative token estimate, not invoice",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    }
+  },
+  "candidates": {
+    "schema_version": "slide-change-pilot.v1",
+    "manifest_sha256": "2f053a107711b882af0ea052cb94701bc75459a895522f6a58704415a306da16",
+    "config": {
+      "threshold": 0.0025,
+      "stable_ms": 500
+    },
+    "candidates": [
+      {
+        "id": "c-0000",
+        "before_id": "f-000000000",
+        "after_id": "f-000001560",
+        "change_from_ms": 1040,
+        "stable_ms": 1560,
+        "changed_fraction": 1.0
+      },
+      {
+        "id": "c-0001",
+        "before_id": "f-000001560",
+        "after_id": "f-000014040",
+        "change_from_ms": 12480,
+        "stable_ms": 14040,
+        "changed_fraction": 0.0030902777777777777
+      },
+      {
+        "id": "c-0002",
+        "before_id": "f-000014040",
+        "after_id": "f-000016120",
+        "change_from_ms": 15600,
+        "stable_ms": 16120,
+        "changed_fraction": 0.0033043981481481483
+      },
+      {
+        "id": "c-0003",
+        "before_id": "f-000016120",
+        "after_id": "f-000018720",
+        "change_from_ms": 17160,
+        "stable_ms": 18720,
+        "changed_fraction": 0.006186342592592592
+      },
+      {
+        "id": "c-0004",
+        "before_id": "f-000018720",
+        "after_id": "f-000020800",
+        "change_from_ms": 19240,
+        "stable_ms": 20800,
+        "changed_fraction": 0.0062268518518518515
+      },
+      {
+        "id": "c-0005",
+        "before_id": "f-000020800",
+        "after_id": "f-000024960",
+        "change_from_ms": 22360,
+        "stable_ms": 24960,
+        "changed_fraction": 0.0060879629629629626
+      },
+      {
+        "id": "c-0006",
+        "before_id": "f-000024960",
+        "after_id": "f-000027560",
+        "change_from_ms": 26000,
+        "stable_ms": 27560,
+        "changed_fraction": 0.0029976851851851853
+      },
+      {
+        "id": "c-0007",
+        "before_id": "f-000027560",
+        "after_id": "f-000046280",
+        "change_from_ms": 45760,
+        "stable_ms": 46280,
+        "changed_fraction": 0.04428240740740741
+      },
+      {
+        "id": "c-0008",
+        "before_id": "f-000046280",
+        "after_id": "f-000068640",
+        "change_from_ms": 67600,
+        "stable_ms": 68640,
+        "changed_fraction": 0.0031134259259259257
+      },
+      {
+        "id": "c-0009",
+        "before_id": "f-000068640",
+        "after_id": "f-000069680",
+        "change_from_ms": 69160,
+        "stable_ms": 69680,
+        "changed_fraction": 0.0030497685185185185
+      },
+      {
+        "id": "c-0010",
+        "before_id": "f-000069680",
+        "after_id": "f-000071240",
+        "change_from_ms": 70200,
+        "stable_ms": 71240,
+        "changed_fraction": 0.0030208333333333333
+      },
+      {
+        "id": "c-0011",
+        "before_id": "f-000071240",
+        "after_id": "f-000116480",
+        "change_from_ms": 114400,
+        "stable_ms": 116480,
+        "changed_fraction": 0.038177083333333334
+      },
+      {
+        "id": "c-0012",
+        "before_id": "f-000116480",
+        "after_id": "f-000216840",
+        "change_from_ms": 216320,
+        "stable_ms": 216840,
+        "changed_fraction": 0.24237847222222222
+      },
+      {
+        "id": "c-0013",
+        "before_id": "f-000216840",
+        "after_id": "f-000236600",
+        "change_from_ms": 236080,
+        "stable_ms": 236600,
+        "changed_fraction": 0.09881365740740741
+      },
+      {
+        "id": "c-0014",
+        "before_id": "f-000236600",
+        "after_id": "f-000239200",
+        "change_from_ms": 237640,
+        "stable_ms": 239200,
+        "changed_fraction": 0.010625
+      },
+      {
+        "id": "c-0015",
+        "before_id": "f-000239200",
+        "after_id": "f-000245440",
+        "change_from_ms": 244920,
+        "stable_ms": 245440,
+        "changed_fraction": 0.0025173611111111113
+      },
+      {
+        "id": "c-0016",
+        "before_id": "f-000245440",
+        "after_id": "f-000246480",
+        "change_from_ms": 245960,
+        "stable_ms": 246480,
+        "changed_fraction": 0.030688657407407408
+      },
+      {
+        "id": "c-0017",
+        "before_id": "f-000246480",
+        "after_id": "f-000249600",
+        "change_from_ms": 249080,
+        "stable_ms": 249600,
+        "changed_fraction": 0.0034432870370370372
+      },
+      {
+        "id": "c-0018",
+        "before_id": "f-000249600",
+        "after_id": "f-000263640",
+        "change_from_ms": 263120,
+        "stable_ms": 263640,
+        "changed_fraction": 0.009074074074074075
+      },
+      {
+        "id": "c-0019",
+        "before_id": "f-000263640",
+        "after_id": "f-000276120",
+        "change_from_ms": 275600,
+        "stable_ms": 276120,
+        "changed_fraction": 0.01960648148148148
+      },
+      {
+        "id": "c-0020",
+        "before_id": "f-000276120",
+        "after_id": "f-000279760",
+        "change_from_ms": 279240,
+        "stable_ms": 279760,
+        "changed_fraction": 0.011359953703703704
+      },
+      {
+        "id": "c-0021",
+        "before_id": "f-000279760",
+        "after_id": "f-000310440",
+        "change_from_ms": 309920,
+        "stable_ms": 310440,
+        "changed_fraction": 0.1789872685185185
+      },
+      {
+        "id": "c-0022",
+        "before_id": "f-000310440",
+        "after_id": "f-000325000",
+        "change_from_ms": 324480,
+        "stable_ms": 325000,
+        "changed_fraction": 0.007337962962962963
+      },
+      {
+        "id": "c-0023",
+        "before_id": "f-000325000",
+        "after_id": "f-000399880",
+        "change_from_ms": 399360,
+        "stable_ms": 399880,
+        "changed_fraction": 0.024947916666666667
+      },
+      {
+        "id": "c-0024",
+        "before_id": "f-000399880",
+        "after_id": "f-000409240",
+        "change_from_ms": 408720,
+        "stable_ms": 409240,
+        "changed_fraction": 0.02119212962962963
+      },
+      {
+        "id": "c-0025",
+        "before_id": "f-000409240",
+        "after_id": "f-000445120",
+        "change_from_ms": 444600,
+        "stable_ms": 445120,
+        "changed_fraction": 0.014450231481481482
+      },
+      {
+        "id": "c-0026",
+        "before_id": "f-000445120",
+        "after_id": "f-000497640",
+        "change_from_ms": 497120,
+        "stable_ms": 497640,
+        "changed_fraction": 0.18078125
+      },
+      {
+        "id": "c-0027",
+        "before_id": "f-000497640",
+        "after_id": "f-000499200",
+        "change_from_ms": 498680,
+        "stable_ms": 499200,
+        "changed_fraction": 0.03487268518518519
+      },
+      {
+        "id": "c-0028",
+        "before_id": "f-000499200",
+        "after_id": "f-000537160",
+        "change_from_ms": 536640,
+        "stable_ms": 537160,
+        "changed_fraction": 0.024241898148148148
+      },
+      {
+        "id": "c-0029",
+        "before_id": "f-000537160",
+        "after_id": "f-000597480",
+        "change_from_ms": 596960,
+        "stable_ms": 597480,
+        "changed_fraction": 0.059224537037037034
+      },
+      {
+        "id": "c-0030",
+        "before_id": "f-000597480",
+        "after_id": "f-000599040",
+        "change_from_ms": 598520,
+        "stable_ms": 599040,
+        "changed_fraction": 0.017042824074074075
+      },
+      {
+        "id": "c-0031",
+        "before_id": "f-000599040",
+        "after_id": "f-000691080",
+        "change_from_ms": 690560,
+        "stable_ms": 691080,
+        "changed_fraction": 0.007644675925925926
+      },
+      {
+        "id": "c-0032",
+        "before_id": "f-000691080",
+        "after_id": "f-000696280",
+        "change_from_ms": 695760,
+        "stable_ms": 696280,
+        "changed_fraction": 0.020856481481481483
+      },
+      {
+        "id": "c-0033",
+        "before_id": "f-000696280",
+        "after_id": "f-000711880",
+        "change_from_ms": 711360,
+        "stable_ms": 711880,
+        "changed_fraction": 0.0072511574074074076
+      },
+      {
+        "id": "c-0034",
+        "before_id": "f-000711880",
+        "after_id": "f-000737880",
+        "change_from_ms": 737360,
+        "stable_ms": 737880,
+        "changed_fraction": 0.019386574074074073
+      },
+      {
+        "id": "c-0035",
+        "before_id": "f-000737880",
+        "after_id": "f-000773760",
+        "change_from_ms": 773240,
+        "stable_ms": 773760,
+        "changed_fraction": 0.007604166666666667
+      },
+      {
+        "id": "c-0036",
+        "before_id": "f-000773760",
+        "after_id": "f-000776880",
+        "change_from_ms": 776360,
+        "stable_ms": 776880,
+        "changed_fraction": 0.016464120370370372
+      },
+      {
+        "id": "c-0037",
+        "before_id": "f-000776880",
+        "after_id": "f-000795600",
+        "change_from_ms": 795080,
+        "stable_ms": 795600,
+        "changed_fraction": 0.007245370370370371
+      },
+      {
+        "id": "c-0038",
+        "before_id": "f-000795600",
+        "after_id": "f-000871000",
+        "change_from_ms": 870480,
+        "stable_ms": 871000,
+        "changed_fraction": 0.0033275462962962963
+      },
+      {
+        "id": "c-0039",
+        "before_id": "f-000871000",
+        "after_id": "f-000872040",
+        "change_from_ms": 871520,
+        "stable_ms": 872040,
+        "changed_fraction": 0.1928125
+      },
+      {
+        "id": "c-0040",
+        "before_id": "f-000872040",
+        "after_id": "f-000874640",
+        "change_from_ms": 874120,
+        "stable_ms": 874640,
+        "changed_fraction": 0.010636574074074074
+      }
+    ]
+  },
+  "cursor_or_controls_candidate_ids": [
+    "c-0001",
+    "c-0002",
+    "c-0003",
+    "c-0004",
+    "c-0005",
+    "c-0006",
+    "c-0007",
+    "c-0008",
+    "c-0009",
+    "c-0010",
+    "c-0011",
+    "c-0015",
+    "c-0017",
+    "c-0038"
+  ],
+  "summary": {
+    "schema_version": "slide-change-pilot.v1",
+    "source_sha256": "43443ed0c1c0c25cc25378379fca26cfc53e1aafaedee1f4b8f0fab20419fe72",
+    "manifest_sha256": "2f053a107711b882af0ea052cb94701bc75459a895522f6a58704415a306da16",
+    "reference_sha256": "662685e6f7cc9339c6d6b4adc9d0f981117af056d98657011919d83bc4578164",
+    "candidates_sha256": "27d8db32cd1e9d466617f6bde2cfe07ec598d05001c87ebc9b4834254db43ff4",
+    "review_sha256": "cea8d366b80fa3db3d8f494ea95cbcfbc628953aeca112147446d7e6956b654f",
+    "candidate_count": 41,
+    "exported_state_count": 24,
+    "initial_acquisition": {
+      "reference_count": 1,
+      "detected_count": 24,
+      "matched_count": 1,
+      "recall": 1.0,
+      "precision": 0.041666666666666664,
+      "tolerance_ms": 0,
+      "matches": [
+        {
+          "reference_id": "r-000",
+          "detected_id": "c-0000",
+          "distance_to_reference_interval_ms": 0
+        }
+      ],
+      "missed": []
+    },
+    "changes": {
+      "reference_count": 24,
+      "detected_count": 23,
+      "matched_count": 22,
+      "recall": 0.9166666666666666,
+      "precision": 0.9565217391304348,
+      "tolerance_ms": 0,
+      "matches": [
+        {
+          "reference_id": "r-001",
+          "detected_id": "c-0012",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-002",
+          "detected_id": "c-0014",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-004",
+          "detected_id": "c-0018",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-005",
+          "detected_id": "c-0019",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-006",
+          "detected_id": "c-0020",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-007",
+          "detected_id": "c-0021",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-008",
+          "detected_id": "c-0022",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-009",
+          "detected_id": "c-0023",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-010",
+          "detected_id": "c-0024",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-011",
+          "detected_id": "c-0025",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-012",
+          "detected_id": "c-0027",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-013",
+          "detected_id": "c-0028",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-014",
+          "detected_id": "c-0030",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-015",
+          "detected_id": "c-0031",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-016",
+          "detected_id": "c-0032",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-017",
+          "detected_id": "c-0033",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-018",
+          "detected_id": "c-0034",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-019",
+          "detected_id": "c-0035",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-020",
+          "detected_id": "c-0036",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-021",
+          "detected_id": "c-0037",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-023",
+          "detected_id": "c-0039",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-024",
+          "detected_id": "c-0040",
+          "distance_to_reference_interval_ms": 0
+        }
+      ],
+      "missed": [
+        {
+          "id": "r-003",
+          "earliest_ms": 243360,
+          "latest_ms": 245440,
+          "kind": "build",
+          "note": "Indicative mood 記述式",
+          "initial_acquisition": false
+        },
+        {
+          "id": "r-022",
+          "earliest_ms": 807040,
+          "latest_ms": 809120,
+          "kind": "build",
+          "note": "毛幫要解放台灣",
+          "initial_acquisition": false
+        }
+      ],
+      "false_positives": [
+        {
+          "id": "c-0016",
+          "before_id": "f-000245440",
+          "after_id": "f-000246480",
+          "change_from_ms": 245960,
+          "stable_ms": 246480,
+          "changed_fraction": 0.030688657407407408,
+          "candidate_id": "c-0016",
+          "kind": "build",
+          "confidence": 1.0,
+          "label": "增現 Indicative mood",
+          "reason": "動畫逐步顯現 Indicative mood 記述式相關說明文字。",
+          "time_ms": 245960,
+          "selected_frame_id": "f-000248560",
+          "capture_ms": 248560,
+          "source_frame_number": 6214,
+          "roi_original_xywh": [
+            239,
+            0,
+            1441,
+            1080
+          ],
+          "quality": {
+            "method": "maximum_laplacian_variance_of_sampled_roi",
+            "sample_count": 5,
+            "score": 605.2293183571853
+          },
+          "original_image": "originals/c-0016-full.png",
+          "slide_image": "originals/c-0016-slide.png",
+          "decoder_pts_ms": 248560.0,
+          "original_sha256": "23fb13624a0aaf9d490185948f6fffab3a15db5dadcc025cf6abfae697acc102",
+          "slide_sha256": "f5a802dcbc3f09e7070b317c36d259c185bf52c6cad4a8d86002ce64aab686d2"
+        }
+      ]
+    },
+    "changes_with_2s_tolerance": {
+      "reference_count": 24,
+      "detected_count": 23,
+      "matched_count": 23,
+      "recall": 0.9583333333333334,
+      "precision": 1.0,
+      "tolerance_ms": 2000,
+      "matches": [
+        {
+          "reference_id": "r-001",
+          "detected_id": "c-0012",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-002",
+          "detected_id": "c-0014",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-003",
+          "detected_id": "c-0016",
+          "distance_to_reference_interval_ms": 520
+        },
+        {
+          "reference_id": "r-004",
+          "detected_id": "c-0018",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-005",
+          "detected_id": "c-0019",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-006",
+          "detected_id": "c-0020",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-007",
+          "detected_id": "c-0021",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-008",
+          "detected_id": "c-0022",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-009",
+          "detected_id": "c-0023",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-010",
+          "detected_id": "c-0024",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-011",
+          "detected_id": "c-0025",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-012",
+          "detected_id": "c-0027",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-013",
+          "detected_id": "c-0028",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-014",
+          "detected_id": "c-0030",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-015",
+          "detected_id": "c-0031",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-016",
+          "detected_id": "c-0032",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-017",
+          "detected_id": "c-0033",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-018",
+          "detected_id": "c-0034",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-019",
+          "detected_id": "c-0035",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-020",
+          "detected_id": "c-0036",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-021",
+          "detected_id": "c-0037",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-023",
+          "detected_id": "c-0039",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-024",
+          "detected_id": "c-0040",
+          "distance_to_reference_interval_ms": 0
+        }
+      ],
+      "missed": [
+        {
+          "id": "r-022",
+          "earliest_ms": 807040,
+          "latest_ms": 809120,
+          "kind": "build",
+          "note": "毛幫要解放台灣",
+          "initial_acquisition": false
+        }
+      ],
+      "false_positives": []
+    },
+    "classification_counts": {
+      "build": 17,
+      "emphasis": 0,
+      "layout_change": 0,
+      "new_slide": 7,
+      "not_visible": 3,
+      "return": 0,
+      "same_content": 14,
+      "uncertain": 0
+    },
+    "human_confirmed": false,
+    "cost": {
+      "model": "gemini-3.8-flash",
+      "estimated_usd_upper": 0.062163750000000004,
+      "pricing": {
+        "date": "2026-10-27",
+        "input_usd_per_million_upper": 0.75,
+        "output_usd_per_million": 3.75,
+        "kind": "conservative token estimate, not invoice",
+        "source": "https://ai.google.dev/gemini-api/docs/pricing"
+      },
+      "reserved_usd": 0.25680000000000003
+    },
+    "model_comparison": {
+      "models": [
+        {
+          "model": "gemini-3.8-flash",
+          "call_count": 7,
+          "estimated_usd_upper": 0.062163750000000004,
+          "model_wall_seconds": 74.30083529278636
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "call_count": 7,
+          "estimated_usd_upper": 0.168005,
+          "model_wall_seconds": 44.95617633429356
+        }
+      ],
+      "candidate_count": 41,
+      "disagreements": [],
+      "same_classification_count": 41,
+      "total_estimated_usd_upper": 0.23016874999999998
+    },
+    "observed_sampling_interval_ms": {
+      "min": 520,
+      "max": 520
+    },
+    "sampling_wall_seconds": 9.985094583127648,
+    "model_wall_seconds": 74.30083529278636,
+    "limitations": [
+      "Not independently confirmed by a human coworker",
+      "Uniform survey spacing is 2080ms: short events may be missed; boundary is an interval",
+      "One selected development clip, not a held-out generalization benchmark",
+      "Pilot uses decoder presentation milliseconds; native rational PTS/time_base export remains future work.",
+      "Blue-background ROI proposal with full-frame fallback; general slide localization not implemented",
+      "Observed sampling interval 520–520ms; short-lived changes may be missed",
+      "Event time is first candidate difference, not an independently verified content onset; cursor noise may broaden the boundary",
+      "Best-of-sampled sharpness does not remove pointers or guarantee the best video frame",
+      "AI comparison labels and confidence are not transcript, calibrated probability, or human approval",
+      "Events are visual states, not verified semantic page identities; no transcript insertion yet"
+    ],
+    "reference_errata_sha256": "6a77450c585a6376691821c82269a7c77e0c21faa2878c978978d68f8521c113",
+    "changes_after_reference_errata": {
+      "reference_count": 23,
+      "detected_count": 23,
+      "matched_count": 23,
+      "recall": 1.0,
+      "precision": 1.0,
+      "tolerance_ms": 0,
+      "matches": [
+        {
+          "reference_id": "r-001",
+          "detected_id": "c-0012",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-002",
+          "detected_id": "c-0014",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-003",
+          "detected_id": "c-0016",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-004",
+          "detected_id": "c-0018",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-005",
+          "detected_id": "c-0019",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-006",
+          "detected_id": "c-0020",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-007",
+          "detected_id": "c-0021",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-008",
+          "detected_id": "c-0022",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-009",
+          "detected_id": "c-0023",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-010",
+          "detected_id": "c-0024",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-011",
+          "detected_id": "c-0025",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-012",
+          "detected_id": "c-0027",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-013",
+          "detected_id": "c-0028",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-014",
+          "detected_id": "c-0030",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-015",
+          "detected_id": "c-0031",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-016",
+          "detected_id": "c-0032",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-017",
+          "detected_id": "c-0033",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-018",
+          "detected_id": "c-0034",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-019",
+          "detected_id": "c-0035",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-020",
+          "detected_id": "c-0036",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-021",
+          "detected_id": "c-0037",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-023",
+          "detected_id": "c-0039",
+          "distance_to_reference_interval_ms": 0
+        },
+        {
+          "reference_id": "r-024",
+          "detected_id": "c-0040",
+          "distance_to_reference_interval_ms": 0
+        }
+      ],
+      "missed": [],
+      "false_positives": []
+    }
+  }
+}

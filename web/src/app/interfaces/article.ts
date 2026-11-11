@@ -29,6 +29,8 @@ export interface Sermon {
   speaker: string;
   date: string;       // e.g., "2024年12月25日"
   published_date?: string; // 可選的發布日期
+  published_by?: string | null;
+  published_by_name?: string | null;
   assigned_to_date?: string;
   completed_date?: string;
   last_updated?: string;
@@ -42,14 +44,18 @@ export interface Sermon {
   topic: string[];      // 主題/系列
   status: string;
   source: string;
+  assigned_to?: string;       // 認領人 email
   assigned_to_name: string;   // 認領人
   markdownContent?: string;   // 可選的 Markdown 內容
+  transcriptPending?: boolean;
   keypoints?: string; // 可選的要點列表
   theme: string; // 主題
   core_bible_verses?: { [key: string]: string }; // 可選的核心經文列表
   series_id?: string;
   series_title?: string;
   series_order?: number;
+  rough_href?: string;
+  editor_href?: string;
   organization_mode?: 'scripture_led' | 'topic_led' | 'mixed';
   organization_mode_label?: string;
   classification_confidence?: 'high' | 'medium' | 'low';

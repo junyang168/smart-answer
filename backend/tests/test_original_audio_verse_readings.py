@@ -62,3 +62,20 @@ def test_punctuation_does_not_block_the_match() -> None:
     sermon = _sermon("耶穌說我要把天國的鑰匙給你凡你在地上所捆綁的")
     verses = {"mat-16-19": "我要把天國的鑰匙給你，凡你在地上所捆綁的，在天上也要捆綁；"}
     assert {slug for _, slug in verse_readings(sermon, verses)} == {"mat-16-19"}
+
+
+def test_verse_texts_come_from_the_saved_cuv_chapter_without_asking_per_verse(tmp_path, monkeypatch):
+    import json
+
+    from backend.pipeline import original_audio_index
+
+    chapter = tmp_path / "bible" / "cuv" / "MAT"
+    chapter.mkdir(parents=True)
+    (chapter / "9.json").write_text(json.dumps({"1": "耶穌上了船", "2": "有人用褥子抬著一個癱子"}, ensure_ascii=False))
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("asked bible-api verse by verse")
+
+    monkeypatch.setattr(original_audio_index.httpx, "Client", no_network)
+    texts = original_audio_index.verse_texts(tmp_path, "mat", 9, 1, 2)
+    assert texts == {"mat-9-1": "耶穌上了船", "mat-9-2": "有人用褥子抬著一個癱子"}
