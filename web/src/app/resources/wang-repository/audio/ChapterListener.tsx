@@ -146,7 +146,7 @@ export default function ChapterListener({
       play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
       attempts: 0,
       warming: false,
-      deadline: Date.now() + SEEK_TIMEOUT_MS,
+      deadline: 0,
     };
     pending.current = wanted;
     setSeekError("");
@@ -172,7 +172,8 @@ export default function ChapterListener({
     const wanted = pending.current;
     if (!wanted) return;
     const element = media.current;
-    const ready = element && element.currentSrc === wanted.src && element.readyState >= 1;
+    // iOS may enter a stalled seek if currentTime is assigned while only metadata is loaded.
+    const ready = element && element.currentSrc === wanted.src && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= SEEK_TOLERANCE) {
       pending.current = null;
       window.clearTimeout(seekTimer.current);
@@ -182,6 +183,10 @@ export default function ChapterListener({
       element.muted = false;
       if (wanted.play && element.paused) playMedia(element);
       return;
+    }
+    if (wanted.deadline === 0) {
+      if (!ready && !wanted.play) return;
+      wanted.deadline = Date.now() + SEEK_TIMEOUT_MS;
     }
     if (Date.now() >= wanted.deadline) {
       // Keep the target available for retry and leave playback paused at an unconfirmed position.
@@ -284,7 +289,7 @@ export default function ChapterListener({
     if (!element) return;
     const wanted = pending.current;
     if (wanted) {
-      if (Date.now() >= wanted.deadline && clip) {
+      if (wanted.deadline > 0 && Date.now() >= wanted.deadline && clip) {
         requestSeek(clip, position.clip, wanted.time, true);
       } else {
         wanted.play = !wanted.play;
