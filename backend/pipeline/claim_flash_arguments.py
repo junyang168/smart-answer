@@ -51,6 +51,20 @@ def material_candidates(pool,records,paragraphs,source_id):
     return result
 
 
+def expand_fragment_ids(source_id, supplied, fragment_ids):
+    """Restore a dropped repeated source prefix only when it identifies one supplied fragment."""
+    prefix = 'FR-' + source_id.removeprefix('SRC-') + '-'
+    repeated = prefix + 'DK-' + source_id.rsplit('-', 1)[-1] + '-'
+    aliases = {}
+    for fragment_id in supplied:
+        if fragment_id.startswith(repeated):
+            aliases.setdefault(prefix + fragment_id[len(repeated):], []).append(fragment_id)
+    return [
+        aliases[fragment_id][0] if fragment_id not in supplied and len(aliases.get(fragment_id, [])) == 1 else fragment_id
+        for fragment_id in fragment_ids
+    ]
+
+
 def active_root(root):
     """A new input correction keeps the original stopped verification immutable."""
     root=Path(root).resolve();path=root/'material-scope-continuation.json'
@@ -264,8 +278,14 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         for value in routes:
             item=Route.model_validate(value)
             if item.action!='complete':pending.append({'object_key':item.job_id,'layer':'source' if item.action=='needs_source' else 'evidence','reason':item.reason})
-            for pair in item.pairs:
+            for index, pair in enumerate(item.pairs):
                 provided=completion_nodes if item.job_id in remaining and e.digest(pair.model_dump()) not in retained_pairs else nodes
+                fragment_ids = expand_fragment_ids(source_id, fragments, pair.fragment_ids)
+                if fragment_ids != pair.fragment_ids:
+                    e.save(root / 'fragment-id-corrections' / (e.digest(pair.model_dump()) + '.json'),
+                           {'before': pair.fragment_ids, 'after': fragment_ids})
+                    pair = pair.model_copy(update={'fragment_ids': fragment_ids})
+                    value['pairs'][index] = pair.model_dump()
                 if pair.a not in provided or pair.b not in provided or pair.a==pair.b or not set(pair.fragment_ids)<=known_fragments:
                     raise ValueError('unprovided argument endpoint or source fragment')
                 if pair.a.startswith('claims/') and pair.b.startswith('claims/'):

@@ -256,3 +256,12 @@ def test_omitted_job_only_receives_one_bounded_correction(tmp_path):
     ports=Omit();result=stage.final_support_decisions(tmp_path,ports,_final_jobs())
     assert [v.job_id for v in result]==['claims/C','claims/D']
     assert [[j['job_id'] for j in req['input']['jobs']] for _,req in ports.calls]==[['claims/C','claims/D'],['claims/D']]
+
+
+def test_fragment_id_correction_restores_only_supplied_repeated_prefix():
+    source_id = 'SRC-lecture-123456789abc'
+    canonical = 'FR-lecture-123456789abc-DK-123456789abc-P04-E009-01'
+    shortened = 'FR-lecture-123456789abc-P04-E009-01'
+    missing = 'FR-lecture-123456789abc-P04-E009-02'
+    assert stage.expand_fragment_ids(source_id, {canonical}, [shortened, missing]) == [canonical, missing]
+    assert stage.expand_fragment_ids(source_id, {canonical, shortened}, [shortened]) == [shortened]
