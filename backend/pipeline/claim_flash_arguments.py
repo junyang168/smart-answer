@@ -105,32 +105,40 @@ def clarify_final_scripture(store, source_id, group, parent_root, root, ports, a
         records, sources = f.load_group_source(store, source_id, group)
         if before['sources'] != sources or any(records.get(k) != v for k, v in before['records'].items()):
             raise ValueError('scripture clarification parent input changed')
-        finding, = parent['pending']
         request_path = Path(authority['final_support_request_path']).resolve()
         if not request_path.is_relative_to(parent_root / 'postimage-disposition'):
             raise ValueError('scripture clarification must use the parent final-support request')
         request = json.loads(request_path.read_text())
         response = json.loads((request_path.parent / 'response.json').read_text())
-        job, = [j for j in request['input']['jobs'] if j['job_id'] == finding['object_key']]
-        prior, = [item for item in response['items'] if item['job_id'] == job['job_id']]
         if (request_path.parent.name != e.digest(request)
                 or request['input']['task'] != 'argument_final_support'
                 or request['identity'] != ports.identity['gpt']
-                or e.digest(response) != authority['final_support_response_sha256']
-                or job['findings'] != {'scripture': 'missing'}
-                or prior['action'] != 'needs_source' or prior['reason'] != finding['reason']):
+                or e.digest(response) != authority['final_support_response_sha256']):
             raise ValueError('scripture clarification differs from the recorded finding')
-        candidate = {**job, 'previous_reason': prior['reason']}
-        _, reply = next(f.gpt(root / 'scripture', ports, 'argument_final_support', [candidate],
-                              statements.Edits.model_json_schema(), FINAL_SUPPORT_PROMPT + SCRIPTURE_CLARIFICATION,
-                              semantic_review=False))
-        edit, = statements.Edits.model_validate(reply).items
-        f.exactly([edit.model_dump()], [job['job_id']], 'job_id')
+        jobs = {job['job_id']: job for job in request['input']['jobs']}
+        prior = {item['job_id']: item for item in response['items']}
+        candidates = []
+        for finding in parent['pending']:
+            key = finding['object_key']
+            if (key not in jobs or key not in prior or jobs[key]['findings'] != {'scripture': 'missing'}
+                    or prior[key]['action'] != 'needs_source' or prior[key]['reason'] != finding['reason']):
+                raise ValueError('scripture clarification must address only recorded scripture findings')
+            candidates.append({**jobs[key], 'previous_reason': prior[key]['reason']})
         result = deepcopy(parent)
-        if edit.action == 'keep' and edit.statement is None and edit.scripture_refs is None:
-            result.update(status='verified', pending=[])
-        result['outcomes'].append({'object_key': edit.job_id, 'basis': 'scripture_clarification',
-                                   'action': edit.action, 'reason': edit.reason})
+        accepted = set()
+        for batch, reply in f.gpt(root / 'scripture', ports, 'argument_final_support', candidates,
+                                  statements.Edits.model_json_schema(), FINAL_SUPPORT_BATCH_PROMPT + SCRIPTURE_CLARIFICATION,
+                                  semantic_review=False):
+            edits = statements.Edits.model_validate(reply).items
+            f.exactly([edit.model_dump() for edit in edits], [job['job_id'] for job in batch], 'job_id')
+            for edit in edits:
+                if edit.action == 'keep' and edit.statement is None and edit.scripture_refs is None:
+                    accepted.add(edit.job_id)
+                result['outcomes'].append({'object_key': edit.job_id, 'basis': 'scripture_clarification',
+                                           'action': edit.action, 'reason': edit.reason})
+        result['pending'] = [finding for finding in parent['pending'] if finding['object_key'] not in accepted]
+        if not result['pending']:
+            result['status'] = 'verified'
         e.save(root / 'before.json', before)
         e.save(root / 'intent.json', json.loads((parent_root / 'intent.json').read_text()))
         e.save(root / 'verification.json', result)
