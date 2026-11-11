@@ -133,3 +133,39 @@ def test_legacy_frozen_input_is_not_silently_expanded(ready,monkeypatch):
     monkeypatch.setattr(stage,'material_candidates',forbidden)
     assert stage.run(store,'S',plan,'G',eroot,sroot,aroot,Ports(),apply=True)['status']=='verified'
     assert json.loads((aroot/'intent.json').read_text())==intent
+
+
+def test_scripture_only_clarification_reuses_parent_postimage(ready, tmp_path):
+    store, root, plan, eroot, sroot = adjacent(ready, tmp_path)
+    argument_root = root / 'arguments'
+
+    class ScriptureStop(Ports):
+        def repair(self, request):
+            reply = super().repair(request)
+            if request['input']['task'] == 'argument_final_support':
+                reply['items'][0].update(action='needs_source', reason='沒有具體經文。')
+            return reply
+
+    stopped = stage.run(store, 'S', plan, 'G', eroot, sroot, argument_root,
+                        ScriptureStop(choices={'scripture': 'missing'}), apply=True)
+    assert stopped['status'] == 'needs_attention' and len(stopped['pending']) == 1
+    read = lambda path: json.loads(path.read_text())
+    parent = read(argument_root / 'verification.json')
+    before = read(argument_root / 'before.json')
+    request, = (argument_root / 'postimage-disposition/gpt').glob('*/request.json')
+    e.save(argument_root / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Clarify generic reference to Scripture',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'final_support_request_path': str(request),
+        'final_support_response_sha256': e.digest(read(request.parent / 'response.json')),
+    })
+    ports = Ports()
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, argument_root, ports, apply=True)
+    assert result['status'] in {'verified', 'applied'} and not result['pending']
+    assert result['updates'] == parent['updates'] and read(argument_root / 'verification.json') == parent
+    (role, sent), = ports.calls
+    assert role == 'gpt' and stage.SCRIPTURE_CLARIFICATION in sent['system']
+    assert [j['job_id'] for j in sent['input']['jobs']] == [stopped['pending'][0]['object_key']]
+    replay = Ports()
+    assert stage.run(store, 'S', plan, 'G', eroot, sroot, argument_root, replay, apply=True) == result
+    assert replay.calls == []

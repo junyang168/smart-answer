@@ -73,6 +73,55 @@ FINAL_SUPPORT_PROMPT='只判斷最終論據集合是否仍完整支持此Claim�
 
 FINAL_SUPPORT_BATCH_PROMPT=FINAL_SUPPORT_PROMPT+'每個job_id獨立判定且恰好一次；只用該job材料，不將其他job的論據視為它的支持。'
 
+SCRIPTURE_CLARIFICATION = (
+    '只復核上一輪的經文疑點。區分教授實際引用的具體經文與泛稱「聖經所說」。'
+    '只有原文確實引用了可辨認、承重的經文而材料遺漏時，才因經文不足選needs_source。'
+    '若原文只是泛稱，論據已完整支持主張，選keep；不得補造經文。'
+)
+
+
+def clarify_final_scripture(store, source_id, group, parent_root, root, ports, authority, *, apply):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / 'run.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if (root / 'verification.json').exists():
+            return statements.finish(store, root) if apply else json.loads((root / 'verification.json').read_text())
+        before = json.loads((parent_root / 'before.json').read_text())
+        parent = json.loads((parent_root / 'verification.json').read_text())
+        records, sources = f.load_group_source(store, source_id, group)
+        if before['sources'] != sources or any(records.get(k) != v for k, v in before['records'].items()):
+            raise ValueError('scripture clarification parent input changed')
+        finding, = parent['pending']
+        request_path = Path(authority['final_support_request_path']).resolve()
+        if not request_path.is_relative_to(parent_root / 'postimage-disposition'):
+            raise ValueError('scripture clarification must use the parent final-support request')
+        request = json.loads(request_path.read_text())
+        response = json.loads((request_path.parent / 'response.json').read_text())
+        job, = [j for j in request['input']['jobs'] if j['job_id'] == finding['object_key']]
+        prior, = [item for item in response['items'] if item['job_id'] == job['job_id']]
+        if (request_path.parent.name != e.digest(request)
+                or request['input']['task'] != 'argument_final_support'
+                or request['identity'] != ports.identity['gpt']
+                or e.digest(response) != authority['final_support_response_sha256']
+                or job['findings'] != {'scripture': 'missing'}
+                or prior['action'] != 'needs_source' or prior['reason'] != finding['reason']):
+            raise ValueError('scripture clarification differs from the recorded finding')
+        candidate = {**job, 'previous_reason': prior['reason']}
+        _, reply = next(f.gpt(root / 'scripture', ports, 'argument_final_support', [candidate],
+                              statements.Edits.model_json_schema(), FINAL_SUPPORT_PROMPT + SCRIPTURE_CLARIFICATION,
+                              semantic_review=False))
+        edit, = statements.Edits.model_validate(reply).items
+        f.exactly([edit.model_dump()], [job['job_id']], 'job_id')
+        result = deepcopy(parent)
+        if edit.action == 'keep' and edit.statement is None and edit.scripture_refs is None:
+            result.update(status='verified', pending=[])
+        result['outcomes'].append({'object_key': edit.job_id, 'basis': 'scripture_clarification',
+                                   'action': edit.action, 'reason': edit.reason})
+        e.save(root / 'before.json', before)
+        e.save(root / 'intent.json', json.loads((parent_root / 'intent.json').read_text()))
+        e.save(root / 'verification.json', result)
+        return statements.finish(store, root) if apply else e.publish(root, result)
+
 
 def final_support_decisions(root,ports,jobs):
     """Reuse exact legacy single-job replies; batch only unanswered checks."""
@@ -123,8 +172,13 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
     if _parent_root is None and active_root(root)!=root:
         stopped=json.loads((root/'result.json').read_text())
         if stopped.get('pending'):e.save(root/'stopped-results'/(e.digest(stopped)+'.json'),stopped)
-        result=run(store,source_id,plan,group_id,evidence_root,statement_root,active_root(root),ports,
-            apply=apply,claim_ids=claim_ids,_parent_root=root)
+        authority = json.loads((root / 'material-scope-continuation.json').read_text())
+        if authority.get('final_support_request_path'):
+            group = next(g for g in plan['groups'] if g['group_id'] == group_id)
+            result = clarify_final_scripture(store, source_id, group, root, active_root(root), ports, authority, apply=apply)
+        else:
+            result=run(store,source_id,plan,group_id,evidence_root,statement_root,active_root(root),ports,
+                apply=apply,claim_ids=claim_ids,_parent_root=root)
         return e.publish(root,result)
     parent=None
     if _parent_root is not None:
