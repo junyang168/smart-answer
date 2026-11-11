@@ -498,3 +498,24 @@ def test_coverage_group_id_is_corrected_only_for_one_candidate(tmp_path, count):
         with pytest.raises(ValueError, match='coverage disposition must address every unit'):
             run()
         assert not (root / 'coverage-id-corrections').exists()
+
+
+def test_coverage_split_checks_only_authorized_saved_units_and_replays(tmp_path):
+    jobs = [{'job_id': key, 'unit': {'statement': key}, 'required_fragment_ids': ['F']}
+            for key in ('U15', 'U18', 'U20', 'U21')]
+    raw = {'items': [{'job_id': 'FG007', 'items': [{'job_id': 'FG007'}]}]}
+    ports = Ports()
+    with pytest.raises(ValueError, match='no unknown unit'):
+        stage.split_coverage_disposition(tmp_path, ports, 'FG007', jobs, raw, 'Verify coverage.', {})
+    assert not ports.calls
+    ports.coverage_split_authority = {
+        'group_id': 'FG007', 'reply_sha256': e.digest(raw), 'jobs_sha256': e.digest(jobs),
+        'owner_direction': 'Check the four units independently',
+    }
+    check = lambda: stage.split_coverage_disposition(tmp_path, ports, 'FG007', jobs, raw, 'Verify coverage.', {})
+    edits = check()
+    assert [edit.job_id for edit in edits] == [job['job_id'] for job in jobs]
+    assert [req['input']['jobs'][0]['candidates'] for _, req in ports.calls] == [[job] for job in jobs]
+    ports.calls.clear()
+    assert check() == edits
+    assert not ports.calls

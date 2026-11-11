@@ -219,6 +219,28 @@ def coverage_edits(edits,jobs):
     return edits
 
 
+def split_coverage_disposition(root, ports, group_id, jobs, raw, instruction, shared):
+    """Admit one explicit, bounded correction of a saved malformed bundle."""
+    authority = getattr(ports, 'coverage_split_authority', {})
+    if (authority.get('group_id') != group_id or authority.get('reply_sha256') != e.digest(raw)
+            or authority.get('jobs_sha256') != e.digest(jobs) or not authority.get('owner_direction')):
+        raise ValueError('coverage disposition must address every unit and no unknown unit')
+    folder = root / 'coverage-unit-continuation' / e.digest([raw, jobs])
+    e.save(folder / 'authority.json', authority)
+    edits = []
+    for job in jobs:
+        unit_id = job['job_id']
+        scoped = {'job_id': group_id, 'candidates': [job]}
+        prompt = (instruction + f'　本次只有來源單元 {unit_id}。外層 job_id 填 {group_id}，'
+                  f'每個內層處置的 job_id 必須填 {unit_id}。只判定這個單元，勿合併別的調查結果。')
+        for _, reply in f.gpt(folder / unit_id, ports, 'evidence_coverage_repair', [scoped],
+                              MissingEdits.model_json_schema(), prompt, shared=shared, semantic_review=False):
+            bundles = MissingEdits.model_validate(reply).items
+            f.exactly([bundle.model_dump() for bundle in bundles], [group_id], 'job_id')
+            edits.extend(coverage_edits(bundles[0].items, [job]))
+    return coverage_edits(edits, jobs)
+
+
 def covered_handoff(root,job,records,sources,ports):
     """Consume a focused successor; never rewrite the original handoff reply."""
     folder=Path(root)/'handoff-resolutions'/e.digest(job)
@@ -565,6 +587,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             e.save(root / 'coverage-id-corrections' / (e.digest(raw) + '.json'),
                    {'group_id': group['group_id'], 'unit_id': unit_id})
             edits = [edits[0].model_copy(update={'job_id': unit_id})]
+        if {edit.job_id for edit in edits} != {job['job_id'] for job in jobs}:
+            edits = split_coverage_disposition(root, ports, group['group_id'], jobs, raw, instruction, shared)
         edits = coverage_edits(edits, jobs)
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
