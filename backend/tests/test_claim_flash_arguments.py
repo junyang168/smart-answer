@@ -347,3 +347,31 @@ def test_argument_continuation_corrects_only_the_pending_claim_statement(ready_p
     assert (target / 'verification.json').read_bytes() == parent
     assert [j['job_id'] for role, req in ports.calls if role == 'gpt'
             and req['input']['task'] == 'argument_completeness' for j in req['input']['jobs']] == ['claims/D']
+
+
+def test_route_context_continuation_binds_the_saved_connection_finding(tmp_path):
+    root = tmp_path / 'arguments'
+    pending = {'object_key': 'claims/C', 'layer': 'source', 'reason': '需要前段原文。'}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention', 'pending': [pending]}
+    before = {'records': {}, 'sources': {}}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Check source context',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/C': ['source_fragments/F']},
+    })
+    source_root = stage.active_root(root)
+    finding = '前段解釋仍缺論證連接。'
+    review = {**parent, 'outcomes': [{'basis': 'route_source_clarification',
+        'object_key': 'claims/C', 'action': 'needs_connection', 'reason': finding}]}
+    e.save(source_root/'verification.json', review)
+    followup = {'owner_direction': 'Resolve the recorded connection',
+                'review_sha256': e.digest(review), 'finding': finding,
+                'record_keys': ['evidence_steps/E']}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == source_root/'route-context'/e.digest(followup)
+    assert json.loads((source_root/'verification.json').read_text()) == review
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'finding': 'Different finding'}))
+    with pytest.raises(ValueError, match='saved source clarification'):
+        stage.active_root(root)

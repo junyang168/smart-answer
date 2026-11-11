@@ -78,7 +78,20 @@ def active_root(root):
             or not parent.get('pending') or any(x.get('layer') != ('source' if authority.get('source_context_keys') else 'claim_connections') for x in parent['pending'])
             or (root/'commit-intent.json').exists()):
         raise ValueError('argument material correction differs from its uncommitted parent')
-    return root/'material-scope-continuations'/e.digest(parent)
+    original_child = root/'material-scope-continuations'/e.digest(parent)
+    followup = root/'route-context-continuation.json'
+    if authority.get('source_context_keys') and followup.exists():
+        scoped = json.loads(followup.read_text())
+        review = json.loads((original_child/'verification.json').read_text())
+        if (scoped.get('review_sha256') != e.digest(review) or not scoped.get('owner_direction')
+                or len(review['pending']) != 1
+                or not any(item.get('basis') == 'route_source_clarification'
+                           and item.get('action') == 'needs_connection'
+                           and item['object_key'] == review['pending'][0]['object_key']
+                           and item['reason'] == scoped.get('finding') for item in review['outcomes'])):
+            raise ValueError('argument route context differs from the saved source clarification')
+        return original_child/'route-context'/e.digest(scoped)
+    return original_child
 
 
 CONTINUATION_PROMPT='本次只補判remaining_findings；accepted_proposed_edges已處置，保留並只補缺口。不重做其他Claim的判斷。'
@@ -256,7 +269,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         stopped=json.loads((root/'result.json').read_text())
         if stopped.get('pending'):e.save(root/'stopped-results'/(e.digest(stopped)+'.json'),stopped)
         authority = json.loads((root / 'material-scope-continuation.json').read_text())
-        if authority.get('source_context_keys'):
+        if authority.get('source_context_keys') and not (root/'route-context-continuation.json').exists():
             group = next(g for g in plan['groups'] if g['group_id'] == group_id)
             result = clarify_route_source(store, source_id, group, root, active_root(root), ports, authority, apply=apply)
         elif authority.get('final_support_request_path'):
@@ -267,9 +280,14 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 apply=apply,claim_ids=claim_ids,_parent_root=root)
         return e.publish(root,result)
     parent=None
+    route_context = None
     if _parent_root is not None:
         if active_root(_parent_root)!=root:raise ValueError('argument correction root differs')
         parent=json.loads((Path(_parent_root)/'verification.json').read_text())
+        route_path = Path(_parent_root)/'route-context-continuation.json'
+        if route_path.exists():
+            route_context = json.loads(route_path.read_text())
+            parent['pending'][0]['reason'] = route_context['finding']
     group=next(g for g in plan['groups'] if g['group_id']==group_id);ids=group['claim_ids']
     if claim_ids is not None:
         if claim_ids not in group.get('sequential_claim_batches', []):
@@ -327,6 +345,16 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         pool={k for k in group['lower_record_keys'] if k.split('/')[0] in {'evidence_steps','observations'}}
         for key in targets:pool.update(x['object_key'] for x in flash.claim_material(key,records,sources,source_id)['evidence'])
         candidates=material_candidates(pool,records,set(group['paragraph_keys'])|material_paragraphs(pool,records),source_id) if expanded else pool
+        extra = set()
+        if route_context:
+            extra = set(route_context['record_keys'])
+            if not extra or any(k not in records or records[k].get('retired')
+                    or not k.startswith(('evidence_steps/', 'observations/'))
+                    or not e.evidence_fragment_ids(records[k]['payload'])
+                    or any(records.get('source_fragments/'+fid, {}).get('payload', {}).get('source_id') != source_id
+                           for fid in e.evidence_fragment_ids(records[k]['payload'])) for k in extra):
+                raise ValueError('argument route context requires current source-local lower records')
+            candidates.update(extra)
         proof=statements.verify_evidence(evidence_root,candidates,records,sources)
         nodes=candidates|targets;by_id={k.split('/',1)[1]:k for k in nodes}
         if len(by_id)!=len(nodes):raise ValueError('ambiguous argument endpoint')
@@ -342,6 +370,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             own.update(k for item in parent['routes'] if item['job_id'] in remaining
                        for pair in item['pairs'] for k in (pair['a'],pair['b']) if k in candidates)
             completion_pool=material_candidates(own,records,material_paragraphs(own,records),source_id)
+        completion_pool.update(extra)
         completion_nodes=completion_pool|remaining
         fragments={fid:records['source_fragments/'+fid]['payload'] for key in completion_pool for fid in e.evidence_fragment_ids(records[key]['payload'])}
         shared={'nodes':{k:{field:r for field,r in records[k]['payload'].items() if field in
@@ -359,6 +388,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         if parent is not None:
             shared['accepted_proposed_edges']=[p for item in parent['routes'] for p in item['pairs'] if {p['a'],p['b']}<=completion_nodes]
             prompt+=CONTINUATION_PROMPT
+            if route_context:
+                prompt += ('只處理補充的已核實前段材料與指定主張之間的論證缺口。'
+                           '若前段只是背景，保留既有路線；已有間接承載，不重複加邊。'
+                           '區分教授的前段解釋、結尾禱告與任何超出原文的推論。')
         route_map={p['job_id']:deepcopy(p) for p in parent['routes']} if parent is not None else {}
         for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),prompt,shared=shared,semantic_review=False):
             replies=Routes.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
