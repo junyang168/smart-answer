@@ -11,6 +11,9 @@ import { load, plain } from "./ScriptureSlide";
  * 经文是和合本全文，按出处去取，不经模型。
  */
 
+// Let listeners read the next point before the professor starts expanding it.
+export const POINT_PREVIEW_SECONDS = 4;
+
 export type ChapterSlideData = {
   at: number;
   seconds: number;
@@ -143,8 +146,8 @@ export default function ChapterSlide({
   /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
   className?: string;
 }) {
-  // 要点和经文都是他讲到、读到了才出现。新读的经文放在最上面、亮着。
-  const points = slide.points.filter((item) => item.at <= seconds + 1);
+  // The speech anchor stays exact while points get a short reading lead.
+  const points = slide.points.filter((item) => item.at <= seconds + POINT_PREVIEW_SECONDS);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
   const shown = [...read].reverse();
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。

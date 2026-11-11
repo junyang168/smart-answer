@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import ChapterSlide from "./ChapterSlide";
+import ChapterSlide, { POINT_PREVIEW_SECONDS } from "./ChapterSlide";
 import ScriptureSlide from "./ScriptureSlide";
 import {
   citedAt,
@@ -426,7 +426,7 @@ export default function ChapterListener({
     : null;
   const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
   const slides = clip?.sermon.slides ?? [];
-  const slide = [...slides].reverse().find((item) => item.at <= time) ?? slides[0];
+  const slide = [...slides].reverse().find((item) => item.at <= time + POINT_PREVIEW_SECONDS) ?? slides[0];
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
   const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
   const sectionSeconds = (index: number) =>
