@@ -265,3 +265,44 @@ def test_fragment_id_correction_restores_only_supplied_repeated_prefix():
     missing = 'FR-lecture-123456789abc-P04-E009-02'
     assert stage.expand_fragment_ids(source_id, {canonical}, [shortened, missing]) == [canonical, missing]
     assert stage.expand_fragment_ids(source_id, {canonical, shortened}, [shortened]) == [shortened]
+
+
+@pytest.mark.parametrize('approve', [True, False])
+def test_source_clarification_checks_only_stopped_route(ready_pair, approve):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+
+    class Review(Ports):
+        def repair(self, request):
+            result = super().repair(request)
+            task = request['input']['task']
+            if task == 'argument_completeness':
+                for item in result['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_source', reason='補核前段經文。')
+            if task == 'argument_final_support' and not approve:
+                result['items'][0].update(action='needs_connection', reason='仍缺連接。')
+            return result
+
+    original = stage.run(store, 'S', plan, 'G', eroot, sroot, target, Review(), apply=True)
+    assert original['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Resolve source scope',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/D': ['source_fragments/F']},
+    })
+    ports = Review()
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert result['status'] == ('verified' if approve else 'needs_attention')
+    assert (target / 'verification.json').read_bytes() == parent
+    assert len(ports.calls) == 1
+    _, request = ports.calls[0]
+    jobs = request['input']['jobs']
+    assert [job['job_id'] for job in jobs] == ['claims/D']
+    assert jobs[0]['source_context'][0]['fragment_id'] == 'F'
+    replay = Review()
+    assert stage.run(store, 'S', plan, 'G', eroot, sroot, target, replay, apply=True) == result
+    assert replay.calls == []

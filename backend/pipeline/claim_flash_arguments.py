@@ -75,7 +75,7 @@ def active_root(root):
             or authority.get('parent_verification_sha256')!=e.digest(parent)
             or authority.get('parent_before_sha256')!=e.digest(before)
             or parent.get('version')!=VERSION or parent.get('status')!='needs_attention'
-            or not parent.get('pending') or any(x.get('layer')!='claim_connections' for x in parent['pending'])
+            or not parent.get('pending') or any(x.get('layer') != ('source' if authority.get('source_context_keys') else 'claim_connections') for x in parent['pending'])
             or (root/'commit-intent.json').exists()):
         raise ValueError('argument material correction differs from its uncommitted parent')
     return root/'material-scope-continuations'/e.digest(parent)
@@ -145,6 +145,67 @@ def clarify_final_scripture(store, source_id, group, parent_root, root, ports, a
         return statements.finish(store, root) if apply else e.publish(root, result)
 
 
+def clarify_route_source(store, source_id, group, parent_root, root, ports, authority, *, apply):
+    """Recheck only a stopped route using identified, bound source context."""
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / 'run.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if (root / 'verification.json').exists():
+            return statements.finish(store, root) if apply else json.loads((root / 'verification.json').read_text())
+        before = json.loads((parent_root / 'before.json').read_text())
+        result = json.loads((parent_root / 'verification.json').read_text())
+        records, sources = f.load_group_source(store, source_id, group)
+        if before['sources'] != sources or any(records.get(k) != v for k, v in before['records'].items()):
+            raise ValueError('source clarification parent input changed')
+        bindings = authority['source_context_keys']
+        pending = {item['object_key']: item for item in result['pending']}
+        if set(bindings) != set(pending):
+            raise ValueError('source clarification scope differs from pending routes')
+        jobs = []
+        working = f.apply_overlay(records, result['updates'])
+        for key, context in bindings.items():
+            if not context or any(not k.startswith('source_fragments/') for k in context):
+                raise ValueError('source clarification requires bound fragments')
+            fragments = []
+            for fragment_key in context:
+                row = records[fragment_key]
+                fragment = row['payload']
+                if row.get('retired') or fragment.get('source_id') != source_id:
+                    raise ValueError('source clarification fragment differs from current source')
+                binding = {'source_fragment_id': fragment_key.split('/', 1)[1],
+                           'evidence_step_id': key, 'statement': ''}
+                fragments.extend(e.material(binding, records, sources)['fragments'])
+                before['records'][fragment_key] = row
+            jobs.append({'job_id': key, 'previous_reason': pending[key]['reason'],
+                         'material': flash.claim_material(key, working, sources, source_id),
+                         'source_context': fragments})
+        prompt = FINAL_SUPPORT_BATCH_PROMPT + (
+            '本次只復核先前論證路線的原文疑點。source_context是同講道的唯讀片段。'
+            '區分教授用來論證本主張的承重經文、已由間接路線承載的前提、以及別處同主題的背景。'
+            '只在既有路線已完整且無須新增經文或連接時選keep。若需補直接論證或來源，說明實際缺項。'
+        )
+        accepted = {}
+        for batch, reply in f.gpt(root / 'source-context', ports, 'argument_final_support', jobs,
+                                  statements.Edits.model_json_schema(), prompt, semantic_review=False):
+            edits = statements.Edits.model_validate(reply).items
+            f.exactly([edit.model_dump() for edit in edits], [job['job_id'] for job in batch], 'job_id')
+            for edit in edits:
+                if edit.action == 'keep' and edit.statement is None and edit.scripture_refs is None:
+                    accepted[edit.job_id] = edit.reason
+                result['outcomes'].append({'object_key': edit.job_id, 'basis': 'route_source_clarification',
+                                           'action': edit.action, 'reason': edit.reason})
+        for route in result['routes']:
+            if route['job_id'] in accepted:
+                route.update(action='complete', reason=accepted[route['job_id']])
+        result['pending'] = [item for key, item in pending.items() if key not in accepted]
+        if not result['pending']:
+            result['status'] = 'verified'
+        e.save(root / 'before.json', before)
+        e.save(root / 'intent.json', json.loads((parent_root / 'intent.json').read_text()))
+        e.save(root / 'verification.json', result)
+        return statements.finish(store, root) if apply else e.publish(root, result)
+
+
 def final_support_decisions(root,ports,jobs):
     """Reuse exact legacy single-job replies; batch only unanswered checks."""
     root=Path(root);schema=statements.Edits.model_json_schema();answers={};remaining=[]
@@ -195,7 +256,10 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         stopped=json.loads((root/'result.json').read_text())
         if stopped.get('pending'):e.save(root/'stopped-results'/(e.digest(stopped)+'.json'),stopped)
         authority = json.loads((root / 'material-scope-continuation.json').read_text())
-        if authority.get('final_support_request_path'):
+        if authority.get('source_context_keys'):
+            group = next(g for g in plan['groups'] if g['group_id'] == group_id)
+            result = clarify_route_source(store, source_id, group, root, active_root(root), ports, authority, apply=apply)
+        elif authority.get('final_support_request_path'):
             group = next(g for g in plan['groups'] if g['group_id'] == group_id)
             result = clarify_final_scripture(store, source_id, group, root, active_root(root), ports, authority, apply=apply)
         else:
