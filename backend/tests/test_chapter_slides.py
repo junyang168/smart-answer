@@ -309,6 +309,8 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
     # All three real pipeline calls receive the same range rule, including revisions.
     for client in (author, reviewer, reviser):
         assert chapter_slides.SLIDE_TITLE_RULES in client.systems[0]
+        assert chapter_slides.POINT_TIMING_RULES in client.systems[0]
+        assert "〈要點時間規則〉" not in client.systems[0]
         assert '〈標題規則〉' not in client.systems[0]
     assert '原文中標題沒有涵蓋的部分' in reviewer.systems[0]
     assert fixture['reason'] in reviser.prompts[0]
