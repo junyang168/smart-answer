@@ -46,6 +46,13 @@ SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之�
 - 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
 
 
+POINT_TIMING_RULES = """要點的 sentence 按這一張完整原文由前往後找，選教授第一次明確開始表達同一要點的句子。
+- 介紹一段或提出一個問題時，從開始介紹、開始提問的那一句出現，不等到後面再把問題說完整。
+- 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
+- 結論、理由或限定要等原文實際說出才出現，不能因主題相關就提前。一條要點包含幾個分別才說出的新意思時，重新組織要點，使每條能在自己的句子出現。
+- 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
+
+
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
 使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
@@ -56,7 +63,8 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
 
 要點（points，2 到 4 條，每條不超過 28 字）：
-- 每條寫 sentence：教授講到這一點的那一句（他說出這個問題、理由或結論的那一句）。要點在那一句才出現在螢幕上，所以按他講的次序排，sentence 遞增。
+- 每條寫 sentence，按他講的次序排，sentence 遞增。
+〈要點時間規則〉
 - 每條一個意思；同一張裡兩條不可說同一件事（例如「全與天國有關」和「都與天國有關係」只留一條）。
 - 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
 - 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
@@ -104,7 +112,12 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
-    prompt = _SYSTEM_TEMPLATE.replace("〈標題規則〉", SLIDE_TITLE_RULES).replace("〈整章〉", f"{number}:{start}-{end}").replace("〈章〉", str(number))
+    prompt = (
+        _SYSTEM_TEMPLATE.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+        .replace("〈整章〉", f"{number}:{start}-{end}")
+        .replace("〈章〉", str(number))
+    )
     return for_lecture(prompt, lecture)
 
 
@@ -491,6 +504,9 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 3. 聽得懂、跟得上：每條要點一個意思；同一張裡兩條不說同一件事；要點標的句子確實是他講到這一點的地方；不會很久（約一分鐘以上）螢幕上只有標題沒有要點；標題說得出這一張在講什麼。
 4. 經文：他（或會眾）讀出來、幾乎逐字引用的經文都顯示，節數與他實際讀的相符；只提到出處沒讀的不顯示；同一張不重複顯示同一段。
 
+每條另查出現時間
+〈要點時間規則〉
+
 每張另查標題範圍：
 〈標題規則〉
 把只涵蓋子段的標題列為「跟得上」問題，指出原文中標題沒有涵蓋的部分，並給出能涵蓋整張的具體新標題；不要只看標題是否和某一條要點相符。
@@ -591,7 +607,10 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
     prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
-    review_system = REVIEW_PROMPT.replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    review_system = (
+        REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+    )
     answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
