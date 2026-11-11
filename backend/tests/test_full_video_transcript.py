@@ -76,6 +76,14 @@ def test_corrected_text_alignment_is_bound_to_exact_revision_and_clip_origin():
     invalid=copy.deepcopy(raw)
     invalid['items']=[{'text':'原','start_ms':11000,'end_ms':12000}]
     assert resolve_final_paragraph(p,clip,invalid)['timing_precision']=='unresolved'
+    reversed_words=copy.deepcopy(raw)
+    reversed_words['items']=[{'text':'原','start_ms':3000,'end_ms':3200},
+                             {'text':'文','start_ms':1000,'end_ms':1100},
+                             {'text':'是','start_ms':1100,'end_ms':1200}]
+    pending=resolve_final_paragraph(p,clip,reversed_words)
+    assert pending['start_ms'] is None and pending['end_ms'] is None
+    assert pending['timing_precision']=='unresolved' and pending['text']==p['text']
+    assert pending['alignment_issue']=='non_increasing_isolated_word_predictions'
 
 
 def test_zero_time_long_silence_and_invalid_predictions_are_not_interpolated():

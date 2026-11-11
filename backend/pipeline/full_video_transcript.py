@@ -568,7 +568,9 @@ def resolve_final_paragraph(p: dict, clip: dict, raw: dict) -> dict:
         return {**p, 'start_ms': None, 'end_ms': None, 'timing_precision': 'unresolved'}
     begin, end = valid[0]['start_ms'], valid[-1]['end_ms']
     if end <= begin:
-        raise ValueError('Non-increasing final paragraph timing')
+        return {**p, 'start_ms': None, 'end_ms': None, 'timing_precision': 'unresolved',
+                'alignment_issue': 'non_increasing_isolated_word_predictions',
+                'alignment_sha256': slides.object_sha(raw)}
     return {**p, 'start_ms': absolute_ms(clip['source_origin_sample'], begin, clip['sample_count']),
         'end_ms': absolute_ms(clip['source_origin_sample'], end, clip['sample_count']),
         'timing_precision': 'phrase', 'word_timing_valid': False,
