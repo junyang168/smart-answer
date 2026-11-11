@@ -149,12 +149,17 @@ export default function ChapterListener({
     pending.current = wanted;
     setSeekError("");
     setPosition({ clip: index, time });
+    setPlaying(wanted.play);
+    if (element && !element.paused) element.pause();
     applySeek();
   }
 
   function playMedia(element: HTMLAudioElement) {
     void element.play().catch((error) => {
-      if (error.name === "NotAllowedError") setSeekError("請按播放繼續聆聽。");
+      if (error.name === "NotAllowedError" && !pending.current) {
+        setPlaying(false);
+        setSeekError("請按播放繼續聆聽。");
+      }
     });
   }
 
@@ -167,17 +172,16 @@ export default function ChapterListener({
       pending.current = null;
       window.clearTimeout(seekTimer.current);
       setPosition((position) => ({ ...position, time: element.currentTime }));
+      setSeekError("");
       if (wanted.play && element.paused) playMedia(element);
       return;
     }
     if (Date.now() >= wanted.deadline) {
-      pending.current = null;
+      // Keep the target available for retry and leave playback paused at an unconfirmed position.
+      wanted.play = false;
       window.clearTimeout(seekTimer.current);
+      setPlaying(false);
       setSeekError("錄音未能跳到指定位置，請再試一次。");
-      if (ready) {
-        setPosition((position) => ({ ...position, time: element.currentTime }));
-        if (wanted.play && element.paused) playMedia(element);
-      }
       return;
     }
     if (ready && !element.seeking && wanted.attempts < 2) {
@@ -186,12 +190,8 @@ export default function ChapterListener({
         .some((i) => ranges.start(i) <= wanted.time && wanted.time <= ranges.end(i));
       if (canSeek) {
         wanted.attempts += 1;
-        // The first seek can be ignored while the media engine is playing.
-        // Pause for the retry and resume when the media reports the target time.
-        if (wanted.attempts === 2 && !element.paused) element.pause();
         try {
           element.currentTime = wanted.time;
-          if (wanted.attempts === 1 && wanted.play && element.paused) playMedia(element);
         } catch {
           // A later media event or the retry timer can run after the range loads.
         }
@@ -268,10 +268,19 @@ export default function ChapterListener({
     const element = media.current;
     if (!element) return;
     const wanted = pending.current;
-    if (wanted) wanted.play = !wanted.play;
-    if (wanted ? wanted.play : element.paused) {
+    if (wanted) {
+      if (Date.now() >= wanted.deadline && clip) {
+        requestSeek(clip, position.clip, wanted.time, true);
+      } else {
+        wanted.play = !wanted.play;
+        setPlaying(wanted.play);
+        applySeek();
+      }
+      return;
+    }
+    if (element.paused) {
       setSeekError("");
-      if (!wanted || element.currentSrc === wanted.src) playMedia(element);
+      playMedia(element);
     } else element.pause();
   }
 
@@ -697,8 +706,11 @@ export default function ChapterListener({
           onSeeked={applySeek}
           onTimeUpdate={onTimeUpdate}
           onEnded={advance}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPlay={(event) => {
+            if (pending.current) event.currentTarget.pause();
+            else setPlaying(true);
+          }}
+          onPause={() => setPlaying(Boolean(pending.current?.play))}
         />
       )}
     </div>
