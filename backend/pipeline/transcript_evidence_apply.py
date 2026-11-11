@@ -290,6 +290,13 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         if touched:
             post = {**f,'source_fragment_id':None,'source_fragment_ids':list(dict.fromkeys(result_ids))}
             reference_changes[key] = post; updates[key] = post
+    from backend.pipeline import transcript_consumer_binding
+    consumer_updates, consumer_fragments, consumer_exceptions = transcript_consumer_binding.project(
+        records, {**updates, **creations}, new, source_id, (calibration or {}).get('consumers', {}),
+    )
+    reference_changes.update(consumer_updates)
+    updates.update(consumer_updates)
+    creations.update(consumer_fragments)
     evidence_rows = []
     for key, state in sorted(records.items()):
         if not key.startswith('evidence_steps/') or state.get('retired'):
@@ -336,7 +343,7 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
             'summary': dict(Counter(r['status'] for r in rows)), 'fragments': rows,
             'evidence_updates': evidence_rows, 'updates': updates,
             'created_keys':sorted(creations), 'reference_changes':sorted(reference_changes),
-            'literal_audits': audits,
+            'literal_audits': audits, 'consumer_exceptions': consumer_exceptions,
             'model_calls': 0, 'claim_prose_changed': False, 'content_approval_granted': False}
 
 
@@ -412,7 +419,8 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
     if new['body_sha256'] != source['payload']['source_body_sha256'] or snap(published) != {**new, 'file': m.binding(Path(published))}:
         raise ValueError('registered source is not the exact published body and clocks')
     paths = list(dict.fromkeys([*map(Path, old_paths), path, Path(published)]))
-    bounds = [m.binding(p) for p in paths]
+    from backend.pipeline import transcript_consumer_binding
+    bounds = [m.binding(p) for p in paths] + [m.binding(Path(transcript_consumer_binding.__file__))]
     epochs = {snap(p)['body_sha256']: snap(p) for p in paths}
     calibration = m.read(calibration_path) if calibration_path else None
     if calibration_path:
@@ -510,6 +518,8 @@ def apply(store, root):
     cm.source.verify_file(p['implementation'])
     for key in ('records', 'report'): cm.source.verify_file(p[key])
     report = m.read(p['report']['path']); records = m.read(p['records']['path'])
+    if report.get('consumer_exceptions'):
+        raise ValueError('consumer source bindings require calibration before apply')
     history = store.get_change_history(p['change_set_id'])
     if history and history['status'] == 'applied':
         # Recover a lost response, never repeat a committed transaction.
