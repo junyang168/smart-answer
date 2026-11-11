@@ -55,7 +55,8 @@ class Ports(BasePorts):
         assert set(request['input']['source_paragraphs'])=={'S0001'}
         for job in request['input']['jobs']:
             oid=job['job_id'].split('/')[1]
-            item={'job_id':job['job_id'],'action':'keep' if oid=='KEEP' else 'repair','reason':'逐項處置本項疑點。'}
+            action='keep' if oid=='KEEP' or oid.startswith('EXTRA') else 'repair'
+            item={'job_id':job['job_id'],'action':action,'reason':'逐項處置本項疑點。'}
             if oid=='E':item['statement']='不知道神的旨意就無法遵行。'
             if oid in {'BIND','BOTH','O'}:item['quotes']=[{'paragraph_key':'S0001','quote':QUOTE}]
             if oid in {'BOTH','O'}:item['statement']=STATEMENT
@@ -74,9 +75,10 @@ def test_four_outcomes_share_one_call_and_are_not_reviewed_again(campaign):
     assert result['status']=='completed' and len(fidelity_calls(ports))==1
     first=fidelity_calls(ports)[0]
     assert len(first['input']['jobs'])==4
-    assert first['schema']['properties']['items']['minItems']==4
-    assert first['schema']['properties']['items']['maxItems']==4
-    assert first['schema']['$defs']['CompletionEdit']['properties']['job_id']['enum']==[j['job_id'] for j in first['input']['jobs']]
+    assert first['schema'] == eo.program_validated_schema(eo.CompletionEdits.model_json_schema())
+    assert 'minLength' not in json.dumps(first['schema'])
+    assert 'minItems' not in first['schema']['properties']['items']
+    assert 'enum' not in first['schema']['$defs']['CompletionEdit']['properties']['job_id']
     assert all(req['input']['task']!='source_binding_completion' for role,req in ports.calls if role=='gpt')
     assert store.get_record_state('evidence_steps','E')['payload']['statement']=='不知道神的旨意就無法遵行。'
     assert store.get_record_state('evidence_steps','KEEP')['payload']==next(p for p in before['evidence_steps'] if p['evidence_step_id']=='KEEP')
@@ -91,7 +93,7 @@ def test_four_outcomes_share_one_call_and_are_not_reviewed_again(campaign):
     assert again['status']=='completed' and replay.calls==[]
 
 
-@pytest.mark.parametrize('fault',['invented_quote','foreign_paragraph','foreign_record','duplicate_id','keep_with_quotes','needs_source_with_patch','binding_field','protected'])
+@pytest.mark.parametrize('fault',['invented_quote','foreign_paragraph','foreign_record','duplicate_id','keep_with_quotes','needs_source_with_patch','binding_field','empty_reason','empty_quote','protected'])
 def test_invalid_or_protected_combined_disposition_never_partially_commits(campaign,fault):
     store,root,_,plan,previous=campaign
     if fault=='protected':
@@ -107,6 +109,8 @@ def test_invalid_or_protected_combined_disposition_never_partially_commits(campa
         if fault=='keep_with_quotes':item['action']='keep'
         if fault=='needs_source_with_patch':item['action']='needs_source'
         if fault=='binding_field':item['source_fragment_ids']=['unprovided']
+        if fault=='empty_reason':item['reason']=''
+        if fault=='empty_quote':item['quotes'][0]['quote']=''
     ports.mutate=mutate
     if fault=='protected':
         assert eo.run(store,'S',plan,root/'run',ports,previous,apply=True)['status']=='needs_attention'
@@ -114,6 +118,22 @@ def test_invalid_or_protected_combined_disposition_never_partially_commits(campa
         with pytest.raises(ValueError):eo.run(store,'S',plan,root/'run',ports,previous,apply=True)
     after=store.compile_package();before.pop('compiled_at');after.pop('compiled_at');before.pop('package_id');after.pop('package_id')
     assert after==before
+
+
+@pytest.mark.parametrize('same_value',[False,True])
+def test_empty_evidence_repairs_are_rejected_before_acceptance(campaign,same_value):
+    store,root,_,plan,previous=campaign;ports=Ports()
+    def empty_repairs(request,reply):
+        reply['items']=[{'job_id':job['job_id'],'action':'repair','reason':'已補掛原文。',
+                         'statement':job['record']['statement'] if same_value else None}
+                        for job in request['input']['jobs']]
+    ports.mutate=empty_repairs
+    before=store.get_record_state('evidence_steps','E')
+    with pytest.raises(ValueError,match='Evidence repair has no effective changes'):
+        eo.run(store,'S',plan,root/'run',ports,previous,apply=True)
+    assert store.get_record_state('evidence_steps','E')==before
+    assert not list((root/'run'/'accepted').glob('*.json'))
+    assert not list((root/'run').rglob('commit-intent.json'))
 
 
 @pytest.mark.parametrize('where',['compile','sql','receipt'])
@@ -187,6 +207,7 @@ def test_omitted_job_only_is_requested_again_and_replay_reuses_both_answers(camp
     requests=fidelity_calls(ports)
     assert [len(req['input']['jobs']) for req in requests]==[4,1]
     assert requests[1]['input']['jobs'][0]['job_id']==requests[0]['input']['jobs'][-1]['job_id']
+    assert requests[1]['schema'] == requests[0]['schema']
     replay=Ports();assert eo.run(store,'S',plan,root/'missing',replay,previous,apply=True)['status']=='completed'
     assert not replay.calls
 
@@ -332,6 +353,31 @@ def test_seven_small_records_split_into_four_and_three_despite_fitting_bytes(cam
     assert result['status']=='completed'
     requests=fidelity_calls(ports)
     assert [len(req['input']['jobs']) for req in requests]==[4,3]
-    assert [req['schema']['properties']['items']['minItems'] for req in requests]==[4,3]
-    assert [req['schema']['properties']['items']['maxItems'] for req in requests]==[4,3]
+    assert requests[0]['schema'] == requests[1]['schema']
     assert all(len(req['input']['source_paragraphs'])==1 for req in requests)
+
+
+def test_empty_repair_correction_only_resends_affected_item(campaign):
+    store, root, _, plan, previous = campaign
+    ports = Ports()
+    ports.correct_empty_evidence_once = True
+    ports.new_gpt_identity = {**ports.identity['gpt'], 'model': 'gpt-6-sol'}
+
+    def empty_first_reply(request, reply):
+        for job, item in zip(request['input']['jobs'], reply['items'], strict=True):
+            if job['job_id'] == 'evidence_steps/BIND' and 'previous_empty_repair' not in job:
+                item.pop('quotes')
+
+    ports.mutate = empty_first_reply
+    result = eo.run(store, 'S', plan, root / 'corrected', ports, previous, apply=True)
+    assert result['status'] == 'completed'
+    initial, correction = fidelity_calls(ports)
+    assert len(initial['input']['jobs']) == 4
+    assert [job['job_id'] for job in correction['input']['jobs']] == ['evidence_steps/BIND']
+    assert correction['identity']['model'] == 'gpt-6-sol'
+    assert len(store.get_record_state('evidence_steps', 'BIND')['payload']['source_fragment_ids']) == 2
+    replay = Ports()
+    replay.correct_empty_evidence_once = True
+    replay.new_gpt_identity = ports.new_gpt_identity
+    assert eo.run(store, 'S', plan, root / 'corrected', replay, previous, apply=True)['status'] == 'completed'
+    assert replay.calls == []

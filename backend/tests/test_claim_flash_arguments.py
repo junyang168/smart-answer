@@ -256,3 +256,175 @@ def test_omitted_job_only_receives_one_bounded_correction(tmp_path):
     ports=Omit();result=stage.final_support_decisions(tmp_path,ports,_final_jobs())
     assert [v.job_id for v in result]==['claims/C','claims/D']
     assert [[j['job_id'] for j in req['input']['jobs']] for _,req in ports.calls]==[['claims/C','claims/D'],['claims/D']]
+
+
+def test_fragment_id_correction_restores_only_supplied_repeated_prefix():
+    source_id = 'SRC-lecture-123456789abc'
+    canonical = 'FR-lecture-123456789abc-DK-123456789abc-P04-E009-01'
+    shortened = 'FR-lecture-123456789abc-P04-E009-01'
+    missing = 'FR-lecture-123456789abc-P04-E009-02'
+    assert stage.expand_fragment_ids(source_id, {canonical}, [shortened, missing]) == [canonical, missing]
+    assert stage.expand_fragment_ids(source_id, {canonical, shortened}, [shortened]) == [shortened]
+
+
+@pytest.mark.parametrize('approve', [True, False])
+def test_source_clarification_checks_only_stopped_route(ready_pair, approve):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+
+    class Review(Ports):
+        def repair(self, request):
+            result = super().repair(request)
+            task = request['input']['task']
+            if task == 'argument_completeness':
+                for item in result['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_source', reason='補核前段經文。')
+            if task == 'argument_final_support' and not approve:
+                result['items'][0].update(action='needs_connection', reason='仍缺連接。')
+            return result
+
+    original = stage.run(store, 'S', plan, 'G', eroot, sroot, target, Review(), apply=True)
+    assert original['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Resolve source scope',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/D': ['source_fragments/F']},
+    })
+    ports = Review()
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert result['status'] == ('verified' if approve else 'needs_attention')
+    assert (target / 'verification.json').read_bytes() == parent
+    assert len(ports.calls) == 1
+    _, request = ports.calls[0]
+    jobs = request['input']['jobs']
+    assert [job['job_id'] for job in jobs] == ['claims/D']
+    assert jobs[0]['source_context'][0]['fragment_id'] == 'F'
+    replay = Review()
+    assert stage.run(store, 'S', plan, 'G', eroot, sroot, target, replay, apply=True) == result
+    assert replay.calls == []
+
+
+def test_argument_continuation_corrects_only_the_pending_claim_statement(ready_pair):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+    proposal = {'a': 'observations/O', 'b': 'evidence_steps/E',
+                'fragment_ids': ['F'], 'reason': '原文行為支持判斷。'}
+
+    class Finding(Ports):
+        def repair(self, request):
+            reply = super().repair(request)
+            if request['input']['task'] == 'argument_final_support':
+                for item in reply['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_connection', reason='措辭超出教授原話。')
+            return reply
+
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target,
+                       Finding([proposal], choices={'support': 'partial'}), apply=True)
+    assert result['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    old_c = store.get_record_state('claims', 'C')
+    old_e = store.get_record_state('evidence_steps', 'E')
+    statement = '沒有聽從祂的話，顯明沒有真正相信祂。'
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct the stopped statement',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': 'claims/D', 'statement': statement,
+                                 'before_sha256': e.digest(before['records']['claims/D']['payload'])},
+    })
+    ports = Ports()
+    completed = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert completed['status'] == 'applied', completed.get('pending')
+    assert store.get_record_state('claims', 'D')['payload']['statement'] == statement
+    assert store.get_record_state('claims', 'C') == old_c
+    assert store.get_record_state('evidence_steps', 'E') == old_e
+    assert (target / 'verification.json').read_bytes() == parent
+    assert [j['job_id'] for role, req in ports.calls if role == 'gpt'
+            and req['input']['task'] == 'argument_completeness' for j in req['input']['jobs']] == ['claims/D']
+
+
+def test_route_context_continuation_binds_the_saved_connection_finding(tmp_path):
+    root = tmp_path / 'arguments'
+    pending = {'object_key': 'claims/C', 'layer': 'source', 'reason': '需要前段原文。'}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention', 'pending': [pending]}
+    before = {'records': {}, 'sources': {}}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Check source context',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'source_context_keys': {'claims/C': ['source_fragments/F']},
+    })
+    source_root = stage.active_root(root)
+    finding = '前段解釋仍缺論證連接。'
+    review = {**parent, 'outcomes': [{'basis': 'route_source_clarification',
+        'object_key': 'claims/C', 'action': 'needs_connection', 'reason': finding}]}
+    e.save(source_root/'verification.json', review)
+    followup = {'owner_direction': 'Resolve the recorded connection',
+                'review_sha256': e.digest(review), 'finding': finding,
+                'record_keys': ['evidence_steps/E']}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == source_root/'route-context'/e.digest(followup)
+    assert json.loads((source_root/'verification.json').read_text()) == review
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'finding': 'Different finding'}))
+    with pytest.raises(ValueError, match='saved source clarification'):
+        stage.active_root(root)
+
+
+def test_route_context_can_clarify_a_source_request_after_wording_review(tmp_path):
+    root = tmp_path / 'arguments'
+    key = 'claims/C'
+    before = {'records': {}, 'sources': {}}
+    parent = {'version': stage.VERSION, 'status': 'needs_attention',
+              'pending': [{'object_key': key, 'layer': 'claim_connections'}]}
+    e.save(root/'verification.json', parent)
+    e.save(root/'before.json', before)
+    e.save(root/'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct wording',
+        'parent_verification_sha256': e.digest(parent), 'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': key},
+    })
+    first = stage.active_root(root)
+    reason = '需要獨立的語法證明。'
+    review = {**parent, 'pending': [{'object_key': key, 'layer': 'source', 'reason': reason}]}
+    e.save(first/'verification.json', review)
+    e.save(first/'statement-correction.json', {'pending': [], 'updates': {}})
+    followup = {'owner_direction': 'Check attribution',
+                'review_sha256': e.digest(review), 'previous_reason': reason,
+                'finding': '只核對講者原話是否支持此歸屬。'}
+    e.save(root/'route-context-continuation.json', followup)
+    assert stage.active_root(root) == first/'route-context'/e.digest(followup)
+    (root/'route-context-continuation.json').write_text(json.dumps({**followup, 'previous_reason': '另一項'}))
+    with pytest.raises(ValueError, match='verified wording'):
+        stage.active_root(root)
+
+
+@pytest.mark.parametrize('error_type', ['max_tokens_exceeded', 'invalid_request'])
+def test_final_argument_support_recognizes_only_the_recorded_token_limit(tmp_path, error_type):
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    class Reject(Ports):
+        def judge(self, request):
+            self.calls.append(('jev', request))
+            body = json.dumps({'detail': {'error_type': error_type}}).encode()
+            raise HTTPError('https://example.invalid', 400, 'Bad Request', {}, BytesIO(body))
+
+    material = {'claim': {'statement': '保存完整的待查內容。'}}
+    ports = Reject()
+    if error_type == 'max_tokens_exceeded':
+        expected = {'support': 'not_run_provider_token_limit', 'scripture': 'not_run_provider_token_limit'}
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+        assert stage.argument_support_issues(tmp_path, ports, material) == expected
+    else:
+        with pytest.raises(HTTPError):
+            stage.argument_support_issues(tmp_path, ports, material)
+        with pytest.raises(e.RecordedCallRejected):
+            stage.argument_support_issues(tmp_path, ports, material)
+    assert len(ports.calls) == 1

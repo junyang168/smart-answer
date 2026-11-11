@@ -97,6 +97,27 @@ def completion_schema(schema,job_ids):
     return result
 
 
+PROGRAM_VALIDATED_SCHEMA = 'program_validated_v1'
+
+
+def program_validated_schema(schema):
+    """Leave string lengths and batch membership to the reply validators."""
+    def remove_lengths(value):
+        if isinstance(value, dict):
+            return {k: remove_lengths(v) for k, v in value.items() if k != 'minLength'}
+        if isinstance(value, list):
+            return [remove_lengths(item) for item in value]
+        return value
+
+    result = remove_lengths(schema)
+    items = result['properties']['items']
+    items.pop('minItems', None)
+    items.pop('maxItems', None)
+    definition = result['$defs'][items['items']['$ref'].rsplit('/', 1)[1]]
+    definition['properties']['job_id'].pop('enum', None)
+    return result
+
+
 def assert_candidate_context(decision,all_decisions):
     context=decision.get('source_context')
     if context and human.scoped(all_decisions,context['paragraphs'])!=context['entries']:
@@ -196,6 +217,28 @@ def coverage_edits(edits,jobs):
         if len(keys)!=len(set(keys)):
             raise ValueError('repeated coverage unit writes the same record twice')
     return edits
+
+
+def split_coverage_disposition(root, ports, group_id, jobs, raw, instruction, shared):
+    """Admit one explicit, bounded correction of a saved malformed bundle."""
+    authority = getattr(ports, 'coverage_split_authority', {})
+    if (authority.get('group_id') != group_id or authority.get('reply_sha256') != e.digest(raw)
+            or authority.get('jobs_sha256') != e.digest(jobs) or not authority.get('owner_direction')):
+        raise ValueError('coverage disposition must address every unit and no unknown unit')
+    folder = root / 'coverage-unit-continuation' / e.digest([raw, jobs])
+    e.save(folder / 'authority.json', authority)
+    edits = []
+    for job in jobs:
+        unit_id = job['job_id']
+        scoped = {'job_id': group_id, 'candidates': [job]}
+        prompt = (instruction + f'　本次只有來源單元 {unit_id}。外層 job_id 填 {group_id}，'
+                  f'每個內層處置的 job_id 必須填 {unit_id}。只判定這個單元，勿合併別的調查結果。')
+        for _, reply in f.gpt(folder / unit_id, ports, 'evidence_coverage_repair', [scoped],
+                              MissingEdits.model_json_schema(), prompt, shared=shared, semantic_review=False):
+            bundles = MissingEdits.model_validate(reply).items
+            f.exactly([bundle.model_dump() for bundle in bundles], [group_id], 'job_id')
+            edits.extend(coverage_edits(bundles[0].items, [job]))
+    return coverage_edits(edits, jobs)
 
 
 def covered_handoff(root,job,records,sources,ports):
@@ -372,7 +415,36 @@ def coverage_state(catalog):
         **{field:p[field] for field in ('speaker','stance') if p.get(field)}} for k,p in catalog.items()}}
 
 
-def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False):
+def missing_quote_only(job, reason):
+    """Recognize explicit source-only repairs; ambiguous decisions stay pending."""
+    import re
+
+    text = reason.strip()
+    if any(job['jev'].get(field) == 'different' for field in ('speaker_consistency', 'stance_consistency')):
+        return False
+    return (
+        re.match(r'^(?:應|应|需|請|请|只需|只要)?(?:補|补)(?:上|入|掛|挂|引|充|足)', text) is not None
+        and re.search(r'原文|引文|原句|[前後后][一兩两]?(?:句|段)|上文|下文|前文|後文|后文|上下文|開場|开场', text) is not None
+        and re.search(r'改|更正|調整|调整|刪|删|重寫|重写|重述摘要|應為|应为', text) is None
+    )
+
+
+def select_missing_quotes(root, ports, jobs):
+    """Use the source-only reply contract with the already scoped candidates."""
+    prompt = ('只處理上一份答覆所指出的補引文缺口。每項先確認原因只是缺逐字引文，'
+              '且補入後能支持未改的摘要、說話者與立場。若仍需改內容、分類，或找不到唯一的原文位置，'
+              '選needs_source並說明，禁止以原文補綁代替內容修訂。'
+              '能補時選bind，quotes只列必要的新逐字片段。原文共用於source_paragraphs，'
+              '每項只可用material.nearby_paragraph_keys，每個job_id恰好一次。')
+    for batch, raw in f.gpt(root, ports, 'source_binding_completion', jobs,
+                            source.BindingDecisions.model_json_schema(), prompt,
+                            project_input=source.shared_binding_input, semantic_review=False):
+        edits = source.BindingDecisions.model_validate(raw).items
+        f.exactly([edit.model_dump() for edit in edits], [job['job_id'] for job in batch], 'job_id')
+        yield from edits
+
+
+def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False, program_validated=False):
     sid = next(iter(sources)); working = dict(records); updates = {}; generated = {}; outcomes = []; pending = []; values = {}; ready = {}
     pool, _ = group_records(group, records, targets)
     paragraphs = {sid: sorted(set(group['paragraph_keys']) | {p['paragraph_key'] for p in pool.values()})}
@@ -419,9 +491,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 raise ValueError('human source clarification needs reconfirmation for candidate paragraph')
             if facts:job.update(human_source_decisions=facts,source_interpretation=SOURCE_INTERPRETATION)
     schema=CompletionEdits if complete_source else Edits
-    for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,schema.model_json_schema(),
-            completion_prompt() if complete_source else PROMPT,semantic_review=False,
-            project_input=completion_input if complete_source else None):
+    def consume(batch, raw):
         replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
             quotes=getattr(edit,'quotes',None)
@@ -432,6 +502,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 pending.append({'object_key':edit.job_id,'layer':'source','reason':edit.reason,
                     **({'source_completion_attempted':True} if complete_source else {})});continue
             key=edit.job_id;p=working[key]['payload'];patch=patch_for(key,p,edit);fragments={}
+            if key in getattr(ports, 'preserve_evidence_statements', ()) and 'statement' in patch:
+                raise ValueError('Evidence repair must preserve the approved statement: '+key)
             if quotes:
                 post,fragments=source.supplement_binding(key,{**p,**patch},[q.model_dump() for q in quotes],
                     candidates[key],working,sources)
@@ -442,6 +514,63 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if complete_source:
                 scope={sid:sorted({p['paragraph_key'] for p in candidates[key]['nearby_paragraphs']})}
                 ready[key]['source_context']={'paragraphs':scope,'entries':human.scoped(all_decisions,scope)}
+    def repair_batches(path, requests):
+        return f.gpt(path, ports, 'evidence_fidelity_repair', requests, schema.model_json_schema(),
+                     completion_prompt() if complete_source else PROMPT, semantic_review=False,
+                     project_input=completion_input if complete_source else None,
+                     program_validated=program_validated)
+
+    for batch, raw in repair_batches(root / 'fidelity-edits', jobs):
+        consume(batch, raw)
+    def bind_empty_repairs():
+        quote_jobs = []
+        for job in jobs:
+            key = job['job_id']
+            decision = ready.get(key, {})
+            if (decision.get('basis') == 'gpt_repair' and not decision['patch']
+                    and working[key]['payload'].get('review_status') not in f.PROTECTED
+                    and missing_quote_only(job, decision['reason'])):
+                quote_jobs.append({'job_id': key, 'record': job['record'], 'material': candidates[key],
+                                   'reason': decision['reason'],
+                                   **{field: job[field] for field in ('human_source_decisions', 'source_interpretation')
+                                      if field in job}})
+        for selection in select_missing_quotes(root/'empty-repair-source-bindings', ports, quote_jobs):
+            key = selection.job_id
+            if selection.action == 'bind' and selection.quotes:
+                try:
+                    consume([{'job_id': key}], {'items': [{'job_id': key, 'action': 'repair',
+                        'reason': selection.reason, 'quotes': [quote.model_dump() for quote in selection.quotes]}]})
+                except ValueError as exc:
+                    reason = str(exc)
+                else:
+                    if ready[key]['patch']:
+                        ready[key]['basis'] = 'gpt_source_binding_for_empty_repair'
+                        continue
+                    reason = 'Selected source quote did not add a binding.'
+            else:
+                reason = selection.reason
+            ready.pop(key)
+            pending.append({'object_key': key, 'layer': 'evidence', 'reason': reason})
+    if complete_source:
+        bind_empty_repairs()
+    if getattr(ports, 'correct_empty_evidence_once', False):
+        invalid = [job for job in jobs if ready.get(job['job_id'], {}).get('basis') == 'gpt_repair'
+                   and not ready[job['job_id']]['patch']]
+        corrections = []
+        for job in invalid:
+            key = job['job_id']
+            corrections.append({**job, 'previous_empty_repair': {
+                'reason': ready.pop(key)['reason'],
+                'instruction': '上次選repair但沒有任何改動。若理由說要補原文，這次必須在quotes輸出所選逐字引文；否則給出具體欄位修改，或有據keep／needs_source。'
+                    + (' 保留原摘要，只補所需原文。' if key in getattr(ports, 'preserve_evidence_statements', ()) else '')}})
+        for batch, raw in repair_batches(root / 'empty-repair-corrections', corrections):
+            consume(batch, raw)
+        if complete_source:
+            bind_empty_repairs()
+    # Unclassified empty repairs retain the existing rejection and Agent handoff.
+    for key,decision in ready.items():
+        if decision['basis']=='gpt_repair' and not decision['patch']:
+            raise ValueError('Evidence repair has no effective changes: '+key)
     for key,decision in ready.items():
         p=working[key]['payload'];fp=fingerprint(key,p,values[key]);path=root/'decisions'/fp/'result.json'
         e.save(path,decision)
@@ -513,7 +642,16 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     for batch,raw in f.gpt(root/'coverage-edits',ports,'evidence_coverage_repair',grouped,MissingEdits.model_json_schema(),instruction,
         shared=shared,semantic_review=False):
         bundles=MissingEdits.model_validate(raw).items;f.exactly([x.model_dump() for x in bundles],[j['job_id'] for j in batch],'job_id')
-        edits=coverage_edits(bundles[0].items,jobs)
+        edits = bundles[0].items
+        if len(jobs) == len(edits) == 1 and edits[0].job_id == group['group_id']:
+            # The reply used the enclosing group ID for its only candidate.
+            unit_id = jobs[0]['job_id']
+            e.save(root / 'coverage-id-corrections' / (e.digest(raw) + '.json'),
+                   {'group_id': group['group_id'], 'unit_id': unit_id})
+            edits = [edits[0].model_copy(update={'job_id': unit_id})]
+        if {edit.job_id for edit in edits} != {job['job_id'] for job in jobs}:
+            edits = split_coverage_disposition(root, ports, group['group_id'], jobs, raw, instruction, shared)
+        edits = coverage_edits(edits, jobs)
         for edit in edits:
             if edit.action=='keep':outcomes.append({'unit_id':edit.job_id,'basis':'gpt_keep','reason':edit.reason});continue
             if edit.action in {'needs_source','handoff'}:
@@ -608,6 +746,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         if len(selected)!=len(set(selected)) or not set(selected)<={g['group_id'] for g in plan['groups']}:raise ValueError('invalid Evidence group selection')
         saved_intent=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
         complete_source=not saved_intent or saved_intent.get('source_completion_contract')==COMPLETION_CONTRACT
+        program_validated = not saved_intent or saved_intent.get('wire_schema') == PROGRAM_VALIDATED_SCHEMA
         authorized=saved_intent['selected'] if saved_intent else selected
         if not set(selected)<=set(authorized):raise ValueError('Evidence group selection expands frozen scope')
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':authorized,'models':ports.identity,
@@ -615,6 +754,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             'policy':e.digest([PROMPT,COVERAGE_PROMPT,components.PROMPT,Edits.model_json_schema(),MissingEdits.model_json_schema()]),
             **({'source_completion_contract':COMPLETION_CONTRACT,
                 'source_completion_policy':e.digest([completion_prompt(),completion_prompt(True),CompletionEdits.model_json_schema()])} if complete_source else {}),
+            **({'wire_schema': PROGRAM_VALIDATED_SCHEMA} if program_validated else {}),
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
@@ -622,6 +762,11 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
                         and e.rejection_receipt(started.parent,
                         json.loads((started.parent/'request.json').read_text()))):
                     continue  # Retained refusal; a different corrected input may proceed.
+                if started.parent.parent.name=='gpt' and (started.parent/'returned-answer-admission.json').exists():
+                    from backend.pipeline.claim_flash_answer_reuse import returned_answer
+                    returned_answer(started.parent.parent.parent,ports,
+                        json.loads((started.parent/'request.json').read_text()))
+                    continue  # Same exact successful answer; old timeout remains unknown.
                 if started.parent.parent.name=='gpt' and (started.parent/'owner-recovery.json').exists():
                     f.stopped_gpt_authority(started.parent.parent.parent,ports,
                         json.loads((started.parent/'request.json').read_text()))
@@ -667,7 +812,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             if group['group_id'] not in selected:continue
             targets=sorted(k for k,gid in owners.items() if gid==group['group_id'] and k in records)
             result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply,
-                complete_source=complete_source)
+                complete_source=complete_source, program_validated=program_validated)
             results.append(result)
             if result.get('applied'):
                 for key in result['updates']:

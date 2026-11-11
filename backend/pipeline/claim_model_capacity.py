@@ -153,10 +153,10 @@ class ClaimModelCapacity:
                 saved=_read(exit_receipt,{})
                 actual={name:hashlib.sha256((transport/name).read_bytes()).hexdigest()
                         for name in ('stdout.log','stderr.log','response.json') if (transport/name).is_file()}
-                if (saved.get('error_type')!='TimeoutExpired' or saved.get('returncode') is not None
+                if (saved.get('error_type') not in {'TimeoutExpired', 'KeyboardInterrupt'} or saved.get('returncode') is not None
                         or not saved.get('finished_at') or (transport/'response.json').exists()
                         or saved.get('files')!=actual):
-                    raise ValueError('quarantine requires no exit or an exact ended timeout without a response')
+                    raise ValueError('quarantine requires no exit or a verified timeout or interruption without a response')
             reasons = ('unsettled transport: ', 'unsettled previous transport: ')
             blocked = state.get('blocked')
             if blocked and not any(blocked.startswith(prefix) and

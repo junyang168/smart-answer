@@ -181,7 +181,7 @@ def test_explicit_stopped_quarantine_preserves_unknown_and_never_retries(tmp_pat
     with gate.call('opus',tmp_path/'different'):returned(tmp_path/'different')
 
 
-@pytest.mark.parametrize('fault',[None,'tampered','wrong_error'])
+@pytest.mark.parametrize('fault',[None,'interrupt','tampered','wrong_error'])
 def test_stopped_timeout_can_release_capacity_without_authorizing_retry(tmp_path,fault):
     import hashlib
     gate=capacity(tmp_path);lost=tmp_path/'timed-out'
@@ -190,13 +190,13 @@ def test_stopped_timeout_can_release_capacity_without_authorizing_retry(tmp_path
         (lost/'stdout.log').write_text('{"type":"turn.started"}')
         (lost/'stderr.log').write_text('')
         files={n:hashlib.sha256((lost/n).read_bytes()).hexdigest() for n in ('stdout.log','stderr.log')}
-        (lost/'exit.json').write_text(json.dumps({'returncode':None,'error_type':'TimeoutExpired',
+        (lost/'exit.json').write_text(json.dumps({'returncode':None,'error_type':'KeyboardInterrupt' if fault=='interrupt' else 'TimeoutExpired',
                                                 'finished_at':'2026-11-09T20:39:07Z','files':files}))
     if fault=='tampered':(lost/'stdout.log').write_text('changed')
     if fault=='wrong_error':
         receipt=json.loads((lost/'exit.json').read_text());receipt['error_type']='OSError'
         (lost/'exit.json').write_text(json.dumps(receipt))
-    if fault:
+    if fault in {'tampered', 'wrong_error'}:
         with pytest.raises(ValueError):gate.quarantine_stopped('gpt',lost)
     else:
         before={p.name:p.read_bytes() for p in lost.iterdir()}

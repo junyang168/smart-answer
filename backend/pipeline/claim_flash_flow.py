@@ -126,6 +126,23 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
     for col in KNOWLEDGE_COLLECTIONS:
         if col in result_package or any(k.startswith(col+'/') for k in records):
             result_package[col]=[deepcopy(v['payload']) for k,v in sorted(records.items()) if k.startswith(col+'/')]
+    historical_fragments=[]
+    if mode=='canonical_refresh':
+        live_fragment_ids={fid for key,row in records.items() if key.split('/')[0] in f.LOWER
+                           for fid in e.evidence_fragment_ids(row['payload'])}
+        generations={doc['source_id']:doc.get('source_body_sha256') or doc.get('source_sha256')
+                     for doc in result_package.get('source_documents',[])}
+        live_fragments=[]
+        for fragment in result_package.get('source_fragments',[]):
+            generation=generations.get(fragment['source_id'])
+            if (generation and fragment.get('source_sha256')!=generation
+                    and fragment.get('anchor_state') in source.HISTORICAL
+                    and fragment['fragment_id'] not in live_fragment_ids):
+                historical_fragments.append(fragment)
+            else:
+                live_fragments.append(fragment)
+        if historical_fragments:
+            result_package['source_fragments']=live_fragments
     changed={'created':[],'updated':[],'retired':[]};retired=[]
     for key,row in records.items():
         if key not in before:changed['created'].append(key)
@@ -141,6 +158,8 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'initial_package_sha256':e.digest(original) if original else None,
         'source_file':sources[sid]['file'],'retired_records':retired,
         'completion':'needs_attention' if pending else 'completed'}
+    if historical_fragments:
+        result_package['flash_application']['historical_source_fragments']=historical_fragments
     external,external_records=external_reference_pins(store,records,include_records=True)
     if external:result_package['flash_application']['external_reference_pins']=external
     validation_errors=[]
@@ -169,12 +188,25 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
     return e.publish(root,result)
 
 
-def run(store,source_id,root,ports,*,plan=None,candidate=None):
+def bind_evidence_ports(root, ports, evidence_ports):
+    intent_path = Path(root) / 'evidence' / 'intent.json'
+    if evidence_ports is not ports and intent_path.exists():
+        saved = read(intent_path)['models']
+        if saved == ports.identity and saved != evidence_ports.identity:
+            # Preserve earlier requests; only undispatched work uses the configured model.
+            evidence_ports.new_gpt_identity = evidence_ports.identity['gpt']
+            evidence_ports.identity = saved
+    return evidence_ports
+
+
+def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None):
     """Apply each authorized layer to its store; candidate mode requires private SQL.
 
     Passing a canonical store authorizes no writes by itself: its caller must
     already have the refresh authority. Candidate entry creates only private SQL.
     """
+    if evidence_ports is None:
+        evidence_ports = ports
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True);started=time.monotonic()
     with (root/'flow.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -270,8 +302,10 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
                 source.repair_bindings(store,source_id,saved['findings'],path.parent,ports,apply=True)
         attempted={item['job_id'] for p in (root/'source-handoffs').glob('*/verification.json')
                    for item in read(p).get('outcomes',[])}
+        if not resume_claims:
+            evidence_ports = bind_evidence_ports(root, ports, evidence_ports)
         while not resume_claims:
-            er=eo.run(store,source_id,plan,root/'evidence',ports,root/'coverage',apply=True);stages['evidence']=er
+            er=eo.run(store,source_id,plan,root/'evidence',evidence_ports,root/'coverage',apply=True);stages['evidence']=er
             handoffs=er.get('pending',[])+[p for g in er.get('groups',[]) for p in g.get('pending',[])]
             if complete(er) or not handoffs or any(p.get('layer')!='source' for p in handoffs):break
             if any(p.get('source_completion_attempted') for p in handoffs):break
@@ -336,21 +370,35 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None):
         return finish(stages,[])
 
 
-def run_candidate(candidate_path,root,ports,*,plan=None):
+def run_candidate(candidate_path,root,ports,*,plan=None,evidence_ports=None):
     from backend.pipeline.claim_candidate_workspace import open_candidate
     candidate=read(candidate_path);root=Path(root).resolve()
     if not candidate.get('extraction'):raise ValueError('Flash candidate requires extraction provenance')
     sid=candidate['source_documents'][0]['source_id']
     with open_candidate(candidate,root/'workspace') as store:
-        return run(store,sid,root/'flash',ports,plan=plan,candidate=candidate)
+        return run(store,sid,root/'flash',ports,plan=plan,candidate=candidate,evidence_ports=evidence_ports)
+
+
+def subscription_ports(root, capacity, executable=None):
+    """Build the normal Flash model routing with one shared capacity pool."""
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    from backend.pipeline.claim_refresh import Models
+
+    def make(model):
+        client = CodexSubscriptionClient(model=model, reasoning_effort='medium',
+                                         max_output_tokens=6000, executable=executable)
+        return Models(client, root, capacity=capacity)
+
+    evidence = make('gpt-6-sol')
+    evidence.gpt.cache_usage_events = True
+    evidence.evidence_fidelity_limits = (180, 2500)
+    return make('gpt-6.1-sol'), evidence
 
 
 def main():
     import argparse
     from dotenv import load_dotenv
-    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
     from backend.pipeline.claim_model_capacity import ClaimModelCapacity
-    from backend.pipeline.claim_refresh import Models
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     parser=argparse.ArgumentParser(description='Layered Flash with full result package and exact stage receipts')
     for name in ('root','capacity-file'):parser.add_argument('--'+name,required=True)
@@ -363,12 +411,15 @@ def main():
     if args.candidate and (args.apply or args.database_url):parser.error('candidate mode never accepts canonical write flags or database URLs')
     if args.source_id and not args.apply:parser.error('canonical flow requires explicit --apply')
     load_dotenv('.env');root=Path(args.root).resolve()
-    client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=6000,executable=args.codex_executable)
-    ports=Models(client,root,capacity=ClaimModelCapacity(read(args.capacity_file)))
+    ports, evidence_ports = subscription_ports(root, ClaimModelCapacity(read(args.capacity_file)), args.codex_executable)
     plan=read(args.shared_groups) if args.shared_groups else None
-    if args.candidate:result=run_candidate(args.candidate,root,ports,plan=plan)
-    else:result=run(PostgresKnowledgeStore(args.database_url),args.source_id,root,ports,plan=plan)
-    print(json.dumps(result,ensure_ascii=False))
+    if args.candidate:result=run_candidate(args.candidate,root,ports,plan=plan,evidence_ports=evidence_ports)
+    else:result=run(PostgresKnowledgeStore(args.database_url),args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports)
+    print(json.dumps(result, ensure_ascii=False))
+    # Keep the full JSON contract on stdout. An incomplete lecture needs an
+    # Agent decision even when the runner exited normally.
+    return 0 if result['status'] == 'completed' and not result['pending'] else 2
 
 
-if __name__=='__main__':main()
+if __name__ == '__main__':
+    raise SystemExit(main())

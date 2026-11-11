@@ -91,6 +91,34 @@ def test_conflicting_complete_proposals_never_partially_commit(ready):
     assert not (root/'conflicting'/'commit-intent.json').exists()
     assert not any(role=='jev' or req['input']['task']=='pair_claim' for role,req in ports.calls)
 
+    relation_root = root / 'conflicting'
+    parent = json.loads((relation_root / 'verification.json').read_text())
+    before = json.loads((relation_root / 'before.json').read_text())
+    e.save(relation_root / 'conflict-continuation.json', {'owner_direction': 'Resolve the pending pair',
+        'parent_sha256': e.digest(parent), 'before_sha256': e.digest(before)})
+
+    class Decide(Ports):
+        def repair(self, request):
+            self.calls.append(('gpt', request))
+            assert request['input']['task'] == 'claim_relation_conflict'
+            job, = request['input']['jobs']
+            assert len(job['candidates']) == 2
+            return {'items': [{'job_id': job['job_id'], 'action': 'set', 'relation_type': 'supports',
+                              'direction': 'b_to_a', 'reason': '教授用後項支持前項。'}]}
+
+    decide = Decide()
+    fixed = stage.run(store, 'S', aroot, relation_root, decide, apply=True)
+    assert fixed['status'] == 'applied' and len(decide.calls) == 1
+    edge, = fixed['updates'].values()
+    assert (edge['from_id'], edge['to_id']) == ('D', 'C')
+    assert json.loads((relation_root / 'verification.json').read_text()) == parent
+    from backend.pipeline import claim_flash_missing as missing
+    records, sources = f.load_source(store, 'S')
+    assert missing.consume(store, stage.active_root(relation_root), records, sources)
+    replay = Decide()
+    assert stage.run(store, 'S', aroot, relation_root, replay, apply=True) == fixed
+    assert replay.calls == []
+
 
 def test_postreply_source_record_drift_still_blocks_completed_relation_commit(ready):
     store,root,aroot=ready

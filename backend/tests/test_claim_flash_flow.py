@@ -139,6 +139,32 @@ def test_export_pending_is_not_approval_and_tracks_real_changes(candidate,tmp_pa
         assert final['source_fragments']==[v['payload'] for k,v in sorted(before.items()) if k.startswith('source_fragments/')]
 
 
+@pytest.mark.parametrize('referenced',[False,True])
+def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced):
+    package,_=candidate
+    with workspace.open_candidate(package,tmp_path/'private') as store:
+        sid=package['source_documents'][0]['source_id']
+        records,sources=flow.snapshot(store,sid)
+        historical={**deepcopy(package['source_fragments'][0]),'fragment_id':'OLD-FRAGMENT',
+                    'source_sha256':'0'*64,'anchor_state':'replaced_by_precise_fragments'}
+        records['source_fragments/OLD-FRAGMENT']={'payload':historical,'content_sha256':'historical',
+                                                  'revision':1,'retired':False}
+        if referenced:
+            evidence=next(row for key,row in records.items() if key.startswith('evidence_steps/'))
+            evidence['payload']['source_fragment_ids'].append('OLD-FRAGMENT')
+        monkeypatch.setattr(flow,'snapshot',lambda *_:(records,sources))
+        args=(store,sid,tmp_path/'export',records,None,{},[],0,'canonical_refresh')
+        if referenced:
+            with pytest.raises(flow.KnowledgePackageMergeError,match='fragment source generation'):
+                flow.export(*args)
+        else:
+            result=flow.export(*args)
+            output=flow.read(result['package']['path'])
+            assert result['status']=='completed'
+            assert output['flash_application']['historical_source_fragments']==[historical]
+            assert historical not in output['source_fragments']
+
+
 def test_completed_output_drift_is_rejected_without_new_calls(candidate,tmp_path):
     package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
     result=flow.run_candidate(path,tmp_path/'flow',FlowPorts())
@@ -411,3 +437,86 @@ def test_checkpoint_must_be_saved_before_entering_next_layer(candidate,tmp_path,
     with pytest.raises(OSError,match='checkpoint disk failure'):
         flow.run_candidate(path,tmp_path/'resume',FlowPorts())
     assert not (tmp_path/'resume/flash/source-layer-input.json').exists()
+
+
+def test_subscription_flash_routes_models_by_layer(candidate, tmp_path, monkeypatch):
+    from backend.pipeline import claim_refresh, codex_subscription_client
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.model = kwargs['model']
+
+    class Ports(FlowPorts):
+        def __init__(self, client, root, *, capacity):
+            super().__init__()
+            self.identity = {**self.identity, 'gpt': {'model': client.model}}
+            self.capacity = capacity
+            self.gpt = client
+
+    monkeypatch.setattr(codex_subscription_client, 'CodexSubscriptionClient', Client)
+    monkeypatch.setattr(claim_refresh, 'Models', Ports)
+    capacity = object()
+    normal, evidence = flow.subscription_ports(tmp_path, capacity)
+    assert normal.capacity is evidence.capacity is capacity
+    package, _ = candidate
+    path = tmp_path / 'candidate.json'
+    path.write_text(json.dumps(package))
+
+    observed = {}
+    for module, name in [(flow.coverage, 'source'), (flow.eo, 'evidence'), (flow.statements, 'claim')]:
+        original = module.run
+
+        def record(*args, _name=name, _original=original, **kwargs):
+            ports = args[4] if _name == 'evidence' else args[-1]
+            observed[_name] = ports.identity['gpt']['model']
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, 'run', record)
+
+    root = tmp_path / 'flow'
+    result = flow.run_candidate(path, root, normal, evidence_ports=evidence)
+    assert result['status'] == 'completed'
+    assert observed == {'source': 'gpt-6.1-sol', 'evidence': 'gpt-6-sol', 'claim': 'gpt-6.1-sol'}
+    normal.calls.clear()
+    evidence.calls.clear()
+    observed.clear()
+    assert flow.run_candidate(path, root, normal, evidence_ports=evidence) == result
+    assert not observed and not normal.calls and not evidence.calls
+
+
+def test_legacy_evidence_keeps_saved_identity_and_routes_new_calls(tmp_path):
+    from types import SimpleNamespace
+
+    normal = SimpleNamespace(identity={'gpt': {'model': 'gpt-6.1-sol'}, 'jev': {}})
+    evidence = SimpleNamespace(identity={'gpt': {'model': 'gpt-6-sol'}, 'jev': {}})
+    root = tmp_path / 'evidence'
+    root.mkdir()
+    (root / 'intent.json').write_text(json.dumps({'models': normal.identity}))
+    assert flow.bind_evidence_ports(tmp_path, normal, evidence) is evidence
+    assert evidence.identity == normal.identity
+    assert evidence.new_gpt_identity == {'model': 'gpt-6-sol'}
+    assert flow.bind_evidence_ports(tmp_path, normal, evidence).new_gpt_identity == {'model': 'gpt-6-sol'}
+
+
+@pytest.mark.parametrize(('result', 'expected'), [
+    ({'status': 'completed', 'pending': []}, 0),
+    ({'status': 'needs_attention', 'pending': [
+        {'layer': 'claims', 'group_id': 'FG008', 'task': 'arguments',
+         'findings': [{'object_key': 'claims/P06-CL009'}]},
+    ]}, 2),
+    ({'status': 'needs_attention', 'pending': []}, 2),
+])
+def test_flash_cli_reports_lecture_completion_separately_from_process_exit(
+        tmp_path, monkeypatch, capsys, result, expected):
+    import sys
+    from backend.pipeline import claim_model_capacity
+
+    capacity = tmp_path / 'capacity.json'
+    capacity.write_text('{}')
+    monkeypatch.setattr(claim_model_capacity, 'ClaimModelCapacity', lambda config: object())
+    monkeypatch.setattr(flow, 'subscription_ports', lambda *args: (object(), object()))
+    monkeypatch.setattr(flow, 'run_candidate', lambda *args, **kwargs: result)
+    monkeypatch.setattr(sys, 'argv', ['claim_flash_flow', '--root', str(tmp_path),
+                                    '--capacity-file', str(capacity), '--candidate', 'candidate.json'])
+    assert flow.main() == expected
+    assert json.loads(capsys.readouterr().out) == result

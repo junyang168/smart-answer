@@ -173,3 +173,113 @@ def test_statement_subject_repair_can_update_its_dependent_role_only_when_author
         eo.validate_focused_reply(request,{'items':[item]})
     else:
         with pytest.raises(ValueError,match='outside'):eo.validate_focused_reply(request,{'items':[item]})
+
+
+@pytest.mark.parametrize('fault',[None,'missing_authority','old_authority_kind','wrong_parent','changed_exit','third_timeout'])
+def test_additional_owner_retry_preserves_every_unknown_attempt_and_stops_without_new_authority(tmp_path,fault):
+    class Ports:
+        identity={'gpt':{'backend':'test','model':'test','effort':'medium'}}
+        focus_evidence_findings=True
+        focused_review_instruction='只處置原疑點'
+        def __init__(self):self.root=tmp_path/'provider';self.calls=[]
+        def repair(self,request):
+            self.calls.append(deepcopy(request))
+            if len(self.calls)<3 or fault=='third_timeout':raise TimeoutError('ended without answer')
+            return {'items':[{'job_id':job()['job_id'],'action':'keep','reason':'保留。'}]}
+    ports=Ports();root=tmp_path/'fidelity'
+    def run():return list(f.gpt(root,ports,'evidence_fidelity_repair',[job()],eo.Edits.model_json_schema(),eo.PROMPT,semantic_review=False))
+    def authorize(request,additional=False):
+        key=e.digest(request);old=root/'gpt'/key;exit_path=ports.root/'gpt'/key/'transport/exit.json'
+        receipt={'error_type':'TimeoutExpired','returncode':None}
+        e.save(exit_path,receipt)
+        authority={'owner_direction':'再试一次,也许需要等一下','max_reissues':1,
+            'original_request_sha256':key,'exit_path':str(exit_path),'exit_sha256':e.digest(receipt)}
+        if additional:authority['kind']='owner_additional_stopped_retry_v1'
+        if additional and fault=='old_authority_kind':authority.pop('kind')
+        if additional and fault=='wrong_parent':authority['original_request_sha256']='another-call'
+        if not additional or fault!='missing_authority':e.save(old/'owner-recovery.json',authority)
+        if additional and fault=='changed_exit':exit_path.write_text('{}')
+    with pytest.raises(TimeoutError):run()
+    authorize(ports.calls[0])
+    with pytest.raises(TimeoutError):run()
+    assert len(ports.calls)==2
+    with pytest.raises(ValueError):run()
+    assert len(ports.calls)==2
+    authorize(ports.calls[1],additional=True)
+    if fault in {'missing_authority','old_authority_kind','wrong_parent','changed_exit'}:
+        with pytest.raises(ValueError):run()
+        assert len(ports.calls)==2
+        return
+    if fault=='third_timeout':
+        with pytest.raises(TimeoutError):run()
+        with pytest.raises(ValueError):run()
+        assert len(ports.calls)==3
+        return
+    result=run()
+    assert len(ports.calls)==3
+    assert ports.calls[2]['execution_recovery']['original_request_sha256']==e.digest(ports.calls[1])
+    assert {k:v for k,v in ports.calls[2].items() if k!='execution_recovery'}==ports.calls[0]
+    for request in ports.calls[:2]:
+        old=root/'gpt'/e.digest(request)
+        assert (old/'started.json').exists() and not (old/'response.json').exists()
+    assert run()==result and len(ports.calls)==3
+
+
+@pytest.mark.parametrize('replace_model', [False, True])
+def test_authorized_retry_preserves_stopped_request(tmp_path, replace_model):
+    import hashlib
+    class Ports:
+        identity = {'gpt': {'backend': 'test', 'model': 'test', 'effort': 'medium'}}
+        focus_evidence_findings = True
+        focused_review_instruction = '只處置原疑點'
+
+        def __init__(self):
+            self.root = tmp_path / 'provider'
+            self.calls = []
+
+        def repair(self, request):
+            self.calls.append(deepcopy(request))
+            if len(self.calls) == 1:
+                raise TimeoutError('stopped without an answer')
+            return {'items': [{'job_id': job()['job_id'], 'action': 'keep', 'reason': '有據保留。'}]}
+
+    ports = Ports()
+    root = tmp_path / 'evidence'
+
+    def run():
+        return list(f.gpt(root, ports, 'evidence_fidelity_repair', [job()],
+                          eo.CompletionEdits.model_json_schema(), eo.PROMPT,
+                          shared={'source_completion_contract': eo.COMPLETION_CONTRACT}, semantic_review=False))
+
+    with pytest.raises(TimeoutError):
+        run()
+    original = ports.calls[0]
+    key = e.digest(original)
+    saved = root / 'gpt' / key
+    exit_path = ports.root / 'gpt' / key / 'transport' / 'exit.json'
+    exit_receipt = {'error_type': 'TimeoutExpired', 'returncode': None}
+    replacement = {}
+    if replace_model:
+        exit_path.parent.mkdir(parents=True)
+        files = {}
+        for name in ('stdout.log', 'stderr.log'):
+            (exit_path.parent / name).write_bytes(b'')
+            files[name] = hashlib.sha256(b'').hexdigest()
+        exit_receipt.update(error_type='KeyboardInterrupt', finished_at='2026-11-10T22:00:00Z', files=files)
+        ports.new_gpt_identity = {**original['identity'], 'model': 'gpt-6-sol'}
+        replacement['replacement_identity'] = ports.new_gpt_identity
+    e.save(exit_path, exit_receipt)
+    e.save(saved / 'owner-recovery.json', {'owner_direction': 'Use the schema-only retry', 'max_reissues': 1,
+        'original_request_sha256': key, 'exit_path': str(exit_path), 'exit_sha256': e.digest(exit_receipt),
+        'wire_schema': eo.PROGRAM_VALIDATED_SCHEMA, **replacement})
+
+    result = run()
+    successor = ports.calls[1]
+    assert successor['execution_recovery']['original_request_sha256'] == key
+    assert successor['schema'] == eo.program_validated_schema(original['schema'])
+    assert successor['identity'] == replacement.get('replacement_identity', original['identity'])
+    assert {k: v for k, v in successor.items() if k not in {'schema', 'execution_recovery', 'identity'}} == {
+        k: v for k, v in original.items() if k not in {'schema', 'identity'}}
+    assert json.loads((saved / 'request.json').read_text()) == original
+    assert not (saved / 'response.json').exists()
+    assert run() == result and len(ports.calls) == 2

@@ -570,9 +570,19 @@ class Models(e.Models):
         folder = self.root / 'gpt' / e.digest(request)
         self.gpt.call_artifacts = folder / 'transport'
         gate = self.capacity.call('gpt', self.gpt.call_artifacts) if self.capacity else nullcontext()
+        limits = getattr(self, 'evidence_fidelity_limits', None) if request['input'].get('task') == 'evidence_fidelity_repair' else None
+        options = {'timeout_seconds': limits[0]} if limits else {}
         with gate:
-            reply = self.gpt.generate_json(request['system'], json.dumps(request['input'], ensure_ascii=False), request['schema'])
-        e.save(folder / 'provider.json', {'usage': self.gpt.last_usage, 'raw': self.gpt.last_raw_response})
+            reply = self.gpt.generate_json(request['system'], json.dumps(request['input'], ensure_ascii=False),
+                                           request['schema'], **options)
+        usage = self.gpt.last_usage
+        e.save(folder / 'provider.json', {'usage': usage, 'raw': self.gpt.last_raw_response})
+        if limits:
+            output_tokens = usage.get('output_tokens') if isinstance(usage, dict) else None
+            if type(output_tokens) is not int or output_tokens < 0:
+                raise ValueError('Evidence fidelity reply has no output token receipt')
+            if output_tokens > limits[1]:
+                raise ValueError(f'Evidence fidelity reply exceeded output token acceptance limit: {output_tokens} > {limits[1]}')
         return reply
 
 

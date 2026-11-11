@@ -285,11 +285,13 @@ def yn(text):
 def stopped_gpt_authority(root,ports,request):
     key=e.digest(request);old=Path(root)/'gpt'/key
     if (request.get('input',{}).get('task')!='evidence_fidelity_repair'
-            or request.get('execution_recovery') or not getattr(ports,'focus_evidence_findings',False)
+            or not getattr(ports,'focus_evidence_findings',False)
             or not (old/'started.json').exists() or (old/'response.json').exists()
             or not (old/'owner-recovery.json').exists()):
         raise ValueError('unknown GPT call requires its explicit bounded owner recovery')
     authority=json.loads((old/'owner-recovery.json').read_text())
+    if request.get('execution_recovery') and authority.get('kind')!='owner_additional_stopped_retry_v1':
+        raise ValueError('another stopped retry requires a new explicit bounded owner recovery')
     expected=Path(ports.root)/'gpt'/key/'transport'/'exit.json'
     receipt=json.loads(expected.read_text())
     if (authority.get('original_request_sha256')!=key or not authority.get('owner_direction')
@@ -313,8 +315,21 @@ def stopped_gpt_authority(root,ports,request):
                 or not events[-1].get('error',{}).get('message','').startswith(message)
                 or any(x.get('type') not in {'thread.started','turn.started','error','turn.failed'} for x in events)):
             raise ValueError('owner retry cannot reinterpret another failure or generated answer')
+    elif receipt.get('error_type') == 'KeyboardInterrupt' and authority.get('replacement_identity'):
+        import hashlib
+        files = receipt.get('files', {})
+        if (receipt.get('returncode') is not None or not receipt.get('finished_at')
+                or (expected.parent / 'response.json').exists()
+                or set(files) != {'stdout.log', 'stderr.log'}
+                or any(hashlib.sha256((expected.parent / name).read_bytes()).hexdigest() != sha
+                       for name, sha in files.items())):
+            raise ValueError('model replacement requires its unchanged interruption receipt')
     elif receipt.get('error_type')!='TimeoutExpired':
         raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+    replacement = authority.get('replacement_identity')
+    if replacement and (replacement != getattr(ports, 'new_gpt_identity', None)
+                        or replacement != {**request['identity'], 'model': replacement.get('model')}):
+        raise ValueError('replacement GPT identity differs from its authorized model')
     return authority
 
 
@@ -341,18 +356,29 @@ def reuse_argument_edge_order(root,request):
     return request
 
 
-def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None):
+def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None, program_validated=False):
     """Split BEFORE calling by complete wire size and task count. No truncation."""
+    evidence_task = task == 'evidence_fidelity_repair'
+    if evidence_task:
+        from backend.pipeline import claim_flash_evidence as eo
+
+    def select_model(path, req):
+        identity = getattr(ports, 'new_gpt_identity', None)
+        saved = Path(path) / 'gpt' / e.digest(req)
+        if identity and not (saved / 'started.json').exists() and not (saved / 'response.json').exists():
+            return {**req, 'identity': identity}
+        return req
+
     def request(batch):
         data={'task': task, 'jobs': batch, **(shared or {})}
         if project_input:data=project_input(deepcopy(data))
         result={'identity': ports.identity['gpt'],
                 'system': instruction+('\n'+SEMANTIC_REVIEW if semantic_review else ''),
                 'input': data, 'schema': schema}
-        if task=='evidence_fidelity_repair' and data.get('source_completion_contract'):
-            from backend.pipeline import claim_flash_evidence as eo
-            if data['source_completion_contract']==eo.COMPLETION_CONTRACT:
-                result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
+        if evidence_task and program_validated:
+            result['schema'] = eo.program_validated_schema(schema)
+        elif evidence_task and data.get('source_completion_contract') == eo.COMPLETION_CONTRACT:
+            result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
         return result
     batches, batch = [], []
     for job in jobs:
@@ -370,8 +396,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if prepare:
             batch=prepare(deepcopy(batch))
         req=request(batch)
-        if task=='evidence_fidelity_repair' and getattr(ports,'focus_evidence_findings',False):
-            from backend.pipeline import claim_flash_evidence as eo
+        if evidence_task and getattr(ports,'focus_evidence_findings',False):
             direction=getattr(ports,'focused_review_instruction','')
             if not direction:raise ValueError('focused Evidence continuation requires its owner direction')
             e.save(Path(root)/'focused-review-admission.json',{'contract':eo.FOCUSED_CONTRACT,
@@ -383,6 +408,8 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
                     authority=stopped_gpt_authority(root,ports,req)
                     req=eo.focused_request(req)
                     req['execution_recovery']={'original_request_sha256':old_key,'authority_sha256':e.digest(authority)}
+                    if authority.get('wire_schema') == eo.PROGRAM_VALIDATED_SCHEMA:
+                        req['schema'] = eo.program_validated_schema(req['schema'])
                 else:req=eo.focused_request(req)
         if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
             if req.get('execution_recovery'):
@@ -394,18 +421,34 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             continue
         if task=='argument_completeness':
             req=reuse_argument_edge_order(root,req)
+        # Follow only separately authorized stopped attempts. Each immutable
+        # authority binds its immediate predecessor, with one new dispatch.
+        # No authority is created here; an unknown successor still stops.
         stopped=Path(root)/'gpt'/e.digest(req)
-        if ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
-                and (stopped/'owner-recovery.json').exists() and not req.get('execution_recovery')):
+        while ((stopped/'started.json').exists() and not (stopped/'response.json').exists()
+                and (stopped/'owner-recovery.json').exists()):
             authority=stopped_gpt_authority(root,ports,req)
             req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
                 'authority_sha256':e.digest(authority)}}
+            if authority.get('wire_schema') == eo.PROGRAM_VALIDATED_SCHEMA:
+                req['schema'] = eo.program_validated_schema(req['schema'])
+            if authority.get('replacement_identity'):
+                req['identity'] = authority['replacement_identity']
             if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete authorized retry exceeds payload limit; no call made')
-        reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
+            stopped=Path(root)/'gpt'/e.digest(req)
+        if not req.get('execution_recovery'):
+            req = select_model(root, req)
+        from backend.pipeline.claim_flash_answer_reuse import returned_answer
+        reply=returned_answer(root,ports,req)
+        if reply is None:
+            reply=e.recorded_call(root, 'gpt', req, ports.repair, preflight=getattr(ports, 'preflight', None),gpt_max_bytes=GPT_BYTES)
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
+        if evidence_task and (program_validated or req.get('execution_recovery')):
+            reply_model = eo.CompletionEdits if req['input'].get('source_completion_contract') == eo.COMPLETION_CONTRACT else eo.Edits
+            reply_model.model_validate(reply)
         # A schema-valid reply may omit jobs. Keep every returned adjudication;
         # request only the missing jobs once, under the same provider call budget.
         # Unknown/duplicate IDs are not silently assigned or adjudicated by code.
@@ -421,17 +464,19 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             correction=request(missing)
             if req.get('focused_contract'):correction=eo.focused_request(correction)
             correction['system']+='\n前次漏答；本次只處置這些未答工作，每個 ID 恰好一次，不重做已答項。'
-            correction['schema']=deepcopy(schema)
-            array=correction['schema'].get('properties',{}).get('items',{})
-            array.update(minItems=len(missing),maxItems=len(missing))
-            definition=array.get('items',{})
-            if '$ref' in definition:
-                definition=correction['schema']['$defs'][definition['$ref'].rsplit('/',1)[1]]
-            if field in definition.get('properties',{}):
-                definition['properties'][field]['enum']=[job['job_id'] for job in missing]
+            if not program_validated:
+                correction['schema']=deepcopy(schema)
+                array=correction['schema'].get('properties',{}).get('items',{})
+                array.update(minItems=len(missing),maxItems=len(missing))
+                definition=array.get('items',{})
+                if '$ref' in definition:
+                    definition=correction['schema']['$defs'][definition['$ref'].rsplit('/',1)[1]]
+                if field in definition.get('properties',{}):
+                    definition['properties'][field]['enum']=[job['job_id'] for job in missing]
             if len(json.dumps(correction,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete missing-job correction exceeds Flash payload limit; no call made')
             recovery=Path(root)/'output-contract'/e.digest(req)
+            correction = select_model(recovery, correction)
             e.save(recovery/'recovery.json',{'original_request_sha256':e.digest(req),
                 'original_answer_sha256':e.digest(reply),'retained_ids':ids,
                 'missing_ids':[j['job_id'] for j in missing],'max_additional_calls':1})

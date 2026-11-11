@@ -403,6 +403,16 @@ class SourceCoverageReader:
                 claims[object_id] = {**payload, "review_status": review_status}
             else:
                 nodes.append((collection, object_id, review_status, payload))
+        # Keep superseded fragments visible if a live record still depends on them.
+        referenced_fragments = {
+            fragment_id for _, _, _, payload in nodes for fragment_id in _fragment_ids(payload)
+        }
+        for source_id, fragments in fragments_by_source.items():
+            fragments_by_source[source_id] = [
+                fragment for fragment in fragments
+                if fragment.get("anchor_state") != "replaced_by_precise_fragments"
+                or fragment["fragment_id"] in referenced_fragments
+            ]
         return {
             "documents": documents,
             "fragments_by_source": fragments_by_source,
