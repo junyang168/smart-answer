@@ -104,7 +104,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 ### 本堂 Claims 提示试验（负责人明确指定时）
 
-方案 §4.6 的单堂试验：仍由逐字稿分张、定时，Claims 和证据步骤只提示重点。先用 `backend.pipeline.chapter_slide_claims <passage> --lecture '<全名>' --output <提示包.json>` 只读编译，程序核实际逐字稿与已存选材一致、摘录唯一定位及保留句子；不重跑选材。包内披露候选状态及排除清单。
+方案 §4.6 的单堂试验：仍由逐字稿分张、定时，Claims 和证据步骤只提示重点。先用 `backend.pipeline.chapter_slide_claims <passage> --lecture '<全名>' --output <提示包.json>` 只读编译，程序核实际逐字稿与已存选材一致、摘录唯一定位及保留句子；不重跑选材。包内披露候选状态及排除清单。 编译时从 SourceFragment 对应的保留句预计算每条 Claim 的连续证据范围，按证据作用区分，遇省略片段或证据空缺就断开。生成、修订及审阅收到范围与原文，再逐条选教授引入该要点的句子。
 
 复制这一堂原选材到隔离 `<data>/chapter_exposition/<passage>/`，保存旧幻灯和全部旧审阅供比较。生成时给 `chapter_slides` 加 `--claims-context <提示包.json> --data-dir <data>`；审阅用同一个 `--data-dir`，程序从幻灯存档读取冻结包，不重新取库。最多两轮修正；每条 Claim 都须有审阅处置，原文不支持的不能补进来。隔离调用保存精确请求与原始回答，未知调用不自动重试。
 

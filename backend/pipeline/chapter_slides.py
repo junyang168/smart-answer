@@ -212,11 +212,20 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
     if claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import claim_source_ranges
+
+        ranges = claim_source_ranges(claim_context, decisions_record)
+        if claim_context.get("claim_source_ranges", ranges) != ranges:
+            raise ValueError("Claim source ranges differ from retained evidence anchors")
+        model_context = {**claim_context, "claim_source_ranges": ranges}
         lines += ["", "# 本堂主張與證據步驟（編輯提示，逐字稿為準）",
+                  "claim_source_ranges 是程序從 SourceFragment 逐字摘錄定位出的保留句範圍，按證據作用分開。",
+                  "先從各自的問題、理由、結論範圍找同一要點的原文，再查看相鄰保留句，選教授開始引入這一點的句子。",
+                  "一條主張可包含多個要點或分散範圍。分開判斷各要點的開始位置，保留片段間的省略。",
                   "依照逐字稿分張、定時。主張不決定分張，不是原話；候選主張不是已批准教導。",
                   "逐項核對本堂保留句子中的問題、理由、結論與限定，勿漏重點。",
                   "不把未保留片段或別堂的內容補入；原文不支持的提示不得採用。",
-                  json.dumps(claim_context, ensure_ascii=False)]
+                  json.dumps(model_context, ensure_ascii=False)]
     return f"課程：{lecture}\n\n" + "\n".join(lines)
 
 

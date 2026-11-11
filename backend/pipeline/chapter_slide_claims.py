@@ -26,6 +26,50 @@ def validate_context(context, passage, lecture, decisions, decisions_sha):
         raise ValueError("Claim context transcript changed")
 
 
+
+def claim_source_ranges(context: dict, decisions: dict) -> list[dict]:
+    """Group exact evidence sentences by role and continuous retained source."""
+    piece_order = {piece["id"]: index for index, piece in enumerate(decisions["pieces"])}
+    positions = {}
+    previous_piece = None
+    block = 0
+    kept = chapter_slides.kept_pieces(decisions)
+    for index, line in enumerate(chapter_slides.sentences(kept)):
+        piece = piece_order[line["piece"]]
+        if previous_piece is not None and piece > previous_piece + 1:
+            block += 1
+        positions[line["id"]] = (block, index)
+        previous_piece = piece
+
+    result = []
+    for claim in context["claims"]:
+        roles_by_sentence = {}
+        for step in claim["evidence_steps"]:
+            role = step.get("step_type") or "unspecified"
+            for anchor in step["anchors"]:
+                for sentence_id in anchor["sentences"]:
+                    if sentence_id not in positions:
+                        raise ValueError(f"Evidence sentence outside retained transcript: {sentence_id}")
+                    roles_by_sentence.setdefault(sentence_id, set()).add(role)
+
+        ranges = []
+        previous_position = None
+        for sentence_id in sorted(roles_by_sentence, key=positions.__getitem__):
+            position = positions[sentence_id]
+            roles = sorted(roles_by_sentence[sentence_id])
+            if (
+                previous_position is not None
+                and position == (previous_position[0], previous_position[1] + 1)
+                and roles == ranges[-1]["evidence_roles"]
+            ):
+                ranges[-1]["last"] = sentence_id
+            else:
+                ranges.append({"first": sentence_id, "last": sentence_id, "evidence_roles": roles})
+            previous_position = position
+        if ranges:
+            result.append({"claim_id": claim["claim_id"], "ranges": ranges})
+    return result
+
 def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: Any) -> dict:
     from backend.pipeline.original_audio_index import Sermons
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
@@ -103,10 +147,12 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
                              "scripture_refs": claim.get("scripture_refs"), "evidence_steps": evidence})
         else:
             excluded.append({"claim_id": cid, "sha256": digest(claim), "reason": "no evidence in retained sentences"})
-    return {"schema_version": "chapter-slide-claim-context.v1", "passage": passage, "lecture": lecture,
-            "decisions_sha256": chapter_exposition.file_sha256(path),
-            "transcript_sha256": decisions["transcript_sha256"], "source_id": document["source_id"],
-            "claims": included, "excluded": excluded}
+    context = {"schema_version": "chapter-slide-claim-context.v1", "passage": passage, "lecture": lecture,
+               "decisions_sha256": chapter_exposition.file_sha256(path),
+               "transcript_sha256": decisions["transcript_sha256"], "source_id": document["source_id"],
+               "claims": included, "excluded": excluded}
+    context["claim_source_ranges"] = claim_source_ranges(context, decisions)
+    return context
 
 
 

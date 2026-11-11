@@ -108,3 +108,37 @@ def test_rejected_claim_trial_revision_is_preserved_and_not_called_again(tmp_pat
     assert chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=unused)['status'] == 'revision_attempt_used'
     assert not unused.prompts
     assert chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').read_bytes() == before
+
+
+def test_source_ranges_preserve_roles_and_gaps_in_retained_transcript():
+    omitted = {"id": "U-omitted", "start": 210, "end": 220, "text": "省略。"}
+    decisions = {
+        "pieces": [KEPT[0], omitted, KEPT[1]],
+        "decisions": [{"id": p["id"], "keep": True} for p in KEPT],
+    }
+    context = {
+        "claims": [{
+            "claim_id": "C1",
+            "evidence_steps": [
+                {"step_type": "question", "anchors": [{"sentences": ["S0001"]}]},
+                {"step_type": "reasoning", "anchors": [{"sentences": ["S0002", "S0003", "S0004"]}]},
+            ],
+        }],
+    }
+    expected = [{
+        "claim_id": "C1",
+        "ranges": [
+            {"first": "S0001", "last": "S0001", "evidence_roles": ["question"]},
+            {"first": "S0002", "last": "S0002", "evidence_roles": ["reasoning"]},
+            {"first": "S0003", "last": "S0004", "evidence_roles": ["reasoning"]},
+        ],
+    }]
+    assert hints.claim_source_ranges(context, decisions) == expected
+    prompt = chapter_slides.user_prompt("L", decisions, context)
+    supplied = json.loads(prompt[prompt.index('{"claims"'):])
+    assert supplied["claim_source_ranges"] == expected
+    assert "claim_source_ranges" not in context
+
+    context["claim_source_ranges"] = [{"claim_id": "C1", "ranges": []}]
+    with pytest.raises(ValueError, match="differ from retained evidence"):
+        chapter_slides.user_prompt("L", decisions, context)
