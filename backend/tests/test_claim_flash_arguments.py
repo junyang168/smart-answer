@@ -306,3 +306,44 @@ def test_source_clarification_checks_only_stopped_route(ready_pair, approve):
     replay = Review()
     assert stage.run(store, 'S', plan, 'G', eroot, sroot, target, replay, apply=True) == result
     assert replay.calls == []
+
+
+def test_argument_continuation_corrects_only_the_pending_claim_statement(ready_pair):
+    store, root, plan, eroot, sroot = ready_pair
+    target = root / 'arguments'
+    proposal = {'a': 'observations/O', 'b': 'evidence_steps/E',
+                'fragment_ids': ['F'], 'reason': '原文行為支持判斷。'}
+
+    class Finding(Ports):
+        def repair(self, request):
+            reply = super().repair(request)
+            if request['input']['task'] == 'argument_final_support':
+                for item in reply['items']:
+                    if item['job_id'] == 'claims/D':
+                        item.update(action='needs_connection', reason='措辭超出教授原話。')
+            return reply
+
+    result = stage.run(store, 'S', plan, 'G', eroot, sroot, target,
+                       Finding([proposal], choices={'support': 'partial'}), apply=True)
+    assert result['status'] == 'needs_attention'
+    before = json.loads((target / 'before.json').read_text())
+    parent = (target / 'verification.json').read_bytes()
+    old_c = store.get_record_state('claims', 'C')
+    old_e = store.get_record_state('evidence_steps', 'E')
+    statement = '沒有聽從祂的話，顯明沒有真正相信祂。'
+    e.save(target / 'material-scope-continuation.json', {
+        'contract': stage.CANDIDATE_SCOPE, 'owner_direction': 'Correct the stopped statement',
+        'parent_verification_sha256': e.digest(json.loads(parent)),
+        'parent_before_sha256': e.digest(before),
+        'statement_correction': {'object_key': 'claims/D', 'statement': statement,
+                                 'before_sha256': e.digest(before['records']['claims/D']['payload'])},
+    })
+    ports = Ports()
+    completed = stage.run(store, 'S', plan, 'G', eroot, sroot, target, ports, apply=True)
+    assert completed['status'] == 'applied', completed.get('pending')
+    assert store.get_record_state('claims', 'D')['payload']['statement'] == statement
+    assert store.get_record_state('claims', 'C') == old_c
+    assert store.get_record_state('evidence_steps', 'E') == old_e
+    assert (target / 'verification.json').read_bytes() == parent
+    assert [j['job_id'] for role, req in ports.calls if role == 'gpt'
+            and req['input']['task'] == 'argument_completeness' for j in req['input']['jobs']] == ['claims/D']

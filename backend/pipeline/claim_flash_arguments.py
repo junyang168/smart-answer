@@ -300,6 +300,29 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             raise ValueError('argument target belongs to another source')
         old_checks,old_before,statement_updates=statement_proof(statement_root,ids,records,sources)
         records=f.apply_overlay(records,statement_updates)
+        previous_records = records
+        if parent is not None:
+            authority = json.loads((Path(_parent_root) / 'material-scope-continuation.json').read_text())
+            correction = authority.get('statement_correction')
+            if correction:
+                finding, = parent['pending']
+                key = correction['object_key']
+                payload = records[key]['payload']
+                if (key != finding['object_key'] or key not in {'claims/'+cid for cid in ids}
+                        or e.digest(payload) != correction['before_sha256']
+                        or payload.get('review_status') in f.PROTECTED
+                        or not correction['statement'].strip() or correction['statement'] == payload['statement']):
+                    raise ValueError('Claim statement correction differs from pending argument')
+                proposed = flash.current_claim_payload({**payload, 'statement': correction['statement']})
+                projected = f.apply_overlay(records, {key: proposed})
+                material = flash.claim_material(key, projected, sources, source_id)
+                statements.verify_evidence(evidence_root, {row['object_key'] for row in material['evidence']}, records, sources)
+                checked = statements.review(projected, sources, [key], source_id, root/'statement-correction', ports)
+                e.save(root/'statement-correction.json', checked)
+                if checked['pending'] or checked['updates']:
+                    raise ValueError('Proposed Claim statement needs further disposition')
+                statement_updates[key] = proposed
+                records = projected
         targets={'claims/'+cid for cid in ids}
         pool={k for k in group['lower_record_keys'] if k.split('/')[0] in {'evidence_steps','observations'}}
         for key in targets:pool.update(x['object_key'] for x in flash.claim_material(key,records,sources,source_id)['evidence'])
@@ -405,7 +428,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 p['produced_claim_ids']=list(dict.fromkeys(owners));updates[key]=p
         # Reuse unchanged whole-support/scripture decisions; only changed argument sets need those tasks.
         final_jobs=[]
-        previous=f.apply_overlay(records,parent['updates']) if parent is not None else None
+        previous=f.apply_overlay(previous_records,parent['updates']) if parent is not None else None
         if previous is not None:
             for retired in parent.get('retiring_keys',[]):previous.pop(retired,None)
         for key in sorted(targets):
