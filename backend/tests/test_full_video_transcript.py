@@ -361,6 +361,17 @@ def test_conservative_cleanup_supports_restart_and_aside_without_rewriting():
         with pytest.raises(ValueError):apply_exclusions(paragraphs,{'deletions':[dict(paragraph_id='p',old=old,reason='bad',kind='speech_restart')]})
 
 
+def test_cleanup_withholds_negation_even_if_model_calls_it_a_restart():
+    from backend.pipeline.full_video_transcript import apply_exclusions
+
+    rows = [{'id': 'p', 'text': '不會不不談話。這話不是那個意思。'}]
+    for old in ('不會', '不是'):
+        with pytest.raises(ValueError, match='negation requires review'):
+            apply_exclusions(rows, {'deletions': [
+                dict(paragraph_id='p', old=old, reason='疑似重啟', kind='speech_restart'),
+            ]})
+
+
 def test_overlapping_whole_lecture_proposals_keep_disjoint_valid_deletions(tmp_path,monkeypatch):
     from backend.pipeline import full_video_transcript as f
     f.save(tmp_path/'master.json',{'windows':[{'id':'w00'}]})
