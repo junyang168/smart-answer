@@ -440,9 +440,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 raise ValueError('human source clarification needs reconfirmation for candidate paragraph')
             if facts:job.update(human_source_decisions=facts,source_interpretation=SOURCE_INTERPRETATION)
     schema=CompletionEdits if complete_source else Edits
-    for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,schema.model_json_schema(),
-            completion_prompt() if complete_source else PROMPT,semantic_review=False,
-            project_input=completion_input if complete_source else None, program_validated=program_validated):
+    def consume(batch, raw):
         replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
             quotes=getattr(edit,'quotes',None)
@@ -453,6 +451,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 pending.append({'object_key':edit.job_id,'layer':'source','reason':edit.reason,
                     **({'source_completion_attempted':True} if complete_source else {})});continue
             key=edit.job_id;p=working[key]['payload'];patch=patch_for(key,p,edit);fragments={}
+            if key in getattr(ports, 'preserve_evidence_statements', ()) and 'statement' in patch:
+                raise ValueError('Evidence repair must preserve the approved statement: '+key)
             if quotes:
                 post,fragments=source.supplement_binding(key,{**p,**patch},[q.model_dump() for q in quotes],
                     candidates[key],working,sources)
@@ -463,6 +463,26 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if complete_source:
                 scope={sid:sorted({p['paragraph_key'] for p in candidates[key]['nearby_paragraphs']})}
                 ready[key]['source_context']={'paragraphs':scope,'entries':human.scoped(all_decisions,scope)}
+    def repair_batches(path, requests):
+        return f.gpt(path, ports, 'evidence_fidelity_repair', requests, schema.model_json_schema(),
+                     completion_prompt() if complete_source else PROMPT, semantic_review=False,
+                     project_input=completion_input if complete_source else None,
+                     program_validated=program_validated)
+
+    for batch, raw in repair_batches(root / 'fidelity-edits', jobs):
+        consume(batch, raw)
+    if getattr(ports, 'correct_empty_evidence_once', False):
+        invalid = [job for job in jobs if ready.get(job['job_id'], {}).get('basis') == 'gpt_repair'
+                   and not ready[job['job_id']]['patch']]
+        corrections = []
+        for job in invalid:
+            key = job['job_id']
+            corrections.append({**job, 'previous_empty_repair': {
+                'reason': ready.pop(key)['reason'],
+                'instruction': '上次選repair但沒有任何改動。若理由說要補原文，這次必須在quotes輸出所選逐字引文；否則給出具體欄位修改，或有據keep／needs_source。'
+                    + (' 保留原摘要，只補所需原文。' if key in getattr(ports, 'preserve_evidence_statements', ()) else '')}})
+        for batch, raw in repair_batches(root / 'empty-repair-corrections', corrections):
+            consume(batch, raw)
     # Check the compiled changes before accepting any disposition in this group.
     for key,decision in ready.items():
         if decision['basis']=='gpt_repair' and not decision['patch']:

@@ -355,3 +355,29 @@ def test_seven_small_records_split_into_four_and_three_despite_fitting_bytes(cam
     assert [len(req['input']['jobs']) for req in requests]==[4,3]
     assert requests[0]['schema'] == requests[1]['schema']
     assert all(len(req['input']['source_paragraphs'])==1 for req in requests)
+
+
+def test_empty_repair_correction_only_resends_affected_item(campaign):
+    store, root, _, plan, previous = campaign
+    ports = Ports()
+    ports.correct_empty_evidence_once = True
+    ports.new_gpt_identity = {**ports.identity['gpt'], 'model': 'gpt-6-sol'}
+
+    def empty_first_reply(request, reply):
+        for job, item in zip(request['input']['jobs'], reply['items'], strict=True):
+            if job['job_id'] == 'evidence_steps/BIND' and 'previous_empty_repair' not in job:
+                item.pop('quotes')
+
+    ports.mutate = empty_first_reply
+    result = eo.run(store, 'S', plan, root / 'corrected', ports, previous, apply=True)
+    assert result['status'] == 'completed'
+    initial, correction = fidelity_calls(ports)
+    assert len(initial['input']['jobs']) == 4
+    assert [job['job_id'] for job in correction['input']['jobs']] == ['evidence_steps/BIND']
+    assert correction['identity']['model'] == 'gpt-6-sol'
+    assert len(store.get_record_state('evidence_steps', 'BIND')['payload']['source_fragment_ids']) == 2
+    replay = Ports()
+    replay.correct_empty_evidence_once = True
+    replay.new_gpt_identity = ports.new_gpt_identity
+    assert eo.run(store, 'S', plan, root / 'corrected', replay, previous, apply=True)['status'] == 'completed'
+    assert replay.calls == []

@@ -315,8 +315,21 @@ def stopped_gpt_authority(root,ports,request):
                 or not events[-1].get('error',{}).get('message','').startswith(message)
                 or any(x.get('type') not in {'thread.started','turn.started','error','turn.failed'} for x in events)):
             raise ValueError('owner retry cannot reinterpret another failure or generated answer')
+    elif receipt.get('error_type') == 'KeyboardInterrupt' and authority.get('replacement_identity'):
+        import hashlib
+        files = receipt.get('files', {})
+        if (receipt.get('returncode') is not None or not receipt.get('finished_at')
+                or (expected.parent / 'response.json').exists()
+                or set(files) != {'stdout.log', 'stderr.log'}
+                or any(hashlib.sha256((expected.parent / name).read_bytes()).hexdigest() != sha
+                       for name, sha in files.items())):
+            raise ValueError('model replacement requires its unchanged interruption receipt')
     elif receipt.get('error_type')!='TimeoutExpired':
         raise ValueError('unknown GPT call lacks its exact bounded owner recovery')
+    replacement = authority.get('replacement_identity')
+    if replacement and (replacement != getattr(ports, 'new_gpt_identity', None)
+                        or replacement != {**request['identity'], 'model': replacement.get('model')}):
+        raise ValueError('replacement GPT identity differs from its authorized model')
     return authority
 
 
@@ -348,6 +361,13 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
     evidence_task = task == 'evidence_fidelity_repair'
     if evidence_task:
         from backend.pipeline import claim_flash_evidence as eo
+
+    def select_model(path, req):
+        identity = getattr(ports, 'new_gpt_identity', None)
+        saved = Path(path) / 'gpt' / e.digest(req)
+        if identity and not (saved / 'started.json').exists() and not (saved / 'response.json').exists():
+            return {**req, 'identity': identity}
+        return req
 
     def request(batch):
         data={'task': task, 'jobs': batch, **(shared or {})}
@@ -412,9 +432,13 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
                 'authority_sha256':e.digest(authority)}}
             if authority.get('wire_schema') == eo.PROGRAM_VALIDATED_SCHEMA:
                 req['schema'] = eo.program_validated_schema(req['schema'])
+            if authority.get('replacement_identity'):
+                req['identity'] = authority['replacement_identity']
             if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete authorized retry exceeds payload limit; no call made')
             stopped=Path(root)/'gpt'/e.digest(req)
+        if not req.get('execution_recovery'):
+            req = select_model(root, req)
         from backend.pipeline.claim_flash_answer_reuse import returned_answer
         reply=returned_answer(root,ports,req)
         if reply is None:
@@ -452,6 +476,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             if len(json.dumps(correction,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete missing-job correction exceeds Flash payload limit; no call made')
             recovery=Path(root)/'output-contract'/e.digest(req)
+            correction = select_model(recovery, correction)
             e.save(recovery/'recovery.json',{'original_request_sha256':e.digest(req),
                 'original_answer_sha256':e.digest(reply),'retained_ids':ids,
                 'missing_ids':[j['job_id'] for j in missing],'max_additional_calls':1})

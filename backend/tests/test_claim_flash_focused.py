@@ -225,7 +225,9 @@ def test_additional_owner_retry_preserves_every_unknown_attempt_and_stops_withou
     assert run()==result and len(ports.calls)==3
 
 
-def test_authorized_schema_only_retry_preserves_stopped_request(tmp_path):
+@pytest.mark.parametrize('replace_model', [False, True])
+def test_authorized_retry_preserves_stopped_request(tmp_path, replace_model):
+    import hashlib
     class Ports:
         identity = {'gpt': {'backend': 'test', 'model': 'test', 'effort': 'medium'}}
         focus_evidence_findings = True
@@ -256,17 +258,28 @@ def test_authorized_schema_only_retry_preserves_stopped_request(tmp_path):
     saved = root / 'gpt' / key
     exit_path = ports.root / 'gpt' / key / 'transport' / 'exit.json'
     exit_receipt = {'error_type': 'TimeoutExpired', 'returncode': None}
+    replacement = {}
+    if replace_model:
+        exit_path.parent.mkdir(parents=True)
+        files = {}
+        for name in ('stdout.log', 'stderr.log'):
+            (exit_path.parent / name).write_bytes(b'')
+            files[name] = hashlib.sha256(b'').hexdigest()
+        exit_receipt.update(error_type='KeyboardInterrupt', finished_at='2026-11-10T22:00:00Z', files=files)
+        ports.new_gpt_identity = {**original['identity'], 'model': 'gpt-6-sol'}
+        replacement['replacement_identity'] = ports.new_gpt_identity
     e.save(exit_path, exit_receipt)
     e.save(saved / 'owner-recovery.json', {'owner_direction': 'Use the schema-only retry', 'max_reissues': 1,
         'original_request_sha256': key, 'exit_path': str(exit_path), 'exit_sha256': e.digest(exit_receipt),
-        'wire_schema': eo.PROGRAM_VALIDATED_SCHEMA})
+        'wire_schema': eo.PROGRAM_VALIDATED_SCHEMA, **replacement})
 
     result = run()
     successor = ports.calls[1]
     assert successor['execution_recovery']['original_request_sha256'] == key
     assert successor['schema'] == eo.program_validated_schema(original['schema'])
-    assert {k: v for k, v in successor.items() if k not in {'schema', 'execution_recovery'}} == {
-        k: v for k, v in original.items() if k != 'schema'}
+    assert successor['identity'] == replacement.get('replacement_identity', original['identity'])
+    assert {k: v for k, v in successor.items() if k not in {'schema', 'execution_recovery', 'identity'}} == {
+        k: v for k, v in original.items() if k not in {'schema', 'identity'}}
     assert json.loads((saved / 'request.json').read_text()) == original
     assert not (saved / 'response.json').exists()
     assert run() == result and len(ports.calls) == 2
