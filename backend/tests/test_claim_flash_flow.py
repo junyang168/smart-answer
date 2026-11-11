@@ -469,3 +469,27 @@ def test_legacy_evidence_keeps_saved_identity_and_routes_new_calls(tmp_path):
     assert evidence.identity == normal.identity
     assert evidence.new_gpt_identity == {'model': 'gpt-6-sol'}
     assert flow.bind_evidence_ports(tmp_path, normal, evidence).new_gpt_identity == {'model': 'gpt-6-sol'}
+
+
+@pytest.mark.parametrize(('result', 'expected'), [
+    ({'status': 'completed', 'pending': []}, 0),
+    ({'status': 'needs_attention', 'pending': [
+        {'layer': 'claims', 'group_id': 'FG008', 'task': 'arguments',
+         'findings': [{'object_key': 'claims/P06-CL009'}]},
+    ]}, 2),
+    ({'status': 'needs_attention', 'pending': []}, 2),
+])
+def test_flash_cli_reports_lecture_completion_separately_from_process_exit(
+        tmp_path, monkeypatch, capsys, result, expected):
+    import sys
+    from backend.pipeline import claim_model_capacity
+
+    capacity = tmp_path / 'capacity.json'
+    capacity.write_text('{}')
+    monkeypatch.setattr(claim_model_capacity, 'ClaimModelCapacity', lambda config: object())
+    monkeypatch.setattr(flow, 'subscription_ports', lambda *args: (object(), object()))
+    monkeypatch.setattr(flow, 'run_candidate', lambda *args, **kwargs: result)
+    monkeypatch.setattr(sys, 'argv', ['claim_flash_flow', '--root', str(tmp_path),
+                                    '--capacity-file', str(capacity), '--candidate', 'candidate.json'])
+    assert flow.main() == expected
+    assert json.loads(capsys.readouterr().out) == result

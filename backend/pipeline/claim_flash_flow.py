@@ -393,7 +393,11 @@ def main():
     plan=read(args.shared_groups) if args.shared_groups else None
     if args.candidate:result=run_candidate(args.candidate,root,ports,plan=plan,evidence_ports=evidence_ports)
     else:result=run(PostgresKnowledgeStore(args.database_url),args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports)
-    print(json.dumps(result,ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=False))
+    # Keep the full JSON contract on stdout. An incomplete lecture needs an
+    # Agent decision even when the runner exited normally.
+    return 0 if result['status'] == 'completed' and not result['pending'] else 2
 
 
-if __name__=='__main__':main()
+if __name__ == '__main__':
+    raise SystemExit(main())
