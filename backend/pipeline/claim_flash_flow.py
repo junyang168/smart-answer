@@ -370,7 +370,10 @@ def subscription_ports(root, capacity, executable=None):
                                          max_output_tokens=6000, executable=executable)
         return Models(client, root, capacity=capacity)
 
-    return make('gpt-6.1-sol'), make('gpt-6-sol')
+    evidence = make('gpt-6-sol')
+    evidence.gpt.cache_usage_events = True
+    evidence.evidence_fidelity_limits = (120, 2500)
+    return make('gpt-6.1-sol'), evidence
 
 
 def main():

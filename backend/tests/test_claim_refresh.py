@@ -446,3 +446,35 @@ def test_explicit_relation_constraint_is_not_overridden(group):
     result = c.run(store, ['C'], root, RelationPorts('b_to_a_supports'), max_new_claims=0, apply=True)
     assert result['status'] == 'needs_attention' and not result['applied']
     assert result['pending'][0]['reason'] == 'explicit_relation_constraint'
+
+
+@pytest.mark.parametrize(('task', 'usage', 'timeout', 'error'), [
+    ('evidence_fidelity_repair', {'output_tokens': 2500}, 120, None),
+    ('evidence_fidelity_repair', {'output_tokens': 2501}, 120, 'exceeded output token'),
+    ('evidence_fidelity_repair', None, 120, 'no output token receipt'),
+    ('argument_completeness', {'output_tokens': 3000}, None, None),
+])
+def test_flash_evidence_limits_keep_raw_provider_receipt(tmp_path, task, usage, timeout, error):
+    from types import SimpleNamespace
+    from backend.pipeline import claim_refresh, evidence_refresh
+
+    options = {}
+
+    def reply(*args, **kwargs):
+        options.update(kwargs)
+        return {'items': []}
+
+    gpt = SimpleNamespace(backend='codex_subscription', model='gpt-6-sol',
+                          reasoning_effort='medium', last_usage=usage,
+                          last_raw_response={'items': []}, generate_json=reply)
+    ports = claim_refresh.Models(gpt, tmp_path)
+    ports.evidence_fidelity_limits = (120, 2500)
+    request = {'system': 'Check the evidence', 'input': {'task': task}, 'schema': {}}
+    if error:
+        with pytest.raises(ValueError, match=error):
+            ports.repair(request)
+    else:
+        assert ports.repair(request) == {'items': []}
+    assert options.get('timeout_seconds') == timeout
+    receipt = tmp_path / 'gpt' / evidence_refresh.digest(request) / 'provider.json'
+    assert json.loads(receipt.read_text())['usage'] == usage

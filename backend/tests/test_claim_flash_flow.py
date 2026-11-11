@@ -425,6 +425,7 @@ def test_subscription_flash_routes_models_by_layer(candidate, tmp_path, monkeypa
             super().__init__()
             self.identity = {**self.identity, 'gpt': {'model': client.model}}
             self.capacity = capacity
+            self.gpt = client
 
     monkeypatch.setattr(codex_subscription_client, 'CodexSubscriptionClient', Client)
     monkeypatch.setattr(claim_refresh, 'Models', Ports)
