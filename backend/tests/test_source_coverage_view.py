@@ -356,6 +356,29 @@ def test_build_places_the_claim_layer_on_the_source_text(tmp_path: Path, transcr
     assert detail["nodes"]["E1"]["kind"] == "step"
 
 
+def test_claim_highlights_fragments_from_related_evidence_material(tmp_path: Path, transcript: Path) -> None:
+    rows = _corpus_rows(transcript)
+    for name in ("linked", "unlinked"):
+        rows.extend([
+            ("source_fragments", name, "candidate", {
+                "fragment_id": name, "source_id": "SRC-T1", "paragraph_key": "S0003",
+                "verbatim_excerpt": "這一段有人抽過。",
+            }),
+            ("observations", f"OBS-{name}", "candidate", {"source_fragment_id": name}),
+        ])
+    rows.append(("knowledge_relations", "R1", "candidate", {
+        "from_id": "OBS-linked", "to_id": "E1", "relation_type": "contextualizes", "reason": "經文語境。",
+    }))
+
+    detail = SourceCoverageReader(FakeStore(rows), tmp_path).build("SRC-T1")
+
+    assert detail["claims"]["CL1"]["fragment_ids"] == ["FR-1", "linked"]
+    assert detail["nodes"]["E1"]["related_material"] == [{
+        "id": "R1", "node_id": "OBS-linked", "direction": "incoming",
+        "relation_type": "contextualizes", "reason": "經文語境。",
+    }]
+
+
 def test_coverage_omits_only_unreferenced_superseded_fragments(tmp_path: Path, transcript: Path) -> None:
     rows = _corpus_rows(transcript)
     for fragment_id, excerpt in (("OLD-PLACED", "這一段有人抽過。"),

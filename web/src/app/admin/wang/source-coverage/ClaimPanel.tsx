@@ -11,6 +11,7 @@ type Props = {
   selectedClaimId: string | null;
   onSelectFragment: (fragmentId: string | null) => void;
   onSelectClaim: (claim: Claim) => void;
+  onFocusFragment: (fragmentId: string) => void;
   onClearClaim: () => void;
 };
 
@@ -79,6 +80,7 @@ export function ClaimPanel({
   selectedClaimId,
   onSelectFragment,
   onSelectClaim,
+  onFocusFragment,
   onClearClaim,
 }: Props) {
   const claims = useMemo(
@@ -107,7 +109,7 @@ export function ClaimPanel({
         detail={detail}
         claim={detail.claims[selectedClaimId]}
         onBack={onClearClaim}
-        onSelectFragment={onSelectFragment}
+        onSelectFragment={onFocusFragment}
       />
     );
   }
@@ -118,8 +120,7 @@ export function ClaimPanel({
         claims<span className="ml-2 font-mono text-[11px] font-normal text-slate-500">{claims.length}</span>
       </h2>
       <p className="mt-1 text-[11.5px] leading-6 text-slate-500">
-        依它在來源裡出現的先後排列。點一條，左邊會標出它實際引用的每一段話。
-        （<code className="font-mono">CL005</code> 這種編號是模型吐出的順序，不是講道的順序。）
+        選一條主張，查看證據並在左側標出相關原文。
       </p>
 
       {unplaced.length ? (
@@ -143,15 +144,9 @@ export function ClaimPanel({
             }`}
           >
             <p className="text-[13px] leading-7 text-slate-900">{claim.statement}</p>
-            <Fields
-              rows={[
-                ["claim_id", claim.id],
-                ["claim_type", claim.claim_type],
-                ["evidence_step", claim.evidence_step_ids.length],
-                ["fragment", claim.fragment_ids.length, claim.fragment_ids.length ? undefined : "warn"],
-                ["scripture_refs", claim.scripture_refs.join("、")],
-              ]}
-            />
+            <p className="mt-1 text-xs text-slate-500">
+              {[claim.label, ...claim.scripture_refs].join(" · ")}
+            </p>
           </button>
         ))}
         {claims.length === 0 ? (
@@ -181,7 +176,7 @@ function ClaimDetail({
   detail: SourceDetail;
   claim: Claim;
   onBack: () => void;
-  onSelectFragment: (fragmentId: string | null) => void;
+  onSelectFragment: (fragmentId: string) => void;
 }) {
   // A claim reaches the source three ways, and walking only `evidence_step_ids`
   // reaches one of them.  334 fragments corpus-wide belong to a question the
@@ -224,73 +219,77 @@ function ClaimDetail({
     </div>
   );
 
+  const relationLabels: Record<string, string> = {
+    contextualizes: "提供語境", supports: "支持", qualifies: "限定",
+    refutes: "反駁", contrasts: "對照", explains: "解釋", answers: "回答",
+  };
+
   return (
     <aside className={PANEL}>
       <BackButton onClick={onBack} />
+      <h2 className="mt-3 text-sm font-semibold text-slate-950">{claim.statement}</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        {[claim.label, ...claim.scripture_refs].join(" · ")}
+      </p>
+      <details className="mt-2 text-xs text-slate-600">
+        <summary className="cursor-pointer">主張資料</summary>
+        <Fields rows={[
+          ["claim_id", claim.id], ["claim_type", claim.claim_type],
+          ["attribution", claim.attribution], ["maturity", claim.maturity],
+          ["review_status", claim.review_status],
+        ]} />
+      </details>
 
-      <div className="mt-3 rounded-xl border border-indigo-300 bg-white p-3">
-        <p className="font-mono text-[10.5px] text-indigo-700">claim</p>
-        <p className="mt-1 text-[14px] leading-8 text-slate-950">{claim.statement}</p>
-        <Fields
-          rows={[
-            ["claim_id", claim.id],
-            ["claim_type", claim.claim_type],
-            ["attribution", claim.attribution],
-            ["maturity", claim.maturity],
-            ["review_status", claim.review_status],
-            ["scripture_refs", claim.scripture_refs.join("、")],
-          ]}
-        />
-      </div>
-
-      <h3 className="mt-4 text-[12.5px] font-bold text-slate-900">
-        它靠這個來源的哪幾步
-        <span className="ml-2 font-mono text-[11px] font-normal text-slate-500">{steps.length} evidence_step</span>
-      </h3>
+      <h3 className="mt-4 text-xs font-semibold text-slate-900">證據與原文</h3>
       {claim.foreign_evidence_steps ? (
-        <p className="mt-1 flex items-start gap-1.5 text-[11.5px] leading-6 text-amber-800">
-          <AlertTriangle className="mt-1 h-3.5 w-3.5 shrink-0" />
-          另有 {claim.foreign_evidence_steps} 個 evidence_step 不在這個來源——這條 claim 是跨來源建立的，左邊只標得出它在這裡引用的部分。
-        </p>
+        <p className="mt-1 text-xs text-slate-600">另有 {claim.foreign_evidence_steps} 項證據來自其他來源。</p>
       ) : null}
-
-      <div className="mt-2 space-y-2">
+      <div className="mt-2 space-y-3">
         {steps.map((step) => (
-          <div key={step.id} className="rounded-xl border border-slate-200 bg-white p-3">
-            <KindBadge kind={step.kind} />
-            <p className="mt-1.5 text-[13px] leading-7 text-slate-800">{step.statement}</p>
-            {linkNote(step) ? <p className="mt-1 text-[11px] text-amber-700">{linkNote(step)}</p> : null}
-            <Fields rows={nodeRows(step)} />
-            {quotes(step)}
-          </div>
+          <section key={step.id} className="border-l-2 border-indigo-200 pl-3">
+            <p className="text-[13px] leading-6 text-slate-900">{step.statement}</p>
+            {linkNote(step) ? <p className="text-xs text-amber-800">{linkNote(step)}</p> : null}
+            <details className="text-xs text-slate-600">
+              <summary className="cursor-pointer py-1">原文與證據資料</summary>
+              {quotes(step)}
+              <Fields rows={nodeRows(step)} />
+            </details>
+            {step.related_material?.map((relation) => {
+              const node = detail.nodes[relation.node_id];
+              if (!node) return null;
+              const label = relationLabels[relation.relation_type] ?? relation.relation_type;
+              return (
+                <details key={relation.id}
+                  className="mt-1 border-l border-slate-300 pl-2 text-xs text-slate-700">
+                  <summary className="cursor-pointer leading-6">
+                    <KindBadge kind={node.kind} />{" "}
+                    <span className="mr-1 font-medium text-indigo-800">
+                      {relation.direction === "incoming" ? `${label}此證據` : `此證據${label}`}
+                    </span>
+                    {node.statement}
+                  </summary>
+                  {relation.reason ? <p className="leading-6">{relation.reason}</p> : null}
+                  {quotes(node)}
+                  <Fields rows={nodeRows(node)} />
+                </details>
+              );
+            })}
+          </section>
         ))}
-        {steps.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white py-6 text-center text-[12px] text-slate-400">
-            這條 claim 在這個來源沒有任何 evidence_step。
-          </p>
-        ) : null}
+        {!steps.length && <p className="text-xs text-slate-500">此來源沒有直接連到這條主張的證據。</p>}
       </div>
-
       {others.length ? (
-        <>
-          <h3 className="mt-4 text-[12.5px] font-bold text-slate-900">
-            還有哪些記錄指名它
-            <span className="ml-2 font-mono text-[11px] font-normal text-slate-500">{others.length}</span>
-          </h3>
-          <p className="mt-1 text-[11.5px] leading-6 text-slate-500">
-            這些不是它的 evidence_step，但它們指名了這條 claim——例如一個 question 把它列為答案。它們各自錨在原文上，所以左邊的標示也包含它們。
-          </p>
-          <div className="mt-2 space-y-2">
-            {others.map((node) => (
-              <div key={node.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                <KindBadge kind={node.kind} />
-                <p className="mt-1.5 text-[13px] leading-7 text-slate-800">{node.statement}</p>
-                <Fields rows={nodeRows(node)} />
-                {quotes(node)}
-              </div>
-            ))}
-          </div>
-        </>
+        <details className="mt-4 text-xs text-slate-700">
+          <summary className="cursor-pointer font-semibold">直接連到主張的其他資料（{others.length}）</summary>
+          {others.map((node) => (
+            <div key={node.id} className="mt-2 border-l border-slate-300 pl-2">
+              <KindBadge kind={node.kind} />
+              <p className="mt-1 leading-6">{node.statement}</p>
+              {quotes(node)}
+              <Fields rows={nodeRows(node)} />
+            </div>
+          ))}
+        </details>
       ) : null}
     </aside>
   );
@@ -319,17 +318,18 @@ function FragmentDetail({
       <BackButton onClick={onBack} />
 
       <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
-        <p className="font-mono text-[10.5px] text-amber-800">source_fragment</p>
+        <p className="text-xs text-amber-800">原文片段 · {fragment.paragraph_key}</p>
         <p className="mt-1 text-[13px] leading-7 text-slate-900">{fragment.excerpt || "（沒有 verbatim_excerpt）"}</p>
-        <Fields
-          rows={[
+        <details className="mt-2 text-xs text-amber-900">
+          <summary className="cursor-pointer">定位資料</summary>
+          <Fields rows={[
             ["fragment_id", fragment.id],
             ["paragraph_key", fragment.paragraph_key],
             ["anchor_state", fragment.anchor_state],
             ["media_time", fragment.media_time === null ? "" : timecode(fragment.media_time)],
-          ]}
-        />
-        <p className="mt-2 text-[11px] leading-6 text-amber-900">{ANCHOR_NOTE[fragment.anchor_method]}</p>
+          ]} />
+          <p className="mt-2 leading-6">{ANCHOR_NOTE[fragment.anchor_method]}</p>
+        </details>
       </div>
 
       <h3 className="mt-4 text-[12.5px] font-bold text-slate-900">
@@ -340,7 +340,10 @@ function FragmentDetail({
           <div key={node.id} className="rounded-xl border border-slate-200 bg-white p-3">
             <KindBadge kind={node.kind} />
             <p className="mt-1.5 text-[13px] leading-7 text-slate-800">{node.statement}</p>
-            <Fields rows={nodeRows(node)} />
+            <details className="mt-1 text-xs text-slate-600">
+              <summary className="cursor-pointer">記錄資料</summary>
+              <Fields rows={nodeRows(node)} />
+            </details>
           </div>
         ))}
         {nodes.length === 0 ? (
@@ -351,7 +354,7 @@ function FragmentDetail({
       </div>
 
       <h3 className="mt-4 text-[12.5px] font-bold text-slate-900">
-        由此產生的 claims<span className="ml-2 font-mono text-[11px] font-normal text-slate-500">{claims.length}</span>
+        相關主張<span className="ml-2 text-[11px] font-normal text-slate-500">{claims.length}</span>
       </h3>
       <div className="mt-2 space-y-2">
         {claims.map((claim) => (
@@ -362,13 +365,7 @@ function FragmentDetail({
             className="block w-full rounded-xl border border-indigo-200 bg-white p-3 text-left hover:border-indigo-400"
           >
             <p className="text-[13px] leading-7 text-slate-900">{claim.statement}</p>
-            <Fields
-              rows={[
-                ["claim_id", claim.id],
-                ["claim_type", claim.claim_type],
-                ["fragment", claim.fragment_ids.length],
-              ]}
-            />
+            <p className="mt-1 text-xs text-slate-500">{claim.label}</p>
           </button>
         ))}
         {claims.length === 0 ? (

@@ -389,11 +389,12 @@ class SourceCoverageReader:
             return [(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
 
     def load(self) -> dict[str, Any]:
-        rows = self._rows(("source_documents", "source_fragments", "claims") + ANCHORED_COLLECTIONS)
+        rows = self._rows(("source_documents", "source_fragments", "claims", "knowledge_relations") + ANCHORED_COLLECTIONS)
         documents: dict[str, dict[str, Any]] = {}
         fragments_by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
         nodes: list[tuple[str, str, str, dict[str, Any]]] = []
         claims: dict[str, dict[str, Any]] = {}
+        relations: list[dict[str, Any]] = []
         for collection, object_id, review_status, payload in rows:
             if collection == "source_documents":
                 documents[object_id] = payload
@@ -401,6 +402,8 @@ class SourceCoverageReader:
                 fragments_by_source[str(payload.get("source_id") or "")].append(payload)
             elif collection == "claims":
                 claims[object_id] = {**payload, "review_status": review_status}
+            elif collection == "knowledge_relations":
+                relations.append({**payload, "relation_id": object_id})
             else:
                 nodes.append((collection, object_id, review_status, payload))
         # Keep superseded fragments visible if a live record still depends on them.
@@ -418,6 +421,7 @@ class SourceCoverageReader:
             "fragments_by_source": fragments_by_source,
             "nodes": nodes,
             "claims": claims,
+            "relations": relations,
         }
 
     def source_ids(self) -> list[str]:
@@ -520,9 +524,21 @@ class SourceCoverageReader:
                 "scripture_refs": [str(item) for item in payload.get("scripture_refs") or []],
                 "fragment_ids": owned,
                 "claim_ids": list(dict.fromkeys(produced)),
+                "related_material": [],
             }
             for fragment_id in owned:
                 fragments[fragment_id]["node_ids"].append(object_id)
+
+        for relation in corpus.get("relations", []):
+            from_id, to_id = relation.get("from_id"), relation.get("to_id")
+            if from_id == to_id or from_id not in nodes or to_id not in nodes:
+                continue
+            for step_id, related_id, direction in ((to_id, from_id, "incoming"), (from_id, to_id, "outgoing")):
+                if nodes[step_id]["kind"] == "step":
+                    nodes[step_id]["related_material"].append({
+                        "id": relation["relation_id"], "node_id": related_id, "direction": direction,
+                        "relation_type": relation["relation_type"], "reason": relation.get("reason") or "",
+                    })
 
         # A claim reaches this source through its EvidenceSteps and through
         # other anchored node types such as a Question's `answer_claim_ids`.
@@ -540,13 +556,22 @@ class SourceCoverageReader:
                     for fragment_id in nodes[step]["fragment_ids"]
                 )
             )
+            named_nodes = [node for node in nodes.values() if claim_id in node["claim_ids"]]
             fragment_ids += [
                 fragment_id
-                for node in nodes.values()
-                if claim_id in node["claim_ids"]
+                for node in named_nodes
                 for fragment_id in node["fragment_ids"]
                 if fragment_id not in fragment_ids
             ]
+            local_steps = dict.fromkeys([
+                *(step for step in steps if step in nodes),
+                *(node["id"] for node in named_nodes if node["kind"] == "step"),
+            ])
+            fragment_ids = list(dict.fromkeys([
+                *fragment_ids,
+                *(fragment_id for step in local_steps for relation in nodes[step]["related_material"]
+                  for fragment_id in nodes[relation["node_id"]]["fragment_ids"]),
+            ]))
             ordinals = [
                 fragments[fragment_id]["segment_ordinal"]
                 for fragment_id in fragment_ids
