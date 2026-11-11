@@ -145,76 +145,88 @@ def test_unknown_outcome_has_no_recovery_generation(tmp_path):
     assert len(list((tmp_path / 'calls').glob('*/state.json'))) == 1
 
 
-@pytest.mark.parametrize('repair_needed', [False, True, 'malformed_json', 'unlocatable_old', 'blocked'])
-@pytest.mark.parametrize('use_vocabulary', [False, True])
-def test_run_applies_clear_edits_with_no_second_transcriber(tmp_path, monkeypatch, repair_needed, use_vocabulary):
+@pytest.mark.parametrize('verdict, heard, expected', [
+    ('replacement', '引號', 'machine_supported'),
+    ('original', 'in how', 'pending'),
+    ('uncertain', '', 'pending'),
+    ('replacement', '別的詞', 'pending'),
+    (None, '', None),
+])
+def test_run_verifies_context_edits_and_preserves_out_of_scope_paragraphs(
+    tmp_path, monkeypatch, verdict, heard, expected,
+):
     import json
-    import sys
     from backend.pipeline import transcript_audio_correction as module
     from backend.pipeline.slide_change_pilot import file_sha, save_json
-    source, audio, out = tmp_path / 'source', tmp_path / 'audio', tmp_path / 'out'
-    source.mkdir(); audio.mkdir()
+
+    source, audio, out = [tmp_path / name for name in ('source', 'audio', 'out')]
+    source.mkdir()
+    audio.mkdir()
     (audio / 'audio.wav').write_bytes(b'synthetic audio')
     (audio / 'illustrated_transcript.json').write_text('{}')
-    p = paragraph()
-    row = proposal(p)
-    fields = ['paragraph_id', 'old', 'new', 'occurrence', 'kind', 'audio_quote',
-              'audio_support', 'reason', 'slide_event_ids']
-    answer = {'proposals': [{k: row[k] for k in fields}]}
-    save_json(audio / 'audio_manifest.json', {'source_sha256': 'source',
-              'audio_sha256': file_sha(audio / 'audio.wav'), 'duration_ms': 900000})
-    save_json(source / 'illustrated_with_visual_text.json', {'source_sha256': 'source',
-              'speech_artifact_sha256': file_sha(audio / 'illustrated_transcript.json'),
-              'paragraphs': [p], 'assets': [], 'occurrences': []})
+    editable = paragraph()
+    protected = {**editable, 'id': 'protected'}
+    row = proposal(editable)
+    fields = ('paragraph_id', 'old', 'new', 'occurrence', 'kind', 'reason')
+    candidate = {key: row[key] for key in fields}
+    save_json(audio / 'audio_manifest.json', {
+        'source_sha256': 'source', 'audio_sha256': file_sha(audio / 'audio.wav'), 'duration_ms': 900000,
+    })
+    save_json(source / 'illustrated_with_visual_text.json', {
+        'source_sha256': 'source', 'speech_artifact_sha256': file_sha(audio / 'illustrated_transcript.json'),
+        'paragraphs': [protected, editable], 'assets': [], 'occurrences': [],
+    })
+    stages = []
+
     class Adapter:
-        def __init__(self, *args):
-            self.config = {'response_json_schema': {}, 'max_output_tokens': 8192}
-            self.model = 'synthetic-gemini'
-            self.calls = 0
-        def count(self, parts): return 100
+        input_rate = output_rate = 1
+
+        def __init__(self, provider, prompt, schema):
+            self.model = provider
+            self.prompt = prompt
+            self.config = {'max_output_tokens': 1024}
+
+        def count(self, parts):
+            return 100
+
         def generate(self, parts):
-            self.calls += 1
-            if repair_needed == 'blocked' and self.calls == 2:
-                return {'candidates': [], 'prompt_feedback': {'block_reason': 'PROHIBITED_CONTENT'}}
-            response = {'proposals': answer['proposals'] * 2} if repair_needed in (True, 'blocked') and self.calls == 1 else answer
-            if repair_needed == 'unlocatable_old' and self.calls == 2:
-                response = {'proposals': answer['proposals'] + [{**answer['proposals'][0], 'old': '不存在的原文'}]}
-            return {'answer': response, 'bad_prefix': repair_needed in ('malformed_json', 'unlocatable_old') and self.calls == 1,
-                    'candidates': [{'finish_reason': 'STOP'}]}
-        def text(self, raw): return ('female' if raw.get('bad_prefix') else '') + json.dumps(raw['answer'])
-        def usage(self, raw): return {'estimated_usd_upper': .01}
+            stages.append(self.model)
+            if self.model == 'openai':
+                material = json.loads(parts)
+                assert material['eligible_ids'] == ['p0']
+                assert [p['id'] for p in material['context']] == ['protected', 'p0']
+                suggestions = [{**candidate, 'paragraph_id': 'protected'}]
+                if verdict is not None:
+                    suggestions.append(candidate)
+                return {'proposals': suggestions}
+            assert parts[1].inline_data.data == b'synthetic mp3'
+            return {'verdict': verdict, 'heard': heard}
+
+        def text(self, raw):
+            return json.dumps(raw)
+
+        def usage(self, raw):
+            return {'estimated_usd_upper': .01}
+
     def fake_clip(samples, start, end, folder):
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / 'audio.mp3'; path.write_bytes(b'synthetic mp3'); return path
+        path = folder / 'audio.mp3'
+        path.write_bytes(b'synthetic mp3')
+        return path
+
     monkeypatch.setattr(module, 'VisionReviewer', Adapter)
     monkeypatch.setattr(module, 'read_audio', lambda _: None)
     monkeypatch.setattr(module, 'clip_audio', fake_clip)
-    # Any reintroduced OpenAI ASR import would fail this end-to-end trial.
-    monkeypatch.setitem(sys.modules, 'openai', None)
-    from backend.pipeline.transcription_vocabulary import load_vocabulary, vocabulary_binding
-    vocabulary = load_vocabulary(Path(module.__file__).parent / 'policies/wang_transcription_vocabulary_v1.json') if use_vocabulary else None
-    result = module.run(source, audio, out, vocabulary=vocabulary)
-    if use_vocabulary:
-        assert result['vocabulary_hint'] == vocabulary_binding(vocabulary)
-        assert 'Possible confusions are NOT automatic replacements' in result['prompt']
-    else:
-        assert 'vocabulary_hint' not in result
-    if repair_needed == 'blocked':
-        assert result['status_counts'] == {}
-        assert result['corrected_paragraphs'][0]['text'] == p['text']
-        assert result['blocked_repairs'][0]['paragraph_ids'] == [p['id']]
-    else:
-        assert result['status_counts'] == {'machine_supported': 1}
-        assert result['corrected_paragraphs'][0]['text'] == '他用了 引號 來引用這句話。'
+    result = module.run(source, audio, out, eligible_ids={'p0'})
+    assert stages == (['openai'] if verdict is None else ['openai', 'gemini'])
+    assert result['corrected_paragraphs'][0] == protected
+    assert result['withheld_proposals'][0]['status'] == 'withheld_outside_edit_scope'
+    assert result['status_counts'] == ({expected: 1} if expected else {})
+    expected_text = editable['text'].replace('in how', '引號') if expected == 'machine_supported' else editable['text']
+    assert result['corrected_paragraphs'][1]['text'] == expected_text
     assert result['independent_asr_calls'] == 0
-    if repair_needed == 'unlocatable_old':
-        assert len(result['withheld_proposals']) == 1
-        assert result['withheld_proposals'][0]['status'] == 'withheld_invalid_exact_range'
-        assert result['withheld_proposals'][0]['old'] == '不存在的原文'
-    requests = [json.loads(p.read_text()) for p in (out / 'calls').glob('*/request.json')]
-    expected = ['audio_correction_proposals', 'proposal_structure_repair_once'] if repair_needed else ['audio_correction_proposals']
-    assert sorted(r['stage'] for r in requests) == sorted(expected)
-    assert result['reconciliation_rounds_per_batch'] == 0
+    assert module.run(source, audio, out, eligible_ids={'p0'}) == result
+    assert len(stages) == (1 if verdict is None else 2)
 
 
 def test_redundant_nested_foreign_word_edit_is_recorded_under_covering_edit():
