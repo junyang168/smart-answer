@@ -72,6 +72,7 @@ type SeekRequest = {
   time: number;
   play: boolean;
   attempts: number;
+  warming: boolean;
   deadline: number;
 };
 
@@ -144,13 +145,17 @@ export default function ChapterListener({
       time,
       play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
       attempts: 0,
+      warming: false,
       deadline: Date.now() + SEEK_TIMEOUT_MS,
     };
     pending.current = wanted;
     setSeekError("");
     setPosition({ clip: index, time });
     setPlaying(wanted.play);
-    if (element && !element.paused) element.pause();
+    if (element) {
+      element.pause();
+      element.muted = false;
+    }
     applySeek();
   }
 
@@ -173,28 +178,38 @@ export default function ChapterListener({
       window.clearTimeout(seekTimer.current);
       setPosition((position) => ({ ...position, time: element.currentTime }));
       setSeekError("");
+      if (!wanted.play) element.pause();
+      element.muted = false;
       if (wanted.play && element.paused) playMedia(element);
       return;
     }
     if (Date.now() >= wanted.deadline) {
       // Keep the target available for retry and leave playback paused at an unconfirmed position.
       wanted.play = false;
+      if (element) {
+        element.pause();
+        element.muted = false;
+      }
       window.clearTimeout(seekTimer.current);
       setPlaying(false);
       setSeekError("錄音未能跳到指定位置，請再試一次。");
       return;
     }
-    if (ready && !element.seeking && wanted.attempts < 2) {
-      const ranges = element.seekable;
-      const canSeek = Array.from({ length: ranges.length }, (_, i) => i)
-        .some((i) => ranges.start(i) <= wanted.time && wanted.time <= ranges.end(i));
-      if (canSeek) {
-        wanted.attempts += 1;
-        try {
-          element.currentTime = wanted.time;
-        } catch {
-          // A later media event or the retry timer can run after the range loads.
-        }
+    // Some mobile browsers require play() before they will load or honor a seek.
+    if (element?.src === wanted.src && wanted.play && !wanted.warming) {
+      wanted.warming = true;
+      element.muted = true;
+      playMedia(element);
+    }
+    const ranges = ready ? element.seekable : null;
+    const canSeek = ranges && Array.from({ length: ranges.length }, (_, i) => i)
+      .some((i) => ranges.start(i) <= wanted.time && wanted.time <= ranges.end(i));
+    if (ready && canSeek && !element.seeking && wanted.attempts < 2) {
+      wanted.attempts += 1;
+      try {
+        element.currentTime = wanted.time;
+      } catch {
+        // The retry timer can run after the range loads.
       }
     }
     window.clearTimeout(seekTimer.current);
@@ -274,6 +289,10 @@ export default function ChapterListener({
       } else {
         wanted.play = !wanted.play;
         setPlaying(wanted.play);
+        if (!wanted.play) {
+          element.pause();
+          wanted.warming = false;
+        }
         applySeek();
       }
       return;
@@ -701,14 +720,15 @@ export default function ChapterListener({
           ref={media}
           src={mediaSrc(clip.sermon.media_url)}
           preload="auto"
+          onLoadStart={applySeek}
           onLoadedMetadata={onLoaded}
           onCanPlay={applySeek}
           onSeeked={applySeek}
           onTimeUpdate={onTimeUpdate}
           onEnded={advance}
           onPlay={(event) => {
-            if (pending.current) event.currentTarget.pause();
-            else setPlaying(true);
+            if (!pending.current) setPlaying(true);
+            else if (!event.currentTarget.muted) event.currentTarget.pause();
           }}
           onPause={() => setPlaying(Boolean(pending.current?.play))}
         />
