@@ -58,7 +58,7 @@ def publish(trial: Path, live: Path, *, owner_corrections: Path | None = None) -
         raise ValueError(f'Model postimage failed program checks: {problems}')
     review_path = slides.review_path(trial / 'data', passage, lecture, int(record.get('revision', 0)))
     review = json.loads(review_path.read_text())
-    if review.get('slides_sha256') != source_sha or review.get('blocking') is not False:
+    if review.get('slides_sha256') != source_sha or slides.review_blocks_publication(review):
         raise ValueError('Latest saved model slides have no matching nonblocking review')
     if context is not None:
         check_review(review, context, record['slides'])
