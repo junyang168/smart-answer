@@ -3,10 +3,11 @@ import pytest
 from backend.pipeline.transcript_playback_readiness import base_rows,usable,require_control
 
 
-def test_noisy_owner_source_can_enter_editor_but_not_knowledge(tmp_path,monkeypatch):
+@pytest.mark.parametrize('hold_kind', ['owner_noise', 'unresolved_playback'])
+def test_source_hold_can_enter_editor_but_not_knowledge(tmp_path,monkeypatch,hold_kind):
     import hashlib
     import backend.pipeline.transcript_playback_readiness as module
-    from backend.pipeline.slide_change_pilot import save_json
+    from backend.pipeline.slide_change_pilot import save_json, object_sha
     from backend.pipeline.transcript_source_observations import record_unintelligible
     from backend.pipeline.contextual_transcript_timing import require_verified_timing
     evidence=tmp_path/'evidence';evidence.mkdir()
@@ -14,15 +15,25 @@ def test_noisy_owner_source_can_enter_editor_but_not_knowledge(tmp_path,monkeypa
     record=dict(schema_version='full-illustrated-corrected-transcript.v1',source_sha256='a'*64,paragraphs=copy.deepcopy(paragraphs))
     save_json(evidence/'plan.json',dict(records={'source':dict(source_sha256='a'*64,paragraphs=paragraphs)},chunks=[]))
     save_json(evidence/'playback-readiness/input.json',dict(text_sha256={'source':{p['id']:hashlib.sha256(p['text'].encode()).hexdigest() for p in paragraphs}}))
-    result=dict(blocked=1,source_plan_sha256='plan',input_sha256='input',plan_sha256='reviews',paragraphs={'source':[dict(**paragraphs[0],status='ready'),dict(**paragraphs[1],status='blocked')]})
+    result=dict(blocked=1,source_plan_sha256='plan',input_sha256='input',plan_sha256='reviews',paragraphs={'source':[dict(**paragraphs[0],status='ready'),dict(**paragraphs[1],status='blocked',reason='錄音未包含完整文字。')]})
     monkeypatch.setattr(module,'assess',lambda *a,**k:copy.deepcopy(result))
     monkeypatch.setattr('backend.pipeline.transcript_timing_report.write_report',lambda *a,**k:None)
     # An unresolved boundary without the exact owner observation is still blocked.
     with pytest.raises(ValueError):module.qualify_record(tmp_path,copy.deepcopy(record),evidence,saved_only=True)
-    observation=record_unintelligible(evidence,'p2','owner','噪音太大聽不清楚')
+    if hold_kind == 'owner_noise':
+        observation=record_unintelligible(evidence,'p2','owner','噪音太大聽不清楚')
+    else:
+        observation=evidence/'playback-readiness/editor-source-holds.json'
+        save_json(observation,dict(schema_version='playback-editor-source-holds.v1',
+                                   paragraph_ids=['p1'],assessment_sha256=object_sha(result)))
+        with pytest.raises(ValueError,match='does not match'):
+            module.qualify_record(tmp_path,copy.deepcopy(record),evidence,saved_only=True)
+        save_json(observation,dict(schema_version='playback-editor-source-holds.v1',
+                                   paragraph_ids=['p2'],assessment_sha256=object_sha(result)))
     module.qualify_record(tmp_path,record,evidence,saved_only=True)
     assert record['timing_quality']['status']=='editor_draft_only'
     assert record['paragraphs'][1]['text']==paragraphs[1]['text']
+    assert record['timing_quality']['source_holds']['p2']['text_confirmed'] is False
     require_verified_timing(tmp_path,record,allow_editor_draft=True)
     with pytest.raises(ValueError,match='knowledge exports'):require_verified_timing(tmp_path,record)
     # Neither a forged qualified flag nor changed hold/source/text can bypass it.

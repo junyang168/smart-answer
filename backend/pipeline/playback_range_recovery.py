@@ -96,6 +96,9 @@ def apply(evidence, base):
     plan = validate(evidence, base)
     result = copy.deepcopy(base)
     rows = {(l, r['id']): r for l, rs in result['paragraphs'].items() for r in rs}
+    for row in rows.values():
+        if row.get('prior_range_status'):
+            row['status'] = row['prior_range_status']
     parser = VisionReviewer.__new__(VisionReviewer)
     parser.provider = 'gemini'
     for i, case in enumerate(plan['cases']):
@@ -122,11 +125,20 @@ def apply(evidence, base):
         row['range_recovery_review'] = str(saved.relative_to(evidence))
         if selected:
             c = next(c for c in case['candidates'] if c['id'] == selected['id'])
-            row['prior_playback_verdict'] = copy.deepcopy(row)
+            original = next(r for r in base['paragraphs'][case['lecture']] if r['id'] == case['paragraph_id'])
+            row['prior_playback_verdict'] = copy.deepcopy(original)
+            options = []
+            for candidate in case['candidates']:
+                judgment = playback.usable({**answer, 'selected_id': candidate['id']}, case)
+                if judgment:
+                    options.append(dict(id=candidate['id'], start_ms=candidate['start_ms'],
+                                        end_ms=candidate['end_ms'], judgment=judgment))
             row.update(status='ready_with_context' if any(selected[k] == 'brief' for k in ('leading_context', 'trailing_context')) else 'ready',
                        start_ms=c['start_ms'], end_ms=c['end_ms'], reason=answer['reason'],
-                       selected_id=c['id'], context=selected, basis='new_source_range_audio_review')
+                       selected_id=c['id'], model_selected_id=c['id'], context=selected,
+                       complete_options=options, basis='new_source_range_audio_review')
     for rs in result['paragraphs'].values():
+        playback.repair_range_conflicts(rs)
         for left, right in zip(rs, rs[1:]):
             if left['status'] != 'blocked' and right['status'] != 'blocked' and (
                     right['start_ms'] < left['start_ms'] or left['end_ms'] - right['start_ms'] > playback.MAX_CONTEXT_MS):
