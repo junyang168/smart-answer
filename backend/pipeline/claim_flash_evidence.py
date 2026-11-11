@@ -97,6 +97,27 @@ def completion_schema(schema,job_ids):
     return result
 
 
+PROGRAM_VALIDATED_SCHEMA = 'program_validated_v1'
+
+
+def program_validated_schema(schema):
+    """Leave string lengths and batch membership to the reply validators."""
+    def remove_lengths(value):
+        if isinstance(value, dict):
+            return {k: remove_lengths(v) for k, v in value.items() if k != 'minLength'}
+        if isinstance(value, list):
+            return [remove_lengths(item) for item in value]
+        return value
+
+    result = remove_lengths(schema)
+    items = result['properties']['items']
+    items.pop('minItems', None)
+    items.pop('maxItems', None)
+    definition = result['$defs'][items['items']['$ref'].rsplit('/', 1)[1]]
+    definition['properties']['job_id'].pop('enum', None)
+    return result
+
+
 def assert_candidate_context(decision,all_decisions):
     context=decision.get('source_context')
     if context and human.scoped(all_decisions,context['paragraphs'])!=context['entries']:
@@ -372,7 +393,7 @@ def coverage_state(catalog):
         **{field:p[field] for field in ('speaker','stance') if p.get(field)}} for k,p in catalog.items()}}
 
 
-def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False):
+def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False, program_validated=False):
     sid = next(iter(sources)); working = dict(records); updates = {}; generated = {}; outcomes = []; pending = []; values = {}; ready = {}
     pool, _ = group_records(group, records, targets)
     paragraphs = {sid: sorted(set(group['paragraph_keys']) | {p['paragraph_key'] for p in pool.values()})}
@@ -421,7 +442,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     schema=CompletionEdits if complete_source else Edits
     for batch,raw in f.gpt(root/'fidelity-edits',ports,'evidence_fidelity_repair',jobs,schema.model_json_schema(),
             completion_prompt() if complete_source else PROMPT,semantic_review=False,
-            project_input=completion_input if complete_source else None):
+            project_input=completion_input if complete_source else None, program_validated=program_validated):
         replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
             quotes=getattr(edit,'quotes',None)
@@ -612,6 +633,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         if len(selected)!=len(set(selected)) or not set(selected)<={g['group_id'] for g in plan['groups']}:raise ValueError('invalid Evidence group selection')
         saved_intent=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
         complete_source=not saved_intent or saved_intent.get('source_completion_contract')==COMPLETION_CONTRACT
+        program_validated = not saved_intent or saved_intent.get('wire_schema') == PROGRAM_VALIDATED_SCHEMA
         authorized=saved_intent['selected'] if saved_intent else selected
         if not set(selected)<=set(authorized):raise ValueError('Evidence group selection expands frozen scope')
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':authorized,'models':ports.identity,
@@ -619,6 +641,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             'policy':e.digest([PROMPT,COVERAGE_PROMPT,components.PROMPT,Edits.model_json_schema(),MissingEdits.model_json_schema()]),
             **({'source_completion_contract':COMPLETION_CONTRACT,
                 'source_completion_policy':e.digest([completion_prompt(),completion_prompt(True),CompletionEdits.model_json_schema()])} if complete_source else {}),
+            **({'wire_schema': PROGRAM_VALIDATED_SCHEMA} if program_validated else {}),
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
@@ -676,7 +699,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             if group['group_id'] not in selected:continue
             targets=sorted(k for k,gid in owners.items() if gid==group['group_id'] and k in records)
             result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply,
-                complete_source=complete_source)
+                complete_source=complete_source, program_validated=program_validated)
             results.append(result)
             if result.get('applied'):
                 for key in result['updates']:

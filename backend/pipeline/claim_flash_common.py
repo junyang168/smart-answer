@@ -343,18 +343,22 @@ def reuse_argument_edge_order(root,request):
     return request
 
 
-def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None):
+def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=None, semantic_review=True, project_input=None, program_validated=False):
     """Split BEFORE calling by complete wire size and task count. No truncation."""
+    evidence_task = task == 'evidence_fidelity_repair'
+    if evidence_task:
+        from backend.pipeline import claim_flash_evidence as eo
+
     def request(batch):
         data={'task': task, 'jobs': batch, **(shared or {})}
         if project_input:data=project_input(deepcopy(data))
         result={'identity': ports.identity['gpt'],
                 'system': instruction+('\n'+SEMANTIC_REVIEW if semantic_review else ''),
                 'input': data, 'schema': schema}
-        if task=='evidence_fidelity_repair' and data.get('source_completion_contract'):
-            from backend.pipeline import claim_flash_evidence as eo
-            if data['source_completion_contract']==eo.COMPLETION_CONTRACT:
-                result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
+        if evidence_task and program_validated:
+            result['schema'] = eo.program_validated_schema(schema)
+        elif evidence_task and data.get('source_completion_contract') == eo.COMPLETION_CONTRACT:
+            result['schema']=eo.completion_schema(schema,[j['job_id'] for j in batch])
         return result
     batches, batch = [], []
     for job in jobs:
@@ -372,8 +376,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         if prepare:
             batch=prepare(deepcopy(batch))
         req=request(batch)
-        if task=='evidence_fidelity_repair' and getattr(ports,'focus_evidence_findings',False):
-            from backend.pipeline import claim_flash_evidence as eo
+        if evidence_task and getattr(ports,'focus_evidence_findings',False):
             direction=getattr(ports,'focused_review_instruction','')
             if not direction:raise ValueError('focused Evidence continuation requires its owner direction')
             e.save(Path(root)/'focused-review-admission.json',{'contract':eo.FOCUSED_CONTRACT,
@@ -385,6 +388,8 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
                     authority=stopped_gpt_authority(root,ports,req)
                     req=eo.focused_request(req)
                     req['execution_recovery']={'original_request_sha256':old_key,'authority_sha256':e.digest(authority)}
+                    if authority.get('wire_schema') == eo.PROGRAM_VALIDATED_SCHEMA:
+                        req['schema'] = eo.program_validated_schema(req['schema'])
                 else:req=eo.focused_request(req)
         if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
             if req.get('execution_recovery'):
@@ -405,6 +410,8 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             authority=stopped_gpt_authority(root,ports,req)
             req={**req,'execution_recovery':{'original_request_sha256':e.digest(req),
                 'authority_sha256':e.digest(authority)}}
+            if authority.get('wire_schema') == eo.PROGRAM_VALIDATED_SCHEMA:
+                req['schema'] = eo.program_validated_schema(req['schema'])
             if len(json.dumps(req,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete authorized retry exceeds payload limit; no call made')
             stopped=Path(root)/'gpt'/e.digest(req)
@@ -415,6 +422,9 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
         e.save(Path(root)/'gpt'/e.digest(req)/'metrics.json', {
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
+        if evidence_task and (program_validated or req.get('execution_recovery')):
+            reply_model = eo.CompletionEdits if req['input'].get('source_completion_contract') == eo.COMPLETION_CONTRACT else eo.Edits
+            reply_model.model_validate(reply)
         # A schema-valid reply may omit jobs. Keep every returned adjudication;
         # request only the missing jobs once, under the same provider call budget.
         # Unknown/duplicate IDs are not silently assigned or adjudicated by code.
@@ -430,14 +440,15 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             correction=request(missing)
             if req.get('focused_contract'):correction=eo.focused_request(correction)
             correction['system']+='\n前次漏答；本次只處置這些未答工作，每個 ID 恰好一次，不重做已答項。'
-            correction['schema']=deepcopy(schema)
-            array=correction['schema'].get('properties',{}).get('items',{})
-            array.update(minItems=len(missing),maxItems=len(missing))
-            definition=array.get('items',{})
-            if '$ref' in definition:
-                definition=correction['schema']['$defs'][definition['$ref'].rsplit('/',1)[1]]
-            if field in definition.get('properties',{}):
-                definition['properties'][field]['enum']=[job['job_id'] for job in missing]
+            if not program_validated:
+                correction['schema']=deepcopy(schema)
+                array=correction['schema'].get('properties',{}).get('items',{})
+                array.update(minItems=len(missing),maxItems=len(missing))
+                definition=array.get('items',{})
+                if '$ref' in definition:
+                    definition=correction['schema']['$defs'][definition['$ref'].rsplit('/',1)[1]]
+                if field in definition.get('properties',{}):
+                    definition['properties'][field]['enum']=[job['job_id'] for job in missing]
             if len(json.dumps(correction,ensure_ascii=False).encode())>GPT_BYTES:
                 raise ValueError('complete missing-job correction exceeds Flash payload limit; no call made')
             recovery=Path(root)/'output-contract'/e.digest(req)

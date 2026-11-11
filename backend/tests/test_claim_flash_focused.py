@@ -223,3 +223,50 @@ def test_additional_owner_retry_preserves_every_unknown_attempt_and_stops_withou
         old=root/'gpt'/e.digest(request)
         assert (old/'started.json').exists() and not (old/'response.json').exists()
     assert run()==result and len(ports.calls)==3
+
+
+def test_authorized_schema_only_retry_preserves_stopped_request(tmp_path):
+    class Ports:
+        identity = {'gpt': {'backend': 'test', 'model': 'test', 'effort': 'medium'}}
+        focus_evidence_findings = True
+        focused_review_instruction = '只處置原疑點'
+
+        def __init__(self):
+            self.root = tmp_path / 'provider'
+            self.calls = []
+
+        def repair(self, request):
+            self.calls.append(deepcopy(request))
+            if len(self.calls) == 1:
+                raise TimeoutError('stopped without an answer')
+            return {'items': [{'job_id': job()['job_id'], 'action': 'keep', 'reason': '有據保留。'}]}
+
+    ports = Ports()
+    root = tmp_path / 'evidence'
+
+    def run():
+        return list(f.gpt(root, ports, 'evidence_fidelity_repair', [job()],
+                          eo.CompletionEdits.model_json_schema(), eo.PROMPT,
+                          shared={'source_completion_contract': eo.COMPLETION_CONTRACT}, semantic_review=False))
+
+    with pytest.raises(TimeoutError):
+        run()
+    original = ports.calls[0]
+    key = e.digest(original)
+    saved = root / 'gpt' / key
+    exit_path = ports.root / 'gpt' / key / 'transport' / 'exit.json'
+    exit_receipt = {'error_type': 'TimeoutExpired', 'returncode': None}
+    e.save(exit_path, exit_receipt)
+    e.save(saved / 'owner-recovery.json', {'owner_direction': 'Use the schema-only retry', 'max_reissues': 1,
+        'original_request_sha256': key, 'exit_path': str(exit_path), 'exit_sha256': e.digest(exit_receipt),
+        'wire_schema': eo.PROGRAM_VALIDATED_SCHEMA})
+
+    result = run()
+    successor = ports.calls[1]
+    assert successor['execution_recovery']['original_request_sha256'] == key
+    assert successor['schema'] == eo.program_validated_schema(original['schema'])
+    assert {k: v for k, v in successor.items() if k not in {'schema', 'execution_recovery'}} == {
+        k: v for k, v in original.items() if k != 'schema'}
+    assert json.loads((saved / 'request.json').read_text()) == original
+    assert not (saved / 'response.json').exists()
+    assert run() == result and len(ports.calls) == 2
