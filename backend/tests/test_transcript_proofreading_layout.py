@@ -41,3 +41,26 @@ def test_editor_uses_roles_and_keeps_unverified_speech_without_a_model_label():
     text, turns = proofreading_speaker_text(cues, {"w0:spk:0": "professor", "w0:spk:1": "audience"})
     assert text == "**教授**：先說。\n\n**聽眾**：請問？\n\n還有。"
     assert "".join(t["text"] for t in turns) == "".join(c["text"] for c in cues)
+
+
+def test_self_correction_keeps_replacement_and_refuses_ambiguous_or_marked_text():
+    from backend.pipeline.transcript_proofreading_layout import mark_self_correction
+
+    before = "保羅用幾節來談到丈夫的責任？啊不是，妻子的責任。~~幾，~~幾節？"
+    drop, keep = "丈夫的責任？啊不是，", "妻子的責任。"
+    after = mark_self_correction(before, drop, keep)
+    assert after == before.replace(drop, f"~~{drop}~~")
+    assert mark_self_correction(after, drop, keep) == after
+    assert mark_self_correction(before + before, drop, keep) == before + before
+    contrast = "保羅談丈夫的責任，也談妻子的責任。"
+    assert mark_self_correction(contrast, drop, keep) == contrast
+
+
+
+def test_self_correction_leaves_negation_and_substantive_contrast_for_review():
+    from backend.pipeline.transcript_proofreading_layout import mark_self_correction
+
+    text = "這裡不是在談丈夫的責任，而是在談妻子的責任。"
+    assert mark_self_correction(text, "不是在談丈夫的責任，", "而是在談妻子的責任。") == text
+    text = "先告訴你啊，不要，我先給你看證據。"
+    assert mark_self_correction(text, "先告訴你啊，不要，", "我先給你看證據") == text

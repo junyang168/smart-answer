@@ -91,6 +91,28 @@ def mark_repetition(text, quote, retained):
     return text
 
 
+def mark_self_correction(text, drop, keep):
+    """Soft-delete the exact withdrawn words while retaining the correction."""
+    if (not drop.strip() or not keep.strip() or len(drop) > 48 or "~" in drop + keep
+            or "\n" in drop + keep or not any(c.isalnum() for c in drop)
+            or not any(c.isalnum() for c in keep) or drop.strip() == keep.strip()):
+        return text
+    # Only a trailing spoken retraction can contain a negation in an
+    # automatic correction. Keep negations in the withdrawn wording reviewable.
+    withdrawn = re.sub(r"(?:啊|喔|哦|呃)?(?:不是|不對)[，,。！？!?\s]*$", "", drop)
+    if re.search(r"[不沒没未無无非勿別别]", withdrawn):
+        return text
+    anchor = drop + keep
+    start = text.find(anchor)
+    if start < 0 or text.find(anchor, start + 1) >= 0:
+        return text
+    end = start + len(drop)
+    if any(m.start() < start + len(anchor) and start < m.end()
+           for m in re.finditer(r"~~.*?~~", text, flags=re.S)):
+        return text
+    return text[:start] + "~~" + text[start:end] + "~~" + text[end:]
+
+
 def proofreading_speaker_text(cues, roles):
     """Render canonical speaker roles while retaining uncertain speech."""
     turns = []
