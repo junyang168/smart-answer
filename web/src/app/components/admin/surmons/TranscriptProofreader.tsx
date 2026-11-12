@@ -440,7 +440,6 @@ function TranscriptProofreader({
         "unordered-list",
         "ordered-list",
         "link",
-        "table",
         "horizontal-rule",
       ],
       shortcuts: {
