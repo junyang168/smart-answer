@@ -45,6 +45,43 @@ def test_candidate_loader_keeps_provenance_and_canonical_guard(candidate,tmp_pat
         assert store.get_record_state('claims',package['claims'][0]['claim_id'])==before
 
 
+@pytest.mark.parametrize('action',['needs_connection','needs_source'])
+def test_only_connection_findings_resume_into_argument_stage(candidate,tmp_path,monkeypatch,action):
+    package,_=candidate
+    path=tmp_path/'candidate.json';path.write_text(json.dumps(package))
+    class HandoffPorts(FlowPorts):
+        def repair(self,request):
+            if request['input']['task']=='claim_support':
+                self.calls.append(('gpt',request))
+                return {'items':[{'job_id':job['job_id'],'action':action,'reason':'核對缺項。'}
+                                 for job in request['input']['jobs']]}
+            return super().repair(request)
+    original=flow.arguments.run
+    def interrupted(*args,**kwargs):
+        raise RuntimeError('interrupted before argument review')
+    monkeypatch.setattr(flow.arguments,'run',interrupted)
+    root=tmp_path/'handoff'
+    ports=HandoffPorts(choices={'support':'partial'})
+    if action=='needs_source':
+        stopped=flow.run_candidate(path,root,ports)
+        assert stopped['status']=='needs_attention' and stopped['pending'][0]['task']=='statements'
+        return
+    with pytest.raises(RuntimeError,match='interrupted before argument review'):
+        flow.run_candidate(path,root,ports)
+    progress=flow.read(root/'flash/claim-progress.json')
+    assert progress['active']['task']=='arguments'
+    statement_path=next((root/'flash/claims').glob('*/statements/result.json'))
+    checkpoint=flow.read(statement_path)
+    original_verification=flow.read(statement_path.with_name('verification.json'))
+    assert checkpoint['argument_handoffs']==original_verification['pending']
+    assert checkpoint['statement_verification_sha256']==flow.e.digest(original_verification)
+    monkeypatch.setattr(flow.arguments,'run',original)
+    monkeypatch.setattr(flow.statements,'run',lambda *a,**kw:pytest.fail('statement stage ran again'))
+    resumed=flow.run_candidate(path,root,HandoffPorts(choices={'candidate':'none'}))
+    assert resumed['status']=='completed'
+    assert next(iter(resumed['stages']['claims'].values()))['arguments']['resolved_statement_handoffs']==original_verification['pending']
+
+
 def test_complete_layered_candidate_and_zero_model_replay(candidate,tmp_path):
     package,_=candidate;path=tmp_path/'candidate.json';path.write_text(json.dumps(package));ports=FlowPorts()
     result=flow.run_candidate(path,tmp_path/'flow',ports)
