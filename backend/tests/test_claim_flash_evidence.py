@@ -91,6 +91,76 @@ def test_fidelity_uses_only_complete_actual_fragments_and_source_blind_split(tmp
     assert {k:v for k,v in post.items() if k!='statement'}=={k:v for k,v in before['evidence_steps/E']['payload'].items() if k!='statement'}
 
 
+@pytest.mark.parametrize('mode',['direct','omitted','misquoted','neighbor','not_found','out_of_scope','changes_statement'])
+def test_quote_only_repair_uses_one_local_selection(tmp_path, monkeypatch, mode):
+    quote='當小孩子被人家騙了，小孩子受苦的時候，不聽話受苦的時候是什麼？父母比孩子更痛心。你不相信？我們這些做父母的人。神也一樣。'
+    texts=['遠段一。','前二段。','前一段。',quote,'後一段。','後二段。','遠段二。']
+    quote_key='S0004'
+    if mode=='neighbor':
+        quote=quote.removesuffix('神也一樣。')
+        texts[2:4]=[quote,'神也一樣。']
+        quote_key='S0003'
+    records,sources=fixture(tmp_path,texts,[('S0004','神也一樣。')])
+    statement='神對受騙受苦之人的心，也像父母對孩子一樣痛心。'
+    payload=records['evidence_steps/E']['payload']
+    payload.update(statement=statement,speaker='professor',stance='asserted')
+    group={'group_id':'A','paragraph_keys':['S0004'],'lower_record_keys':['evidence_steps/E'],'reference_record_keys':[]}
+    monkeypatch.setattr(stage.components,'check',lambda *a,**kw:{
+        'record_fidelity':'partial','speaker_consistency':'different','stance_consistency':'matched'})
+    monkeypatch.setattr(stage.source,'binding_candidates',lambda *a,**kw:{'evidence_steps/E':{
+        'fragments':[{'fragment_id':'F0','paragraph_key':'S0004','quote':'神也一樣。'}],
+        'nearby_paragraphs':[{'source_id':'S','paragraph_key':'S0004',**sources['S']['paragraphs']['S0004']}],
+        'source_lookup':{'candidate_paragraph_keys':['S0004']}}})
+
+    class QuotePorts(Ports):
+        def repair(self, request):
+            task=request['input']['task']
+            if task not in {'evidence_fidelity_repair','source_binding_completion'}:
+                return super().repair(request)
+            self.calls.append(('gpt',request))
+            job,=request['input']['jobs']
+            if task=='evidence_fidelity_repair':
+                item={'job_id':job['job_id'],'action':'add_quotes','reason':'補上父母類比。'}
+                if mode=='direct':item['quotes']=[{'paragraph_key':'S0004','quote':quote}]
+                if mode=='misquoted':item['quotes']=[{'paragraph_key':'S0004','quote':'來源沒有的文字。'}]
+                if mode=='changes_statement':item['statement']='另一主張。'
+            else:
+                assert set(request['input']['source_paragraphs'])=={'S0002','S0003','S0004','S0005','S0006'}
+                assert job['statement']==statement and job['reason']=='補上父母類比。'
+                assert set(job)=={'job_id','statement','reason','material'}
+                item={'job_id':job['job_id'],'action':'bind','reason':'父母的類比與結語。',
+                      'quotes':[{'paragraph_key':quote_key,'quote':quote}]}
+                if mode=='not_found':item.update(action='needs_source',reason='附近原文不足。',quotes=[])
+                if mode=='out_of_scope':item['quotes']=[{'paragraph_key':'S0007','quote':texts[-1]}]
+            return {'items':[item]}
+
+    ports=QuotePorts();root=tmp_path/'run';previous=saved_inventory(tmp_path/'previous',sources)
+    def run(ports):
+        return stage.run_group(None,records,sources,group,['evidence_steps/E'],[],root,ports,previous,
+                               apply=False,complete_source=True,program_validated=True,quote_action=True)
+    if mode=='changes_statement':
+        with pytest.raises(ValueError,match='add_quotes cannot modify Evidence fields'):
+            run(ports)
+        return
+    result=run(ports)
+    tasks=[request['input']['task'] for role,request in ports.calls if role=='gpt']
+    assert tasks.count('evidence_fidelity_repair')==1
+    assert tasks.count('source_binding_completion')==(0 if mode=='direct' else 1)
+    if mode in {'not_found','out_of_scope'}:
+        finding,=result['pending']
+        assert finding['layer']=='source' and finding['source_completion_attempted']
+        assert result['updates']=={} and result['new_fragments']=={}
+    else:
+        assert result['status']=='verified'
+        after=result['updates']['evidence_steps/E']
+        assert after['statement']==statement and after['speaker']=='professor' and after['stance']=='asserted'
+        assert after['source_fragment_ids'][0]=='F0'
+        fragment,=result['new_fragments'].values()
+        assert fragment['verbatim_excerpt']==quote and fragment['paragraph_key']==quote_key
+    replay=QuotePorts()
+    assert run(replay)==result and replay.calls==[]
+
+
 def test_process_commentary_repair_stays_within_lower_statement_task(tmp_path):
     records,sources,plan=setup(tmp_path)
     records['evidence_steps/E']['payload']['statement']='沒有聽從祂的話，顯明沒有真正相信祂；本組尚未解釋。'

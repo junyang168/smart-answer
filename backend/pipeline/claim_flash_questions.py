@@ -18,9 +18,12 @@ SUPPORT = {'supported':'所有實質成分有據。','partial':'部分成分有�
 SCRIPTURE = {'complete':'關鍵經文及其論證作用完整、對應正確。','missing':'有遺漏，沒有錯配。',
              'mismatched':'有錯配，沒有遺漏。','missing_and_mismatched':'同時有遺漏與錯配。','uncertain':'無法判定。'}
 ROLES = {
-    'speaker': ('這項內容的發言來源角色是誰？',
-                {'professor':'教授自己的講解或判斷，不是單純引用。','audience':'聽眾自己的發言，不是單純朗讀引文。',
-                 'quoted_source':'僅承載經文或第三者引語。','mixed':'混合多種來源，不能歸一類。','uncertain':'原文不能確定。'}),
+    'speaker': ('這條 Evidence 摘要主要記錄哪一方的發言？以摘要的主要內容判定。',
+                {'professor':'摘要記錄教授自己的講解、比較、判斷或轉述。即使提到別的作者或經文，教授的比較或轉述仍選此項。',
+                 'audience':'摘要記錄聽眾自己的提問、回答或評論。',
+                 'quoted_source':'摘要本身以經文或第三者的直接引語為主要內容。',
+                 'mixed':'摘要合併多個同樣主要、無法歸一方的發言。',
+                 'uncertain':'材料不足，無法確定摘要主要記錄哪一方。'}),
     'stance': ('教授對這個完整判斷採取什麼態度？',
                {'asserted':'教授採納或肯定該完整判斷，包括判斷自身的否定。','opposed':'教授明確反對該完整判斷。',
                 'questioned':'教授設問，材料中尚未回答。','quoted':'僅轉述或假設，未表明採納或反對。',
@@ -29,10 +32,16 @@ ROLES = {
                    {'professor':'教授設問。','audience':'聽眾提問。','quoted_source':'引述別人的問題。',
                     'mixed':'多方共同提出，不能歸一位。','uncertain':'無法確定。'})}
 
+LEGACY_SPEAKER = ('這項內容的發言來源角色是誰？',
+                  {'professor':'教授自己的講解或判斷，不是單純引用。','audience':'聽眾自己的發言，不是單純朗讀引文。',
+                   'quoted_source':'僅承載經文或第三者引語。','mixed':'混合多種來源，不能歸一類。','uncertain':'原文不能確定。'})
 
-def gpt_role_rules():
+
+def gpt_role_rules(*, legacy_speaker=False):
     """One option vocabulary for Jev and the GPT disposition, not two taxonomies."""
     options={field:{'question':ROLES[field][0],'choices':ROLES[field][1]} for field in ('speaker','stance')}
+    if legacy_speaker:
+        options['speaker']={'question':LEGACY_SPEAKER[0],'choices':LEGACY_SPEAKER[1]}
     return ('分類選項與Jev共用，按以下定義選擇，不另造標籤：'
             +json.dumps(options,ensure_ascii=False,separators=(',',':'))+
             'stance針對record.statement所表達的完整判斷，不按原文問句句型、問號或個別否定詞分類。'
@@ -58,8 +67,12 @@ def decomposition():
                    'changed':'有改義或多種缺陷。','uncertain':'無法判定。'})
 
 
-def role(field, text, *, speaker=None):
+def role(field, text, *, speaker=None, legacy_speaker=False):
     instruction,criteria=ROLES[field]
+    if field=='speaker' and legacy_speaker:
+        instruction,criteria=LEGACY_SPEAKER
+    elif field=='speaker':
+        return choice(instruction+'\n內容：'+text,criteria)
     if field=='stance' and speaker and speaker!='professor':
         # The actor is a query parameter, not the answer being checked. It is
         # supplied only to this question; the speaker question remains blind.
