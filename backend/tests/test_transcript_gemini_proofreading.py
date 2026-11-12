@@ -129,12 +129,38 @@ def test_semantic_segmentation_accepts_only_punctuation_offsets_and_keeps_text()
         {"speaker": "教授", "text": "對，可以這樣看。下一題。"},
     ]
     text, positions, marked = semantic.segmentation_input(turns)
-    assert len(positions) == 4
+    assert len(positions) == 3
     assert "3.14" in marked[0]["text"]
-    assert marked[1]["text"].endswith("。〈4〉")
-    paragraphs = semantic.apply_ends(text, positions, [3, 4])
+    assert marked[1]["text"].endswith("。〈3〉")
+    paragraphs = semantic.apply_ends(text, positions, [2, 3])
     assert paragraphs[0]["text"] == "這是 3.14 嗎？對，可以這樣看。"
     assert "".join(p["text"] for p in paragraphs) == text
-    for invalid in ([4, 3], [2, 2, 4], [0, 4], [3], [3.0, 4], [True, 4]):
+    for invalid in ([3, 2], [2, 2, 3], [0, 3], [2], [2.0, 3], [True, 3]):
         with pytest.raises(ValueError, match="ordered punctuation IDs"):
             semantic.apply_ends(text, positions, invalid)
+
+
+
+def test_semantic_segmentation_offers_commas_only_inside_long_sentences():
+    from backend.pipeline.transcript_semantic_segmentation import segmentation_input
+
+    short = "你要聽我的話，人家馬上把你踢出去。"
+    long = "前" * 75 + "，" + "後" * 75 + "。"
+    text, positions, _ = segmentation_input([{"speaker": "教授", "text": short + long}])
+    assert positions == [len(short), len(short) + 76, len(text)]
+
+
+
+def test_semantic_playback_spans_keep_source_turns_across_punctuation_cut():
+    from backend.pipeline import transcript_semantic_segmentation as semantic
+
+    turns = [
+        {"id": "t1", "speaker": "聽眾", "text": "為何？", "start": 2, "end": 4},
+        {"id": "t2", "speaker": "教授", "text": "可以。下題。", "start": 4, "end": 10},
+    ]
+    text, positions, _ = semantic.segmentation_input(turns)
+    blocks = semantic.playback_blocks(semantic.apply_ends(text, positions, [2, 3]), turns)
+    assert [(b["start"], b["end"]) for b in blocks] == [(2, 7), (7, 10)]
+    assert [[(c["speaker"], c["text"]) for c in b["cues"]] for b in blocks] == [
+        [("聽眾", "為何？"), ("教授", "可以。")], [("教授", "下題。")],
+    ]
