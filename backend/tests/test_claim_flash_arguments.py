@@ -151,6 +151,43 @@ def test_statement_connection_handoff_commits_candidate_and_route_together(ready
     assert not any('statement_fidelity' in r.get('questions',{}) for role,r in ports.calls if role=='jev')
 
 
+@pytest.mark.parametrize('selected',[True,False])
+def test_connection_lookup_can_find_evidence_already_owned_by_another_claim(ready,selected):
+    store,root,plan,_,_=ready
+    evidence=deepcopy(store.get_record_state('evidence_steps','E')['payload'])
+    evidence.update(evidence_step_id='E024',produced_claim_ids=['PEER'],
+        statement='保羅不在摩西律法之下，卻仍在基督律法之下。',scripture_refs=[])
+    peer=deepcopy(store.get_record_state('claims','C')['payload'])
+    peer.update(claim_id='PEER',evidence_step_ids=['E024'],statement=evidence['statement'])
+    store.apply_plan(store.plan_package({'package_id':'peer-evidence','claims':[peer],'evidence_steps':[evidence]}))
+    plan['groups'][0]['lower_record_keys'].append('evidence_steps/E024')
+    _,sources=f.load_source(store,'S')
+    eroot=root/'with-peer-evidence'
+    assert eo.run(store,'S',plan,eroot,EvidencePorts(),saved_inventory(root/'peer-inventory',sources),apply=True)['status']=='completed'
+    finding='缺少保羅不受摩西律法管轄、卻仍受基督律法管轄的前提。'
+    class Handoff(Ports):
+        def repair(self,request):
+            if request['input']['task']=='claim_support':
+                return {'items':[{'job_id':job['job_id'],'action':'needs_connection','reason':finding}
+                                 for job in request['input']['jobs']]}
+            return super().repair(request)
+    sroot=root/'peer-statements'
+    statements.run(store,'S',['C'],eroot,sroot,Handoff(choices={'support':'partial'}),apply=True)
+    ports=Ports([{'a':'evidence_steps/E024','b':'claims/C','fragment_ids':['F'],'reason':finding}],
+                choices={'candidate':'E0' if selected else 'none'})
+    result=stage.run(store,'S',plan,'G',eroot,sroot,root/'peer-arguments',ports,apply=True)
+    assert result['status']=='applied' and result['resolved_statement_handoffs'][0]['reason']==finding
+    lookup,=[req for role,req in ports.calls if role=='jev' and 'candidate' in req['questions']]
+    assert lookup['state']['evidence']=={'E0':evidence['statement']}
+    argument,=[req for role,req in ports.calls if role=='gpt' and req['input']['task']=='argument_completeness']
+    job,=argument['input']['jobs']
+    assert job['remaining_findings'][0]['reason']==finding
+    assert job['candidate_evidence_keys']==(['evidence_steps/E024'] if selected else [])
+    assert 'evidence_steps/E024' in argument['input']['nodes']
+    assert 'E024' in store.get_record_state('claims','C')['payload']['evidence_step_ids']
+    assert set(store.get_record_state('evidence_steps','E024')['payload']['produced_claim_ids'])=={'PEER','C'}
+
+
 def test_argument_commit_crash_reuses_saved_candidate_without_new_models(ready,monkeypatch):
     store,root,plan,eroot,sroot=ready;apply=store.apply_plan
     def crash(*a,**kw):apply(*a,**kw);raise RuntimeError('after SQL')

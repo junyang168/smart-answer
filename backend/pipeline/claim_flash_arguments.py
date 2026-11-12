@@ -126,6 +126,8 @@ def active_root(root):
 
 
 CONTINUATION_PROMPT='本次只補判remaining_findings；accepted_proposed_edges已處置，保留並只補缺口。不重做其他Claim的判斷。'
+STATEMENT_HANDOFF_PROMPT=('逐項處理remaining_findings。candidate_evidence_keys是Jev找到的候選，'
+                         '用原文及現有路線確認關係，候選不足時可從其他已提供材料補足。')
 
 FINAL_SUPPORT_PROMPT='只判斷最終論據集合是否仍完整支持此Claim及關鍵經文。keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
 
@@ -250,12 +252,10 @@ def clarify_route_source(store, source_id, group, parent_root, root, ports, auth
         return statements.finish(store, root) if apply else e.publish(root, result)
 
 
-def argument_support_issues(root, ports, material):
-    questions = {key: q.claim(with_references=bool(material.get('claim_references')))[key]
-                 for key in ('support', 'scripture')}
+def bounded_jev(root, ports, material, questions):
     request = {'model': e.MODEL, 'state': material, 'questions': questions}
     if len(json.dumps(request, ensure_ascii=False).encode()) > f.JEV_BYTES:
-        return {key: 'not_run_input_limit' for key in questions}
+        return None, 'not_run_input_limit'
     try:
         answers = f.jev(root, ports, material, questions)
     except (HTTPError, e.RecordedCallRejected):
@@ -269,7 +269,33 @@ def argument_support_issues(root, ports, material):
             raise ValueError('invalid Jev rejection receipt') from None
         if not isinstance(detail, dict) or detail.get('error_type') != 'max_tokens_exceeded':
             raise
-        return {key: 'not_run_provider_token_limit' for key in questions}
+        return None, 'not_run_provider_token_limit'
+    return answers, None
+
+
+def connection_candidate(root, ports, records, claim_key, finding, pool):
+    """Find a candidate for one stated gap. The route still decides what to link."""
+    claim=records[claim_key]['payload']
+    attached={'evidence_steps/'+eid for eid in claim.get('evidence_step_ids',[])}
+    candidates=sorted(k for k in pool-attached if k.startswith('evidence_steps/'))
+    if not candidates or len(candidates)>254:
+        return None
+    choices={f'E{i}':key for i,key in enumerate(candidates)}
+    material={'claim':claim['statement'],'missing_premise':finding['reason'],
+              'evidence':{label:records[key]['payload']['statement'] for label,key in choices.items()}}
+    question=q.choice('哪筆已核驗的 EvidenceStep 最直接承載所缺的論證前提？'
+        '依實質命題配對，經文或主題相同不足以配對。沒有則選none。',
+        {**{label:label for label in choices},'none':'沒有足夠符合的候選。'})
+    answers,_=bounded_jev(root,ports,material,{'candidate':question})
+    return choices.get(answers['candidate']) if answers else None
+
+
+def argument_support_issues(root, ports, material):
+    questions = {key: q.claim(with_references=bool(material.get('claim_references')))[key]
+                 for key in ('support', 'scripture')}
+    answers,unavailable=bounded_jev(root,ports,material,questions)
+    if unavailable:
+        return {key:unavailable for key in questions}
     return {key: value for key, value in answers.items()
             if value != ('supported' if key=='support' else 'complete')}
 
@@ -296,6 +322,12 @@ def final_support_decisions(root,ports,jobs):
 
 def statement_proof(root,claim_ids,records,sources):
     root=Path(root).resolve();result=json.loads((root/'verification.json').read_text());before=json.loads((root/'before.json').read_text())
+    if (root/'result.json').exists():
+        receipt=json.loads((root/'result.json').read_text())
+        if receipt.get('argument_handoffs') and (
+                receipt.get('statement_verification_sha256')!=e.digest(result)
+                or receipt['argument_handoffs']!=result['pending']):
+            raise ValueError('Claim statement handoff differs from its saved verification')
     if (result.get('version')!=statements.VERSION or result['status'] not in {'verified','needs_attention'}
             or result.get('completion_scope')!='claim_statement_tasks_only' or not set(claim_ids)<=set(result['claim_ids'])):
         raise ValueError('completed Claim statement tasks required')
@@ -449,6 +481,17 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         proposals=[];pending=[];routes=[];claim_handoffs={}
         jobs=[{'job_id':k,**({'remaining_findings':[p for p in parent['pending'] if p['object_key']==k]} if parent is not None else {})} for k in sorted(remaining)]
         prompt=PROMPT
+        if parent is None and old_checks['pending']:
+            for job in jobs:
+                key=job['job_id']
+                findings=[item for item in old_checks['pending'] if item['object_key']==key]
+                if not findings:
+                    continue
+                job['remaining_findings']=findings
+                hints=[connection_candidate(root/'connection-lookup',ports,records,key,item,completion_pool)
+                       for item in findings]
+                job['candidate_evidence_keys']=list(dict.fromkeys(hint for hint in hints if hint))
+            prompt+=STATEMENT_HANDOFF_PROMPT
         if parent is not None:
             shared['accepted_proposed_edges']=[p for item in parent['routes'] for p in item['pairs'] if {p['a'],p['b']}<=completion_nodes]
             prompt+=CONTINUATION_PROMPT

@@ -364,7 +364,10 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                         raise ValueError('completed Claim checkpoint stage differs')
                     continue
                 recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
-                value=fn();outputs[name]=value
+                value=fn()
+                if name=='statements':
+                    value=statements.handoff_connections(gr/name,value)
+                outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
         recovery.start_stage(root,intent,stages,None,lower_sha)
         return finish(stages,[])

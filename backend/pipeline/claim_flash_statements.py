@@ -156,6 +156,19 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
     return {'updates':updates,'pending':pending,'outcomes':outcomes}
 
 
+def handoff_connections(root, result):
+    """Checkpoint the statement tasks while arguments consume the original findings."""
+    pending=result.get('pending',[])
+    if (result.get('completion_scope')!='claim_statement_tasks_only' or not pending
+            or any(item.get('layer')!='claim_connections' for item in pending)):
+        return result
+    # Arguments reads verification.json and validates fidelity and the prepared
+    # statement postimage before it can resolve any of these findings.
+    return e.publish(root,{**result,'status':'verified','pending':[],
+        'argument_handoffs':pending,'statement_verification_sha256':e.digest(
+            json.loads((root/'verification.json').read_text()))})
+
+
 def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
     if not claim_ids or len(claim_ids)>10 or len(set(claim_ids))!=len(claim_ids):
         raise ValueError('one group of one to ten distinct Claim IDs required')
