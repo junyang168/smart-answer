@@ -119,3 +119,22 @@ def test_word_stream_creates_editor_paragraphs_without_subtitle_splits():
     assert [turn["text"] for turn in first["cues"]] == ["教授說了這句。", "怎麼理解？", "可以這樣看。"]
     assert [turn["speaker"] for turn in first["cues"]] == ["professor", "audience", "professor"]
     assert second["cues"][0]["text"] == "再看下一段。"
+
+
+def test_semantic_segmentation_accepts_only_punctuation_offsets_and_keeps_text():
+    from backend.pipeline import transcript_semantic_segmentation as semantic
+
+    turns = [
+        {"speaker": "聽眾", "text": "這是 3.14 嗎？"},
+        {"speaker": "教授", "text": "對，可以這樣看。下一題。"},
+    ]
+    text, positions, marked = semantic.segmentation_input(turns)
+    assert len(positions) == 4
+    assert "3.14" in marked[0]["text"]
+    assert marked[1]["text"].endswith("。〈4〉")
+    paragraphs = semantic.apply_ends(text, positions, [3, 4])
+    assert paragraphs[0]["text"] == "這是 3.14 嗎？對，可以這樣看。"
+    assert "".join(p["text"] for p in paragraphs) == text
+    for invalid in ([4, 3], [2, 2, 4], [0, 4], [3], [3.0, 4], [True, 4]):
+        with pytest.raises(ValueError, match="ordered punctuation IDs"):
+            semantic.apply_ends(text, positions, invalid)
