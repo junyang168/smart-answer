@@ -298,7 +298,28 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             else:
                 blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
-                    value = speaker_roles([turn for block in blocks for turn in block["cues"]], media, out)
+                    turns = [turn for block in blocks for turn in block["cues"]]
+                    if recovery:
+                        prior_timing = read_json(prior / "timing.json")
+                        prior_speakers = read_json(prior / "speakers.json")
+                        if (prior_timing["input_sha256"] != object_sha({
+                                "identity": identity, "prior_stages": {
+                                    key: outputs[key] for key in ("transcribe", "flash")},
+                            }) or prior_timing["output_sha256"] != object_sha(prior_timing["value"])
+                            or prior_speakers["input_sha256"] != object_sha({
+                                "identity": identity, "prior_stages": {
+                                    **{key: outputs[key] for key in ("transcribe", "flash")},
+                                    "timing": prior_timing["value"]},
+                            }) or prior_speakers["output_sha256"] != object_sha(prior_speakers["value"])):
+                            raise ValueError("Invalid prior speaker checkpoint")
+                        value = prior_speakers["value"]
+                        expected = {turn["speaker"] for turn in turns if turn["end"] > turn["start"]
+                                    and turn["speaker"] not in {"unknown", "uncertain"}
+                                    and not turn["speaker"].endswith(":unknown")}
+                        if set(value) != expected:
+                            raise ValueError("Recovered turns use different speaker clusters")
+                    else:
+                        value = speaker_roles(turns, media, out)
                 elif stage == "repetitions":
                     value = repetition_proposals(blocks, out, protected)
                 else:
