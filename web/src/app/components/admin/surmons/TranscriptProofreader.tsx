@@ -28,6 +28,7 @@ import {
   scrollToReviewParagraph,
 } from "./review-navigation";
 import { documentVersion, recoverTransportVersion } from "./review-version";
+import { reviewEditorHistoryEvents } from "./review-editor-history";
 import {
   FastForward,
   Pause,
@@ -134,6 +135,8 @@ type Receipt = {
   paragraph_shas: Record<string, string>;
   group_shas: Record<string, string>;
   reviews: Record<string, Decision>;
+  paragraph_bindings?: Context["paragraph_bindings"];
+  timing_quality?: Context["timing_quality"];
 };
 type Packet = {
   operation_id: string;
@@ -227,6 +230,17 @@ const stamp = (ms: number) => {
 };
 const button =
   "rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed";
+function timingInput(ms: number) {
+  return `${stamp(ms)}.${String(ms % 1000).padStart(3, "0")}`;
+}
+
+function parseTiming(value: string) {
+  const match = /^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?$/.exec(value.trim());
+  if (!match) return NaN;
+  return (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) *
+    1000 + Number((match[4] || "").padEnd(3, "0"));
+}
+
 const transportButton =
   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded border border-slate-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1";
 
@@ -379,6 +393,9 @@ function TranscriptProofreader({
     initial.script.find((p) => p.type !== "subtitle")?.index || "",
   );
   const playbackParagraph = useRef<string>();
+  const previewTiming = useRef<{ start_ms: number; end_ms: number }>();
+  const [timingEdit, setTimingEdit] = useState<{ id: string; start: string; end: string }>();
+  const [timingError, setTimingError] = useState("");
   const selectParagraph = useCallback((id: string) => {
     if (selectedParagraph.current !== id) {
       video.current?.pause();
@@ -386,6 +403,8 @@ function TranscriptProofreader({
       clearTimeout(boundaryTimer.current);
       contextPlayback.current = false;
       playbackParagraph.current = undefined;
+      previewTiming.current = undefined;
+      setTimingEdit(undefined);
       selectedParagraph.current = id;
     }
     setSelected(id);
@@ -396,7 +415,7 @@ function TranscriptProofreader({
     clearTimeout(boundaryTimer.current);
     const media = video.current;
     const binding =
-      current.current.context.paragraph_bindings[selectedParagraph.current];
+      previewTiming.current ?? current.current.context.paragraph_bindings[selectedParagraph.current];
     if (!media || contextPlayback.current || !binding) return;
     if (stopAtParagraphEnd(media, binding) || media.paused) return;
     const remaining =
@@ -532,6 +551,10 @@ function TranscriptProofreader({
           ...current.current.context,
           revision: result.revision,
           reviews: result.reviews,
+          ...(result.paragraph_bindings && {
+            paragraph_bindings: result.paragraph_bindings,
+            timing_quality: result.timing_quality,
+          }),
         },
       });
       packet.current = undefined;
@@ -861,7 +884,54 @@ function TranscriptProofreader({
         enqueue({ kind: "ocr", id, region_id: r.id, text: r.text });
     });
   };
+  const stopTimingPreview = () => {
+    if (!previewTiming.current) return;
+    video.current?.pause();
+    clearTimeout(boundaryTimer.current);
+    previewTiming.current = undefined;
+  };
+  const useTimingEdit = async (save: boolean) => {
+    if (!timingEdit) return;
+    const start_ms = parseTiming(timingEdit.start);
+    const end_ms = parseTiming(timingEdit.end);
+    const media = video.current;
+    if (!Number.isSafeInteger(start_ms) || !Number.isSafeInteger(end_ms) ||
+        start_ms >= end_ms || (media && Number.isFinite(media.duration) &&
+          end_ms > Math.ceil(media.duration * 1000))) {
+      setTimingError("請輸入有效的起訖時間（時:分:秒），結束須晚於開始。");
+      return;
+    }
+    setTimingError("");
+    stopTimingPreview();
+    if (save) {
+      if (composing.current) {
+        setTimingError("請完成目前的中文輸入後再確認時間。");
+        return;
+      }
+      setBusy(true);
+      try {
+        enqueue({ kind: "paragraph_timing", id: timingEdit.id, start_ms, end_ms });
+        await flush();
+        setTimingEdit(undefined);
+      } catch {
+        // The shared save flow preserves the pending operation and shows the error.
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (!media || !Number.isFinite(media.duration)) {
+      setTimingError("錄音尚未載入，請稍後再試。");
+      return;
+    }
+    previewTiming.current = { start_ms, end_ms };
+    playbackParagraph.current = timingEdit.id;
+    contextPlayback.current = false;
+    media.currentTime = start_ms / 1000;
+    void media.play().catch(() => setTimingError("無法試播，請再試一次。"));
+  };
   const play = (id: string) => {
+    stopTimingPreview();
     const binding = current.current.context.paragraph_bindings[id];
     selectParagraph(id);
     playbackParagraph.current = id;
@@ -872,6 +942,7 @@ function TranscriptProofreader({
     }
   };
   const seek = (seconds: number) => {
+    stopTimingPreview();
     const media = video.current;
     if (!media) return;
     seekParagraphPlayback(
@@ -885,6 +956,7 @@ function TranscriptProofreader({
     checkParagraphEnd();
   };
   const togglePlayback = () => {
+    stopTimingPreview();
     const media = video.current;
     if (!media) return;
     if (contextPlayback.current && !media.paused) {
@@ -2040,6 +2112,40 @@ function TranscriptProofreader({
                         : "待核對"}
                   </span>
                 </div>
+                {active && doc.can_edit && !doc.context.timing_quality?.source_holds?.[p.index] && (
+                  <div className="mb-3 text-sm">
+                    {timingEdit?.id === p.index ? (
+                      <div className="rounded-md border border-slate-300 p-3">
+                        <div className="flex flex-wrap gap-3">
+                          <label className="grid gap-1">
+                            開始時間
+                            <input className="w-36 rounded border px-2 py-1 text-base" value={timingEdit.start}
+                              onChange={(e) => setTimingEdit({ ...timingEdit, start: e.target.value })} />
+                          </label>
+                          <label className="grid gap-1">
+                            結束時間
+                            <input className="w-36 rounded border px-2 py-1 text-base" value={timingEdit.end}
+                              onChange={(e) => setTimingEdit({ ...timingEdit, end: e.target.value })} />
+                          </label>
+                        </div>
+                        {timingError && <p role="alert" className="mt-2 text-red-800">{timingError}</p>}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button className={button} onClick={() => void useTimingEdit(false)}>試播</button>
+                          <button className={button} disabled={disabled} onClick={() => void useTimingEdit(true)}>確認時間</button>
+                          <button className={button} onClick={() => {
+                            stopTimingPreview();
+                            setTimingEdit(undefined);
+                          }}>取消</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button className={button} disabled={disabled} onClick={() => {
+                        setTimingError("");
+                        setTimingEdit({ id: p.index, start: timingInput(binding.start_ms), end: timingInput(binding.end_ms) });
+                      }}>調整時間</button>
+                    )}
+                  </div>
+                )}
                 {baseline &&
                   baseline.find((v) => v.index === p.index)?.text !==
                     p.text && (
@@ -2067,8 +2173,13 @@ function TranscriptProofreader({
                       value={p.text}
                       onChange={editText}
                       options={options}
+                      events={reviewEditorHistoryEvents}
                       getCodemirrorInstance={(cm) => {
-                        editor.current = cm;
+                        if (editor.current !== cm) {
+                          // EasyMDE sets the initial value after creating CodeMirror.
+                          cm.clearHistory();
+                          editor.current = cm;
+                        }
                         if (focusNext.current) {
                           focusNext.current = false;
                           cm.focus();

@@ -81,6 +81,15 @@ def prepare_recovery(store,actor,item,request):
                 if key not in now:continue
                 if before[key]!=now[key]:conflict(key)
                 before.pop(key);now.pop(key)
+            elif kind=='paragraph_timing':
+                paragraph(key)
+                if (before[key].get('type')=='subtitle'
+                    or old['paragraph_bindings'][key]!=new['paragraph_bindings'][key]
+                    or before[key]['text']!=now[key]['text']):
+                    conflict(key)
+                old_state=(old.get('timing_quality') or {}).get('paragraph_states',{}).get(key)
+                new_state=(new.get('timing_quality') or {}).get('paragraph_states',{}).get(key)
+                if old_state!=new_state:conflict(key)
             elif kind in ('text','paragraph_review','bookmark'):
                 paragraph(key)
                 if kind=='text':
