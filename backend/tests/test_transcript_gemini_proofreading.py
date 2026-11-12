@@ -195,3 +195,17 @@ def test_word_timing_uses_word_edges_and_rejects_uncertain_clock():
     ]
     words[1]["timing_review"] = True
     assert locate_paragraph_edges(paragraphs, turns, words)[1] == {"start": None, "end": None}
+
+
+def test_word_timing_projects_flash_corrections_through_original_turn():
+    from backend.pipeline.transcript_word_timing import locate_starts_from_base
+
+    turn = {"id": "t1", "speaker": "w0:0", "start": 1.0, "end": 4.0}
+    base = [{**turn, "text": "耶蘇說。"}]
+    words = [{**turn, "text": "耶苏", "end": 2.0},
+             {**turn, "text": "说", "start": 2.0}]
+    paragraphs = [{"start": 0, "end": 4}]
+    assert locate_starts_from_base(paragraphs, [{**turn, "text": "耶穌說。"}], words, base) == [
+        {"start": 1.0, "method": "original_word"},
+    ]
+    assert locate_starts_from_base(paragraphs, [{**turn, "text": "所以耶穌說。"}], words, base) == [None]

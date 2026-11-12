@@ -9,7 +9,7 @@ from opencc import OpenCC
 
 
 def locate_paragraph_edges(paragraphs, turns, words):
-    converter = OpenCC("s2t")
+    converter = OpenCC("t2s")
 
     def normalized(text):
         return "".join(c for c in unicodedata.normalize("NFKC", converter.convert(text)).casefold()
@@ -66,3 +66,64 @@ def locate_paragraph_edges(paragraphs, turns, words):
         {"start": locate(p["start"], True), "end": locate(p["end"], False)}
         for p in paragraphs
     ]
+
+
+def locate_starts_from_base(paragraphs, turns, words, base_turns):
+    """Project a refined paragraph start through its original Flash input turn."""
+    from difflib import SequenceMatcher
+
+    converter = OpenCC("t2s")
+
+    def norm(text):
+        return "".join(c for c in unicodedata.normalize("NFKC", converter.convert(text)).casefold()
+                       if c.isalnum())
+
+    by_speaker = defaultdict(list)
+    for word in words:
+        text = norm(word["text"])
+        if text:
+            by_speaker[word["speaker"]].append((word, text))
+    base = {turn["id"]: turn for turn in base_turns}
+    offsets = [0, *accumulate(len(turn["text"]) for turn in turns)]
+    results = []
+    for paragraph in paragraphs:
+        index = bisect_right(offsets, paragraph["start"]) - 1
+        refined = turns[index]
+        original = base.get(refined["id"])
+        split = paragraph["start"] - offsets[index]
+        before = norm(refined["text"][:split])
+        after = norm(refined["text"][split:])
+        source = norm(original["text"]) if original else ""
+        if not source or not after:
+            results.append(None)
+            continue
+        pool = [(word, text) for word, text in by_speaker[original["speaker"]]
+                if original["start"] - .15 <= word["start"] <= original["end"] + .15]
+        joined = "".join(text for _, text in pool)
+        position = joined.find(source)
+        if position == -1 or joined.find(source, position + 1) != -1:
+            results.append(None)
+            continue
+
+        offset = len(before)
+        mapped = None
+        method = None
+        matcher = SequenceMatcher(None, source, before + after, autojunk=False)
+        for tag, a, b, c, d in matcher.get_opcodes():
+            if not c <= offset < d:
+                continue
+            if tag == "equal":
+                mapped, method = a + offset - c, "original_word"
+            elif tag == "replace" and b - a == d - c and d - c <= 4 and matcher.find_longest_match().size >= 2:
+                mapped, method = a + offset - c, "same_length_correction"
+            break
+        if mapped is None:
+            results.append(None)
+            continue
+        token_starts = [0, *accumulate(len(text) for _, text in pool)]
+        word = pool[bisect_right(token_starts, position + mapped) - 1][0]
+        if word.get("timing_review") or not 0 <= word["start"] <= word["end"]:
+            results.append(None)
+            continue
+        results.append({"start": word["start"], "method": method})
+    return results
