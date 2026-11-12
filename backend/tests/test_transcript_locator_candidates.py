@@ -3,6 +3,10 @@ import pytest
 from backend.pipeline.transcript_locator_candidates import calibration_rules, candidate_packet
 
 
+def span(key, quote):
+    return {"paragraph_key": key, "start_marker": quote, "end_marker": quote}
+
+
 def test_model_can_select_changed_passage_but_cannot_supply_its_own_location_or_text():
     row = dict(record_key="fragment", old_paragraph="S0001", quote="馬太五章三十二節",
                target_paragraphs=["S0002"])
@@ -16,7 +20,7 @@ def test_model_can_select_changed_passage_but_cannot_supply_its_own_location_or_
     new = {"paragraphs": live, "body_sha256": "new"}
 
     def decide(keys):
-        return {"decisions": [{"record_key": "fragment", "paragraph_keys": keys, "reason": "同一處發言"}]}
+        return {"decisions": [{"record_key": "fragment", "spans": [span(key, live[key]["text"]) for key in keys], "reason": "同一處發言"}]}
 
     rules, pending = calibration_rules([packet], decide(["S0002"]), records, new, {})
     assert not pending
@@ -35,7 +39,7 @@ def test_approximate_candidate_without_verified_clock_stays_unresolved():
     packet = candidate_packet(row, {}, live, {})
     assert packet["candidates"]
     records = {"fragment": {"revision": 1, "content_sha256": "old", "payload": {}}}
-    answer = {"decisions": [{"record_key": "fragment", "paragraph_keys": ["S0002"], "reason": "候選"}]}
+    answer = {"decisions": [{"record_key": "fragment", "spans": [span("S0002", "新版")], "reason": "候選"}]}
     rules, pending = calibration_rules([packet], answer, records, {"paragraphs": live}, {})
     assert not rules and pending == {"fragment": "no_verified_clock_match"}
 
@@ -66,7 +70,7 @@ def test_repeated_reference_uses_consumer_slots_and_rejects_wrong_order():
     new = {"paragraphs": live, "body_sha256": "new"}
     for selected, expected in [(["S0001", "S0003"], True), (["S0003", "S0001"], False),
                                (["S0001"], False), (["S0001", "S0004"], False)]:
-        answer = {"decisions": [{"record_key": key, "paragraph_keys": selected, "reason": "問答"}]}
+        answer = {"decisions": [{"record_key": key, "spans": [span(pk, "對啊。" if pk in {"S0001", "S0003"} else live[pk]["text"]) for pk in selected], "reason": "問答"}]}
         rules, pending = calibration_rules([packet], answer, records, new, {})
         assert bool(rules) == expected and bool(pending) != expected
         if expected:
@@ -158,7 +162,7 @@ def test_resolution_calibrates_fragment_and_context_consumer_and_reuses_saved_re
     def respond(batch):
         calls.append(batch)
         return {"id": "saved"}, {"decisions": [
-            {"record_key": p["record_key"], "paragraph_keys": ["S0001"], "reason": "原聲中的問題"}
+            {"record_key": p["record_key"], "spans": [span("S0001", paragraphs["S0001"]["text"])], "reason": "原聲中的問題"}
             for p in batch
         ]}
 
@@ -170,3 +174,28 @@ def test_resolution_calibrates_fragment_and_context_consumer_and_reuses_saved_re
     assert read(tmp_path / "unresolved.json") == {}
     assert resolve_packets(tmp_path, bundle, records, new, {}, call=respond) == output
     assert len(calls) == 1
+
+
+def test_live_quote_uses_exact_unique_boundaries_and_rejects_whole_paragraph_overreach():
+    text = "對啊。聽眾又提出另一個完全不同的問題，然後教授花了很長的時間詳細解答這個新的問題。"
+    key = "source_fragments/f"
+    paragraph = "S0001"
+    new = {"paragraphs": {paragraph: {"text": text, "start_time": 10, "end_time": 15}},
+           "body_sha256": "new"}
+    clock = {"media_time": 5, "media_end_time": 20}
+    records = {key: {"revision": 1, "content_sha256": "old", "payload": clock}}
+    packet = candidate_packet({"record_key": key, "quote": "對啊。", "old_paragraph": paragraph},
+                              {}, new["paragraphs"], clock)
+
+    def resolve(quote):
+        return calibration_rules([packet], {"decisions": [{
+            "record_key": key, "spans": [span(paragraph, quote)], "reason": "同一處",
+        }]}, records, new, {})
+
+    rules, pending = resolve("對啊。")
+    assert not pending
+    assert rules[key]["segments"] == [{"paragraph_key": paragraph, "verbatim_excerpt": "對啊。"}]
+    rules, pending = resolve(text)
+    assert not rules and pending[key] == "selected_quote_is_too_broad"
+    rules, pending = resolve("不存在的文字")
+    assert not rules and pending[key] == "no_valid_candidate_selection"

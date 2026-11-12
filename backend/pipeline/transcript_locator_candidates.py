@@ -4,7 +4,7 @@ from difflib import SequenceMatcher
 import json
 
 from backend.pipeline.transcript_evidence_calibration import audio_position
-from backend.pipeline.transcript_evidence_migration import literal_layout
+from backend.pipeline.transcript_evidence_migration import literal_layout, positions
 from backend.pipeline.slide_visual_evidence import obj
 
 PROMPT = """Locate the same occurrence in the new transcript. Use the old quotation,
@@ -15,16 +15,54 @@ separate spoken occurrences. Use the surrounding citations to distinguish them.
 For a consumer whose citations are only verbal prompts, locate the actual
 question or explanation described by its statement. Use its quoted prompts as
 context, never as the substantive citation. The new transcript is authoritative. Differences in wording, speaker labels or scripture references
-do not rule out a location. Select only supplied paragraph IDs. For a single
-occurrence select consecutive paragraphs. For separately evidenced repeated
-occurrences, select one distinct paragraph per occurrence in playback order. If no candidate is convincing or two
-occurrences cannot be distinguished, select an empty list. Return one decision
-per fragment. Do not write a quotation or decide what a Claim means."""
+do not rule out a location. Select only supplied paragraph IDs. For each
+paragraph select the smallest continuous span that expresses the old citation,
+including both question and answer if the old citation contains both. Return
+exact beginning and ending marker strings copied from the supplied live text.
+Each marker must occur exactly once in the paragraph. A single short quotation
+can use the same marker for both boundaries. Do not include other speaker turns
+or adjacent points merely because they share the paragraph. For a single
+occurrence select consecutive paragraphs. For repeated occurrences select one
+distinct paragraph per occurrence in playback order. When the location or
+boundaries are uncertain, return an empty spans list. Return one decision per
+record. Do not paraphrase or decide what a Claim means."""
 SCHEMA = obj({"decisions": {"type": "array", "items": obj({
     "record_key": {"type": "string"},
-    "paragraph_keys": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+    "spans": {"type": "array", "items": obj({
+        "paragraph_key": {"type": "string"},
+        "start_marker": {"type": "string"},
+        "end_marker": {"type": "string"},
+    }), "maxItems": 4},
     "reason": {"type": "string"},
 })}})
+
+
+def select_spans(packet, decision, new):
+    """Turn unique boundary markers into exact, live, paragraph-local slices."""
+    allowed = {p["paragraph_key"]: p for p in packet["candidates"]}
+    spans = decision["spans"]
+    if not spans or len(spans) > 4 or not decision["reason"].strip():
+        return []
+    selected = []
+    for span in spans:
+        key = span["paragraph_key"]
+        if key not in allowed:
+            return []
+        live = new["paragraphs"][key]["text"]
+        if live != allowed[key]["text"]:
+            raise ValueError("Candidate differs from current live paragraph")
+        start_marker, end_marker = span["start_marker"], span["end_marker"]
+        starts, ends = positions(live, start_marker), positions(live, end_marker)
+        if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+            return []
+        start, end = starts[0], ends[0] + len(end_marker)
+        if end < start + len(start_marker):
+            return []
+        quote = live[start:end]
+        if not quote.strip() or "~~" in quote or len(positions(live, quote)) != 1:
+            return []
+        selected.append({"paragraph_key": key, "verbatim_excerpt": quote})
+    return selected
 
 
 def consumer_context(row, records, resolved):
@@ -135,6 +173,8 @@ def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
 
 def calibration_rules(packets, answer, records, new, clock_proofs):
     """Accept only supplied, consecutive, clock-compatible live paragraphs."""
+    from backend.pipeline.transcript_evidence_apply import context_only
+
     by_key = {p["record_key"]: p for p in packets}
     decisions = answer["decisions"]
     if len(decisions) != len(by_key) or {d["record_key"] for d in decisions} != set(by_key):
@@ -144,9 +184,10 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
         key = decision["record_key"]
         packet = by_key[key]
         allowed = {p["paragraph_key"]: p for p in packet["candidates"]}
-        selected = decision["paragraph_keys"]
+        segments = select_spans(packet, decision, new)
+        selected = [segment["paragraph_key"] for segment in segments]
         reason = decision["reason"].strip()
-        if not selected or not reason or len(selected) > 4 or any(k not in allowed for k in selected):
+        if not selected:
             unresolved[key] = "no_valid_candidate_selection"
             continue
         ordinals = [allowed[k]["ordinal"] for k in selected]
@@ -162,12 +203,22 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
             unresolved[key] = "nonconsecutive_candidate_selection"
             continue
         state = records[key]
-        segments = []
-        for k in selected:
-            live = new["paragraphs"][k]
-            if live["text"] != allowed[k]["text"] or not live["text"].strip() or "~~" in live["text"]:
-                raise ValueError("Candidate differs from current live paragraph")
-            segments.append({"paragraph_key": k, "verbatim_excerpt": live["text"]})
+        if not context_only(packet["old_quote"]) and all(
+            context_only(segment["verbatim_excerpt"]) for segment in segments
+        ):
+            unresolved[key] = "selection_is_only_conversational_context"
+            continue
+        old_length = len(literal_layout(packet["old_quote"])[0])
+        new_length = sum(len(literal_layout(s["verbatim_excerpt"])[0]) for s in segments)
+        if new_length > max(24, old_length * 2 * (len(segments) if repeated else 1)):
+            unresolved[key] = "selected_quote_is_too_broad"
+            continue
+        if repeated and any(
+            literal_layout(packet["old_quote"])[0] not in literal_layout(segment["verbatim_excerpt"])[0]
+            for segment in segments
+        ):
+            unresolved[key] = "unverified_repeated_occurrences"
+            continue
         clock = dict(zip(("media_time", "media_end_time"), packet["old_interval"]))
         fragment = state["payload"]
         proof = clock_proofs.get(key)

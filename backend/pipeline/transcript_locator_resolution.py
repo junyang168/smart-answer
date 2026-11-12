@@ -33,16 +33,12 @@ def consumer_packets(bundle, records, new):
 
 def consumer_rule(packet, selection, records, new):
     """Resolve a consumer only with a clock-bound literal witness for its prompt."""
-    keys = selection["paragraph_keys"]
-    allowed = {row["paragraph_key"]: row for row in packet["candidates"]}
-    reason = selection["reason"].strip()
-    if len(keys) != 1 or keys[0] not in allowed or not reason:
+    segments = candidates.select_spans(packet, selection, new)
+    if len(segments) != 1 or context_only(segments[0]["verbatim_excerpt"]):
         return None
-    key = keys[0]
+    key = segments[0]["paragraph_key"]
     paragraph = new["paragraphs"][key]
-    text = paragraph["text"]
-    if text != allowed[key]["text"] or not text.strip() or context_only(text) or "~~" in text:
-        return None
+    reason = selection["reason"].strip()
 
     consumer = packet["consumer"]
     source_sha = new["body_sha256"]
@@ -91,7 +87,7 @@ def consumer_rule(packet, selection, records, new):
     state = records[packet["record_key"]]
     rule = {"before_pin": [state["revision"], state["content_sha256"]],
             "target_source_sha256": source_sha, "mode": "rebind",
-            "reason": reason, "segments": [{"paragraph_key": key, "verbatim_excerpt": text}]}
+            "reason": reason, "segments": segments}
     return rule, parent_rules
 
 
