@@ -10,7 +10,7 @@ export default async function BetaEditor({
   const item = decodeURIComponent(routeParams.item);
   return (
     <>
-      <div className="mb-3 flex items-center justify-between text-sm text-slate-600">
+      <div className="mb-3 hidden items-center justify-between text-sm text-slate-600 lg:flex">
         <span>圖文審核 Beta · 測試同工專用</span>
         <Link
           className="text-blue-700 underline"

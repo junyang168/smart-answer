@@ -354,6 +354,8 @@ function TranscriptProofreader({
     revision: number;
   }>();
   const [metadataOpen, setMetadataOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [mobileMediaOpen, setMobileMediaOpen] = useState(false);
   const [deletionsOpen, setDeletionsOpen] = useState(false);
   const [generatingHeadings, setGeneratingHeadings] = useState(false);
   const [headingSuggestions, setHeadingSuggestions] = useState<{
@@ -1273,15 +1275,15 @@ function TranscriptProofreader({
       )}
       <header
         ref={reviewHeader}
-        className="sticky top-0 z-20 rounded-xl border bg-white/95 p-4 shadow-sm backdrop-blur"
+        className="sticky top-0 z-20 rounded-xl border bg-white/95 p-2 shadow-sm backdrop-blur lg:p-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-xs text-slate-500">講道圖文審核 · {item}</div>
-            <h1 className="text-xl font-semibold">
+        <div className="flex flex-wrap items-center justify-between gap-2 lg:gap-3">
+          <div className="min-w-0 flex-1 lg:flex-none">
+            <div className="hidden text-xs text-slate-500 lg:block">講道圖文審核 · {item}</div>
+            <h1 className={`${mobileToolsOpen ? "" : "truncate"} text-sm font-semibold lg:whitespace-normal lg:text-xl`}>
               {doc.context.editorial_metadata.title || doc.header.title || item}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 hidden text-sm text-slate-500 lg:block">
               {doc.header.assigned_to_name
                 ? `認領人：${doc.header.assigned_to_name}`
                 : "尚未認領"}{" "}
@@ -1292,7 +1294,38 @@ function TranscriptProofreader({
               </span>
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 gap-1 lg:hidden">
+            <button
+              type="button"
+              className={button}
+              aria-expanded={mobileMediaOpen}
+              aria-controls="transcript-review-media"
+              onClick={() => setMobileMediaOpen((open) => !open)}
+            >
+              媒體
+            </button>
+            <button
+              type="button"
+              className={button}
+              aria-expanded={mobileToolsOpen}
+              aria-controls="transcript-review-tools"
+              onClick={() => setMobileToolsOpen((open) => !open)}
+            >
+              更多
+            </button>
+          </div>
+          <div
+            id="transcript-review-tools"
+            className={`${mobileToolsOpen ? "flex" : "hidden"} w-full flex-wrap gap-2 lg:flex lg:w-auto`}
+          >
+            {apiBase === "/api/sc_api/beta" && (
+              <a
+                className={button + " lg:hidden"}
+                href={`/admin/transcript-beta/${encodeURIComponent(item)}/published`}
+              >
+                查看發佈版
+              </a>
+            )}
             <a
               className={button}
               href={`/admin/surmons/${encodeURIComponent(item)}?redirect=false`}
@@ -1418,11 +1451,11 @@ function TranscriptProofreader({
             )}
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-4 text-sm">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs lg:mt-3 lg:gap-4 lg:text-sm">
           <span>
             口述已核對 {confirmed}/{spokenRows.length}
           </span>
-          <span>
+          <span className={doc.context.groups.length ? "" : "hidden lg:inline"}>
             圖片已處理 {groupsConfirmed}/{doc.context.groups.length}
           </span>
           <button
@@ -1450,6 +1483,9 @@ function TranscriptProofreader({
             </button>
           )}
         </div>
+        <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-500 lg:hidden">
+          {saveStatus}
+        </p>
         {recoveryNotice && (
           <p role="status" className="mt-3 text-amber-800">
             {recoveryNotice}
@@ -1600,14 +1636,18 @@ function TranscriptProofreader({
           </div>
         </section>
       )}
-      <div className="mt-4 grid items-start gap-5 lg:grid-cols-[minmax(310px,0.85fr)_minmax(0,1.6fr)]">
-        <aside className="space-y-4 lg:sticky lg:top-40 max-h-[calc(100vh-11rem)] overflow-y-auto">
+      <div className="mt-2 grid items-start gap-3 lg:mt-4 lg:grid-cols-[minmax(310px,0.85fr)_minmax(0,1.6fr)] lg:gap-5">
+        <aside
+          id="transcript-review-media"
+          className={`${mobileMediaOpen ? "block" : "hidden"} max-h-[calc(100vh-11rem)] space-y-4 overflow-y-auto lg:sticky lg:top-40 lg:block`}
+        >
           <section className="overflow-hidden rounded-xl border bg-white">
             <MediaPlayer
               ref={(element) => {
                 video.current = element;
               }}
               controls
+              playsInline={!audioOnly}
               preload="metadata"
               src={base + "/media"}
               aria-label={audioOnly ? "講道音訊" : "講道影片"}
@@ -1663,7 +1703,7 @@ function TranscriptProofreader({
               <span className="text-xs text-slate-500">播放至本段結尾</span>
             </div>
           </section>
-          <section className="rounded-xl border bg-white p-3">
+          <section className={`${doc.context.groups.length ? "" : "hidden lg:block"} rounded-xl border bg-white p-3`}>
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-semibold">投影片參考</h2>
               <select
