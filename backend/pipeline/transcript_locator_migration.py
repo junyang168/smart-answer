@@ -179,7 +179,7 @@ def execution_locks(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare', 'candidates', 'run', 'verify'])
+    parser.add_argument('command', choices=['prepare', 'candidates', 'resolve', 'run', 'verify'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id'); parser.add_argument('--published', type=Path)
     parser.add_argument('--old-source', type=Path, action='append', default=[])
@@ -187,6 +187,7 @@ def main():
     parser.add_argument('--jev-impact', action='store_true')
     parser.add_argument('--backup-manifest', type=Path)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--capacity-root', type=Path, help='shared Sol concurrency directory for resolve')
     args = parser.parse_args()
     if args.command == 'candidates':
         if not args.backup_manifest or not args.output:
@@ -194,11 +195,29 @@ def main():
         from backend.pipeline.transcript_locator_candidates import prepare_run_packets
         print(json.dumps(prepare_run_packets(args.root, args.backup_manifest, args.output)))
         return
+    if args.command == 'resolve' and (not args.backup_manifest or not args.output):
+        parser.error('resolve requires --backup-manifest and --output (new migration directory)')
     from dotenv import load_dotenv
     load_dotenv()
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = PostgresKnowledgeStore()
-    if args.command == 'prepare':
+    if args.command == 'resolve':
+        import os
+        if args.capacity_root:
+            os.environ['MEDIA_BATCH_CAPACITY_ROOT'] = str(args.capacity_root.resolve())
+        if not os.environ.get('MEDIA_BATCH_CAPACITY_ROOT'):
+            parser.error('resolve requires --capacity-root or MEDIA_BATCH_CAPACITY_ROOT')
+        from backend.pipeline.transcript_locator_candidates import load_run_packets
+        from backend.pipeline.transcript_locator_resolution import resolve_packets
+        manifest, records, new, bundle = load_run_packets(args.root, args.backup_manifest)
+        intent = manifest['intent']
+        prior = m.read(Path(intent['calibration'])) if intent['calibration'] else {}
+        calibration = resolve_packets(args.output / 'resolution', bundle, records, new, prior)
+        result = prepare(store, args.output, source_id=intent['source_id'],
+                         old_paths=intent['old_paths'], published=intent['published'],
+                         instruction_file=intent['instruction_file'], calibration_path=calibration,
+                         jev_impact=intent.get('jev_impact', False))
+    elif args.command == 'prepare':
         if not all([args.source_id, args.published, args.instruction_file]):
             parser.error('prepare requires source-id, published and instruction-file')
         result = prepare(store, args.root, source_id=args.source_id, old_paths=args.old_source,

@@ -96,7 +96,7 @@ def test_candidate_handoff_keeps_context_only_consumers_out_of_fragment_packets(
     assert result["consumer_exceptions"] == [{
         **exception, "statement": "五個丈夫是什麼意思？",
         "citations": [{"record_key": fragment_key, "old_quote": "什麼意思？",
-                       "target_paragraphs": ["S0002"]}],
+                       "target_paragraphs": ["S0002"], "bound_paragraph": None}],
     }]
 
 
@@ -127,3 +127,46 @@ def test_verified_cross_paragraph_rule_requires_both_edges_and_matching_clock():
     assert verified_cross_paragraph_rule(
         row, {**state, "payload": {"media_time": 100, "media_end_time": 200}}, new,
     ) is None
+
+
+def test_resolution_calibrates_fragment_and_context_consumer_and_reuses_saved_reply(tmp_path):
+    from backend.pipeline.transcript_locator_resolution import resolve_packets
+    from backend.pipeline.transcript_claim_migration import read
+
+    fragment = "source_fragments/f"
+    parent = "source_fragments/p"
+    question = "questions/q"
+    clock = {"media_time": 5, "media_end_time": 20}
+    records = {
+        fragment: {"revision": 1, "content_sha256": "f", "payload": clock},
+        parent: {"revision": 1, "content_sha256": "p",
+                 "payload": {**clock, "verbatim_excerpt": "什麼意思？"}},
+        question: {"revision": 2, "content_sha256": "q", "payload": {}},
+    }
+    paragraphs = {"S0001": {"text": "你已經有五個丈夫，這是什麼意思？",
+                            "start_time": 10, "end_time": 15}}
+    new = {"paragraphs": paragraphs, "body_sha256": "new"}
+    packet = candidate_packet(
+        {"record_key": fragment, "quote": "五個丈夫", "old_paragraph": "S0001"},
+        {}, paragraphs, clock,
+    )
+    bundle = {"packets": [packet], "clock_proofs": {}, "unscoped": [],
+              "consumer_exceptions": [{"record_key": question, "statement": "五個丈夫是什麼意思？",
+                                       "context_fragment_ids": ["p"], "citations": []}]}
+    calls = []
+
+    def respond(batch):
+        calls.append(batch)
+        return {"id": "saved"}, {"decisions": [
+            {"record_key": p["record_key"], "paragraph_keys": ["S0001"], "reason": "原聲中的問題"}
+            for p in batch
+        ]}
+
+    output = resolve_packets(tmp_path, bundle, records, new, {}, call=respond)
+    calibration = read(output)
+    assert set(calibration["fragments"]) == {fragment, parent}
+    assert set(calibration["consumers"]) == {question}
+    assert calibration["fragments"][parent]["segments"][0]["verbatim_excerpt"] == "什麼意思？"
+    assert read(tmp_path / "unresolved.json") == {}
+    assert resolve_packets(tmp_path, bundle, records, new, {}, call=respond) == output
+    assert len(calls) == 1

@@ -12,8 +12,9 @@ surrounding speech, saved playback range and speaker turns. Consult the direct
 consumer's statement and ordered citations, especially the resolved citations
 immediately before and after the target. Repeated target IDs can refer to
 separate spoken occurrences. Use the surrounding citations to distinguish them.
-The new transcript is
-authoritative. Differences in wording, speaker labels or scripture references
+For a consumer whose citations are only verbal prompts, locate the actual
+question or explanation described by its statement. Use its quoted prompts as
+context, never as the substantive citation. The new transcript is authoritative. Differences in wording, speaker labels or scripture references
 do not rule out a location. Select only supplied paragraph IDs. For a single
 occurrence select consecutive paragraphs. For separately evidenced repeated
 occurrences, select one distinct paragraph per occurrence in playback order. If no candidate is convincing or two
@@ -230,7 +231,8 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
                 "citations": [
                     {"record_key": fragment_key,
                      "old_quote": records[fragment_key]["payload"].get("verbatim_excerpt"),
-                     "target_paragraphs": fragment_rows.get(fragment_key, {}).get("target_paragraphs") or []}
+                     "target_paragraphs": fragment_rows.get(fragment_key, {}).get("target_paragraphs") or [],
+                     "bound_paragraph": (fragment_rows.get(fragment_key, {}).get("applied_fields") or {}).get("paragraph_key")}
                     for fid in payload.get("source_fragment_ids") or [payload.get("source_fragment_id")]
                     if (fragment_key := "source_fragments/" + str(fid)) in records
                 ],
@@ -280,7 +282,7 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
             "consumer_exceptions": consumer_exceptions}
 
 
-def prepare_run_packets(root, backup, output):
+def load_run_packets(root, backup):
     """Build a repeatable, read-only handoff from the frozen migration plan."""
     from pathlib import Path
 
@@ -312,6 +314,13 @@ def prepare_run_packets(root, backup, output):
         migration.read(root / "preview.json"), records, old, new, proof,
         comparison=migration.read(plan["report"]["path"]),
     )
+    return manifest, records, new, result
+
+
+def prepare_run_packets(root, backup, output):
+    from backend.pipeline import transcript_claim_migration as migration
+
+    _, _, _, result = load_run_packets(root, backup)
     migration.immutable(output, result)
     return {**{key: len(result[key]) for key in ("packets", "unscoped", "consumer_exceptions")},
             "output": str(output.resolve())}
