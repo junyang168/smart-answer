@@ -14,6 +14,7 @@ import tempfile
 import time
 
 from backend.pipeline import transcript_gemini_audio as audio
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.full_video_transcript import cleanup_generate
 from backend.pipeline.media_batch.runtime import WaitingCapacity
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
@@ -136,7 +137,7 @@ def repetition_proposals(blocks, folder, protected):
     candidates = [[{key: cue[key] for key in ("id", "speaker", "text")} for cue in block["cues"]]
                   for i, block in enumerate(blocks, 1)
                   if str(i) not in protected]
-    model = VisionReviewer("openai", REPETITION_PROMPT, REPETITION_SCHEMA)
+    model = TranscriptSubscriptionReviewer(REPETITION_PROMPT, REPETITION_SCHEMA)
     model.config.update(max_output_tokens=3500)
     edits = []
     for i, packet in enumerate(batches(candidates, 14)):

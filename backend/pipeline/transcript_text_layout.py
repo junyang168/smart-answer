@@ -279,9 +279,9 @@ FORMAT_PROMPT = '''你只負責繁體中文逐字稿的標點與分段。材料�
 
 
 def format_text(out: Path) -> dict:
-    from dotenv import load_dotenv
-    from openai import OpenAI
-    load_dotenv(Path(__file__).resolve().parents[2] / '.env')
+    from backend.pipeline.full_video_transcript import cleanup_generate
+    from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
+
     timed = read_json(out / 'timed_text.json')
     units = text_units(timed['text'])
     schema = {'type': 'object', 'properties': {
@@ -293,24 +293,15 @@ def format_text(out: Path) -> dict:
         'paragraph_break_after': {'type': 'array', 'items': {'type': 'string'}}},
         'required': ['text_sha256', 'operations', 'paragraph_break_after'], 'additionalProperties': False}
     inputs = json.dumps({'text_sha256': timed['text_sha256'], 'units': units}, ensure_ascii=False)
-    config = {'model': 'gpt-6.1-sol', 'instructions': FORMAT_PROMPT, 'reasoning': {'effort': 'low'},
-        'max_output_tokens': 8192, 'store': False, 'service_tier': 'default',
-        'text': {'format': {'type': 'json_schema', 'name': 'punctuation_layout', 'strict': True, 'schema': schema}}}
+    reviewer = TranscriptSubscriptionReviewer(FORMAT_PROMPT, schema)
+    config = {"model": reviewer.model, **reviewer.config, "prompt": FORMAT_PROMPT}
     request = {'stage': 'punctuation_layout', 'config': config, 'input': inputs,
                'timed_text_sha256': file_sha(out / 'timed_text.json')}
-    client = OpenAI(timeout=180, max_retries=0)
     responses = []
     for attempt in range(2):
-        count = client.responses.input_tokens.count(model=config['model'], input=inputs,
-            instructions=FORMAT_PROMPT, reasoning=config['reasoning'], text=config['text']).input_tokens
-        raw = saved_call(out, request, (count * 1.2 * 2.5 + 8192 * 10) / 1_000_000,
-            lambda: client.responses.create(input=inputs, **config).model_dump(mode='json', exclude_none=True))
+        raw = saved_call(out, request, 0, lambda: cleanup_generate(reviewer, inputs))
         responses.append(raw)
-        if raw.get('status') != 'completed':
-            raise ValueError('Format response incomplete; do not resend automatically')
-        answer = ''.join(p.get('text', '') for item in raw.get('output', []) if item.get('type') == 'message'
-                         for p in item.get('content', []) if p.get('type') == 'output_text')
-        plan = json.loads(answer)
+        plan = json.loads(reviewer.text(raw))
         save_json(out / f'format_plan_attempt_{attempt}.json', plan)
         try:
             result = apply_layout(timed['text'], units, plan)
@@ -329,7 +320,7 @@ def format_text(out: Path) -> dict:
             request = {'stage': 'punctuation_layout_repair', 'config': config, 'input': inputs,
                        'timed_text_sha256': file_sha(out / 'timed_text.json')}
     save_json(out / 'format_plan.json', plan)
-    result.update(request_sha256=object_sha(request), usages=[r['usage'] for r in responses],
-        estimated_usd_upper=sum((r['usage']['input_tokens'] * 2.5 + r['usage']['output_tokens'] * 10) / 1_000_000 for r in responses))
+    result.update(request_sha256=object_sha(request), usages=[r.get('usage') for r in responses],
+                  estimated_usd_upper=0.0)
     save_json(out / 'formatted_text.json', result)
     return result

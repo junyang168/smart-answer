@@ -19,6 +19,8 @@ def estimate(request, raw, *, at=None):
         model=model,
         basis="saved usage; conservative rates, no cache discount; not a provider invoice",
     )
+    if model == "gpt-6.1-sol" and raw.get("backend") == "codex_subscription":
+        return {**result, "basis": "ChatGPT subscription", "estimated_usd_upper": 0.0}
     if model == "gpt-transcribe":
         chunk = request["chunk"]
         seconds = (chunk["end_ms"] - chunk["start_ms"]) / 1000

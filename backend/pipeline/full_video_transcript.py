@@ -20,6 +20,7 @@ import shutil
 import subprocess
 
 from backend.pipeline import slide_change_pilot as slides
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.transcript_audio_pilot import read_audio, write_audio, quiet_boundaries, saved_call, transcribe
 from backend.pipeline.transcript_text_layout import stitch, format_text, inspect_timings, text_sha
@@ -300,8 +301,8 @@ def cleanup_adapter():
         'paragraph_id':{'type':'string'}, 'old':{'type':'string'},
         'reason':{'type':'string'}, 'kind':{'type':'string','enum':[
             'technical_setup','logistics','speech_restart','unrelated_aside']}})}})
-    adapter = VisionReviewer('openai', CLEAN_PROMPT, schema)
-    adapter.config.update(max_output_tokens=16384, reasoning={'effort':'medium'})
+    adapter = TranscriptSubscriptionReviewer(CLEAN_PROMPT, schema)
+    adapter.config.update(max_output_tokens=16384, reasoning_effort='medium')
     return adapter
 
 
