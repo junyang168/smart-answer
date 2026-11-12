@@ -414,7 +414,7 @@ function TranscriptProofreader({
     boundaryTimer.current = setTimeout(check, Math.max(10, remaining * 1000));
   }, []);
   useEffect(() => () => clearTimeout(boundaryTimer.current), []);
-  const composing = useRef(false);
+  const composing = useRef<EventTarget | null>(null);
   const [tabId] = useState(() => {
     if (typeof window === "undefined") return "";
     const key = "transcript-review-tab";
@@ -621,6 +621,15 @@ function TranscriptProofreader({
       if (running.current === task) running.current = undefined;
     }
   }, [acknowledge, base, persist]);
+  const finishComposition = (target: EventTarget) => {
+    if (composing.current !== target) return;
+    composing.current = null;
+    // Let the editor process the final native input before saving.
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      if (!composing.current) void flush().catch(() => {});
+    }, 0);
+  };
   const enqueue = useCallback(
     (op: Operation) => {
       if (!current.current.can_edit || blocked.current) return;
@@ -786,6 +795,10 @@ function TranscriptProofreader({
   ) => {
     setBusy(true);
     try {
+      if (composing.current instanceof HTMLElement) {
+        composing.current.blur();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
       await flush();
       enqueue({
         kind,
@@ -1335,13 +1348,11 @@ function TranscriptProofreader({
   const MediaPlayer = audioOnly ? "audio" : "video";
   return (
     <main
-      onCompositionStartCapture={() => {
-        composing.current = true;
+      onCompositionStartCapture={(event) => {
+        composing.current = event.target;
       }}
-      onCompositionEndCapture={() => {
-        composing.current = false;
-        void flush().catch(() => {});
-      }}
+      onCompositionEndCapture={(event) => finishComposition(event.target)}
+      onBlurCapture={(event) => finishComposition(event.target)}
       className="mx-auto max-w-[1700px] p-3 md:p-6 text-slate-800"
     >
       {headingSuggestions && (
@@ -2213,13 +2224,6 @@ function TranscriptProofreader({
                   )}
                 {active && doc.can_edit ? (
                   <div
-                    onCompositionStart={() => {
-                      composing.current = true;
-                    }}
-                    onCompositionEnd={() => {
-                      composing.current = false;
-                      void flush().catch(() => {});
-                    }}
                     className="[&_.CodeMirror]:text-base [&_.CodeMirror]:leading-8"
                   >
                     <MarkdownEditor
