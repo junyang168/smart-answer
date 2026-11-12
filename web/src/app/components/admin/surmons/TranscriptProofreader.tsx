@@ -614,7 +614,7 @@ function TranscriptProofreader({
       }
       setFailure((error as Error).message);
       setStatus(
-        durable.current ? "同步暫停，修改保留在本機" : "尚未同步；請下載備份",
+        durable.current ? "同步暫停，修改保留在本機" : "尚未同步，請重試儲存",
       );
       throw error;
     } finally {
@@ -682,7 +682,7 @@ function TranscriptProofreader({
         if (saved.operations.length || saved.packet) {
           blocked.current = true;
           setRecovered(saved);
-          setFailure("找到上次尚未同步的修改；請先檢視或恢復。");
+          setFailure("找到上次尚未儲存的修改，可以在這裡恢復。");
         } else await draftStorage(identity, null);
       })
       .catch((error) => {
@@ -851,7 +851,7 @@ function TranscriptProofreader({
     setBusy(true);
     editor.current?.setOption("readOnly", true);
     try {
-      download();
+      const latest = await loadDocument(base);
       await persistTail.current.catch(() => {});
       await draftStorage(
         identity + ":archive:" + Date.now(),
@@ -861,15 +861,15 @@ function TranscriptProofreader({
           packet: packet.current,
         },
       );
+      await draftStorage(identity, null);
       queue.current = [];
       packet.current = undefined;
-      await draftStorage(identity, null);
-      updateDoc(await loadDocument(base));
+      updateDoc(latest);
       blocked.current = false;
       setRecovered(undefined);
       setFailure("");
       setDirty(false);
-      setStatus("已載入最新稿件；原本修改已下載備份");
+      setStatus("已載入網站上的最新稿");
       editor.current?.clearHistory();
     } finally {
       setBusy(false);
@@ -1144,32 +1144,6 @@ function TranscriptProofreader({
       setFailure((error as Error).message);
     }
   };
-  const download = () => {
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            item,
-            actor: doc.actor,
-            script: doc.script,
-            pending: recovered || {
-              operations: queue.current,
-              packet: packet.current,
-            },
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${item}-本機修改.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
   const restore = async () => {
     if (!recovered) return;
     setBusy(true);
@@ -1342,7 +1316,7 @@ function TranscriptProofreader({
       : blocked.current
         ? durable.current
           ? "同步已暫停；請檢查下方提示"
-          : "尚未同步；請下載備份"
+          : "尚未同步，請重試儲存"
         : status;
   const audioOnly = doc.context.media_mime_type?.startsWith("audio/") ?? false;
   const MediaPlayer = audioOnly ? "audio" : "video";
@@ -1595,33 +1569,25 @@ function TranscriptProofreader({
             className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900"
           >
             {failure}
-            <div className="mt-2 flex gap-2">
-              <button className={button} onClick={download}>
-                下載本機修改
-              </button>
-              {recovered && (
-                <button className={button} onClick={() => void restore()}>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {recovered ? (
+                <button className={button} disabled={busy} onClick={() => void restore()}>
                   恢復待存修改
                 </button>
+              ) : (
+                <button className={button} disabled={busy} onClick={() => {
+                  blocked.current = false;
+                  void flush().catch((error) => setFailure(error.message));
+                }}>
+                  重試儲存
+                </button>
               )}
-              <button
-                className={button}
-                onClick={() =>
-                  void discardLocal().catch((e) => setFailure(e.message))
-                }
-              >
-                下載備份並載入最新稿
-              </button>
-              {!recovered && blocked.current && (
-                <button
-                  className={button}
-                  onClick={() => {
-                    blocked.current = false;
-                    setFailure("");
-                    void flush().catch(() => {});
-                  }}
-                >
-                  重試同步
+              {(recovered || blocked.current) && (
+                <button className={button} disabled={busy} onClick={() => {
+                  if (!window.confirm("載入網站上的最新稿？尚未儲存的修改將從編輯器移除。")) return;
+                  void discardLocal().catch((error) => setFailure(error.message));
+                }}>
+                  載入最新稿
                 </button>
               )}
             </div>
