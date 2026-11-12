@@ -265,7 +265,11 @@ def test_source_clock_keeps_word_anchors_when_neighbouring_estimates_drift():
     assert flow.audio.start_estimates(blocks, selected, 100) == [75, 83, 91]
 
 
-def test_filtered_flash_window_keeps_base_words_and_continues(tmp_path, monkeypatch):
+@pytest.mark.parametrize("filtered_response", [
+    {"candidates": [{"finish_reason": "PROHIBITED_CONTENT"}]},
+    {"prompt_feedback": {"block_reason": "PROHIBITED_CONTENT"}},
+])
+def test_filtered_flash_window_keeps_base_words_and_continues(tmp_path, monkeypatch, filtered_response):
     from types import SimpleNamespace
 
     monkeypatch.setattr(flow.audio, "VisionReviewer", lambda *_: SimpleNamespace(
@@ -284,7 +288,7 @@ def test_filtered_flash_window_keeps_base_words_and_continues(tmp_path, monkeypa
         called.append(name)
         raw = {"model_version": model.model}
         if name == "flash-0":
-            raw["candidates"] = [{"finish_reason": "PROHIBITED_CONTENT"}]
+            raw.update(filtered_response)
         else:
             raw["answer"] = '{"edits":[{"id":"' + packet["editable_ids"][0] + '","text":"精修第二段"}],"omissions":[]}'
         return flow.saved_response(folder, name, model, packet, lambda: raw)

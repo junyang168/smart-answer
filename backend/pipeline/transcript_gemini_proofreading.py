@@ -68,10 +68,12 @@ def saved_response(folder, name, model, payload, invoke):
     raw = read_json(result)
     if (raw.get("model") or raw.get("model_version")) != model.model:
         raise ValueError(f"Unexpected model for {name}")
-    candidates = raw.get("candidates", [])
-    if (name.startswith("flash-") and getattr(model, "provider", None) == "gemini"
-            and len(candidates) == 1 and candidates[0].get("finish_reason") == "PROHIBITED_CONTENT"):
-        raise audio.FilteredRefinement("PROHIBITED_CONTENT")
+    if name.startswith("flash-") and getattr(model, "provider", None) == "gemini":
+        candidates = raw.get("candidates") or []
+        blocked_prompt = (raw.get("prompt_feedback") or {}).get("block_reason") == "PROHIBITED_CONTENT"
+        blocked_response = len(candidates) == 1 and candidates[0].get("finish_reason") == "PROHIBITED_CONTENT"
+        if blocked_prompt or blocked_response:
+            raise audio.FilteredRefinement("PROHIBITED_CONTENT")
     return json.loads(model.text(raw))
 
 
