@@ -357,6 +357,9 @@ class ReviewStore:
             **self.target_shas(rows, context),
             "reviews": context["reviews"],
         }
+        if any(op.get("kind") == "paragraph_timing" for op in request.get("operations", [])):
+            result["paragraph_bindings"] = context["paragraph_bindings"]
+            result["timing_quality"] = context.get("timing_quality")
         files = {
             self.root / "script_review" / f"{item}.json": rows,
             folder / "context.json": context,
@@ -424,6 +427,8 @@ class ReviewStore:
                     rows[:] = [p for p in rows if p["index"] != key]
                     by_id.pop(key)
                     c["reviews"].pop("p:" + key, None)
+                elif kind == "paragraph_timing":
+                    self.confirm_paragraph_timing(item, actor, c, by_id.get(key), op)
                 elif kind == "paragraph_review":
                     if key not in c["paragraph_bindings"] or op.get("decision") not in (
                         "confirmed",
@@ -551,6 +556,43 @@ class ReviewStore:
             return self.commit(
                 item, actor, request["operation_id"], request, rows, c, "edit"
             )
+
+    def confirm_paragraph_timing(self, item, actor, context, row, operation):
+        if not row or row.get("type") == "subtitle":
+            raise ReviewError(400, "無效段落")
+        key = row["index"]
+        bindings = context["paragraph_bindings"]
+        binding = bindings.get(key)
+        timing = context.get("timing_quality")
+        if key in ((timing or {}).get("source_holds") or {}):
+            raise ReviewError(409, "此段音源不清，須先處理原聲問題")
+        start, end = operation.get("start_ms"), operation.get("end_ms")
+        source = read(self.folder(item) / "source-record.json") or {}
+        duration = source.get("duration_ms")
+        if not binding or type(start) is not int or type(end) is not int or not (
+            type(duration) is int and 0 <= start < end <= duration
+        ):
+            raise ReviewError(400, "起訖時間無效，請確認時間在錄音範圍內")
+
+        previous = digest({"text": row["text"], **binding})
+        binding.update(start_ms=start, end_ms=end)
+        review = context["reviews"].get("p:" + key)
+        if review and review.get("sha256") == previous:
+            review["sha256"] = digest({"text": row["text"], **binding})
+
+        if timing is None:
+            timing = context["timing_quality"] = {"status": "qualified"}
+        states = timing.setdefault("paragraph_states", {})
+        states[key] = {
+            **states.get(key, {}),
+            "status": "qualified",
+            "confirmed_by": actor,
+            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if not timing.get("source_holds") and all(
+            states.get(pid, {}).get("status") == "qualified" for pid in bindings
+        ):
+            timing["status"] = "qualified"
 
     @staticmethod
     def group_target(c, g):

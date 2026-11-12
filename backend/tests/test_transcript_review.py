@@ -1121,3 +1121,55 @@ def test_non_mp3_audio_cannot_enter_editor_without_verified_mp3_copy(setup):
     store.candidate_path('講道 test').unlink();store.register_candidate('講道 test',source,expected_script_sha256=None)
     with pytest.raises(ReviewError,match='MP3'):adopted(setup)
     assert not store.enabled('講道 test')
+
+
+def test_assigned_editor_can_confirm_paragraph_timing_and_publish(setup):
+    from backend.api.sc_api.transcript_review import pending_timing_ids
+
+    store, _, _ = setup
+    item = "講道 test"
+    adopted(setup)
+    doc = confirmed(store)
+    pid = doc["script"][0]["index"]
+    source_path = store.folder(item) / "source-record.json"
+    source = read(source_path)
+    # Older test fixture predates the source duration field.
+    if "duration_ms" not in source:
+        source["duration_ms"] = 3615000
+        atomic(source_path, source)
+    source_sha = file_hash(source_path)
+
+    context = doc["context"]
+    states = {key: {"status": "qualified"} for key in context["paragraph_bindings"]}
+    states[pid] = {"status": "withheld"}
+    context["timing_quality"] = {"status": "withheld", "paragraph_states": states}
+    atomic(store.folder(item) / "context.json", context)
+    doc = store.document("a", item)
+    assert pending_timing_ids(doc["script"], doc["context"]) == [pid]
+
+    with pytest.raises(ReviewError, match="時間邊界"):
+        store.publish("a", item, op(doc))
+    old_binding = doc["context"]["paragraph_bindings"][pid]
+    timing = {
+        "kind": "paragraph_timing",
+        "id": pid,
+        "start_ms": old_binding["start_ms"] + 100,
+        "end_ms": old_binding["end_ms"],
+    }
+    with pytest.raises(ReviewError, match="當前認領人"):
+        store.mutate("b", item, op(doc, operations=[timing]))
+    with pytest.raises(ReviewError, match="起訖時間無效"):
+        store.mutate("a", item, op(doc, operations=[{**timing, "end_ms": source["duration_ms"] + 1}]))
+
+    request = op(doc, operations=[timing])
+    result = store.mutate("a", item, request)
+    assert store.mutate("a", item, request) == result
+    after = store.document("a", item)
+    assert after["script"] == doc["script"]
+    assert file_hash(source_path) == source_sha
+    assert result["paragraph_bindings"][pid]["start_ms"] == timing["start_ms"]
+    assert result["reviews"]["p:" + pid]["sha256"] == after["paragraph_shas"][pid]
+    assert pending_timing_ids(after["script"], after["context"]) == []
+    store.publish("a", item, op(after))
+    published, _ = store.published_snapshot(item)
+    assert published["script"][0]["start_time"] == timing["start_ms"] / 1000
