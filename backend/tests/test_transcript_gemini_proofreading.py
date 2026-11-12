@@ -54,7 +54,9 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
         calls.append("transcribe")
         return {"words": [{"text": "要要要說明。", "speaker": "w0:spk:0", "start": 0, "end": 8}]}
 
-    def flash(_, transcript, *args):
+    def flash(_, transcript, *args, speaker_name=None):
+        if speaker_name:
+            calls.append(speaker_name)
         assert transcript["words"][0]["text"] == "要要要說明。"
         calls.append("flash")
         return {"cues": [cue], "coverage": [], "omissions_for_review": []}
@@ -93,6 +95,12 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
     calls.clear()
     assert flow.run(None, media, tmp_path / "new", start="flash", prior=original, aligner=aligner) == expected
     assert calls == ["flash", "segment", "timing"]
+    calls.clear()
+    named = tmp_path / "named-flash"
+    assert flow.run(None, media, named, start="flash", prior=original,
+                    aligner=aligner, speaker_name="王守仁（王教授）") == expected
+    assert calls == ["王守仁（王教授）", "flash", "segment", "timing"]
+    assert flow.read_json(named / "run.json")["speaker_name"] == "王守仁（王教授）"
     calls.clear()
     assert flow.run(None, media, tmp_path / "layout", start="layout", prior=original, aligner=aligner) == expected
     assert calls == []
