@@ -68,6 +68,10 @@ def saved_response(folder, name, model, payload, invoke):
     raw = read_json(result)
     if (raw.get("model") or raw.get("model_version")) != model.model:
         raise ValueError(f"Unexpected model for {name}")
+    candidates = raw.get("candidates", [])
+    if (name.startswith("flash-") and getattr(model, "provider", None) == "gemini"
+            and len(candidates) == 1 and candidates[0].get("finish_reason") == "PROHIBITED_CONTENT"):
+        raise audio.FilteredRefinement("PROHIBITED_CONTENT")
     return json.loads(model.text(raw))
 
 
@@ -292,6 +296,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
                     if cues is None:
                         value.update(omissions_for_review=outputs["timing"]["omissions_for_review"],
                                      coverage=outputs["timing"]["coverage"])
+                        if outputs["timing"].get("unrefined_windows"):
+                            value["unrefined_windows"] = outputs["timing"]["unrefined_windows"]
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")

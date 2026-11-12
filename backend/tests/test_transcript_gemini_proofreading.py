@@ -263,3 +263,34 @@ def test_source_clock_keeps_word_anchors_when_neighbouring_estimates_drift():
     selected = flow.audio.ordered_start_anchors(anchors, 100)
     assert selected == anchors
     assert flow.audio.start_estimates(blocks, selected, 100) == [75, 83, 91]
+
+
+def test_filtered_flash_window_keeps_base_words_and_continues(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(flow.audio, "VisionReviewer", lambda *_: SimpleNamespace(
+        model="gemini-test", provider="gemini", prompt="test", config={},
+        text=lambda raw: raw["answer"],
+    ))
+    monkeypatch.setattr(flow.audio, "extract", lambda _, path, *_args: path.write_bytes(b"mp3"))
+    media = tmp_path / "source.mp3"
+    words = [
+        {"text": "底稿", "speaker": "w0:spk:0", "start": 0, "end": 1},
+        {"text": "第二段", "speaker": "w1:spk:0", "start": 2, "end": 3},
+    ]
+    called = []
+
+    def respond(folder, name, model, packet, _invoke):
+        called.append(name)
+        raw = {"model_version": model.model}
+        if name == "flash-0":
+            raw["candidates"] = [{"finish_reason": "PROHIBITED_CONTENT"}]
+        else:
+            raw["answer"] = '{"edits":[{"id":"' + packet["editable_ids"][0] + '","text":"精修第二段"}],"omissions":[]}'
+        return flow.saved_response(folder, name, model, packet, lambda: raw)
+
+    result = flow.audio.refine(media, {"duration": 3, "words": words, "coverage": []}, tmp_path, respond)
+    assert called == ["flash-0", "flash-1"]
+    assert [turn["text"] for turn in result["turns"]] == ["底稿", "精修第二段"]
+    assert result["unrefined_windows"] == [{"window": 0, "start": 0, "end": 1,
+                                           "reason": "PROHIBITED_CONTENT"}]

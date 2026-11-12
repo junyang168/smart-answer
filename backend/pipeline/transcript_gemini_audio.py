@@ -34,6 +34,10 @@ FLASH_SCHEMA = obj({
 })
 
 
+class FilteredRefinement(RuntimeError):
+    """A completed provider decision that supplied no usable refinement."""
+
+
 def extract(media, target, start, end):
     if target.exists():
         return
@@ -163,6 +167,7 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
     model = VisionReviewer("gemini", FLASH_PROMPT, FLASH_SCHEMA)
     model.config.update(max_output_tokens=9500, thinking_config={"thinking_level": "LOW"})
     omissions = []
+    unrefined_windows = []
     for i, (_, window) in enumerate(groupby(turns, key=lambda turn: turn["speaker"].split(":", 1)[0])):
         owned = list(window)
         start = max(0, owned[0]["start"] - 1.2)
@@ -176,7 +181,14 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
             packet["known_speaker_name"] = speaker_name
         parts = [types.Part.from_text(text=FLASH_PROMPT + "\n" + json.dumps(packet, ensure_ascii=False)),
                  types.Part.from_bytes(data=audio.read_bytes(), mime_type="audio/mp3")]
-        answer = saved_response(folder, f"flash-{i}", model, packet, lambda: model.generate(parts))
+        try:
+            answer = saved_response(folder, f"flash-{i}", model, packet, lambda: model.generate(parts))
+        except FilteredRefinement as error:
+            unrefined_windows.append({
+                "window": i, "start": owned[0]["start"], "end": max(x["end"] for x in owned),
+                "reason": str(error),
+            })
+            continue
         check_schema(answer, FLASH_SCHEMA)
         seen = set()
         for change in answer["edits"]:
@@ -187,7 +199,7 @@ def refine(media, transcription, folder, saved_response, *, speaker_name=None):
             ids[key]["text"] = text
         omissions.extend(x for x in answer["omissions"] if start <= x["start"] < x["end"] <= end and x["text"].strip())
     return {"duration": transcription["duration"], "turns": turns, "base_turns": base_turns, "omissions_for_review": omissions,
-            "coverage": transcription["coverage"]}
+            "coverage": transcription["coverage"], "unrefined_windows": unrefined_windows}
 
 
 def alignment_worker(aligner, clips):
