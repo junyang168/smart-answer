@@ -196,6 +196,42 @@ def question_context_rule(packet, decision, records, new):
     }
 
 
+def paragraph_location_rule(packet, decision, records, new, clock_proofs):
+    """Keep a checked location when a quotation cannot be compiled."""
+    keys = [span["paragraph_key"] for span in decision["spans"]]
+    allowed = {row["paragraph_key"]: row for row in packet["candidates"]}
+    if (not keys or any(key not in allowed or key not in new["paragraphs"] for key in keys)
+            or not decision["reason"].strip()
+            or not candidates.consecutive_spoken(keys, new)):
+        return None
+    key = packet["record_key"]
+    if "consumer" in packet:
+        ids = packet["consumer"]["context_fragment_ids"]
+        if len(ids) != 1:
+            return None
+        key = "source_fragments/" + ids[0]
+    state = records[key]
+    clock = state["payload"]
+    proof = clock_proofs.get(key)
+    if proof:
+        from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+        clock = verified_legacy_interval(clock, proof)
+    intervals = []
+    for pk in keys:
+        paragraph = new["paragraphs"][pk]
+        if allowed[pk]["text"] != paragraph["text"]:
+            raise ValueError("Candidate differs from current live paragraph")
+        intervals.append({"media_time": paragraph["start_time"], "media_end_time": paragraph["end_time"]})
+    if not audio_position(clock, intervals)["consistent"]:
+        return None
+    return key, {
+        "before_pin": [state["revision"], state["content_sha256"]],
+        "target_source_sha256": new["body_sha256"], "mode": "paragraph_location",
+        "paragraph_keys": keys, "reason": decision["reason"].strip(),
+        **({"legacy_clock": proof} if proof else {}),
+    }
+
+
 def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_first=False):
     """Run bounded batches, replay saved replies and emit a calibration input."""
     from backend.pipeline.transcript_locator_migration import run_lock
@@ -216,12 +252,14 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_f
         if row["record_key"] not in available:
             unresolved[row["record_key"]] = "no_scoped_consumer_candidate"
 
+    fallback = []
     with run_lock(root) as root:
         for offset in range(0, len(packets), 6):
             batch = packets[offset:offset + 6]
             folder = root / f"batch-{offset // 6 + 1:03d}"
             by_key = review_batch(folder, batch, call, prompt=prompt, schema=schema)
             if statement_first:
+                fallback.extend((p, by_key[p["record_key"]]) for p in batch)
                 actionable = []
                 for packet in batch:
                     key = packet["record_key"]
@@ -264,6 +302,15 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_f
                     continue
                 fragment_rules.update(parents)
                 consumer_rules[key] = rule
+        for packet, decision in fallback:
+            key = packet["record_key"]
+            if key not in unresolved or decision["disposition"] not in {"aligned", "question_context_only"}:
+                continue
+            result = paragraph_location_rule(packet, decision, records, new, bundle["clock_proofs"])
+            if result and result[0] not in fragment_rules:
+                parent, rule = result
+                fragment_rules[parent] = rule
+                unresolved.pop(key)
         calibration = root / "calibration.json"
         migration.immutable(calibration, {
             "schema_version": "wang_transcript_locator_calibration_v1",

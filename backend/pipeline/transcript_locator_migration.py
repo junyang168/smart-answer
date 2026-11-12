@@ -71,7 +71,7 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
         exceptions = [
             row for row in report['fragments']
             if row['status'] not in RESOLVED
-            and row['status'] != 'question_context_only'
+            and row['status'] not in {'question_context_only', 'paragraph_location'}
             and not (row['status'] == 'source_text_missing'
                      and row.get('calibration_decision', {}).get('owner_confirmation'))
         ] + report.get('consumer_exceptions', [])

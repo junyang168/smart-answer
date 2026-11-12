@@ -450,3 +450,28 @@ def test_locator_live_transport_uses_codex_subscription(tmp_path, monkeypatch):
     assert result == answer
     assert raw["backend"] == "codex_subscription"
     assert raw["usage"] == {"input_tokens": 100}
+
+
+def test_confirmed_paragraph_survives_invalid_quote_without_becoming_evidence():
+    from backend.pipeline.transcript_evidence_apply import calibrate, validate_fragment_locations
+    from backend.pipeline.transcript_locator_resolution import paragraph_location_rule
+
+    key = "source_fragments/f"
+    clock = {"media_time": 5, "media_end_time": 20}
+    paragraph = {"index": "145", "text": "教授接著回答。", "start_time": 10, "end_time": 15}
+    new = {"body_sha256": "new", "paragraphs": {"S0145": paragraph}}
+    state = {"revision": 1, "content_sha256": "old", "payload": {**clock, "verbatim_excerpt": "歷史引文"}}
+    packet = {"record_key": key, "candidates": [{"paragraph_key": "S0145", **paragraph}]}
+    decision = {"reason": "同一次問答", "spans": [span("S0145", "舊文字不在新版")]}
+    assert not paragraph_location_rule(packet, {**decision, "spans": [span("S9999", "其他段")]},
+                                       {key: state}, new, {})
+    _, rule = paragraph_location_rule(packet, decision, {key: state}, new, {})
+    row = {"record_key": key, "status": "exception"}
+    result = calibrate(row, state, rule, new, {})
+    post = {**state["payload"], **result["proposed_fields"]}
+    assert post["verbatim_excerpt"] == "歷史引文"
+    assert post["anchor_state"] == "unresolved"
+    assert post["aligned_paragraphs"]["locations"] == [
+        {"paragraph_key": "S0145", "media_time": 10, "media_end_time": 15},
+    ]
+    validate_fragment_locations({key: post}, new)

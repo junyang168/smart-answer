@@ -29,7 +29,7 @@ FRAGMENT_FIELDS = {
     'paragraph_text_sha256', 'verbatim_excerpt', 'verbatim_excerpt_sha256',
     'media_time', 'media_end_time', 'anchor_state', 'speaker',
     'source_binding_status', 'deleted_in_source_sha256',
-    'replacement_fragment_ids', 'missing_in_source_sha256', 'question_context',
+    'replacement_fragment_ids', 'missing_in_source_sha256', 'question_context', 'aligned_paragraphs',
 }
 EVIDENCE_FIELDS = {'source_binding_status', 'support_eligibility',
                    'valid_for_identity_review', 'speaker', 'source_fragment_id', 'source_fragment_ids',
@@ -70,6 +70,27 @@ def calibrate(row, state, rule, new, document):
                 'reason': rule['reason'], 'proposed_fields': {
                     'anchor_state':'unresolved', 'source_binding_status':'source_text_missing',
                     'missing_in_source_sha256':new['body_sha256']}}
+    if mode == 'paragraph_location':
+        from backend.pipeline.transcript_locator_candidates import consecutive_spoken
+        from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+
+        keys = rule['paragraph_keys']
+        if not keys or not consecutive_spoken(keys, new):
+            raise ValueError('invalid aligned paragraphs')
+        locations = [
+            {'paragraph_key': pk, 'media_time': new['paragraphs'][pk]['start_time'],
+             'media_end_time': new['paragraphs'][pk]['end_time']}
+            for pk in keys
+        ]
+        clock = verified_legacy_interval(f, rule['legacy_clock']) if rule.get('legacy_clock') else f
+        if not audio_position(clock, locations)['consistent']:
+            raise ValueError('aligned paragraphs are outside the saved audio interval')
+        return {**row, 'status': 'paragraph_location', 'reason': rule['reason'],
+                'target_paragraphs': keys, 'candidate_segments': locations,
+                'calibration_decision': rule, 'proposed_fields': {
+                    'anchor_state': 'unresolved', 'source_binding_status': 'quotation_pending_update',
+                    'aligned_paragraphs': {'source_body_sha256': new['body_sha256'], 'locations': locations},
+                }}
     segments = []
     for target in rule['segments']:
         p = new['paragraphs'][target['paragraph_key']]; quote = target['verbatim_excerpt']
@@ -190,7 +211,7 @@ def fields_for(row, fragment, new):
         return {**row['proposed_fields'], 'deleted_in_source_sha256': new['body_sha256']}, False
     if status == 'auto_rebind':
         return {**row['proposed_fields'], 'source_binding_status': 'source_version_bound'}, False
-    if status in {'source_text_missing', 'question_context_only'}:
+    if status in {'source_text_missing', 'question_context_only', 'paragraph_location'}:
         return row['proposed_fields'], True
     if status == 'calibrated_rebind' and len(row['candidate_segments']) == 1:
         return segment_fields(row['candidate_segments'][0],new), True
@@ -301,9 +322,9 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                     updates[key] = post
                 if changed:
                     changed_quotes.add(key)
-                    if row['status'] not in {'source_text_missing', 'question_context_only'}:
+                    if row['status'] not in {'source_text_missing', 'question_context_only', 'paragraph_location'}:
                         row.update(status='relocate_changed_quote', content_approval_granted=False)
-        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted','source_text_missing','question_context_only'}
+        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted','source_text_missing','question_context_only','paragraph_location'}
                 and context_only(f.get('verbatim_excerpt',''))):
             if key not in replacements:
                 updates[key] = {**updates.get(key,f),'anchor_state':'context_only','source_binding_status':'context_only'}
@@ -387,8 +408,11 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         elif changed:
             fields['source_binding_status'] = 'needs_claim_refresh'
         missing = [r['record_key'] for r in matching if r['status'] == 'source_text_missing']
+        located = any(r['status'] == 'paragraph_location' for r in matching)
+        if located and not deleted:
+            fields['source_binding_status'] = 'quotation_pending_update'
         if missing: fields['source_binding_status'] = 'source_text_missing'
-        if context_ids and not deleted and not missing:
+        if context_ids and not deleted and not missing and not located:
             fields['source_binding_status'] = 'context_only' if not fields['source_fragment_ids'] else 'context_excluded'
         if deleted or changed or missing or context_ids:
             fields.update(support_eligibility='withheld_unreviewed', valid_for_identity_review=False)
@@ -442,6 +466,7 @@ def render_report(report, *, applied=False):
         'source_deleted':'已刪除，不可作證據','already_deleted':'已標記刪除，保留',
         'context_only':'僅語境，不可作證據','source_text_missing':'新版未保留，不作證據',
         'question_context_only':'原問句未保留，僅列問答位置',
+        'paragraph_location':'已對齊段落，引文待 Update',
         'located_review':'尚待可靠定位','exception':'尚待可靠定位','retired':'歷史保留'}
     cells = []
     for row in report['fragments']:
@@ -449,7 +474,7 @@ def render_report(report, *, applied=False):
         targets = row.get('target_paragraphs') or [row.get('target_paragraph') or fields.get('paragraph_key') or '']
         clock = '; '.join(f"{s['paragraph_key']} {s.get('media_time')}–{s.get('media_end_time')}" for s in segments)
         reason = (row.get('calibration_decision') or {}).get('reason',row['reason'])
-        if row['status'] in {'source_deleted', 'source_text_missing'}:
+        if row['status'] in {'source_deleted', 'source_text_missing', 'paragraph_location'}:
             new_quote = '歷史原文保留；不移入有效證據。'
         else: new_quote = row.get('candidate_quote',fields.get('verbatim_excerpt',''))
         values = [labels[row['status']],row['record_key'],row.get('old_paragraph'),', '.join(targets),
@@ -569,6 +594,13 @@ def validate_fragment_locations(updates, snapshot):
     for key, fragment in updates.items():
         if not key.startswith('source_fragments/'):
             continue
+        if alignment := fragment.get('aligned_paragraphs'):
+            if (fragment.get('anchor_state') == 'source_version_bound'
+                    or alignment['source_body_sha256'] != snapshot['body_sha256']
+                    or any((p := snapshot['paragraphs'].get(row['paragraph_key'])) is None
+                           or row['media_time'] != p['start_time'] or row['media_end_time'] != p['end_time']
+                           for row in alignment['locations'])):
+                raise ValueError('aligned paragraph provenance differs: ' + key)
         if fragment.get('question_context'):
             if fragment.get('anchor_state') == 'source_version_bound':
                 raise ValueError('question context must not be an active quotation')
