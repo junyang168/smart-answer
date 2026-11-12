@@ -251,7 +251,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
                 options = {"speaker_name": speaker_name} if speaker_name else {}
                 value = audio.refine(media, outputs["transcribe"], out, saved_response, **options)
             elif stage == "timing":
-                from backend.pipeline.transcript_semantic_segmentation import playback_blocks, segment
+                from backend.pipeline.transcript_semantic_segmentation import playback_blocks
+                from backend.pipeline.transcript_punctuation import apply_combined, combined_operations, insert_punctuation
 
                 from backend.pipeline.transcript_word_timing import locate_starts_from_base, locate_paragraph_edges
                 refined = outputs["flash"]
@@ -259,7 +260,10 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
                 turns = refined.get("turns") or refined.get("cues")
                 if turns is None:
                     turns = [turn for block in refined["blocks"] for turn in block["cues"]]
-                paragraphs = segment(turns, out / "semantic-segmentation")
+                operations = combined_operations(turns, out / "punctuation-and-segmentation")
+                paragraphs, punctuation, rejected = apply_combined(turns, operations)
+                save_json(out / "punctuation-and-segmentation" / "edits.json",
+                          {"paragraphs": paragraphs, "punctuation": punctuation, "rejected": rejected})
                 words = outputs["transcribe"]["words"]
                 base_turns = refined.get("base_turns") or [
                     {**turn, "text": turn.get("base", turn["text"])} for turn in turns
@@ -271,9 +275,11 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
                           if b["start"] is not None else None)
                     for a, b in zip(mapped, exact, strict=True)
                 ]
-                value = audio.align_starts(media, {**refined, "blocks": playback_blocks(paragraphs, turns)},
+                blocks = playback_blocks(paragraphs, turns)
+                insert_punctuation(paragraphs, blocks, punctuation)
+                value = audio.align_starts(media, {**refined, "blocks": blocks},
                                            out, aligner, starts)
-                value["segmentation"] = "gpt-punctuation-start-timing.v2"
+                value["segmentation"] = "combined-punctuation-start-timing.v3"
             else:
                 blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
@@ -289,7 +295,7 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")
-        if stage == "timing" and saved["value"].get("segmentation") != "gpt-punctuation-start-timing.v2":
+        if stage == "timing" and saved["value"].get("segmentation") != "combined-punctuation-start-timing.v3":
             raise ValueError("Legacy timing checkpoint: restart at timing in a new output directory")
         save_json(checkpoint, saved)
         outputs[stage] = saved["value"]

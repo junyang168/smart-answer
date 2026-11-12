@@ -64,17 +64,19 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
     def timing(_, refined, _out, _aligner, starts):
         calls.append("timing")
         assert len(refined["blocks"]) == 1
+        assert refined["blocks"][0]["cues"][0]["text"] == "要要要，說明。"
         assert starts == [{"start": 0, "method": "original_word"}]
         return {**refined, "blocks": [{**refined["blocks"][0], "start": 0.25, "timing_review": True}]}
 
-    from backend.pipeline import transcript_semantic_segmentation as semantic
+    from backend.pipeline import transcript_punctuation as punctuation
 
-    def segment(turns, _):
+    def combined(turns, folder):
         calls.append("segment")
-        text, positions, _ = semantic.segmentation_input(turns)
-        return semantic.apply_ends(text, positions, [len(positions)])
+        assert turns == [cue]
+        assert folder.name == "punctuation-and-segmentation"
+        return ["1|要要要|，|0"]
 
-    monkeypatch.setattr(semantic, "segment", segment)
+    monkeypatch.setattr(punctuation, "combined_operations", combined)
 
     monkeypatch.setattr(flow.audio, "transcribe", transcribe)
     monkeypatch.setattr(flow.audio, "refine", flash)

@@ -119,6 +119,15 @@ def apply_combined(turns, operations, required_breaks=()):
     return paragraphs, edits, rejected
 
 
+def insert_punctuation(paragraphs, blocks, edits):
+    for p, block in zip(paragraphs, blocks, strict=True):
+        pos = p["start"]
+        for turn in block["cues"]:
+            raw = turn["text"]
+            turn["text"] = "".join(char + edits.get(pos+i, "") for i, char in enumerate(raw, 1))
+            pos += len(raw)
+
+
 def finish_combined(media, prior, words, roles, operations, out, aligner):
     """Apply combined edits, then run playback timing, cleanup and layout."""
     from itertools import accumulate
@@ -142,12 +151,7 @@ def finish_combined(media, prior, words, roles, operations, out, aligner):
                                     if match["start"] is not None else None)
         for p, match in zip(paragraphs, found, strict=True)
     ]
-    for p, block in zip(paragraphs, blocks, strict=True):
-        pos = p["start"]
-        for turn in block["cues"]:
-            raw = turn["text"]
-            turn["text"] = "".join(char + edits.get(pos+i, "") for i, char in enumerate(raw, 1))
-            pos += len(raw)
+    insert_punctuation(paragraphs, blocks, edits)
     result = flow.audio.align_starts(media, {**prior, "blocks": blocks}, out, aligner, starts)
     flow.save_json(out / "timing.json", result)
     edits = flow.repetition_proposals(result["blocks"], out, {})
