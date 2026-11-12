@@ -220,3 +220,15 @@ def test_start_only_timing_reuses_gemini_and_ends_at_next_start(tmp_path):
         (0.2, 6.8, False), (6.8, 20, False),
     ]
     assert not (tmp_path / "paragraph-start-timing").exists()
+
+
+def test_punctuation_cannot_rewrite_transcript_or_protected_markup():
+    from backend.pipeline.transcript_punctuation import validate_punctuation
+
+    original = "**教授**：對對~~要要~~要這樣做\n\n**聽眾**：是嗎？"
+    corrected = "**教授**：對，對，~~要要~~要這樣做。\n\n**聽眾**：是嗎？"
+    assert validate_punctuation(original, corrected) == corrected
+    with pytest.raises(ValueError, match="content"):
+        validate_punctuation(original, corrected.replace("做", "說"))
+    with pytest.raises(ValueError, match="markup"):
+        validate_punctuation(original, corrected.replace("~~要要~~", "~~要，要~~"))
