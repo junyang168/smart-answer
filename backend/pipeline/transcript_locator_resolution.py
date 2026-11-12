@@ -95,10 +95,10 @@ def consumer_rule(packet, selection, records, new):
     return rule, parent_rules
 
 
-def review_batch(folder, batch, call):
+def review_batch(folder, batch, call, *, prompt=candidates.PROMPT, schema=candidates.SCHEMA):
     request = migration.immutable(folder / "request.json", {
-        "model": "gpt-6.1-sol", "prompt": candidates.PROMPT,
-        "schema": candidates.SCHEMA, "packets": batch,
+        "model": "gpt-6.1-sol", "prompt": prompt,
+        "schema": schema, "packets": batch,
     })
     reply = folder / "response.json"
     if not reply.exists():
@@ -106,11 +106,19 @@ def review_batch(folder, batch, call):
         if started.exists():
             raise ValueError(f"Locator request has no saved response: {started}")
         migration.immutable(started, {"request": request})
-        raw, answer = call(batch)
+        from backend.pipeline.media_batch.runtime import WaitingCapacity
+        try:
+            raw, answer = call(batch)
+        except WaitingCapacity:
+            # The capacity check runs before the provider call. Save the refusal
+            # and leave this exact request eligible to resume.
+            migration.immutable(folder / "capacity-wait.json", {"request": request, "provider_call_sent": False})
+            started.unlink()
+            raise
         migration.immutable(reply, {"raw": raw, "answer": answer})
     answer = migration.read(reply)["answer"]
     from backend.pipeline.slide_visual_evidence import check_schema
-    check_schema(answer, candidates.SCHEMA)
+    check_schema(answer, schema)
     decisions = answer["decisions"]
     keys = {p["record_key"] for p in batch}
     if len(decisions) != len(batch) or {d["record_key"] for d in decisions} != keys:
@@ -159,16 +167,52 @@ def refine_boundaries(folder, packets, decisions, pending, records, new, clock_p
     return rules
 
 
-def resolve_packets(root, bundle, records, new, prior, *, call=None):
+def question_context_rule(packet, decision, records, new):
+    """Keep the old quotation and capture a separate, checked playback context."""
+    key = packet["record_key"]
+    if key.startswith("questions/"):
+        ids = packet["consumer"]["context_fragment_ids"]
+        if len(ids) != 1:
+            return None
+        key = "source_fragments/" + ids[0]
+    elif (not packet.get("consumers")
+          or any(not x["record_key"].startswith("questions/") for x in packet["consumers"])):
+        return None
+    state = records[key]
+    spans = candidates.select_spans(packet, decision, new)
+    if not spans or any(context_only(s["verbatim_excerpt"]) for s in spans):
+        return None
+    order = list(new["paragraphs"])
+    selected = [order.index(s["paragraph_key"]) for s in spans]
+    if selected != list(range(selected[0], selected[0] + len(selected))):
+        return None
+    intervals = [{"media_time": new["paragraphs"][s["paragraph_key"]]["start_time"],
+                  "media_end_time": new["paragraphs"][s["paragraph_key"]]["end_time"]}
+                 for s in spans]
+    if not audio_position(state["payload"], intervals)["consistent"]:
+        return None
+    return key, {
+        "before_pin": [state["revision"], state["content_sha256"]],
+        "target_source_sha256": new["body_sha256"], "mode": "question_context_only",
+        "segments": spans, "reason": decision["reason"].strip(),
+    }
+
+
+def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_first=False):
     """Run bounded batches, replay saved replies and emit a calibration input."""
     from backend.pipeline.transcript_locator_migration import run_lock
 
-    call = call or candidates.review_packets
+    legacy_call = call or candidates.review_packets
+    prompt = candidates.STATEMENT_PROMPT if statement_first else candidates.PROMPT
+    schema = candidates.STATEMENT_SCHEMA if statement_first else candidates.SCHEMA
+    if call is None:
+        def call(batch):
+            return candidates.review_packets(batch, prompt=prompt, schema=schema)
     fragment_rules = dict(prior.get("fragments", {}))
     consumer_rules = dict(prior.get("consumers", {}))
     unresolved = {key: "no_scoped_candidate" for key in bundle["unscoped"]}
     consumers = consumer_packets(bundle, records, new)
-    packets = bundle["packets"] + consumers
+    packets = [p for p in bundle["packets"] + consumers if p["record_key"] not in fragment_rules]
     available = {p["record_key"] for p in consumers}
     for row in bundle["consumer_exceptions"]:
         if row["record_key"] not in available:
@@ -178,14 +222,32 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None):
         for offset in range(0, len(packets), 6):
             batch = packets[offset:offset + 6]
             folder = root / f"batch-{offset // 6 + 1:03d}"
-            by_key = review_batch(folder, batch, call)
+            by_key = review_batch(folder, batch, call, prompt=prompt, schema=schema)
+            if statement_first:
+                actionable = []
+                for packet in batch:
+                    key = packet["record_key"]
+                    decision = by_key[key]
+                    disposition = decision["disposition"]
+                    if disposition == "verbatim_support":
+                        actionable.append(packet)
+                        continue
+                    if disposition == "question_context_only":
+                        result = question_context_rule(packet, decision, records, new)
+                        if result:
+                            parent, rule = result
+                            if parent not in fragment_rules:
+                                fragment_rules[parent] = rule
+                                continue
+                    unresolved[key] = disposition
+                batch = actionable
             fragment_batch = [p for p in batch if "consumer" not in p]
             rules, pending = candidates.calibration_rules(
                 fragment_batch, {"decisions": [by_key[p["record_key"]] for p in fragment_batch]},
                 records, new, bundle["clock_proofs"],
             )
             narrowed = refine_boundaries(folder / "boundary-review", fragment_batch, by_key,
-                                         pending, records, new, bundle["clock_proofs"], call)
+                                         pending, records, new, bundle["clock_proofs"], legacy_call)
             fragment_rules.update(rules)
             fragment_rules.update(narrowed)
             unresolved.update({k: v for k, v in pending.items() if k not in narrowed})

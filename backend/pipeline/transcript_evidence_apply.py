@@ -29,7 +29,7 @@ FRAGMENT_FIELDS = {
     'paragraph_text_sha256', 'verbatim_excerpt', 'verbatim_excerpt_sha256',
     'media_time', 'media_end_time', 'anchor_state', 'speaker',
     'source_binding_status', 'deleted_in_source_sha256',
-    'replacement_fragment_ids', 'missing_in_source_sha256',
+    'replacement_fragment_ids', 'missing_in_source_sha256', 'question_context',
 }
 EVIDENCE_FIELDS = {'source_binding_status', 'support_eligibility',
                    'valid_for_identity_review', 'speaker', 'source_fragment_id', 'source_fragment_ids',
@@ -57,6 +57,15 @@ def calibrate(row, state, rule, new, document):
         raise ValueError('saved locator calibration drift: '+row['record_key'])
     mode = rule['mode']
     if mode == 'source_text_missing':
+        if rule.get('owner_confirmation'):
+            confirmation = rule['owner_confirmation']
+            expected = confirmation.get('evidence_key')
+            if (confirmation.get('fragment_key') != row['record_key']
+                    or expected not in row.get('direct_consumers', [])
+                    or not expected.startswith('evidence_steps/')
+                    or not confirmation.get('owner_response')
+                    or confirmation.get('source_id') != f.get('source_id')):
+                raise ValueError('owner confirmation does not match the missing evidence')
         return {**row, 'status': 'source_text_missing', 'calibration_decision': rule,
                 'reason': rule['reason'], 'proposed_fields': {
                     'anchor_state':'unresolved', 'source_binding_status':'source_text_missing',
@@ -86,6 +95,24 @@ def calibrate(row, state, rule, new, document):
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
                 'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'}}
+    if mode == 'question_context_only':
+        consumers = row.get('direct_consumers', [])
+        if not consumers or not all(key.startswith('questions/') for key in consumers):
+            raise ValueError('question context cannot replace a substantive evidence citation')
+        if not segments or any(context_only(s['verbatim_excerpt']) for s in segments):
+            raise ValueError('question context requires substantive published text')
+        return {**row, 'status': 'question_context_only', 'reason': rule['reason'],
+                'target_paragraphs': [s['paragraph_key'] for s in segments],
+                'candidate_segments': segments,
+                'candidate_quote': '\n'.join(s['verbatim_excerpt'] for s in segments),
+                'calibration_decision': rule, 'proposed_fields': {
+                    'anchor_state': 'unresolved',
+                    'source_binding_status': 'source_text_missing',
+                    'missing_in_source_sha256': new['body_sha256'],
+                    'question_context': [
+                        {**segment_fields(s, new), 'kind': 'question_answer_context'} for s in segments
+                    ],
+                }}
     from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     return {**row, 'status':'calibrated_rebind', 'reason':rule['reason'],
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
@@ -163,7 +190,7 @@ def fields_for(row, fragment, new):
         return {**row['proposed_fields'], 'deleted_in_source_sha256': new['body_sha256']}, False
     if status == 'auto_rebind':
         return {**row['proposed_fields'], 'source_binding_status': 'source_version_bound'}, False
-    if status == 'source_text_missing':
+    if status in {'source_text_missing', 'question_context_only'}:
         return row['proposed_fields'], True
     if status == 'calibrated_rebind' and len(row['candidate_segments']) == 1:
         return segment_fields(row['candidate_segments'][0],new), True
@@ -274,9 +301,9 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                     updates[key] = post
                 if changed:
                     changed_quotes.add(key)
-                    if row['status'] != 'source_text_missing':
+                    if row['status'] not in {'source_text_missing', 'question_context_only'}:
                         row.update(status='relocate_changed_quote', content_approval_granted=False)
-        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted'}
+        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted','source_text_missing','question_context_only'}
                 and context_only(f.get('verbatim_excerpt',''))):
             if key not in replacements:
                 updates[key] = {**updates.get(key,f),'anchor_state':'context_only','source_binding_status':'context_only'}
@@ -414,6 +441,7 @@ def render_report(report, *, applied=False):
         'relocate_changed_quote':'新版原話／分段定位，資格按影響判定',
         'source_deleted':'已刪除，不可作證據','already_deleted':'已標記刪除，保留',
         'context_only':'僅語境，不可作證據','source_text_missing':'新版未保留，不作證據',
+        'question_context_only':'原問句未保留，僅列問答位置',
         'located_review':'尚待可靠定位','exception':'尚待可靠定位','retired':'歷史保留'}
     cells = []
     for row in report['fragments']:
@@ -421,7 +449,8 @@ def render_report(report, *, applied=False):
         targets = row.get('target_paragraphs') or [row.get('target_paragraph') or fields.get('paragraph_key') or '']
         clock = '; '.join(f"{s['paragraph_key']} {s.get('media_time')}–{s.get('media_end_time')}" for s in segments)
         reason = (row.get('calibration_decision') or {}).get('reason',row['reason'])
-        if row['status'] == 'source_deleted': new_quote = '歷史原文保留；不移入有效證據。'
+        if row['status'] in {'source_deleted', 'source_text_missing'}:
+            new_quote = '歷史原文保留；不移入有效證據。'
         else: new_quote = row.get('candidate_quote',fields.get('verbatim_excerpt',''))
         values = [labels[row['status']],row['record_key'],row.get('old_paragraph'),', '.join(targets),
                   row.get('quote'),new_quote,f"{row.get('old_media_time')} → {clock}",reason]
@@ -445,6 +474,9 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
                 or saved.get('jev_impact', False) != jev_impact
                 or saved['old_paths'] != [str(Path(p).resolve()) for p in old_paths]):
             raise ValueError('existing migration intent differs')
+        if not (root/'comparison.html').exists() or not (root/'comparison.csv').exists():
+            cm.source.verify_file(saved['report'])
+            write_comparison(root, m.read(saved['report']['path']))
         return saved
     records = {cm.source.key(*k): cm.model_state(v)
                for k, v in store.read_affected_context([('source_documents', source_id)]).items()}
@@ -499,6 +531,11 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
               'jev_impact': jev_impact, 'model_calls': report.get('model_calls', 0)}
     source_files_current(result)
     m.immutable(root/'plan.json', result)
+    write_comparison(root, report)
+    return result
+
+
+def write_comparison(root, report):
     m._write_bytes(root/'comparison.html', render_report(report).encode())
     buf = io.StringIO(); writer = csv.writer(buf)
     writer.writerow(['fragment','action','reason','old_paragraph','new_paragraphs','old_quote','new_quote','fields'])
@@ -507,7 +544,6 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
             row.get('target_paragraphs', row.get('target_paragraph')), row.get('quote'),
             row.get('candidate_quote'), json.dumps(row.get('applied_fields'), ensure_ascii=False)])
     m._write_bytes(root/'comparison.csv', buf.getvalue().encode('utf-8-sig'))
-    return result
 
 
 def validate_plan(plan, report, records):
@@ -531,7 +567,16 @@ def validate_plan(plan, report, records):
 def validate_fragment_locations(updates, snapshot):
     """Check migrated live fragments against the authoritative published rows."""
     for key, fragment in updates.items():
-        if not key.startswith('source_fragments/') or fragment.get('anchor_state') != 'source_version_bound':
+        if not key.startswith('source_fragments/'):
+            continue
+        if fragment.get('question_context'):
+            if fragment.get('anchor_state') == 'source_version_bound':
+                raise ValueError('question context must not be an active quotation')
+            for context in fragment['question_context']:
+                if context.get('kind') != 'question_answer_context' or context.get('anchor_state') != 'source_version_bound':
+                    raise ValueError('invalid question context provenance')
+                validate_fragment_locations({'source_fragments/context': context}, snapshot)
+        if fragment.get('anchor_state') != 'source_version_bound':
             continue
         paragraph = snapshot['paragraphs'].get(fragment.get('paragraph_key'))
         quote = fragment.get('verbatim_excerpt')

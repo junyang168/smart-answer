@@ -317,3 +317,88 @@ def test_blank_paragraph_does_not_hide_the_adjacent_spoken_context():
     row = {"record_key": "source_fragments/f", "quote": "其實什麼東西啊？", "old_paragraph": "S0001"}
     packet = candidate_packet(row, {}, paragraphs, clock, limit=2)
     assert [p["paragraph_key"] for p in packet["candidates"]] == ["S0201", "S0203"]
+
+
+def test_statement_first_keeps_question_context_separate_from_unsupported_evidence(tmp_path):
+    from backend.pipeline.transcript_claim_migration import read
+    from backend.pipeline.transcript_evidence_apply import calibrate, validate_fragment_locations
+    from backend.pipeline.transcript_locator_resolution import resolve_packets
+
+    question = "source_fragments/question"
+    evidence = "source_fragments/evidence"
+    clock = {"media_time": 5, "media_end_time": 20}
+    text = "**聽眾**：……\n\n**教授**：對，不可離開。"
+    paragraphs = {"S0145": {"index": "145", "text": text, "start_time": 10, "end_time": 15}}
+    new = {"paragraphs": paragraphs, "body_sha256": "new"}
+    records = {
+        question: {"revision": 1, "content_sha256": "q", "payload": {
+            **clock, "source_id": "s", "verbatim_excerpt": "聽眾舊問句",
+        }},
+        evidence: {"revision": 1, "content_sha256": "e", "payload": {
+            **clock, "source_id": "s", "verbatim_excerpt": "安於不嫁",
+        }},
+    }
+    packets = [candidate_packet({"record_key": key, "quote": row["payload"]["verbatim_excerpt"],
+                                 "old_paragraph": "S0001"}, {}, paragraphs, clock)
+               for key, row in records.items()]
+    packets[0]["consumers"] = [{"record_key": "questions/q"}]
+    packets[1]["consumers"] = [{"record_key": "evidence_steps/e"}]
+    answer = {"decisions": [
+        {"record_key": question, "spans": [span("S0145", "對，不可離開。")],
+         "disposition": "question_context_only", "reason": "原問句省略，回答可定位"},
+        {"record_key": evidence, "spans": [], "disposition": "not_supported", "reason": "新版沒有支持"},
+    ]}
+    bundle = {"packets": packets, "clock_proofs": {}, "unscoped": [], "consumer_exceptions": []}
+    out = resolve_packets(tmp_path, bundle, records, new, {}, statement_first=True,
+                          call=lambda _: ({}, answer))
+    rule = read(out)["fragments"][question]
+    row = {"record_key": question, "status": "exception", "direct_consumers": ["questions/q"]}
+    result = calibrate(row, records[question], rule, new, {})
+    post = {**records[question]["payload"], **result["proposed_fields"]}
+    assert post["verbatim_excerpt"] == "聽眾舊問句"
+    assert post["anchor_state"] == "unresolved"
+    assert post["question_context"][0]["verbatim_excerpt"] == "對，不可離開。"
+    validate_fragment_locations({question: post}, new)
+    assert read(tmp_path / "unresolved.json") == {evidence: "not_supported"}
+    assert evidence not in read(out)["fragments"]
+
+
+def test_locator_capacity_wait_does_not_create_unknown_model_outcome(tmp_path):
+    import pytest
+    from backend.pipeline.media_batch.runtime import WaitingCapacity
+    from backend.pipeline.transcript_locator_resolution import review_batch
+
+    packet = {"record_key": "source_fragments/f"}
+    def no_capacity(_):
+        raise WaitingCapacity("no local slot")
+    with pytest.raises(WaitingCapacity):
+        review_batch(tmp_path, [packet], no_capacity)
+    assert (tmp_path / "capacity-wait.json").exists()
+    assert not (tmp_path / "started.json").exists()
+    answer = {"decisions": [{"record_key": packet["record_key"], "spans": [], "reason": "不確定"}]}
+    assert review_batch(tmp_path, [packet], lambda _: ({}, answer)) == {
+        packet["record_key"]: answer["decisions"][0]
+    }
+
+
+def test_owner_confirmation_must_match_fragment_source_and_evidence():
+    import pytest
+    from backend.pipeline.transcript_evidence_apply import calibrate
+
+    key = "source_fragments/f"
+    row = {"record_key": key, "status": "exception", "direct_consumers": ["evidence_steps/e"]}
+    state = {"revision": 4, "content_sha256": "old",
+             "payload": {"source_id": "sermon", "verbatim_excerpt": "歷史文字"}}
+    rule = {
+        "before_pin": [4, "old"], "target_source_sha256": "new", "mode": "source_text_missing",
+        "reason": "人工核實歸屬錯誤", "owner_confirmation": {
+            "source_id": "sermon", "fragment_key": key, "evidence_key": "evidence_steps/e",
+            "owner_response": "不是教授說的",
+        },
+    }
+    result = calibrate(row, state, rule, {"body_sha256": "new"}, {})
+    assert result["status"] == "source_text_missing"
+    assert "verbatim_excerpt" not in result["proposed_fields"]
+    rule["owner_confirmation"]["evidence_key"] = "evidence_steps/other"
+    with pytest.raises(ValueError, match="owner confirmation"):
+        calibrate(row, state, rule, {"body_sha256": "new"}, {})
