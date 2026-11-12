@@ -199,3 +199,19 @@ def test_live_quote_uses_exact_unique_boundaries_and_rejects_whole_paragraph_ove
     assert not rules and pending[key] == "selected_quote_is_too_broad"
     rules, pending = resolve("不存在的文字")
     assert not rules and pending[key] == "no_valid_candidate_selection"
+
+
+def test_overlong_model_selection_trims_only_a_unique_literal_acknowledgment_prefix():
+    from backend.pipeline.transcript_locator_candidates import narrow_overlong_quote
+
+    quote = "那個是另外\n一個situation，對。"
+    text = "Yeah, yeah, yeah. \n" + quote
+    segment = {"paragraph_key": "S0119", "verbatim_excerpt": text}
+    new = {"paragraphs": {"S0119": {"text": text}}}
+    assert narrow_overlong_quote([segment], new, 24) == [
+        {"paragraph_key": "S0119", "verbatim_excerpt": quote}
+    ]
+    assert narrow_overlong_quote([segment], {"paragraphs": {"S0119": {"text": text + quote}}}, 24) is None
+    assert narrow_overlong_quote(
+        [{**segment, "verbatim_excerpt": "對他來說，這是另外一個情況。"}], new, 24,
+    ) is None

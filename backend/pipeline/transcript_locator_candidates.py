@@ -2,6 +2,7 @@
 
 from difflib import SequenceMatcher
 import json
+import re
 
 from backend.pipeline.transcript_evidence_calibration import audio_position
 from backend.pipeline.transcript_evidence_migration import literal_layout, positions
@@ -171,6 +172,33 @@ def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
             "candidates": candidates}
 
 
+# A leading standalone acknowledgment can be dropped from an overlong candidate.
+# Require punctuation so prefixes of substantive clauses such as 「對他來說」 stay intact.
+LEADING_ACKNOWLEDGMENTS = re.compile(
+    r"^(?:(?:yeah|yes|okay|ok|對啊|對呀|對|沒有錯|沒錯)[，、。,.!！]+\s*)+",
+    re.IGNORECASE,
+)
+
+
+def narrow_overlong_quote(segments, new, limit):
+    """Recover a unique literal suffix without crossing a paragraph or a turn."""
+    if len(segments) != 1:
+        return None
+    segment = segments[0]
+    quote = segment["verbatim_excerpt"]
+    narrowed = LEADING_ACKNOWLEDGMENTS.sub("", quote, count=1).lstrip()
+    if (narrowed == quote or not narrowed or "**" in narrowed
+            or len(literal_layout(narrowed)[0]) > limit):
+        return None
+    paragraph = new["paragraphs"][segment["paragraph_key"]]["text"]
+    if len(positions(paragraph, narrowed)) != 1:
+        return None
+    from backend.pipeline.transcript_evidence_apply import context_only
+    if context_only(narrowed):
+        return None
+    return [{**segment, "verbatim_excerpt": narrowed}]
+
+
 def calibration_rules(packets, answer, records, new, clock_proofs):
     """Accept only supplied, consecutive, clock-compatible live paragraphs."""
     from backend.pipeline.transcript_evidence_apply import context_only
@@ -210,9 +238,15 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
             continue
         old_length = len(literal_layout(packet["old_quote"])[0])
         new_length = sum(len(literal_layout(s["verbatim_excerpt"])[0]) for s in segments)
-        if new_length > max(24, old_length * 2 * (len(segments) if repeated else 1)):
-            unresolved[key] = "selected_quote_is_too_broad"
-            continue
+        limit = max(24, old_length * 2 * (len(segments) if repeated else 1))
+        if new_length > limit:
+            narrowed = None if repeated else narrow_overlong_quote(segments, new, limit)
+            if narrowed is None:
+                unresolved[key] = "selected_quote_is_too_broad"
+                continue
+            segments = narrowed
+            reason += "；程式移除句首確認語，保留新版唯一的實質原文。"
+
         if repeated and any(
             literal_layout(packet["old_quote"])[0] not in literal_layout(segment["verbatim_excerpt"])[0]
             for segment in segments
