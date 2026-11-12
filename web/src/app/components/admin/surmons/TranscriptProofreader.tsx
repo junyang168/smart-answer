@@ -28,6 +28,7 @@ import {
   scrollToReviewParagraph,
 } from "./review-navigation";
 import { documentVersion, recoverTransportVersion } from "./review-version";
+import { reviewEditorHistoryEvents } from "./review-editor-history";
 import {
   FastForward,
   Pause,
@@ -2067,8 +2068,13 @@ function TranscriptProofreader({
                       value={p.text}
                       onChange={editText}
                       options={options}
+                      events={reviewEditorHistoryEvents}
                       getCodemirrorInstance={(cm) => {
-                        editor.current = cm;
+                        if (editor.current !== cm) {
+                          // EasyMDE sets the initial value after creating CodeMirror.
+                          cm.clearHistory();
+                          editor.current = cm;
+                        }
                         if (focusNext.current) {
                           focusNext.current = false;
                           cm.focus();
