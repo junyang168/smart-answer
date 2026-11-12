@@ -421,6 +421,16 @@ function TranscriptProofreader({
       status: false,
       minHeight: "180px",
       toolbar: [
+        {
+          name: "undo",
+          action: ({ codemirror }) => {
+            if (codemirror.getOption("readOnly")) return;
+            codemirror.undo();
+            codemirror.focus();
+          },
+          className: "fa fa-undo",
+          title: "復原",
+        },
         "heading",
         "bold",
         "italic",
@@ -1975,7 +1985,11 @@ function TranscriptProofreader({
                       {doc.context.timing_quality?.source_holds?.[p.index] ? "音源不清・粗稿未確認" : "時間待核對"}
                     </span>
                   )}
-                  {active && doc.can_edit && playbackControls("本段播放控制")}
+                  {active && doc.can_edit && (
+                    <div className="hidden lg:block">
+                      {playbackControls("本段播放控制")}
+                    </div>
+                  )}
                   <span
                     className={reviewed ? "text-green-700" : "text-slate-500"}
                   >
@@ -2025,7 +2039,19 @@ function TranscriptProofreader({
                     />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
-                        className={button}
+                        type="button"
+                        className={button + " inline-flex min-h-11 items-center gap-2 lg:hidden"}
+                        onClick={togglePlayback}
+                      >
+                        {playing ? (
+                          <Pause aria-hidden="true" size={18} fill="currentColor" />
+                        ) : (
+                          <Play aria-hidden="true" size={18} fill="currentColor" />
+                        )}
+                        {playing ? "暫停" : "播放"}
+                      </button>
+                      <button
+                        className={button + " min-h-11 lg:min-h-0"}
                         disabled={disabled || (!!doc.context.timing_quality?.source_holds?.[p.index] && pendingTiming.includes(p.index))}
                         onClick={() =>
                           void confirm("paragraph_review", p.index, "confirmed")
@@ -2034,7 +2060,7 @@ function TranscriptProofreader({
                         確認並下一段
                       </button>
                       <button
-                        className={button}
+                        className={button + " hidden lg:inline-block"}
                         disabled={disabled}
                         onClick={() =>
                           void confirm("paragraph_review", p.index, "question")
@@ -2043,14 +2069,14 @@ function TranscriptProofreader({
                         有疑問
                       </button>
                       <button
-                        className={button}
+                        className={button + " hidden lg:inline-block"}
                         disabled={i === 0 || busy}
                         onClick={() => selectParagraph(spokenRows[i - 1].index)}
                       >
                         上一段
                       </button>
                       <button
-                        className={button}
+                        className={button + " hidden lg:inline-block"}
                         disabled={i === spokenRows.length - 1 || busy}
                         onClick={() => selectParagraph(spokenRows[i + 1].index)}
                       >
