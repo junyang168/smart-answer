@@ -61,7 +61,8 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
 
     def timing(_, refined, *args):
         calls.append("timing")
-        return refined
+        return {**refined, "blocks": [{**flow.proofreading_blocks([cue])[0],
+                                       "start": 0.25, "timing_review": True}]}
 
     monkeypatch.setattr(flow.audio, "transcribe", transcribe)
     monkeypatch.setattr(flow.audio, "refine", flash)
@@ -72,7 +73,12 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
     ])
     original = tmp_path / "complete"
     expected = flow.run(None, media, original)
+    assert expected["paragraphs"][0]["start"] == 0.25
+    assert expected["paragraphs"][0]["timing_review"] is True
     assert calls == ["transcribe", "flash", "timing"]
+    calls.clear()
+    assert flow.run(None, media, tmp_path / "retimed", start="timing", prior=original) == expected
+    assert calls == ["timing"]
     calls.clear()
     assert flow.run(None, media, tmp_path / "new", start="flash", prior=original) == expected
     assert calls == ["flash", "timing"]
@@ -98,3 +104,18 @@ def test_asr_rejects_wrong_model_and_marks_inverted_clock():
     assert words[0]["timing_review"] and words[0]["start"] <= words[0]["end"]
     with pytest.raises(ValueError, match="did not complete"):
         flow.audio.words({**result, "model": "wrong"}, "0", 0, 5, 0, 5)
+
+
+def test_word_stream_creates_editor_paragraphs_without_subtitle_splits():
+    words = [
+        {"text": "教授說", "speaker": "professor", "start": 0, "end": 6},
+        {"text": "了這句。", "speaker": "professor", "start": 6, "end": 8},
+        {"text": "怎麼理解？", "speaker": "audience", "start": 8, "end": 10},
+        {"text": "可以這樣看。", "speaker": "professor", "start": 10, "end": 12},
+        {"text": "再看下一段。", "speaker": "professor", "start": 13, "end": 18},
+    ]
+    first, second = flow.audio.editor_paragraphs(words)
+    assert (first["start"], first["end"]) == (0, 12)
+    assert [turn["text"] for turn in first["cues"]] == ["教授說了這句。", "怎麼理解？", "可以這樣看。"]
+    assert [turn["speaker"] for turn in first["cues"]] == ["professor", "audience", "professor"]
+    assert second["cues"][0]["text"] == "再看下一段。"

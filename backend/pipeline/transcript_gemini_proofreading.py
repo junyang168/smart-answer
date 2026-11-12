@@ -192,9 +192,12 @@ def editor_layout(blocks, roles, proposals, protected=None):
                     cue["text"] = mark_repetition(previous, edit["quote"], edit["replace"])
                 marked += cue["text"] != previous and "kind" not in edit
         text, turns = proofreading_speaker_text(cues, roles)
+        timing_review = block.get("timing_review")
+        if timing_review is None:
+            closing = max(cues, key=lambda cue: cue["end"])
+            timing_review = bool(cues[0].get("timing_review") or closing.get("timing_review"))
         rows.append({**block, "index": key, "text": text, "cues": cues, "speaker_turns": turns,
-                     "timing_review": bool(cues[0].get("timing_review") or
-                                           max(cues, key=lambda cue: cue["end"]).get("timing_review"))})
+                     "timing_review": timing_review})
     return {"paragraphs": rows, "repetitions_marked": marked}
 
 
@@ -228,6 +231,7 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             raise ValueError("Prior checkpoints belong to different audio, cues or protected rows")
     save_json(path, intent)
     outputs = {}
+    imported_blocks = proofreading_blocks(cues) if cues is not None else None
     for ordinal, stage in enumerate(stages):
         checkpoint = out / f"{stage}.json"
         input_sha = object_sha({"identity": identity, "prior_stages": outputs})
@@ -243,13 +247,13 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             elif stage == "timing":
                 value = audio.align(media, outputs["flash"], out, aligner)
             else:
-                refined = cues if cues is not None else outputs["timing"]["cues"]
+                blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
-                    value = speaker_roles(refined, media, out)
+                    value = speaker_roles([turn for block in blocks for turn in block["cues"]], media, out)
                 elif stage == "repetitions":
-                    value = repetition_proposals(proofreading_blocks(refined), out, protected)
+                    value = repetition_proposals(blocks, out, protected)
                 else:
-                    value = editor_layout(proofreading_blocks(refined), outputs["speakers"],
+                    value = editor_layout(blocks, outputs["speakers"],
                                           outputs["repetitions"], protected)
                     if cues is None:
                         value.update(omissions_for_review=outputs["timing"]["omissions_for_review"],
@@ -257,6 +261,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")
+        if stage == "timing" and "blocks" not in saved["value"]:
+            raise ValueError("Legacy cue timing checkpoint: restart at timing in a new output directory")
         save_json(checkpoint, saved)
         outputs[stage] = saved["value"]
     return outputs["layout"]
