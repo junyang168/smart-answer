@@ -247,16 +247,27 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             elif stage == "timing":
                 from backend.pipeline.transcript_semantic_segmentation import playback_blocks, segment
 
-                if not aligner:
-                    raise ValueError("--aligner-python is required for paragraph timing")
+                from backend.pipeline.transcript_word_timing import locate_starts_from_base, locate_paragraph_edges
                 refined = outputs["flash"]
                 # Older Flash checkpoints use cue IDs or provisional blocks.
                 turns = refined.get("turns") or refined.get("cues")
                 if turns is None:
                     turns = [turn for block in refined["blocks"] for turn in block["cues"]]
                 paragraphs = segment(turns, out / "semantic-segmentation")
-                value = audio.align(media, {**refined, "blocks": playback_blocks(paragraphs, turns)}, out, aligner)
-                value["segmentation"] = "gpt-punctuation.v1"
+                words = outputs["transcribe"]["words"]
+                base_turns = refined.get("base_turns") or [
+                    {**turn, "text": turn.get("base", turn["text"])} for turn in turns
+                ]
+                mapped = locate_starts_from_base(paragraphs, turns, words, base_turns)
+                exact = locate_paragraph_edges(paragraphs, turns, words, starts_only=True)
+                starts = [
+                    a or ({"start": b["start"], "method": "exact_word_match"}
+                          if b["start"] is not None else None)
+                    for a, b in zip(mapped, exact, strict=True)
+                ]
+                value = audio.align_starts(media, {**refined, "blocks": playback_blocks(paragraphs, turns)},
+                                           out, aligner, starts)
+                value["segmentation"] = "gpt-punctuation-start-timing.v2"
             else:
                 blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
@@ -272,7 +283,7 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")
-        if stage == "timing" and saved["value"].get("segmentation") != "gpt-punctuation.v1":
+        if stage == "timing" and saved["value"].get("segmentation") != "gpt-punctuation-start-timing.v2":
             raise ValueError("Legacy timing checkpoint: restart at timing in a new output directory")
         save_json(checkpoint, saved)
         outputs[stage] = saved["value"]

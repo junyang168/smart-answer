@@ -44,7 +44,7 @@ def paragraph_groups(rows,offset):
     return result
 
 
-def prepare(sources:dict[str,Path],out:Path):
+def prepare(sources:dict[str,Path],out:Path,*,owned_ids=None,opening_recovery=False):
     out.mkdir(parents=True,exist_ok=True);chunks=[];records={}
     for lecture,source in sources.items():
         record=read_json(source/'full_transcript.json');master=read_json(source/'master.json');rows=record['paragraphs']
@@ -53,14 +53,23 @@ def prepare(sources:dict[str,Path],out:Path):
                           'duration_ms':master['duration_ms'],'paragraphs':rows}
         samples=read_audio(source/'master.wav')
         for pass_id in [0,1]:
-            for ordinal,(a,b) in enumerate(paragraph_groups(rows,pass_id)):
-                left,right=max(0,a-1),min(len(rows),b+1);pad=1000*(pass_id+1)
+            groups = ([(i, i+1) for i in range(len(rows))] if opening_recovery
+                      else paragraph_groups(rows,pass_id))
+            for ordinal,(a,b) in enumerate(groups):
+                if owned_ids is not None and not any(row['id'] in owned_ids for row in rows[a:b]):
+                    continue
+                if opening_recovery:
+                    left,right,pad=max(0,a-1),b,(800,1800)[pass_id]
+                else:
+                    left,right,pad=max(0,a-1),min(len(rows),b+1),1000*(pass_id+1)
                 def bounds():
                     selected=rows[left:right]
                     lo=max(0,min(min(candidate_bounds(p)[0],p.get('prior_start_ms') if p.get('prior_start_ms') is not None else candidate_bounds(p)[0]) for p in selected)-pad)
                     hi=min(master['duration_ms'],max(max(candidate_bounds(p)[1],(p.get('alignment_clip_origin_sample',0)+p.get('alignment_clip_samples',0))//16) for p in selected)+pad)
                     return lo,hi
                 lo,hi=bounds()
+                if opening_recovery:
+                    hi=min(hi,candidate_bounds(rows[a])[0]+25000)
                 while hi-lo>180000 and (left<a or right>b):
                     if right>b:right-=1
                     elif left<a:left+=1
@@ -69,7 +78,11 @@ def prepare(sources:dict[str,Path],out:Path):
                 text='';ranges=[]
                 for i in range(left,right):
                     if text:text+='\n'
-                    start=len(text);text+=rows[i]['text'];ranges.append({'id':rows[i]['id'],'start':start,'end':len(text),'owned':a<=i<b})
+                    start=len(text)
+                    phrase=rows[i]['text']
+                    text+=phrase[:(35,65)[pass_id]] if opening_recovery and i==a else phrase
+                    owned=a<=i<b and (owned_ids is None or rows[i]['id'] in owned_ids)
+                    ranges.append({'id':rows[i]['id'],'start':start,'end':len(text),'owned':owned})
                 key=f'L{lecture}-P{pass_id}-{ordinal:04d}';path=out/'audio'/f'{key}.wav'
                 if path.exists():
                     import numpy as np

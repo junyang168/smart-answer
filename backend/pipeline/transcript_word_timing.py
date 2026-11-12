@@ -8,7 +8,7 @@ import unicodedata
 from opencc import OpenCC
 
 
-def locate_paragraph_edges(paragraphs, turns, words):
+def locate_paragraph_edges(paragraphs, turns, words, *, starts_only=False):
     converter = OpenCC("t2s")
 
     def normalized(text):
@@ -62,6 +62,8 @@ def locate_paragraph_edges(paragraphs, turns, words):
                 return matches[0]
         return None
 
+    if starts_only:
+        return [{"start": locate(p["start"], True)} for p in paragraphs]
     return [
         {"start": locate(p["start"], True), "end": locate(p["end"], False)}
         for p in paragraphs

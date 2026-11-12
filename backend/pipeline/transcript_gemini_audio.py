@@ -153,6 +153,7 @@ def refine(media, transcription, folder, saved_response):
 
     converter = OpenCC("s2t")
     turns = refinement_turns(transcription["words"])
+    base_turns = [dict(turn) for turn in turns]
     model = VisionReviewer("gemini", FLASH_PROMPT, FLASH_SCHEMA)
     model.config.update(max_output_tokens=9500, thinking_config={"thinking_level": "LOW"})
     omissions = []
@@ -177,8 +178,84 @@ def refine(media, transcription, folder, saved_response):
             seen.add(key)
             ids[key]["text"] = text
         omissions.extend(x for x in answer["omissions"] if start <= x["start"] < x["end"] <= end and x["text"].strip())
-    return {"duration": transcription["duration"], "turns": turns, "omissions_for_review": omissions,
+    return {"duration": transcription["duration"], "turns": turns, "base_turns": base_turns, "omissions_for_review": omissions,
             "coverage": transcription["coverage"]}
+
+
+def alignment_worker(aligner, clips):
+    environment = os.environ.copy()
+    capacity = environment.get("MEDIA_BATCH_CAPACITY_ROOT")
+    if capacity and "MEDIA_BATCH_CONTEXT" not in environment:
+        environment["MEDIA_BATCH_CONTEXT"] = json.dumps({"capacity_root": capacity})
+    subprocess.run([str(aligner), "-m", "backend.pipeline.transcript_alignment_worker",
+                    "--out", str(clips), "--decode-profile", "monotonic"],
+                   check=True, env=environment)
+
+
+def align_starts(media, refined, folder, aligner, word_starts):
+    from backend.pipeline.contextual_transcript_timing import analyse, prepare
+
+    blocks = refined["blocks"]
+    duration = refined["duration"]
+    starts = [entry for entry in word_starts]
+    # Reject an anchor outside its immediate neighbouring paragraphs.
+    for i, candidate in enumerate(starts):
+        lower = blocks[i-1]["start"] if i else -1
+        upper = blocks[i+1]["end"] if i+1 < len(blocks) else duration
+        if candidate and not lower < candidate["start"] < upper:
+            starts[i] = None
+
+    if any(entry is None for entry in starts):
+        if not aligner:
+            raise ValueError("--aligner-python is required for unlocated paragraph starts")
+        source = folder / "paragraph-start-timing"
+        source.mkdir(exist_ok=True)
+        master = source / "master.wav"
+        extract(media, master, 0, duration)
+        with wave.open(str(master), "rb") as pcm:
+            duration_ms = pcm.getnframes() // 16
+        record = {"paragraphs": [
+            {"id": f"p{i}", "start_ms": min(duration_ms, round(block["start"] * 1000)),
+             "end_ms": min(duration_ms, round(block["end"] * 1000)),
+             "text": "\n".join(turn["text"].replace("~~", "") for turn in block["cues"])}
+            for i, block in enumerate(blocks, 1)
+        ]}
+        save_json(source / "full_transcript.json", record)
+        save_json(source / "master.json", {"source_sha256": file_sha(media), "duration_ms": duration_ms})
+
+        for recovery in (False, True):
+            pending = {f"p{i}" for i, entry in enumerate(starts, 1) if entry is None}
+            if not pending:
+                break
+            evidence = source / ("opening-recovery" if recovery else "context")
+            prepare({"source": source}, evidence, owned_ids=pending, opening_recovery=recovery)
+            alignment_worker(aligner, evidence)
+            assessment = analyse(evidence, tolerance_ms=1000, detail=True, apply_coherence=False)
+            for i, row in enumerate(assessment["lectures"]["source"]["paragraphs"]):
+                if row["id"] in pending and row["start_status"] == "qualified":
+                    starts[i] = {"start": row["start_ms"] / 1000,
+                                 "method": "qwen_opening_context" if recovery else "qwen_context"}
+
+    positions = [entry["start"] if entry else block["start"] for entry, block in zip(starts, blocks, strict=True)]
+    # An ambiguous placement must never invert or empty a playback interval.
+    while True:
+        conflicts = {i for i in range(len(positions)-1) if positions[i] >= positions[i+1]}
+        if not conflicts:
+            break
+        affected = {j for i in conflicts for j in (i, i+1) if starts[j] is not None}
+        if not affected:
+            raise ValueError("Paragraph source starts are not strictly increasing")
+        for i in affected:
+            starts[i] = None
+            positions[i] = blocks[i]["start"]
+    output = [
+        {**block, "start": start, "end": end, "timing_review": entry is None,
+         "start_timing_method": entry["method"] if entry else "provisional"}
+        for block, entry, start, end in zip(blocks, starts, positions, [*positions[1:], duration], strict=True)
+    ]
+    if any(not 0 <= row["start"] < row["end"] <= duration for row in output):
+        raise ValueError("Paragraph playback falls outside source audio")
+    return {**refined, "blocks": output}
 
 
 def align(media, refined, folder, aligner):
@@ -203,13 +280,7 @@ def align(media, refined, folder, aligner):
     save_json(source / "master.json", {"source_sha256": file_sha(media), "duration_ms": duration_ms})
     clips = source / "evidence"
     prepare({"source": source}, clips)
-    environment = os.environ.copy()
-    capacity = environment.get("MEDIA_BATCH_CAPACITY_ROOT")
-    if capacity and "MEDIA_BATCH_CONTEXT" not in environment:
-        environment["MEDIA_BATCH_CONTEXT"] = json.dumps({"capacity_root": capacity})
-    subprocess.run([str(aligner), "-m", "backend.pipeline.transcript_alignment_worker",
-                    "--out", str(clips), "--decode-profile", "monotonic"],
-                   check=True, env=environment)
+    alignment_worker(aligner, clips)
     assessed = analyse(clips, tolerance_ms=1000, detail=True, apply_coherence=False)
     rows = assessed["lectures"]["source"]["paragraphs"]
     output = []

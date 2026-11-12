@@ -52,16 +52,17 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
 
     def transcribe(*_):
         calls.append("transcribe")
-        return {"words": ["original"]}
+        return {"words": [{"text": "要要要說明。", "speaker": "w0:spk:0", "start": 0, "end": 8}]}
 
     def flash(_, transcript, *args):
-        assert transcript["words"] == ["original"]
+        assert transcript["words"][0]["text"] == "要要要說明。"
         calls.append("flash")
         return {"cues": [cue], "coverage": [], "omissions_for_review": []}
 
-    def timing(_, refined, *args):
+    def timing(_, refined, _out, _aligner, starts):
         calls.append("timing")
         assert len(refined["blocks"]) == 1
+        assert starts == [{"start": 0, "method": "original_word"}]
         return {**refined, "blocks": [{**refined["blocks"][0], "start": 0.25, "timing_review": True}]}
 
     from backend.pipeline import transcript_semantic_segmentation as semantic
@@ -75,7 +76,7 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
 
     monkeypatch.setattr(flow.audio, "transcribe", transcribe)
     monkeypatch.setattr(flow.audio, "refine", flash)
-    monkeypatch.setattr(flow.audio, "align", timing)
+    monkeypatch.setattr(flow.audio, "align_starts", timing)
     monkeypatch.setattr(flow, "speaker_roles", lambda *_: {"w0:spk:0": "professor"})
     monkeypatch.setattr(flow, "repetition_proposals", lambda *_: [
         {"id": "p1-t1", "quote": "要要要說明", "replace": "要說明"},
@@ -96,7 +97,7 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
     assert flow.run(None, media, tmp_path / "layout", start="layout", prior=original, aligner=aligner) == expected
     assert calls == []
     checkpoint = original / "transcribe.json"
-    checkpoint.write_text(checkpoint.read_text().replace("original", "tampered"))
+    checkpoint.write_text(checkpoint.read_text().replace("w0:spk:0", "tampered"))
     with pytest.raises(ValueError, match="Invalid transcribe checkpoint"):
         flow.run(None, media, tmp_path / "bad", start="flash", prior=original, aligner=aligner)
 
@@ -209,3 +210,13 @@ def test_word_timing_projects_flash_corrections_through_original_turn():
         {"start": 1.0, "method": "original_word"},
     ]
     assert locate_starts_from_base(paragraphs, [{**turn, "text": "所以耶穌說。"}], words, base) == [None]
+
+
+def test_start_only_timing_reuses_gemini_and_ends_at_next_start(tmp_path):
+    refined = {"duration": 20, "blocks": [{"start": 0, "end": 3}, {"start": 7, "end": 10}]}
+    starts = [{"start": 0.2, "method": "original_word"}, {"start": 6.8, "method": "exact_word_match"}]
+    result = flow.audio.align_starts(tmp_path / "unused.mp3", refined, tmp_path, None, starts)
+    assert [(b["start"], b["end"], b["timing_review"]) for b in result["blocks"]] == [
+        (0.2, 6.8, False), (6.8, 20, False),
+    ]
+    assert not (tmp_path / "paragraph-start-timing").exists()
