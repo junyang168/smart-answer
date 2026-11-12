@@ -232,3 +232,15 @@ def test_punctuation_cannot_rewrite_transcript_or_protected_markup():
         validate_punctuation(original, corrected.replace("做", "說"))
     with pytest.raises(ValueError, match="markup"):
         validate_punctuation(original, corrected.replace("~~要要~~", "~~要，要~~"))
+
+
+def test_combined_punctuation_and_segmentation_rejects_ambiguous_locations():
+    from backend.pipeline.transcript_punctuation import apply_combined
+
+    turns = [{"text": "對對這樣你看。"}, {"text": "怎麼辦"}]
+    paragraphs, edits, rejected = apply_combined(turns, [
+        "1|對|，|0", "1|這樣|，|0", "1|^||1", "2|^|？|0",
+    ])
+    assert [p["text"] for p in paragraphs] == ["對對這樣你看。", "怎麼辦"]
+    assert edits == {4: "，", 10: "？"}
+    assert len(rejected) == 1
