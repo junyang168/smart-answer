@@ -28,6 +28,22 @@ def digest(value):
     return hashlib.sha256(encoded(value)).hexdigest()
 
 
+def same_edit_period(newer, older):
+    if (
+        not newer
+        or newer["kind"] != "edit"
+        or older["kind"] != "edit"
+        or newer["actor"] != older["actor"]
+        or newer["revision"] != older["revision"] + 1
+    ):
+        return False
+    try:
+        gap = datetime.fromisoformat(newer["time"]) - datetime.fromisoformat(older["time"])
+    except (ValueError, TypeError):
+        return False
+    return 0 <= gap.total_seconds() < 30 * 60
+
+
 def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
@@ -808,7 +824,7 @@ class ReviewStore:
                     },
                 )
 
-    def history(self, actor, item, *, before=10**12, limit=30):
+    def history(self, actor, item, *, before=10**12, limit=30, grouped=False):
         with self.lock(item):
             self.require(actor, item)
             self.load(item)
@@ -823,6 +839,9 @@ class ReviewStore:
                         "revision_sha256"
                     )
             result = []
+            page_size = min(max(limit, 1), 100)
+            next_before = None
+            paragraph_ids = set()
             for path in sorted(
                 (self.folder(item) / "revisions").glob("*.json"), reverse=True
             ):
@@ -832,15 +851,26 @@ class ReviewStore:
                 r = read(path)
                 if committed[revision] and digest(r) != committed[revision]:
                     raise ReviewError(409, "歷史版本雜湊不一致，不顯示被改動的紀錄")
-                result.append(
-                    {
-                        k: r[k]
-                        for k in ("revision", "actor", "time", "kind", "operation_id")
-                    }
+                entry = {k: r[k] for k in ("revision", "actor", "time", "kind", "operation_id")}
+                if not grouped:
+                    result.append(entry)
+                    if len(result) >= page_size:
+                        break
+                    continue
+                previous = result[-1]["revisions"][-1] if result else None
+                if not same_edit_period(previous, entry):
+                    if len(result) == page_size:
+                        next_before = previous["revision"]
+                        break
+                    result.append({"revisions": [], "changed_paragraphs": 0})
+                    paragraph_ids = set()
+                paragraph_ids.update(
+                    target["id"] for target in r.get("change_targets", [])
+                    if target.get("kind") in ("text", "paragraph_timing") and target.get("id")
                 )
-                if len(result) >= min(max(limit, 1), 100):
-                    break
-            return result
+                result[-1]["revisions"].append(entry)
+                result[-1]["changed_paragraphs"] = len(paragraph_ids)
+            return {"periods": result, "next_before": next_before} if grouped else result
 
     def published_snapshot(self, item):
         pub = read(self.root / "script_published" / f"{item}.json", {})

@@ -1,8 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { AiDeletionReview } from "./AiDeletionReview";
-import { aiDeletions, restoreAiDeletion, type AiExclusion, type AiDeletion } from "./review-ai-deletions";
 import { ReviewTextDiff } from "./ReviewTextDiff";
 import { pendingTimingIds } from "./review-timing";
 import {
@@ -74,7 +72,6 @@ type Metadata = {
 };
 type Context = {
   source_notices?: { start_ms: number; end_ms: number; note: string; paragraph_ids: string[]; status: string }[];
-  editorial_exclusions?: AiExclusion[];
   speaker_attribution?: {
     pipeline_release?: string;
     notices?: {
@@ -152,6 +149,9 @@ type Pending = {
   packet?: Packet;
 };
 type Revision = { revision: number; actor: string; time: string; kind: string };
+type HistoryPeriod = { revisions: Revision[]; changed_paragraphs: number };
+type HistoryPage = { periods: HistoryPeriod[]; next_before: number | null };
+type HistorySnapshot = { script: Row[]; context: Context; revision: number };
 class RequestError extends Error {
   constructor(
     message: string,
@@ -232,13 +232,6 @@ const button =
   "rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed";
 function timingInput(ms: number) {
   return `${stamp(ms)}.${String(ms % 1000).padStart(3, "0")}`;
-}
-
-function parseTiming(value: string) {
-  const match = /^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?$/.exec(value.trim());
-  if (!match) return NaN;
-  return (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) *
-    1000 + Number((match[4] || "").padEnd(3, "0"));
 }
 
 const transportButton =
@@ -361,16 +354,12 @@ function TranscriptProofreader({
   const historyPanel = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [history, setHistory] = useState<Revision[] | null>(null);
-  const [snapshot, setSnapshot] = useState<{
-    script: Row[];
-    context: Context;
-    revision: number;
-  }>();
+  const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [mobileMediaOpen, setMobileMediaOpen] = useState(false);
-  const [deletionsOpen, setDeletionsOpen] = useState(false);
   const [generatingHeadings, setGeneratingHeadings] = useState(false);
   const [headingSuggestions, setHeadingSuggestions] = useState<{
     version: string;
@@ -394,7 +383,9 @@ function TranscriptProofreader({
   );
   const playbackParagraph = useRef<string>();
   const previewTiming = useRef<{ start_ms: number; end_ms: number }>();
-  const [timingEdit, setTimingEdit] = useState<{ id: string; start: string; end: string }>();
+  const [timingEdit, setTimingEdit] = useState<{ id: string; start_ms: number; end_ms: number }>();
+  const [timingCursor, setTimingCursor] = useState(0);
+  const [mediaDuration, setMediaDuration] = useState(0);
   const [timingError, setTimingError] = useState("");
   const selectParagraph = useCallback((id: string) => {
     if (selectedParagraph.current !== id) {
@@ -483,13 +474,12 @@ function TranscriptProofreader({
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setHistory(null);
-        setSnapshot(undefined);
         return;
       }
       if (event.key !== "Tab" || !panel) return;
       const controls = Array.from(
         panel.querySelectorAll<HTMLElement>(
-          'button:not(:disabled),a[href],input,textarea,select,[tabindex="0"]',
+          'button:not(:disabled),a[href],input,textarea,select,summary,[tabindex="0"]',
         ),
       );
       const first = controls[0],
@@ -890,17 +880,37 @@ function TranscriptProofreader({
     clearTimeout(boundaryTimer.current);
     previewTiming.current = undefined;
   };
-  const useTimingEdit = async (save: boolean) => {
-    if (!timingEdit) return;
-    const start_ms = parseTiming(timingEdit.start);
-    const end_ms = parseTiming(timingEdit.end);
+  const seekTiming = (position: number) => {
     const media = video.current;
-    if (!Number.isSafeInteger(start_ms) || !Number.isSafeInteger(end_ms) ||
-        start_ms >= end_ms || (media && Number.isFinite(media.duration) &&
-          end_ms > Math.ceil(media.duration * 1000))) {
-      setTimingError("請輸入有效的起訖時間（時:分:秒），結束須晚於開始。");
+    if (!media || !Number.isFinite(media.duration)) {
+      setTimingError("錄音尚未載入，請稍後再試。");
       return;
     }
+    stopTimingPreview();
+    media.pause();
+    contextPlayback.current = true;
+    const ms = Math.max(0, Math.min(Math.floor(media.duration * 1000), position));
+    media.currentTime = ms / 1000;
+    setTimingCursor(ms);
+    setTimingError("");
+  };
+  const markTiming = (edge: "start_ms" | "end_ms") => {
+    const media = video.current;
+    if (!timingEdit || !media || !Number.isFinite(media.duration)) return;
+    const ms = Math.round(media.currentTime * 1000);
+    const next = { ...timingEdit, [edge]: ms };
+    if (next.start_ms >= next.end_ms) {
+      setTimingError("段尾須晚於段首。");
+      return;
+    }
+    media.pause();
+    setTimingEdit(next);
+    setTimingError("");
+  };
+  const useTimingEdit = async (save: boolean) => {
+    if (!timingEdit) return;
+    const { start_ms, end_ms } = timingEdit;
+    const media = video.current;
     setTimingError("");
     stopTimingPreview();
     if (save) {
@@ -908,6 +918,8 @@ function TranscriptProofreader({
         setTimingError("請完成目前的中文輸入後再確認時間。");
         return;
       }
+      video.current?.pause();
+      contextPlayback.current = false;
       setBusy(true);
       try {
         enqueue({ kind: "paragraph_timing", id: timingEdit.id, start_ms, end_ms });
@@ -1062,7 +1074,6 @@ function TranscriptProofreader({
     doc.script,
     doc.context.timing_quality,
   );
-  const timingBlocked = pendingTiming.length > 0;
   const timingPending = doc.script.filter((p) =>
     pendingTiming.includes(p.index),
   );
@@ -1086,6 +1097,22 @@ function TranscriptProofreader({
       doc.context.reviews["g:" + g.id]?.decision === "confirmed" &&
       doc.context.reviews["g:" + g.id]?.sha256 === doc.group_shas[g.id],
   ).length;
+  const pendingSource = timingPending.some(
+    (p) => p.index in (doc.context.timing_quality?.source_holds || {}),
+  );
+  const timingLabel = pendingSource ? "音源不清・未確認" : "時間待核對";
+  const pendingGroups = doc.context.groups.length - groupsConfirmed;
+  const publishIssues = [
+    blocked.current ? "同步已暫停，請先處理本機修改" : !ready ? "正在載入編輯狀態" : "",
+    pendingTiming.length
+      ? timingPending.length ? `${timingLabel} ${timingPending.length} 段` : "稿件的時間核對狀態尚未確認"
+      : "",
+    pendingParagraph ? `還有 ${spokenRows.length - confirmed} 段口述未核對` : "",
+    pendingGroups ? `還有 ${pendingGroups} 組投影片未核對` : "",
+    doc.script.some((p) => p.type === "subtitle" && !p.text.replace(/^#+/, "").trim())
+      ? "請填寫或移除空白小標題"
+      : "",
+  ].filter(Boolean);
   const disabled =
     !doc.can_edit ||
     busy ||
@@ -1098,7 +1125,8 @@ function TranscriptProofreader({
   const openHistory = async () => {
     try {
       await flush();
-      setHistory(await request<Revision[]>(base + "/history"));
+      setHistoryError("");
+      setHistory(await request<HistoryPage>(base + "/history?grouped=true"));
     } catch (error) {
       setFailure((error as Error).message);
     }
@@ -1294,20 +1322,6 @@ function TranscriptProofreader({
     });
     enqueue({ kind: "text", id, text });
   };
-  const deletionCandidates = useMemo(() => aiDeletions(doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions || []), [doc.script, doc.context.paragraph_bindings, doc.context.editorial_exclusions]);
-  const restoreDeletion = (candidate: AiDeletion) => {
-    if (disabled) return;
-    try {
-      const row = current.current.script.find((p) => p.index === candidate.id);
-      if (!row) throw new Error("找不到段落");
-      const text = restoreAiDeletion(row.text, candidate);
-      const reviews = { ...current.current.context.reviews };
-      delete reviews["p:" + candidate.id];
-      updateDoc({ ...current.current, context: { ...current.current.context, reviews },
-        script: current.current.script.map((p) => p.index === candidate.id ? { ...p, text } : p) });
-      enqueue({ kind: "text", id: candidate.id, text });
-    } catch (e) { setFailure((e as Error).message); }
-  };
   const saveStatus = !ready
     ? "正在檢查本機草稿…"
     : recovered
@@ -1404,9 +1418,6 @@ function TranscriptProofreader({
             >
               舊版 Editor
             </a>
-            <button className={button} onClick={() => setDeletionsOpen((v) => !v)}>
-              {deletionsOpen ? "關閉 AI 刪除" : `AI 刪除 (${deletionCandidates.length})`}
-            </button>
             <button className={button} onClick={() => void openHistory()}>
               編輯歷史
             </button>
@@ -1501,9 +1512,8 @@ function TranscriptProofreader({
                 {doc.can_publish && (
                   <button
                     className="rounded-md bg-blue-700 px-4 py-2 text-sm text-white disabled:opacity-40"
-                    disabled={
-                      busy || blocked.current || !ready || timingBlocked
-                    }
+                    disabled={busy || publishIssues.length > 0}
+                    aria-describedby={publishIssues.length ? "transcript-publish-issues" : undefined}
                     onClick={() => void command("publish")}
                   >
                     發佈逐字稿
@@ -1551,10 +1561,15 @@ function TranscriptProofreader({
                 setNavigationTarget({ id: first.index });
               }}
             >
-              {doc.context.timing_quality?.source_holds ? "音源不清・未確認" : "時間待核對"} {timingPending.length} 段
+              {timingLabel} {timingPending.length} 段
             </button>
           )}
         </div>
+        {doc.can_publish && publishIssues.length > 0 && (
+          <p id="transcript-publish-issues" role="status" className="mt-2 text-xs text-amber-800 lg:text-sm">
+            暫時無法發佈（{publishIssues.join("、")}）
+          </p>
+        )}
         <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-500 lg:hidden">
           {saveStatus}
         </p>
@@ -1610,8 +1625,6 @@ function TranscriptProofreader({
           {n.paragraph_ids.filter(id => pendingTiming.includes(id)).map(id => <button className={button} key={id} onClick={() => { selectParagraph(id); setNavigationTarget({id}); }}>第 {id} 段</button>)}
         </div>)}
       </section>}
-      {deletionsOpen && <AiDeletionReview items={deletionCandidates} disabled={disabled}
-        onRestore={restoreDeletion} onLocate={(id) => { selectParagraph(id); setNavigationTarget({ id }); }} />}
       {metadataOpen && (
         <section className="my-4 rounded-xl border bg-white p-4">
           <p className="mb-3 text-sm text-slate-500">
@@ -1729,7 +1742,7 @@ function TranscriptProofreader({
               onPlay={() => {
                 const media = video.current;
                 const id = selectedParagraph.current;
-                const binding = current.current.context.paragraph_bindings[id];
+                const binding = previewTiming.current ?? current.current.context.paragraph_bindings[id];
                 if (!media) return;
                 if (
                   !contextPlayback.current &&
@@ -1750,7 +1763,7 @@ function TranscriptProofreader({
                 if (video.current && !contextPlayback.current) {
                   seekParagraphPlayback(
                     video.current,
-                    current.current.context.paragraph_bindings[
+                    previewTiming.current ?? current.current.context.paragraph_bindings[
                       selectedParagraph.current
                     ],
                     0,
@@ -1768,7 +1781,15 @@ function TranscriptProofreader({
                 setPlaying(false);
                 clearTimeout(boundaryTimer.current);
               }}
-              onTimeUpdate={checkParagraphEnd}
+              onLoadedMetadata={(e) => {
+                const duration = e.currentTarget.duration;
+                setMediaDuration(Number.isFinite(duration) ? Math.floor(duration * 1000) : 0);
+                if (timingEdit && Number.isFinite(duration)) seekTiming(timingCursor);
+              }}
+              onTimeUpdate={(e) => {
+                if (timingEdit) setTimingCursor(Math.round(e.currentTarget.currentTime * 1000));
+                checkParagraphEnd();
+              }}
             />
             <div className="flex flex-wrap items-center gap-2 p-3">
               {playbackControls(audioOnly ? "音訊播放控制" : "影片播放控制")}
@@ -2116,24 +2137,55 @@ function TranscriptProofreader({
                   <div className="mb-3 text-sm">
                     {timingEdit?.id === p.index ? (
                       <div className="rounded-md border border-slate-300 p-3">
-                        <div className="flex flex-wrap gap-3">
-                          <label className="grid gap-1">
-                            開始時間
-                            <input className="w-36 rounded border px-2 py-1 text-base" value={timingEdit.start}
-                              onChange={(e) => setTimingEdit({ ...timingEdit, start: e.target.value })} />
-                          </label>
-                          <label className="grid gap-1">
-                            結束時間
-                            <input className="w-36 rounded border px-2 py-1 text-base" value={timingEdit.end}
-                              onChange={(e) => setTimingEdit({ ...timingEdit, end: e.target.value })} />
-                          </label>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <button className="text-blue-700" disabled={!mediaDuration}
+                            onClick={() => seekTiming(timingEdit.start_ms)}>
+                            段首 {timingInput(timingEdit.start_ms)}
+                          </button>
+                          <button className="text-blue-700" disabled={!mediaDuration}
+                            onClick={() => seekTiming(timingEdit.end_ms)}>
+                            段尾 {timingInput(timingEdit.end_ms)}
+                          </button>
+                        </div>
+                        <p className="mt-2 text-slate-600">拖曳或播放到想要的位置，再設為段首或段尾。</p>
+                        <label className="mt-2 grid gap-1">
+                          播放位置 {timingInput(timingCursor)}
+                          <input className="h-8 w-full" type="range" step={1}
+                            min={Math.max(0, Math.min(binding.start_ms - 15000, timingCursor))}
+                            max={Math.max(timingCursor, Math.min(mediaDuration, binding.end_ms + 15000))}
+                            value={timingCursor} disabled={!mediaDuration}
+                            onChange={(e) => seekTiming(e.currentTarget.valueAsNumber)} />
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button className={button} disabled={!mediaDuration}
+                            onClick={() => seekTiming(timingCursor - 500)}>−0.5 秒</button>
+                          <button className={button} disabled={!mediaDuration} onClick={() => {
+                            const media = video.current;
+                            if (!media) return;
+                            if (!media.paused) {
+                              media.pause();
+                              return;
+                            }
+                            stopTimingPreview();
+                            contextPlayback.current = true;
+                            void media.play().catch(() => setTimingError("無法播放，請再試一次。"));
+                          }}>{playing ? "暫停" : "播放"}</button>
+                          <button className={button} disabled={!mediaDuration}
+                            onClick={() => seekTiming(timingCursor + 500)}>＋0.5 秒</button>
+                          <button className={button} disabled={!mediaDuration || busy}
+                            onClick={() => markTiming("start_ms")}>設為段首</button>
+                          <button className={button} disabled={!mediaDuration || busy}
+                            onClick={() => markTiming("end_ms")}>設為段尾</button>
                         </div>
                         {timingError && <p role="alert" className="mt-2 text-red-800">{timingError}</p>}
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button className={button} onClick={() => void useTimingEdit(false)}>試播</button>
+                          <button className={button} disabled={!mediaDuration}
+                            onClick={() => void useTimingEdit(false)}>試播整段</button>
                           <button className={button} disabled={disabled} onClick={() => void useTimingEdit(true)}>確認時間</button>
                           <button className={button} onClick={() => {
+                            video.current?.pause();
                             stopTimingPreview();
+                            contextPlayback.current = false;
                             setTimingEdit(undefined);
                           }}>取消</button>
                         </div>
@@ -2141,7 +2193,9 @@ function TranscriptProofreader({
                     ) : (
                       <button className={button} disabled={disabled} onClick={() => {
                         setTimingError("");
-                        setTimingEdit({ id: p.index, start: timingInput(binding.start_ms), end: timingInput(binding.end_ms) });
+                        setTimingEdit({ id: p.index, start_ms: binding.start_ms, end_ms: binding.end_ms });
+                        setTimingCursor(binding.start_ms);
+                        if (mediaDuration) seekTiming(binding.start_ms);
                       }}>調整時間</button>
                     )}
                   </div>
@@ -2254,7 +2308,6 @@ function TranscriptProofreader({
           className="fixed inset-0 z-40 flex justify-end bg-black/20"
           onClick={() => {
             setHistory(null);
-            setSnapshot(undefined);
           }}
         >
           <section
@@ -2271,56 +2324,40 @@ function TranscriptProofreader({
                 className={button}
                 onClick={() => {
                   setHistory(null);
-                  setSnapshot(undefined);
                 }}
               >
                 關閉
               </button>
             </div>
             <p className="my-3 text-sm text-slate-500">
-              選擇版本，檢視該次修改與上一版本的差異。
+              展開編輯時段可查看前後差異，也可查看每次儲存。
             </p>
-            {history.map((h) => (
-              <button
-                key={h.revision}
-                className={`mb-2 block w-full rounded border p-3 text-left text-sm ${snapshot?.revision === h.revision ? "border-blue-600" : ""}`}
-                onClick={() =>
-                  void request<{
-                    script: Row[];
-                    context: Context;
-                    revision: number;
-                  }>(`${base}/revisions/${h.revision}`)
-                    .then(setSnapshot)
-                    .catch((e) => setFailure(e.message))
-                }
-              >
-                第 {h.revision} 版 · {new Date(h.time).toLocaleString()} ·{" "}
-                {h.actor} ·{" "}
-                {(
-                  {
-                    edit: "自動儲存",
-                    adopt: "採用候選",
-                    claim: "認領",
-                    unclaim: "取消認領",
-                    takeover: "接手",
-                    publish: "發佈",
-                  } as Record<string, string>
-                )[h.kind] || h.kind}
-              </button>
+            {history.periods.length === 0 && <p className="text-sm text-slate-500">目前沒有編輯紀錄。</p>}
+            {history.periods.map((period) => (
+              <HistoryPeriodCard key={period.revisions[0].revision} base={base} period={period} />
             ))}
-            {history.length > 0 && (
-              <button
-                className={button}
-                onClick={() =>
-                  void request<Revision[]>(
-                    `${base}/history?before=${history[history.length - 1].revision}`,
-                  ).then((more) => setHistory([...history, ...more]))
+            {historyError && <p role="alert" className="text-sm text-red-700">{historyError}</p>}
+            {history.next_before !== null && (
+              <button className={button} disabled={historyLoading} onClick={async () => {
+                setHistoryLoading(true);
+                setHistoryError("");
+                try {
+                  const more = await request<HistoryPage>(
+                    `${base}/history?grouped=true&before=${history.next_before}`,
+                  );
+                  setHistory((current) => current === history ? {
+                    periods: [...current.periods, ...more.periods],
+                    next_before: more.next_before,
+                  } : current);
+                } catch (error) {
+                  setHistoryError((error as Error).message);
+                } finally {
+                  setHistoryLoading(false);
                 }
-              >
-                載入更早版本
+              }}>
+                {historyLoading ? "載入中…" : "載入更早紀錄"}
               </button>
             )}
-            {snapshot && <HistoryDiff base={base} snapshot={snapshot} />}
           </section>
         </div>
       )}
@@ -2337,47 +2374,88 @@ const TranscriptText = memo(function TranscriptText({
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 });
 
-function HistoryDiff({
-  base,
-  snapshot,
-}: {
-  base: string;
-  snapshot: { script: Row[]; context: Context; revision: number };
-}) {
-  const [previous, setPrevious] = useState<{
-    script: Row[];
-    context: Context;
-  }>();
+const historyAction: Record<string, string> = {
+  edit: "自動儲存",
+  adopt: "採用候選",
+  claim: "認領",
+  unclaim: "取消認領",
+  takeover: "接手",
+  publish: "發佈",
+};
+
+function HistoryPeriodCard({ base, period }: { base: string; period: HistoryPeriod }) {
+  const latest = period.revisions[0];
+  const first = period.revisions[period.revisions.length - 1];
+  const [comparison, setComparison] = useState<{ from: number; to: number }>();
+  const start = new Date(first.time);
+  const end = new Date(latest.time);
+  const time = first === latest ? start.toLocaleString() :
+    `${start.toLocaleString()}–${start.toDateString() === end.toDateString() ? end.toLocaleTimeString() : end.toLocaleString()}`;
+  return (
+    <details className="mb-2 rounded border p-3 text-sm" onToggle={(event) => {
+      if (event.currentTarget.open && !comparison) {
+        setComparison({ from: first.revision - 1, to: latest.revision });
+      }
+    }}>
+      <summary className="cursor-pointer">
+        {latest.actor} · {latest.kind === "edit" ? "編輯" : historyAction[latest.kind] || latest.kind}
+        {period.changed_paragraphs > 0 && ` · 修改 ${period.changed_paragraphs} 段`}
+        <span className="ml-2 text-slate-600">{time}</span>
+      </summary>
+      {period.revisions.length > 1 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer">逐次儲存（{period.revisions.length} 筆）</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button className={button} onClick={() => setComparison({ from: first.revision - 1, to: latest.revision })}>
+              時段前後差異
+            </button>
+            {period.revisions.map((revision) => (
+              <button key={revision.revision} className={button}
+                onClick={() => setComparison({ from: revision.revision - 1, to: revision.revision })}>
+                第 {revision.revision} 版 · {new Date(revision.time).toLocaleTimeString()}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
+      {comparison && <HistoryComparison base={base} {...comparison} />}
+    </details>
+  );
+}
+
+function HistoryComparison({ base, from, to }: { base: string; from: number; to: number }) {
+  const [result, setResult] = useState<{ previous: HistorySnapshot; snapshot: HistorySnapshot }>();
   const [error, setError] = useState("");
   useEffect(() => {
-    let alive = true;
-    setPrevious(undefined);
+    let active = true;
     setError("");
-    if (snapshot.revision > 1)
-      request<{ script: Row[]; context: Context }>(
-        `${base}/revisions/${snapshot.revision - 1}`,
-      )
-        .then((v) => {
-          if (alive) setPrevious(v);
-        })
-        .catch((e) => {
-          if (alive) setError(e.message);
-        });
-    else setPrevious({ script: [], context: {} as Context });
-    return () => {
-      alive = false;
-    };
-  }, [base, snapshot.revision]);
-  if (error)
-    return (
-      <p role="alert" className="mt-4 text-red-700">
-        無法比較歷史：{error}
-      </p>
-    );
-  if (!previous) return <p>正在比較版本…</p>;
+    setResult(undefined);
+    const revision = (n: number) => request<HistorySnapshot>(`${base}/revisions/${n}`);
+    const empty = { script: [], context: {} as Context, revision: 0 };
+    Promise.all([from > 0 ? revision(from) : empty, revision(to)])
+      .then(([previous, snapshot]) => { if (active) setResult({ previous, snapshot }); })
+      .catch((error) => { if (active) setError(error.message); });
+    return () => { active = false; };
+  }, [base, from, to]);
+  if (error) return <p role="alert" className="mt-4 text-red-700">無法比較歷史：{error}</p>;
+  if (!result || result.snapshot.revision !== to || result.previous.revision !== from) {
+    return <p className="mt-3">正在比較版本…</p>;
+  }
+  return <HistoryDiff {...result} />;
+}
+
+function HistoryDiff({ previous, snapshot }: { previous: HistorySnapshot; snapshot: HistorySnapshot }) {
   const changes = snapshot.script.filter(
     (p) => previous.script.find((v) => v.index === p.index)?.text !== p.text,
   );
+  const timingChanges = Object.entries(snapshot.context.paragraph_bindings).filter(([id, after]) => {
+    const before = previous.context.paragraph_bindings?.[id];
+    if (!before) return false;
+    const status = (context: Context) => context.timing_quality?.paragraph_states?.[id]?.status;
+    return before.start_ms !== after.start_ms || before.end_ms !== after.end_ms ||
+      status(previous.context) !== status(snapshot.context);
+  });
+  const removed = previous.script.filter((p) => !snapshot.script.some((v) => v.index === p.index));
   const groups = snapshot.context.groups.filter(
     (g) =>
       JSON.stringify(previous.context.groups?.find((v) => v.id === g.id)) !==
@@ -2410,7 +2488,7 @@ function HistoryDiff({
   );
   return (
     <div className="mt-5 space-y-3">
-      <h3 className="font-semibold">第 {snapshot.revision} 版的差異</h3>
+      <h3 className="font-semibold">{previous.revision ? `第 ${previous.revision} 版 → 第 ${snapshot.revision} 版` : `第 ${snapshot.revision} 版的差異`}</h3>
       {changes.map((p) => (
         <div key={p.index} className="rounded border p-3">
           <p className="text-sm text-slate-500">段落 {p.index}</p>
@@ -2420,14 +2498,22 @@ function HistoryDiff({
           />
         </div>
       ))}
-      {previous.script
-        .filter((p) => !snapshot.script.some((v) => v.index === p.index))
-        .map((p) => (
+      {removed.map((p) => (
           <div key={p.index} className="rounded border p-3">
             <p className="text-sm text-slate-500">已移除小標題</p>
             <ReviewTextDiff before={p.text} after="" />
           </div>
         ))}
+      {timingChanges.map(([id, after]) => {
+        const before = previous.context.paragraph_bindings[id];
+        const range = (binding: typeof after) => `${timingInput(binding.start_ms)}–${timingInput(binding.end_ms)}`;
+        return (
+          <p key={id} className="rounded border p-3 text-sm">
+            段落 {id} 的時間 {range(before) === range(after) ? range(after) : `${range(before)} → ${range(after)}`}
+            {snapshot.context.timing_quality?.paragraph_states?.[id]?.status === "qualified" && " · 已確認"}
+          </p>
+        );
+      })}
       {groups.map((g) => {
         const before = previous.context.groups?.find((v) => v.id === g.id);
         return (
@@ -2501,11 +2587,13 @@ function HistoryDiff({
         </p>
       ))}
       {!changes.length &&
+        !removed.length &&
+        !timingChanges.length &&
         !groups.length &&
         !regions.length &&
         !reviews.length && (
           <p className="text-sm text-slate-500">
-            口述正文未變更；本次為認領、書籤、講道資料或發佈操作。
+            這段期間沒有口述、時間或投影片的差異。
           </p>
         )}
     </div>
