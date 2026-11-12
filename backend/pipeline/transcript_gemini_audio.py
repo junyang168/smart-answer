@@ -132,41 +132,19 @@ def transcribe(media, folder):
     return {"duration": duration, "words": result, "coverage": coverage}
 
 
-def editor_paragraphs(words):
-    """Group word-timed speech directly into paragraphs with speaker turns."""
+def refinement_turns(words):
+    """Retain speaker turns within the existing transcription windows."""
     from opencc import OpenCC
 
     converter = OpenCC("s2t")
-    paragraphs = []
-    current = []
-    end = 0
-    for word in words:
-        if current:
-            elapsed = end - current[0]["start"]
-            gap = word["start"] - end
-            sentence_end = current[-1]["text"].rstrip("」』”").endswith(("。", "？", "！", ".", "?", "!"))
-            if gap >= 5 or (elapsed >= 12 and (gap >= 2 or sentence_end)) or word["end"] - current[0]["start"] > 30:
-                paragraphs.append(current)
-                current = []
-                end = 0
-        current.append(word)
-        end = max(end, word["end"])
-    if current:
-        paragraphs.append(current)
-
-    blocks = []
-    for i, paragraph in enumerate(paragraphs):
-        turns = []
-        for j, (speaker, values) in enumerate(groupby(paragraph, key=lambda word: word["speaker"])):
-            group = list(values)
-            text = converter.convert("".join(w["text"] for w in group)).strip()
-            if text:
-                turns.append({"id": f"p{i + 1}-t{j + 1}", "text": text, "speaker": speaker,
-                              "start": group[0]["start"], "end": max(w["end"] for w in group)})
-        if turns:
-            blocks.append({"start": turns[0]["start"], "end": max(turn["end"] for turn in turns),
-                           "cues": turns})
-    return blocks
+    turns = []
+    for i, (speaker, values) in enumerate(groupby(words, key=lambda word: word["speaker"])):
+        group = list(values)
+        text = converter.convert("".join(w["text"] for w in group)).strip()
+        if text:
+            turns.append({"id": f"turn-{i + 1}", "text": text, "speaker": speaker,
+                          "start": group[0]["start"], "end": max(w["end"] for w in group)})
+    return turns
 
 
 def refine(media, transcription, folder, saved_response):
@@ -174,12 +152,12 @@ def refine(media, transcription, folder, saved_response):
     from opencc import OpenCC
 
     converter = OpenCC("s2t")
-    blocks = editor_paragraphs(transcription["words"])
+    turns = refinement_turns(transcription["words"])
     model = VisionReviewer("gemini", FLASH_PROMPT, FLASH_SCHEMA)
     model.config.update(max_output_tokens=9500, thinking_config={"thinking_level": "LOW"})
     omissions = []
-    for i in range(0, len(blocks), 5):
-        owned = [turn for block in blocks[i:i + 5] for turn in block["cues"]]
+    for i, (_, window) in enumerate(groupby(turns, key=lambda turn: turn["speaker"].split(":", 1)[0])):
+        owned = list(window)
         start = max(0, owned[0]["start"] - 1.2)
         end = min(transcription["duration"], max(x["end"] for x in owned) + 1.2)
         audio = folder / f"flash-{i}.mp3"
@@ -199,17 +177,14 @@ def refine(media, transcription, folder, saved_response):
             seen.add(key)
             ids[key]["text"] = text
         omissions.extend(x for x in answer["omissions"] if start <= x["start"] < x["end"] <= end and x["text"].strip())
-    return {"duration": transcription["duration"], "blocks": blocks, "omissions_for_review": omissions,
+    return {"duration": transcription["duration"], "turns": turns, "omissions_for_review": omissions,
             "coverage": transcription["coverage"]}
 
 
 def align(media, refined, folder, aligner):
     from backend.pipeline.contextual_transcript_timing import analyse, prepare
-    from backend.pipeline.transcript_proofreading_layout import proofreading_blocks
 
-    # Earlier Flash checkpoints already have text keyed by their original cue IDs.
-    # Preserve that text and group it once for a restart at timing.
-    blocks = refined["blocks"] if "blocks" in refined else proofreading_blocks(refined["cues"])
+    blocks = refined["blocks"]
     if not aligner:
         raise ValueError("--aligner-python is required for paragraph timing")
     source = folder / "paragraph-timing"

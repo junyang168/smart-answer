@@ -245,7 +245,18 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             elif stage == "flash":
                 value = audio.refine(media, outputs["transcribe"], out, saved_response)
             elif stage == "timing":
-                value = audio.align(media, outputs["flash"], out, aligner)
+                from backend.pipeline.transcript_semantic_segmentation import playback_blocks, segment
+
+                if not aligner:
+                    raise ValueError("--aligner-python is required for paragraph timing")
+                refined = outputs["flash"]
+                # Older Flash checkpoints use cue IDs or provisional blocks.
+                turns = refined.get("turns") or refined.get("cues")
+                if turns is None:
+                    turns = [turn for block in refined["blocks"] for turn in block["cues"]]
+                paragraphs = segment(turns, out / "semantic-segmentation")
+                value = audio.align(media, {**refined, "blocks": playback_blocks(paragraphs, turns)}, out, aligner)
+                value["segmentation"] = "gpt-punctuation.v1"
             else:
                 blocks = imported_blocks if cues is not None else outputs["timing"]["blocks"]
                 if stage == "speakers":
@@ -261,8 +272,8 @@ def _run(cues, media, out, *, start=None, prior=None, protected=None, aligner=No
             saved = {"input_sha256": input_sha, "value": value, "output_sha256": object_sha(value)}
         if saved["input_sha256"] != input_sha or saved["output_sha256"] != object_sha(saved["value"]):
             raise ValueError(f"Invalid {stage} checkpoint")
-        if stage == "timing" and "blocks" not in saved["value"]:
-            raise ValueError("Legacy cue timing checkpoint: restart at timing in a new output directory")
+        if stage == "timing" and saved["value"].get("segmentation") != "gpt-punctuation.v1":
+            raise ValueError("Legacy timing checkpoint: restart at timing in a new output directory")
         save_json(checkpoint, saved)
         outputs[stage] = saved["value"]
     return outputs["layout"]

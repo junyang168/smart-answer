@@ -61,34 +61,44 @@ def test_full_runner_can_restart_at_flash_without_transcribing_again(tmp_path, m
 
     def timing(_, refined, *args):
         calls.append("timing")
-        return {**refined, "blocks": [{**flow.proofreading_blocks([cue])[0],
-                                       "start": 0.25, "timing_review": True}]}
+        assert len(refined["blocks"]) == 1
+        return {**refined, "blocks": [{**refined["blocks"][0], "start": 0.25, "timing_review": True}]}
+
+    from backend.pipeline import transcript_semantic_segmentation as semantic
+
+    def segment(turns, _):
+        calls.append("segment")
+        text, positions, _ = semantic.segmentation_input(turns)
+        return semantic.apply_ends(text, positions, [len(positions)])
+
+    monkeypatch.setattr(semantic, "segment", segment)
 
     monkeypatch.setattr(flow.audio, "transcribe", transcribe)
     monkeypatch.setattr(flow.audio, "refine", flash)
     monkeypatch.setattr(flow.audio, "align", timing)
     monkeypatch.setattr(flow, "speaker_roles", lambda *_: {"w0:spk:0": "professor"})
     monkeypatch.setattr(flow, "repetition_proposals", lambda *_: [
-        {"id": "w0-1", "quote": "要要要說明", "replace": "要說明"},
+        {"id": "p1-t1", "quote": "要要要說明", "replace": "要說明"},
     ])
     original = tmp_path / "complete"
-    expected = flow.run(None, media, original)
+    aligner = tmp_path / "aligner"
+    expected = flow.run(None, media, original, aligner=aligner)
     assert expected["paragraphs"][0]["start"] == 0.25
     assert expected["paragraphs"][0]["timing_review"] is True
-    assert calls == ["transcribe", "flash", "timing"]
+    assert calls == ["transcribe", "flash", "segment", "timing"]
     calls.clear()
-    assert flow.run(None, media, tmp_path / "retimed", start="timing", prior=original) == expected
-    assert calls == ["timing"]
+    assert flow.run(None, media, tmp_path / "retimed", start="timing", prior=original, aligner=aligner) == expected
+    assert calls == ["segment", "timing"]
     calls.clear()
-    assert flow.run(None, media, tmp_path / "new", start="flash", prior=original) == expected
-    assert calls == ["flash", "timing"]
+    assert flow.run(None, media, tmp_path / "new", start="flash", prior=original, aligner=aligner) == expected
+    assert calls == ["flash", "segment", "timing"]
     calls.clear()
-    assert flow.run(None, media, tmp_path / "layout", start="layout", prior=original) == expected
+    assert flow.run(None, media, tmp_path / "layout", start="layout", prior=original, aligner=aligner) == expected
     assert calls == []
     checkpoint = original / "transcribe.json"
     checkpoint.write_text(checkpoint.read_text().replace("original", "tampered"))
     with pytest.raises(ValueError, match="Invalid transcribe checkpoint"):
-        flow.run(None, media, tmp_path / "bad", start="flash", prior=original)
+        flow.run(None, media, tmp_path / "bad", start="flash", prior=original, aligner=aligner)
 
 
 def test_asr_rejects_wrong_model_and_marks_inverted_clock():
@@ -106,19 +116,16 @@ def test_asr_rejects_wrong_model_and_marks_inverted_clock():
         flow.audio.words({**result, "model": "wrong"}, "0", 0, 5, 0, 5)
 
 
-def test_word_stream_creates_editor_paragraphs_without_subtitle_splits():
+def test_flash_input_preserves_turns_without_cutting_at_punctuation():
     words = [
-        {"text": "教授說", "speaker": "professor", "start": 0, "end": 6},
-        {"text": "了這句。", "speaker": "professor", "start": 6, "end": 8},
-        {"text": "怎麼理解？", "speaker": "audience", "start": 8, "end": 10},
-        {"text": "可以這樣看。", "speaker": "professor", "start": 10, "end": 12},
-        {"text": "再看下一段。", "speaker": "professor", "start": 13, "end": 18},
+        {"text": "教授說。", "speaker": "professor", "start": 0, "end": 15},
+        {"text": "再說一句。", "speaker": "professor", "start": 15, "end": 35},
+        {"text": "怎麼理解？", "speaker": "audience", "start": 35, "end": 37},
+        {"text": "可以這樣看。", "speaker": "professor", "start": 37, "end": 42},
     ]
-    first, second = flow.audio.editor_paragraphs(words)
-    assert (first["start"], first["end"]) == (0, 12)
-    assert [turn["text"] for turn in first["cues"]] == ["教授說了這句。", "怎麼理解？", "可以這樣看。"]
-    assert [turn["speaker"] for turn in first["cues"]] == ["professor", "audience", "professor"]
-    assert second["cues"][0]["text"] == "再看下一段。"
+    turns = flow.audio.refinement_turns(words)
+    assert [turn["text"] for turn in turns] == ["教授說。再說一句。", "怎麼理解？", "可以這樣看。"]
+    assert [turn["speaker"] for turn in turns] == ["professor", "audience", "professor"]
 
 
 def test_semantic_segmentation_accepts_only_punctuation_offsets_and_keeps_text():
@@ -164,3 +171,12 @@ def test_semantic_playback_spans_keep_source_turns_across_punctuation_cut():
     assert [[(c["speaker"], c["text"]) for c in b["cues"]] for b in blocks] == [
         [("聽眾", "為何？"), ("教授", "可以。")], [("教授", "下題。")],
     ]
+
+
+def test_semantic_segmentation_preserves_unpunctuated_tail():
+    from backend.pipeline import transcript_semantic_segmentation as semantic
+
+    turns = [{"speaker": "教授", "text": "第一個觀點。第二個觀點。最後幾個字 "}]
+    text, positions, _ = semantic.segmentation_input(turns)
+    paragraphs = semantic.apply_ends(text, positions, [1, 2])
+    assert [p["text"] for p in paragraphs] == ["第一個觀點。", "第二個觀點。最後幾個字 "]

@@ -44,8 +44,8 @@ def segmentation_input(turns):
             inner = []
         elif any(mark in match[0] for mark in "；，;,"):
             inner.append(match.end())
-    if not positions or positions[-1] != len(text.rstrip()):
-        raise ValueError("The input must end at a punctuation boundary")
+    if not positions:
+        raise ValueError("No sentence punctuation in the Flash transcript")
     markers = dict(zip(positions, range(1, len(positions) + 1)))
     offset = 0
     lines = []
@@ -68,14 +68,12 @@ def apply_ends(text, positions, ends):
     result = []
     start = 0
     for marker in ends:
-        end = positions[marker - 1]
+        end = len(text) if marker == len(positions) else positions[marker - 1]
         paragraph = text[start:end]
         if not any(char.isalnum() for char in paragraph):
             raise ValueError("Paragraph contains no spoken text")
         result.append({"start": start, "end": end, "punctuation_id": marker, "text": paragraph})
         start = end
-    if start < len(text):
-        result[-1]["trailing_whitespace"] = text[start:]
     return result
 
 
