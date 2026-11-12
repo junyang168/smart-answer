@@ -447,8 +447,7 @@ def gpt(root, ports, task, jobs, schema, instruction, *, shared=None, prepare=No
             'task':task, 'jobs':len(batch), 'request_bytes':len(json.dumps(req,ensure_ascii=False).encode()),
             'response_bytes':len(json.dumps(reply,ensure_ascii=False).encode())})
         if evidence_task and (program_validated or req.get('execution_recovery')):
-            reply_model = eo.CompletionEdits if req['input'].get('source_completion_contract') == eo.COMPLETION_CONTRACT else eo.Edits
-            reply_model.model_validate(reply)
+            eo.reply_model(req['input']).model_validate(reply)
         # A schema-valid reply may omit jobs. Keep every returned adjudication;
         # request only the missing jobs once, under the same provider call budget.
         # Unknown/duplicate IDs are not silently assigned or adjudicated by code.

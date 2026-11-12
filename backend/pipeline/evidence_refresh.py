@@ -239,6 +239,10 @@ REPAIR_PROMPT = (
     '不改 ID、owners、審閱資格或其他物件。')
 
 
+class QuoteLocationError(ValueError):
+    """A proposed quote cannot be located uniquely in its allowed source."""
+
+
 def repair_postimage(evidence, reply, value, records, sources):
     """Program owns IDs/anchors; the model supplies only content and exact quotes."""
     reply = Repair.model_validate(reply).model_dump()
@@ -252,11 +256,11 @@ def repair_postimage(evidence, reply, value, records, sources):
     result, generated, projection = deepcopy(evidence), {}, []
     for item in reply['quotes']:
         if item['paragraph_key'] not in allowed:
-            raise ValueError('repair quoted an unauthorized paragraph')
+            raise QuoteLocationError('repair quoted an unauthorized paragraph')
         p = allowed[item['paragraph_key']]
         quote = source_excerpt(item['quote'], p['text'], contract=SPAN_CONTRACT)
         if not quote or p['text'].count(quote) != 1:
-            raise ValueError('repair quote is not a unique literal source span')
+            raise QuoteLocationError('repair quote is not a unique literal source span')
         projection.append({'supplied': item['quote'], 'exact': quote, 'paragraph_key': item['paragraph_key']})
         sid = p['source_id']
         old = next((r['payload'] for k, r in records.items() if k.startswith('source_fragments/')

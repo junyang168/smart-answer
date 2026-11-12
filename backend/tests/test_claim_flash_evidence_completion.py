@@ -75,10 +75,10 @@ def test_four_outcomes_share_one_call_and_are_not_reviewed_again(campaign):
     assert result['status']=='completed' and len(fidelity_calls(ports))==1
     first=fidelity_calls(ports)[0]
     assert len(first['input']['jobs'])==4
-    assert first['schema'] == eo.program_validated_schema(eo.CompletionEdits.model_json_schema())
+    assert first['schema'] == eo.program_validated_schema(eo.QuoteCompletionEdits.model_json_schema())
     assert 'minLength' not in json.dumps(first['schema'])
     assert 'minItems' not in first['schema']['properties']['items']
-    assert 'enum' not in first['schema']['$defs']['CompletionEdit']['properties']['job_id']
+    assert 'enum' not in first['schema']['$defs']['QuoteCompletionEdit']['properties']['job_id']
     assert all(req['input']['task']!='source_binding_completion' for role,req in ports.calls if role=='gpt')
     assert store.get_record_state('evidence_steps','E')['payload']['statement']=='不知道神的旨意就無法遵行。'
     assert store.get_record_state('evidence_steps','KEEP')['payload']==next(p for p in before['evidence_steps'] if p['evidence_step_id']=='KEEP')

@@ -69,7 +69,7 @@ def supplement_binding(key,payload,quotes,value,records,sources):
     """Compile selected exact spans and retain every previously valid attachment."""
     allowed={p['paragraph_key'] for p in value['nearby_paragraphs']}
     if any(q['paragraph_key'] not in allowed for q in quotes):
-        raise ValueError('unprovided source repair paragraph')
+        raise e.QuoteLocationError('unprovided source repair paragraph')
     quotes=list({(q['paragraph_key'],q['quote']):q for q in quotes}.values())
     post,fragments,_=binding_postimage(key,payload,quotes,value,records,sources)
     post['source_fragment_ids']=list(dict.fromkeys(

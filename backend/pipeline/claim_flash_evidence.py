@@ -48,6 +48,7 @@ FOCUSED_PROMPT=(
     '不審Claim、論證或節點關係。keep表示原值可保留。只輸出必要修改和針對疑點的簡短理由，'
     '每個job_id恰好一次；未改欄位用null。保留教授的經文引用。'+f.KNOWLEDGE_TEXT_RULES)
 COMPLETION_CONTRACT='claim_flash_evidence_source_completion_v1'
+QUOTE_ACTION_CONTRACT='claim_flash_evidence_quote_action_v1'
 COMPLETION_RULES=(
     '本次來源層已先提供候選原文：source_paragraphs按段落ID共用，'
     '每項只能選source_candidates.nearby_paragraph_keys列出的段落；候選不是支持成立的結論。'
@@ -62,7 +63,7 @@ COMPLETION_RULES=(
     '不審Claim、論證關係或其他已通過記錄。')
 
 
-def completion_prompt(focused=False):
+def completion_prompt(focused=False, *, quote_action=False, legacy_speaker=False):
     base=FOCUSED_PROMPT if focused else PROMPT
     base=base.replace('只用已掛SourceFragments；缺必要上下文用needs_source交回原文層，不自行借鄰段。','')
     base=base.replace('sources只包含已驗證的SourceFragments；不查整篇原文、不補未掛片段作為自身支持。','')
@@ -70,7 +71,16 @@ def completion_prompt(focused=False):
     base=base.replace('缺上下文時保留並交接，','必要上下文先核對所給候選，')
     base=base.replace('只准改writable_fields列出的欄位；',
         '未改statement時，只准改writable_fields；實際修改statement時，也准同步修正statement_change_fields所列的相關分類；')
-    return base+COMPLETION_RULES+q.gpt_role_rules()
+    quote_rule = ('若唯一修訂是補引文，選add_quotes，在同一答覆提供quotes，保留摘要和分類。'
+                  'add_quotes表示已處置Jev疑點且不需改欄位；不能夾帶欄位修改。'
+                  '若同時需要修改欄位及引文，仍選repair。') if quote_action else ''
+    return base+COMPLETION_RULES+q.gpt_role_rules(legacy_speaker=legacy_speaker)+quote_rule
+
+
+def completion_policy(*, quote_action=False, legacy_speaker=False):
+    schema=QuoteCompletionEdits if quote_action else CompletionEdits
+    return e.digest([completion_prompt(quote_action=quote_action,legacy_speaker=legacy_speaker),
+        completion_prompt(True,quote_action=quote_action,legacy_speaker=legacy_speaker),schema.model_json_schema()])
 
 
 def completion_input(data):
@@ -85,6 +95,12 @@ def completion_input(data):
     data['source_paragraphs']=paragraphs
     data['source_completion_contract']=COMPLETION_CONTRACT
     return data
+
+
+def quote_action_input(data):
+    result=completion_input(data)
+    result['quote_action_contract']=QUOTE_ACTION_CONTRACT
+    return result
 
 
 def completion_schema(schema,job_ids):
@@ -126,7 +142,10 @@ def assert_candidate_context(decision,all_decisions):
 
 def focused_request(request):
     result=deepcopy(request)
-    result['system']=completion_prompt(True) if result['input'].get('source_completion_contract')==COMPLETION_CONTRACT else FOCUSED_PROMPT
+    result['system']=completion_prompt(True,
+        quote_action=result['input'].get('quote_action_contract')==QUOTE_ACTION_CONTRACT,
+        legacy_speaker=q.LEGACY_SPEAKER[0] in request.get('system',''),
+    ) if result['input'].get('source_completion_contract')==COMPLETION_CONTRACT else FOCUSED_PROMPT
     result['focused_contract']=FOCUSED_CONTRACT
     for job in result['input']['jobs']:
         issues={k:v for k,v in job['jev'].items() if not k.endswith('_classification')
@@ -145,8 +164,7 @@ def focused_request(request):
 
 def validate_focused_reply(request,reply):
     jobs={j['job_id']:j for j in request['input']['jobs']}
-    schema=CompletionEdits if request['input'].get('source_completion_contract')==COMPLETION_CONTRACT else Edits
-    for edit in schema.model_validate(reply).items:
+    for edit in reply_model(request['input']).model_validate(reply).items:
         if edit.action!='repair':continue
         job=jobs[edit.job_id]
         changed={field for field in FIELDS if getattr(edit,field) is not None
@@ -182,6 +200,22 @@ class CompletionEdit(Edit):
 class CompletionEdits(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     items: list[CompletionEdit]
+
+
+class QuoteCompletionEdit(CompletionEdit):
+    action: Literal['repair','keep','needs_source','add_quotes']
+
+
+class QuoteCompletionEdits(CompletionEdits):
+    items: list[QuoteCompletionEdit]
+
+
+def reply_model(request_input):
+    if request_input.get('quote_action_contract')==QUOTE_ACTION_CONTRACT:
+        return QuoteCompletionEdits
+    if request_input.get('source_completion_contract')==COMPLETION_CONTRACT:
+        return CompletionEdits
+    return Edits
 
 
 class Missing(Edit):
@@ -429,13 +463,18 @@ def missing_quote_only(job, reason):
     )
 
 
-def select_missing_quotes(root, ports, jobs):
+def select_missing_quotes(root, ports, jobs, *, quote_action=False):
     """Use the source-only reply contract with the already scoped candidates."""
     prompt = ('只處理上一份答覆所指出的補引文缺口。每項先確認原因只是缺逐字引文，'
               '且補入後能支持未改的摘要、說話者與立場。若仍需改內容、分類，或找不到唯一的原文位置，'
               '選needs_source並說明，禁止以原文補綁代替內容修訂。'
               '能補時選bind，quotes只列必要的新逐字片段。原文共用於source_paragraphs，'
               '每項只可用material.nearby_paragraph_keys，每個job_id恰好一次。')
+    if quote_action:
+        prompt = ('摘要與分類已處置，只選支持指定缺口的逐字引文。'
+                  '從提供的附近原文選最小而完整的範圍，必要時可選多段。'
+                  '能補選bind，輸出paragraph_key及quote；找不到足夠原文則選needs_source。'
+                  '每項只可用material.nearby_paragraph_keys，每個job_id恰好一次。')
     for batch, raw in f.gpt(root, ports, 'source_binding_completion', jobs,
                             source.BindingDecisions.model_json_schema(), prompt,
                             project_input=source.shared_binding_input, semantic_review=False):
@@ -444,7 +483,7 @@ def select_missing_quotes(root, ports, jobs):
         yield from edits
 
 
-def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False, program_validated=False):
+def run_group(store, records, sources, group, targets, units, root, ports, previous, *, apply, complete_source=False, program_validated=False, quote_action=False, legacy_speaker=False):
     sid = next(iter(sources)); working = dict(records); updates = {}; generated = {}; outcomes = []; pending = []; values = {}; ready = {}
     pool, _ = group_records(group, records, targets)
     paragraphs = {sid: sorted(set(group['paragraph_keys']) | {p['paragraph_key'] for p in pool.values()})}
@@ -469,7 +508,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     todo={k:working[k]['payload']['statement'] for k in values if k not in ready and not any(x.get('object_key')==k for x in outcomes)}
     parts=decompose(root,ports,todo);jobs=[]
     for key in todo:
-        answers=components.check(root/'fidelity',ports,key.split('/')[0],visible(working[key]['payload']),values[key],parts[key],fragment_only=True)
+        answers=components.check(root/'fidelity',ports,key.split('/')[0],visible(working[key]['payload']),values[key],parts[key],fragment_only=True,
+                                 **({'legacy_speaker':True} if legacy_speaker else {}))
         if components.needs_disposition(answers):
             jobs.append({'job_id':key,'record':visible(working[key]['payload']),'sources':values[key]['fragments'],
                          'components':parts[key],'jev':answers,
@@ -490,13 +530,16 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if any(fact['applicability']!='current' for fact in facts):
                 raise ValueError('human source clarification needs reconfirmation for candidate paragraph')
             if facts:job.update(human_source_decisions=facts,source_interpretation=SOURCE_INTERPRETATION)
-    schema=CompletionEdits if complete_source else Edits
+    schema=QuoteCompletionEdits if quote_action else CompletionEdits if complete_source else Edits
+    quote_retries={}
     def consume(batch, raw):
         replies=schema.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
         for edit in replies:
             quotes=getattr(edit,'quotes',None)
             changed=any(getattr(edit,k) is not None and getattr(edit,k)!=working[edit.job_id]['payload'].get(k) for k in FIELDS)
-            if complete_source and edit.action!='repair' and (quotes or changed):
+            if edit.action=='add_quotes' and changed:
+                raise ValueError('add_quotes cannot modify Evidence fields')
+            if complete_source and edit.action not in {'repair','add_quotes'} and (quotes or changed):
                 raise ValueError('non-repair disposition contains modifications')
             if edit.action=='needs_source':
                 pending.append({'object_key':edit.job_id,'layer':'source','reason':edit.reason,
@@ -505,10 +548,21 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             if key in getattr(ports, 'preserve_evidence_statements', ()) and 'statement' in patch:
                 raise ValueError('Evidence repair must preserve the approved statement: '+key)
             if quotes:
-                post,fragments=source.supplement_binding(key,{**p,**patch},[q.model_dump() for q in quotes],
-                    candidates[key],working,sources)
-                post=KNOWLEDGE_COLLECTIONS[key.split('/')[0]][0].model_validate(post).model_dump(mode='json')
-                patch={k:v for k,v in post.items() if p.get(k)!=v}
+                try:
+                    post,fragments=source.supplement_binding(key,{**p,**patch},[q.model_dump() for q in quotes],
+                        candidates[key],working,sources)
+                except e.QuoteLocationError:
+                    if edit.action!='add_quotes' or p.get('review_status') in f.PROTECTED:
+                        raise
+                else:
+                    post=KNOWLEDGE_COLLECTIONS[key.split('/')[0]][0].model_validate(post).model_dump(mode='json')
+                    patch={k:v for k,v in post.items() if p.get(k)!=v}
+            if edit.action=='add_quotes' and not patch:
+                if p.get('review_status') in f.PROTECTED:
+                    pending.append({'object_key':key,'layer':'evidence','reason':'protected_record'})
+                else:
+                    quote_retries[key]=edit.reason
+                continue
             ready[key]={'patch':patch,'basis':'gpt_'+edit.action,'reason':edit.reason,
                         **({'new_fragments':fragments} if fragments else {})}
             if complete_source:
@@ -516,8 +570,8 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                 ready[key]['source_context']={'paragraphs':scope,'entries':human.scoped(all_decisions,scope)}
     def repair_batches(path, requests):
         return f.gpt(path, ports, 'evidence_fidelity_repair', requests, schema.model_json_schema(),
-                     completion_prompt() if complete_source else PROMPT, semantic_review=False,
-                     project_input=completion_input if complete_source else None,
+                     completion_prompt(quote_action=quote_action,legacy_speaker=legacy_speaker) if complete_source else PROMPT, semantic_review=False,
+                     project_input=quote_action_input if quote_action else completion_input if complete_source else None,
                      program_validated=program_validated)
 
     for batch, raw in repair_batches(root / 'fidelity-edits', jobs):
@@ -567,6 +621,51 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             consume(batch, raw)
         if complete_source:
             bind_empty_repairs()
+    if quote_retries:
+        source_paragraphs=sources[sid]['paragraphs']
+        keys=list(source_paragraphs)
+        positions={pk:i for i,pk in enumerate(keys)}
+        quote_jobs=[];local_material={}
+        for key,reason in quote_retries.items():
+            indexes={positions[fragment['paragraph_key']] for fragment in values[key]['fragments']}
+            nearby=sorted({i for n in indexes for i in range(max(0,n-2),min(len(keys),n+3))})
+            scope={sid:sorted(keys[i] for i in nearby)}
+            paragraphs[sid]=sorted(set(paragraphs[sid])|set(scope[sid]))
+            facts=human.scoped(all_decisions,scope)
+            if facts:
+                projected=deepcopy(sources)
+                human.project(projected,facts)
+                facts=projected[sid]['human_source_decisions']
+                if any(fact['applicability']!='current' for fact in facts):
+                    raise ValueError('human source clarification needs reconfirmation for candidate paragraph')
+            value={**candidates[key],'nearby_paragraphs':[
+                {'source_id':sid,'paragraph_key':keys[i],**source_paragraphs[keys[i]]} for i in nearby]}
+            local_material[key]=(value,scope)
+            quote_jobs.append({'job_id':key,'statement':working[key]['payload']['statement'],'reason':reason,
+                'material':{'nearby_paragraphs':[
+                    {field:p[field] for field in ('source_id','paragraph_key','text')} for p in value['nearby_paragraphs']]},
+                **({'human_source_decisions':facts,'source_interpretation':SOURCE_INTERPRETATION} if facts else {})})
+        guard={'paragraphs':paragraphs,'entries':human.scoped(all_decisions,paragraphs)}
+        for selection in select_missing_quotes(root/'quote-only-source-bindings',ports,quote_jobs,quote_action=True):
+            key=selection.job_id
+            value,scope=local_material[key]
+            reason=selection.reason
+            if selection.action=='bind' and selection.quotes:
+                try:
+                    post,fragments=source.supplement_binding(key,working[key]['payload'],
+                        [quote.model_dump() for quote in selection.quotes],value,working,sources)
+                except e.QuoteLocationError as exc:
+                    reason=str(exc)
+                else:
+                    post=KNOWLEDGE_COLLECTIONS[key.split('/')[0]][0].model_validate(post).model_dump(mode='json')
+                    patch={k:v for k,v in post.items() if working[key]['payload'].get(k)!=v}
+                    if patch:
+                        ready[key]={'patch':patch,'basis':'gpt_source_binding_for_quote_action','reason':reason,
+                            'new_fragments':fragments,'source_context':{'paragraphs':scope,
+                                'entries':human.scoped(all_decisions,scope)}}
+                        continue
+                    reason='Selected source quote did not add a binding.'
+            pending.append({'object_key':key,'layer':'source','reason':reason,'source_completion_attempted':True})
     # Unclassified empty repairs retain the existing rejection and Agent handoff.
     for key,decision in ready.items():
         if decision['basis']=='gpt_repair' and not decision['patch']:
@@ -747,14 +846,18 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
         saved_intent=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
         complete_source=not saved_intent or saved_intent.get('source_completion_contract')==COMPLETION_CONTRACT
         program_validated = not saved_intent or saved_intent.get('wire_schema') == PROGRAM_VALIDATED_SCHEMA
+        quote_action = complete_source and (not saved_intent or saved_intent.get('quote_action_contract')==QUOTE_ACTION_CONTRACT)
+        legacy_speaker = bool(complete_source and saved_intent and not quote_action
+            and saved_intent.get('source_completion_policy')==completion_policy(legacy_speaker=True))
         authorized=saved_intent['selected'] if saved_intent else selected
         if not set(selected)<=set(authorized):raise ValueError('Evidence group selection expands frozen scope')
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'groups':plan,'selected':authorized,'models':ports.identity,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None),
             'policy':e.digest([PROMPT,COVERAGE_PROMPT,components.PROMPT,Edits.model_json_schema(),MissingEdits.model_json_schema()]),
             **({'source_completion_contract':COMPLETION_CONTRACT,
-                'source_completion_policy':e.digest([completion_prompt(),completion_prompt(True),CompletionEdits.model_json_schema()])} if complete_source else {}),
+                'source_completion_policy':completion_policy(quote_action=quote_action,legacy_speaker=legacy_speaker)} if complete_source else {}),
             **({'wire_schema': PROGRAM_VALIDATED_SCHEMA} if program_validated else {}),
+            **({'quote_action_contract': QUOTE_ACTION_CONTRACT} if quote_action else {}),
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
@@ -812,7 +915,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             if group['group_id'] not in selected:continue
             targets=sorted(k for k,gid in owners.items() if gid==group['group_id'] and k in records)
             result=run_group(store,records,sources,group,targets,[u for u in units if u['paragraph_key'] in group['paragraph_keys']],root,ports,previous,apply=apply,
-                complete_source=complete_source, program_validated=program_validated)
+                complete_source=complete_source, program_validated=program_validated, quote_action=quote_action, legacy_speaker=legacy_speaker)
             results.append(result)
             if result.get('applied'):
                 for key in result['updates']:

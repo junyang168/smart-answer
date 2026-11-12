@@ -32,10 +32,16 @@ ROLES = {
                    {'professor':'教授設問。','audience':'聽眾提問。','quoted_source':'引述別人的問題。',
                     'mixed':'多方共同提出，不能歸一位。','uncertain':'無法確定。'})}
 
+LEGACY_SPEAKER = ('這項內容的發言來源角色是誰？',
+                  {'professor':'教授自己的講解或判斷，不是單純引用。','audience':'聽眾自己的發言，不是單純朗讀引文。',
+                   'quoted_source':'僅承載經文或第三者引語。','mixed':'混合多種來源，不能歸一類。','uncertain':'原文不能確定。'})
 
-def gpt_role_rules():
+
+def gpt_role_rules(*, legacy_speaker=False):
     """One option vocabulary for Jev and the GPT disposition, not two taxonomies."""
     options={field:{'question':ROLES[field][0],'choices':ROLES[field][1]} for field in ('speaker','stance')}
+    if legacy_speaker:
+        options['speaker']={'question':LEGACY_SPEAKER[0],'choices':LEGACY_SPEAKER[1]}
     return ('分類選項與Jev共用，按以下定義選擇，不另造標籤：'
             +json.dumps(options,ensure_ascii=False,separators=(',',':'))+
             'stance針對record.statement所表達的完整判斷，不按原文問句句型、問號或個別否定詞分類。'
@@ -61,9 +67,11 @@ def decomposition():
                    'changed':'有改義或多種缺陷。','uncertain':'無法判定。'})
 
 
-def role(field, text, *, speaker=None):
+def role(field, text, *, speaker=None, legacy_speaker=False):
     instruction,criteria=ROLES[field]
-    if field=='speaker':
+    if field=='speaker' and legacy_speaker:
+        instruction,criteria=LEGACY_SPEAKER
+    elif field=='speaker':
         return choice(instruction+'\n內容：'+text,criteria)
     if field=='stance' and speaker and speaker!='professor':
         # The actor is a query parameter, not the answer being checked. It is

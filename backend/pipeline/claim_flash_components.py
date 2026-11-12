@@ -105,7 +105,7 @@ def decompose(root, ports, statements):
     return result
 
 
-def check(root, ports, record_type, record, material, components, *, fragment_only=False):
+def check(root, ports, record_type, record, material, components, *, fragment_only=False, legacy_speaker=False):
     # Do not let existing classifications answer their own verification questions.
     visible = {k:v for k,v in record.items() if k in {'statement','text','title','scripture_refs'}}
     state = {'record_type': record_type, 'record': visible,
@@ -124,7 +124,7 @@ def check(root, ports, record_type, record, material, components, *, fragment_on
     text=record.get('statement',record.get('text',record.get('title','')))
     for field in jevq.ROLES:
         if record.get(field):
-            questions[field+'_classification'] = jevq.role(field,text,speaker=record.get('speaker'))
+            questions[field+'_classification'] = jevq.role(field,text,speaker=record.get('speaker'),legacy_speaker=legacy_speaker)
     request = {'model': e.MODEL, 'state': state, 'questions': questions}
     if len(json.dumps(request, ensure_ascii=False).encode()) > f.JEV_BYTES:
         raise ValueError('complete component check exceeds Flash payload limit; no call issued')
