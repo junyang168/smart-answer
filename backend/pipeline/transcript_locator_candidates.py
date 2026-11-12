@@ -122,7 +122,7 @@ def ordered_repeat_selection(packet, selected, allowed):
     return True
 
 
-def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
+def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8, consumers=()):
     """Rank within the old playback interval and retain adjacent candidate turns."""
     ordered = list(new_paragraphs)
     clock_matches = [
@@ -143,26 +143,41 @@ def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
     old_text = old_paragraphs.get(old_key, {}).get("text", "")
     old_context = literal_layout(old_text)[0]
 
+    context_queries = {
+        literal_layout(text)[0] for consumer in consumers
+        for text in [consumer["statement"], *(c["old_quote"] for c in consumer["citations"] if not c["target"])]
+        if text
+    }
+
     def score(key):
         new = literal_layout(new_paragraphs[key]["text"])[0]
         overlap = SequenceMatcher(None, quote, new, autojunk=False).find_longest_match().size
         context = SequenceMatcher(None, old_context, new, autojunk=False).find_longest_match().size
+        if len(quote) < 12 and context_queries:
+            matches = [SequenceMatcher(None, query, new, autojunk=False).find_longest_match().size
+                       for query in context_queries]
+            return (key in hints, sum(n for n in matches if n >= 2), overlap, context)
         return (bool(quote and quote in new), key in hints, overlap, context)
 
-    ranked = sorted((key for key in ordered if key in scope), key=score, reverse=True)
-    # Keep one neighboring turn with each high-ranked location when space allows.
-    positions = {key: i for i, key in enumerate(ordered)}
-    shortlist = set()
-    for key in ranked:
+    scoped_live = [key for key in ordered if key in scope and new_paragraphs[key]["text"].strip()]
+    ranked = sorted(scoped_live, key=score, reverse=True)
+    # Keep several ranked anchors before spending the remaining slots on neighbors.
+    ordinals = {key: i for i, key in enumerate(ordered)}
+    live_positions = {key: i for i, key in enumerate(scoped_live)}
+    anchors = ranked[:max(1, limit // 2)]
+    shortlist = set(anchors)
+    for key in dict.fromkeys([*anchors, *ranked]):
         if len(shortlist) >= limit:
             break
         shortlist.add(key)
-        i = positions[key]
-        for neighbor in ordered[max(0, i - 1):i + 2]:
-            if len(shortlist) < limit and neighbor in scope:
+        i = live_positions[key]
+        for neighbor in scoped_live[max(0, i - 1):i + 2]:
+            if len(shortlist) < limit and abs(ordinals[neighbor] - ordinals[key]) <= 2:
                 shortlist.add(neighbor)
+    if not shortlist:
+        return None
     candidates = [
-        {"paragraph_key": key, "ordinal": positions[key], "text": p["text"],
+        {"paragraph_key": key, "ordinal": ordinals[key], "text": p["text"],
          "start_time": p.get("start_time"), "end_time": p.get("end_time")}
         for key, p in new_paragraphs.items() if key in shortlist
     ]
@@ -180,13 +195,23 @@ LEADING_ACKNOWLEDGMENTS = re.compile(
 )
 
 
-def narrow_overlong_quote(segments, new, limit):
+def narrow_overlong_quote(segments, new, limit, *, old_quote=""):
     """Recover a unique literal suffix without crossing a paragraph or a turn."""
     if len(segments) != 1:
         return None
     segment = segments[0]
     quote = segment["verbatim_excerpt"]
-    narrowed = LEADING_ACKNOWLEDGMENTS.sub("", quote, count=1).lstrip()
+    # Prefer the old substantive quote itself when it survives verbatim except
+    # for layout and ASCII letter case. The cut stays inside the selected span.
+    needle = literal_layout(old_quote)[0]
+    normalized, offsets = literal_layout(quote)
+    ascii_lower = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+    hits = positions(normalized.translate(ascii_lower), needle.translate(ascii_lower))
+    if 8 <= len(needle) <= limit and len(hits) == 1:
+        start = hits[0]
+        narrowed = quote[offsets[start]:offsets[start + len(needle) - 1] + 1]
+    else:
+        narrowed = LEADING_ACKNOWLEDGMENTS.sub("", quote, count=1).lstrip()
     if (narrowed == quote or not narrowed or "**" in narrowed
             or len(literal_layout(narrowed)[0]) > limit):
         return None
@@ -240,12 +265,12 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
         new_length = sum(len(literal_layout(s["verbatim_excerpt"])[0]) for s in segments)
         limit = max(24, old_length * 2 * (len(segments) if repeated else 1))
         if new_length > limit:
-            narrowed = None if repeated else narrow_overlong_quote(segments, new, limit)
+            narrowed = None if repeated else narrow_overlong_quote(segments, new, limit, old_quote=packet["old_quote"])
             if narrowed is None:
                 unresolved[key] = "selected_quote_is_too_broad"
                 continue
             segments = narrowed
-            reason += "；程式移除句首確認語，保留新版唯一的實質原文。"
+            reason += "；程式縮至新版唯一的實質引文。"
 
         if repeated and any(
             literal_layout(packet["old_quote"])[0] not in literal_layout(segment["verbatim_excerpt"])[0]
@@ -354,7 +379,7 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
                         neighbors.update(source_order[max(0, i - 1):i + 2])
         packet = candidate_packet(
             {**row, "target_paragraphs": sorted(neighbors)},
-            old["paragraphs"], new["paragraphs"], scope,
+            old["paragraphs"], new["paragraphs"], scope, consumers=consumers,
         )
         if packet is None:
             unscoped.append(key)

@@ -215,3 +215,105 @@ def test_overlong_model_selection_trims_only_a_unique_literal_acknowledgment_pre
     assert narrow_overlong_quote(
         [{**segment, "verbatim_excerpt": "對他來說，這是另外一個情況。"}], new, 24,
     ) is None
+
+
+def test_short_fragment_ranks_the_complete_question_and_sibling_citation():
+    clock = {"media_time": 0, "media_end_time": 100}
+    paragraphs = {
+        f"S{i:04}": {"text": "中文叫什麼？這是主動語態。", "start_time": i, "end_time": i + 1}
+        for i in range(1, 10)
+    }
+    paragraphs["S0010"] = {"text": "這種募款，raise money。", "start_time": 10, "end_time": 11}
+    row = {"record_key": "source_fragments/f", "quote": "中文叫什麼？", "old_paragraph": "S0001"}
+    consumers = [{"statement": "是否明白「募款」，其中文所指為何？",
+                  "citations": [{"target": False, "old_quote": "募款聽懂了？"}]}]
+    packet = candidate_packet(row, {}, paragraphs, clock, consumers=consumers)
+    keys = {p["paragraph_key"] for p in packet["candidates"]}
+    assert "S0010" in keys
+    assert len(keys) == 8
+
+
+def test_actual_hypotasso_question_trims_to_the_unique_literal_prompt():
+    from backend.pipeline.transcript_locator_candidates import narrow_overlong_quote
+
+    question = "hypotasso是什麼？"
+    text = question + "\n把自己放在對面的下面。把自己啊放在對方的下面。"
+    new = {"paragraphs": {"S0161": {"text": text}}}
+    assert narrow_overlong_quote(
+        [{"paragraph_key": "S0161", "verbatim_excerpt": text}], new, 26,
+        old_quote="Hypotasso 是什麼？",
+    ) == [{"paragraph_key": "S0161", "verbatim_excerpt": question}]
+
+
+def test_overlong_location_only_rechecks_the_selected_span_and_reuses_the_reply(tmp_path):
+    from backend.pipeline.transcript_claim_migration import read
+    from backend.pipeline.transcript_locator_resolution import resolve_packets
+
+    key = "source_fragments/f"
+    paragraph = "S0001"
+    quote = "我那時候還不能夠回去。"
+    broad = quote + "後面就講了完全不同的事情，跟這次引文沒有任何關係。"
+    other = "後來我就回去了。"
+    clock = {"media_time": 5, "media_end_time": 20}
+    paragraphs = {paragraph: {"text": broad + other, "start_time": 10, "end_time": 15}}
+    new = {"paragraphs": paragraphs, "body_sha256": "new"}
+    records = {key: {"revision": 1, "content_sha256": "old", "payload": clock}}
+    packet = candidate_packet({"record_key": key, "quote": "我現在不能回去。", "old_paragraph": paragraph},
+                              {}, paragraphs, clock)
+    bundle = {"packets": [packet], "clock_proofs": {}, "unscoped": [], "consumer_exceptions": []}
+    for label, second, passes in [("valid", quote, True), ("outside", other, False)]:
+        calls = []
+        def respond(batch):
+            calls.append(batch)
+            if len(calls) == 2:
+                assert batch[0]["boundary_review"]["previous_spans"] == [
+                    {"paragraph_key": paragraph, "verbatim_excerpt": broad},
+                ]
+            return {}, {"decisions": [{"record_key": key,
+                                       "spans": [span(paragraph, second if len(calls) == 2 else broad)],
+                                       "reason": "同一次發言"}]}
+        output = resolve_packets(tmp_path / label, bundle, records, new, {}, call=respond)
+        assert (key in read(output)["fragments"]) is passes
+        assert resolve_packets(tmp_path / label, bundle, records, new, {}, call=respond) == output
+        assert len(calls) == 2
+
+
+def test_consumer_keeps_adjacent_question_and_answer_with_one_verified_witness():
+    from backend.pipeline.transcript_locator_resolution import consumer_rule
+
+    key = "questions/q"
+    parent = "source_fragments/p"
+    clock = {"media_time": 50, "media_end_time": 100}
+    question = "保羅用三節講妻子的責任，用更多篇幅講丈夫的責任。什麼意思？"
+    answer = "丈夫要愛妻子，愛到妻子願意甘心順服。"
+    paragraphs = {
+        "S0207": {"text": question, "start_time": 60, "end_time": 70},
+        "S0208": {"text": answer, "start_time": 70, "end_time": 80},
+        "S0209": {"text": "另一個問題。", "start_time": 80, "end_time": 90},
+    }
+    new = {"paragraphs": paragraphs, "body_sha256": "new"}
+    records = {
+        parent: {"revision": 1, "content_sha256": "p", "payload": {**clock, "verbatim_excerpt": "什麼意思？"}},
+        key: {"revision": 2, "content_sha256": "q", "payload": {}},
+    }
+    packet = candidate_packet({"record_key": key, "quote": "夫妻責任篇幅的差異是什麼意思？",
+                               "old_paragraph": "S0207"}, {}, paragraphs, clock)
+    packet["consumer"] = {"context_fragment_ids": ["p"], "citations": []}
+    decision = {"record_key": key, "spans": [span("S0207", question), span("S0208", answer)], "reason": "完整問答"}
+    rule, parents = consumer_rule(packet, decision, records, new)
+    assert [s["paragraph_key"] for s in rule["segments"]] == ["S0207", "S0208"]
+    assert parents[parent]["segments"] == [{"paragraph_key": "S0207", "verbatim_excerpt": "什麼意思？"}]
+    assert consumer_rule(packet, {**decision, "spans": [span("S0207", question),
+                                                         span("S0209", "另一個問題。")]}, records, new) is None
+
+
+def test_blank_paragraph_does_not_hide_the_adjacent_spoken_context():
+    clock = {"media_time": 0, "media_end_time": 100}
+    paragraphs = {
+        "S0201": {"text": "其實什麼東西啊？", "start_time": 10, "end_time": 20},
+        "S0202": {"text": "\n", "start_time": 20, "end_time": 21},
+        "S0203": {"text": "保羅用幾節聖經來談到妻子的責任？", "start_time": 21, "end_time": 30},
+    }
+    row = {"record_key": "source_fragments/f", "quote": "其實什麼東西啊？", "old_paragraph": "S0001"}
+    packet = candidate_packet(row, {}, paragraphs, clock, limit=2)
+    assert [p["paragraph_key"] for p in packet["candidates"]] == ["S0201", "S0203"]

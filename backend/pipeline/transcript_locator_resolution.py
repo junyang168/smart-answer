@@ -34,24 +34,28 @@ def consumer_packets(bundle, records, new):
 def consumer_rule(packet, selection, records, new):
     """Resolve a consumer only with a clock-bound literal witness for its prompt."""
     segments = candidates.select_spans(packet, selection, new)
-    if len(segments) != 1 or context_only(segments[0]["verbatim_excerpt"]):
+    if not segments or any(context_only(s["verbatim_excerpt"]) for s in segments):
         return None
-    key = segments[0]["paragraph_key"]
-    paragraph = new["paragraphs"][key]
+    order = list(new["paragraphs"])
+    selected = [order.index(s["paragraph_key"]) for s in segments]
+    if selected != list(range(selected[0], selected[0] + len(selected))):
+        return None
+    target_clock = [
+        {"media_time": new["paragraphs"][s["paragraph_key"]].get("start_time"),
+         "media_end_time": new["paragraphs"][s["paragraph_key"]].get("end_time")}
+        for s in segments
+    ]
     reason = selection["reason"].strip()
 
     consumer = packet["consumer"]
     source_sha = new["body_sha256"]
-    order = list(new["paragraphs"])
-    center = order.index(key)
-    nearby = order[max(0, center - 2):center + 3]
+    # Each selected passage must be within two paragraphs of the same witness.
+    nearby = order[max(0, selected[-1] - 2):selected[0] + 3]
     parent_rules = {}
     for fid in consumer["context_fragment_ids"]:
         fragment_key = "source_fragments/" + fid
         state = records[fragment_key]
         fragment = state["payload"]
-        target_clock = [{"media_time": paragraph.get("start_time"),
-                         "media_end_time": paragraph.get("end_time")}]
         if not audio_position(fragment, target_clock)["consistent"]:
             continue
         citations = [c for c in consumer["citations"] if c["record_key"] == fragment_key]
@@ -91,6 +95,70 @@ def consumer_rule(packet, selection, records, new):
     return rule, parent_rules
 
 
+def review_batch(folder, batch, call):
+    request = migration.immutable(folder / "request.json", {
+        "model": "gpt-6.1-sol", "prompt": candidates.PROMPT,
+        "schema": candidates.SCHEMA, "packets": batch,
+    })
+    reply = folder / "response.json"
+    if not reply.exists():
+        started = folder / "started.json"
+        if started.exists():
+            raise ValueError(f"Locator request has no saved response: {started}")
+        migration.immutable(started, {"request": request})
+        raw, answer = call(batch)
+        migration.immutable(reply, {"raw": raw, "answer": answer})
+    answer = migration.read(reply)["answer"]
+    from backend.pipeline.slide_visual_evidence import check_schema
+    check_schema(answer, candidates.SCHEMA)
+    decisions = answer["decisions"]
+    keys = {p["record_key"] for p in batch}
+    if len(decisions) != len(batch) or {d["record_key"] for d in decisions} != keys:
+        raise ValueError("Locator reply does not cover the exact packet")
+    return {d["record_key"]: d for d in decisions}
+
+
+def refine_boundaries(folder, packets, decisions, pending, records, new, clock_proofs, call):
+    """Request smaller spans only within the previously selected live text."""
+    windows = {
+        packet["record_key"]: candidates.select_spans(packet, decisions[packet["record_key"]], new)
+        for packet in packets if pending.get(packet["record_key"]) == "selected_quote_is_too_broad"
+    }
+    if not windows:
+        return {}
+    focused = []
+    for packet in packets:
+        key = packet["record_key"]
+        if key not in windows:
+            continue
+        spans = windows[key]
+        selected = {segment["paragraph_key"] for segment in spans}
+        focused.append({
+            **packet,
+            "candidates": [p for p in packet["candidates"] if p["paragraph_key"] in selected],
+            "boundary_review": {
+                "instruction": "只縮短已定位的引文。限定在下列逐字範圍，只選同一次發言的必要文字；"
+                               "保留原引用的講者、問題或回答。新版沒有該發言時回空。",
+                "previous_spans": spans,
+            },
+        })
+    replies = review_batch(folder, focused, call)
+    valid_packets, valid_decisions = [], []
+    for packet in focused:
+        key = packet["record_key"]
+        reply = replies[key]
+        spans = candidates.select_spans(packet, reply, new)
+        if spans and all(any(s["paragraph_key"] == prior["paragraph_key"]
+                            and s["verbatim_excerpt"] in prior["verbatim_excerpt"]
+                            for prior in windows[key]) for s in spans):
+            valid_packets.append(packet)
+            valid_decisions.append(reply)
+    rules, _ = candidates.calibration_rules(
+        valid_packets, {"decisions": valid_decisions}, records, new, clock_proofs,
+    )
+    return rules
+
+
 def resolve_packets(root, bundle, records, new, prior, *, call=None):
     """Run bounded batches, replay saved replies and emit a calibration input."""
     from backend.pipeline.transcript_locator_migration import run_lock
@@ -110,33 +178,17 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None):
         for offset in range(0, len(packets), 6):
             batch = packets[offset:offset + 6]
             folder = root / f"batch-{offset // 6 + 1:03d}"
-            request = migration.immutable(folder / "request.json", {
-                "model": "gpt-6.1-sol", "prompt": candidates.PROMPT,
-                "schema": candidates.SCHEMA, "packets": batch,
-            })
-            reply = folder / "response.json"
-            if not reply.exists():
-                started = folder / "started.json"
-                if started.exists():
-                    raise ValueError(f"Locator request has no saved response: {started}")
-                migration.immutable(started, {"request": request})
-                raw, answer = call(batch)
-                migration.immutable(reply, {"raw": raw, "answer": answer})
-            answer = migration.read(reply)["answer"]
-            from backend.pipeline.slide_visual_evidence import check_schema
-            check_schema(answer, candidates.SCHEMA)
-            decisions = answer["decisions"]
-            keys = {p["record_key"] for p in batch}
-            if len(decisions) != len(batch) or {d["record_key"] for d in decisions} != keys:
-                raise ValueError("Locator reply does not cover the exact packet")
-            by_key = {d["record_key"]: d for d in decisions}
+            by_key = review_batch(folder, batch, call)
             fragment_batch = [p for p in batch if "consumer" not in p]
             rules, pending = candidates.calibration_rules(
                 fragment_batch, {"decisions": [by_key[p["record_key"]] for p in fragment_batch]},
                 records, new, bundle["clock_proofs"],
             )
+            narrowed = refine_boundaries(folder / "boundary-review", fragment_batch, by_key,
+                                         pending, records, new, bundle["clock_proofs"], call)
             fragment_rules.update(rules)
-            unresolved.update(pending)
+            fragment_rules.update(narrowed)
+            unresolved.update({k: v for k, v in pending.items() if k not in narrowed})
             for packet in batch:
                 if "consumer" not in packet:
                     continue
