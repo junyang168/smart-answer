@@ -42,7 +42,7 @@ def context_only(text):
     from backend.pipeline.transcript_evidence_calibration import content_quote
     text = content_quote(text)[0]
     text = re.sub(r'[\s。！？?!，、…⋯（）()：:「」『』]+','',text)
-    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|什麼|是什麼|還有什麼|還有其他的|問題在哪裡|問題在哪|很重要|這很重要|這個很重要|對不對|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
+    return bool(re.fullmatch(r'(?:有沒有聽懂|聽懂沒有|有沒有懂|什麼|是什麼|還有什麼|還有其他的|問題在哪裡|問題在哪|很重要|這很重要|這個很重要|對不對|問題就是這個|問題就是這樣|對啊|對呀|對|沒有錯|什麼意思|是什麼意思|這是什麼意思|要怎麼樣|怎麼回事|小問題|小小問題|就是這樣|Yeah|yeah|Yes|yes|OK|Ok|ok)+',text))
 
 
 def calibrate(row, state, rule, new, document):
@@ -91,6 +91,42 @@ def calibrate(row, state, rule, new, document):
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
         'target_paragraphs':[s['paragraph_key'] for s in segments], 'calibration_decision':rule,
         'speaker_annotation':speaker_annotation(segments,new), 'content_approval_granted':False}
+
+
+def verified_cross_paragraph_rule(row, state, new):
+    """Reuse independently audited sequence anchors for changed live quotes."""
+    from difflib import SequenceMatcher
+    from backend.pipeline.transcript_evidence_calibration import content_quote
+
+    alignment = row.get('alignment') or {}
+    candidates = row.get('candidate_segments') or []
+    if (row['reason'] != 'source_located_requires_refresh'
+            or not alignment.get('both_endpoints_matched')
+            or not alignment.get('left_anchor') or not alignment.get('right_anchor')
+            or not 2 <= len(candidates) <= 3):
+        return None
+    segments = [
+        {'paragraph_key': item['paragraph_key'], 'verbatim_excerpt': item['verbatim_excerpt'].strip()}
+        for item in candidates
+    ]
+    if any(not item['verbatim_excerpt'] or context_only(item['verbatim_excerpt'])
+           or new['paragraphs'][item['paragraph_key']]['text'].count(item['verbatim_excerpt']) != 1
+           for item in segments):
+        return None
+    old = e.literal_layout(content_quote(row['quote'])[0])[0]
+    joined = ''.join(item['verbatim_excerpt'] for item in segments)
+    current = e.literal_layout(re.sub(r'\*\*(?:教授|聽眾)\*\*[：:]', '', joined))[0]
+    if (min(len(old), len(current)) < 12
+            or SequenceMatcher(None, old, current, autojunk=False).ratio() < .83
+            or not audio_position(state['payload'], candidates)['consistent']):
+        return None
+    return {
+        'before_pin': [state['revision'], state['content_sha256']],
+        'target_source_sha256': new['body_sha256'],
+        'mode': 'relocate',
+        'reason': '兩側唯一上下文及引文兩端均對齊，各段逐字切片符合舊音訊區間；內容待審。',
+        'segments': segments,
+    }
 
 
 def segment_fields(segment, new):
@@ -186,8 +222,10 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                                'old_paragraph': f.get('paragraph_key'),
                                'old_media_time': f.get('media_time'), 'affected_claims': []})
         row = deepcopy(row)
-        if key in rules and not state.get('retired'):
-            row = calibrate(row,state,rules[key],new,document)
+        if not state.get('retired'):
+            rule = rules.get(key) or verified_cross_paragraph_rule(row, state, new)
+            if rule is not None:
+                row = calibrate(row, state, rule, new, document)
         if (live_candidates and row.get('reason') == 'partial_deletion_has_live_candidate'
                 and row.get('localized') and row.get('alignment', {}).get('left_anchor')
                 and row.get('alignment', {}).get('right_anchor')

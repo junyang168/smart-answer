@@ -2,9 +2,10 @@
 
 from difflib import SequenceMatcher
 import json
+import re
 
 from backend.pipeline.transcript_evidence_calibration import audio_position
-from backend.pipeline.transcript_evidence_migration import literal_layout
+from backend.pipeline.transcript_evidence_migration import literal_layout, positions
 from backend.pipeline.slide_visual_evidence import obj
 
 PROMPT = """Locate the same occurrence in the new transcript. Use the old quotation,
@@ -12,18 +13,57 @@ surrounding speech, saved playback range and speaker turns. Consult the direct
 consumer's statement and ordered citations, especially the resolved citations
 immediately before and after the target. Repeated target IDs can refer to
 separate spoken occurrences. Use the surrounding citations to distinguish them.
-The new transcript is
-authoritative. Differences in wording, speaker labels or scripture references
-do not rule out a location. Select only supplied paragraph IDs. For a single
-occurrence select consecutive paragraphs. For separately evidenced repeated
-occurrences, select one distinct paragraph per occurrence in playback order. If no candidate is convincing or two
-occurrences cannot be distinguished, select an empty list. Return one decision
-per fragment. Do not write a quotation or decide what a Claim means."""
+For a consumer whose citations are only verbal prompts, locate the actual
+question or explanation described by its statement. Use its quoted prompts as
+context, never as the substantive citation. The new transcript is authoritative. Differences in wording, speaker labels or scripture references
+do not rule out a location. Select only supplied paragraph IDs. For each
+paragraph select the smallest continuous span that expresses the old citation,
+including both question and answer if the old citation contains both. Return
+exact beginning and ending marker strings copied from the supplied live text.
+Each marker must occur exactly once in the paragraph. A single short quotation
+can use the same marker for both boundaries. Do not include other speaker turns
+or adjacent points merely because they share the paragraph. For a single
+occurrence select consecutive paragraphs. For repeated occurrences select one
+distinct paragraph per occurrence in playback order. When the location or
+boundaries are uncertain, return an empty spans list. Return one decision per
+record. Do not paraphrase or decide what a Claim means."""
 SCHEMA = obj({"decisions": {"type": "array", "items": obj({
     "record_key": {"type": "string"},
-    "paragraph_keys": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+    "spans": {"type": "array", "items": obj({
+        "paragraph_key": {"type": "string"},
+        "start_marker": {"type": "string"},
+        "end_marker": {"type": "string"},
+    }), "maxItems": 4},
     "reason": {"type": "string"},
 })}})
+
+
+def select_spans(packet, decision, new):
+    """Turn unique boundary markers into exact, live, paragraph-local slices."""
+    allowed = {p["paragraph_key"]: p for p in packet["candidates"]}
+    spans = decision["spans"]
+    if not spans or len(spans) > 4 or not decision["reason"].strip():
+        return []
+    selected = []
+    for span in spans:
+        key = span["paragraph_key"]
+        if key not in allowed:
+            return []
+        live = new["paragraphs"][key]["text"]
+        if live != allowed[key]["text"]:
+            raise ValueError("Candidate differs from current live paragraph")
+        start_marker, end_marker = span["start_marker"], span["end_marker"]
+        starts, ends = positions(live, start_marker), positions(live, end_marker)
+        if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+            return []
+        start, end = starts[0], ends[0] + len(end_marker)
+        if end < start + len(start_marker):
+            return []
+        quote = live[start:end]
+        if not quote.strip() or "~~" in quote or len(positions(live, quote)) != 1:
+            return []
+        selected.append({"paragraph_key": key, "verbatim_excerpt": quote})
+    return selected
 
 
 def consumer_context(row, records, resolved):
@@ -132,8 +172,37 @@ def candidate_packet(row, old_paragraphs, new_paragraphs, clock, *, limit=8):
             "candidates": candidates}
 
 
+# A leading standalone acknowledgment can be dropped from an overlong candidate.
+# Require punctuation so prefixes of substantive clauses such as 「對他來說」 stay intact.
+LEADING_ACKNOWLEDGMENTS = re.compile(
+    r"^(?:(?:yeah|yes|okay|ok|對啊|對呀|對|沒有錯|沒錯)[，、。,.!！]+\s*)+",
+    re.IGNORECASE,
+)
+
+
+def narrow_overlong_quote(segments, new, limit):
+    """Recover a unique literal suffix without crossing a paragraph or a turn."""
+    if len(segments) != 1:
+        return None
+    segment = segments[0]
+    quote = segment["verbatim_excerpt"]
+    narrowed = LEADING_ACKNOWLEDGMENTS.sub("", quote, count=1).lstrip()
+    if (narrowed == quote or not narrowed or "**" in narrowed
+            or len(literal_layout(narrowed)[0]) > limit):
+        return None
+    paragraph = new["paragraphs"][segment["paragraph_key"]]["text"]
+    if len(positions(paragraph, narrowed)) != 1:
+        return None
+    from backend.pipeline.transcript_evidence_apply import context_only
+    if context_only(narrowed):
+        return None
+    return [{**segment, "verbatim_excerpt": narrowed}]
+
+
 def calibration_rules(packets, answer, records, new, clock_proofs):
     """Accept only supplied, consecutive, clock-compatible live paragraphs."""
+    from backend.pipeline.transcript_evidence_apply import context_only
+
     by_key = {p["record_key"]: p for p in packets}
     decisions = answer["decisions"]
     if len(decisions) != len(by_key) or {d["record_key"] for d in decisions} != set(by_key):
@@ -143,9 +212,10 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
         key = decision["record_key"]
         packet = by_key[key]
         allowed = {p["paragraph_key"]: p for p in packet["candidates"]}
-        selected = decision["paragraph_keys"]
+        segments = select_spans(packet, decision, new)
+        selected = [segment["paragraph_key"] for segment in segments]
         reason = decision["reason"].strip()
-        if not selected or not reason or len(selected) > 4 or any(k not in allowed for k in selected):
+        if not selected:
             unresolved[key] = "no_valid_candidate_selection"
             continue
         ordinals = [allowed[k]["ordinal"] for k in selected]
@@ -161,12 +231,28 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
             unresolved[key] = "nonconsecutive_candidate_selection"
             continue
         state = records[key]
-        segments = []
-        for k in selected:
-            live = new["paragraphs"][k]
-            if live["text"] != allowed[k]["text"] or not live["text"].strip() or "~~" in live["text"]:
-                raise ValueError("Candidate differs from current live paragraph")
-            segments.append({"paragraph_key": k, "verbatim_excerpt": live["text"]})
+        if not context_only(packet["old_quote"]) and all(
+            context_only(segment["verbatim_excerpt"]) for segment in segments
+        ):
+            unresolved[key] = "selection_is_only_conversational_context"
+            continue
+        old_length = len(literal_layout(packet["old_quote"])[0])
+        new_length = sum(len(literal_layout(s["verbatim_excerpt"])[0]) for s in segments)
+        limit = max(24, old_length * 2 * (len(segments) if repeated else 1))
+        if new_length > limit:
+            narrowed = None if repeated else narrow_overlong_quote(segments, new, limit)
+            if narrowed is None:
+                unresolved[key] = "selected_quote_is_too_broad"
+                continue
+            segments = narrowed
+            reason += "；程式移除句首確認語，保留新版唯一的實質原文。"
+
+        if repeated and any(
+            literal_layout(packet["old_quote"])[0] not in literal_layout(segment["verbatim_excerpt"])[0]
+            for segment in segments
+        ):
+            unresolved[key] = "unverified_repeated_occurrences"
+            continue
         clock = dict(zip(("media_time", "media_end_time"), packet["old_interval"]))
         fragment = state["payload"]
         proof = clock_proofs.get(key)
@@ -211,14 +297,33 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
     """Scope every unresolved fragment from fresh alignment and the old clock."""
     from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
 
+    fragment_rows = {row["record_key"]: row for row in (comparison or {}).get("fragments", ())}
     resolved = {
-        row["record_key"]: row for row in (comparison or {}).get("fragments", ())
+        key: row for key, row in fragment_rows.items()
         if row["status"] in {"auto_rebind", "already_current", "relocate_changed_quote"}
     }
+    consumer_exceptions = []
+    source_order = list(new["paragraphs"])
+    source_positions = {key: index for index, key in enumerate(source_order)}
     packets, proofs, unscoped = [], {}, []
     for row in preview["exceptions"]:
         key = row["record_key"]
-        fragment = records[key]["payload"]
+        payload = records[key]["payload"]
+        if not key.startswith("source_fragments/"):
+            consumer_exceptions.append({
+                **row,
+                "statement": payload.get("statement") or payload.get("text") or "",
+                "citations": [
+                    {"record_key": fragment_key,
+                     "old_quote": records[fragment_key]["payload"].get("verbatim_excerpt"),
+                     "target_paragraphs": fragment_rows.get(fragment_key, {}).get("target_paragraphs") or [],
+                     "bound_paragraph": (fragment_rows.get(fragment_key, {}).get("applied_fields") or {}).get("paragraph_key")}
+                    for fid in payload.get("source_fragment_ids") or [payload.get("source_fragment_id")]
+                    if (fragment_key := "source_fragments/" + str(fid)) in records
+                ],
+            })
+            continue
+        fragment = payload
         clock = fragment
         if fragment.get("media_time") is None or fragment.get("media_end_time") is None:
             try:
@@ -238,15 +343,14 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
         else:
             scope = clock
         consumers = consumer_context(row, records, resolved)
-        source_order = list(new["paragraphs"])
         neighbors = set(row.get("target_paragraphs") or ())
         for consumer in consumers:
             for citation in consumer["citations"]:
                 if citation["target"]:
                     continue
                 for paragraph in citation["resolved_paragraphs"]:
-                    if paragraph in new["paragraphs"]:
-                        i = source_order.index(paragraph)
+                    if paragraph in source_positions:
+                        i = source_positions[paragraph]
                         neighbors.update(source_order[max(0, i - 1):i + 2])
         packet = candidate_packet(
             {**row, "target_paragraphs": sorted(neighbors)},
@@ -259,35 +363,31 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
         packet["old_interval"] = [clock.get("media_time"), clock.get("media_end_time")]
         packet["consumers"] = consumers
         packets.append(packet)
-    return {"packets": packets, "clock_proofs": proofs, "unscoped": unscoped}
+    return {"packets": packets, "clock_proofs": proofs, "unscoped": unscoped,
+            "consumer_exceptions": consumer_exceptions}
 
 
-def main():
-    import argparse
+def load_run_packets(root, backup):
+    """Build a repeatable, read-only handoff from the frozen migration plan."""
     from pathlib import Path
 
     from backend.pipeline import transcript_claim_migration as migration
     from backend.pipeline import transcript_evidence_apply as evidence
     from backend.pipeline import transcript_locator_migration as locator
 
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--locator-run", type=Path, required=True)
-    parser.add_argument("--backup-manifest", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    root = args.locator_run.resolve()
+    root = root.resolve()
     manifest = locator.load(root)
     plan = migration.read(root / "evidence/plan.json")
     migration.cm.source.verify_file(plan["records"])
     records = migration.read(plan["records"]["path"])
     intent = manifest["intent"]
     if len(intent["old_paths"]) != 1:
-        parser.error("Candidate preparation requires one explicit legacy source")
+        raise ValueError("Candidate preparation requires one explicit legacy source")
     old_path = Path(intent["old_paths"][0])
     old_bound = migration.binding(old_path)
     old = migration.cm.source.source_snapshot(old_bound)
     new = evidence.snap(intent["published"])
-    backup = args.backup_manifest.resolve()
+    backup = backup.resolve()
     item = migration.read(backup)["intent"]["item"]
     proof = {
         "item": item, "source_file": old_bound,
@@ -299,8 +399,28 @@ def main():
         migration.read(root / "preview.json"), records, old, new, proof,
         comparison=migration.read(plan["report"]["path"]),
     )
-    migration.immutable(args.output, result)
-    print(json.dumps({"packets": len(result["packets"]), "unscoped": len(result["unscoped"])}))
+    return manifest, records, new, result
+
+
+def prepare_run_packets(root, backup, output):
+    from backend.pipeline import transcript_claim_migration as migration
+
+    _, _, _, result = load_run_packets(root, backup)
+    migration.immutable(output, result)
+    return {**{key: len(result[key]) for key in ("packets", "unscoped", "consumer_exceptions")},
+            "output": str(output.resolve())}
+
+
+def main():
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--locator-run", type=Path, required=True)
+    parser.add_argument("--backup-manifest", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    print(json.dumps(prepare_run_packets(args.locator_run, args.backup_manifest, args.output)))
 
 
 if __name__ == "__main__":
