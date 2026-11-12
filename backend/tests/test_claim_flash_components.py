@@ -151,7 +151,10 @@ def test_listener_stance_uses_listener_as_subject_without_leaking_speaker_answer
     result=parts.check(tmp_path,ports,'evidence_steps',record,{'original_text_excerpts':['聽眾：我沒有想到。']},None)
     request=ports.calls[0][1]
     assert '聽眾對這個完整判斷' in request['questions']['stance_classification']['instructions']
-    assert request['questions']['speaker_classification']['instructions'].startswith('只根據原文，這項內容的發言來源角色是誰？')
+    speaker_question=request['questions']['speaker_classification']
+    assert speaker_question['instructions'].startswith('這條 Evidence 摘要主要記錄哪一方的發言？')
+    assert '教授的比較或轉述仍選此項' in speaker_question['criteria']['professor']
+    assert '直接引語為主要內容' in speaker_question['criteria']['quoted_source']
     assert 'speaker' not in request['state']['record']
     assert not parts.needs_disposition(result)
 
