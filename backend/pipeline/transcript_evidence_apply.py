@@ -93,6 +93,42 @@ def calibrate(row, state, rule, new, document):
         'speaker_annotation':speaker_annotation(segments,new), 'content_approval_granted':False}
 
 
+def verified_cross_paragraph_rule(row, state, new):
+    """Reuse independently audited sequence anchors for changed live quotes."""
+    from difflib import SequenceMatcher
+    from backend.pipeline.transcript_evidence_calibration import content_quote
+
+    alignment = row.get('alignment') or {}
+    candidates = row.get('candidate_segments') or []
+    if (row['reason'] != 'source_located_requires_refresh'
+            or not alignment.get('both_endpoints_matched')
+            or not alignment.get('left_anchor') or not alignment.get('right_anchor')
+            or not 2 <= len(candidates) <= 3):
+        return None
+    segments = [
+        {'paragraph_key': item['paragraph_key'], 'verbatim_excerpt': item['verbatim_excerpt'].strip()}
+        for item in candidates
+    ]
+    if any(not item['verbatim_excerpt'] or context_only(item['verbatim_excerpt'])
+           or new['paragraphs'][item['paragraph_key']]['text'].count(item['verbatim_excerpt']) != 1
+           for item in segments):
+        return None
+    old = e.literal_layout(content_quote(row['quote'])[0])[0]
+    joined = ''.join(item['verbatim_excerpt'] for item in segments)
+    current = e.literal_layout(re.sub(r'\*\*(?:教授|聽眾)\*\*[：:]', '', joined))[0]
+    if (min(len(old), len(current)) < 12
+            or SequenceMatcher(None, old, current, autojunk=False).ratio() < .83
+            or not audio_position(state['payload'], candidates)['consistent']):
+        return None
+    return {
+        'before_pin': [state['revision'], state['content_sha256']],
+        'target_source_sha256': new['body_sha256'],
+        'mode': 'relocate',
+        'reason': '兩側唯一上下文及引文兩端均對齊，各段逐字切片符合舊音訊區間；內容待審。',
+        'segments': segments,
+    }
+
+
 def segment_fields(segment, new):
     from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     p = new['paragraphs'][segment['paragraph_key']]; quote = segment['verbatim_excerpt']
@@ -186,8 +222,10 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                                'old_paragraph': f.get('paragraph_key'),
                                'old_media_time': f.get('media_time'), 'affected_claims': []})
         row = deepcopy(row)
-        if key in rules and not state.get('retired'):
-            row = calibrate(row,state,rules[key],new,document)
+        if not state.get('retired'):
+            rule = rules.get(key) or verified_cross_paragraph_rule(row, state, new)
+            if rule is not None:
+                row = calibrate(row, state, rule, new, document)
         if (live_candidates and row.get('reason') == 'partial_deletion_has_live_candidate'
                 and row.get('localized') and row.get('alignment', {}).get('left_anchor')
                 and row.get('alignment', {}).get('right_anchor')

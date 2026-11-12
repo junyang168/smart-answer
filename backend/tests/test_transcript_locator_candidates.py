@@ -98,3 +98,32 @@ def test_candidate_handoff_keeps_context_only_consumers_out_of_fragment_packets(
         "citations": [{"record_key": fragment_key, "old_quote": "什麼意思？",
                        "target_paragraphs": ["S0002"]}],
     }]
+
+
+def test_verified_cross_paragraph_rule_requires_both_edges_and_matching_clock():
+    from backend.pipeline.transcript_evidence_apply import verified_cross_paragraph_rule
+
+    first = "保羅曾經結過婚嘛。"
+    second = "可能是他的太太早死，他就沒有再婚"
+    row = {
+        "reason": "source_located_requires_refresh",
+        "quote": "保羅曾經結過婚，可能是他的太太早死，他就沒有再婚。",
+        "alignment": {"both_endpoints_matched": True, "left_anchor": {"literal": "前文"},
+                      "right_anchor": {"literal": "後文"}},
+        "candidate_segments": [
+            {"paragraph_key": "S0002", "verbatim_excerpt": first, "media_time": 12, "media_end_time": 16},
+            {"paragraph_key": "S0003", "verbatim_excerpt": second, "media_time": 16, "media_end_time": 20},
+        ],
+    }
+    state = {"revision": 3, "content_sha256": "old", "payload": {"media_time": 10, "media_end_time": 22}}
+    new = {"body_sha256": "new", "paragraphs": {"S0002": {"text": first}, "S0003": {"text": second}}}
+
+    rule = verified_cross_paragraph_rule(row, state, new)
+    assert rule["before_pin"] == [3, "old"]
+    assert [segment["verbatim_excerpt"] for segment in rule["segments"]] == [first, second]
+    assert verified_cross_paragraph_rule(
+        {**row, "alignment": {**row["alignment"], "both_endpoints_matched": False}}, state, new,
+    ) is None
+    assert verified_cross_paragraph_rule(
+        row, {**state, "payload": {"media_time": 100, "media_end_time": 200}}, new,
+    ) is None
