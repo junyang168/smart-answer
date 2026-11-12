@@ -340,16 +340,33 @@ def calibration_rules(packets, answer, records, new, clock_proofs):
 
 
 def review_packets(packets, *, prompt=PROMPT, schema=SCHEMA):
-    """Use the shared Sol capacity limit for a caller-supplied bounded batch."""
-    from backend.pipeline.full_video_transcript import cleanup_generate
-    from backend.pipeline.slide_pilot_models import VisionReviewer
-    from backend.pipeline.slide_visual_evidence import check_schema
+    """Run transcript locator requests through the shared Codex subscription slots."""
+    import os
+    import shutil
 
-    adapter = VisionReviewer("openai", prompt, schema)
-    raw = cleanup_generate(adapter, json.dumps(packets, ensure_ascii=False))
-    answer = json.loads(adapter.text(raw))
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    from backend.pipeline.media_batch.runtime import atomic, slot
+    from backend.pipeline.slide_visual_evidence import check_schema
+    from backend.pipeline.transcript_claim_migration import sha
+
+    capacity = os.environ.get("MEDIA_BATCH_CAPACITY_ROOT")
+    if not capacity:
+        raise ValueError("Transcript locator requires the shared MEDIA_BATCH_CAPACITY_ROOT")
+    client = CodexSubscriptionClient(
+        model="gpt-6.1-sol", reasoning_effort="low", timeout_seconds=180,
+        max_output_tokens=8192, executable=shutil.which("codex"),
+    )
+    client.cache_usage_events = True
+    with slot(capacity, "sol", 2) as journal:
+        client._verify_chatgpt_login()
+        stage = "transcript_locator_subscription"
+        atomic(journal, {"state": "unknown", "stage": stage})
+        answer = client.generate_json(prompt, json.dumps(packets, ensure_ascii=False), schema)
+        response_sha = sha(json.dumps(answer, ensure_ascii=False, sort_keys=True).encode())
+        atomic(journal, {"state": "complete", "stage": stage, "response_sha256": response_sha})
     check_schema(answer, schema)
-    return raw, answer
+    return {"backend": client.backend, "usage": client.last_usage,
+            "response": client.last_raw_response}, answer
 
 
 def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None):

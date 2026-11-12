@@ -416,3 +416,37 @@ def test_spoken_continuity_allows_blank_rows_but_not_skipped_speech():
     assert consecutive_spoken(["S0049", "S0051"], new)
     assert not consecutive_spoken(["S0049", "S0052"], new)
     assert not consecutive_spoken(["S0051", "S0049"], new)
+
+
+def test_locator_live_transport_uses_codex_subscription(tmp_path, monkeypatch):
+    from backend.pipeline import codex_subscription_client, transcript_locator_candidates
+
+    packet = {"record_key": "source_fragments/f"}
+    answer = {"decisions": [{"record_key": packet["record_key"], "spans": [], "reason": "不確定"}]}
+
+    class Subscription:
+        backend = "codex_subscription"
+        last_usage = {"input_tokens": 100}
+        last_raw_response = {"last_message": "saved"}
+
+        def __init__(self, **kwargs):
+            assert kwargs["model"] == "gpt-6.1-sol"
+            self.authenticated = False
+
+        def _verify_chatgpt_login(self):
+            self.authenticated = True
+
+        def generate_json(self, prompt, payload, schema):
+            import json
+
+            assert self.authenticated
+            assert json.loads(payload) == [packet]
+            assert schema == transcript_locator_candidates.SCHEMA
+            return answer
+
+    monkeypatch.setenv("MEDIA_BATCH_CAPACITY_ROOT", str(tmp_path))
+    monkeypatch.setattr(codex_subscription_client, "CodexSubscriptionClient", Subscription)
+    raw, result = transcript_locator_candidates.review_packets([packet])
+    assert result == answer
+    assert raw["backend"] == "codex_subscription"
+    assert raw["usage"] == {"input_tokens": 100}
