@@ -180,3 +180,18 @@ def test_semantic_segmentation_preserves_unpunctuated_tail():
     text, positions, _ = semantic.segmentation_input(turns)
     paragraphs = semantic.apply_ends(text, positions, [1, 2])
     assert [p["text"] for p in paragraphs] == ["第一個觀點。", "第二個觀點。最後幾個字 "]
+
+
+def test_word_timing_uses_word_edges_and_rejects_uncertain_clock():
+    from backend.pipeline.transcript_word_timing import locate_paragraph_edges
+
+    text = "這是第一句。這是第二句。"
+    turns = [{"text": text, "speaker": "w0:0", "start": 0, "end": 8}]
+    words = [{"text": "这是第一句", "speaker": "w0:0", "start": 0.2, "end": 2.1},
+             {"text": "这是第二句", "speaker": "w0:0", "start": 3.0, "end": 7.5}]
+    paragraphs = [{"start": 0, "end": 6}, {"start": 6, "end": len(text)}]
+    assert locate_paragraph_edges(paragraphs, turns, words) == [
+        {"start": 0.2, "end": 2.1}, {"start": 3.0, "end": 7.5},
+    ]
+    words[1]["timing_review"] = True
+    assert locate_paragraph_edges(paragraphs, turns, words)[1] == {"start": None, "end": None}
