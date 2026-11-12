@@ -19,3 +19,25 @@ def test_does_not_join_across_long_pause_or_create_overlong_paragraph():
         dict(id="1-0", start=42, end=44, text="另外。"),
     ]
     assert [block["cues"] for block in proofreading_blocks(cues)] == [[cue] for cue in cues]
+
+
+def test_marks_clear_repetitions_without_changing_source_or_negation():
+    from backend.pipeline.transcript_proofreading_layout import mark_repetition
+
+    text = "他不是自己要要要這麼做。"
+    result = mark_repetition(text, "自己要要要這麼做", "自己要這麼做")
+    assert result == "他不是自己~~要要~~要這麼做。"
+    assert result.replace("~~", "") == text
+    assert mark_repetition("不是不是。", "不是不是", "不是") == "不是不是。"
+    assert mark_repetition("要~~要要~~這樣。", "要要", "要") == "要~~要要~~這樣。"
+
+
+def test_editor_uses_roles_and_keeps_unverified_speech_without_a_model_label():
+    from backend.pipeline.transcript_proofreading_layout import proofreading_speaker_text
+
+    cues = [{"speaker": "w0:spk:0", "text": "先說。"},
+            {"speaker": "w0:spk:1", "text": "請問？"},
+            {"speaker": "w1:spk:0", "text": "還有。"}]
+    text, turns = proofreading_speaker_text(cues, {"w0:spk:0": "professor", "w0:spk:1": "audience"})
+    assert text == "**教授**：先說。\n\n**聽眾**：請問？\n\n還有。"
+    assert "".join(t["text"] for t in turns) == "".join(c["text"] for c in cues)

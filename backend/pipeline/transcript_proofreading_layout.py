@@ -55,3 +55,58 @@ def proofreading_blocks(cues):
     if [cue for block in result for cue in block["cues"]] != cues:
         raise ValueError("Proofreading layout changed the ordered subtitle cues")
     return result
+
+
+def mark_repetition(text, quote, retained):
+    """Apply one exact, reversible deletion of adjacent repeated speech."""
+    if not quote or not retained.strip() or text.count(quote) != 1 or "~" in quote:
+        return text
+    size = len(quote) - len(retained)
+    if size <= 0:
+        return text
+    position = text.index(quote)
+    if any(m.start() < position + len(quote) and position < m.end()
+           for m in re.finditer(r"~~.*?~~", text, flags=re.S)):
+        return text
+
+    def spoken(value):
+        return "".join(char for char in value if char.isalnum())
+
+    for start in range(len(quote) - size + 1):
+        end = start + size
+        if quote[:start] + quote[end:] != retained:
+            continue
+        cut = quote[start:end]
+        repeated = spoken(cut)
+        if not repeated or re.search(r"[不沒没未無无非勿別别第章節节\d]", cut):
+            continue
+        left, right = spoken(quote[:start]), spoken(quote[end:])
+        # More than one redundant repetition may be removed in a single span.
+        if not any(repeated == repeated[:n] * (len(repeated) // n)
+                   and (left.endswith(repeated[:n]) or right.startswith(repeated[:n]))
+                   for n in range(1, len(repeated) + 1) if len(repeated) % n == 0):
+            continue
+        a, b = position + start, position + end
+        return text[:a] + "~~" + text[a:b] + "~~" + text[b:]
+    return text
+
+
+def proofreading_speaker_text(cues, roles):
+    """Render canonical speaker roles while retaining uncertain speech."""
+    turns = []
+    for cue in cues:
+        speaker = cue["speaker"]
+        role = roles.get(speaker, "uncertain")
+        if role not in {"professor", "audience", "uncertain"}:
+            raise ValueError("Unknown proofreading speaker role")
+        if turns and turns[-1]["speaker"] == speaker:
+            turns[-1]["text"] += cue["text"]
+        else:
+            turns.append({"speaker": speaker, "role": role, "text": cue["text"]})
+    names = {"professor": "教授", "audience": "聽眾"}
+    parts = []
+    for turn in turns:
+        name = names.get(turn["role"])
+        label = f"**{name}**：" if name and (len(turns) > 1 or turn["role"] == "audience") else ""
+        parts.append(label + turn["text"])
+    return "\n\n".join(parts), turns
