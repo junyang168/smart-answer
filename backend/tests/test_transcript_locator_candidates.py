@@ -71,3 +71,30 @@ def test_repeated_reference_uses_consumer_slots_and_rejects_wrong_order():
         assert bool(rules) == expected and bool(pending) != expected
         if expected:
             assert rules[key]["consumer_occurrence_segments"] == {"evidence_steps/e": [0, 1]}
+
+
+def test_candidate_handoff_keeps_context_only_consumers_out_of_fragment_packets():
+    from backend.pipeline.transcript_locator_candidates import prepare_packets
+
+    fragment_key = "source_fragments/f"
+    consumer_key = "questions/q"
+    clock = {"media_time": 10, "media_end_time": 20}
+    row = {"record_key": fragment_key, "old_paragraph": "S0001",
+           "quote": "什麼意思？", "target_paragraphs": ["S0002"]}
+    records = {
+        fragment_key: {"payload": {**clock, "verbatim_excerpt": "什麼意思？"}},
+        consumer_key: {"payload": {"text": "五個丈夫是什麼意思？", "source_fragment_ids": ["f"]}},
+    }
+    exception = {"record_key": consumer_key, "reason": "consumer_requires_substantive_source",
+                 "context_fragment_ids": ["f"]}
+    old = {"paragraphs": {"S0001": {"text": "五個丈夫。什麼意思？"}}}
+    new = {"paragraphs": {"S0002": {"text": "五個丈夫是什麼意思？",
+                                  "start_time": 12, "end_time": 18}}}
+    result = prepare_packets({"exceptions": [row, exception]}, records, old, new, {},
+                             comparison={"fragments": [{**row, "status": "context_only"}]})
+    assert [packet["record_key"] for packet in result["packets"]] == [fragment_key]
+    assert result["consumer_exceptions"] == [{
+        **exception, "statement": "五個丈夫是什麼意思？",
+        "citations": [{"record_key": fragment_key, "old_quote": "什麼意思？",
+                       "target_paragraphs": ["S0002"]}],
+    }]

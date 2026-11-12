@@ -179,13 +179,21 @@ def execution_locks(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare', 'run', 'verify'])
+    parser.add_argument('command', choices=['prepare', 'candidates', 'run', 'verify'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id'); parser.add_argument('--published', type=Path)
     parser.add_argument('--old-source', type=Path, action='append', default=[])
     parser.add_argument('--instruction-file', type=Path); parser.add_argument('--calibration', type=Path)
     parser.add_argument('--jev-impact', action='store_true')
+    parser.add_argument('--backup-manifest', type=Path)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if args.command == 'candidates':
+        if not args.backup_manifest or not args.output:
+            parser.error('candidates requires --backup-manifest and --output')
+        from backend.pipeline.transcript_locator_candidates import prepare_run_packets
+        print(json.dumps(prepare_run_packets(args.root, args.backup_manifest, args.output)))
+        return
     from dotenv import load_dotenv
     load_dotenv()
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore

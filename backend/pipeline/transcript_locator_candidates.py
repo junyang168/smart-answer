@@ -211,14 +211,32 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
     """Scope every unresolved fragment from fresh alignment and the old clock."""
     from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
 
+    fragment_rows = {row["record_key"]: row for row in (comparison or {}).get("fragments", ())}
     resolved = {
-        row["record_key"]: row for row in (comparison or {}).get("fragments", ())
+        key: row for key, row in fragment_rows.items()
         if row["status"] in {"auto_rebind", "already_current", "relocate_changed_quote"}
     }
+    consumer_exceptions = []
+    source_order = list(new["paragraphs"])
+    source_positions = {key: index for index, key in enumerate(source_order)}
     packets, proofs, unscoped = [], {}, []
     for row in preview["exceptions"]:
         key = row["record_key"]
-        fragment = records[key]["payload"]
+        payload = records[key]["payload"]
+        if not key.startswith("source_fragments/"):
+            consumer_exceptions.append({
+                **row,
+                "statement": payload.get("statement") or payload.get("text") or "",
+                "citations": [
+                    {"record_key": fragment_key,
+                     "old_quote": records[fragment_key]["payload"].get("verbatim_excerpt"),
+                     "target_paragraphs": fragment_rows.get(fragment_key, {}).get("target_paragraphs") or []}
+                    for fid in payload.get("source_fragment_ids") or [payload.get("source_fragment_id")]
+                    if (fragment_key := "source_fragments/" + str(fid)) in records
+                ],
+            })
+            continue
+        fragment = payload
         clock = fragment
         if fragment.get("media_time") is None or fragment.get("media_end_time") is None:
             try:
@@ -238,15 +256,14 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
         else:
             scope = clock
         consumers = consumer_context(row, records, resolved)
-        source_order = list(new["paragraphs"])
         neighbors = set(row.get("target_paragraphs") or ())
         for consumer in consumers:
             for citation in consumer["citations"]:
                 if citation["target"]:
                     continue
                 for paragraph in citation["resolved_paragraphs"]:
-                    if paragraph in new["paragraphs"]:
-                        i = source_order.index(paragraph)
+                    if paragraph in source_positions:
+                        i = source_positions[paragraph]
                         neighbors.update(source_order[max(0, i - 1):i + 2])
         packet = candidate_packet(
             {**row, "target_paragraphs": sorted(neighbors)},
@@ -259,35 +276,31 @@ def prepare_packets(preview, records, old, new, legacy_proof, *, comparison=None
         packet["old_interval"] = [clock.get("media_time"), clock.get("media_end_time")]
         packet["consumers"] = consumers
         packets.append(packet)
-    return {"packets": packets, "clock_proofs": proofs, "unscoped": unscoped}
+    return {"packets": packets, "clock_proofs": proofs, "unscoped": unscoped,
+            "consumer_exceptions": consumer_exceptions}
 
 
-def main():
-    import argparse
+def prepare_run_packets(root, backup, output):
+    """Build a repeatable, read-only handoff from the frozen migration plan."""
     from pathlib import Path
 
     from backend.pipeline import transcript_claim_migration as migration
     from backend.pipeline import transcript_evidence_apply as evidence
     from backend.pipeline import transcript_locator_migration as locator
 
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--locator-run", type=Path, required=True)
-    parser.add_argument("--backup-manifest", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    root = args.locator_run.resolve()
+    root = root.resolve()
     manifest = locator.load(root)
     plan = migration.read(root / "evidence/plan.json")
     migration.cm.source.verify_file(plan["records"])
     records = migration.read(plan["records"]["path"])
     intent = manifest["intent"]
     if len(intent["old_paths"]) != 1:
-        parser.error("Candidate preparation requires one explicit legacy source")
+        raise ValueError("Candidate preparation requires one explicit legacy source")
     old_path = Path(intent["old_paths"][0])
     old_bound = migration.binding(old_path)
     old = migration.cm.source.source_snapshot(old_bound)
     new = evidence.snap(intent["published"])
-    backup = args.backup_manifest.resolve()
+    backup = backup.resolve()
     item = migration.read(backup)["intent"]["item"]
     proof = {
         "item": item, "source_file": old_bound,
@@ -299,8 +312,21 @@ def main():
         migration.read(root / "preview.json"), records, old, new, proof,
         comparison=migration.read(plan["report"]["path"]),
     )
-    migration.immutable(args.output, result)
-    print(json.dumps({"packets": len(result["packets"]), "unscoped": len(result["unscoped"])}))
+    migration.immutable(output, result)
+    return {**{key: len(result[key]) for key in ("packets", "unscoped", "consumer_exceptions")},
+            "output": str(output.resolve())}
+
+
+def main():
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--locator-run", type=Path, required=True)
+    parser.add_argument("--backup-manifest", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    print(json.dumps(prepare_run_packets(args.locator_run, args.backup_manifest, args.output)))
 
 
 if __name__ == "__main__":
