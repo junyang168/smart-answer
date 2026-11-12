@@ -254,3 +254,12 @@ def test_combined_punctuation_and_segmentation_rejects_ambiguous_locations():
     assert [p["text"] for p in paragraphs] == ["對對這樣你看。", "怎麼辦"]
     assert edits == {4: "，", 10: "？"}
     assert len(rejected) == 1
+
+
+def test_source_clock_keeps_word_anchors_when_neighbouring_estimates_drift():
+    blocks = [{"start": 42, "end": 49}, {"start": 49, "end": 56}, {"start": 56, "end": 61}]
+    anchors = [{"start": 75, "method": "original_word"}, None,
+               {"start": 91, "method": "original_word"}]
+    selected = flow.audio.ordered_start_anchors(anchors, 100)
+    assert selected == anchors
+    assert flow.audio.start_estimates(blocks, selected, 100) == [75, 83, 91]

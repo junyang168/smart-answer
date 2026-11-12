@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from itertools import groupby
 import json
 import os
@@ -199,19 +200,55 @@ def alignment_worker(aligner, clips):
                    check=True, env=environment)
 
 
+def ordered_start_anchors(candidates, duration):
+    """Keep an increasing chain of source-backed starts without using text estimates."""
+    tails, indices = [], []
+    previous = [None] * len(candidates)
+    for i, entry in enumerate(candidates):
+        if entry is None or not 0 <= entry["start"] < duration or (i and entry["start"] == 0):
+            continue
+        value = entry["start"]
+        slot = bisect_left(tails, value)
+        previous[i] = indices[slot-1] if slot else None
+        if slot == len(tails):
+            tails.append(value)
+            indices.append(i)
+        elif value < tails[slot]:
+            tails[slot], indices[slot] = value, i
+    selected = [None] * len(candidates)
+    i = indices[-1] if indices else None
+    while i is not None:
+        selected[i] = candidates[i]
+        i = previous[i]
+    return selected
+
+
+def start_estimates(blocks, anchors, duration):
+    """Fit unresolved text estimates between neighbouring source-backed starts."""
+    points = [-1, *(i for i, anchor in enumerate(anchors) if anchor), len(blocks)]
+    positions = [0.0] * len(blocks)
+    for left, right in zip(points, points[1:]):
+        a = anchors[left]["start"] if left >= 0 else 0
+        b = anchors[right]["start"] if right < len(blocks) else duration
+        if left >= 0:
+            positions[left] = a
+        raw_a = blocks[left]["start"] if left >= 0 else 0
+        raw_b = blocks[right]["start"] if right < len(blocks) else duration
+        ratios = [(blocks[i]["start"]-raw_a)/(raw_b-raw_a) for i in range(left+1, right)] if raw_b > raw_a else []
+        if len(ratios) != right-left-1 or any(x >= y for x, y in zip([0, *ratios], [*ratios, 1])):
+            ratios = [(i-left)/(right-left) for i in range(left+1, right)]
+        for i, ratio in enumerate(ratios, left+1):
+            positions[i] = a + ratio * (b-a)
+    return positions
+
+
 def align_starts(media, refined, folder, aligner, word_starts):
     from backend.pipeline.contextual_transcript_timing import analyse, prepare
 
     blocks = refined["blocks"]
     duration = refined["duration"]
-    starts = [entry for entry in word_starts]
-    # Reject an anchor outside its immediate neighbouring paragraphs.
-    for i, candidate in enumerate(starts):
-        lower = blocks[i-1]["start"] if i else -1
-        upper = blocks[i+1]["end"] if i+1 < len(blocks) else duration
-        if candidate and not lower < candidate["start"] < upper:
-            starts[i] = None
-
+    starts = ordered_start_anchors(word_starts, duration)
+    estimates = start_estimates(blocks, starts, duration)
     if any(entry is None for entry in starts):
         if not aligner:
             raise ValueError("--aligner-python is required for unlocated paragraph starts")
@@ -222,10 +259,10 @@ def align_starts(media, refined, folder, aligner, word_starts):
         with wave.open(str(master), "rb") as pcm:
             duration_ms = pcm.getnframes() // 16
         record = {"paragraphs": [
-            {"id": f"p{i}", "start_ms": min(duration_ms, round(block["start"] * 1000)),
-             "end_ms": min(duration_ms, round(block["end"] * 1000)),
+            {"id": f"p{i}", "start_ms": min(duration_ms, round(start * 1000)),
+             "end_ms": min(duration_ms, round(end * 1000)),
              "text": "\n".join(turn["text"].replace("~~", "") for turn in block["cues"])}
-            for i, block in enumerate(blocks, 1)
+            for i, (block, start, end) in enumerate(zip(blocks, estimates, [*estimates[1:], duration], strict=True), 1)
         ]}
         save_json(source / "full_transcript.json", record)
         save_json(source / "master.json", {"source_sha256": file_sha(media), "duration_ms": duration_ms})
@@ -239,22 +276,16 @@ def align_starts(media, refined, folder, aligner, word_starts):
             alignment_worker(aligner, evidence)
             assessment = analyse(evidence, tolerance_ms=1000, detail=True, apply_coherence=False)
             for i, row in enumerate(assessment["lectures"]["source"]["paragraphs"]):
-                if row["id"] in pending and row["start_status"] == "qualified":
-                    starts[i] = {"start": row["start_ms"] / 1000,
+                if row["id"] not in pending or row["start_status"] != "qualified":
+                    continue
+                start = row["start_ms"] / 1000
+                lower = next((x["start"] for x in reversed(starts[:i]) if x), -1)
+                upper = next((x["start"] for x in starts[i+1:] if x), duration)
+                if lower < start < upper:
+                    starts[i] = {"start": start,
                                  "method": "qwen_opening_context" if recovery else "qwen_context"}
 
-    positions = [entry["start"] if entry else block["start"] for entry, block in zip(starts, blocks, strict=True)]
-    # An ambiguous placement must never invert or empty a playback interval.
-    while True:
-        conflicts = {i for i in range(len(positions)-1) if positions[i] >= positions[i+1]}
-        if not conflicts:
-            break
-        affected = {j for i in conflicts for j in (i, i+1) if starts[j] is not None}
-        if not affected:
-            raise ValueError("Paragraph source starts are not strictly increasing")
-        for i in affected:
-            starts[i] = None
-            positions[i] = blocks[i]["start"]
+    positions = start_estimates(blocks, starts, duration)
     output = [
         {**block, "start": start, "end": end, "timing_review": entry is None,
          "start_timing_method": entry["method"] if entry else "provisional"}
