@@ -15,6 +15,7 @@ const navItems = [
 
 export const AdminHeader = () => {
   const pathname = usePathname();
+  const isTranscriptEditor = /^\/admin\/transcript-beta\/[^/]+\/?$/.test(pathname);
   const { data: session } = useSession();
   const items = hasTranscriptBetaAccess(
     session?.user?.email,
@@ -37,7 +38,9 @@ export const AdminHeader = () => {
       : items;
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
+    <header
+      className={`${isTranscriptEditor ? "relative lg:sticky" : "sticky"} top-0 z-40 border-b border-gray-200 bg-white/90 backdrop-blur-sm`}
+    >
       <div className="container mx-auto flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6">
         <Link href="/admin" className="flex items-center gap-3">
           <Image
