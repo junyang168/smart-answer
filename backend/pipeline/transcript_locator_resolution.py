@@ -38,7 +38,7 @@ def consumer_rule(packet, selection, records, new):
         return None
     order = list(new["paragraphs"])
     selected = [order.index(s["paragraph_key"]) for s in segments]
-    if selected != list(range(selected[0], selected[0] + len(selected))):
+    if not candidates.consecutive_spoken([s["paragraph_key"] for s in segments], new):
         return None
     target_clock = [
         {"media_time": new["paragraphs"][s["paragraph_key"]].get("start_time"),
@@ -182,9 +182,7 @@ def question_context_rule(packet, decision, records, new):
     spans = candidates.select_spans(packet, decision, new)
     if not spans or any(context_only(s["verbatim_excerpt"]) for s in spans):
         return None
-    order = list(new["paragraphs"])
-    selected = [order.index(s["paragraph_key"]) for s in spans]
-    if selected != list(range(selected[0], selected[0] + len(selected))):
+    if not candidates.consecutive_spoken([s["paragraph_key"] for s in spans], new):
         return None
     intervals = [{"media_time": new["paragraphs"][s["paragraph_key"]]["start_time"],
                   "media_end_time": new["paragraphs"][s["paragraph_key"]]["end_time"]}
@@ -229,7 +227,7 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_f
                     key = packet["record_key"]
                     decision = by_key[key]
                     disposition = decision["disposition"]
-                    if disposition == "verbatim_support":
+                    if disposition == "aligned":
                         actionable.append(packet)
                         continue
                     if disposition == "question_context_only":

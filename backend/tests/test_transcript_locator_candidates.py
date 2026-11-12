@@ -346,7 +346,7 @@ def test_statement_first_keeps_question_context_separate_from_unsupported_eviden
     answer = {"decisions": [
         {"record_key": question, "spans": [span("S0145", "對，不可離開。")],
          "disposition": "question_context_only", "reason": "原問句省略，回答可定位"},
-        {"record_key": evidence, "spans": [], "disposition": "not_supported", "reason": "新版沒有支持"},
+        {"record_key": evidence, "spans": [], "disposition": "no_match", "reason": "新版沒有支持"},
     ]}
     bundle = {"packets": packets, "clock_proofs": {}, "unscoped": [], "consumer_exceptions": []}
     out = resolve_packets(tmp_path, bundle, records, new, {}, statement_first=True,
@@ -359,7 +359,7 @@ def test_statement_first_keeps_question_context_separate_from_unsupported_eviden
     assert post["anchor_state"] == "unresolved"
     assert post["question_context"][0]["verbatim_excerpt"] == "對，不可離開。"
     validate_fragment_locations({question: post}, new)
-    assert read(tmp_path / "unresolved.json") == {evidence: "not_supported"}
+    assert read(tmp_path / "unresolved.json") == {evidence: "no_match"}
     assert evidence not in read(out)["fragments"]
 
 
@@ -402,3 +402,17 @@ def test_owner_confirmation_must_match_fragment_source_and_evidence():
     rule["owner_confirmation"]["evidence_key"] = "evidence_steps/other"
     with pytest.raises(ValueError, match="owner confirmation"):
         calibrate(row, state, rule, {"body_sha256": "new"}, {})
+
+
+def test_spoken_continuity_allows_blank_rows_but_not_skipped_speech():
+    from backend.pipeline.transcript_locator_candidates import consecutive_spoken
+
+    new = {"paragraphs": {
+        "S0049": {"text": "第八節開始說了。"},
+        "S0050": {"text": " \n"},
+        "S0051": {"text": "我對著沒有嫁娶的和寡婦。"},
+        "S0052": {"text": "這是另一句話。"},
+    }}
+    assert consecutive_spoken(["S0049", "S0051"], new)
+    assert not consecutive_spoken(["S0049", "S0052"], new)
+    assert not consecutive_spoken(["S0051", "S0049"], new)
