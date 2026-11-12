@@ -149,6 +149,9 @@ type Pending = {
   packet?: Packet;
 };
 type Revision = { revision: number; actor: string; time: string; kind: string };
+type HistoryPeriod = { revisions: Revision[]; changed_paragraphs: number };
+type HistoryPage = { periods: HistoryPeriod[]; next_before: number | null };
+type HistorySnapshot = { script: Row[]; context: Context; revision: number };
 class RequestError extends Error {
   constructor(
     message: string,
@@ -351,12 +354,9 @@ function TranscriptProofreader({
   const historyPanel = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [history, setHistory] = useState<Revision[] | null>(null);
-  const [snapshot, setSnapshot] = useState<{
-    script: Row[];
-    context: Context;
-    revision: number;
-  }>();
+  const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [mobileMediaOpen, setMobileMediaOpen] = useState(false);
@@ -474,13 +474,12 @@ function TranscriptProofreader({
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setHistory(null);
-        setSnapshot(undefined);
         return;
       }
       if (event.key !== "Tab" || !panel) return;
       const controls = Array.from(
         panel.querySelectorAll<HTMLElement>(
-          'button:not(:disabled),a[href],input,textarea,select,[tabindex="0"]',
+          'button:not(:disabled),a[href],input,textarea,select,summary,[tabindex="0"]',
         ),
       );
       const first = controls[0],
@@ -1126,7 +1125,8 @@ function TranscriptProofreader({
   const openHistory = async () => {
     try {
       await flush();
-      setHistory(await request<Revision[]>(base + "/history"));
+      setHistoryError("");
+      setHistory(await request<HistoryPage>(base + "/history?grouped=true"));
     } catch (error) {
       setFailure((error as Error).message);
     }
@@ -2308,7 +2308,6 @@ function TranscriptProofreader({
           className="fixed inset-0 z-40 flex justify-end bg-black/20"
           onClick={() => {
             setHistory(null);
-            setSnapshot(undefined);
           }}
         >
           <section
@@ -2325,56 +2324,40 @@ function TranscriptProofreader({
                 className={button}
                 onClick={() => {
                   setHistory(null);
-                  setSnapshot(undefined);
                 }}
               >
                 關閉
               </button>
             </div>
             <p className="my-3 text-sm text-slate-500">
-              選擇版本，檢視該次修改與上一版本的差異。
+              展開編輯時段可查看前後差異，也可查看每次儲存。
             </p>
-            {history.map((h) => (
-              <button
-                key={h.revision}
-                className={`mb-2 block w-full rounded border p-3 text-left text-sm ${snapshot?.revision === h.revision ? "border-blue-600" : ""}`}
-                onClick={() =>
-                  void request<{
-                    script: Row[];
-                    context: Context;
-                    revision: number;
-                  }>(`${base}/revisions/${h.revision}`)
-                    .then(setSnapshot)
-                    .catch((e) => setFailure(e.message))
-                }
-              >
-                第 {h.revision} 版 · {new Date(h.time).toLocaleString()} ·{" "}
-                {h.actor} ·{" "}
-                {(
-                  {
-                    edit: "自動儲存",
-                    adopt: "採用候選",
-                    claim: "認領",
-                    unclaim: "取消認領",
-                    takeover: "接手",
-                    publish: "發佈",
-                  } as Record<string, string>
-                )[h.kind] || h.kind}
-              </button>
+            {history.periods.length === 0 && <p className="text-sm text-slate-500">目前沒有編輯紀錄。</p>}
+            {history.periods.map((period) => (
+              <HistoryPeriodCard key={period.revisions[0].revision} base={base} period={period} />
             ))}
-            {history.length > 0 && (
-              <button
-                className={button}
-                onClick={() =>
-                  void request<Revision[]>(
-                    `${base}/history?before=${history[history.length - 1].revision}`,
-                  ).then((more) => setHistory([...history, ...more]))
+            {historyError && <p role="alert" className="text-sm text-red-700">{historyError}</p>}
+            {history.next_before !== null && (
+              <button className={button} disabled={historyLoading} onClick={async () => {
+                setHistoryLoading(true);
+                setHistoryError("");
+                try {
+                  const more = await request<HistoryPage>(
+                    `${base}/history?grouped=true&before=${history.next_before}`,
+                  );
+                  setHistory((current) => current === history ? {
+                    periods: [...current.periods, ...more.periods],
+                    next_before: more.next_before,
+                  } : current);
+                } catch (error) {
+                  setHistoryError((error as Error).message);
+                } finally {
+                  setHistoryLoading(false);
                 }
-              >
-                載入更早版本
+              }}>
+                {historyLoading ? "載入中…" : "載入更早紀錄"}
               </button>
             )}
-            {snapshot && <HistoryDiff base={base} snapshot={snapshot} />}
           </section>
         </div>
       )}
@@ -2391,47 +2374,88 @@ const TranscriptText = memo(function TranscriptText({
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 });
 
-function HistoryDiff({
-  base,
-  snapshot,
-}: {
-  base: string;
-  snapshot: { script: Row[]; context: Context; revision: number };
-}) {
-  const [previous, setPrevious] = useState<{
-    script: Row[];
-    context: Context;
-  }>();
+const historyAction: Record<string, string> = {
+  edit: "自動儲存",
+  adopt: "採用候選",
+  claim: "認領",
+  unclaim: "取消認領",
+  takeover: "接手",
+  publish: "發佈",
+};
+
+function HistoryPeriodCard({ base, period }: { base: string; period: HistoryPeriod }) {
+  const latest = period.revisions[0];
+  const first = period.revisions[period.revisions.length - 1];
+  const [comparison, setComparison] = useState<{ from: number; to: number }>();
+  const start = new Date(first.time);
+  const end = new Date(latest.time);
+  const time = first === latest ? start.toLocaleString() :
+    `${start.toLocaleString()}–${start.toDateString() === end.toDateString() ? end.toLocaleTimeString() : end.toLocaleString()}`;
+  return (
+    <details className="mb-2 rounded border p-3 text-sm" onToggle={(event) => {
+      if (event.currentTarget.open && !comparison) {
+        setComparison({ from: first.revision - 1, to: latest.revision });
+      }
+    }}>
+      <summary className="cursor-pointer">
+        {latest.actor} · {latest.kind === "edit" ? "編輯" : historyAction[latest.kind] || latest.kind}
+        {period.changed_paragraphs > 0 && ` · 修改 ${period.changed_paragraphs} 段`}
+        <span className="ml-2 text-slate-600">{time}</span>
+      </summary>
+      {period.revisions.length > 1 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer">逐次儲存（{period.revisions.length} 筆）</summary>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button className={button} onClick={() => setComparison({ from: first.revision - 1, to: latest.revision })}>
+              時段前後差異
+            </button>
+            {period.revisions.map((revision) => (
+              <button key={revision.revision} className={button}
+                onClick={() => setComparison({ from: revision.revision - 1, to: revision.revision })}>
+                第 {revision.revision} 版 · {new Date(revision.time).toLocaleTimeString()}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
+      {comparison && <HistoryComparison base={base} {...comparison} />}
+    </details>
+  );
+}
+
+function HistoryComparison({ base, from, to }: { base: string; from: number; to: number }) {
+  const [result, setResult] = useState<{ previous: HistorySnapshot; snapshot: HistorySnapshot }>();
   const [error, setError] = useState("");
   useEffect(() => {
-    let alive = true;
-    setPrevious(undefined);
+    let active = true;
     setError("");
-    if (snapshot.revision > 1)
-      request<{ script: Row[]; context: Context }>(
-        `${base}/revisions/${snapshot.revision - 1}`,
-      )
-        .then((v) => {
-          if (alive) setPrevious(v);
-        })
-        .catch((e) => {
-          if (alive) setError(e.message);
-        });
-    else setPrevious({ script: [], context: {} as Context });
-    return () => {
-      alive = false;
-    };
-  }, [base, snapshot.revision]);
-  if (error)
-    return (
-      <p role="alert" className="mt-4 text-red-700">
-        無法比較歷史：{error}
-      </p>
-    );
-  if (!previous) return <p>正在比較版本…</p>;
+    setResult(undefined);
+    const revision = (n: number) => request<HistorySnapshot>(`${base}/revisions/${n}`);
+    const empty = { script: [], context: {} as Context, revision: 0 };
+    Promise.all([from > 0 ? revision(from) : empty, revision(to)])
+      .then(([previous, snapshot]) => { if (active) setResult({ previous, snapshot }); })
+      .catch((error) => { if (active) setError(error.message); });
+    return () => { active = false; };
+  }, [base, from, to]);
+  if (error) return <p role="alert" className="mt-4 text-red-700">無法比較歷史：{error}</p>;
+  if (!result || result.snapshot.revision !== to || result.previous.revision !== from) {
+    return <p className="mt-3">正在比較版本…</p>;
+  }
+  return <HistoryDiff {...result} />;
+}
+
+function HistoryDiff({ previous, snapshot }: { previous: HistorySnapshot; snapshot: HistorySnapshot }) {
   const changes = snapshot.script.filter(
     (p) => previous.script.find((v) => v.index === p.index)?.text !== p.text,
   );
+  const timingChanges = Object.entries(snapshot.context.paragraph_bindings).filter(([id, after]) => {
+    const before = previous.context.paragraph_bindings?.[id];
+    if (!before) return false;
+    const status = (context: Context) => context.timing_quality?.paragraph_states?.[id]?.status;
+    return before.start_ms !== after.start_ms || before.end_ms !== after.end_ms ||
+      status(previous.context) !== status(snapshot.context);
+  });
+  const removed = previous.script.filter((p) => !snapshot.script.some((v) => v.index === p.index));
   const groups = snapshot.context.groups.filter(
     (g) =>
       JSON.stringify(previous.context.groups?.find((v) => v.id === g.id)) !==
@@ -2464,7 +2488,7 @@ function HistoryDiff({
   );
   return (
     <div className="mt-5 space-y-3">
-      <h3 className="font-semibold">第 {snapshot.revision} 版的差異</h3>
+      <h3 className="font-semibold">{previous.revision ? `第 ${previous.revision} 版 → 第 ${snapshot.revision} 版` : `第 ${snapshot.revision} 版的差異`}</h3>
       {changes.map((p) => (
         <div key={p.index} className="rounded border p-3">
           <p className="text-sm text-slate-500">段落 {p.index}</p>
@@ -2474,14 +2498,22 @@ function HistoryDiff({
           />
         </div>
       ))}
-      {previous.script
-        .filter((p) => !snapshot.script.some((v) => v.index === p.index))
-        .map((p) => (
+      {removed.map((p) => (
           <div key={p.index} className="rounded border p-3">
             <p className="text-sm text-slate-500">已移除小標題</p>
             <ReviewTextDiff before={p.text} after="" />
           </div>
         ))}
+      {timingChanges.map(([id, after]) => {
+        const before = previous.context.paragraph_bindings[id];
+        const range = (binding: typeof after) => `${timingInput(binding.start_ms)}–${timingInput(binding.end_ms)}`;
+        return (
+          <p key={id} className="rounded border p-3 text-sm">
+            段落 {id} 的時間 {range(before) === range(after) ? range(after) : `${range(before)} → ${range(after)}`}
+            {snapshot.context.timing_quality?.paragraph_states?.[id]?.status === "qualified" && " · 已確認"}
+          </p>
+        );
+      })}
       {groups.map((g) => {
         const before = previous.context.groups?.find((v) => v.id === g.id);
         return (
@@ -2555,11 +2587,13 @@ function HistoryDiff({
         </p>
       ))}
       {!changes.length &&
+        !removed.length &&
+        !timingChanges.length &&
         !groups.length &&
         !regions.length &&
         !reviews.length && (
           <p className="text-sm text-slate-500">
-            口述正文未變更；本次為認領、書籤、講道資料或發佈操作。
+            這段期間沒有口述、時間或投影片的差異。
           </p>
         )}
     </div>

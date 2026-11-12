@@ -1173,3 +1173,34 @@ def test_assigned_editor_can_confirm_paragraph_timing_and_publish(setup):
     store.publish("a", item, op(after))
     published, _ = store.published_snapshot(item)
     assert published["script"][0]["start_time"] == timing["start_ms"] / 1000
+
+
+def test_grouped_history_keeps_complete_edit_periods_and_individual_revisions(setup):
+    from backend.api.sc_api.transcript_review import same_edit_period
+
+    store, _, _ = setup
+    item = "講道 test"
+    doc = adopted(setup)
+    pid = doc["script"][0]["index"]
+    for i in range(32):
+        store.mutate("a", item, op(doc, operations=[{"kind": "text", "id": pid, "text": f"修訂 {i}"}]))
+        doc = store.document("a", item)
+
+    page = store.history("a", item, grouped=True, limit=1)
+    period, = page["periods"]
+    assert period["changed_paragraphs"] == 1
+    assert len(period["revisions"]) == 32
+    first = period["revisions"][-1]
+    assert page["next_before"] == first["revision"]
+    older = store.history("a", item, grouped=True, before=page["next_before"])
+    assert [p["revisions"][0]["kind"] for p in older["periods"]] == ["adopt"]
+    assert older["next_before"] is None
+    assert len(store.history("a", item)) == 30
+    assert store.revision("a", item, first["revision"])["script"][0]["text"] == "修訂 0"
+
+    first = {**first, "time": "2026-11-12T08:00:00+00:00"}
+    second = {**first, "revision": first["revision"] + 1}
+    assert same_edit_period({**second, "time": "2026-11-12T08:29:59+00:00"}, first)
+    assert not same_edit_period({**second, "time": "2026-11-12T08:30:00+00:00"}, first)
+    assert not same_edit_period({**second, "actor": "b"}, first)
+    assert not same_edit_period({**second, "kind": "publish"}, first)

@@ -283,10 +283,10 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
         return call(result)
 
     @router.get("/review_document/{item}/history")
-    def history(item: str, request: Request, before: int = 10**12):
+    def history(item: str, request: Request, before: int = 10**12, grouped: bool = False):
         store = call(lambda: store_for(item))
         return call(
-            lambda: store.history(authenticated_actor(request), item, before=before)
+            lambda: store.history(authenticated_actor(request), item, before=before, grouped=grouped)
         )
 
     @router.get("/review_document/{item}/revisions/{revision}")
