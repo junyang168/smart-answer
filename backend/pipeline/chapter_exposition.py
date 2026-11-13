@@ -46,11 +46,20 @@ KINDS = ("釋經", "神學", "應用")
 
 DEFAULT_MODEL = "claude-opus-5-5"
 
+
+def chapter_client(model: str):
+    if model.startswith("gpt-"):
+        from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+        return CodexSubscriptionClient(model=model, reasoning_effort="high")
+    from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
+    return ClaudeSubscriptionClient(model=model)
+
+
 _SENTENCE = re.compile(r"[^。？！?!]+[。？！?!」』）)]*|[。？！?!」』）)]+")
 _VERSE = re.compile(r"(\d+)\s*[:：]\s*(\d+)(?:\s*[-–—~～]\s*(?:(\d+)\s*[:：]\s*)?(\d+))?")
 
 
-SYSTEM_PROMPT = """你在幫助整理王教授在 NYSC 馬太福音系列講座中對馬太福音某一章的釋經。使用者會給你：這一章的經文、一堂課的逐字稿（已切成編號片段，每段帶時間）、落在各片段裡的主張（Claim）。
+SYSTEM_PROMPT = """你在幫助整理王教授在 NYSC 馬太福音系列講座中對馬太福音某一章的釋經。使用者會給你：這一章的經文、一堂課的逐字稿（已切成編號片段，每段帶時間）、落在各片段裡的主張（Claim）與其原文證據（如有）。
 
 任務：逐一決定每個片段是否保留——保留的是解釋這一章某段經文的片段，並標出對應的經節。
 
@@ -61,6 +70,7 @@ SYSTEM_PROMPT = """你在幫助整理王教授在 NYSC 馬太福音系列講座�
 - 不保留：與這一章經文無關的見證、問答、其他章節的釋經、開場禱告、行政事項。
 
 論證要整段判斷，不要從中間切開：
+- 用證據的提問、理由、結論及對應原文判斷哪些相鄰片段屬同一論證；主張的引用只供參考，逐字稿決定實際的經節歸屬。用論證的起訖辨認離題的完整區間；沒有主張或證據標記的片段，仍須讀原文判斷，不能據此判為離題。重講往年內容時，若本堂有實質解釋本章，照樣保留；年份或先前講授情況只依本堂明說的原文。
 - 教授為了解釋這一章的經文，岔出去講的例子、故事、別處經文、原文字詞，是這段解釋的一部分，要保留。例如為了說明「較小的惡」舉的喇合、墮胎的例子；為了說明「實在」而講的 Amen 用法。
 - 如果保留了一個例子的結論或勸告，就要保留這個例子本身；如果不保留一個例子，也不要保留它的結論，否則聽的人只聽到半句。
 - 不保留的應是完整離題的部分：從離開這一章開始，到回到這一章為止。
@@ -69,6 +79,7 @@ SYSTEM_PROMPT = """你在幫助整理王教授在 NYSC 馬太福音系列講座�
 - 每一個片段都必須有一個決定，不可遺漏、不可合併、不可重複。少一個片段，整份輸出作廢。
 - 保留的片段：keep 為 true，verses 寫經節，格式為「章:節」或「章:節-節」，幾處用逗號分開，例如「5:27-28」或「5:3, 5:10」；kind 為「釋經」「神學」「應用」之一。
 - 不保留的片段：keep 為 false，reason 寫一句話說明為什麼不保留。
+- 所有欄位都要填。保留時 reason 填空字串；不保留時 verses 填空字串、kind 填 null。
 - decisions 按片段編號順序排列。"""
 
 
@@ -83,10 +94,10 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                     "id": {"type": "string"},
                     "keep": {"type": "boolean"},
                     "verses": {"type": "string"},
-                    "kind": {"type": "string", "enum": list(KINDS)},
+                    "kind": {"type": ["string", "null"], "enum": [*KINDS, None]},
                     "reason": {"type": "string"},
                 },
-                "required": ["id", "keep"],
+                "required": ["id", "keep", "verses", "kind", "reason"],
                 "additionalProperties": False,
             },
         }
@@ -168,6 +179,7 @@ def user_prompt(
     pieces: list[dict[str, Any]],
     claims_by_piece: dict[str, list[str]],
     claims: dict[str, dict[str, Any]],
+    evidence_by_piece: dict[str, list[dict[str, str]]] | None = None,
 ) -> str:
     lines = [f"# {chapter_label}（和合本）"]
     for slug, text in sorted(verse_texts.items(), key=lambda item: int(item[0].split("-")[-1])):
@@ -179,6 +191,8 @@ def user_prompt(
             claim = claims.get(claim_id) or {}
             refs = "、".join(str(ref) for ref in claim.get("scripture_refs") or []) or "無"
             lines.append(f"  主張：{str(claim.get('statement') or '').strip()}（引用：{refs}）")
+        for evidence in (evidence_by_piece or {}).get(piece["id"], []):
+            lines.append(f"  論證證據：{json.dumps(evidence, ensure_ascii=False)}")
     return "\n".join(lines)
 
 
@@ -411,6 +425,49 @@ def _claim_starts(
     return out
 
 
+
+def piece_evidence(pieces, claims, steps, fragments, source_id, lecture):
+    """Bind same-lecture evidence excerpts to all overlapping transcript pieces."""
+    from backend.pipeline.chapter_slide_claims import compact
+
+    spans = []
+    parts = []
+    offset = 0
+    for piece in pieces:
+        part = compact(piece["text"])
+        spans.append((offset, offset + len(part), piece["id"]))
+        parts.append(part)
+        offset += len(part)
+    transcript = "".join(parts)
+    out = {}
+    for claim_id, claim in sorted(claims.items()):
+        if claim.get("review_status") in {"superseded", "retired", "rejected"}:
+            continue
+        if not any(o.get("transcript_id") == lecture for o in claim.get("occurrences") or []):
+            continue
+        for step_id in claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []:
+            step = steps.get(step_id, {})
+            ids = list(step.get("source_fragment_ids") or [])
+            if step.get("source_fragment_id"):
+                ids.append(step["source_fragment_id"])
+            for fragment_id in dict.fromkeys(ids):
+                fragment = fragments.get(fragment_id, {})
+                quote = fragment.get("verbatim_excerpt") or ""
+                needle = compact(quote)
+                if fragment.get("source_id") != source_id or not needle or transcript.count(needle) != 1:
+                    continue
+                start = transcript.index(needle)
+                end = start + len(needle)
+                for low, high, piece_id in spans:
+                    if low < end and high > start:
+                        out.setdefault(piece_id, []).append({
+                            "claim_id": claim_id, "review_status": claim.get("review_status"),
+                            "step_id": step_id, "role": step.get("step_type"),
+                            "fragment_id": fragment_id, "quote": quote,
+                        })
+    return out
+
+
 def decide(
     chapter: Chapter,
     lecture: str,
@@ -446,15 +503,11 @@ def decide(
 
     claims = by_id("claims", "claim_id")
     pieces = cut(sermon)
-    starts = _claim_starts(
-        claims,
-        by_id("evidence_steps", "evidence_step_id"),
-        by_id("source_fragments", "fragment_id"),
-        sermon,
-        source_id,
-        lecture,
-    )
+    steps = by_id("evidence_steps", "evidence_step_id")
+    fragments = by_id("source_fragments", "fragment_id")
+    starts = _claim_starts(claims, steps, fragments, sermon, source_id, lecture)
     placed = place_claims(pieces, starts)
+    evidence = piece_evidence(pieces, claims, steps, fragments, source_id, lecture)
     book, number, low, high = chapter_material.verse_range(chapter.passage)
     prompt = user_prompt(
         format_chinese_reference(chapter.passage),
@@ -463,6 +516,7 @@ def decide(
         pieces,
         placed,
         claims,
+        evidence,
     )
     response = client.generate_json(SYSTEM_PROMPT, prompt, RESPONSE_SCHEMA)
     problems, decisions = check(response.get("decisions") or [], pieces, chapter)
@@ -480,6 +534,7 @@ def decide(
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "pieces": pieces,
         "claims_by_piece": placed,
+        "evidence_by_piece": evidence,
         "decisions": decisions,
         "raw_decisions": response.get("decisions") or [],
     }
@@ -521,7 +576,6 @@ def main(argv: list[str] | None = None) -> int:
 
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.api.config import DATA_BASE_PATH
-    from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 
     chapter = chapter_material.CHAPTERS[args.passage]
     lectures = [
@@ -531,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
     if not lectures:
         parser.error("没有符合的讲道")
     store = PostgresKnowledgeStore()
-    client = ClaudeSubscriptionClient(model=args.model)
+    client = chapter_client(args.model)
     failed = False
     for lecture in lectures:
         report = decide(

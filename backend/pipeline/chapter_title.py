@@ -177,7 +177,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from backend.api.config import DATA_BASE_PATH
-    from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 
     found = chapters(Path(DATA_BASE_PATH), args.source)
     if args.passage not in found:
@@ -185,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     report = decide(
         found[args.passage],
         data_base_dir=Path(DATA_BASE_PATH),
-        client=ClaudeSubscriptionClient(model=args.model),
+        client=chapter_exposition.chapter_client(args.model),
         force=args.force,
     )
     print(json.dumps(report, ensure_ascii=False))

@@ -141,6 +141,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                             "type": "object",
                             "properties": {"sentence": {"type": "string"}, "text": {"type": "string"}},
                             "required": ["sentence", "text"],
+                            "additionalProperties": False,
                         },
                     },
                     "verses": {"type": "string"},
@@ -150,14 +151,17 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                             "type": "object",
                             "properties": {"sentence": {"type": "string"}, "ref": {"type": "string"}},
                             "required": ["sentence", "ref"],
+                            "additionalProperties": False,
                         },
                     },
                 },
                 "required": ["first", "title", "points", "verses", "scriptures"],
+                "additionalProperties": False,
             },
         }
     },
     "required": ["slides"],
+    "additionalProperties": False,
 }
 
 
@@ -583,10 +587,12 @@ REVIEW_SCHEMA: dict[str, Any] = {
                     "fix": {"type": "string"},
                 },
                 "required": ["slide", "kind", "problem", "fix"],
+                "additionalProperties": False,
             },
         },
     },
     "required": ["grade", "blocking", "findings"],
+    "additionalProperties": False,
 }
 
 _REVISE_TAIL = """
@@ -749,7 +755,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from backend.api.config import DATA_BASE_PATH
-    from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 
     chapter = chapter_material.CHAPTERS[args.passage]
     lectures = [
@@ -771,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False))
             failed = failed or report["status"] not in {"saved", "nothing_rejected", "already_saved"}
         return 1 if failed else 0
-    client = ClaudeSubscriptionClient(model=args.model)
+    client = chapter_exposition.chapter_client(args.model)
     if args.data_dir:
         from backend.pipeline.chapter_slide_claims import RecordedClient
         client = RecordedClient(client, data_root.parent / "calls")

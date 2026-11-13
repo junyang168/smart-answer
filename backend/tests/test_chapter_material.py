@@ -218,3 +218,12 @@ def test_the_slide_prompt_names_the_chapter_it_is_for():
     prompt = chapter_slides.system_prompt(thirteen)
     assert "第 13 章" in prompt and "13:1-58" in prompt
     assert "第五章" not in prompt and "5:1-48" not in prompt
+
+
+def test_chapter_16_retires_the_three_prototype_audio_entries(monkeypatch):
+    from backend.pipeline import original_audio_index
+
+    monkeypatch.setattr(original_audio_index.chapter_material, "CHAPTERS", {})
+    assert dict(original_audio_index.passages())["mat-16-24-27"]
+    monkeypatch.setattr(original_audio_index.chapter_material, "CHAPTERS", {"mat-16-1-28": None})
+    assert original_audio_index.passages() == (("mat-16-1-28", "太16:1–28"),)
