@@ -70,7 +70,7 @@ def claim_source_ranges(context: dict, decisions: dict) -> list[dict]:
             result.append({"claim_id": claim["claim_id"], "ranges": ranges})
     return result
 
-def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: Any) -> dict:
+def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: Any, allow_unusable_evidence: bool = False) -> dict:
     from backend.pipeline.original_audio_index import Sermons
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
     decisions = json.loads(path.read_text())
@@ -104,7 +104,7 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
         sentence_spans.append((low, low + len(compact(line["text"])), line["id"], line["piece"]))
     steps = {e["evidence_step_id"]: e for e in store.list_records("evidence_steps")}
     fragments = {f["fragment_id"]: f for f in store.list_records("source_fragments")}
-    included, excluded = [], []
+    included, excluded, unusable = [], [], []
     for claim in sorted(store.list_records("claims"), key=lambda c: c["claim_id"]):
         if not any(o.get("transcript_id") == lecture for o in claim.get("occurrences", [])):
             continue
@@ -116,7 +116,10 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
         for eid in claim.get("evidence_step_ids", []):
             step = steps.get(eid)
             if step is None:
-                raise ValueError(f"Missing evidence step: {eid}")
+                if not allow_unusable_evidence:
+                    raise ValueError(f"Missing evidence step: {eid}")
+                unusable.append({"claim_id": cid, "object_id": eid, "reason": "missing evidence step"})
+                continue
             anchors = []
             fids = list(step.get("source_fragment_ids") or [])
             if step.get("source_fragment_id"):
@@ -124,13 +127,22 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
             for fid in dict.fromkeys(fids):
                 fragment = fragments.get(fid)
                 if fragment is None:
-                    raise ValueError(f"Missing fragment: {fid}")
+                    if not allow_unusable_evidence:
+                        raise ValueError(f"Missing fragment: {fid}")
+                    unusable.append({"claim_id": cid, "object_id": fid, "reason": "missing or retired fragment"})
+                    continue
                 if fragment.get("source_id") != document["source_id"]:
-                    raise ValueError(f"Cross-sermon fragment in {cid}: {fid}")
+                    if not allow_unusable_evidence:
+                        raise ValueError(f"Cross-sermon fragment in {cid}: {fid}")
+                    unusable.append({"claim_id": cid, "object_id": fid, "reason": "cross-sermon fragment"})
+                    continue
                 quote = fragment.get("verbatim_excerpt") or ""
                 needle = compact(quote)
                 if not needle or text.count(needle) != 1:
-                    raise ValueError(f"Excerpt missing/ambiguous in actual transcript: {fid}")
+                    if not allow_unusable_evidence:
+                        raise ValueError(f"Excerpt missing/ambiguous in actual transcript: {fid}")
+                    unusable.append({"claim_id": cid, "object_id": fid, "reason": "excerpt missing or ambiguous"})
+                    continue
                 low = text.index(needle)
                 high = low + len(needle)
                 ids = [sid for a, b, sid, _ in sentence_spans if a < high and b > low]
@@ -151,6 +163,8 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
                "decisions_sha256": chapter_exposition.file_sha256(path),
                "transcript_sha256": decisions["transcript_sha256"], "source_id": document["source_id"],
                "claims": included, "excluded": excluded}
+    if unusable:
+        context["unusable_evidence"] = unusable
     context["claim_source_ranges"] = claim_source_ranges(context, decisions)
     return context
 
@@ -211,10 +225,13 @@ def main():
     parser.add_argument("passage")
     parser.add_argument("--lecture", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--allow-unusable-evidence", action="store_true",
+                        help="Exclude and record unverifiable evidence instead of aborting")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output already exists; reuse the frozen context")
-    context = compile_context(args.passage, args.lecture, data_base_dir=Path(DATA_BASE_PATH), store=PostgresKnowledgeStore())
+    context = compile_context(args.passage, args.lecture, data_base_dir=Path(DATA_BASE_PATH),
+                              store=PostgresKnowledgeStore(), allow_unusable_evidence=args.allow_unusable_evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(context, ensure_ascii=False, indent=2))
     print(json.dumps({"claims": len(context["claims"]), "excluded": len(context["excluded"]),
