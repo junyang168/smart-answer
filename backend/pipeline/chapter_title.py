@@ -181,12 +181,27 @@ def main(argv: list[str] | None = None) -> int:
     found = chapters(Path(DATA_BASE_PATH), args.source)
     if args.passage not in found:
         parser.error(f"没有这一章：{args.passage}（可选：{', '.join(sorted(found))}）")
+    data_root = Path(DATA_BASE_PATH)
+    client = chapter_exposition.chapter_client(args.model)
     report = decide(
         found[args.passage],
         data_base_dir=Path(DATA_BASE_PATH),
-        client=chapter_exposition.chapter_client(args.model),
+        client=client,
         force=args.force,
     )
+    if report["status"] in {"saved", "unchanged"}:
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+        from backend.pipeline import chapter_topics, original_audio_index
+
+        notes = _notes(args.source)
+        index = (original_audio_index.build_notes_index(data_root, args.passage) if notes
+                 else original_audio_index.build_index(PostgresKnowledgeStore(), data_root, args.passage))
+        if index is not None:
+            output = record_path(data_root, args.passage, args.source).with_name(
+                "overview-topics-notes.json" if notes else "overview-topics.json"
+            )
+            chapter_topics.save(chapter_topics.generate(index, client), output)
+            report["overview_topics"] = str(output)
     print(json.dumps(report, ensure_ascii=False))
     return 0 if report["status"] in {"saved", "unchanged"} else 1
 

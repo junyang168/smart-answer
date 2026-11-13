@@ -89,3 +89,30 @@ def test_the_notes_page_gets_its_own_title_beside_the_lectures(tmp_path, monkeyp
     assert "釋經筆記" in chapter_title.system_prompt(notes_chapter.NOTES_SOURCE)
     assert chapter_title.load(tmp_path, "mat-5-1-48") == "講座那一句"
     assert chapter_title.load(tmp_path, "mat-5-1-48", notes_chapter.NOTES_SOURCE) == "筆記那一句"
+
+
+def test_overview_topics_are_bound_to_playable_slide_cues(tmp_path):
+    from backend.pipeline import chapter_topics
+
+    section = {"passage": "mat-16-19", "sermons": [{
+        "source_id": "recording", "media_url": "/audio.mp3",
+        "stretches": [{"start": 10, "end": 20}],
+        "slides": [{"at": 12, "title": "原標題", "points": [{"text": "原要點"}]},
+                   {"at": 25, "title": "不在播放區間", "points": []}],
+    }]}
+    index = {"passage": "mat-16-1-28", "sections": [section]}
+
+    class Client:
+        model = "gpt-6.1-sol"
+
+        def generate_json(self, system, prompt, schema):
+            assert "不在播放區間" not in prompt
+            return {"mat-16-19": [{"text": "精簡主題", "cue": 1}]}
+
+    generated = chapter_topics.generate(index, Client())
+    chapter_topics.save(generated, tmp_path / "chapter_slides/mat-16-1-28/overview-topics.json")
+    chapter_topics.attach(index, tmp_path)
+    assert section.pop("topics") == [{"text": "精簡主題", "source_id": "recording", "at": 12}]
+    section["sermons"][0]["slides"][0]["at"] = 13
+    chapter_topics.attach(index, tmp_path)
+    assert "topics" not in section
