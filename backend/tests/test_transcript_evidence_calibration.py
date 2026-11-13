@@ -209,3 +209,10 @@ def test_saved_locator_calibration_uses_verified_legacy_clock_and_keeps_bounds(l
     outside = snapshot([row('這是教授的原話。', 10, start_time=300, end_time=310)])
     with pytest.raises(ValueError, match='audio interval'):
         a.calibrate(original, state, {**rule, 'target_source_sha256': outside['body_sha256']}, outside, document)
+
+
+def test_legacy_clock_uses_pinned_paragraph_when_physical_index_absent(legacy_clock):
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    fragment, proof = legacy_clock
+    clock = verified_legacy_interval({**fragment, 'source_segment_index': None}, proof)
+    assert clock['media_end_time'] == 5
