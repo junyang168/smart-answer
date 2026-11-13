@@ -347,3 +347,22 @@ def test_a_named_term_is_anchored_to_its_introduction_before_the_definition():
 
     point["sentence"] = "S0001"
     assert chapter_slides.check(answer, kept, CHAPTER)[0] == []
+
+
+def test_argument_evidence_spans_adjacent_selection_pieces():
+    pieces = [
+        {"id": "U001", "text": "這是問題嗎？"},
+        {"id": "U002", "text": "答案在這裡。"},
+        {"id": "U003", "text": "轉到另一個問題。"},
+    ]
+    claims = {"C1": {"occurrences": [{"transcript_id": "L"}], "evidence_step_ids": ["E1"]}}
+    steps = {"E1": {"step_type": "reasoning", "source_fragment_ids": ["F1", "F2"]}}
+    fragments = {
+        "F1": {"source_id": "SRC", "verbatim_excerpt": "這是問題嗎？答案在這裡。"},
+        "F2": {"source_id": "OTHER", "verbatim_excerpt": "轉到另一個問題。"},
+    }
+    evidence = chapter_exposition.piece_evidence(pieces, claims, steps, fragments, "SRC", "L")
+    assert list(evidence) == ["U001", "U002"]
+    assert evidence["U001"] == evidence["U002"]
+    assert evidence["U001"][0]["role"] == "reasoning"
+    assert evidence["U001"][0]["fragment_id"] == "F1"

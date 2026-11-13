@@ -165,7 +165,7 @@ def review_contract(context: dict, slides: list[dict]) -> tuple[str, dict]:
             "status": {"type": "string", "enum": ["covered", "missing", "not_supported"]},
             "slides": {"type": "array", "items": {"type": "string"}},
             "reason": {"type": "string"}},
-        "required": ["claim_id", "status", "slides", "reason"]}}
+        "required": ["claim_id", "status", "slides", "reason"], "additionalProperties": False}}
     schema["required"].append("claim_checks")
     instruction = """\n另逐項回查提示包 claims 中的每一條（不含 excluded），回傳 claim_checks。
 covered：保留原文支持且投影片已表達重要結論、理由和限定，slides 列投影片 first。
