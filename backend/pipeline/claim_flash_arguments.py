@@ -333,7 +333,15 @@ def final_support_decisions(root,ports,jobs):
         else:remaining.append(job)
     ordinary = [job for job in remaining if not job.get('reuse_scripture_check')]
     support_only = [job for job in remaining if job.get('reuse_scripture_check')]
-    consume(f.gpt(root,ports,'argument_final_support',ordinary,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    legacy_batch = any(
+        json.loads(path.read_text()).get('system') == FINAL_SUPPORT_BATCH_PROMPT
+        for path in (root/'gpt').glob('*/request.json')
+    )
+    instruction = FINAL_SUPPORT_BATCH_PROMPT
+    if not legacy_batch:
+        instruction += statements.SCRIPTURE_SOURCE_RULE
+        instruction += '講道原話（包括禱告）已支持主張且無可定位的經文引述時，選keep。'
+    consume(f.gpt(root,ports,'argument_final_support',ordinary,schema,instruction,semantic_review=False))
     if support_only:
         instruction = ('只核對最終論據集合是否完整支持Claim。經文出處已核對，沿用該判定。'
                        'keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
@@ -531,7 +539,13 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 projected = f.apply_overlay(records, {key: proposed})
                 material = flash.claim_material(key, projected, sources, source_id)
                 statements.verify_evidence(evidence_root, {row['object_key'] for row in material['evidence']}, records, sources)
-                checked = statements.review(projected, sources, [key], source_id, root/'statement-correction', ports)
+                tasks = None
+                if correction.get('retain_scripture_refs'):
+                    if proposed['scripture_refs'] != payload['scripture_refs']:
+                        raise ValueError('Claim wording correction changed retained Scripture references')
+                    tasks = ['statement_fidelity', 'support']
+                review_root = root/('statement-correction-support' if tasks else 'statement-correction')
+                checked = statements.review(projected, sources, [key], source_id, review_root, ports, tasks=tasks)
                 e.save(root/'statement-correction.json', checked)
                 if checked['pending'] or checked['updates']:
                     raise ValueError('Proposed Claim statement needs further disposition')

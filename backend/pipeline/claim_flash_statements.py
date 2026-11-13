@@ -17,15 +17,15 @@ PROMPT=(flash.PROMPT+'只處置本次指定的一項Claim檢查，不修改下�
  '若缺來源用needs_source；已有材料缺連接用needs_connection，不以刪弱主張掩蓋。'
  'keep不修改任何欄位，修訂只輸出必要差異。')
 
-SCRIPTURE_PROMPT = (
+SCRIPTURE_SOURCE_RULE = (
     '經文檢查：scripture_refs 只記教授在本段實際引用或指向、且用於本主張的經文。'
     '只提及人物、事件或教導，沒有給出可定位的線索，出處可留空；正確留空選 keep。'
     '只指明書卷、章或範圍，保留該精度；只有教授的引文或當段語境足以唯一定位才細化到節。'
     '可由常識聯想到平行經文，不等於教授在本段指向該處。'
     '只有原文已提供可定位的線索，而出處漏記或錯記，才 repair scripture_refs。'
     '只有原文缺漏或含混且影響判定時，才 needs_source，並說明需要核對哪段。'
-    '此項只改 scripture_refs，勿改主張文字。'
 )
+SCRIPTURE_PROMPT = SCRIPTURE_SOURCE_RULE + '此項只改 scripture_refs，勿改主張文字。'
 
 
 class Edit(BaseModel):
