@@ -535,7 +535,8 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 statement_updates[key] = proposed
                 records = projected
         targets={'claims/'+cid for cid in ids}
-        pool={k for k in group['lower_record_keys'] if k.split('/')[0] in {'evidence_steps','observations'}}
+        pool={k for k in group['lower_record_keys'] if k in records and not records[k].get('retired')
+              and k.split('/')[0] in {'evidence_steps','observations'}}
         for key in targets:pool.update(x['object_key'] for x in flash.claim_material(key,records,sources,source_id)['evidence'])
         candidates=material_candidates(pool,records,set(group['paragraph_keys'])|material_paragraphs(pool,records),source_id) if expanded else pool
         extra = set()
