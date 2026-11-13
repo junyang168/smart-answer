@@ -10,9 +10,6 @@ from backend.pipeline.chapter_exposition import chapter_client
 ITEM = {"type": "object", "additionalProperties": False,
         "properties": {"text": {"type": "string"}, "cue": {"type": "integer"}},
         "required": ["text", "cue"]}
-SCHEMA = {"type": "object", "additionalProperties": False,
-          "properties": {"topics": {"type": "array", "maxItems": 3, "items": ITEM}},
-          "required": ["topics"]}
 
 
 def candidates(section: dict) -> list[dict]:
@@ -36,12 +33,14 @@ def generate(index: dict, client: Any) -> dict:
     result = {}
     if not sources:
         return {"passage": index["passage"], "model": client.model, "sections": result}
-    group = {"type": "object", "additionalProperties": False,
-             "properties": {"section": {"type": "string"}, **SCHEMA["properties"]},
-             "required": ["section", "topics"]}
-    schema = {"type": "object", "additionalProperties": False,
-              "properties": {"sections": {"type": "array", "items": group}},
-              "required": ["sections"]}
+    schema = {"type": "object", "additionalProperties": False, "required": list(sources),
+              "properties": {
+                  section: {"type": "array", "minItems": 1, "maxItems": 3, "items": {
+                      **ITEM, "properties": {**ITEM["properties"], "cue": {
+                          "type": "integer", "enum": list(range(1, len(options) + 1))
+                      }}
+                  }} for section, options in sources.items()
+              }}
     prompt = {section: [
         {"cue": number, "title": item["title"], "points": item["points"]}
         for number, item in enumerate(options, start=1)
@@ -52,15 +51,12 @@ def generate(index: dict, client: Any) -> dict:
         "不要補入材料沒有的意思。每個輸入段落恰好回傳一次。",
         json.dumps(prompt, ensure_ascii=False), schema,
     )
-    groups = answer["sections"]
-    if len(groups) != len(sources) or {group["section"] for group in groups} != set(sources):
+    if set(answer) != set(sources):
         raise ValueError("Overview response must cover each playable section exactly once")
-    for group in groups:
-        section = group["section"]
+    for section, topics in answer.items():
         options = sources[section]
-        topics = group["topics"]
-        if not 1 <= len(topics) <= 3 or len({t["cue"] for t in topics}) != len(topics):
-            raise ValueError(f"Invalid topic count or repeated cue in {section}")
+        if not 1 <= len(topics) <= 3:
+            raise ValueError(f"Invalid topic count in {section}")
         entries = []
         for item in topics:
             cue, text = item["cue"], item["text"].strip()
