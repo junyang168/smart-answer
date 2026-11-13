@@ -217,3 +217,13 @@ def test_pending_split_is_committed_in_source_order_and_used_by_update(relocatio
     stale = {'S': {**snapshot, 'body_sha256': 'newer'}}
     with pytest.raises(ValueError, match='pending quotation location is stale'):
         Locator(stale).prepare(key, records, stale)
+
+
+def test_flash_preflight_reuses_existing_locator_transaction(relocation):
+    store, root, args = setup(relocation)
+    assert flow.preflight(store, 'S', published=args['published'])['status'] == 'locator_required'
+    flow.prepare(store, root, **args)
+    assert flow.preflight(store, 'S', published=args['published'], locator_root=root)['status'] == 'migrated'
+    assert flow.preflight(store, 'S', published=args['published'])['status'] == 'not_needed'
+    args['published'].write_text('{"script":[{"index":1,"text":"different publication"}]}')
+    assert flow.preflight(store, 'S', published=args['published'])['status'] == 'registration_required'

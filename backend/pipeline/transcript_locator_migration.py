@@ -22,6 +22,73 @@ RESOLVED = {'auto_rebind', 'already_current', 'source_deleted', 'already_deleted
             'retired', 'context_only', 'relocate_changed_quote'}
 
 
+def preflight(store, source_id, *, published=None, locator_root=None, registration_root=None):
+    """Check source identity and active locator epochs before Flash grouping."""
+    from backend.pipeline import claim_flash_common as common
+    from backend.pipeline import claim_flash_source as flash_source
+
+    if registration_root is not None:
+        root = Path(registration_root).resolve()
+        manifest = m.load(root)
+        if manifest['source_id'] != source_id or published is None:
+            raise ValueError('registration plan does not match the Flash source and publication')
+        target = evidence.snap(published)
+        if {**evidence.snap(manifest['after']['path']), 'file':target['file']} != target:
+            raise ValueError('registration plan differs from published body or clocks')
+        with evidence.locks(source_id, record_keys=['source_documents/'+source_id]):
+            m.register(store, root)
+
+    row = store.get_record_state('source_documents', source_id)
+    if not row or row['retired']:
+        raise ValueError('missing source: '+source_id)
+    doc = row['payload']
+    try:
+        bound = common.source_binding(doc)
+        if published is not None:
+            target = evidence.snap(published)
+            if {**evidence.snap(bound['path']), 'file':target['file']} != target:
+                return {'status':'registration_required', 'reason':'registered source differs from published body or clocks'}
+        records, sources = common.load_source(store, source_id, visual_context=True)
+        source = flash_source.current_source(records, sources, source_id)
+    except (ValueError, OSError) as exc:
+        return {'status':'registration_required','reason':str(exc)}
+
+    body_sha = source['body_sha256']
+    stale = []
+    for key, state in records.items():
+        payload = state['payload']
+        if key.startswith('source_fragments/') and payload.get('anchor_state') not in {'source_deleted','context_only'}:
+            if payload.get('source_sha256') and payload['source_sha256'] != body_sha:
+                stale.append(key)
+        if key.startswith('claims/') and payload.get('review_status') not in {'superseded','retired'}:
+            if any(anchor.get('source_sha256') and anchor['source_sha256'] != body_sha
+                   for occurrence in payload.get('occurrences', []) if anchors.own_occurrence(occurrence, doc)
+                   for anchor in occurrence.get('anchors', [])):
+                stale.append(key)
+    if stale and registration_root is not None and locator_root is not None and not (Path(locator_root)/'migration.json').exists():
+        direction = Path(registration_root)/'locator-direction.txt'
+        if not direction.exists():
+            direction.write_text(manifest['instruction'])
+        prepare(store, locator_root, source_id=source_id, old_paths=[manifest['before']['path']],
+                published=published, instruction_file=direction)
+    if stale or locator_root is not None:
+        if locator_root is None:
+            return {'status':'locator_required','record_keys':sorted(stale)}
+        root = Path(locator_root).resolve()
+        plan = load(root)
+        if (plan['intent']['source_id'] != source_id
+                or published is None or plan['intent']['published'] != str(Path(published).resolve())):
+            raise ValueError('locator plan does not match the Flash source and publication')
+        preview = m.read(root/'preview.json')
+        if preview['exceptions']:
+            return {'status':'locator_required','exceptions':preview['exceptions']}
+        with execution_locks(root):
+            run(store, root)
+        result = preflight(store, source_id, published=published)
+        return {'status':'migrated'} if result['status']=='not_needed' else result
+    return {'status':'not_needed','records':records,'sources':sources}
+
+
 @contextmanager
 def run_lock(root):
     root = Path(root).resolve()

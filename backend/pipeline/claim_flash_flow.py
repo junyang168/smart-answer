@@ -256,7 +256,7 @@ def bind_evidence_ports(root, ports, evidence_ports):
     return evidence_ports
 
 
-def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None):
+def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None,published=None,locator_root=None,registration_root=None):
     """Apply each authorized layer to its store; candidate mode requires private SQL.
 
     Passing a canonical store authorizes no writes by itself: its caller must
@@ -270,7 +270,20 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
         mode='candidate_workspace' if candidate is not None else 'canonical_refresh'
         if candidate is not None and not getattr(store,'_flash_candidate_workspace',None):
             raise ValueError('candidate Flash requires its private isolated workspace')
-        records,sources=snapshot(store,source_id)
+        if candidate is None and not (root/'flow-intent.json').exists():
+            from backend.pipeline import transcript_locator_migration as migration
+
+            check = migration.preflight(store, source_id, published=published, locator_root=locator_root,
+                                        registration_root=registration_root)
+            if check['status'] not in {'not_needed','migrated'}:
+                return {'version':VERSION,'source_id':source_id,'status':'needs_attention',
+                        'pending':[{'layer':'migration',**check}]}
+            if check['status']=='not_needed':
+                records,sources=check['records'],check['sources']
+            else:
+                records,sources=snapshot(store,source_id)
+        else:
+            records,sources=snapshot(store,source_id)
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
         e.save(root/'flow-intent.json',intent)
@@ -501,6 +514,7 @@ def main():
     selector.add_argument('--source-id',help='Existing canonical source; requires explicit --apply')
     parser.add_argument('--apply',action='store_true');parser.add_argument('--database-url')
     parser.add_argument('--shared-groups');parser.add_argument('--codex-executable')
+    parser.add_argument('--published');parser.add_argument('--locator-root');parser.add_argument('--registration-root')
     args=parser.parse_args()
     if args.candidate and (args.apply or args.database_url):parser.error('candidate mode never accepts canonical write flags or database URLs')
     if args.source_id and not args.apply:parser.error('canonical flow requires explicit --apply')
@@ -508,7 +522,18 @@ def main():
     ports, evidence_ports = subscription_ports(root, ClaimModelCapacity(read(args.capacity_file)), args.codex_executable)
     plan=read(args.shared_groups) if args.shared_groups else None
     if args.candidate:result=run_candidate(args.candidate,root,ports,plan=plan,evidence_ports=evidence_ports)
-    else:result=run(PostgresKnowledgeStore(args.database_url),args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports)
+    else:
+        store = PostgresKnowledgeStore(args.database_url)
+        published = args.published
+        if published is None and os.getenv('DATA_BASE_DIR'):
+            row = store.get_record_state('source_documents', args.source_id)
+            item = row['payload'].get('transcript_id') if row else None
+            if item and Path(item).name == item:
+                path = Path(os.environ['DATA_BASE_DIR'])/'script_published'/(item+'.json')
+                if path.is_file():
+                    published = path
+        result=run(store,args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports,
+                   published=published,locator_root=args.locator_root,registration_root=args.registration_root)
     print(json.dumps(result, ensure_ascii=False))
     # Keep the full JSON contract on stdout. An incomplete lecture needs an
     # Agent decision even when the runner exited normally.
