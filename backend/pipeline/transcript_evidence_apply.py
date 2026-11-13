@@ -87,10 +87,7 @@ def calibrate(row, state, rule, new, document):
             raise ValueError('aligned paragraphs are outside the saved audio interval')
         return {**row, 'status': 'paragraph_location', 'reason': rule['reason'],
                 'target_paragraphs': keys, 'candidate_segments': locations,
-                'calibration_decision': rule, 'proposed_fields': {
-                    'anchor_state': 'unresolved', 'source_binding_status': 'quotation_pending_update',
-                    'aligned_paragraphs': {'source_body_sha256': new['body_sha256'], 'locations': locations},
-                }}
+                'calibration_decision': rule, 'proposed_fields': pending_location_fields(locations[0], new)}
     segments = []
     for target in rule['segments']:
         p = new['paragraphs'][target['paragraph_key']]; quote = target['verbatim_excerpt']
@@ -126,14 +123,7 @@ def calibrate(row, state, rule, new, document):
                 'target_paragraphs': [s['paragraph_key'] for s in segments],
                 'candidate_segments': segments,
                 'candidate_quote': '\n'.join(s['verbatim_excerpt'] for s in segments),
-                'calibration_decision': rule, 'proposed_fields': {
-                    'anchor_state': 'unresolved',
-                    'source_binding_status': 'source_text_missing',
-                    'missing_in_source_sha256': new['body_sha256'],
-                    'question_context': [
-                        {**segment_fields(s, new), 'kind': 'question_answer_context'} for s in segments
-                    ],
-                }}
+                'calibration_decision': rule, 'proposed_fields': pending_location_fields(segments[0], new, question=True)}
     from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     return {**row, 'status':'calibrated_rebind', 'reason':rule['reason'],
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
@@ -175,6 +165,23 @@ def verified_cross_paragraph_rule(row, state, new):
         'reason': '兩側唯一上下文及引文兩端均對齊，各段逐字切片符合舊音訊區間；內容待審。',
         'segments': segments,
     }
+
+
+def pending_location_fields(segment, new, *, question=False):
+    pk = segment['paragraph_key']
+    p = new['paragraphs'][pk]
+    fields = {
+        'paragraph_key': pk, 'source_segment_index': p['index'],
+        'source_sha256': new['body_sha256'], 'media_time': p['start_time'],
+        'media_end_time': p['end_time'], 'paragraph_text_sha256': m.sha(p['text'].encode()),
+        'verbatim_excerpt': '', 'verbatim_excerpt_sha256': None,
+        'anchor_state': 'unresolved', 'source_binding_status': 'quotation_pending_update',
+    }
+    if question:
+        fields.update(source_binding_status='source_text_missing',
+                      missing_in_source_sha256=new['body_sha256'],
+                      question_context=[{**segment_fields(segment, new), 'kind': 'question_answer_context'}])
+    return fields
 
 
 def segment_fields(segment, new):
@@ -270,6 +277,22 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                                'old_paragraph': f.get('paragraph_key'),
                                'old_media_time': f.get('media_time'), 'affected_claims': []})
         row = deepcopy(row)
+        if (f.get('source_sha256') == new['body_sha256'] and not f.get('verbatim_excerpt')
+                and f.get('anchor_state') == 'unresolved'
+                and f.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'}):
+            validate_fragment_locations({key: f}, new)
+            row.update(status='already_current', reason='current_paragraph_awaits_quotation')
+            rows.append(row)
+            continue
+        if f.get('anchor_state') == 'replaced_by_precise_fragments':
+            children = [records.get('source_fragments/'+fid, {}) for fid in f.get('replacement_fragment_ids', [])]
+            if children and all(not child.get('retired')
+                                and child.get('payload', {}).get('source_id') == source_id
+                                and child['payload'].get('source_sha256') == new['body_sha256']
+                                for child in children):
+                row.update(status='already_current', reason='current_replacement_fragments')
+                rows.append(row)
+                continue
         if not state.get('retired'):
             rule = rules.get(key) or verified_cross_paragraph_rule(row, state, new)
             if rule is not None:
@@ -298,12 +321,16 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
               and f.get('deleted_in_source_sha256') == new['body_sha256']):
             row.update(status='already_deleted', reason='deletion_already_recorded')
         fields, changed = fields_for(row, f, new)
-        if row['status'] == 'calibrated_rebind' and len(row['candidate_segments']) > 1:
+        if (not state.get('retired') and f.get('anchor_state') != 'source_deleted'
+                and row['status'] in {'calibrated_rebind', 'paragraph_location', 'question_context_only'}
+                and len(row['candidate_segments']) > 1):
             ids = []
             for segment in row['candidate_segments']:
                 fid = 'TMR-'+cm.sha256_json([key,new['body_sha256'],segment])[:48]
+                child_fields = (segment_fields(segment, new) if row['status'] == 'calibrated_rebind'
+                                else pending_location_fields(segment, new, question=row['status'] == 'question_context_only'))
                 child = SourceFragmentRecord.model_validate({
-                    'fragment_id':fid,'source_id':source_id, **segment_fields(segment,new),
+                    'fragment_id':fid,'source_id':source_id, **child_fields,
                     'split_from_fragment_id':f['fragment_id'],
                 }).model_dump(mode='json')
                 if 'source_fragments/'+fid in records:
@@ -344,7 +371,8 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
     for key,state in sorted(records.items()):
         if state.get('retired') or key.split('/',1)[0] not in {'evidence_steps','questions','observations','position_nodes'}:
             continue
-        f = state['payload']; old_ids = evidence_fragment_ids(f); result_ids = []
+        f = state['payload']; old_ids = list(dict.fromkeys([
+            *(f.get('source_fragment_ids') or []), *evidence_fragment_ids(f)])); result_ids = []
         slots = f.get('source_fragment_ids') or []
         occurrence_maps = {
             fid: rules.get('source_fragments/'+fid, {}).get('consumer_occurrence_segments', {}).get(key)
@@ -608,6 +636,15 @@ def validate_fragment_locations(updates, snapshot):
                 if context.get('kind') != 'question_answer_context' or context.get('anchor_state') != 'source_version_bound':
                     raise ValueError('invalid question context provenance')
                 validate_fragment_locations({'source_fragments/context': context}, snapshot)
+        if (fragment.get('anchor_state') == 'unresolved'
+                and not fragment.get('verbatim_excerpt')
+                and fragment.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'}):
+            pk = fragment.get('paragraph_key')
+            paragraph = snapshot['paragraphs'].get(pk)
+            if not paragraph or any(fragment.get(field) != value for field, value in
+                                    pending_location_fields({'paragraph_key': pk}, snapshot).items()
+                                    if field != 'source_binding_status'):
+                raise ValueError('pending quotation location differs: ' + key)
         if fragment.get('anchor_state') != 'source_version_bound':
             continue
         paragraph = snapshot['paragraphs'].get(fragment.get('paragraph_key'))

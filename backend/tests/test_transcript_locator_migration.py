@@ -165,3 +165,55 @@ def test_completed_run_detects_later_sql_drift(relocation):
     with pytest.raises(ValueError, match='postimage readback differs'):
         flow.verify(store, root)
     assert (root / 'result.json').read_bytes() == receipt
+
+
+def test_pending_split_is_committed_in_source_order_and_used_by_update(relocation):
+    from backend.pipeline.claim_flash_source_lookup import Locator
+
+    store, root, args = setup(relocation)
+    # Two live paragraphs in a distinct source version, both within the saved
+    # playback window for F1. Keep the old quotation in the original fragment.
+    published = args['published']
+    doc = m.read(published)
+    doc['script'].insert(1, {'index': 11, 'text': '教授緊接著回答。', 'start_time': 4, 'end_time': 5})
+    published.write_text(json.dumps(doc))
+    snapshot = ea.snap(published)
+    source = store.get_record_state('source_documents', 'S')['payload']
+    source_path = published.with_name('new.json')
+    source_path.write_bytes(published.read_bytes())
+    source.update(source_file_sha256=m.sha(source_path.read_bytes()),
+                  source_sha256=snapshot['body_sha256'], source_body_sha256=snapshot['body_sha256'])
+    store.apply_plan(store.plan_package({'source_documents': [source]}))
+    # Include the previous registered source for the already-current F3.
+    f3 = store.get_record_state('source_fragments', 'F3')['payload']
+    f3.update(source_sha256=ea.snap(args['old_paths'][0])['body_sha256'])
+    store.apply_plan(store.plan_package({'source_fragments': [f3]}))
+    before = store.get_record_state('source_fragments', 'F1')
+    calibration = root.parent / 'calibration.json'
+    calibration.write_text(json.dumps({'fragments': {'source_fragments/F1': {
+        'mode': 'paragraph_location', 'paragraph_keys': ['S0001', 'S0002'],
+        'before_pin': [before['revision'], before['content_sha256']],
+        'target_source_sha256': snapshot['body_sha256'], 'reason': '同一次發言跨兩段',
+    }}}))
+    assert not flow.prepare(store, root, **args, calibration_path=calibration)['exceptions']
+    result = flow.run(store, root)
+    assert flow.verify(store, root) == result
+    parent = store.get_record_state('source_fragments', 'F1')['payload']
+    children = parent['replacement_fragment_ids']
+    assert parent['verbatim_excerpt'] == before['payload']['verbatim_excerpt']
+    assert store.get_record_state('evidence_steps', 'E')['payload']['source_fragment_ids'] == [*children, 'F2']
+    records = {'source_fragments/' + fid: store.get_record_state('source_fragments', fid) for fid in children}
+    assert [r['payload']['paragraph_key'] for r in records.values()] == ['S0001', 'S0002']
+    assert all(not r['payload']['verbatim_excerpt'] for r in records.values())
+    key = 'questions/Q'
+    records[key] = {'payload': {'text': '問題', 'source_fragment_ids': children}}
+    sources = {'S': snapshot}
+    material, quotes = Locator(sources).prepare(key, records, sources)
+    assert quotes is None and material['original_text_excerpts'] == []
+    assert '教授緊接著回答。' in [p['text'] for p in material['nearby_paragraphs']]
+    fresh = flow.prepare(store, root.with_name('fresh'), **args)
+    assert fresh['exceptions'] == []
+    assert fresh['evidence_updates'] == 0
+    stale = {'S': {**snapshot, 'body_sha256': 'newer'}}
+    with pytest.raises(ValueError, match='pending quotation location is stale'):
+        Locator(stale).prepare(key, records, stale)

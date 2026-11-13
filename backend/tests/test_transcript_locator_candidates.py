@@ -355,7 +355,8 @@ def test_statement_first_keeps_question_context_separate_from_unsupported_eviden
     row = {"record_key": question, "status": "exception", "direct_consumers": ["questions/q"]}
     result = calibrate(row, records[question], rule, new, {})
     post = {**records[question]["payload"], **result["proposed_fields"]}
-    assert post["verbatim_excerpt"] == "聽眾舊問句"
+    assert post["verbatim_excerpt"] == ""
+    assert post["paragraph_key"] == "S0145"
     assert post["anchor_state"] == "unresolved"
     assert post["question_context"][0]["verbatim_excerpt"] == "對，不可離開。"
     validate_fragment_locations({question: post}, new)
@@ -469,9 +470,7 @@ def test_confirmed_paragraph_survives_invalid_quote_without_becoming_evidence():
     row = {"record_key": key, "status": "exception"}
     result = calibrate(row, state, rule, new, {})
     post = {**state["payload"], **result["proposed_fields"]}
-    assert post["verbatim_excerpt"] == "歷史引文"
+    assert post["verbatim_excerpt"] == ""
     assert post["anchor_state"] == "unresolved"
-    assert post["aligned_paragraphs"]["locations"] == [
-        {"paragraph_key": "S0145", "media_time": 10, "media_end_time": 15},
-    ]
+    assert (post["paragraph_key"], post["media_time"], post["media_end_time"]) == ("S0145", 10, 15)
     validate_fragment_locations({key: post}, new)
