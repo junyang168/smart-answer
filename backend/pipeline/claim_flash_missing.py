@@ -56,8 +56,19 @@ def discovery_material(ports,jobs,shared):
 def consume(store,root,records,sources):
     root=Path(root);result=json.loads((root/'result.json').read_text());before=json.loads((root/'before.json').read_text())
     if (result.get('version')!=relations.VERSION or result.get('completion_scope')!='group_claim_relations_only'
-            or result.get('pending') or result.get('status') not in {'verified','applied'} or before['sources']!=sources):
+            or result.get('pending') or result.get('status') not in {'verified','applied'}):
         raise ValueError('completed group Claim relations required')
+    from backend.pipeline import claim_human_source as human
+    source_fields = {'human_source_guard', 'human_source_decisions'}
+    def content(view):
+        return {sid: {key: value for key, value in source.items() if key not in source_fields}
+                for sid, source in view.items()}
+    if content(before['sources']) != content(sources):
+        raise ValueError('completed group Claim relation source changed')
+    for source in before['sources'].values():
+        if guard := source.get('human_source_guard'):
+            with store.connect() as conn, conn.cursor() as cursor:
+                human.assert_scope_current(cursor, guard)
     if result['updates'] or result.get('retiring_keys'):
         intent=json.loads((root/'commit-intent.json').read_text());history=store.get_change_history(intent['change_set_id'])
         if (not result.get('applied') or not history or history['status']!='applied'
