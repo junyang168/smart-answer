@@ -262,7 +262,7 @@ export default function OriginalAudio({
   source?: string;
   embedded?: boolean;
   /** 按章页面：每一段进聆听模式的地址。 */
-  listenHref?: (section: string) => string;
+  listenHref?: (section: string, cue?: { sourceId: string; at: number }) => string;
 }) {
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
@@ -447,8 +447,8 @@ export default function OriginalAudio({
       return section.sermons
         .flatMap((sermon) =>
           sermon.slides && sermon.slides.length > 0
-            ? sermon.slides.map((slide) => ({ at: slide.at, text: slide.title }))
-            : sermon.judgements.map((mark) => ({ at: mark.at, text: mark.judgement })),
+            ? sermon.slides.map((slide) => ({ at: slide.at, text: slide.title, sourceId: sermon.source_id }))
+            : sermon.judgements.map((mark) => ({ at: mark.at, text: mark.judgement, sourceId: sermon.source_id })),
         )
         .filter((item) => item.text && !seen.has(item.text) && seen.add(item.text));
     };
@@ -471,12 +471,28 @@ export default function OriginalAudio({
         <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {sections.map((section) => (
             <li key={section.passage}>
+              {section.passage === "mat-16-19" && !aiVoice ? (
+                <div className="space-y-2 px-4 py-3 sm:px-5">
+                  <Link href={listenHref(section.passage)} className="font-serif text-lg font-bold hover:text-amber-800">
+                    {section.label} · {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+                  </Link>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {topics(section).map((item) => (
+                      <li key={item.text}>
+                        <Link href={listenHref(section.passage, item)} className="inline-block rounded-full bg-stone-100 px-2.5 py-1 text-sm hover:bg-amber-100">
+                          {item.text}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
               <Link
                 href={listenHref(section.passage)}
                 className="flex flex-col gap-2 px-4 py-3 hover:bg-amber-50/60 sm:flex-row sm:items-baseline sm:gap-4 sm:px-5"
               >
                 <span className="flex shrink-0 items-baseline gap-2 sm:min-w-[7.5rem]">
-                  <span className="font-serif text-lg font-bold text-stone-900">{section.label.split(" ").pop()}</span>
+                  <span className="font-serif text-lg font-bold text-stone-900">{section.label.split(" ").pop()}{section.passage === "mat-16-28" && !aiVoice && " · 登山變像"}</span>
                   <span className="font-mono text-xs text-stone-500">
                     {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
                   </span>
@@ -500,6 +516,7 @@ export default function OriginalAudio({
                   )}
                 </span>
               </Link>
+              )}
             </li>
           ))}
         </ol>
