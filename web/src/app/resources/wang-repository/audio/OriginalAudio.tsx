@@ -458,21 +458,18 @@ export default function OriginalAudio({
           {sections.map((section) => (
             <li key={section.passage}>
               <div className="grid gap-2 px-4 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 sm:px-5">
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 self-start sm:flex-col sm:items-start">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="font-serif text-lg font-bold">{section.label.split(" ").pop()}</span>
-                    <span className="font-mono text-xs text-stone-500">
-                      {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
-                    </span>
-                  </div>
-                  <Link
-                    href={listenHref(section.passage)}
-                    aria-label={`${section.label}，從本段開頭聽`}
-                    className="inline-flex min-h-10 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-amber-900 ring-1 ring-inset ring-stone-200 hover:bg-amber-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-800"
-                  >
-                    <span aria-hidden="true">▶</span> 從本段開頭聽
-                  </Link>
-                </div>
+                <Link
+                  href={listenHref(section.passage)}
+                  aria-label={`${section.label}，從本段開頭聽`}
+                  title="從本段開頭聽"
+                  className="flex min-h-11 w-fit flex-wrap items-center gap-x-2 self-start rounded-md py-1 text-stone-900 hover:text-amber-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-800"
+                >
+                  <span aria-hidden="true" className="text-xs text-amber-800">▶</span>
+                  <span className="font-serif text-lg font-bold">{section.label.split(" ").pop()}</span>
+                  <span className="font-mono text-xs text-stone-500">
+                    {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+                  </span>
+                </Link>
                 {Boolean(section.topics?.length) && (
                   <ul className="divide-y divide-stone-100">
                     {section.topics?.slice(0, 3).map((topic) => {
