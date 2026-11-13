@@ -298,3 +298,33 @@ def test_filtered_flash_window_keeps_base_words_and_continues(tmp_path, monkeypa
     assert [turn["text"] for turn in result["turns"]] == ["底稿", "精修第二段"]
     assert result["unrefined_windows"] == [{"window": 0, "start": 0, "end": 1,
                                            "reason": "PROHIBITED_CONTENT"}]
+
+
+def test_filtered_flash_splits_word_ownership_and_only_keeps_blocked_minute(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(flow.audio, "VisionReviewer", lambda *_: SimpleNamespace(config={}))
+    monkeypatch.setattr(flow.audio, "extract", lambda _, path, *_args: path.write_bytes(b"mp3"))
+    calls = []
+
+    def respond(_, name, model, packet, invoke):
+        calls.append(name)
+        if name in {"flash-0", "flash-0-minute-1"}:
+            raise flow.audio.FilteredRefinement("PROHIBITED_CONTENT")
+        return {"edits": [{"id": packet["editable_ids"][0], "text": "精修" + packet["speaker_turns"][0]["text"]}],
+                "omissions": []}
+
+    words = [{"text": text, "speaker": speaker, "start": start, "end": end}
+             for text, speaker, start, end in [
+                 ("甲", "w0:spk:0", 1, 2), ("乙", "w0:spk:0", 59, 61),
+                 ("丙", "w0:spk:1", 121, 122), ("丁", "w1:spk:0", 181, 182),
+             ]]
+    result = flow.audio.refine(None, {"duration": 190, "words": words, "coverage": []}, tmp_path, respond)
+    assert calls == ["flash-0", "flash-0-minute-0", "flash-0-minute-1", "flash-0-minute-2", "flash-1"]
+    assert [turn["text"] for turn in result["turns"]] == ["精修甲", "乙", "精修丙", "精修丁"]
+    assert [turn["text"] for turn in result["base_turns"]] == ["甲", "乙", "丙", "丁"]
+    ids = [turn["id"] for turn in result["turns"]]
+    assert ids == [turn["id"] for turn in result["base_turns"]] and len(set(ids)) == 4
+    assert result["unrefined_windows"] == [
+        {"window": 0, "start": 60, "end": 120, "reason": "PROHIBITED_CONTENT"}
+    ]
