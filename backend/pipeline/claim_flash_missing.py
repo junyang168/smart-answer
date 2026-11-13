@@ -368,7 +368,8 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             if not p['evidence_step_ids'] and not proposed[index]['_observation_ids']:pending.append({'object_key':key,'reason':'new_claim_has_no_final_support'})
         new_pairs,p,discoveries=flash.discover(records,sources,members,set(members)|{'claims/'+cid for cid in ids},root/'new-relations',ports,task='missing_claim_relations',complete=True) if members else ([],[],[])
         pending+=p
-        relationships=pairs.review(records,sources,[],[],root/'new-claim-pairs',ports,kind='claim',completed_proposals=new_pairs)
+        relationships=pairs.review(records,sources,[],[],root/'new-claim-pairs',ports,kind='claim',completed_proposals=new_pairs,
+                                   repair_invalid_completed=True)
         pending+=relationships['pending']
         selected_questions={qid for link in links for qid in link['question_ids']}
         question_records={k:r for k,r in records.items() if not k.startswith('questions/') or k.split('/',1)[1] in selected_questions}
