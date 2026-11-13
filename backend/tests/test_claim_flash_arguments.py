@@ -465,3 +465,99 @@ def test_final_argument_support_recognizes_only_the_recorded_token_limit(tmp_pat
         with pytest.raises(e.RecordedCallRejected):
             stage.argument_support_issues(tmp_path, ports, material)
     assert len(ports.calls) == 1
+
+
+def test_scripture_decision_reuses_same_material_but_support_is_rechecked(tmp_path):
+    material = {'claim': {'statement': '耶穌談到外邦人的掌權。', 'scripture_refs': []},
+                'evidence': [{'object_key': 'evidence_steps/E', 'statement': '外邦人掌權。',
+                              'relation_type': 'supports'}],
+                'source_paragraphs': {'S0001': '主說，外邦人有君王為主治理他們。'}}
+    key = 'claims/C'
+    outcome = {'object_key': key, 'task': 'claim_scripture', 'action': 'keep',
+               'reason': '教授沒有給出具體出處。',
+               'scripture_input_sha256': statements.scripture_input_hash(material)}
+    changed = deepcopy(material)
+    changed['evidence'][0]['relation_type'] = 'explains'
+    assert statements.scripture_verified([outcome], key, changed)
+
+    class Judge:
+        def judge(self, request):
+            assert set(request['questions']) == {'support'}
+            return {'model': e.MODEL, 'answers': {'support': {'type': 'choice', 'choice': 'partial',
+                    'probabilities': {key: float(key == 'partial') for key in request['questions']['support']['criteria']}}}}
+
+    assert stage.argument_support_issues(tmp_path, Judge(), changed, scripture_verified=True) == {'support': 'partial'}
+    assert not statements.scripture_verified([{**outcome, 'action': 'needs_source'}], key, changed)
+    changed['source_paragraphs']['S0001'] += ' 見馬太福音二十章。'
+    assert not statements.scripture_verified([outcome], key, changed)
+
+
+def test_final_gpt_support_only_prompt_preserves_prior_scripture_decision(tmp_path):
+    ports = Ports()
+    job = {'job_id': 'claims/C', 'material': {}, 'findings': {'support': 'partial'}, 'reuse_scripture_check': True}
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
+    assert '經文出處已核對，沿用該判定' in ports.calls[0][1]['system']
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
+
+
+@pytest.mark.parametrize('drift', ['additive', 'transcript', 'removed', 'started', 'pending'])
+def test_statement_handoff_rechecks_only_new_source_context(ready, monkeypatch, drift):
+    from backend.pipeline import claim_human_source as human
+    from backend.tests.test_claim_flash_human_source import fact, save
+
+    store, root, plan, evidence_root, statement_root = ready
+    before = json.loads((statement_root/'before.json').read_text())
+    if drift == 'removed':
+        now = deepcopy(before['sources'])
+        original = fact(now)
+        human.project(now, [original])
+        now['S']['human_source_guard'] = {'paragraphs': {'S': ['S0001']}, 'entries': [original]}
+        with pytest.raises(ValueError, match='clarification changed'):
+            stage.added_source_context(now, before['sources'])
+        return
+
+    _, sources = f.load_source(store, 'S')
+    save(store, [fact(sources)])
+    records, current = f.load_group_source(store, 'S', plan['groups'][0])
+    if drift == 'transcript':
+        current['S']['file']['file_sha256'] = '0'*64
+        with pytest.raises(ValueError, match='statement source differs'):
+            stage.statement_proof(statement_root, ['C'], records, current)
+        return
+
+    reviewed = []
+    original_review = statements.review
+
+    def track(records, sources, targets, source_id, path, ports, **kwargs):
+        reviewed.extend(targets)
+        assert sources[source_id]['human_source_decisions']
+        return original_review(records, sources, targets, source_id, path, ports, **kwargs)
+
+    monkeypatch.setattr(statements, 'review', track)
+    args = (store, 'S', plan, 'G', evidence_root, statement_root, root/'arguments')
+    if drift == 'started':
+        e.save(root/'arguments'/'routes'/'gpt'/'prior'/'started.json', {})
+        ports = Ports()
+        with pytest.raises(ValueError, match='already-started argument request'):
+            stage.run(*args, ports, apply=True)
+        assert not reviewed and not ports.calls
+        return
+    if drift == 'pending':
+        finding = {'object_key':'claims/C','layer':'source','reason':'仍需補原文。'}
+        monkeypatch.setattr(statements, 'review', lambda *args, **kwargs:
+                            {'pending':[finding],'outcomes':[],'updates':{}})
+        ports = Ports()
+        result = stage.run(*args, ports, apply=True)
+        assert result['status'] == 'needs_attention' and result['pending'] == [finding]
+        assert not ports.calls and not (root/'arguments'/'commit.json').exists()
+        return
+    result = stage.run(*args, Ports(), apply=True)
+    assert result['status'] == 'verified'
+    assert reviewed == ['claims/C']
+    assert json.loads((statement_root/'before.json').read_text()) == before
+    replay = Ports()
+    stage.run(*args, replay, apply=True)
+    assert reviewed == ['claims/C']
+    assert replay.calls == []

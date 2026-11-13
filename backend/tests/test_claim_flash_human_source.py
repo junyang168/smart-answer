@@ -160,3 +160,34 @@ def test_claim_layer_consumes_same_lower_confirmation_without_reauditing_lower(s
     save(store,[fact(sources,supersedes=[first['decision_id']])])
     with pytest.raises(ChangeSetConflict,match='human source decisions changed'):
         statements.run(store,'S',['C'],root,root/'claim-statements',ClaimPorts(),apply=True)
+
+
+def test_cross_group_attached_evidence_consumes_existing_human_proof(seeded):
+    from backend.pipeline import claim_flash_statements as statements, claim_update_flash as flash
+    from backend.tests.test_claim_update_flash import Ports as ClaimPorts
+
+    store, sources, plan, previous, root = seeded
+    group = plan['groups'][1]
+    group['claim_ids'] = ['C']
+    original = store.get_record_state('claims', 'C')['payload']
+    store.apply_plan(store.plan_package({
+        'package_id': 'cross-group-attachment',
+        'claims': [{**original, 'evidence_step_ids': []}],
+        'knowledge_relations': [{'relation_id': 'EC', 'from_id': 'E', 'to_id': 'C',
+                                 'relation_type': 'supports', 'record_namespace': 'claim_update_flash_v1',
+                                 'reason': '原文支持這項主張。'}],
+    }))
+    confirmation = fact(sources)
+    save(store, [confirmation])
+    assert stage.run(store, 'S', plan, root, Ports(), previous, apply=True)['status'] == 'completed'
+
+    records, current = stage.f.load_group_source(store, 'S', group)
+    assert current['S']['human_source_guard']['entries'] == [confirmation]
+    assert flash.claim_material('claims/C', records, current, 'S')['evidence'][0]['human_source_decisions']
+    ports = ClaimPorts()
+    result = statements.run(store, 'S', ['C'], root, root/'cross-group-statements', ports, apply=True)
+    assert not result['pending']
+    assert all('record_fidelity' not in req.get('questions', {}) for role, req in ports.calls if role == 'jev')
+    replay = ClaimPorts()
+    statements.run(store, 'S', ['C'], root, root/'cross-group-statements', replay, apply=True)
+    assert replay.calls == []

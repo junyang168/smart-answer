@@ -22,6 +22,81 @@ RESOLVED = {'auto_rebind', 'already_current', 'source_deleted', 'already_deleted
             'retired', 'context_only', 'relocate_changed_quote'}
 
 
+def preflight(store, source_id, *, published=None, locator_root=None, registration_root=None, backup_manifest=None):
+    """Check source identity and active locator epochs before Flash grouping."""
+    from backend.pipeline import claim_flash_common as common
+    from backend.pipeline import claim_flash_source as flash_source
+
+    if registration_root is not None:
+        root = Path(registration_root).resolve()
+        manifest = m.load(root)
+        if manifest['source_id'] != source_id or published is None:
+            raise ValueError('registration plan does not match the Flash source and publication')
+        target = evidence.snap(published)
+        if {**evidence.snap(manifest['after']['path']), 'file':target['file']} != target:
+            raise ValueError('registration plan differs from published body or clocks')
+        with evidence.locks(source_id, record_keys=['source_documents/'+source_id]):
+            m.register(store, root)
+
+    row = store.get_record_state('source_documents', source_id)
+    if not row or row['retired']:
+        raise ValueError('missing source: '+source_id)
+    doc = row['payload']
+    try:
+        bound = common.source_binding(doc)
+        if published is not None:
+            target = evidence.snap(published)
+            if {**evidence.snap(bound['path']), 'file':target['file']} != target:
+                return {'status':'registration_required', 'reason':'registered source differs from published body or clocks'}
+        records, sources = common.load_source(store, source_id, visual_context=True)
+        source = flash_source.current_source(records, sources, source_id)
+    except (ValueError, OSError) as exc:
+        return {'status':'registration_required','reason':str(exc)}
+
+    body_sha = source['body_sha256']
+    stale = []
+    for key, state in records.items():
+        payload = state['payload']
+        if key.startswith('source_fragments/') and payload.get('anchor_state') == 'replaced_by_precise_fragments':
+            replacements = payload.get('replacement_fragment_ids') or []
+            if replacements and all(
+                records.get('source_fragments/'+fid, {}).get('payload', {}).get('source_id') == source_id
+                and records['source_fragments/'+fid]['payload'].get('source_sha256') == body_sha
+                for fid in replacements):
+                continue
+        if key.startswith('source_fragments/') and payload.get('anchor_state') not in {'source_deleted','context_only'}:
+            if payload.get('source_sha256') and payload['source_sha256'] != body_sha:
+                stale.append(key)
+        if key.startswith('claims/') and payload.get('review_status') not in {'superseded','retired'}:
+            if any(anchor.get('source_sha256') and anchor['source_sha256'] != body_sha
+                   for occurrence in payload.get('occurrences', []) if anchors.own_occurrence(occurrence, doc)
+                   for anchor in occurrence.get('anchors', [])):
+                stale.append(key)
+    if stale and registration_root is not None and locator_root is not None and not (Path(locator_root)/'migration.json').exists():
+        direction = Path(registration_root)/'locator-direction.txt'
+        if not direction.exists():
+            direction.write_text(manifest['instruction'])
+        prepare(store, locator_root, source_id=source_id, old_paths=[manifest['before']['path']],
+                published=published, instruction_file=direction, backup_manifest=backup_manifest)
+    if stale or locator_root is not None and (Path(locator_root)/'migration.json').exists():
+        if locator_root is None:
+            return {'status':'locator_required','record_keys':sorted(stale)}
+        root = Path(locator_root).resolve()
+        plan = load(root)
+        if (plan['intent']['source_id'] != source_id
+                or published is None or plan['intent']['published'] != str(Path(published).resolve())):
+            raise ValueError('locator plan does not match the Flash source and publication')
+        preview = m.read(root/'preview.json')
+        if preview['exceptions']:
+            return {'status':'locator_required','exceptions':preview['exceptions'],
+                    'unlocated_count':len(preview['exceptions']),'preview_path':str(root/'preview.json')}
+        with execution_locks(root):
+            run(store, root)
+        result = preflight(store, source_id, published=published)
+        return {'status':'migrated'} if result['status']=='not_needed' else result
+    return {'status':'not_needed','records':records,'sources':sources}
+
+
 @contextmanager
 def run_lock(root):
     root = Path(root).resolve()
@@ -47,12 +122,14 @@ def load(root):
 
 
 def prepare(store, root, *, source_id, old_paths, published, instruction_file,
-            calibration_path=None, jev_impact=False):
+            calibration_path=None, jev_impact=False, backup_manifest=None):
     with run_lock(root) as root:
         intent = {'source_id': source_id, 'old_paths': [str(Path(p).resolve()) for p in old_paths],
                   'published': str(Path(published).resolve()),
                   'instruction_file': str(Path(instruction_file).resolve()),
                   'calibration': str(Path(calibration_path).resolve()) if calibration_path else None}
+        if backup_manifest:
+            intent['backup_manifest'] = str(Path(backup_manifest).resolve())
         if jev_impact:
             intent['jev_impact'] = True
         if (root / 'migration.json').exists():
@@ -62,11 +139,12 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
             return m.read(root / 'preview.json')
         start = perf_counter()
         inputs = [m.binding(Path(p)) for p in
-                  [*old_paths, published, instruction_file, *([calibration_path] if calibration_path else [])]]
+                  [*old_paths, published, instruction_file, *([calibration_path] if calibration_path else []),
+                    *([backup_manifest] if backup_manifest else [])]]
         evidence.prepare(store, root / 'evidence', source_id=source_id,
                          old_paths=old_paths, published=published,
                          instruction=Path(instruction_file).read_text(), calibration_path=calibration_path,
-                         jev_impact=jev_impact)
+                         jev_impact=jev_impact, backup_manifest=backup_manifest)
         report = m.read(root / 'evidence/comparison.json')
         exceptions = [
             row for row in report['fragments']
@@ -183,7 +261,7 @@ def execution_locks(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['prepare', 'candidates', 'resolve', 'run', 'verify'])
+    parser.add_argument('command', choices=['migrate', 'prepare', 'candidates', 'resolve', 'run', 'verify'])
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--source-id'); parser.add_argument('--published', type=Path)
     parser.add_argument('--old-source', type=Path, action='append', default=[])
@@ -191,6 +269,7 @@ def main():
     parser.add_argument('--jev-impact', action='store_true')
     parser.add_argument('--statement-first', action='store_true')
     parser.add_argument('--backup-manifest', type=Path)
+    parser.add_argument('--registration-root', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--capacity-root', type=Path, help='shared Sol concurrency directory for resolve')
     args = parser.parse_args()
@@ -206,6 +285,15 @@ def main():
     load_dotenv()
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     store = PostgresKnowledgeStore()
+    if args.command == 'migrate':
+        if not args.source_id or not args.published:
+            parser.error('migrate requires source-id and published')
+        locator = args.root if args.registration_root or (args.root/'migration.json').exists() else None
+        result = preflight(store, args.source_id, published=args.published, locator_root=locator,
+                           registration_root=args.registration_root, backup_manifest=args.backup_manifest)
+        result = {k:v for k,v in result.items() if k not in {'records','sources'}}
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result['status'] in {'not_needed','migrated'} else 2
     if args.command == 'resolve':
         import os
         if args.capacity_root:
@@ -222,13 +310,14 @@ def main():
         result = prepare(store, args.output, source_id=intent['source_id'],
                          old_paths=intent['old_paths'], published=intent['published'],
                          instruction_file=intent['instruction_file'], calibration_path=calibration,
-                         jev_impact=intent.get('jev_impact', False))
+                         jev_impact=intent.get('jev_impact', False), backup_manifest=intent.get('backup_manifest'))
     elif args.command == 'prepare':
         if not all([args.source_id, args.published, args.instruction_file]):
             parser.error('prepare requires source-id, published and instruction-file')
         result = prepare(store, args.root, source_id=args.source_id, old_paths=args.old_source,
                          published=args.published, instruction_file=args.instruction_file,
-                         calibration_path=args.calibration, jev_impact=args.jev_impact)
+                         calibration_path=args.calibration, jev_impact=args.jev_impact,
+                         backup_manifest=args.backup_manifest)
     else:
         with execution_locks(args.root):
             result = (run if args.command == 'run' else verify)(store, args.root)
@@ -236,4 +325,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

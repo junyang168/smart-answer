@@ -122,8 +122,20 @@ def build(records, sources, source_id, *, claim_ids=None, max_claims=DEFAULT_MAX
                     fids.add(anchor['source_fragment_id'])
                 if anchor.get('paragraph_key') in rank:
                     positions.add(rank[anchor['paragraph_key']])
+        # A partially deleted citation can still be grouped by its current
+        # source. Source verification decides what support needs replacement.
+        has_live_fragment = any(
+            fragment.get('source_id') == source_id
+            and fragment.get('paragraph_key') in rank
+            and fragment.get('source_sha256') == source['body_sha256']
+            and fragment.get('anchor_state') not in {'source_deleted','context_only','replaced_by_precise_fragments'}
+            for fid in fids for fragment in [active.get('source_fragments/'+fid, {}).get('payload', {})])
         for fid in sorted(fids):
             fragment = active.get('source_fragments/'+fid, {}).get('payload', {})
+            if (has_live_fragment and fragment.get('source_id') == source_id
+                    and fragment.get('anchor_state') == 'source_deleted'
+                    and fragment.get('deleted_in_source_sha256') == source['body_sha256']):
+                continue
             if fragment.get('source_id') == source_id and fragment.get('paragraph_key') in rank:
                 positions.add(rank[fragment['paragraph_key']])
                 if (fragment.get('anchor_state') in {'source_deleted', 'context_only', 'replaced_by_precise_fragments'}

@@ -239,3 +239,43 @@ def test_oversized_jev_precheck_goes_to_gpt_with_full_material_without_faking_ve
         assert job['material']==expected and job['jev']=='not_run_input_limit'
     receipts=list((root/'oversized-precheck/precheck-unavailable').glob('*.json'))
     assert len(receipts)==1 and json.loads(receipts[0].read_text())['model_calls']==0
+
+
+@pytest.mark.parametrize('refs,action,fields', [
+    ([], 'keep', {}),
+    (['Rom 8'], 'keep', {}),
+    ([], 'repair', {'scripture_refs':['Rom 8:16']}),
+    ([], 'needs_source', {}),
+])
+def test_scripture_prompt_uses_source_precision_without_repeating_other_tasks(ready, refs, action, fields):
+    store, root, eroot = ready
+    claim = store.get_record_state('claims', 'C')['payload']
+    store.apply_plan(store.plan_package({'package_id':'scripture-prompt-fixture',
+                                         'claims':[{**claim, 'scripture_refs':refs}]}))
+
+    def answer(request):
+        assert request['input']['task'] == 'claim_scripture'
+        assert stage.SCRIPTURE_PROMPT in request['system']
+        assert request['input']['jobs'][0]['material']['claim']['scripture_refs'] == refs
+        return reply(action, **fields)(request)
+
+    ports = Ports(choices={'scripture':'missing'}, reply=answer)
+    result = stage.run(store,'S',['C'],eroot,root/'claims',ports,apply=True)
+    assert store.get_record_state('claims','C')['payload']['scripture_refs'] == fields.get('scripture_refs',refs)
+    assert bool(result['pending']) == (action == 'needs_source')
+    assert [req['input']['task'] for role,req in ports.calls if role=='gpt'] == ['claim_scripture']
+
+
+def test_new_scripture_policy_preserves_saved_legacy_prompt(ready):
+    store, root, eroot = ready
+    stage_root = root/'claims'
+    e.save(stage_root/'intent.json', {
+        'version':stage.VERSION, 'claim_ids':['C'], 'source':f.bind_source(store,'S',stage_root),
+        'evidence_root':str(eroot.resolve()), 'models':Ports().identity, 'max_task_passes':3,
+        'policy_sha256':e.digest([stage.PROMPT, stage.q.claim(),stage.Edits.model_json_schema(),
+                                 stage.flash.CLAIM_REFERENCE_CONTRACT]),
+    })
+    ports = Ports(choices={'scripture':'missing'}, reply=reply('keep'))
+    result = stage.run(store,'S',['C'],eroot,stage_root,ports)
+    assert result['status']=='verified'
+    assert [req['system'] for role,req in ports.calls if role=='gpt']==[stage.PROMPT]

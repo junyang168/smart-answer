@@ -261,3 +261,48 @@ def test_invalid_distribution_is_not_a_pass():
     response['answers']['unsupported_part_exists']['probabilities']['no'] = 1.5
     with pytest.raises(ValueError, match='distribution'):
         e.judgment(response)
+
+
+@pytest.mark.parametrize('failures,expected', [('handshake', 2), ('twice', 2), ('read', 1), ('unknown', 1), ('http', 1), ('redirect', 1)])
+def test_jev_retries_only_proven_pre_send_tls_handshake(monkeypatch, tmp_path, failures, expected):
+    import io
+    from types import SimpleNamespace
+    from urllib.error import HTTPError, URLError
+
+    ssl = {'__name__': 'ssl'}
+    exec('def do_handshake():\n    raise TimeoutError("handshake timed out")', ssl)
+    redirect = {'__name__': 'urllib.request', 'URLError': URLError, 'handshake': ssl['do_handshake']}
+    exec('def http_error_302():\n    try: handshake()\n    except TimeoutError as exc: raise URLError(exc) from exc', redirect)
+    monkeypatch.setenv('TYPESAFE_API_KEY', 'test-key')
+    sent = []
+
+    class ReadTimeout(io.BytesIO):
+        def read(self):
+            raise TimeoutError('response timed out')
+
+    def open_request(request, *, timeout):
+        sent.append(request)
+        if failures in {'handshake', 'twice'} and (len(sent) == 1 or failures == 'twice'):
+            try:
+                ssl['do_handshake']()
+            except TimeoutError as exc:
+                raise URLError(exc) from exc
+        if failures == 'redirect':
+            redirect['http_error_302']()
+        if failures == 'read':
+            return ReadTimeout()
+        if failures == 'unknown':
+            raise URLError(TimeoutError('phase unknown'))
+        if failures == 'http':
+            raise HTTPError(request.full_url, 429, 'rate limited', None, None)
+        return io.BytesIO(b'{"answers":{}}')
+
+    monkeypatch.setattr('urllib.request.urlopen', open_request)
+    models = e.Models(SimpleNamespace(backend='codex_subscription', model='test', reasoning_effort='medium'), tmp_path)
+    if failures == 'handshake':
+        assert models.judge({'state': {}}) == {'answers': {}}
+        assert sent[0] is sent[1]
+    else:
+        with pytest.raises((TimeoutError, URLError)):
+            models.judge({'state': {}})
+    assert len(sent) == expected

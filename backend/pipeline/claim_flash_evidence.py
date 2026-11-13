@@ -748,6 +748,24 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
             e.save(root / 'coverage-id-corrections' / (e.digest(raw) + '.json'),
                    {'group_id': group['group_id'], 'unit_id': unit_id})
             edits = [edits[0].model_copy(update={'job_id': unit_id})]
+        if edits and all(edit.job_id == group['group_id'] for edit in edits):
+            paragraphs_by_fragment = {p['fragment_id']: p['paragraph_key'] for p in valid.values()}
+            matches = []
+            for edit in edits:
+                ids = [job['job_id'] for job in jobs
+                       if set(edit.fragment_ids) & set(job['required_fragment_ids'])]
+                if not ids and edit.fragment_ids:
+                    paragraphs = {paragraphs_by_fragment.get(fid) for fid in edit.fragment_ids}
+                    if None not in paragraphs:
+                        ids = [job['job_id'] for job in jobs
+                               if job['unit']['paragraph_key'] in paragraphs]
+                matches.append(ids)
+            if all(len(ids) == 1 for ids in matches) and {ids[0] for ids in matches} == {job['job_id'] for job in jobs}:
+                corrections = [ids[0] for ids in matches]
+                e.save(root / 'coverage-id-corrections' / (e.digest(raw) + '.json'),
+                       {'group_id': group['group_id'], 'unit_ids_in_reply_order': corrections})
+                edits = [edit.model_copy(update={'job_id': unit_id})
+                         for edit, unit_id in zip(edits, corrections, strict=True)]
         if {edit.job_id for edit in edits} != {job['job_id'] for job in jobs}:
             edits = split_coverage_disposition(root, ports, group['group_id'], jobs, raw, instruction, shared)
         edits = coverage_edits(edits, jobs)

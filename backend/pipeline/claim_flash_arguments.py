@@ -72,11 +72,14 @@ def active_root(root):
     if not path.exists():return root
     authority=json.loads(path.read_text());parent=json.loads((root/'verification.json').read_text())
     before=json.loads((root/'before.json').read_text())
+    allowed_layers = {'source'} if authority.get('source_context_keys') else {'claim_connections'}
+    if authority.get('statement_correction'):
+        allowed_layers.add('source')
     if (authority.get('contract')!=CANDIDATE_SCOPE or not authority.get('owner_direction')
             or authority.get('parent_verification_sha256')!=e.digest(parent)
             or authority.get('parent_before_sha256')!=e.digest(before)
             or parent.get('version')!=VERSION or parent.get('status')!='needs_attention'
-            or not parent.get('pending') or any(x.get('layer') != ('source' if authority.get('source_context_keys') else 'claim_connections') for x in parent['pending'])
+            or not parent.get('pending') or any(x.get('layer') not in allowed_layers for x in parent['pending'])
             or (root/'commit-intent.json').exists()):
         raise ValueError('argument material correction differs from its uncommitted parent')
     original_child = root/'material-scope-continuations'/e.digest(parent)
@@ -290,9 +293,21 @@ def connection_candidate(root, ports, records, claim_key, finding, pool):
     return choices.get(answers['candidate']) if answers else None
 
 
-def argument_support_issues(root, ports, material):
-    questions = {key: q.claim(with_references=bool(material.get('claim_references')))[key]
-                 for key in ('support', 'scripture')}
+def support_questions(material):
+    options = q.claim(with_references=bool(material.get('claim_references')))
+    return {key: options[key] for key in ('support', 'scripture')}
+
+
+def has_combined_support_request(root, material):
+    request = {'model': e.MODEL, 'state': material, 'questions': support_questions(material)}
+    saved = Path(root)/'jev'/e.digest(request)
+    return (saved/'started.json').exists() or (saved/'response.json').exists()
+
+
+def argument_support_issues(root, ports, material, *, scripture_verified=False):
+    questions = support_questions(material)
+    if scripture_verified:
+        questions.pop('scripture')
     answers,unavailable=bounded_jev(root,ports,material,questions)
     if unavailable:
         return {key:unavailable for key in questions}
@@ -316,8 +331,53 @@ def final_support_decisions(root,ports,jobs):
             # Unknown earlier calls still fail closed in the common recorder.
             consume(f.gpt(root,ports,'argument_final_support',[job],schema,FINAL_SUPPORT_PROMPT,semantic_review=False))
         else:remaining.append(job)
-    consume(f.gpt(root,ports,'argument_final_support',remaining,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    ordinary = [job for job in remaining if not job.get('reuse_scripture_check')]
+    support_only = [job for job in remaining if job.get('reuse_scripture_check')]
+    legacy_batch = any(
+        json.loads(path.read_text()).get('system') == FINAL_SUPPORT_BATCH_PROMPT
+        for path in (root/'gpt').glob('*/request.json')
+    )
+    instruction = FINAL_SUPPORT_BATCH_PROMPT
+    if not legacy_batch:
+        instruction += statements.SCRIPTURE_SOURCE_RULE
+        instruction += '講道原話（包括禱告）已支持主張且無可定位的經文引述時，選keep。'
+    consume(f.gpt(root,ports,'argument_final_support',ordinary,schema,instruction,semantic_review=False))
+    if support_only:
+        instruction = ('只核對最終論據集合是否完整支持Claim。經文出處已核對，沿用該判定。'
+                       'keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
+                       '每個job_id獨立判定且恰好一次，只用該job材料。')
+        consume(f.gpt(root,ports,'argument_final_support',support_only,schema,instruction,semantic_review=False))
     return [answers[j['job_id']] for j in jobs]
+
+
+def added_source_context(before, current):
+    """Allow additive, current source facts on the exact same transcript."""
+    fields = {'human_source_guard', 'human_source_decisions'}
+    if ({sid: {k:v for k,v in src.items() if k not in fields} for sid,src in before.items()}
+            != {sid: {k:v for k,v in src.items() if k not in fields} for sid,src in current.items()}):
+        raise ValueError('statement source differs')
+    for sid, previous in before.items():
+        now = current[sid]
+        old_guard = previous.get('human_source_guard', {})
+        new_guard = now.get('human_source_guard', {})
+        old_keys = set(old_guard.get('paragraphs', {}).get(sid, []))
+        new_keys = set(new_guard.get('paragraphs', {}).get(sid, []))
+        old_entries = old_guard.get('entries', [])
+        new_entries = new_guard.get('entries', [])
+        if (not old_keys <= new_keys or any(entry not in new_entries for entry in old_entries)
+                or any(fact not in now.get('human_source_decisions', [])
+                       for fact in previous.get('human_source_decisions', []))
+                or any(fact.get('applicability') != 'current' for fact in now.get('human_source_decisions', []))):
+            raise ValueError('statement source clarification changed')
+
+
+def changed_statement_context(ids, records, before, sources, source_id):
+    if before['sources'] == sources:
+        return []
+    added_source_context(before['sources'], sources)
+    return [key for cid in ids if
+            flash.claim_material(key := 'claims/'+cid, records, before['sources'], source_id)
+            != flash.claim_material(key, records, sources, source_id)]
 
 
 def statement_proof(root,claim_ids,records,sources):
@@ -331,7 +391,8 @@ def statement_proof(root,claim_ids,records,sources):
     if (result.get('version')!=statements.VERSION or result['status'] not in {'verified','needs_attention'}
             or result.get('completion_scope')!='claim_statement_tasks_only' or not set(claim_ids)<=set(result['claim_ids'])):
         raise ValueError('completed Claim statement tasks required')
-    if before['sources']!=sources:raise ValueError('statement source differs')
+    if before['sources'] != sources:
+        added_source_context(before['sources'], sources)
     prepared={}
     for cid in claim_ids:
         key='claims/'+cid;prior=result['updates'].get(key,before['records'][key]['payload']);now=records[key]['payload']
@@ -389,6 +450,13 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         if claim_ids not in group.get('sequential_claim_batches', []):
             raise ValueError('Claim batch is not frozen in the completed Evidence plan')
         ids=claim_ids
+    retained = Path(statement_root)/'retained-scope.json'
+    if retained.exists():
+        scope = json.loads(retained.read_text())
+        verified = json.loads((Path(statement_root)/'verification.json').read_text())
+        if scope['original_ids'] != ids or scope['retained_sha256'] != e.digest(verified):
+            raise ValueError('retained Claim scope differs from the frozen statement batch')
+        ids = verified['claim_ids']
     if not ids or len(ids)>10 or len(ids)!=len(set(ids)):raise ValueError('one nonempty existing Claim group required')
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
@@ -396,6 +464,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         expanded=not saved or saved.get('candidate_scope')==CANDIDATE_SCOPE
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'group':group,'models':ports.identity,
             **({'claim_ids':ids} if claim_ids is not None else {}),
+            **({'retained_claim_ids':ids} if retained.exists() else {}),
             'evidence_root':str(Path(evidence_root).resolve()),'statement_root':str(Path(statement_root).resolve()),
             'policy_sha256':e.digest([PROMPT,Routes.model_json_schema()]),
             **({'candidate_scope':CANDIDATE_SCOPE} if expanded else {}),
@@ -414,6 +483,45 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             raise ValueError('argument target belongs to another source')
         old_checks,old_before,statement_updates=statement_proof(statement_root,ids,records,sources)
         records=f.apply_overlay(records,statement_updates)
+        refreshed = {}
+        recheck_reads = set()
+        changed = changed_statement_context(ids, records, old_before, sources, source_id)
+        if changed:
+            recheck = root/'statement-source-recheck'
+            intent_path = recheck/'intent.json'
+            if not intent_path.exists() and any(root.rglob('started.json')):
+                raise ValueError('statement source clarification changes an already-started argument request')
+            materials = {key: flash.claim_material(key, records, sources, source_id) for key in changed}
+            e.save(intent_path, {'statement_sha256':e.digest(old_checks),
+                'material_sha256':e.digest(materials)})
+            needed = set()
+            for material in materials.values():
+                needed.update(node['object_key'] for node in material['evidence'])
+                needed.update(node['object_key'] for node in material.get('argument_context', {}).get('records', []))
+                context = material.get('argument_context', {})
+                recheck_reads.update(row['object_key'] for row in context.get('relations', []))
+                for ref in material.get('claim_references', []):
+                    needed.update(ref['supporting_material_keys'])
+                    recheck_reads.add(ref['object_key'])
+                    recheck_reads.update(ref['supporting_relation_keys'])
+                    recheck_reads.update(row['object_key'] for row in ref['relations'])
+                    recheck_reads.update('source_fragments/'+fid for fid in ref['source_fragment_ids'])
+            recheck_reads.update(needed)
+            recheck_reads.update('source_fragments/'+fid for key in needed
+                                 for fid in e.evidence_fragment_ids(records[key]['payload']))
+            statements.verify_evidence(evidence_root, needed, original, sources)
+            checked = statements.review(records, sources, changed, source_id, recheck, ports)
+            e.save(recheck/'review.json', checked)
+            source_pending = [item for item in checked['pending'] if item['layer'] != 'claim_connections']
+            if source_pending:
+                return e.publish(root, {'version':VERSION,'source_id':source_id,'claim_ids':ids,
+                    'status':'needs_attention','updates':{},'pending':source_pending,'applied':False})
+            old_checks = {**old_checks}
+            for field in ('pending', 'outcomes'):
+                old_checks[field] = [item for item in old_checks[field] if item['object_key'] not in changed] + checked[field]
+            statement_updates.update(checked['updates'])
+            records = f.apply_overlay(records, checked['updates'])
+            refreshed = {key: flash.claim_material(key, records, sources, source_id) for key in changed}
         previous_records = records
         if parent is not None:
             authority = json.loads((Path(_parent_root) / 'material-scope-continuation.json').read_text())
@@ -431,14 +539,23 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                 projected = f.apply_overlay(records, {key: proposed})
                 material = flash.claim_material(key, projected, sources, source_id)
                 statements.verify_evidence(evidence_root, {row['object_key'] for row in material['evidence']}, records, sources)
-                checked = statements.review(projected, sources, [key], source_id, root/'statement-correction', ports)
-                e.save(root/'statement-correction.json', checked)
+                tasks = None
+                if correction.get('retain_scripture_refs'):
+                    if proposed['scripture_refs'] != payload['scripture_refs']:
+                        raise ValueError('Claim wording correction changed retained Scripture references')
+                    tasks = ['statement_fidelity', 'support']
+                review_root = root/('statement-correction-support' if tasks else 'statement-correction')
+                checked = statements.review(projected, sources, [key], source_id, review_root, ports, tasks=tasks)
+                e.save(review_root.with_suffix('.json'), checked)
                 if checked['pending'] or checked['updates']:
                     raise ValueError('Proposed Claim statement needs further disposition')
                 statement_updates[key] = proposed
                 records = projected
+                if finding['layer'] == 'source':
+                    parent['pending'] = [{**finding, 'layer': 'claim_connections',
+                        'reason': 'The corrected Claim wording passed statement review. Verify its argument against the supplied source.'}]
         targets={'claims/'+cid for cid in ids}
-        pool={k for k in group['lower_record_keys'] if k.split('/')[0] in {'evidence_steps','observations'}}
+        pool=f.active_group_lower_keys(group,records)
         for key in targets:pool.update(x['object_key'] for x in flash.claim_material(key,records,sources,source_id)['evidence'])
         candidates=material_candidates(pool,records,set(group['paragraph_keys'])|material_paragraphs(pool,records),source_id) if expanded else pool
         extra = set()
@@ -581,6 +698,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if key in old_checks['updates']:
                 prior_records=f.apply_overlay(old_before['records'],old_checks['updates'])
                 prior=flash.claim_material(key,prior_records,old_before['sources'],source_id)
+            prior = refreshed.get(key, prior)
             state=flash.claim_material(key,working,sources,source_id)
             if previous is not None and state==flash.claim_material(key,previous,sources,source_id):
                 unresolved=[p for p in parent['pending'] if p['object_key']==key]
@@ -590,13 +708,20 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if (state==prior and not any(x['object_key']==key for x in old_checks['pending'])
                     and not (parent is not None and key in remaining)):
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
-            issues=argument_support_issues(root/'postimage-support',ports,state)
-            if issues:final_jobs.append({'job_id':key,'material':state,'findings':issues})
+            support_root = root/'postimage-support'
+            reuse_scripture = (statements.scripture_verified(old_checks['outcomes'], key, state)
+                               and not has_combined_support_request(support_root, state))
+            issues=argument_support_issues(support_root,ports,state,scripture_verified=reuse_scripture)
+            if issues:
+                final_jobs.append({'job_id':key,'material':state,'findings':issues,
+                    **({'reuse_scripture_check':True} if reuse_scripture and 'scripture' not in issues else {})})
         for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
             if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})
             outcomes.append({'object_key':edit.job_id,'basis':'gpt_final_support','action':edit.action,'reason':edit.reason})
         read=set(nodes)|set(edges)|set(claim_edges)|{'source_fragments/'+fid for key in candidates for fid in e.evidence_fragment_ids(records[key]['payload'])}|{'source_documents/'+source_id}
         read.update(k for k,r in records.items() if k.startswith('claim_relation_constraints/') and {r['payload']['source_id'],r['payload']['target_id']}&set(by_id))
+        if changed:
+            read.update(old_before['records'].keys() | recheck_reads)
         allowed=targets|pool|set(edges)|{k for k in updates if k.startswith('knowledge_relations/') and k not in records}
         if not set(updates)<=allowed:raise ValueError('argument write scope expanded')
         for key in pool&set(updates):

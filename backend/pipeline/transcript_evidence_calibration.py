@@ -58,11 +58,13 @@ def verified_legacy_interval(fragment, proof):
     old = source.source_snapshot(proof['source_file'])
     paragraph = old['paragraphs'].get(fragment.get('paragraph_key'))
     if (old['body_sha256'] != fragment.get('source_sha256') or not paragraph
-            or str(paragraph.get('index')) != str(fragment.get('source_segment_index'))
+            or (fragment.get('source_segment_index') is not None
+                and str(paragraph.get('index')) != str(fragment['source_segment_index']))
             or hashlib.sha256(paragraph['text'].encode()).hexdigest() != fragment.get('paragraph_text_sha256')
             or fragment.get('verbatim_excerpt') not in paragraph['text']):
         raise ValueError('legacy clock source or fragment binding differs')
-    rows = copy.deepcopy(json.loads(Path(proof['source_file']['path']).read_bytes())['script'])
+    document = json.loads(Path(proof['source_file']['path']).read_bytes())
+    rows = copy.deepcopy(document['script'] if isinstance(document, dict) else document)
     entries = json.loads(Path(proof['timeline_file']['path']).read_bytes())['entries']
     entries = copy.deepcopy(entries)
     for i, entry in enumerate(entries):

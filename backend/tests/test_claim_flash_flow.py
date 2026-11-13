@@ -177,13 +177,20 @@ def test_export_pending_is_not_approval_and_tracks_real_changes(candidate,tmp_pa
 
 
 @pytest.mark.parametrize('referenced',[False,True])
-def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced):
+@pytest.mark.parametrize('anchor_state,binding_status',[
+    ('replaced_by_precise_fragments','needs_claim_refresh'),
+    ('unresolved','quotation_pending_update'),
+    ('unresolved','source_text_missing'),
+])
+def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced,anchor_state,binding_status):
     package,_=candidate
     with workspace.open_candidate(package,tmp_path/'private') as store:
         sid=package['source_documents'][0]['source_id']
         records,sources=flow.snapshot(store,sid)
         historical={**deepcopy(package['source_fragments'][0]),'fragment_id':'OLD-FRAGMENT',
-                    'source_sha256':'0'*64,'anchor_state':'replaced_by_precise_fragments'}
+                    'source_sha256':'0'*64,'anchor_state':anchor_state,'source_binding_status':binding_status}
+        if anchor_state=='unresolved':
+            historical['verbatim_excerpt']=''
         records['source_fragments/OLD-FRAGMENT']={'payload':historical,'content_sha256':'historical',
                                                   'revision':1,'retired':False}
         if referenced:
@@ -557,3 +564,33 @@ def test_flash_cli_reports_lecture_completion_separately_from_process_exit(
                                     '--capacity-file', str(capacity), '--candidate', 'candidate.json'])
     assert flow.main() == expected
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_accounting_reports_unique_dispatches_and_partial_usage_by_layer(tmp_path):
+    import hashlib
+    from backend.pipeline import evidence_refresh as e
+
+    run, providers = tmp_path/'run', tmp_path/'providers'
+    for stage, token in [('source', 'a'), ('coverage', 'a'), ('evidence', 'b'),
+                         ('claims', 'c'), ('claims', 'capacity-denial')]:
+        e.save(run/stage/'gpt'/token/'started.json', {})
+    e.save(providers/'gpt'/'a'/'provider.json',
+           {'usage': {'input_tokens': 100, 'output_tokens': 20, 'cached_input_tokens': 70}})
+    transport = providers/'gpt'/'b'/'transport'
+    e.save(transport/'invocation.json', {})
+    stdout = b'{"type":"turn.completed","usage":{"input_tokens":30,"output_tokens":10,"reasoning_output_tokens":3}}\n'
+    (transport/'stdout.log').write_bytes(stdout)
+    e.save(transport/'exit.json', {'files': {'stdout.log': hashlib.sha256(stdout).hexdigest()}})
+    e.save(providers/'gpt'/'c'/'transport'/'invocation.json', {})
+
+    report = flow.accounting(run, providers)
+    assert report['gpt']['actual_calls'] == 3
+    assert report['gpt']['total_tokens'] is None
+    assert report['gpt']['usage'] == {'input_tokens': 130, 'output_tokens': 30,
+                                     'cached_input_tokens': 70, 'reasoning_output_tokens': 3}
+    assert report['gpt_by_layer']['source']['total_tokens'] == 120
+    assert report['gpt_by_layer']['evidence']['total_tokens'] == 40
+    assert report['gpt_by_layer']['claims']['missing_usage_receipts'] == 1
+    assert report['dollar_cost'] is None
+    (transport/'stdout.log').write_bytes(stdout + b'changed')
+    assert flow.accounting(run, providers)['gpt_by_layer']['evidence']['total_tokens'] is None

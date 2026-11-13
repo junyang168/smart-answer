@@ -154,7 +154,9 @@ def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=
     oldraw = oldpath.read_bytes()
     if sha(oldraw) != source['payload'].get('source_file_sha256'):
         raise ValueError('registered old source file drift')
-    if project_script(json.loads(oldraw)['script']).body_sha256 != source['payload']['source_body_sha256']:
+    old_document = json.loads(oldraw)
+    old_rows = old_document['script'] if isinstance(old_document, dict) else old_document
+    if project_script(old_rows).body_sha256 != source['payload']['source_body_sha256']:
         raise ValueError('registered old body drift')
     historical_inputs = None
     if old_source_snapshot is not None:
@@ -165,7 +167,9 @@ def prepare(store, *, beta_root, item, source_id, root, instruction, group_size=
         if historical_inputs['live']['file_sha256'] != source['payload']['source_file_sha256']:
             from backend.pipeline.transcript_publication_projection import spoken_document
             live, _ = spoken_document(read(live_path))
-            if live.get('metadata', {}).get('item') != item or live['script'] != candidate['script']:
+            live_rows = live['script'] if isinstance(live, dict) else live
+            live_item = live.get('metadata', {}).get('item') if isinstance(live, dict) else live_path.stem
+            if live_item != item or live_rows != (candidate['script'] if isinstance(live, dict) else rows):
                 raise ValueError('replaced live source is not the exact incoming publication')
     if projection.body_sha256 == source['payload']['source_body_sha256']:
         raise ValueError('no source epoch change; reuse existing Claim authority')

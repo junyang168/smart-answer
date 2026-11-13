@@ -175,8 +175,9 @@ def run(store, source_id, argument_root, root, ports, *, apply=False):
     argument_root = arguments.active_root(argument_root)
     prior = json.loads((argument_root/'intent.json').read_text())
     ids = prior.get('claim_ids', prior['group']['claim_ids'])
-    if 'claim_ids' in prior and ids not in prior['group'].get('sequential_claim_batches', []):
+    if 'claim_ids' in prior and 'retained_claim_ids' not in prior and ids not in prior['group'].get('sequential_claim_batches', []):
         raise ValueError('Claim relation batch differs from the frozen argument group')
+    ids = prior.get('retained_claim_ids', ids)
     if not ids or len(ids) > 10 or len(ids) != len(set(ids)):
         raise ValueError('one existing group of one to ten Claims required')
     with (root/'run.lock').open('a') as lock:

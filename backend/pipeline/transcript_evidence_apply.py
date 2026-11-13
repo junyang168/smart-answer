@@ -244,7 +244,46 @@ def fields_for(row, fragment, new):
     return fields, True
 
 
-def compare(records, *, source_id, old_sources, new, document, calibration=None, live_candidates=False):
+def clock_aligned_location(row, state, new, proof):
+    """Keep an independently audited paragraph location when wording changed."""
+    from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+    from backend.pipeline.transcript_locator_candidates import consecutive_spoken
+
+    alignment = row.get('alignment') or {}
+    keys = row.get('target_paragraphs') or []
+    if (not proof or row['reason'] not in {'source_located_requires_refresh', 'partial_deletion_has_live_candidate'}
+            or not alignment.get('left_anchor') or not alignment.get('right_anchor')
+            or not keys or not consecutive_spoken(keys, new)):
+        return None
+    try:
+        clock = verified_legacy_interval(state['payload'], proof)
+    except ValueError:
+        return None
+    intervals = [{'media_time':new['paragraphs'][key]['start_time'],
+                  'media_end_time':new['paragraphs'][key]['end_time']} for key in keys]
+    if not audio_position(clock, intervals)['consistent']:
+        return None
+    return {'mode':'paragraph_location','paragraph_keys':keys,'legacy_clock':proof,
+            'before_pin':[state['revision'],state['content_sha256']],
+            'target_source_sha256':new['body_sha256'],
+            'reason':'舊時間軸與已核驗的新版前後文對齊；引文待核。'}
+
+
+def same_or_extended_paragraph(old, new):
+    if new is None:
+        return False
+    if old == new:
+        return True
+    left = {k:v for k,v in old.items() if k not in {'text','user_id'}}
+    right = {k:v for k,v in new.items() if k not in {'text','user_id'}}
+    if left != right or not old['text']:
+        return False
+    from difflib import SequenceMatcher
+    return all(op in {'equal','insert'} for op, *_ in
+               SequenceMatcher(None, old['text'], new['text'], autojunk=False).get_opcodes())
+
+
+def compare(records, *, source_id, old_sources, new, document, calibration=None, live_candidates=False, clock_witness=None):
     """Combine historical epochs; retain all latest records, including new IDs."""
     reports = {}; audits = {}
     for old in old_sources:
@@ -261,6 +300,11 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
             reports[row['record_key']] = row
     updates = {}; changed_quotes = set(); rows = []; replacements = {}; creations = {}
     rules = (calibration or {}).get('fragments', {})
+    additive_epochs = {old['body_sha256'] for old in old_sources
+        if list(old['paragraphs']) == list(new['paragraphs'])
+        and all(same_or_extended_paragraph(paragraph,new['paragraphs'][pk])
+                for pk,paragraph in old['paragraphs'].items())}
+
     for key, state in sorted(records.items()):
         f = state['payload']
         if not key.startswith('source_fragments/') or f.get('source_id') != source_id:
@@ -277,17 +321,34 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
             row.update(status='already_current', reason='current_paragraph_awaits_quotation')
             rows.append(row)
             continue
+        prior = next((old for old in old_sources if old['body_sha256']==f.get('source_sha256')), None)
+        pk = f.get('paragraph_key')
+        if (not state.get('retired') and prior and pk in prior['paragraphs']
+                and same_or_extended_paragraph(prior['paragraphs'][pk], new['paragraphs'].get(pk))
+                and not f.get('verbatim_excerpt') and not f.get('question_context') and not f.get('aligned_paragraphs')
+                and f.get('anchor_state') == 'unresolved'
+                and f.get('source_binding_status') == 'quotation_pending_update'):
+            validate_fragment_locations({key:f}, prior)
+            row.update(status='paragraph_location', reason='retained_pending_quotation_paragraph',
+                       proposed_fields=pending_location_fields({'paragraph_key':pk},new))
+            updates[key] = {**f, **row['proposed_fields']}
+            row['applied_fields'] = row['proposed_fields']
+            rows.append(row)
+            continue
         if f.get('anchor_state') == 'replaced_by_precise_fragments':
             children = [records.get('source_fragments/'+fid, {}) for fid in f.get('replacement_fragment_ids', [])]
             if children and all(not child.get('retired')
                                 and child.get('payload', {}).get('source_id') == source_id
-                                and child['payload'].get('source_sha256') == new['body_sha256']
+                                and (child['payload'].get('source_sha256') == new['body_sha256']
+                                     or any(old['body_sha256']==child['payload'].get('source_sha256')
+                                            for old in old_sources))
                                 for child in children):
                 row.update(status='already_current', reason='current_replacement_fragments')
                 rows.append(row)
                 continue
         if not state.get('retired'):
-            rule = rules.get(key) or verified_cross_paragraph_rule(row, state, new)
+            rule = (rules.get(key) or verified_cross_paragraph_rule(row, state, new)
+                    or clock_aligned_location(row, state, new, clock_witness))
             if rule is not None:
                 row = calibrate(row, state, rule, new, document)
         if (live_candidates and row.get('reason') == 'partial_deletion_has_live_candidate'
@@ -313,6 +374,10 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         elif (f.get('anchor_state') == 'source_deleted'
               and f.get('deleted_in_source_sha256') == new['body_sha256']):
             row.update(status='already_deleted', reason='deletion_already_recorded')
+        elif (f.get('anchor_state') == 'source_deleted'
+              and f.get('deleted_in_source_sha256') in additive_epochs):
+            row.update(status='source_deleted', reason='previous_deletion_preserved_across_additive_edit',
+                       proposed_fields={'anchor_state':'source_deleted','source_binding_status':'source_deleted'})
         fields, changed = fields_for(row, f, new)
         if (not state.get('retired') and f.get('anchor_state') != 'source_deleted'
                 and row['status'] in {'calibrated_rebind', 'paragraph_location', 'question_context_only'}
@@ -508,7 +573,7 @@ def render_report(report, *, applied=False):
 
 
 def prepare(store, root, *, source_id, old_paths, published, instruction, calibration_path=None,
-            jev_impact=False):
+            jev_impact=False, backup_manifest=None):
     root = Path(root).resolve()
     if not instruction.strip():
         raise ValueError('exact owner direction required')
@@ -517,6 +582,7 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
         if (saved['source_id'] != source_id or saved['instruction'] != instruction
                 or saved['published_path'] != str(Path(published).resolve())
                 or saved.get('calibration_path') != (str(Path(calibration_path).resolve()) if calibration_path else None)
+                or saved.get('backup_manifest') != (str(Path(backup_manifest).resolve()) if backup_manifest else None)
                 or saved.get('jev_impact', False) != jev_impact
                 or saved['old_paths'] != [str(Path(p).resolve()) for p in old_paths]):
             raise ValueError('existing migration intent differs')
@@ -554,8 +620,19 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
         # Pin the material used by calibration through apply and readback, not
         # just the JSON that happens to name it. Deduplicate shared witnesses.
         bounds.extend(witnesses.values())
+    clock_witness = None
+    if backup_manifest:
+        backup = Path(backup_manifest).resolve()
+        item = source['payload'].get('transcript_id')
+        if (len(old_paths) != 1 or not item or Path(item).name != item
+                or m.read(backup)['intent']['item'] != item):
+            raise ValueError('legacy clock backup must match this source and its single old transcript')
+        clock_witness = {'item':item, 'source_file':m.binding(Path(old_paths[0])),
+                         'backup_manifest':m.binding(backup),
+                         'timeline_file':m.binding(backup.parent/'production/script'/(item+'.json'))}
+        bounds.extend(clock_witness[k] for k in ('backup_manifest','timeline_file'))
     report = compare(records, source_id=source_id, old_sources=list(epochs.values()),
-                     new=new, document=m.read(path),calibration=calibration, live_candidates=jev_impact)
+                     new=new, document=m.read(path),calibration=calibration, live_candidates=jev_impact, clock_witness=clock_witness)
     if jev_impact:
         from backend.pipeline import transcript_migration_impact as impact
         proof = impact.review(report, records, new, root / 'impact')
@@ -574,6 +651,7 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
               'source_files': bounds, 'package': package,
               'change_set_id': plan.change_set_id, 'fingerprint_sha256': plan.fingerprint_sha256,
               'implementation': m.binding(Path(__file__)),
+              **({'backup_manifest':str(Path(backup_manifest).resolve())} if backup_manifest else {}),
               'jev_impact': jev_impact, 'model_calls': report.get('model_calls', 0)}
     source_files_current(result)
     m.immutable(root/'plan.json', result)

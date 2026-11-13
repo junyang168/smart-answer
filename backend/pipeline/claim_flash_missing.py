@@ -56,8 +56,19 @@ def discovery_material(ports,jobs,shared):
 def consume(store,root,records,sources):
     root=Path(root);result=json.loads((root/'result.json').read_text());before=json.loads((root/'before.json').read_text())
     if (result.get('version')!=relations.VERSION or result.get('completion_scope')!='group_claim_relations_only'
-            or result.get('pending') or result.get('status') not in {'verified','applied'} or before['sources']!=sources):
+            or result.get('pending') or result.get('status') not in {'verified','applied'}):
         raise ValueError('completed group Claim relations required')
+    from backend.pipeline import claim_human_source as human
+    source_fields = {'human_source_guard', 'human_source_decisions'}
+    def content(view):
+        return {sid: {key: value for key, value in source.items() if key not in source_fields}
+                for sid, source in view.items()}
+    if content(before['sources']) != content(sources):
+        raise ValueError('completed group Claim relation source changed')
+    for source in before['sources'].values():
+        if guard := source.get('human_source_guard'):
+            with store.connect() as conn, conn.cursor() as cursor:
+                human.assert_scope_current(cursor, guard)
     if result['updates'] or result.get('retiring_keys'):
         intent=json.loads((root/'commit-intent.json').read_text());history=store.get_change_history(intent['change_set_id'])
         if (not result.get('applied') or not history or history['status']!='applied'
@@ -96,14 +107,25 @@ def continue_existing_claim(store, source_id, root, ports, *, apply):
     candidate = Candidate.model_validate(finding['candidate'])
     claim_id = candidate.claim_id.removeprefix('claims/')
     key = 'claims/' + claim_id
-    if claim_id not in draft['claim_ids'] or key not in before['records'] or candidate.answer_question_ids:
+    if claim_id not in draft['claim_ids'] or key not in before['records']:
         raise ValueError('Existing Claim continuation exceeds its completed group')
     child = root / 'existing-claim-continuations' / e.digest(draft)
     if (child / 'verification.json').exists():
         result = statements.finish(store, child) if apply else read(child / 'verification.json')
         return e.publish(root, result)
     intent = read(root / 'intent.json')
-    records, sources = f.load_group_source(store, source_id, intent['group'])
+    group = intent['group']
+    relation_root = Path(intent['relation_root']) if candidate.answer_question_ids else None
+    if relation_root:
+        relation_before = read(relation_root/'before.json')
+        endpoints = read(relation_root/'result.json').get('readonly_endpoint_keys', [])
+        lower = {'evidence_steps/'+eid for endpoint in endpoints
+                 for eid in relation_before['records'][endpoint]['payload'].get('evidence_step_ids', [])}
+        group = {**group, 'reference_record_keys': sorted(set(group.get('reference_record_keys', [])) | lower)}
+    records, sources = f.load_group_source(store, source_id, group)
+    questions = {'questions/'+qid for qid in candidate.answer_question_ids}
+    if any(q not in before['records'] or before['records'][q].get('retired') for q in questions):
+        raise ValueError('Existing Claim continuation Question is outside its saved scope')
     if any(records.get(k) != v for k, v in before['records'].items()):
         raise ValueError('Existing Claim continuation input changed')
     if before['sources'] != sources or intent['models'] != ports.identity or records[key]['payload'].get('review_status') in f.PROTECTED:
@@ -128,6 +150,15 @@ def continue_existing_claim(store, source_id, root, ports, *, apply):
         pending.extend(review['pending'])
         if review['retiring_keys'] or review['updates'] or review['new_relations']:
             pending.append({'object_key': key, 'reason': 'existing_claim_revision_requires_relation_changes'})
+    if questions and not pending:
+        scoped = {k: row for k, row in records.items() if not k.startswith('questions/') or k in questions}
+        links = [{'claim': claim_id, 'question_ids': candidate.answer_question_ids}]
+        answers, findings = flash.question_links(scoped, sources, [key], set(), links, child/'answers', ports)
+        pending.extend(findings)
+        for question in questions:
+            if claim_id not in answers.get(question, records[question]['payload']).get('answer_claim_ids', []):
+                pending.append({'object_key': question, 'reason': 'proposed_claim_not_verified_as_answer'})
+        updates.update(answers)
     # Pin the same source-local snapshot that supplied the statement and direct-edge checks.
     result = {**draft, 'version': VERSION, 'status': 'needs_attention' if pending else 'verified',
               'updates': updates, 'new_fragments': {}, 'pending': pending, 'statement_checks': checked}
@@ -142,15 +173,15 @@ def continue_joint_discovery(store, source_id, root, ports, *, apply):
     read = lambda path: json.loads(path.read_text())
     authority = read(root/'joint-discovery-continuation.json')
     draft, before, intent = (read(root/name) for name in ('draft.json', 'before.json', 'intent.json'))
-    finding, = draft['pending']
-    candidate = Candidate.model_validate(finding['candidate'])
-    claim_id = candidate.claim_id
-    key = 'claims/'+claim_id
+    findings = draft['pending']
+    candidates = [Candidate.model_validate(finding['candidate']) for finding in findings]
+    keys = {'claims/'+candidate.claim_id for candidate in candidates if candidate.claim_id}
     if (not authority.get('owner_direction') or authority['draft_sha256'] != e.digest(draft)
             or authority['before_sha256'] != e.digest(before)
-            or finding['reason'] != 'existing_claim_update_required'
-            or candidate.action != 'needs_update' or key not in before['records']
-            or not candidate.answer_question_ids or not draft['new_claim_candidates']):
+            or not candidates or len(keys) != len(candidates) or not keys <= set(before['records'])
+            or any(finding['reason'] != 'existing_claim_update_required' for finding in findings)
+            or any(candidate.action != 'needs_update' or not candidate.answer_question_ids for candidate in candidates)
+            or not draft['new_claim_candidates']):
         raise ValueError('Joint discovery continuation differs from its saved handoff')
     child = root/'joint-discovery-continuations'/e.digest(draft)
     if (child/'draft.json').exists():
@@ -159,52 +190,65 @@ def continue_joint_discovery(store, source_id, root, ports, *, apply):
     relation_intent = read(Path(intent['relation_root'])/'intent.json')
     evidence_root = Path(read(Path(relation_intent['argument_root'])/'intent.json')['evidence_root'])
     plan = read(evidence_root/'intent.json')['groups']
-    if plan['source_id'] != source_id or claim_id not in plan['target_claim_ids']:
+    if plan['source_id'] != source_id or any(candidate.claim_id not in plan['target_claim_ids'] for candidate in candidates):
         raise ValueError('Existing Claim is outside the frozen lecture')
-    questions = {'questions/'+qid for qid in candidate.answer_question_ids}
-    scope = {key, *questions, *candidate.support_keys, *('source_fragments/'+fid for fid in candidate.fragment_ids)}
-    if not scope <= set(before['records']) or any(not item.startswith('evidence_steps/') for item in candidate.support_keys):
+    questions = {'questions/'+qid for candidate in candidates for qid in candidate.answer_question_ids}
+    support_keys = {key for candidate in candidates for key in candidate.support_keys}
+    scope = keys | questions | support_keys | {
+        'source_fragments/'+fid for candidate in candidates for fid in candidate.fragment_ids}
+    if not scope <= set(before['records']) or any(not item.startswith('evidence_steps/') for item in support_keys):
         raise ValueError('Joint discovery continuation exceeds its verified material')
     group = intent['group']
     load_group = {**group, 'reference_record_keys': sorted(set(group.get('reference_record_keys', [])) | scope)}
     records, sources = f.load_group_source(store, source_id, load_group)
     if (before['sources'] != sources or intent['models'] != ports.identity
             or any(records.get(k) != row for k, row in before['records'].items())
-            or any(records[k]['payload'].get('review_status') in f.PROTECTED for k in {key, *questions})):
+            or any(records[k]['payload'].get('review_status') in f.PROTECTED for k in keys | questions)):
         raise ValueError('Joint discovery continuation input or protection changed')
     original = deepcopy(records)
-    payload = records[key]['payload']
-    support_ids = list(dict.fromkeys(payload['evidence_step_ids'] + [k.split('/',1)[1] for k in candidate.support_keys]))
-    statements.verify_evidence(evidence_root, {'evidence_steps/'+eid for eid in support_ids}, records, sources)
-    post = flash.current_claim_payload({**payload, 'statement': candidate.statement,
-        'scripture_refs': candidate.scripture_refs, 'evidence_step_ids': support_ids})
-    post['occurrences'] = c.refresh_occurrences(post, support_ids, records, source_id, source_binding=sources[source_id]['file'])
-    records = f.apply_overlay(records, {key:post})
-    checks = statements.review(records, sources, [key], source_id, child/'statement', ports)
-    records = f.apply_overlay(records, checks['updates'])
-    pending = list(checks['pending'])
-    for kind, collection in [('claim','claim_relations'), ('attachment','knowledge_relations')]:
-        edges = [k for k,row in records.items() if k.startswith(collection+'/')
-                 and claim_id in (row['payload']['from_id'],row['payload']['to_id'])]
-        implicit = [{'a':item, 'b':key} for item in candidate.support_keys] if kind=='attachment' else ()
-        if pending or not (edges or implicit):
-            continue
-        review = pairs.review(records,sources,edges,[],child/kind,ports,kind=kind,implicit=implicit)
-        pending.extend(review['pending'])
-        if any(review[field] for field in ('updates','retiring_keys','new_relations','implicit_changes')):
-            pending.append({'object_key':key,'reason':'joint_discovery_requires_relation_changes'})
-    scoped = {k:row for k,row in records.items() if not k.startswith('questions/') or k in questions}
-    links = [{'claim':claim_id,'question_ids':candidate.answer_question_ids}]
-    answers, findings = flash.question_links(scoped,sources,[key],set(),links,child/'answers',ports,
-                                              required_gpt_ids=candidate.answer_question_ids) if not pending else ({},[])
-    pending.extend(findings)
-    if not pending and any(claim_id not in answers.get(k,records[k]['payload'])['answer_claim_ids'] for k in questions):
-        pending.append({'object_key':key,'reason':'proposed Claim did not verify as the direct answer'})
+    pending, joint_checks, all_answers = [], {}, {}
+    for candidate in candidates:
+        claim_id = candidate.claim_id
+        key = 'claims/'+claim_id
+        candidate_root = child if len(candidates) == 1 else child/claim_id
+        payload = records[key]['payload']
+        support_ids = list(dict.fromkeys(payload['evidence_step_ids'] + [k.split('/',1)[1] for k in candidate.support_keys]))
+        statements.verify_evidence(evidence_root, {'evidence_steps/'+eid for eid in support_ids}, records, sources)
+        post = flash.current_claim_payload({**payload, 'statement': candidate.statement,
+            'scripture_refs': candidate.scripture_refs, 'evidence_step_ids': support_ids})
+        post['occurrences'] = c.refresh_occurrences(post, support_ids, records, source_id, source_binding=sources[source_id]['file'])
+        records = f.apply_overlay(records, {key:post})
+        checks = statements.review(records, sources, [key], source_id, candidate_root/'statement', ports)
+        records = f.apply_overlay(records, checks['updates'])
+        pending.extend(checks['pending'])
+        joint_checks[key] = checks
+        for kind, collection in [('claim','claim_relations'), ('attachment','knowledge_relations')]:
+            edges = [k for k,row in records.items() if k.startswith(collection+'/')
+                     and claim_id in (row['payload']['from_id'],row['payload']['to_id'])]
+            implicit = [{'a':item, 'b':key} for item in candidate.support_keys] if kind=='attachment' else ()
+            if pending or not (edges or implicit):
+                continue
+            review = pairs.review(records,sources,edges,[],candidate_root/kind,ports,kind=kind,implicit=implicit)
+            pending.extend(review['pending'])
+            if any(review[field] for field in ('updates','retiring_keys','new_relations','implicit_changes')):
+                pending.append({'object_key':key,'reason':'joint_discovery_requires_relation_changes'})
+        claim_questions = {'questions/'+qid for qid in candidate.answer_question_ids}
+        scoped = {k:row for k,row in records.items() if not k.startswith('questions/') or k in claim_questions}
+        links = [{'claim':claim_id,'question_ids':candidate.answer_question_ids}]
+        answers, findings = flash.question_links(scoped,sources,[key],set(),links,candidate_root/'answers',ports,
+                                                  required_gpt_ids=candidate.answer_question_ids) if not pending else ({},[])
+        pending.extend(findings)
+        if not pending and any(claim_id not in answers.get(k,records[k]['payload'])['answer_claim_ids'] for k in claim_questions):
+            pending.append({'object_key':key,'reason':'proposed Claim did not verify as the direct answer'})
+        if set(answers) & set(all_answers):
+            raise ValueError('Joint discovery has overlapping Question updates')
+        all_answers.update(answers)
+    answers = all_answers
     if set(answers) & set(draft['updates']):
         raise ValueError('Joint discovery would overwrite an already reviewed Question update')
     result = {**draft, 'status':'needs_attention' if pending else 'verified', 'pending':pending,
-              'updates':{**draft['updates'], key:records[key]['payload'], **answers},
-              'joint_statement_checks':checks}
+              'updates':{**draft['updates'], **{key: records[key]['payload'] for key in sorted(keys)}, **answers},
+              'joint_statement_checks':joint_checks}
     e.save(child/'before.json',{'records':original,'sources':sources})
     e.save(child/'draft.json',result)
     result = flash.commit_group(store, child) if apply else result
@@ -245,17 +289,21 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             # Consume the relationship stage's exact direct-reference scope,
             # including current human interpretations of those references.
             prior_result=json.loads((relation_root/'result.json').read_text())
+            endpoints = set(prior_result.get('readonly_endpoint_keys', []))
+            relation_before = json.loads((relation_root/'before.json').read_text())
+            lower = {'evidence_steps/'+eid for key in endpoints
+                     for eid in relation_before['records'][key]['payload'].get('evidence_step_ids', [])}
             load_group={**group,'reference_record_keys':sorted(set(group.get('reference_record_keys',[]))
-                |set(prior_result.get('readonly_endpoint_keys',[])))}
+                | lower)}
         records,sources=f.load_group_source(store,source_id,load_group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
         if empty_group is None:read=consume(store,relation_root,records,sources)
         else:
-            pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+            pool=f.active_group_lower_keys(group,records)
             statements.verify_evidence(evidence_root,pool,records,sources)
             read=set(pool)|{'source_documents/'+source_id}
         original=deepcopy(records)
-        pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+        pool=f.active_group_lower_keys(group,records)
         if not pool<=read:raise ValueError('group lower materials lack completed proof')
         near=set(group['paragraph_keys'])
         fragments={k.split('/',1)[1]:r['payload'] for k,r in records.items() if k.startswith('source_fragments/') and r['payload']['paragraph_key'] in near}
@@ -368,7 +416,8 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             if not p['evidence_step_ids'] and not proposed[index]['_observation_ids']:pending.append({'object_key':key,'reason':'new_claim_has_no_final_support'})
         new_pairs,p,discoveries=flash.discover(records,sources,members,set(members)|{'claims/'+cid for cid in ids},root/'new-relations',ports,task='missing_claim_relations',complete=True) if members else ([],[],[])
         pending+=p
-        relationships=pairs.review(records,sources,[],[],root/'new-claim-pairs',ports,kind='claim',completed_proposals=new_pairs)
+        relationships=pairs.review(records,sources,[],[],root/'new-claim-pairs',ports,kind='claim',completed_proposals=new_pairs,
+                                   repair_invalid_completed=True)
         pending+=relationships['pending']
         selected_questions={qid for link in links for qid in link['question_ids']}
         question_records={k:r for k,r in records.items() if not k.startswith('questions/') or k.split('/',1)[1] in selected_questions}

@@ -17,6 +17,17 @@ PROMPT=(flash.PROMPT+'只處置本次指定的一項Claim檢查，不修改下�
  '若缺來源用needs_source；已有材料缺連接用needs_connection，不以刪弱主張掩蓋。'
  'keep不修改任何欄位，修訂只輸出必要差異。')
 
+SCRIPTURE_SOURCE_RULE = (
+    '經文檢查：scripture_refs 只記教授在本段實際引用或指向、且用於本主張的經文。'
+    '只提及人物、事件或教導，沒有給出可定位的線索，出處可留空；正確留空選 keep。'
+    '只指明書卷、章或範圍，保留該精度；只有教授的引文或當段語境足以唯一定位才細化到節。'
+    '可由常識聯想到平行經文，不等於教授在本段指向該處。'
+    '只有原文已提供可定位的線索，而出處漏記或錯記，才 repair scripture_refs。'
+    '只有原文缺漏或含混且影響判定時，才 needs_source，並說明需要核對哪段。'
+)
+SCRIPTURE_PROMPT = SCRIPTURE_SOURCE_RULE + '此項只改 scripture_refs，勿改主張文字。'
+
+
 class Edit(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     job_id:str
@@ -78,6 +89,27 @@ def judgment_hash(material,question):
     return e.digest(value)
 
 
+def scripture_input_hash(material):
+    """Bind the citation judgment to text, source facts and nodes, independent of edge edits."""
+    value = deepcopy(material)
+    nodes = value.pop('evidence', []) + value.pop('argument_context', {}).get('records', [])
+    for node in nodes:
+        node.pop('relation_type', None)
+    value['supporting_nodes'] = sorted(nodes, key=lambda node: node['object_key'])
+    for reference in value.get('claim_references', []):
+        reference.pop('relations', None)
+        reference.pop('supporting_relation_keys', None)
+    return e.digest(value)
+
+
+def scripture_verified(outcomes, key, material):
+    stamp = scripture_input_hash(material)
+    return any(item['object_key'] == key and item['task'] == 'claim_scripture'
+               and item.get('scripture_input_sha256') == stamp
+               and (item.get('verdict') == 'complete' or item.get('action') == 'keep')
+               for item in outcomes)
+
+
 def finish(store,root):
     result=json.loads((root/'verification.json').read_text());before=json.loads((root/'before.json').read_text())
     f.source_unchanged(before['sources'])
@@ -95,7 +127,7 @@ def finish(store,root):
     return e.commit_verified(store,root)
 
 
-def review(records,sources,targets,source_id,root,ports,*,tasks=None):
+def review(records,sources,targets,source_id,root,ports,*,tasks=None, legacy_scripture_prompt=False):
     """Review only these statements, including not-yet-committed new candidates."""
     working=deepcopy(records)
     materials={k:flash.claim_material(k,records,sources,source_id) for k in targets}
@@ -126,13 +158,22 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
                     jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
                 else:
                     settled[key][question]=stamp
-                    outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state)})
-            for batch,raw in f.gpt(root/'dispositions',ports,task,jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
+                    outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state),
+                        **({'scripture_input_sha256': scripture_input_hash(state)} if question=='scripture' else {})})
+            prompt = PROMPT
+            if question == 'scripture' and not legacy_scripture_prompt:
+                prompt += SCRIPTURE_PROMPT
+            for batch,raw in f.gpt(root/'dispositions',ports,task,jobs,Edits.model_json_schema(),prompt,semantic_review=False):
                 edits=Edits.model_validate(raw).items
                 f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
                 for edit in edits:
                     key=edit.job_id
-                    outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key])})
+                    if (question == 'scripture' and not legacy_scripture_prompt
+                            and edit.action == 'repair' and (edit.statement is not None or edit.scripture_refs is None)):
+                        raise ValueError('scripture repair must only return scripture_refs')
+                    outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key]),
+                        **({'scripture_input_sha256': scripture_input_hash(states[key])}
+                           if question=='scripture' and edit.action=='keep' else {})})
                     if edit.action in {'needs_source','needs_connection'}:
                         pending.append({'object_key':key,'layer':'source' if edit.action=='needs_source' else 'claim_connections','reason':edit.reason})
                         continue
@@ -176,15 +217,19 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
     with (root/'run.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         pin=f.bind_source(store,source_id,root)
-        e.save(root/'intent.json',{'version':VERSION,'claim_ids':claim_ids,'source':pin,
+        intent_path = root/'intent.json'
+        policy = [PROMPT,q.claim(),Edits.model_json_schema(),flash.CLAIM_REFERENCE_CONTRACT]
+        legacy_policy = e.digest(policy)
+        legacy = intent_path.exists() and json.loads(intent_path.read_text())['policy_sha256'] == legacy_policy
+        e.save(intent_path,{'version':VERSION,'claim_ids':claim_ids,'source':pin,
             'evidence_root':str(Path(evidence_root).resolve()),'models':ports.identity,
-            'max_task_passes':3,'policy_sha256':e.digest([PROMPT,q.claim(),Edits.model_json_schema(),flash.CLAIM_REFERENCE_CONTRACT])})
+            'max_task_passes':3,'policy_sha256':legacy_policy if legacy else e.digest([*policy,SCRIPTURE_PROMPT])})
         if (root/'verification.json').exists():return finish(store,root) if apply else json.loads((root/'verification.json').read_text())
         plan=json.loads((Path(evidence_root)/'intent.json').read_text())['groups']
         group=next((g for g in plan['groups'] if set(claim_ids)<=set(g.get('claim_ids',[]))),None)
         if group is None:
             records,sources=f.load_source(store,source_id);c.fetch_claims(store,claim_ids)
-            group={'paragraph_keys':sorted({pk for cid in claim_ids for pk in flash.paragraph_keys('claims/'+cid,records)}),
+            group={'claim_ids':claim_ids,'paragraph_keys':sorted({pk for cid in claim_ids for pk in flash.paragraph_keys('claims/'+cid,records)}),
                    'lower_record_keys':['evidence_steps/'+eid for cid in claim_ids for eid in records['claims/'+cid]['payload'].get('evidence_step_ids',[])],
                    'reference_record_keys':[]}
         records,sources=f.load_group_source(store,source_id,group);c.fetch_claims(store,claim_ids)
@@ -216,7 +261,7 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
                 read.update('source_fragments/'+a['source_fragment_id'] for a in occurrence.get('anchors',[]) if a.get('source_fragment_id'))
         e.save(root/'before.json',{'records':{k:records[k] for k in read if k in records},'sources':sources})
         e.save(root/'consumed-evidence.json',proof)
-        reviewed=review(records,sources,targets,source_id,root,ports)
+        reviewed=review(records,sources,targets,source_id,root,ports,legacy_scripture_prompt=legacy)
         updates,pending,outcomes=(reviewed[k] for k in ['updates','pending','outcomes'])
         f.source_unchanged(sources)
         result={'version':VERSION,'source_id':source_id,'claim_ids':claim_ids,'status':'needs_attention' if pending else 'verified',
