@@ -128,16 +128,16 @@ def test_bounded_local_fallback_requires_unique_time_and_context_supported_match
     verify_preview({'fragments':[{**result,'quote':quote,'old_media_time':10,'old_media_end_time':100}]},old,new,{'script':rows})
 
 
-@pytest.fixture
-def legacy_clock(tmp_path):
+@pytest.fixture(params=[False, True], ids=["wrapped", "legacy-list"])
+def legacy_clock(tmp_path, request):
     import json
     from hashlib import sha256
     from backend.pipeline import transcript_claim_migration as m
     from backend.pipeline.transcript_evidence_apply import snap
     item = 'lecture'
     source = tmp_path / 'old.json'
-    source.write_text(json.dumps({'metadata': {'item': item}, 'script': [
-        {'index': '1', 'text': '這是有上下文的教授原話。', 'start_time': None, 'end_time': None}]}))
+    rows = [{'index': '1', 'text': '這是有上下文的教授原話。', 'start_time': None, 'end_time': None}]
+    source.write_text(json.dumps(rows if request.param else {'metadata': {'item': item}, 'script': rows}))
     backup = tmp_path / 'backup'
     timeline = backup / 'production/script' / (item + '.json')
     timeline.parent.mkdir(parents=True)
