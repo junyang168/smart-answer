@@ -17,7 +17,7 @@ from backend.pipeline import claim_flash_grouping as grouping, claim_flash_sourc
 from backend.pipeline import claim_flash_coverage as coverage, claim_flash_source_fill as fill
 from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
-from backend.pipeline import claim_flash_missing as missing
+from backend.pipeline import claim_flash_missing as missing, claim_flash_source_disposition as disposition
 from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError, ID_FIELDS
@@ -425,22 +425,39 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':'missing','findings':value.get('pending',[])}])
                 continue
             outputs=stages['claims'].setdefault(task_id,{})
+            statement_root=gr/'statements'
             for name,fn in (
                 ('statements',lambda:statements.run(store,source_id,ids,root/'evidence',gr/'statements',ports,apply=True)),
-                ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',gr/'statements',gr/'arguments',ports,apply=True,
+                ('arguments',lambda:arguments.run(store,source_id,plan,gid,root/'evidence',
+                    statement_root,gr/'arguments',ports,apply=True,
                     claim_ids=ids if group.get('sequential_claim_batches') else None)),
                 ('relations',lambda:relations.run(store,source_id,gr/'arguments',gr/'relations',ports,apply=True)),
                 ('missing',lambda:missing.run(store,source_id,gr/'relations',gr/'missing',ports,apply=True))):
                 if resume_claims and complete(outputs.get(name,{})):
                     if e.digest(read(gr/name/'result.json'))!=e.digest(outputs[name]):
                         raise ValueError('completed Claim checkpoint stage differs')
+                    if name=='statements':
+                        for child in ('retained','rechecked'):
+                            successor = statement_root/'source-disposition'/child
+                            if (successor/'verification.json').exists():
+                                statement_root = successor
+                                break
+                        if not outputs[name]['claim_ids']:
+                            break
                     continue
                 recovery.start_stage(root,intent,stages,{'group_id':gid,'task_id':task_id,'task':name},lower_sha)
-                value=fn()
                 if name=='statements':
-                    value=statements.handoff_connections(gr/name,value)
+                    value, statement_root = disposition.continue_statements(
+                        store, source_id, group, statement_root, root/'evidence', ports, fn)
+                    value=statements.handoff_connections(statement_root,value)
+                    if statement_root != gr/name:
+                        e.publish(gr/name,value)
+                else:
+                    value=fn()
                 outputs[name]=value
                 if not complete(value):return finish(stages,[{'layer':'claims','group_id':gid,'task':name,'findings':value.get('pending',[])}])
+                if name=='statements' and not value['claim_ids']:
+                    break
         recovery.start_stage(root,intent,stages,None,lower_sha)
         return finish(stages,[])
 

@@ -7999,6 +7999,7 @@ class PostgresKnowledgeStore:
         expected_current_claim_legacy_ai_findings: Optional[Mapping[str, dict[str, Any]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
         expected_current_human_source_scope: Optional[Mapping[str, Any]] = None,
+        expected_claim_retirement_consumers: Optional[Mapping[str, Any]] = None,
         transaction_context: Any = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
@@ -8114,6 +8115,14 @@ class PostgresKnowledgeStore:
                     # as well as its write targets. Protect that complete read
                     # set in the same short, advisory-locked transaction.
                     self._assert_transaction_read_pins(cursor, expected_current_record_pins)
+                if expected_claim_retirement_consumers is not None:
+                    from backend.pipeline.claim_flash_source_disposition import VERSION, consumers
+                    if plan.source_kind != VERSION or expected_current_record_pins is None:
+                        raise ValueError('Claim retirement requires guarded Flash writes')
+                    scope = expected_claim_retirement_consumers
+                    actual = sorted(col+'/'+oid for col,oid,_ in consumers(cursor,scope['ids']))
+                    if actual != scope['keys']:
+                        raise ChangeSetConflict('Claim retirement consumers changed')
                 if expected_current_human_source_scope is not None:
                     from backend.pipeline.claim_human_source import assert_scope_current
                     assert_scope_current(cursor, expected_current_human_source_scope)
