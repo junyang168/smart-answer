@@ -472,19 +472,42 @@ export default function OriginalAudio({
           {sections.map((section) => (
             <li key={section.passage}>
               {section.passage === "mat-16-19" && !aiVoice ? (
-                <div className="space-y-2 px-4 py-3 sm:px-5">
-                  <Link href={listenHref(section.passage)} className="font-serif text-lg font-bold hover:text-amber-800">
-                    {section.label} · {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+                <div className="grid gap-3 px-4 py-4 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 sm:px-5">
+                  <Link href={listenHref(section.passage)} className="flex w-fit flex-wrap items-baseline gap-2 self-start hover:text-amber-800">
+                    <span className="font-serif text-lg font-bold">16:19</span>
+                    <span className="font-mono text-xs text-stone-500">
+                      {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
+                    </span>
                   </Link>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {topics(section).map((item) => (
-                      <li key={item.text}>
-                        <Link href={listenHref(section.passage, item)} className="inline-block rounded-full bg-stone-100 px-2.5 py-1 text-sm hover:bg-amber-100">
-                          {item.text}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+                  <div>
+                    <ul className="divide-y divide-stone-100">
+                      {topics(section).filter((item) => [
+                        "天國鑰匙的權柄",
+                        "綑綁與釋放的時態和譯法",
+                        "綑綁與釋放的兩種用法",
+                        "教會如何宣告赦罪與留罪",
+                      ].includes(item.text)).map((item) => (
+                        <li key={item.text}>
+                          <Link href={listenHref(section.passage, item)} className="flex items-center justify-between gap-3 py-2 text-sm font-medium text-stone-800 hover:text-amber-800">
+                            {item.text}
+                            <span aria-hidden="true" className="shrink-0 text-xs text-amber-800">▶</span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    <details className="mt-2 border-t border-stone-200 pt-2">
+                      <summary className="w-fit cursor-pointer py-1 text-sm text-stone-600 hover:text-amber-800">全部主題（{topics(section).length}）</summary>
+                      <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                        {topics(section).map((item) => (
+                          <li key={item.text}>
+                            <Link href={listenHref(section.passage, item)} className="block py-1.5 text-sm text-stone-700 hover:text-amber-800 hover:underline">
+                              {item.text}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </div>
                 </div>
               ) : (
               <Link
