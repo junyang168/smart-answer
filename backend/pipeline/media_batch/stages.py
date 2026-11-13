@@ -247,6 +247,16 @@ def register_catalog(payload):
                     save(catalog, rows)
 
 
+def production_editor_root(configured_root):
+    """Use the deployed catalog rather than implicitly creating a review store."""
+    if not configured_root or not Path(configured_root).is_absolute():
+        raise ValueError("Configure DATA_BASE_DIR as an absolute production Editor directory")
+    root = Path(configured_root).resolve()
+    if not (root / "config/sermon.json").is_file():
+        raise ValueError("Production Editor catalog is missing")
+    return root
+
+
 def editor_link(item, origin=None):
     from urllib.parse import urlsplit,quote
     if origin:
