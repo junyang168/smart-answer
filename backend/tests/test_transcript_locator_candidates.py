@@ -470,3 +470,51 @@ def test_confirmed_paragraph_survives_invalid_quote_without_becoming_evidence():
     assert post["anchor_state"] == "unresolved"
     assert (post["paragraph_key"], post["media_time"], post["media_end_time"]) == ("S0145", 10, 15)
     validate_fragment_locations({key: post}, new)
+
+
+def test_expanded_location_retries_only_unresolved_once(tmp_path):
+    from backend.pipeline.transcript_claim_migration import read
+    from backend.pipeline.transcript_locator_resolution import resolve_packets
+
+    found, missing = 'source_fragments/found', 'source_fragments/missing'
+    clock = {'media_time': 20, 'media_end_time': 60}
+    paragraphs = {
+        'S0144': {'text': '這是前一段原話。', 'start_time': 20, 'end_time': 30},
+        'S0145': {'text': '聽眾：…… 教授：對，不可離開。', 'start_time': 30, 'end_time': 60},
+        'S0146': {'text': '另一個時段。', 'start_time': 80, 'end_time': 90},
+    }
+    new = {'body_sha256': 'new', 'paragraphs': paragraphs}
+    records = {key: {'revision': 1, 'content_sha256': key, 'payload': clock} for key in (found, missing)}
+    packets = [{
+        'record_key': key, 'old_quote': '前一段原話' if key == found else '聽眾原問',
+        'old_interval': [20, 60], 'candidates': [
+            {'paragraph_key': 'S0144', 'ordinal': 0, **paragraphs['S0144']},
+        ],
+    } for key in records]
+    bundle = {'packets': packets, 'unscoped': [], 'consumer_exceptions': [], 'clock_proofs': {}}
+    calls = []
+
+    def respond(batch):
+        calls.append(batch)
+        if len(calls) == 1:
+            return {}, {'decisions': [
+                {'record_key': found, 'disposition': 'aligned', 'reason': '逐字相同',
+                 'spans': [span('S0144', '前一段原話')]},
+                {'record_key': missing, 'disposition': 'no_match', 'reason': '沒有候選', 'spans': []},
+            ]}
+        packet, = batch
+        assert packet['record_key'] == missing
+        assert [p['paragraph_key'] for p in packet['candidates']] == ['S0144', 'S0145']
+        return {}, {'decisions': [
+            {'record_key': missing, 'disposition': 'question_context_only', 'reason': '同一次問答',
+             'spans': [span('S0145', '對，不可離開。')]},
+        ]}
+
+    output = resolve_packets(tmp_path, bundle, records, new, {}, call=respond, statement_first=True)
+    rules = read(output)['fragments']
+    assert rules[found]['mode'] == 'rebind'
+    assert rules[missing]['mode'] == 'paragraph_location'
+    assert rules[missing]['paragraph_keys'] == ['S0145']
+    assert read(tmp_path / 'unresolved.json') == {}
+    assert resolve_packets(tmp_path, bundle, records, new, {}, call=respond, statement_first=True) == output
+    assert len(calls) == 2

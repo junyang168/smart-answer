@@ -1,5 +1,7 @@
 """Resolve scoped transcript exceptions with durable, reusable model decisions."""
 
+import json
+
 from backend.pipeline import transcript_claim_migration as migration
 from backend.pipeline import transcript_locator_candidates as candidates
 from backend.pipeline.transcript_evidence_apply import context_only
@@ -232,6 +234,29 @@ def paragraph_location_rule(packet, decision, records, new, clock_proofs):
     }
 
 
+def expanded_location_packet(packet, new):
+    """Offer the complete old playback window once, within the request size limit."""
+    clock = dict(zip(("media_time", "media_end_time"),
+                     packet.get("search_interval", packet["old_interval"])))
+    initial = {row["paragraph_key"] for row in packet["candidates"]}
+    expanded = [
+        {"paragraph_key": key, "ordinal": i, "text": row["text"],
+         "start_time": row["start_time"], "end_time": row["end_time"]}
+        for i, (key, row) in enumerate(new["paragraphs"].items())
+        if row["text"].strip() and audio_position(clock, [
+            {"media_time": row["start_time"], "media_end_time": row["end_time"]},
+        ])["consistent"]
+    ]
+    if not any(row["paragraph_key"] not in initial for row in expanded):
+        return None
+    result = {**packet, "candidates": expanded,
+              "location_only": "Find the corresponding paragraph in this wider playback window. "
+                               "Use spans to identify it; citation boundaries are not being adjudicated."}
+    if len(json.dumps(result, ensure_ascii=False).encode()) > 120_000:
+        return None
+    return result
+
+
 def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_first=False):
     """Run bounded batches, replay saved replies and emit a calibration input."""
     from backend.pipeline.transcript_locator_migration import run_lock
@@ -307,6 +332,22 @@ def resolve_packets(root, bundle, records, new, prior, *, call=None, statement_f
             if key not in unresolved or decision["disposition"] not in {"aligned", "question_context_only"}:
                 continue
             result = paragraph_location_rule(packet, decision, records, new, bundle["clock_proofs"])
+            if result and result[0] not in fragment_rules:
+                parent, rule = result
+                fragment_rules[parent] = rule
+                unresolved.pop(key)
+        for index, (packet, _) in enumerate(fallback):
+            key = packet["record_key"]
+            if key not in unresolved:
+                continue
+            expanded = expanded_location_packet(packet, new)
+            if expanded is None:
+                continue
+            decision = review_batch(root / "expanded-location" / f"{index:03d}", [expanded], call,
+                                    prompt=prompt, schema=schema)[key]
+            if decision["disposition"] not in {"aligned", "question_context_only"}:
+                continue
+            result = paragraph_location_rule(expanded, decision, records, new, bundle["clock_proofs"])
             if result and result[0] not in fragment_rules:
                 parent, rule = result
                 fragment_rules[parent] = rule
