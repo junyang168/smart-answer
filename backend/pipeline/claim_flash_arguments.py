@@ -546,7 +546,7 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                     tasks = ['statement_fidelity', 'support']
                 review_root = root/('statement-correction-support' if tasks else 'statement-correction')
                 checked = statements.review(projected, sources, [key], source_id, review_root, ports, tasks=tasks)
-                e.save(root/'statement-correction.json', checked)
+                e.save(review_root.with_suffix('.json'), checked)
                 if checked['pending'] or checked['updates']:
                     raise ValueError('Proposed Claim statement needs further disposition')
                 statement_updates[key] = proposed
