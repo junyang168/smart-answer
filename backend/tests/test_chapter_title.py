@@ -107,7 +107,7 @@ def test_overview_topics_are_bound_to_playable_slide_cues(tmp_path):
 
         def generate_json(self, system, prompt, schema):
             assert "不在播放區間" not in prompt
-            return {"sections": [{"section": "mat-16-19", "topics": [{"text": "精簡主題", "cue": 0}]}]}
+            return {"sections": [{"section": "mat-16-19", "topics": [{"text": "精簡主題", "cue": 1}]}]}
 
     generated = chapter_topics.generate(index, Client())
     chapter_topics.save(generated, tmp_path / "chapter_slides/mat-16-1-28/overview-topics.json")

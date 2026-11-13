@@ -44,10 +44,10 @@ def generate(index: dict, client: Any) -> dict:
               "required": ["sections"]}
     prompt = {section: [
         {"cue": number, "title": item["title"], "points": item["points"]}
-        for number, item in enumerate(options)
+        for number, item in enumerate(options, start=1)
     ] for section, options in sources.items()}
     answer = client.generate_json(
-        "為每個經文段落寫一至三條簡短繁體中文主題。綜合整段內容，合併重複論證。"
+        "為每個經文段落寫一至三條簡短繁體中文主題，每條不超過 24 字。綜合整段內容，合併重複論證。"
         "主題概括教授講的內容，勿逐張列標題。每條選該段最能代表主題的原聲 cue。"
         "不要補入材料沒有的意思。每個輸入段落恰好回傳一次。",
         json.dumps(prompt, ensure_ascii=False), schema,
@@ -64,9 +64,9 @@ def generate(index: dict, client: Any) -> dict:
         entries = []
         for item in topics:
             cue, text = item["cue"], item["text"].strip()
-            if type(cue) is not int or not 0 <= cue < len(options) or not 1 <= len(text) <= 32:
-                raise ValueError(f"Invalid topic in {section}")
-            entries.append({"text": text, "source_id": options[cue]["source_id"], "at": options[cue]["at"]})
+            if type(cue) is not int or not 1 <= cue <= len(options) or not 1 <= len(text) <= 32:
+                raise ValueError(f"Invalid topic in {section}: cue={cue}, text={text!r}")
+            entries.append({"text": text, "source_id": options[cue - 1]["source_id"], "at": options[cue - 1]["at"]})
         if len({entry["text"] for entry in entries}) != len(entries):
             raise ValueError(f"Repeated topic in {section}")
         result[section] = {"source_sha256": digest(options), "topics": entries}
