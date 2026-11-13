@@ -805,6 +805,7 @@ class Assistant:
             # Unknown outcomes are reconciled with the bridge, never blindly retried.
             return existing[0]
         if any(m["status"] in {"queued", "processing", "error", "review", "waiting_reply"}
+               and not m["payload"].get("initial_sync")
                and m["payload"]["group_id"] == target
                and (m['payload'].get('origin') != 'schedule' or m['payload'].get('schedule_date') == day)
                for m in self.store.messages(10000)):
@@ -821,6 +822,7 @@ class Assistant:
         # Recheck after consulting the bridge: ingestion may have arrived meanwhile.
         with self.store.db() as db:
             pending = db.execute("SELECT 1 FROM messages WHERE status IN ('queued','processing','error','review','waiting_reply') "
+                                 "AND COALESCE(json_extract(payload,'$.initial_sync'),0)=0 "
                                  "AND json_extract(payload,'$.group_id')=? AND (COALESCE(json_extract(payload,'$.origin'),'whatsapp')!='schedule' "
                                  "OR json_extract(payload,'$.schedule_date')=?) LIMIT 1", (target, day)).fetchone()
         if pending:

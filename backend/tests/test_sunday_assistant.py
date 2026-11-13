@@ -253,6 +253,15 @@ def test_friday_reminder_at_5pm_chicago_and_only_missing_items(agent):
     assert len(agent.bridge.sent) == 1
 
 
+def test_friday_reminder_ignores_historical_preview(agent):
+    agent.store.receive(ChatMessage(message_id="old-preview", group_id="222@g.us", sender_id="sender",
+                                    sent_at=FRIDAY, text="歷史預覽", initial_sync=True))
+    with agent.store.db() as db:
+        db.execute("UPDATE messages SET status='review' WHERE id='old-preview'")
+    assert agent.remind(FRIDAY) == "sent"
+    assert agent.store.messages()[0]["status"] == "review"
+
+
 def test_friday_does_not_remind_when_complete_unsynced_or_backlogged(agent):
     agent.bridge.live = False
     assert agent.remind(FRIDAY) == "bridge_not_synced"
