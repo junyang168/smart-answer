@@ -289,6 +289,20 @@ def create_review_router(root: Path, *, beta_owner: str | None = None, role_root
             lambda: store.history(authenticated_actor(request), item, before=before, grouped=grouped)
         )
 
+    @router.get("/review_document/{item}/legacy_history")
+    def legacy_history(item: str, request: Request):
+        selected = call(lambda: store_for(item))
+        def result():
+            from .legacy_editor_snapshot import legacy_history
+            selected.require(authenticated_actor(request), item)
+            if not (selected.folder(item) / "beta-promotion.json").exists():
+                return None
+            try:
+                return legacy_history(selected.root, item)
+            except (OSError, ValueError, KeyError, TypeError, StopIteration) as exc:
+                raise ReviewError(409, "無法驗證舊版編輯歷史") from exc
+        return call(result)
+
     @router.get("/review_document/{item}/revisions/{revision}")
     def revision(item: str, revision: int, request: Request):
         store = call(lambda: store_for(item))

@@ -8,6 +8,30 @@ from .script_delta import ScriptDelta
 from .transcript_review import ReviewError, ReviewStore, read
 
 
+def legacy_history(root: Path, item: str):
+    """Read the production audit entries and the last saved legacy manuscript."""
+    path = root / "logs/sermon_meta_audit.log"
+    events = []
+    if path.exists():
+        with path.open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("item") == item:
+                    events.append({
+                        "time": entry.get("timestamp"),
+                        "actor": entry.get("actor_name") or entry.get("actor_id"),
+                        "action": entry.get("context"),
+                    })
+    snapshot = legacy_editor_document(root, item)
+    return {
+        "events": sorted(events, key=lambda entry: entry["time"] or "", reverse=True),
+        "snapshot_available": bool(snapshot["script"]),
+    }
+
+
 def legacy_editor_document(root: Path, item: str, *, changes=False):
     store = ReviewStore(root)
     folder = store.folder(item)  # Validate the item before constructing paths.
