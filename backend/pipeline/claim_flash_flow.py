@@ -138,8 +138,11 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         for fragment in result_package.get('source_fragments',[]):
             generation=generations.get(fragment['source_id'])
             if (generation and fragment.get('source_sha256')!=generation
-                    and fragment.get('anchor_state') in source.HISTORICAL
-                    and fragment['fragment_id'] not in live_fragment_ids):
+                    and fragment['fragment_id'] not in live_fragment_ids
+                    and (fragment.get('anchor_state') in source.HISTORICAL or (
+                        fragment.get('anchor_state') == 'unresolved'
+                        and fragment.get('source_binding_status') in {'quotation_pending_update','source_text_missing'}
+                        and not fragment.get('verbatim_excerpt')))):
                 historical_fragments.append(fragment)
             else:
                 live_fragments.append(fragment)

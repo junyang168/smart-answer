@@ -177,13 +177,20 @@ def test_export_pending_is_not_approval_and_tracks_real_changes(candidate,tmp_pa
 
 
 @pytest.mark.parametrize('referenced',[False,True])
-def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced):
+@pytest.mark.parametrize('anchor_state,binding_status',[
+    ('replaced_by_precise_fragments','needs_claim_refresh'),
+    ('unresolved','quotation_pending_update'),
+    ('unresolved','source_text_missing'),
+])
+def test_canonical_export_preserves_superseded_source_fragment_history(candidate,tmp_path,monkeypatch,referenced,anchor_state,binding_status):
     package,_=candidate
     with workspace.open_candidate(package,tmp_path/'private') as store:
         sid=package['source_documents'][0]['source_id']
         records,sources=flow.snapshot(store,sid)
         historical={**deepcopy(package['source_fragments'][0]),'fragment_id':'OLD-FRAGMENT',
-                    'source_sha256':'0'*64,'anchor_state':'replaced_by_precise_fragments'}
+                    'source_sha256':'0'*64,'anchor_state':anchor_state,'source_binding_status':binding_status}
+        if anchor_state=='unresolved':
+            historical['verbatim_excerpt']=''
         records['source_fragments/OLD-FRAGMENT']={'payload':historical,'content_sha256':'historical',
                                                   'revision':1,'retired':False}
         if referenced:
