@@ -290,9 +290,21 @@ def connection_candidate(root, ports, records, claim_key, finding, pool):
     return choices.get(answers['candidate']) if answers else None
 
 
-def argument_support_issues(root, ports, material):
-    questions = {key: q.claim(with_references=bool(material.get('claim_references')))[key]
-                 for key in ('support', 'scripture')}
+def support_questions(material):
+    options = q.claim(with_references=bool(material.get('claim_references')))
+    return {key: options[key] for key in ('support', 'scripture')}
+
+
+def has_combined_support_request(root, material):
+    request = {'model': e.MODEL, 'state': material, 'questions': support_questions(material)}
+    saved = Path(root)/'jev'/e.digest(request)
+    return (saved/'started.json').exists() or (saved/'response.json').exists()
+
+
+def argument_support_issues(root, ports, material, *, scripture_verified=False):
+    questions = support_questions(material)
+    if scripture_verified:
+        questions.pop('scripture')
     answers,unavailable=bounded_jev(root,ports,material,questions)
     if unavailable:
         return {key:unavailable for key in questions}
@@ -316,7 +328,14 @@ def final_support_decisions(root,ports,jobs):
             # Unknown earlier calls still fail closed in the common recorder.
             consume(f.gpt(root,ports,'argument_final_support',[job],schema,FINAL_SUPPORT_PROMPT,semantic_review=False))
         else:remaining.append(job)
-    consume(f.gpt(root,ports,'argument_final_support',remaining,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    ordinary = [job for job in remaining if not job.get('reuse_scripture_check')]
+    support_only = [job for job in remaining if job.get('reuse_scripture_check')]
+    consume(f.gpt(root,ports,'argument_final_support',ordinary,schema,FINAL_SUPPORT_BATCH_PROMPT,semantic_review=False))
+    if support_only:
+        instruction = ('只核對最終論據集合是否完整支持Claim。經文出處已核對，沿用該判定。'
+                       'keep需有據；缺內容needs_source，缺連接needs_connection。不得修改節點或再建邊。'
+                       '每個job_id獨立判定且恰好一次，只用該job材料。')
+        consume(f.gpt(root,ports,'argument_final_support',support_only,schema,instruction,semantic_review=False))
     return [answers[j['job_id']] for j in jobs]
 
 
@@ -590,8 +609,13 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
             if (state==prior and not any(x['object_key']==key for x in old_checks['pending'])
                     and not (parent is not None and key in remaining)):
                 outcomes.append({'object_key':key,'basis':'reused_statement_support_and_scripture'});continue
-            issues=argument_support_issues(root/'postimage-support',ports,state)
-            if issues:final_jobs.append({'job_id':key,'material':state,'findings':issues})
+            support_root = root/'postimage-support'
+            reuse_scripture = (statements.scripture_verified(old_checks['outcomes'], key, state)
+                               and not has_combined_support_request(support_root, state))
+            issues=argument_support_issues(support_root,ports,state,scripture_verified=reuse_scripture)
+            if issues:
+                final_jobs.append({'job_id':key,'material':state,'findings':issues,
+                    **({'reuse_scripture_check':True} if reuse_scripture and 'scripture' not in issues else {})})
         for edit in final_support_decisions(root/'postimage-disposition',ports,final_jobs):
             if edit.action!='keep':pending.append({'object_key':edit.job_id,'layer':'claim_connections','reason':edit.reason})
             outcomes.append({'object_key':edit.job_id,'basis':'gpt_final_support','action':edit.action,'reason':edit.reason})

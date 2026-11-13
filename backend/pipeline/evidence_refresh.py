@@ -6,10 +6,12 @@ Opus, scheduler, or replacement qualification database is involved.
 from copy import deepcopy
 import hashlib
 import json
+import logging
+import traceback
 import os
 from pathlib import Path
 import urllib.request
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import fcntl
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
@@ -456,7 +458,7 @@ def readback(store, result):
 
 
 class Models:
-    """Thin provider calls; no separate model orchestration or automatic retries."""
+    """Thin provider calls; retry only a TLS handshake timeout before a request is sent."""
     def __init__(self, gpt, root, *, capacity=None):
         if gpt.backend != 'codex_subscription':
             raise ValueError('Evidence repair requires the authorized GPT subscription')
@@ -471,8 +473,25 @@ class Models:
         req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', method='POST',
             data=json.dumps(request, ensure_ascii=False).encode(),
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return json.loads(response.read())
+        for attempt in range(2):
+            try:
+                response = urllib.request.urlopen(req, timeout=60)
+            except URLError as exc:
+                reason = exc.reason
+                handshake_timeout = isinstance(reason, TimeoutError) and any(
+                    frame.f_globals.get('__name__') == 'ssl' and frame.f_code.co_name == 'do_handshake'
+                    for frame, _ in traceback.walk_tb(reason.__traceback__))
+                # urllib can open a new TLS connection after receiving a
+                # redirect. In that case the original request already went out.
+                redirected = any(frame.f_globals.get('__name__') == 'urllib.request'
+                                 and frame.f_code.co_name == 'http_error_302'
+                                 for frame, _ in traceback.walk_tb(exc.__traceback__))
+                if attempt or not handshake_timeout or redirected:
+                    raise
+                logging.getLogger(__name__).warning('Jev TLS handshake timed out before send; retrying once')
+            else:
+                with response:
+                    return json.loads(response.read())
 
     def judge_preflight(self):
         if not os.environ.get('TYPESAFE_API_KEY'):

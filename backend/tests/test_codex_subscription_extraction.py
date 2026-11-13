@@ -884,3 +884,38 @@ def test_subscription_backend_changes_fingerprint_without_changing_api_identity(
     assert "backend" not in existing_api_identity
     assert subscription_identity["backend"] == "codex_subscription"
     assert subscription_identity["fingerprint_sha256"] != existing_api_identity["fingerprint_sha256"]
+
+
+def test_new_usage_capture_preserves_legacy_durable_replay(tmp_path, monkeypatch):
+    from backend.pipeline import subscription_process
+
+    binary = tmp_path/'codex'
+    binary.write_text('#!/bin/sh\n')
+    binary.chmod(0o755)
+    sent = []
+
+    def run(command, **kwargs):
+        sent.append(command)
+        Path(command[command.index('--output-last-message') + 1]).write_text('{}')
+        if '--json' in command:
+            kwargs['stdout'].write('{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":3}}\n')
+        return _completed(command)
+
+    monkeypatch.setattr(subscription_process.subprocess, 'run', run)
+    client = CodexSubscriptionClient(model='gpt-6.1-sol', executable=str(binary))
+    client._authenticated = True
+    client.call_artifacts = tmp_path/'legacy'
+    schema = {'type': 'object'}
+    assert client.generate_json('system', 'user', schema) == {}
+    client.capture_usage_events = True
+    client.replay_only = True
+    assert client.generate_json('system', 'user', schema) == {}
+    assert len(sent) == 1 and '--json' not in sent[0] and client.last_usage is None
+
+    client.call_artifacts = tmp_path/'new'
+    client.replay_only = False
+    assert client.generate_json('system', 'user', schema) == {}
+    assert '--json' in sent[-1] and client.last_usage == {'input_tokens': 12, 'output_tokens': 3}
+    client.replay_only = True
+    assert client.generate_json('system', 'user', schema) == {}
+    assert len(sent) == 2 and client.last_usage['input_tokens'] == 12

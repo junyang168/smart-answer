@@ -4,6 +4,7 @@ No semantic task is implemented here. Existing stage receipts remain authority;
 this interface supplies order, a source-local output, and an honest pending exit.
 """
 from copy import deepcopy
+from datetime import datetime
 import fcntl
 import json
 import os
@@ -98,26 +99,77 @@ def external_reference_pins(store,records,*,include_records=False):
         return (pins,projections) if include_records else pins
 
 
-def accounting(root,provider_root=None):
-    """Actual saved receipts only; cached/reasoning tokens are reported subsets."""
-    result={}
-    for role in ('gpt','jev'):
-        usage={'input_tokens':0,'output_tokens':0,'cached_input_tokens':0,'reasoning_output_tokens':0}
-        calls=missing_usage=0
-        for started in Path(root).rglob(role+'/*/started.json'):
-            calls+=1;folder=started.parent
-            if role=='gpt':
-                provider=(Path(provider_root)/'gpt'/folder.name/'provider.json') if provider_root else folder/'provider.json'
-                raw=read(provider).get('usage') if provider.exists() else None
+def accounting(root, provider_root=None, evidence_provider_root=None):
+    """Count durable dispatches once and report measured usage by layer."""
+    from backend.pipeline.codex_subscription_client import completed_turn_usage
+    from backend.pipeline.subscription_process import digest_file
+
+    def summary():
+        return {'actual_calls': 0, 'missing_usage_receipts': 0, 'provider_seconds': 0.0,
+                'missing_duration_receipts': 0, 'usage': dict.fromkeys(
+                    ('input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_output_tokens'), 0)}
+
+    def count(row, usage, seconds):
+        row['actual_calls'] += 1
+        if seconds is None:
+            row['missing_duration_receipts'] += 1
+        else:
+            row['provider_seconds'] += seconds
+        if not isinstance(usage, dict) or any(type(usage.get(key)) is not int or usage[key] < 0
+                                              for key in ('input_tokens', 'output_tokens')):
+            row['missing_usage_receipts'] += 1
+            return
+        for key, value in {
+            'input_tokens': usage['input_tokens'], 'output_tokens': usage['output_tokens'],
+            'cached_input_tokens': usage.get('cached_input_tokens', (usage.get('input_tokens_details') or {}).get('cached_tokens')),
+            'reasoning_output_tokens': usage.get('reasoning_output_tokens', (usage.get('output_tokens_details') or {}).get('reasoning_tokens')),
+        }.items():
+            if type(value) is int and value >= 0:
+                row['usage'][key] += value
+
+    root = Path(root)
+    result = {role: summary() for role in ('gpt', 'jev')}
+    layers = {layer: summary() for layer in ('source', 'evidence', 'claims', 'unclassified')}
+    seen = set()
+    for role in ('gpt', 'jev'):
+        paths = sorted(root.rglob(role+'/*/started.json'), key=lambda path: path.stat().st_mtime_ns)
+        for started in paths:
+            folder = started.parent
+            stage = started.relative_to(root).parts[0]
+            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings'}
+                     else 'evidence' if stage in {'evidence', 'source-handoffs'}
+                     else 'claims' if stage == 'claims' else 'unclassified')
+            seconds = None
+            if role == 'gpt':
+                provider = (evidence_provider_root or provider_root) if layer == 'evidence' else provider_root
+                receipt_folder = Path(provider)/role/folder.name if provider else folder
+                transport = receipt_folder/'transport'
+                invocation, exit_receipt = transport/'invocation.json', transport/'exit.json'
+                receipt = receipt_folder/'provider.json'
+                if receipt_folder in seen or not (invocation.exists() or receipt.exists()):
+                    continue
+                seen.add(receipt_folder)
+                usage = read(receipt).get('usage') if receipt.exists() else None
+                if exit_receipt.exists() and invocation.exists():
+                    saved = read(exit_receipt)
+                    if saved.get('finished_at'):
+                        seconds = max(0, datetime.fromisoformat(saved['finished_at']).timestamp() - invocation.stat().st_mtime)
+                    stdout = transport/'stdout.log'
+                    if usage is None and stdout.exists() and saved.get('files', {}).get('stdout.log') == digest_file(stdout):
+                        usage = completed_turn_usage(stdout.read_text())
+                count(layers[layer], usage, seconds)
             else:
-                raw=read(folder/'response.json').get('usage') if (folder/'response.json').exists() else None
-            if not isinstance(raw,dict):missing_usage+=1;continue
-            for key in ('input_tokens','output_tokens'):usage[key]+=raw.get(key,0) or 0
-            usage['cached_input_tokens']+=raw.get('cached_input_tokens',(raw.get('input_tokens_details') or {}).get('cached_tokens',0)) or 0
-            usage['reasoning_output_tokens']+=raw.get('reasoning_output_tokens',(raw.get('output_tokens_details') or {}).get('reasoning_tokens',0)) or 0
-        result[role]={'actual_calls':calls,'usage':usage,'missing_usage_receipts':missing_usage,
-            'total_tokens':usage['input_tokens']+usage['output_tokens'] if not missing_usage else None}
-    result['dollar_cost']=None
+                reply = folder/'response.json'
+                usage = read(reply).get('usage') if reply.exists() else None
+                if reply.exists():
+                    seconds = max(0, reply.stat().st_mtime - started.stat().st_mtime)
+            count(result[role], usage, seconds)
+    for row in [*result.values(), *layers.values()]:
+        row['total_tokens'] = (row['usage']['input_tokens'] + row['usage']['output_tokens']
+                               if not row['missing_usage_receipts'] else None)
+        row['provider_seconds'] = round(row['provider_seconds'], 3)
+    result['gpt_by_layer'] = layers
+    result['dollar_cost'] = None
     return result
 
 
@@ -274,7 +326,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
         else:before=records;e.save(root/'before.json',before)
         def finish(stages,pending):
             result=export(store,source_id,root,before,candidate,stages,pending,started,mode)
-            result['accounting']=accounting(root,getattr(ports,'root',None))
+            result['accounting']=accounting(root,getattr(ports,'root',None),getattr(evidence_ports,'root',None))
             result=e.publish(root,result)
             return record_completion(result)
         if plan is None:
@@ -415,7 +467,9 @@ def subscription_ports(root, capacity, executable=None):
     evidence = make('gpt-6-sol')
     evidence.gpt.cache_usage_events = True
     evidence.evidence_fidelity_limits = (180, 2500)
-    return make('gpt-6.1-sol'), evidence
+    regular = make('gpt-6.1-sol')
+    regular.gpt.capture_usage_events = True
+    return regular, evidence
 
 
 def main():

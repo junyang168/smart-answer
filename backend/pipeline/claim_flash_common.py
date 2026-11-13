@@ -162,22 +162,33 @@ def load_source(store, sid, *, visual_context=False):
 
 def load_group_source(store, sid, group):
     """Carry existing source interpretations into just this group's Claim tasks."""
-    from backend.pipeline import claim_human_source as human
+    from backend.pipeline import claim_human_source as human, claim_update_flash as flash
+
     records, sources = load_source(store, sid)
+    decisions = store.read_human_source_decisions([sid])
+    if not decisions:
+        return records, sources
     keys = set(group['paragraph_keys'])
-    material_keys=set(group.get('lower_record_keys', [])+group.get('reference_record_keys', []))
-    # These direct references are already read by Claim tasks. Carry their
-    # source interpretations too, without following another Claim neighbour.
+    material_keys = set(group.get('lower_record_keys', []) + group.get('reference_record_keys', []))
+    # The Claim material already resolves typed attachments, incoming lower
+    # argument paths, and one-hop Claim references. Use the same boundaries.
+    for cid in group.get('claim_ids', []):
+        key = 'claims/'+cid
+        if key not in records:
+            continue
+        material = flash.claim_material(key, records, sources, sid)
+        keys.update(material['source_paragraphs'])
+        material_keys.update(node['object_key'] for node in material['evidence'])
+        material_keys.update(node['object_key'] for node in material.get('argument_context', {}).get('records', []))
     material_keys.update('evidence_steps/'+eid for key in list(material_keys)
-        if key.startswith('claims/') and key in records
-        for eid in records[key]['payload'].get('evidence_step_ids',[]))
-    for key in material_keys:
-        if key in records:
-            keys.update(records['source_fragments/'+fid]['payload']['paragraph_key']
-                        for fid in e.evidence_fragment_ids(records[key]['payload'])
-                        if 'source_fragments/'+fid in records)
+                         if key.startswith('claims/') and key in records
+                         for eid in records[key]['payload'].get('evidence_step_ids', []))
+    for key in material_keys & records.keys():
+        keys.update(records['source_fragments/'+fid]['payload']['paragraph_key']
+                    for fid in e.evidence_fragment_ids(records[key]['payload'])
+                    if records.get('source_fragments/'+fid, {}).get('payload', {}).get('source_id') == sid)
     paragraphs = {sid: sorted(keys)}
-    entries = human.scoped(store.read_human_source_decisions([sid]), paragraphs)
+    entries = human.scoped(decisions, paragraphs)
     if entries:
         human.project(sources, entries)
         if any(x['applicability'] != 'current' for x in sources[sid]['human_source_decisions']):

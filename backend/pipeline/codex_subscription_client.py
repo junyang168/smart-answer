@@ -14,6 +14,18 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
+def completed_turn_usage(stdout: str):
+    usage = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get('type') == 'turn.completed':
+            usage = event.get('usage')
+    return usage
+
+
 class CodexSubscriptionError(RuntimeError):
     """The subscription backend could not produce a structured response."""
 
@@ -227,6 +239,7 @@ class CodexSubscriptionClient:
                 str(output_path),
             ]
             working_directory=root
+            capture_usage = getattr(self, 'capture_usage_events', False)
             if getattr(self,'cache_usage_events',False):
                 command.append('--json')
                 if getattr(self,'cache_working_directory',None):
@@ -240,6 +253,11 @@ class CodexSubscriptionClient:
                     )
                 command.extend(["--image", str(resolved)])
             command.append("-")
+            if capture_usage and '--json' not in command:
+                saved_invocation = root / 'invocation.json'
+                legacy_sha = hashlib.sha256(json.dumps(command).encode()).hexdigest()
+                if not saved_invocation.exists() or json.loads(saved_invocation.read_text())['command_sha256'] != legacy_sha:
+                    command.insert(-1, '--json')
             try:
                 if durable:
                     from backend.pipeline.subscription_process import run
@@ -261,17 +279,13 @@ class CodexSubscriptionClient:
                 raise CodexSubscriptionError(
                     f"Codex subscription transport failed: {type(exc).__name__}: {exc}"
                 ) from exc
-            if getattr(self,'cache_usage_events',False):
-                for line in completed.stdout.splitlines():
-                    try:event=json.loads(line)
-                    except ValueError:continue
-                    if isinstance(event,dict) and event.get('type')=='turn.completed':
-                        self.last_usage=event.get('usage')
+            if '--json' in command:
+                self.last_usage = completed_turn_usage(completed.stdout)
             self.last_raw_response = {
                 "stdout": completed.stdout, "stderr": completed.stderr,
                 "last_message": output_path.read_text(encoding="utf-8") if output_path.exists() else None,
             }
-            if getattr(self,'cache_usage_events',False):
+            if '--json' in command:
                 self.last_raw_response['usage']=self.last_usage
             if completed.returncode != 0:
                 raise CodexSubscriptionError(

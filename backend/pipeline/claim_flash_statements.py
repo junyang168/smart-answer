@@ -78,6 +78,27 @@ def judgment_hash(material,question):
     return e.digest(value)
 
 
+def scripture_input_hash(material):
+    """Bind the citation judgment to text, source facts and nodes, independent of edge edits."""
+    value = deepcopy(material)
+    nodes = value.pop('evidence', []) + value.pop('argument_context', {}).get('records', [])
+    for node in nodes:
+        node.pop('relation_type', None)
+    value['supporting_nodes'] = sorted(nodes, key=lambda node: node['object_key'])
+    for reference in value.get('claim_references', []):
+        reference.pop('relations', None)
+        reference.pop('supporting_relation_keys', None)
+    return e.digest(value)
+
+
+def scripture_verified(outcomes, key, material):
+    stamp = scripture_input_hash(material)
+    return any(item['object_key'] == key and item['task'] == 'claim_scripture'
+               and item.get('scripture_input_sha256') == stamp
+               and (item.get('verdict') == 'complete' or item.get('action') == 'keep')
+               for item in outcomes)
+
+
 def finish(store,root):
     result=json.loads((root/'verification.json').read_text());before=json.loads((root/'before.json').read_text())
     f.source_unchanged(before['sources'])
@@ -126,13 +147,16 @@ def review(records,sources,targets,source_id,root,ports,*,tasks=None):
                     jobs.append({'job_id':key,'question':question,'claim':working[key]['payload'],'material':state,'jev':verdict})
                 else:
                     settled[key][question]=stamp
-                    outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state)})
+                    outcomes.append({'object_key':key,'task':task,'basis':'jev_precheck','verdict':verdict,'input_sha256':e.digest(state),
+                        **({'scripture_input_sha256': scripture_input_hash(state)} if question=='scripture' else {})})
             for batch,raw in f.gpt(root/'dispositions',ports,task,jobs,Edits.model_json_schema(),PROMPT,semantic_review=False):
                 edits=Edits.model_validate(raw).items
                 f.exactly([x.model_dump() for x in edits],[j['job_id'] for j in batch],'job_id')
                 for edit in edits:
                     key=edit.job_id
-                    outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key])})
+                    outcomes.append({'object_key':key,'task':task,'basis':'gpt_disposition','action':edit.action,'reason':edit.reason,'input_sha256':e.digest(states[key]),
+                        **({'scripture_input_sha256': scripture_input_hash(states[key])}
+                           if question=='scripture' and edit.action=='keep' else {})})
                     if edit.action in {'needs_source','needs_connection'}:
                         pending.append({'object_key':key,'layer':'source' if edit.action=='needs_source' else 'claim_connections','reason':edit.reason})
                         continue
@@ -184,7 +208,7 @@ def run(store,source_id,claim_ids,evidence_root,root,ports,*,apply=False):
         group=next((g for g in plan['groups'] if set(claim_ids)<=set(g.get('claim_ids',[]))),None)
         if group is None:
             records,sources=f.load_source(store,source_id);c.fetch_claims(store,claim_ids)
-            group={'paragraph_keys':sorted({pk for cid in claim_ids for pk in flash.paragraph_keys('claims/'+cid,records)}),
+            group={'claim_ids':claim_ids,'paragraph_keys':sorted({pk for cid in claim_ids for pk in flash.paragraph_keys('claims/'+cid,records)}),
                    'lower_record_keys':['evidence_steps/'+eid for cid in claim_ids for eid in records['claims/'+cid]['payload'].get('evidence_step_ids',[])],
                    'reference_record_keys':[]}
         records,sources=f.load_group_source(store,source_id,group);c.fetch_claims(store,claim_ids)

@@ -465,3 +465,38 @@ def test_final_argument_support_recognizes_only_the_recorded_token_limit(tmp_pat
         with pytest.raises(e.RecordedCallRejected):
             stage.argument_support_issues(tmp_path, ports, material)
     assert len(ports.calls) == 1
+
+
+def test_scripture_decision_reuses_same_material_but_support_is_rechecked(tmp_path):
+    material = {'claim': {'statement': '耶穌談到外邦人的掌權。', 'scripture_refs': []},
+                'evidence': [{'object_key': 'evidence_steps/E', 'statement': '外邦人掌權。',
+                              'relation_type': 'supports'}],
+                'source_paragraphs': {'S0001': '主說，外邦人有君王為主治理他們。'}}
+    key = 'claims/C'
+    outcome = {'object_key': key, 'task': 'claim_scripture', 'action': 'keep',
+               'reason': '教授沒有給出具體出處。',
+               'scripture_input_sha256': statements.scripture_input_hash(material)}
+    changed = deepcopy(material)
+    changed['evidence'][0]['relation_type'] = 'explains'
+    assert statements.scripture_verified([outcome], key, changed)
+
+    class Judge:
+        def judge(self, request):
+            assert set(request['questions']) == {'support'}
+            return {'model': e.MODEL, 'answers': {'support': {'type': 'choice', 'choice': 'partial',
+                    'probabilities': {key: float(key == 'partial') for key in request['questions']['support']['criteria']}}}}
+
+    assert stage.argument_support_issues(tmp_path, Judge(), changed, scripture_verified=True) == {'support': 'partial'}
+    assert not statements.scripture_verified([{**outcome, 'action': 'needs_source'}], key, changed)
+    changed['source_paragraphs']['S0001'] += ' 見馬太福音二十章。'
+    assert not statements.scripture_verified([outcome], key, changed)
+
+
+def test_final_gpt_support_only_prompt_preserves_prior_scripture_decision(tmp_path):
+    ports = Ports()
+    job = {'job_id': 'claims/C', 'material': {}, 'findings': {'support': 'partial'}, 'reuse_scripture_check': True}
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
+    assert '經文出處已核對，沿用該判定' in ports.calls[0][1]['system']
+    assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
+    assert len(ports.calls) == 1
