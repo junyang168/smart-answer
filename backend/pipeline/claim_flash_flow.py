@@ -256,7 +256,7 @@ def bind_evidence_ports(root, ports, evidence_ports):
     return evidence_ports
 
 
-def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None,published=None,locator_root=None,registration_root=None):
+def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=None,published=None,locator_root=None,registration_root=None,backup_manifest=None):
     """Apply each authorized layer to its store; candidate mode requires private SQL.
 
     Passing a canonical store authorizes no writes by itself: its caller must
@@ -274,7 +274,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
             from backend.pipeline import transcript_locator_migration as migration
 
             check = migration.preflight(store, source_id, published=published, locator_root=locator_root,
-                                        registration_root=registration_root)
+                                        registration_root=registration_root, backup_manifest=backup_manifest)
             if check['status'] not in {'not_needed','migrated'}:
                 return {'version':VERSION,'source_id':source_id,'status':'needs_attention',
                         'pending':[{'layer':'migration',**check}]}
@@ -514,7 +514,7 @@ def main():
     selector.add_argument('--source-id',help='Existing canonical source; requires explicit --apply')
     parser.add_argument('--apply',action='store_true');parser.add_argument('--database-url')
     parser.add_argument('--shared-groups');parser.add_argument('--codex-executable')
-    parser.add_argument('--published');parser.add_argument('--locator-root');parser.add_argument('--registration-root')
+    parser.add_argument('--published');parser.add_argument('--locator-root');parser.add_argument('--registration-root');parser.add_argument('--backup-manifest')
     args=parser.parse_args()
     if args.candidate and (args.apply or args.database_url):parser.error('candidate mode never accepts canonical write flags or database URLs')
     if args.source_id and not args.apply:parser.error('canonical flow requires explicit --apply')
@@ -533,7 +533,7 @@ def main():
                 if path.is_file():
                     published = path
         result=run(store,args.source_id,root,ports,plan=plan,evidence_ports=evidence_ports,
-                   published=published,locator_root=args.locator_root,registration_root=args.registration_root)
+                   published=published,locator_root=args.locator_root,registration_root=args.registration_root,backup_manifest=args.backup_manifest)
     print(json.dumps(result, ensure_ascii=False))
     # Keep the full JSON contract on stdout. An incomplete lecture needs an
     # Agent decision even when the runner exited normally.

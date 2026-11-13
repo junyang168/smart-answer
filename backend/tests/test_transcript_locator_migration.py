@@ -214,6 +214,7 @@ def test_pending_split_is_committed_in_source_order_and_used_by_update(relocatio
     fresh = flow.prepare(store, root.with_name('fresh'), **args)
     assert fresh['exceptions'] == []
     assert fresh['evidence_updates'] == 0
+    assert flow.preflight(store, 'S', published=published)['status'] == 'not_needed'
     stale = {'S': {**snapshot, 'body_sha256': 'newer'}}
     with pytest.raises(ValueError, match='pending quotation location is stale'):
         Locator(stale).prepare(key, records, stale)
@@ -227,3 +228,19 @@ def test_flash_preflight_reuses_existing_locator_transaction(relocation):
     assert flow.preflight(store, 'S', published=args['published'])['status'] == 'not_needed'
     args['published'].write_text('{"script":[{"index":1,"text":"different publication"}]}')
     assert flow.preflight(store, 'S', published=args['published'])['status'] == 'registration_required'
+
+def test_clock_aligned_location_requires_context_and_matching_interval():
+    row = {'reason':'source_located_requires_refresh','target_paragraphs':['S0001'],
+           'alignment':{'left_anchor':{'literal':'前文'},'right_anchor':{'literal':'後文'}}}
+    state = {'revision':2,'content_sha256':'pin','payload':{}}
+    new = {'body_sha256':'epoch','paragraphs':{'S0001':{'text':'原文','start_time':10,'end_time':20}}}
+    proof = {'source_file':'old'}
+    target = 'backend.pipeline.transcript_evidence_calibration.verified_legacy_interval'
+    with patch(target, return_value={'media_time':10,'media_end_time':20}):
+        rule = ea.clock_aligned_location(row,state,new,proof)
+        assert rule['paragraph_keys'] == ['S0001']
+        assert rule['mode'] == 'paragraph_location'
+        assert rule['before_pin'] == [2,'pin']
+        assert ea.clock_aligned_location({**row,'alignment':{}},state,new,proof) is None
+    with patch(target, return_value={'media_time':100,'media_end_time':110}):
+        assert ea.clock_aligned_location(row,state,new,proof) is None
