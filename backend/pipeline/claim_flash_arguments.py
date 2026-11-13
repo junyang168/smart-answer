@@ -72,11 +72,14 @@ def active_root(root):
     if not path.exists():return root
     authority=json.loads(path.read_text());parent=json.loads((root/'verification.json').read_text())
     before=json.loads((root/'before.json').read_text())
+    allowed_layers = {'source'} if authority.get('source_context_keys') else {'claim_connections'}
+    if authority.get('statement_correction'):
+        allowed_layers.add('source')
     if (authority.get('contract')!=CANDIDATE_SCOPE or not authority.get('owner_direction')
             or authority.get('parent_verification_sha256')!=e.digest(parent)
             or authority.get('parent_before_sha256')!=e.digest(before)
             or parent.get('version')!=VERSION or parent.get('status')!='needs_attention'
-            or not parent.get('pending') or any(x.get('layer') != ('source' if authority.get('source_context_keys') else 'claim_connections') for x in parent['pending'])
+            or not parent.get('pending') or any(x.get('layer') not in allowed_layers for x in parent['pending'])
             or (root/'commit-intent.json').exists()):
         raise ValueError('argument material correction differs from its uncommitted parent')
     original_child = root/'material-scope-continuations'/e.digest(parent)
@@ -534,6 +537,9 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                     raise ValueError('Proposed Claim statement needs further disposition')
                 statement_updates[key] = proposed
                 records = projected
+                if finding['layer'] == 'source':
+                    parent['pending'] = [{**finding, 'layer': 'claim_connections',
+                        'reason': 'The corrected Claim wording passed statement review. Verify its argument against the supplied source.'}]
         targets={'claims/'+cid for cid in ids}
         pool=f.active_group_lower_keys(group,records)
         for key in targets:pool.update(x['object_key'] for x in flash.claim_material(key,records,sources,source_id)['evidence'])
