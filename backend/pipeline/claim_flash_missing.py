@@ -258,8 +258,12 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
             # Consume the relationship stage's exact direct-reference scope,
             # including current human interpretations of those references.
             prior_result=json.loads((relation_root/'result.json').read_text())
+            endpoints = set(prior_result.get('readonly_endpoint_keys', []))
+            relation_before = json.loads((relation_root/'before.json').read_text())
+            lower = {'evidence_steps/'+eid for key in endpoints
+                     for eid in relation_before['records'][key]['payload'].get('evidence_step_ids', [])}
             load_group={**group,'reference_record_keys':sorted(set(group.get('reference_record_keys',[]))
-                |set(prior_result.get('readonly_endpoint_keys',[])))}
+                | endpoints | lower)}
         records,sources=f.load_group_source(store,source_id,load_group)
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
         if empty_group is None:read=consume(store,relation_root,records,sources)
