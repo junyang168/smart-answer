@@ -56,16 +56,9 @@ def calibrate(row, state, rule, new, document):
             or rule['target_source_sha256'] != new['body_sha256'] or not rule.get('reason')):
         raise ValueError('saved locator calibration drift: '+row['record_key'])
     mode = rule['mode']
+    if 'owner_confirmation' in rule:
+        raise ValueError('owner confirmation belongs to Update, not transcript locator calibration')
     if mode == 'source_text_missing':
-        if rule.get('owner_confirmation'):
-            confirmation = rule['owner_confirmation']
-            expected = confirmation.get('evidence_key')
-            if (confirmation.get('fragment_key') != row['record_key']
-                    or expected not in row.get('direct_consumers', [])
-                    or not expected.startswith('evidence_steps/')
-                    or not confirmation.get('owner_response')
-                    or confirmation.get('source_id') != f.get('source_id')):
-                raise ValueError('owner confirmation does not match the missing evidence')
         return {**row, 'status': 'source_text_missing', 'calibration_decision': rule,
                 'reason': rule['reason'], 'proposed_fields': {
                     'anchor_state':'unresolved', 'source_binding_status':'source_text_missing',

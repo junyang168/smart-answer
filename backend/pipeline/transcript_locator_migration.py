@@ -72,8 +72,6 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
             row for row in report['fragments']
             if row['status'] not in RESOLVED
             and row['status'] not in {'question_context_only', 'paragraph_location'}
-            and not (row['status'] == 'source_text_missing'
-                     and row.get('calibration_decision', {}).get('owner_confirmation'))
         ] + report.get('consumer_exceptions', [])
         preview = {'source_id': source_id, 'phase': 'evidence_preview',
                    'evidence_updates': len(report['updates']), 'exceptions': exceptions,
@@ -192,7 +190,6 @@ def main():
     parser.add_argument('--instruction-file', type=Path); parser.add_argument('--calibration', type=Path)
     parser.add_argument('--jev-impact', action='store_true')
     parser.add_argument('--statement-first', action='store_true')
-    parser.add_argument('--owner-confirmation', type=Path, action='append', default=[])
     parser.add_argument('--backup-manifest', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--capacity-root', type=Path, help='shared Sol concurrency directory for resolve')
@@ -220,22 +217,6 @@ def main():
         manifest, records, new, bundle = load_run_packets(args.root, args.backup_manifest)
         intent = manifest['intent']
         prior = m.read(Path(intent['calibration'])) if intent['calibration'] else {}
-        if args.owner_confirmation:
-            prior = {**prior, 'fragments': dict(prior.get('fragments', {}))}
-            published = m.read(intent['published'])
-            revision = published.get('metadata', {}).get('review_revision')
-            for path in args.owner_confirmation:
-                confirmation = m.read(path)
-                if revision is None or confirmation.get('publication_revision') != revision:
-                    raise ValueError('owner confirmation belongs to another publication revision')
-                key = confirmation['fragment_key']
-                state = records[key]
-                prior['fragments'][key] = {
-                    'mode': 'source_text_missing', 'owner_confirmation': confirmation,
-                    'before_pin': [state['revision'], state['content_sha256']],
-                    'target_source_sha256': new['body_sha256'],
-                    'reason': confirmation.get('confirmed_statement') or confirmation['confirmed_attribution'],
-                }
         calibration = resolve_packets(args.output / 'resolution', bundle, records, new, prior,
                                       statement_first=args.statement_first)
         result = prepare(store, args.output, source_id=intent['source_id'],

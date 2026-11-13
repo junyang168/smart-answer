@@ -382,7 +382,7 @@ def test_locator_capacity_wait_does_not_create_unknown_model_outcome(tmp_path):
     }
 
 
-def test_owner_confirmation_must_match_fragment_source_and_evidence():
+def test_legacy_owner_confirmation_cannot_mark_a_fragment_missing():
     import pytest
     from backend.pipeline.transcript_evidence_apply import calibrate
 
@@ -397,10 +397,6 @@ def test_owner_confirmation_must_match_fragment_source_and_evidence():
             "owner_response": "不是教授說的",
         },
     }
-    result = calibrate(row, state, rule, {"body_sha256": "new"}, {})
-    assert result["status"] == "source_text_missing"
-    assert "verbatim_excerpt" not in result["proposed_fields"]
-    rule["owner_confirmation"]["evidence_key"] = "evidence_steps/other"
     with pytest.raises(ValueError, match="owner confirmation"):
         calibrate(row, state, rule, {"body_sha256": "new"}, {})
 
