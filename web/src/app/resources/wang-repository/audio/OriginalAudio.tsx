@@ -474,7 +474,7 @@ export default function OriginalAudio({
                       return (
                       <li key={topic.text}>
                         <Link href={listenHref(section.passage, cue)} className="flex items-center justify-between gap-3 py-2 text-sm text-stone-800 hover:text-amber-800">
-                          {transfiguration ? "登山變像（太 16:28–17:8）" : topic.text}
+                          {topic.text}
                           <span aria-hidden="true" className="shrink-0 text-xs text-amber-800">▶</span>
                         </Link>
                       </li>

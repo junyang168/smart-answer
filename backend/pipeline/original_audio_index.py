@@ -1713,7 +1713,8 @@ def _chapter_sections(
     sections = [
         {
             "passage": section,
-            "label": format_chinese_reference(section),
+            "label": ("馬太福音 16:28–17:2" if section == "mat-16-28"
+                      else format_chinese_reference(section)),
             "sermons": rows_by_section[section],
         }
         for section in whole_chapter.sections
