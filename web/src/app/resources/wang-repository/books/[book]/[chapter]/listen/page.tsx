@@ -62,6 +62,8 @@ function Listen() {
       source={source.name}
       backHref={back}
       initialSection={params.get("section") ?? undefined}
+      initialRecording={params.get("recording") ?? undefined}
+      initialTime={params.has("at") ? Number(params.get("at")) : undefined}
     />
   );
 }

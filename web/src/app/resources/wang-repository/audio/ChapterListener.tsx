@@ -82,12 +82,16 @@ export default function ChapterListener({
   source,
   backHref,
   initialSection,
+  initialRecording,
+  initialTime,
 }: {
   passage: string;
   title: string;
   source: string;
   backHref: string;
   initialSection?: string;
+  initialRecording?: string;
+  initialTime?: number;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
@@ -120,9 +124,14 @@ export default function ChapterListener({
         const list = playlist(loaded, false);
         const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
         const first = Math.max(0, list.findIndex((item) => item.section === wanted));
+        const cue = initialTime === undefined ? -1 : list.findIndex((item) =>
+          item.section === wanted && item.sermon.source_id === initialRecording &&
+          item.start <= initialTime && initialTime < item.end,
+        );
+        const index = cue >= 0 ? cue : first;
         setSections(loaded);
-        if (list[first]) {
-          requestSeek(list[first], first, list[first].start, false);
+        if (list[index]) {
+          requestSeek(list[index], index, cue >= 0 ? (initialTime ?? list[index].start) : list[index].start, false);
         }
       })
       .catch(() => alive && setError("讀不到這一章的錄音。"));
@@ -394,6 +403,8 @@ export default function ChapterListener({
     const url = new URL(window.location.href);
     if (url.searchParams.get("section") === sectionPassage) return;
     url.searchParams.set("section", sectionPassage);
+    url.searchParams.delete("recording");
+    url.searchParams.delete("at");
     window.history.replaceState(window.history.state, "", url);
   }, [sectionPassage]);
 

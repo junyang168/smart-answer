@@ -128,14 +128,23 @@ function Chapter() {
               </p>
             )}
 
+            {slug === "mat" && (number === "17" || (number === "16" && current.page?.kind === "chapter")) && current.name === "紐約靈命進深會" && (
+              <Link
+                className="block rounded-xl border border-stone-200 px-4 py-3 font-semibold text-amber-900 hover:bg-amber-50"
+                href={`/resources/wang-repository/books/mat/16/listen?source=${encodeURIComponent(current.name)}&section=mat-16-28&recording=SRC-2016_NYSC_3-f35be4755f9b&at=2391.69`}
+              >
+                聽 16:28 與第 17 章開頭的連續講解 · 登山變像
+              </Link>
+            )}
+
             {current.page?.kind === "chapter" ? (
               <OriginalAudio
                 key={`${current.name}-${current.page.passage}`}
                 passage={current.page.passage}
                 source={current.name}
                 embedded
-                listenHref={(section) =>
-                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}`
+                listenHref={(section, cue) =>
+                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}${cue ? `&recording=${encodeURIComponent(cue.sourceId)}&at=${cue.at}` : ""}`
                 }
               />
             ) : (
