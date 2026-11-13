@@ -131,8 +131,8 @@ function Chapter() {
                 passage={current.page.passage}
                 source={current.name}
                 embedded
-                listenHref={(section, cue) =>
-                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}${cue ? `&recording=${encodeURIComponent(cue.sourceId)}&at=${cue.at}` : ""}`
+                listenHref={(section) =>
+                  `/resources/wang-repository/books/${slug}/${number}/listen?source=${encodeURIComponent(current.name)}&section=${section}`
                 }
               />
             ) : (
