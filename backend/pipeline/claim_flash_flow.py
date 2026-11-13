@@ -342,17 +342,59 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
             result['accounting']=accounting(root,getattr(ports,'root',None),getattr(evidence_ports,'root',None))
             result=e.publish(root,result)
             return record_completion(result)
+        replanned = False
         if plan is None:
-            gp=root/'grouping'/'shared-groups.json'
-            plan=read(gp) if gp.exists() else grouping.save(store,source_id,root/'grouping',allow_claim_batches=True)
+            group_root = root/'grouping'
+            gp = group_root/'retry'/'shared-groups.json'
+            if not gp.exists():
+                gp = group_root/'shared-groups.json'
+            if gp.exists():
+                plan = read(gp)
+                if plan.get('pending') and not checkpoint:
+                    revised = grouping.build(records, sources, source_id, allow_claim_batches=True)
+                    if not revised.get('pending') and revised != plan:
+                        saved_intent = read(group_root/'grouping-intent.json')
+                        if saved_intent['input_sha256'] != e.digest({k:r['payload'] for k,r in records.items()}):
+                            raise ValueError('pending grouping inputs changed')
+                        e.save(group_root/'stopped-plans'/(e.digest(plan)+'.json'),plan)
+                        plan = grouping.save(store,source_id,group_root/'retry',allow_claim_batches=True)
+                        replanned = True
+            else:
+                plan = grouping.save(store,source_id,group_root,allow_claim_batches=True)
         coverage.validate_groups(plan,source_id,sources[source_id])
-        e.save(root/'shared-groups.json',plan)
+        if replanned:
+            recovery.atomic_save(root/'shared-groups.json',plan)
+        else:
+            e.save(root/'shared-groups.json',plan)
         if plan.get('pending'):return finish({},[{'layer':'grouping','findings':plan['pending']}])
         if checkpoint is not None:
             stages=deepcopy(checkpoint)
         else:
             stages={}
-            sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
+            # A migrated paragraph can be valid while the old quotation
+            # still needs replacement. Reuse the source-only handoff here.
+            source_jobs = root/'initial-source-jobs.json'
+            sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]))
+            if not source_jobs.exists():
+                ready = [{'object_key':row['object_key'],'layer':'source','reason':row['reason']}
+                         for row in sr['records'] if row['status']=='unresolved'
+                         and row.get('reason') and not row.get('detail')
+                         and any(records.get('source_fragments/'+fid,{}).get('payload',{}).get('source_binding_status')
+                                 == 'quotation_pending_update' for fid in row['fragment_ids'])]
+                if ready:
+                    e.save(source_jobs,ready)
+            if source_jobs.exists():
+                jobs = read(source_jobs)
+                by_key = {item['object_key']:item for item in jobs}
+                batches = {'groups':[{'pending':[by_key[k] for k in group['lower_record_keys'] if k in by_key]}
+                                     for group in plan['groups']]}
+                for batch, path in source_handoff_batches(batches,root/'initial-source-handoffs'):
+                    repaired = source.repair_bindings(store,source_id,batch,path,ports,apply=True)
+                    if not complete(repaired):
+                        return finish(stages,[{'layer':'source','findings':repaired['pending']}])
+                records,sources=snapshot(store,source_id)
+                sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]))
+            stages['source']=sr
             if sr['status']=='calibration_available':
                 work=root/'calibration';work.mkdir(exist_ok=True)
                 prepared={'version':'claim_flash_mechanical_source_v1','source_id':source_id,'status':'verified',
@@ -362,7 +404,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 e.commit_verified(store,work)
                 records,sources=snapshot(store,source_id)
                 sr=source.run(store,source_id,root/'source'/e.digest([source.CONTRACT,records]));stages['source']=sr
-            if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':sr['records']}])
+            if sr['status']!='verified':return finish(stages,[{'layer':'source','findings':[r for r in sr['records'] if r['status']=='unresolved']}])
             cv=coverage.run(store,source_id,root/'coverage',ports,plan=plan);stages['coverage']=cv
             findings=[v for row in cv['findings'] for v in row['findings']]
             if any(v['verdict']=='needs_context' for v in findings):

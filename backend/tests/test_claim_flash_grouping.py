@@ -522,3 +522,17 @@ def test_saved_eight_plus_tail_plan_is_consumed_without_rewriting():
     frozen={'groups':[group]};before=deepcopy(frozen)
     assert [len(ids) for _,ids,_ in claim_tasks(frozen)]==[8,2]
     assert frozen==before
+
+
+def test_partial_current_deletion_defers_support_check_to_source(tmp_path):
+    records, sources = source(tmp_path)
+    claim(records, 'A', 0)
+    lower(records, 'E', [0, 1])
+    sid = next(iter(sources))
+    records['source_fragments/E-1']['payload']['source_sha256'] = sources[sid]['body_sha256']
+    fragment = records['source_fragments/E-0']['payload']
+    fragment.update(anchor_state='source_deleted', deleted_in_source_sha256=sources[sid]['body_sha256'])
+    result = plan(records, sources)
+    assert not result['pending']
+    fragment['deleted_in_source_sha256'] = 'another-version'
+    assert plan(records, sources)['pending']
