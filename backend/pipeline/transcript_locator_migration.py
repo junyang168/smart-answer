@@ -22,6 +22,98 @@ RESOLVED = {'auto_rebind', 'already_current', 'source_deleted', 'already_deleted
             'retired', 'context_only', 'relocate_changed_quote'}
 
 
+def register_equivalent_publication(store, row, published):
+    """Rebind only the physical file when the registered coordinate identity matches."""
+    doc = row['payload']
+    if (published is None or doc.get('source_type') != 'sermon_transcript'
+            or doc.get('locator_space') != 'spoken_body_v1'
+            or Path(published).resolve() != Path(doc['source_path']).resolve()
+            or not all(doc.get(field) for field in (
+                'source_body_sha256', 'source_text_sha256'))):
+        return False
+    bound = m.binding(Path(published))
+    snapshot = evidence.cm.source.source_snapshot(bound, source=doc, visual_context=True)
+    fields = {'source_body_sha256': 'body_sha256', 'source_text_sha256': 'spoken_text_sha256',
+              'source_visual_sha256': 'visual_content_sha256'}
+    if any(doc.get(field) != snapshot.get(value) for field, value in fields.items()):
+        return False
+    if any(doc.get(field) not in {None, snapshot['body_sha256']}
+           for field in ('source_sha256', 'anchor_binding_sha256')):
+        return False
+    sid = doc['source_id']
+    from backend.pipeline.source_projection import project_script
+
+    raw = evidence.cm.source.bound_bytes(bound)
+    document = json.loads(raw)
+    projection = project_script(document.get('script') if isinstance(document, dict) else document)
+    updated = {**doc, 'source_file_sha256': bound['file_sha256'],
+               'editorial_structure_sha256': projection.editorial_structure_sha256,
+               'editorial_topology_sha256': projection.editorial_topology_sha256}
+    with evidence.locks(sid, record_keys=['source_documents/'+sid]):
+        plan = store.plan_package({'source_documents': [updated]}, source_kind=VERSION)
+        if [(op.collection, op.object_id) for op in plan.operations] != [('source_documents', sid)]:
+            raise ValueError('equivalent publication registration must update only the source document')
+        evidence.cm.source.verify_file(bound)
+        store.apply_plan(plan, expected_current_source_records={sid: (row['revision'], row['content_sha256'])},
+                         metadata={'source_registration_only': True, 'before_file_sha256': doc['source_file_sha256'],
+                                   'after_file_sha256': bound['file_sha256']})
+        evidence.cm.source.verify_file(bound)
+        if store.get_record_state('source_documents', sid)['payload']['source_file_sha256'] != bound['file_sha256']:
+            raise ValueError('equivalent publication registration readback differs')
+    return True
+
+
+def locator_census(records, source, doc):
+    checked = 0
+    unlocated = []
+    for key, state in sorted(records.items()):
+        if state.get('retired'):
+            continue
+        payload = state['payload']
+        if key.startswith('source_fragments/'):
+            if (payload.get('source_id') != doc['source_id'] or payload.get('source_modality') == 'visual'
+                    or payload.get('anchor_state') in {'source_deleted', 'context_only', 'replaced_by_precise_fragments'}):
+                continue
+            checked += 1
+            try:
+                if not (payload.get('anchor_state') == 'source_version_bound'
+                        or payload.get('aligned_paragraphs')
+                        or payload.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'}):
+                    raise ValueError('no verified paragraph binding')
+                paragraph = source['paragraphs'].get(payload.get('paragraph_key'))
+                if payload.get('anchor_state') == 'source_version_bound' and paragraph:
+                    # Legacy records may omit redundant clock/index and hash fields.
+                    quote = payload.get('verbatim_excerpt') or ''
+                    defaults = {'media_time': paragraph.get('start_time'), 'media_end_time': paragraph.get('end_time'),
+                                'source_segment_index': paragraph['index'],
+                                'paragraph_text_sha256': m.sha(paragraph['text'].encode()),
+                                'verbatim_excerpt_sha256': m.sha(quote.encode())}
+                    payload = {**defaults, **{field: value for field, value in payload.items()
+                                              if value is not None or field not in defaults}}
+                evidence.validate_fragment_locations({key: payload}, source)
+            except ValueError as exc:
+                unlocated.append({'object_key': key, 'paragraph_key': payload.get('paragraph_key'),
+                                  'quote': payload.get('verbatim_excerpt'), 'media_time': payload.get('media_time'),
+                                  'reason': str(exc)})
+        elif key.startswith('claims/') and payload.get('review_status') not in {'superseded', 'retired'}:
+            for occurrence in payload.get('occurrences', []):
+                if not anchors.own_occurrence(occurrence, doc):
+                    continue
+                for anchor in occurrence.get('anchors', []):
+                    checked += 1
+                    pk = anchor.get('paragraph_key')
+                    paragraph = source['paragraphs'].get(pk)
+                    if (not paragraph or anchor.get('source_sha256') not in {None, source['body_sha256']}
+                            or anchor.get('media_time') != paragraph.get('start_time')
+                            or (anchor.get('media_end_time') is not None
+                                and anchor['media_end_time'] != paragraph.get('end_time'))):
+                        unlocated.append({'object_key': key, 'paragraph_key': pk,
+                                          'quote': anchors.highlight(anchor), 'media_time': anchor.get('media_time'),
+                                          'reason': 'Claim anchor paragraph or start time differs'})
+    return {'checked_count': checked, 'located_count': checked-len(unlocated),
+            'unlocated_count': len(unlocated), 'unlocated': unlocated}
+
+
 def preflight(store, source_id, *, published=None, locator_root=None, registration_root=None, backup_manifest=None):
     """Check source identity and active locator epochs before Flash grouping."""
     from backend.pipeline import claim_flash_common as common
@@ -42,8 +134,16 @@ def preflight(store, source_id, *, published=None, locator_root=None, registrati
     if not row or row['retired']:
         raise ValueError('missing source: '+source_id)
     doc = row['payload']
+    registered = False
     try:
-        bound = common.source_binding(doc)
+        try:
+            bound = common.source_binding(doc)
+        except ValueError:
+            registered = register_equivalent_publication(store, row, published)
+            if not registered:
+                raise
+            doc = store.get_record_state('source_documents', source_id)['payload']
+            bound = common.source_binding(doc)
         if published is not None:
             target = evidence.snap(published)
             if {**evidence.snap(bound['path']), 'file':target['file']} != target:
@@ -72,6 +172,8 @@ def preflight(store, source_id, *, published=None, locator_root=None, registrati
                    for occurrence in payload.get('occurrences', []) if anchors.own_occurrence(occurrence, doc)
                    for anchor in occurrence.get('anchors', [])):
                 stale.append(key)
+    census = locator_census(records, source, doc)
+    stale = sorted(set(stale) | {item['object_key'] for item in census['unlocated']})
     if stale and registration_root is not None and locator_root is not None and not (Path(locator_root)/'migration.json').exists():
         direction = Path(registration_root)/'locator-direction.txt'
         if not direction.exists():
@@ -79,8 +181,8 @@ def preflight(store, source_id, *, published=None, locator_root=None, registrati
         prepare(store, locator_root, source_id=source_id, old_paths=[manifest['before']['path']],
                 published=published, instruction_file=direction, backup_manifest=backup_manifest)
     if stale or locator_root is not None and (Path(locator_root)/'migration.json').exists():
-        if locator_root is None:
-            return {'status':'locator_required','record_keys':sorted(stale)}
+        if locator_root is None or not (Path(locator_root)/'migration.json').exists():
+            return {'status':'locator_required','record_keys':stale, **census}
         root = Path(locator_root).resolve()
         plan = load(root)
         if (plan['intent']['source_id'] != source_id
@@ -91,10 +193,17 @@ def preflight(store, source_id, *, published=None, locator_root=None, registrati
             return {'status':'locator_required','exceptions':preview['exceptions'],
                     'unlocated_count':len(preview['exceptions']),'preview_path':str(root/'preview.json')}
         with execution_locks(root):
-            run(store, root)
+            applied = run(store, root)
         result = preflight(store, source_id, published=published)
-        return {'status':'migrated'} if result['status']=='not_needed' else result
-    return {'status':'not_needed','records':records,'sources':sources}
+        if result['status'] == 'not_needed':
+            result.update(status='migrated', migration_writes=applied['updated_evidence_records'] + applied['updated_claims'])
+            result.pop('retained_count')
+            result.pop('rebound_count')
+        return result
+    return {'status':'migrated' if registered else 'not_needed',
+            'source_file': source['file'], 'source_body_sha256': body_sha,
+            'locator_verified': True, 'rebound_count': 0, 'retained_count': census['located_count'],
+            **census, 'records':records, 'sources':sources}
 
 
 @contextmanager
