@@ -500,3 +500,64 @@ def test_final_gpt_support_only_prompt_preserves_prior_scripture_decision(tmp_pa
     assert '經文出處已核對，沿用該判定' in ports.calls[0][1]['system']
     assert stage.final_support_decisions(tmp_path, ports, [job])[0].action == 'keep'
     assert len(ports.calls) == 1
+
+
+@pytest.mark.parametrize('drift', ['additive', 'transcript', 'removed', 'started', 'pending'])
+def test_statement_handoff_rechecks_only_new_source_context(ready, monkeypatch, drift):
+    from backend.pipeline import claim_human_source as human
+    from backend.tests.test_claim_flash_human_source import fact, save
+
+    store, root, plan, evidence_root, statement_root = ready
+    before = json.loads((statement_root/'before.json').read_text())
+    if drift == 'removed':
+        now = deepcopy(before['sources'])
+        original = fact(now)
+        human.project(now, [original])
+        now['S']['human_source_guard'] = {'paragraphs': {'S': ['S0001']}, 'entries': [original]}
+        with pytest.raises(ValueError, match='clarification changed'):
+            stage.added_source_context(now, before['sources'])
+        return
+
+    _, sources = f.load_source(store, 'S')
+    save(store, [fact(sources)])
+    records, current = f.load_group_source(store, 'S', plan['groups'][0])
+    if drift == 'transcript':
+        current['S']['file']['file_sha256'] = '0'*64
+        with pytest.raises(ValueError, match='statement source differs'):
+            stage.statement_proof(statement_root, ['C'], records, current)
+        return
+
+    reviewed = []
+    original_review = statements.review
+
+    def track(records, sources, targets, source_id, path, ports, **kwargs):
+        reviewed.extend(targets)
+        assert sources[source_id]['human_source_decisions']
+        return original_review(records, sources, targets, source_id, path, ports, **kwargs)
+
+    monkeypatch.setattr(statements, 'review', track)
+    args = (store, 'S', plan, 'G', evidence_root, statement_root, root/'arguments')
+    if drift == 'started':
+        e.save(root/'arguments'/'routes'/'gpt'/'prior'/'started.json', {})
+        ports = Ports()
+        with pytest.raises(ValueError, match='already-started argument request'):
+            stage.run(*args, ports, apply=True)
+        assert not reviewed and not ports.calls
+        return
+    if drift == 'pending':
+        finding = {'object_key':'claims/C','layer':'source','reason':'仍需補原文。'}
+        monkeypatch.setattr(statements, 'review', lambda *args, **kwargs:
+                            {'pending':[finding],'outcomes':[],'updates':{}})
+        ports = Ports()
+        result = stage.run(*args, ports, apply=True)
+        assert result['status'] == 'needs_attention' and result['pending'] == [finding]
+        assert not ports.calls and not (root/'arguments'/'commit.json').exists()
+        return
+    result = stage.run(*args, Ports(), apply=True)
+    assert result['status'] == 'verified'
+    assert reviewed == ['claims/C']
+    assert json.loads((statement_root/'before.json').read_text()) == before
+    replay = Ports()
+    stage.run(*args, replay, apply=True)
+    assert reviewed == ['claims/C']
+    assert replay.calls == []
