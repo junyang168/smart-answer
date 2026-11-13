@@ -269,6 +269,20 @@ def clock_aligned_location(row, state, new, proof):
             'reason':'舊時間軸與已核驗的新版前後文對齊；引文待核。'}
 
 
+def same_or_extended_paragraph(old, new):
+    if new is None:
+        return False
+    if old == new:
+        return True
+    left = {k:v for k,v in old.items() if k not in {'text','user_id'}}
+    right = {k:v for k,v in new.items() if k not in {'text','user_id'}}
+    if left != right or not old['text']:
+        return False
+    from difflib import SequenceMatcher
+    return all(op in {'equal','insert'} for op, *_ in
+               SequenceMatcher(None, old['text'], new['text'], autojunk=False).get_opcodes())
+
+
 def compare(records, *, source_id, old_sources, new, document, calibration=None, live_candidates=False, clock_witness=None):
     """Combine historical epochs; retain all latest records, including new IDs."""
     reports = {}; audits = {}
@@ -286,6 +300,11 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
             reports[row['record_key']] = row
     updates = {}; changed_quotes = set(); rows = []; replacements = {}; creations = {}
     rules = (calibration or {}).get('fragments', {})
+    additive_epochs = {old['body_sha256'] for old in old_sources
+        if list(old['paragraphs']) == list(new['paragraphs'])
+        and all(same_or_extended_paragraph(paragraph,new['paragraphs'][pk])
+                for pk,paragraph in old['paragraphs'].items())}
+
     for key, state in sorted(records.items()):
         f = state['payload']
         if not key.startswith('source_fragments/') or f.get('source_id') != source_id:
@@ -302,11 +321,27 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
             row.update(status='already_current', reason='current_paragraph_awaits_quotation')
             rows.append(row)
             continue
+        prior = next((old for old in old_sources if old['body_sha256']==f.get('source_sha256')), None)
+        pk = f.get('paragraph_key')
+        if (not state.get('retired') and prior and pk in prior['paragraphs']
+                and same_or_extended_paragraph(prior['paragraphs'][pk], new['paragraphs'].get(pk))
+                and not f.get('verbatim_excerpt') and not f.get('question_context') and not f.get('aligned_paragraphs')
+                and f.get('anchor_state') == 'unresolved'
+                and f.get('source_binding_status') == 'quotation_pending_update'):
+            validate_fragment_locations({key:f}, prior)
+            row.update(status='paragraph_location', reason='retained_pending_quotation_paragraph',
+                       proposed_fields=pending_location_fields({'paragraph_key':pk},new))
+            updates[key] = {**f, **row['proposed_fields']}
+            row['applied_fields'] = row['proposed_fields']
+            rows.append(row)
+            continue
         if f.get('anchor_state') == 'replaced_by_precise_fragments':
             children = [records.get('source_fragments/'+fid, {}) for fid in f.get('replacement_fragment_ids', [])]
             if children and all(not child.get('retired')
                                 and child.get('payload', {}).get('source_id') == source_id
-                                and child['payload'].get('source_sha256') == new['body_sha256']
+                                and (child['payload'].get('source_sha256') == new['body_sha256']
+                                     or any(old['body_sha256']==child['payload'].get('source_sha256')
+                                            for old in old_sources))
                                 for child in children):
                 row.update(status='already_current', reason='current_replacement_fragments')
                 rows.append(row)
@@ -339,6 +374,10 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         elif (f.get('anchor_state') == 'source_deleted'
               and f.get('deleted_in_source_sha256') == new['body_sha256']):
             row.update(status='already_deleted', reason='deletion_already_recorded')
+        elif (f.get('anchor_state') == 'source_deleted'
+              and f.get('deleted_in_source_sha256') in additive_epochs):
+            row.update(status='source_deleted', reason='previous_deletion_preserved_across_additive_edit',
+                       proposed_fields={'anchor_state':'source_deleted','source_binding_status':'source_deleted'})
         fields, changed = fields_for(row, f, new)
         if (not state.get('retired') and f.get('anchor_state') != 'source_deleted'
                 and row['status'] in {'calibrated_rebind', 'paragraph_location', 'question_context_only'}
