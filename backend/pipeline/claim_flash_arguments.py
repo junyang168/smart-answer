@@ -166,6 +166,24 @@ def clarify_final_scripture(store, source_id, group, parent_root, root, ports, a
             raise ValueError('scripture clarification differs from the recorded finding')
         jobs = {job['job_id']: job for job in request['input']['jobs']}
         prior = {item['job_id']: item for item in response['items']}
+        if authority.get('apply_saved_scripture_removals'):
+            result = deepcopy(parent)
+            for finding in parent['pending']:
+                key = finding['object_key']
+                item = prior.get(key, {})
+                payload = result['updates'].get(key, records[key]['payload'])
+                if (key not in before['records'] or not key.startswith('claims/')
+                        or payload.get('review_status') in f.PROTECTED
+                        or jobs.get(key, {}).get('findings') != {'scripture': 'mismatched'}
+                        or item.get('action') != 'repair' or item.get('scripture_refs') != []
+                        or item.get('statement') is not None or item.get('reason') != finding['reason']):
+                    raise ValueError('saved Scripture removal differs from the isolated final-support finding')
+                result['updates'][key] = flash.current_claim_payload({**payload, 'scripture_refs': []})
+            result.update(status='verified', pending=[])
+            e.save(root/'before.json', before)
+            e.save(root/'intent.json', json.loads((parent_root/'intent.json').read_text()))
+            e.save(root/'verification.json', result)
+            return statements.finish(store, root) if apply else e.publish(root, result)
         candidates = []
         for finding in parent['pending']:
             key = finding['object_key']
