@@ -1,6 +1,6 @@
 
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Literal, Union, Optional
 from pydantic import BaseModel, Field
 import os
 import json
@@ -21,6 +21,7 @@ class Sermon(BaseModel):
     title: Optional[str] = None
     deliver_date: Optional[str] = None
     published_date: Optional[str] = None
+    argument_update_status: Literal["completed", "stale"] | None = None
     publication_schema_version: Optional[str] = None
     published_by: Optional[str] = None
     published_by_name: Optional[str] = None

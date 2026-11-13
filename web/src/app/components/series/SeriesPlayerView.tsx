@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { ArgumentUpdateStatus } from "./ArgumentUpdateStatus";
 import { notFound, useParams, useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Sermon, SermonSeries } from "@/app/interfaces/article";
@@ -70,6 +71,9 @@ export const SeriesPlayerView = () => {
           <h1 className="text-3xl font-bold text-stone-950">{name}</h1>
           {subtitle ? <p className="mt-1 text-stone-600">{subtitle}</p> : null}
         </div>
+        <Link href="/admin/wang/sermons" className="text-sm font-medium text-indigo-700 hover:underline">
+          查看全部講道與母本
+        </Link>
       </header>
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="按狀態篩選">
@@ -88,6 +92,7 @@ export const SeriesPlayerView = () => {
               <th className="px-4 py-3 font-medium">認領人</th>
               <th className="px-4 py-3 font-medium">發佈人</th>
               <th className="px-4 py-3 font-medium">最近發佈日期</th>
+              <th scope="col" className="whitespace-nowrap px-4 py-3 font-medium">論證層更新</th>
             </tr>
           </thead>
           <tbody>
@@ -112,6 +117,9 @@ export const SeriesPlayerView = () => {
                 <td className="whitespace-nowrap px-4 py-3 text-stone-700">{sermon.published_by_name || "—"}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-stone-700">
                   {day(sermon.published_date) || "—"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3">
+                  <ArgumentUpdateStatus status={sermon.argument_update_status} />
                 </td>
               </tr>
             ))}

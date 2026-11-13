@@ -65,6 +65,17 @@ def _headings(records, source, sid):
 
 DEFAULT_MAX_CLAIMS = 10
 
+def source_claims(records, source_id):
+    return {k: row for k, row in records.items() if k.startswith('claims/') and _live(row)
+            and f.belongs_to_source(row['payload'], records, source_id)}
+
+
+def covers_all_claims(records, source_id, plan):
+    expected = {k.removeprefix('claims/') for k in source_claims(records, source_id)}
+    grouped = [cid for group in plan['groups'] for cid in group['claim_ids']]
+    return len(grouped) == len(expected) and set(grouped) == expected
+
+
 def build(records, sources, source_id, *, claim_ids=None, max_claims=DEFAULT_MAX_CLAIMS, semantic_groups=None, allow_claim_batches=False):
     """Partition one sermon, minimizing cross-group resources and direct links.
 

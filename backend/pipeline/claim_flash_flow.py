@@ -6,10 +6,12 @@ this interface supplies order, a source-local output, and an honest pending exit
 from copy import deepcopy
 import fcntl
 import json
+import os
 from pathlib import Path
 import time
 
 from backend.pipeline import evidence_refresh as e, claim_flash_common as f
+from backend.pipeline.claim_flash_completion import save_completion
 from backend.pipeline import claim_flash_grouping as grouping, claim_flash_source as source
 from backend.pipeline import claim_flash_coverage as coverage, claim_flash_source_fill as fill
 from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements as statements
@@ -175,7 +177,7 @@ def export(store,sid,root,before,original,stages,pending,started,mode):
         'package':{'path':str(path),'sha256':digest},'changes':changed,'pending':pending,
         'next_action':pending[0] if pending else None,'stages':stages,
         'initial_package_sha256':e.digest(original) if original else None,
-        'source_file':sources[sid]['file'],'final_pins':{k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()},
+        'source_file':sources[sid]['file'],'source_body_sha256':sources[sid]['body_sha256'],'final_pins':{k:{x:v[x] for x in ('revision','content_sha256','retired')} for k,v in records.items()},
         'mode':mode,'canonical_committed':mode=='canonical_refresh' and any(root.rglob('commit.json')),
         'production_writes':0 if mode=='candidate_workspace' else None,
         'legacy_qualification':'not_granted','wall_seconds_this_invocation':round(time.monotonic()-started,3)}
@@ -217,6 +219,20 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
         e.save(root/'flow-intent.json',intent)
+        data_root=os.getenv('DATA_BASE_DIR')
+        canonical_url=os.getenv('KNOWLEDGE_DATABASE_URL') or os.getenv('DATABASE_URL')
+        def record_completion(result):
+            if (mode == 'canonical_refresh' and complete(result) and data_root and canonical_url
+                    and getattr(store, 'database_url', None) == canonical_url):
+                # A scoped plan can complete without refreshing the whole lecture.
+                before_path = root/'before.json'
+                groups_path = root/'shared-groups.json'
+                if not before_path.is_file() or not groups_path.is_file():
+                    return result
+                original = read(before_path)
+                if grouping.covers_all_claims(original, source_id, read(groups_path)):
+                    save_completion(data_root, records['source_documents/'+source_id]['payload'], result)
+            return result
         checkpoint=None;resume_claims=False
         if (root/'result.json').exists():
             saved=read(root/'result.json')
@@ -228,7 +244,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:raise ValueError('Flash output package changed')
                 for ref in saved['evidence_refs']:
                     if e.digest(read(ref['path']))!=ref['sha256']:raise ValueError('Flash saved stage evidence changed')
-                return saved
+                return record_completion(saved)
             if (saved.get('pending') and saved['pending'][0].get('layer')=='evidence'
                     and not (root/'claim-layer-input.json').exists()):
                 if e.digest(read(saved['package']['path']))!=saved['package']['sha256']:
@@ -256,7 +272,8 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
         def finish(stages,pending):
             result=export(store,source_id,root,before,candidate,stages,pending,started,mode)
             result['accounting']=accounting(root,getattr(ports,'root',None))
-            return e.publish(root,result)
+            result=e.publish(root,result)
+            return record_completion(result)
         if plan is None:
             gp=root/'grouping'/'shared-groups.json'
             plan=read(gp) if gp.exists() else grouping.save(store,source_id,root/'grouping',allow_claim_batches=True)
