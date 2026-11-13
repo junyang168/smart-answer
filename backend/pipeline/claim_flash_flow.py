@@ -389,7 +389,15 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 batches = {'groups':[{'pending':[by_key[k] for k in group['lower_record_keys'] if k in by_key]}
                                      for group in plan['groups']]}
                 for batch, path in source_handoff_batches(batches,root/'initial-source-handoffs'):
-                    repaired = source.repair_bindings(store,source_id,batch,path,ports,apply=True)
+                    resolved = path/'source-disposition'/'result.json'
+                    if resolved.exists():
+                        repaired = read(resolved)
+                        if (repaired.get('parent_verification_sha256') != e.digest(read(path/'verification.json'))
+                                or not complete(repaired)):
+                            raise ValueError('source disposition receipt differs')
+                        e.readback(store,repaired)
+                    else:
+                        repaired = source.repair_bindings(store,source_id,batch,path,ports,apply=True)
                     if not complete(repaired):
                         return finish(stages,[{'layer':'source','findings':repaired['pending']}])
                 records,sources=snapshot(store,source_id)
