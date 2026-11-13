@@ -1806,14 +1806,14 @@ FIXED_PASSAGES: tuple[tuple[str, str], ...] = (
 
 
 def passages() -> tuple[tuple[str, str], ...]:
-    """有原声页面的经文：`chapter_material.CHAPTERS` 里的每一章，加上太 16 那三段。
+    """有原声页面的经文：`chapter_material.CHAPTERS` 里的每一章。太 16 尚未有整章資料時，沿用三個舊入口。
 
     每次请求现读——章的清单在 `DATA_BASE_DIR`，加一章不用部署。
     """
 
     return (
         *((passage, _chapter_label(passage)) for passage in chapter_material.CHAPTERS),
-        *FIXED_PASSAGES,
+        *(FIXED_PASSAGES if "mat-16-1-28" not in chapter_material.CHAPTERS else ()),
     )
 
 #: 原声页面的地址。文库落地页按这个拼链接。
