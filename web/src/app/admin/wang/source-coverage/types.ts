@@ -150,6 +150,7 @@ export type CatalogEntry = {
   organization_mode: string | null;
   organization_mode_label: string | null;
   deliver_date: string | null;
+  argument_update_status?: "completed" | "stale" | null;
   /** The coverage source, when this one has been extracted at all. */
   source_id: string | null;
 };
