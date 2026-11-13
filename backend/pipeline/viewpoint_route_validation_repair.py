@@ -1,4 +1,5 @@
 """Repair only failed deltas, preserving stage inputs and complete audit data."""
+from copy import deepcopy
 from pydantic import ValidationError
 from backend.api.canonical_repository.viewpoint_batch_resolution import BatchResolutionError
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -9,6 +10,21 @@ EDIT_REPAIR_INSTRUCTION = 'Fix the failed edits against the SAME baseline; retur
 REVIEW_REPAIR_INSTRUCTION = ('Return a complete corrected review of the SAME proposal and all review_targets. '
     'Resolve the program validation findings, including missing or duplicate target decisions. '
     'Preserve valid substantive findings; do not edit the proposal, infer approval or omit targets.')
+
+HISTORY = 'route_program_repair_history'
+
+
+def with_validation_history(packet, baseline, failures, findings):
+    previous = {finding for attempt in failures for finding in attempt['findings']}
+    return packet | {HISTORY: {
+        'schema_version': 'wang_route_program_repair_history_v1',
+        'baseline_sha256': sha256_json(baseline),
+        'prior_attempts': deepcopy(failures),
+        'repeated_findings': sorted(set(findings) & previous),
+        'instruction': ('只修正当前阶段的程序错误；先对照同一基线及此前失败，不猜测 ID。'
+            '保留仍有效的修改意图和证据，不用删除有效内容来绕过校验。'
+            '这些记录不是 Opus 内容异议或批准，不改变审核标准，也不增加调用额度。'),
+    }}
 
 
 def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repairs,
@@ -33,6 +49,12 @@ def validate_changes(raw, *, validate, adapter, packet, cache, state, max_repair
             'validation_instruction': repair_instruction}
         response = cache.with_name(cache.stem+f'-validation-{len(failures):03d}.json')
         request = response.with_name(response.stem+'-packet.json')
+        dispatched_findings = read_artifact(request)['validation_findings'] if request.exists() else findings
+        if not request.exists() or HISTORY in read_artifact(request):
+            repair=with_validation_history(repair, packet, failures, dispatched_findings)
+        from backend.pipeline.viewpoint_route_decision_rubric import with_decision_rubric, MARKER as RUBRIC
+        if not request.exists() or RUBRIC in read_artifact(request):
+            repair=with_decision_rubric(repair)
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if not request.exists() or OBSERVATION_IDENTITIES in read_artifact(request):
             repair=with_observation_identities(repair)
@@ -76,6 +98,11 @@ def read_validated_changes(adapter, packet, cache, *, repair_instruction=EDIT_RE
         actual = read_artifact(response.with_name(response.stem+'-packet.json'))
         expected = packet | {'prior_invalid_response': raw, 'validation_findings': failure['findings'],
             'validation_instruction': repair_instruction}
+        if HISTORY in actual:
+            expected=with_validation_history(expected, packet, summary['failures'][:index], failure['findings'])
+        from backend.pipeline.viewpoint_route_decision_rubric import with_decision_rubric, MARKER as RUBRIC
+        if RUBRIC in actual:
+            expected=with_decision_rubric(expected)
         from backend.pipeline.viewpoint_route_review_continuity import with_observation_identities, OBSERVATION_IDENTITIES
         if OBSERVATION_IDENTITIES in actual:
             expected=with_observation_identities(expected)

@@ -8,6 +8,7 @@ from backend.pipeline import viewpoint_route_cvp_resolution as flow
 from backend.pipeline.viewpoint_route_review_continuity import (
     CONTEXT, RULES, continuity_packet,
 )
+from backend.pipeline.viewpoint_route_decision_rubric import MARKER as RUBRIC, RUBRIC as DECISION_RUBRIC
 from test_viewpoint_observation_support import Answer, approved, fixture_packet, observation_proposal
 
 
@@ -42,6 +43,7 @@ def test_all_rounds_keep_objections_dispositions_and_shared_rubric(tmp_path):
         history = p[CONTEXT]['rounds']
         assert len(history) == reviewer.calls - 1
         assert p[CONTEXT]['shared_rules'] == RULES
+        assert p[RUBRIC] == DECISION_RUBRIC
         if history:
             first = history[0]
             assert first['change_reviews'][-1]['correction'] == '删除夸大的支持作用，保留观察'
@@ -56,6 +58,7 @@ def test_all_rounds_keep_objections_dispositions_and_shared_rubric(tmp_path):
 
     def correct(p):
         assert p[CONTEXT]['shared_rules'] == RULES
+        assert p[RUBRIC] == DECISION_RUBRIC
         assert len(p[CONTEXT]['rounds']) == corrector.calls
         assert p[CONTEXT]['rounds'][-1]['route_review_sha256'] == p['route_review_sha256']
         revised = deepcopy(p['route_proposal'])
@@ -75,6 +78,7 @@ def test_all_rounds_keep_objections_dispositions_and_shared_rubric(tmp_path):
     result = flow.run_cvp_route_scope(**args)
     assert result['rounds'][-1]['outcome'] == 'pass'
     assert proposer.payloads[0][CONTEXT]['shared_rules'] == RULES
+    assert proposer.payloads[0][RUBRIC] == DECISION_RUBRIC
     # Prior payloads are snapshots, not references subsequently filled in.
     assert corrector.payloads[0][CONTEXT]['rounds'][0]['finding_dispositions'] == []
     assert len(reviewer.payloads[1][CONTEXT]['rounds']) == 1
@@ -153,6 +157,22 @@ def test_saved_new_history_cannot_be_silently_changed(tmp_path):
     continuity_packet({'a': 1}, [], **args)
     with pytest.raises(ValueError):
         continuity_packet({'a': 1}, [{'forged': 'review'}], **args)
+
+
+def test_pre_rubric_saved_input_replays_exactly_and_next_input_gets_rubric(tmp_path):
+    args = dict(packet_path=tmp_path/'packet.json', response_path=tmp_path/'raw.json')
+    old = continuity_packet({'source': 'same'}, [], **args)
+    del old[RUBRIC]
+    args['packet_path'].write_text(json.dumps(old))
+    before = args['packet_path'].read_bytes()
+    assert continuity_packet({'source': 'same'}, [], **args) == old
+    assert args['packet_path'].read_bytes() == before
+    fresh = continuity_packet({'source': 'same'}, [],
+        packet_path=tmp_path/'next.json', response_path=tmp_path/'next-raw.json')
+    assert fresh[RUBRIC] == DECISION_RUBRIC
+    # Caller mutation cannot modify the next call's common rubric.
+    fresh[RUBRIC]['cases'].clear()
+    assert DECISION_RUBRIC['cases']
 
 
 def test_history_never_turns_new_finding_into_approval(tmp_path):
