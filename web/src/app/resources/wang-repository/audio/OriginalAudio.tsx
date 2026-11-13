@@ -457,21 +457,23 @@ export default function OriginalAudio({
         <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {sections.map((section) => (
             <li key={section.passage}>
-              <div className="grid gap-2 px-4 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 sm:px-5">
-                <Link
-                  href={listenHref(section.passage)}
-                  aria-label={`${section.label}，從本段開頭聽`}
-                  title="從本段開頭聽"
-                  className="flex min-h-11 w-fit flex-wrap items-center gap-x-2 self-start rounded-md py-1 text-stone-900 hover:text-amber-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-800"
-                >
-                  <span aria-hidden="true" className="text-xs text-amber-800">▶</span>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-4 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-5">
+                <div className="flex min-h-11 flex-wrap items-center gap-x-2">
                   <span className="font-serif text-lg font-bold">{section.label.split(" ").pop()}</span>
                   <span className="font-mono text-xs text-stone-500">
                     {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
                   </span>
+                </div>
+                <Link
+                  href={listenHref(section.passage)}
+                  aria-label={`${aiVoice ? "聆聽朗讀" : "聆听原声"}，${section.label}`}
+                  className="col-start-2 row-start-1 inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-sm font-medium text-amber-900 ring-1 ring-inset ring-stone-200 hover:bg-amber-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-800 sm:col-start-3"
+                >
+                  <span aria-hidden="true" className="text-xs">▶</span>
+                  {aiVoice ? "聆聽朗讀" : "聆听原声"}
                 </Link>
                 {Boolean(section.topics?.length) && (
-                  <ul className="divide-y divide-stone-100">
+                  <ul className="col-span-2 row-start-2 divide-y divide-stone-100 sm:col-span-1 sm:col-start-2 sm:row-start-1">
                     {section.topics?.slice(0, 3).map((topic) => (
                       <li key={topic.text} className="py-2 text-sm text-stone-800">{topic.text}</li>
                     ))}
