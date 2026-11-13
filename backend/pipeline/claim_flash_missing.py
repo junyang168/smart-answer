@@ -251,11 +251,11 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         if previous['source']!=pin:raise ValueError('missing Claim source differs from completed group')
         if empty_group is None:read=consume(store,relation_root,records,sources)
         else:
-            pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+            pool=f.active_group_lower_keys(group,records)
             statements.verify_evidence(evidence_root,pool,records,sources)
             read=set(pool)|{'source_documents/'+source_id}
         original=deepcopy(records)
-        pool={k for k in group['lower_record_keys'] if k.startswith(('evidence_steps/','observations/'))}
+        pool=f.active_group_lower_keys(group,records)
         if not pool<=read:raise ValueError('group lower materials lack completed proof')
         near=set(group['paragraph_keys'])
         fragments={k.split('/',1)[1]:r['payload'] for k,r in records.items() if k.startswith('source_fragments/') and r['payload']['paragraph_key'] in near}

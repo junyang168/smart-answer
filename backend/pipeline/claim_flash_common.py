@@ -518,3 +518,9 @@ def exactly(items, expected, field):
         raise ValueError('GPT disposition requires a substantive reason')
     if len(items)!=len(expected) or {x[field] for x in items}!=set(expected):
         raise ValueError('GPT must dispose every job exactly once')
+
+
+def active_group_lower_keys(group, records):
+    return {key for key in group['lower_record_keys']
+            if key.startswith(('evidence_steps/', 'observations/'))
+            and key in records and not records[key].get('retired')}
