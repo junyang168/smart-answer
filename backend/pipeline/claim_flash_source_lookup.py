@@ -54,9 +54,15 @@ class Locator:
         keys = list(self.paragraphs)
         for fid, row in zip(ids, rows):
             frag = row['payload']; quote = frag['verbatim_excerpt']
-            historical.append(quote)
+            if quote:
+                historical.append(quote)
             if frag['paragraph_key'] in keys:
                 n = keys.index(frag['paragraph_key']);nearby.update(keys[max(0,n-2):n+3])
+            if frag.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'} and not quote:
+                if frag.get('source_sha256') != sources[self.sid]['body_sha256'] or frag['paragraph_key'] not in keys:
+                    raise ValueError('pending quotation location is stale')
+                semantic = True
+                continue
             try:
                 one = {**p, 'source_fragment_id': None, 'source_fragment_ids': [fid]}
                 v = e.material({**one, 'evidence_step_id': key}, records, sources)

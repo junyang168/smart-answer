@@ -68,7 +68,11 @@ def prepare(store, root, *, source_id, old_paths, published, instruction_file,
                          instruction=Path(instruction_file).read_text(), calibration_path=calibration_path,
                          jev_impact=jev_impact)
         report = m.read(root / 'evidence/comparison.json')
-        exceptions = [row for row in report['fragments'] if row['status'] not in RESOLVED] + report.get('consumer_exceptions', [])
+        exceptions = [
+            row for row in report['fragments']
+            if row['status'] not in RESOLVED
+            and row['status'] not in {'question_context_only', 'paragraph_location'}
+        ] + report.get('consumer_exceptions', [])
         preview = {'source_id': source_id, 'phase': 'evidence_preview',
                    'evidence_updates': len(report['updates']), 'exceptions': exceptions,
                    'claim_preview': 'prepared_after_verified_evidence_commit', 'model_calls': report.get('model_calls', 0)}
@@ -185,6 +189,7 @@ def main():
     parser.add_argument('--old-source', type=Path, action='append', default=[])
     parser.add_argument('--instruction-file', type=Path); parser.add_argument('--calibration', type=Path)
     parser.add_argument('--jev-impact', action='store_true')
+    parser.add_argument('--statement-first', action='store_true')
     parser.add_argument('--backup-manifest', type=Path)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--capacity-root', type=Path, help='shared Sol concurrency directory for resolve')
@@ -212,7 +217,8 @@ def main():
         manifest, records, new, bundle = load_run_packets(args.root, args.backup_manifest)
         intent = manifest['intent']
         prior = m.read(Path(intent['calibration'])) if intent['calibration'] else {}
-        calibration = resolve_packets(args.output / 'resolution', bundle, records, new, prior)
+        calibration = resolve_packets(args.output / 'resolution', bundle, records, new, prior,
+                                      statement_first=args.statement_first)
         result = prepare(store, args.output, source_id=intent['source_id'],
                          old_paths=intent['old_paths'], published=intent['published'],
                          instruction_file=intent['instruction_file'], calibration_path=calibration,

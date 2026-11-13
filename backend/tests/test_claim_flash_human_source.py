@@ -42,6 +42,29 @@ def test_material_preserves_raw_quotes_and_only_projects_relevant_current_facts(
     assert 'Claim已獲批准' in req['state']['source_interpretation']
 
 
+def test_speaker_confirmation_reaches_update_without_changing_source_location(tmp_path):
+    records, sources, _ = setup(tmp_path)
+    key = 'evidence_steps/E'
+    original = stage.material(key, records, sources)
+    sample = fact(sources)
+    record = sample['record']
+    record['user_confirmation'] = '不是教授說的'
+    record['answers'][0].update(question='這句是教授說的嗎？', answer='不是教授說的')
+    decision = human.entry(sample['artifact'], record, 'S', sources['S'], ['S0001'], 'confirmation')
+
+    material = stage.material(key, records, sources, [decision])
+    assert material['fragments'] == original['fragments']
+    assert material['original_text_excerpts'] == original['original_text_excerpts']
+    ports = Ports()
+    parts = [{'role': 'judgment', 'text': '核對說話者。'}]
+    components.check(tmp_path/'speaker', ports, 'evidence_steps', records[key]['payload'],
+                     material, parts, fragment_only=True)
+    supplied = ports.calls[0][1]['state']['human_source_decisions'][0]
+    assert supplied['record']['answers'][0]['answer'] == '不是教授說的'
+    assert supplied['applicability'] == 'current'
+    assert supplied['claim_content_approval'] is False
+
+
 def test_unrelated_facts_preserve_existing_fingerprint_but_relevant_facts_invalidate_it(tmp_path):
     records,sources,_=setup(tmp_path);key='evidence_steps/E';p=records[key]['payload']
     original=stage.material(key,records,sources)

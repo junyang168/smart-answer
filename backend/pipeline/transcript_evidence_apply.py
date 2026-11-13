@@ -29,7 +29,7 @@ FRAGMENT_FIELDS = {
     'paragraph_text_sha256', 'verbatim_excerpt', 'verbatim_excerpt_sha256',
     'media_time', 'media_end_time', 'anchor_state', 'speaker',
     'source_binding_status', 'deleted_in_source_sha256',
-    'replacement_fragment_ids', 'missing_in_source_sha256',
+    'replacement_fragment_ids', 'missing_in_source_sha256', 'question_context', 'aligned_paragraphs',
 }
 EVIDENCE_FIELDS = {'source_binding_status', 'support_eligibility',
                    'valid_for_identity_review', 'speaker', 'source_fragment_id', 'source_fragment_ids',
@@ -56,11 +56,31 @@ def calibrate(row, state, rule, new, document):
             or rule['target_source_sha256'] != new['body_sha256'] or not rule.get('reason')):
         raise ValueError('saved locator calibration drift: '+row['record_key'])
     mode = rule['mode']
+    if 'owner_confirmation' in rule:
+        raise ValueError('owner confirmation belongs to Update, not transcript locator calibration')
     if mode == 'source_text_missing':
         return {**row, 'status': 'source_text_missing', 'calibration_decision': rule,
                 'reason': rule['reason'], 'proposed_fields': {
                     'anchor_state':'unresolved', 'source_binding_status':'source_text_missing',
                     'missing_in_source_sha256':new['body_sha256']}}
+    if mode == 'paragraph_location':
+        from backend.pipeline.transcript_locator_candidates import consecutive_spoken
+        from backend.pipeline.transcript_evidence_calibration import verified_legacy_interval
+
+        keys = rule['paragraph_keys']
+        if not keys or not consecutive_spoken(keys, new):
+            raise ValueError('invalid aligned paragraphs')
+        locations = [
+            {'paragraph_key': pk, 'media_time': new['paragraphs'][pk]['start_time'],
+             'media_end_time': new['paragraphs'][pk]['end_time']}
+            for pk in keys
+        ]
+        clock = verified_legacy_interval(f, rule['legacy_clock']) if rule.get('legacy_clock') else f
+        if not audio_position(clock, locations)['consistent']:
+            raise ValueError('aligned paragraphs are outside the saved audio interval')
+        return {**row, 'status': 'paragraph_location', 'reason': rule['reason'],
+                'target_paragraphs': keys, 'candidate_segments': locations,
+                'calibration_decision': rule, 'proposed_fields': pending_location_fields(locations[0], new)}
     segments = []
     for target in rule['segments']:
         p = new['paragraphs'][target['paragraph_key']]; quote = target['verbatim_excerpt']
@@ -86,6 +106,17 @@ def calibrate(row, state, rule, new, document):
     if mode == 'source_deleted':
         return {**row, 'status':'source_deleted', 'reason':rule['reason'], 'calibration_decision':rule,
                 'proposed_fields':{'anchor_state':'source_deleted','source_binding_status':'source_deleted'}}
+    if mode == 'question_context_only':
+        consumers = row.get('direct_consumers', [])
+        if not consumers or not all(key.startswith('questions/') for key in consumers):
+            raise ValueError('question context cannot replace a substantive evidence citation')
+        if not segments or any(context_only(s['verbatim_excerpt']) for s in segments):
+            raise ValueError('question context requires substantive published text')
+        return {**row, 'status': 'question_context_only', 'reason': rule['reason'],
+                'target_paragraphs': [s['paragraph_key'] for s in segments],
+                'candidate_segments': segments,
+                'candidate_quote': '\n'.join(s['verbatim_excerpt'] for s in segments),
+                'calibration_decision': rule, 'proposed_fields': pending_location_fields(segments[0], new, question=True)}
     from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     return {**row, 'status':'calibrated_rebind', 'reason':rule['reason'],
         'candidate_segments':segments, 'candidate_quote':'\n'.join(s['verbatim_excerpt'] for s in segments),
@@ -129,6 +160,23 @@ def verified_cross_paragraph_rule(row, state, new):
     }
 
 
+def pending_location_fields(segment, new, *, question=False):
+    pk = segment['paragraph_key']
+    p = new['paragraphs'][pk]
+    fields = {
+        'paragraph_key': pk, 'source_segment_index': p['index'],
+        'source_sha256': new['body_sha256'], 'media_time': p['start_time'],
+        'media_end_time': p['end_time'], 'paragraph_text_sha256': m.sha(p['text'].encode()),
+        'verbatim_excerpt': '', 'verbatim_excerpt_sha256': None,
+        'anchor_state': 'unresolved', 'source_binding_status': 'quotation_pending_update',
+    }
+    if question:
+        fields.update(source_binding_status='source_text_missing',
+                      missing_in_source_sha256=new['body_sha256'],
+                      question_context=[{**segment_fields(segment, new), 'kind': 'question_answer_context'}])
+    return fields
+
+
 def segment_fields(segment, new):
     from backend.pipeline.transcript_evidence_alignment import speaker_annotation
     p = new['paragraphs'][segment['paragraph_key']]; quote = segment['verbatim_excerpt']
@@ -163,7 +211,7 @@ def fields_for(row, fragment, new):
         return {**row['proposed_fields'], 'deleted_in_source_sha256': new['body_sha256']}, False
     if status == 'auto_rebind':
         return {**row['proposed_fields'], 'source_binding_status': 'source_version_bound'}, False
-    if status == 'source_text_missing':
+    if status in {'source_text_missing', 'question_context_only', 'paragraph_location'}:
         return row['proposed_fields'], True
     if status == 'calibrated_rebind' and len(row['candidate_segments']) == 1:
         return segment_fields(row['candidate_segments'][0],new), True
@@ -222,6 +270,22 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                                'old_paragraph': f.get('paragraph_key'),
                                'old_media_time': f.get('media_time'), 'affected_claims': []})
         row = deepcopy(row)
+        if (f.get('source_sha256') == new['body_sha256'] and not f.get('verbatim_excerpt')
+                and f.get('anchor_state') == 'unresolved'
+                and f.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'}):
+            validate_fragment_locations({key: f}, new)
+            row.update(status='already_current', reason='current_paragraph_awaits_quotation')
+            rows.append(row)
+            continue
+        if f.get('anchor_state') == 'replaced_by_precise_fragments':
+            children = [records.get('source_fragments/'+fid, {}) for fid in f.get('replacement_fragment_ids', [])]
+            if children and all(not child.get('retired')
+                                and child.get('payload', {}).get('source_id') == source_id
+                                and child['payload'].get('source_sha256') == new['body_sha256']
+                                for child in children):
+                row.update(status='already_current', reason='current_replacement_fragments')
+                rows.append(row)
+                continue
         if not state.get('retired'):
             rule = rules.get(key) or verified_cross_paragraph_rule(row, state, new)
             if rule is not None:
@@ -250,12 +314,16 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
               and f.get('deleted_in_source_sha256') == new['body_sha256']):
             row.update(status='already_deleted', reason='deletion_already_recorded')
         fields, changed = fields_for(row, f, new)
-        if row['status'] == 'calibrated_rebind' and len(row['candidate_segments']) > 1:
+        if (not state.get('retired') and f.get('anchor_state') != 'source_deleted'
+                and row['status'] in {'calibrated_rebind', 'paragraph_location', 'question_context_only'}
+                and len(row['candidate_segments']) > 1):
             ids = []
             for segment in row['candidate_segments']:
                 fid = 'TMR-'+cm.sha256_json([key,new['body_sha256'],segment])[:48]
+                child_fields = (segment_fields(segment, new) if row['status'] == 'calibrated_rebind'
+                                else pending_location_fields(segment, new, question=row['status'] == 'question_context_only'))
                 child = SourceFragmentRecord.model_validate({
-                    'fragment_id':fid,'source_id':source_id, **segment_fields(segment,new),
+                    'fragment_id':fid,'source_id':source_id, **child_fields,
                     'split_from_fragment_id':f['fragment_id'],
                 }).model_dump(mode='json')
                 if 'source_fragments/'+fid in records:
@@ -274,9 +342,9 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
                     updates[key] = post
                 if changed:
                     changed_quotes.add(key)
-                    if row['status'] != 'source_text_missing':
+                    if row['status'] not in {'source_text_missing', 'question_context_only', 'paragraph_location'}:
                         row.update(status='relocate_changed_quote', content_approval_granted=False)
-        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted'}
+        if (not state.get('retired') and row['status'] not in {'source_deleted','already_deleted','source_text_missing','question_context_only','paragraph_location'}
                 and context_only(f.get('verbatim_excerpt',''))):
             if key not in replacements:
                 updates[key] = {**updates.get(key,f),'anchor_state':'context_only','source_binding_status':'context_only'}
@@ -296,7 +364,8 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
     for key,state in sorted(records.items()):
         if state.get('retired') or key.split('/',1)[0] not in {'evidence_steps','questions','observations','position_nodes'}:
             continue
-        f = state['payload']; old_ids = evidence_fragment_ids(f); result_ids = []
+        f = state['payload']; old_ids = list(dict.fromkeys([
+            *(f.get('source_fragment_ids') or []), *evidence_fragment_ids(f)])); result_ids = []
         slots = f.get('source_fragment_ids') or []
         occurrence_maps = {
             fid: rules.get('source_fragments/'+fid, {}).get('consumer_occurrence_segments', {}).get(key)
@@ -360,8 +429,11 @@ def compare(records, *, source_id, old_sources, new, document, calibration=None,
         elif changed:
             fields['source_binding_status'] = 'needs_claim_refresh'
         missing = [r['record_key'] for r in matching if r['status'] == 'source_text_missing']
+        located = any(r['status'] == 'paragraph_location' for r in matching)
+        if located and not deleted:
+            fields['source_binding_status'] = 'quotation_pending_update'
         if missing: fields['source_binding_status'] = 'source_text_missing'
-        if context_ids and not deleted and not missing:
+        if context_ids and not deleted and not missing and not located:
             fields['source_binding_status'] = 'context_only' if not fields['source_fragment_ids'] else 'context_excluded'
         if deleted or changed or missing or context_ids:
             fields.update(support_eligibility='withheld_unreviewed', valid_for_identity_review=False)
@@ -414,6 +486,8 @@ def render_report(report, *, applied=False):
         'relocate_changed_quote':'新版原話／分段定位，資格按影響判定',
         'source_deleted':'已刪除，不可作證據','already_deleted':'已標記刪除，保留',
         'context_only':'僅語境，不可作證據','source_text_missing':'新版未保留，不作證據',
+        'question_context_only':'原問句未保留，僅列問答位置',
+        'paragraph_location':'已對齊段落，引文待 Update',
         'located_review':'尚待可靠定位','exception':'尚待可靠定位','retired':'歷史保留'}
     cells = []
     for row in report['fragments']:
@@ -421,7 +495,8 @@ def render_report(report, *, applied=False):
         targets = row.get('target_paragraphs') or [row.get('target_paragraph') or fields.get('paragraph_key') or '']
         clock = '; '.join(f"{s['paragraph_key']} {s.get('media_time')}–{s.get('media_end_time')}" for s in segments)
         reason = (row.get('calibration_decision') or {}).get('reason',row['reason'])
-        if row['status'] == 'source_deleted': new_quote = '歷史原文保留；不移入有效證據。'
+        if row['status'] in {'source_deleted', 'source_text_missing', 'paragraph_location'}:
+            new_quote = '歷史原文保留；不移入有效證據。'
         else: new_quote = row.get('candidate_quote',fields.get('verbatim_excerpt',''))
         values = [labels[row['status']],row['record_key'],row.get('old_paragraph'),', '.join(targets),
                   row.get('quote'),new_quote,f"{row.get('old_media_time')} → {clock}",reason]
@@ -445,6 +520,9 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
                 or saved.get('jev_impact', False) != jev_impact
                 or saved['old_paths'] != [str(Path(p).resolve()) for p in old_paths]):
             raise ValueError('existing migration intent differs')
+        if not (root/'comparison.html').exists() or not (root/'comparison.csv').exists():
+            cm.source.verify_file(saved['report'])
+            write_comparison(root, m.read(saved['report']['path']))
         return saved
     records = {cm.source.key(*k): cm.model_state(v)
                for k, v in store.read_affected_context([('source_documents', source_id)]).items()}
@@ -499,6 +577,11 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
               'jev_impact': jev_impact, 'model_calls': report.get('model_calls', 0)}
     source_files_current(result)
     m.immutable(root/'plan.json', result)
+    write_comparison(root, report)
+    return result
+
+
+def write_comparison(root, report):
     m._write_bytes(root/'comparison.html', render_report(report).encode())
     buf = io.StringIO(); writer = csv.writer(buf)
     writer.writerow(['fragment','action','reason','old_paragraph','new_paragraphs','old_quote','new_quote','fields'])
@@ -507,7 +590,6 @@ def prepare(store, root, *, source_id, old_paths, published, instruction, calibr
             row.get('target_paragraphs', row.get('target_paragraph')), row.get('quote'),
             row.get('candidate_quote'), json.dumps(row.get('applied_fields'), ensure_ascii=False)])
     m._write_bytes(root/'comparison.csv', buf.getvalue().encode('utf-8-sig'))
-    return result
 
 
 def validate_plan(plan, report, records):
@@ -531,7 +613,32 @@ def validate_plan(plan, report, records):
 def validate_fragment_locations(updates, snapshot):
     """Check migrated live fragments against the authoritative published rows."""
     for key, fragment in updates.items():
-        if not key.startswith('source_fragments/') or fragment.get('anchor_state') != 'source_version_bound':
+        if not key.startswith('source_fragments/'):
+            continue
+        if alignment := fragment.get('aligned_paragraphs'):
+            if (fragment.get('anchor_state') == 'source_version_bound'
+                    or alignment['source_body_sha256'] != snapshot['body_sha256']
+                    or any((p := snapshot['paragraphs'].get(row['paragraph_key'])) is None
+                           or row['media_time'] != p['start_time'] or row['media_end_time'] != p['end_time']
+                           for row in alignment['locations'])):
+                raise ValueError('aligned paragraph provenance differs: ' + key)
+        if fragment.get('question_context'):
+            if fragment.get('anchor_state') == 'source_version_bound':
+                raise ValueError('question context must not be an active quotation')
+            for context in fragment['question_context']:
+                if context.get('kind') != 'question_answer_context' or context.get('anchor_state') != 'source_version_bound':
+                    raise ValueError('invalid question context provenance')
+                validate_fragment_locations({'source_fragments/context': context}, snapshot)
+        if (fragment.get('anchor_state') == 'unresolved'
+                and not fragment.get('verbatim_excerpt')
+                and fragment.get('source_binding_status') in {'quotation_pending_update', 'source_text_missing'}):
+            pk = fragment.get('paragraph_key')
+            paragraph = snapshot['paragraphs'].get(pk)
+            if not paragraph or any(fragment.get(field) != value for field, value in
+                                    pending_location_fields({'paragraph_key': pk}, snapshot).items()
+                                    if field != 'source_binding_status'):
+                raise ValueError('pending quotation location differs: ' + key)
+        if fragment.get('anchor_state') != 'source_version_bound':
             continue
         paragraph = snapshot['paragraphs'].get(fragment.get('paragraph_key'))
         quote = fragment.get('verbatim_excerpt')
