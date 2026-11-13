@@ -2336,6 +2336,7 @@ function TranscriptProofreader({
             {history.periods.map((period) => (
               <HistoryPeriodCard key={period.revisions[0].revision} base={base} period={period} />
             ))}
+            <LegacyHistory base={base} />
             {historyError && <p role="alert" className="text-sm text-red-700">{historyError}</p>}
             {history.next_before !== null && (
               <button className={button} disabled={historyLoading} onClick={async () => {
@@ -2373,6 +2374,50 @@ const TranscriptText = memo(function TranscriptText({
 }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>;
 });
+
+function LegacyHistory({ base }: { base: string }) {
+  const [history, setHistory] = useState<{
+    events: { time: string | null; actor: string | null; action: string | null }[];
+    snapshot_available: boolean;
+  } | null>(null);
+  const [rows, setRows] = useState<Row[]>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    request<typeof history>(base + "/legacy_history")
+      .then((value) => { if (active) setHistory(value); })
+      .catch((error) => { if (active) setError(error.message); });
+    return () => { active = false; };
+  }, [base]);
+  if (!history && !error) return null;
+  const actions: Record<string, string> = { assign: "認領", unassign: "取消認領", publish: "發佈" };
+  return (
+    <section className="my-4 space-y-2">
+      <h3 className="font-semibold">移交前的正式站歷史</h3>
+      {history?.events.map((entry, index) => (
+        <p key={index} className="text-sm">
+          {entry.actor || "編輯者不詳"} · {actions[entry.action || ""] || entry.action || "編輯操作"}
+          {entry.time && ` · ${new Date(entry.time).toLocaleString()}`} · 無全文快照
+        </p>
+      ))}
+      {history?.snapshot_available && (
+        <details onToggle={(event) => {
+          if (event.currentTarget.open && !rows) {
+            request<{ script: Row[] }>(base + "/legacy")
+              .then((value) => setRows(value.script))
+              .catch((error) => setError(error.message));
+          }
+        }}>
+          <summary className="cursor-pointer text-sm">查看移交前最後一版全文</summary>
+          {rows?.map((row) => (
+            <div key={row.index} className="my-2 whitespace-pre-wrap rounded border p-2 text-sm">{row.text}</div>
+          ))}
+        </details>
+      )}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    </section>
+  );
+}
 
 const historyAction: Record<string, string> = {
   edit: "自動儲存",
