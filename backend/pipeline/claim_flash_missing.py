@@ -107,14 +107,25 @@ def continue_existing_claim(store, source_id, root, ports, *, apply):
     candidate = Candidate.model_validate(finding['candidate'])
     claim_id = candidate.claim_id.removeprefix('claims/')
     key = 'claims/' + claim_id
-    if claim_id not in draft['claim_ids'] or key not in before['records'] or candidate.answer_question_ids:
+    if claim_id not in draft['claim_ids'] or key not in before['records']:
         raise ValueError('Existing Claim continuation exceeds its completed group')
     child = root / 'existing-claim-continuations' / e.digest(draft)
     if (child / 'verification.json').exists():
         result = statements.finish(store, child) if apply else read(child / 'verification.json')
         return e.publish(root, result)
     intent = read(root / 'intent.json')
-    records, sources = f.load_group_source(store, source_id, intent['group'])
+    group = intent['group']
+    relation_root = Path(intent['relation_root']) if candidate.answer_question_ids else None
+    if relation_root:
+        relation_before = read(relation_root/'before.json')
+        endpoints = read(relation_root/'result.json').get('readonly_endpoint_keys', [])
+        lower = {'evidence_steps/'+eid for endpoint in endpoints
+                 for eid in relation_before['records'][endpoint]['payload'].get('evidence_step_ids', [])}
+        group = {**group, 'reference_record_keys': sorted(set(group.get('reference_record_keys', [])) | lower)}
+    records, sources = f.load_group_source(store, source_id, group)
+    questions = {'questions/'+qid for qid in candidate.answer_question_ids}
+    if any(q not in before['records'] or before['records'][q].get('retired') for q in questions):
+        raise ValueError('Existing Claim continuation Question is outside its saved scope')
     if any(records.get(k) != v for k, v in before['records'].items()):
         raise ValueError('Existing Claim continuation input changed')
     if before['sources'] != sources or intent['models'] != ports.identity or records[key]['payload'].get('review_status') in f.PROTECTED:
@@ -139,6 +150,15 @@ def continue_existing_claim(store, source_id, root, ports, *, apply):
         pending.extend(review['pending'])
         if review['retiring_keys'] or review['updates'] or review['new_relations']:
             pending.append({'object_key': key, 'reason': 'existing_claim_revision_requires_relation_changes'})
+    if questions and not pending:
+        scoped = {k: row for k, row in records.items() if not k.startswith('questions/') or k in questions}
+        links = [{'claim': claim_id, 'question_ids': candidate.answer_question_ids}]
+        answers, findings = flash.question_links(scoped, sources, [key], set(), links, child/'answers', ports)
+        pending.extend(findings)
+        for question in questions:
+            if claim_id not in answers.get(question, records[question]['payload']).get('answer_claim_ids', []):
+                pending.append({'object_key': question, 'reason': 'proposed_claim_not_verified_as_answer'})
+        updates.update(answers)
     # Pin the same source-local snapshot that supplied the statement and direct-edge checks.
     result = {**draft, 'version': VERSION, 'status': 'needs_attention' if pending else 'verified',
               'updates': updates, 'new_fragments': {}, 'pending': pending, 'statement_checks': checked}
