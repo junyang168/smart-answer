@@ -116,12 +116,14 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 标题须涵盖每张完整原文与全部要点的共同主题（方案 §4.6），不能只取一条 Claim 或一个子段。负责人指出这类问题时，修生成、修订、审阅共用规则并保存原文反例，不以预览标题替换表充当系统修复；不因此自动增加原试跑的调用轮次。
 
-## 4. 审阅、修正、章标题
+## 4. 审阅、修正、章标题与总览主题
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-1-46 --review
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_title mat-21-1-46
 ```
+
+章标题命令也会为各段生成一至三条精简聆听主题，合并重复论证，每条链接到实际可播放的原声位置。总览直接使用生成结果；幻灯更新或改分段后重跑章标题命令，刷新主题和录音定位。
 
 审阅自己循环：审 → 修 → 再审，直到没有意见或两轮用完（`rounds_used_up`）。每轮的审阅和修正稿存在 `$D/chapter_slides/<passage>/` 的 `*.review-N.json`、`*.revision-N.json`。
 

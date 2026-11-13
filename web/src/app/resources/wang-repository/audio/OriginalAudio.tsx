@@ -235,14 +235,13 @@ export function citedAt(sermon: Sermon, seconds: number, passage: string) {
 }
 
 /** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
-export type Section = { passage: string; label: string; sermons: Sermon[] };
+export type Section = { passage: string; label: string; sermons: Sermon[]; topics?: { text: string; source_id: string; at: number }[] };
 
 /** 这一行此刻要播的几段：收起时只播保留的，展开时连灰色的一起按原来的次序播。 */
 export const visible = (sermon: Sermon, showLeftOut: boolean) =>
   showLeftOut ? sermon.stretches : sermon.stretches.filter((stretch) => !stretch.left_out);
 
 /** 總覽上每段列出幾個題目。 */
-const MOST_TOPICS = 12;
 
 export const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
@@ -439,19 +438,6 @@ export default function OriginalAudio({
     );
 
   if (listenHref) {
-    // 按章頁面的總覽只是經文目錄：聽的人關心的是經節，不是哪一堂課（負責人
-    // 2026-11-04）。點一段就進聆聽模式，從那一段開始；講到的題目是投影片的標題，
-    // 讓人看得出這幾節他講了什麼。
-    const topics = (section: Section) => {
-      const seen = new Set<string>();
-      return section.sermons
-        .flatMap((sermon) =>
-          sermon.slides && sermon.slides.length > 0
-            ? sermon.slides.map((slide) => ({ at: slide.at, text: slide.title, sourceId: sermon.source_id }))
-            : sermon.judgements.map((mark) => ({ at: mark.at, text: mark.judgement, sourceId: sermon.source_id })),
-        )
-        .filter((item) => item.text && !seen.has(item.text) && seen.add(item.text));
-    };
     return (
       <div className="flex flex-col gap-6">
         {title && <p className="font-serif text-lg text-stone-800">{title}</p>}
@@ -471,75 +457,26 @@ export default function OriginalAudio({
         <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {sections.map((section) => (
             <li key={section.passage}>
-              {section.passage === "mat-16-19" && !aiVoice ? (
-                <div className="grid gap-3 px-4 py-4 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 sm:px-5">
-                  <Link href={listenHref(section.passage)} className="flex w-fit flex-wrap items-baseline gap-2 self-start hover:text-amber-800">
-                    <span className="font-serif text-lg font-bold">16:19</span>
-                    <span className="font-mono text-xs text-stone-500">
-                      {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
-                    </span>
-                  </Link>
-                  <div>
-                    <ul className="divide-y divide-stone-100">
-                      {topics(section).filter((item) => [
-                        "天國鑰匙的權柄",
-                        "綑綁與釋放的時態和譯法",
-                        "綑綁與釋放的兩種用法",
-                        "教會如何宣告赦罪與留罪",
-                      ].includes(item.text)).map((item) => (
-                        <li key={item.text}>
-                          <Link href={listenHref(section.passage, item)} className="flex items-center justify-between gap-3 py-2 text-sm font-medium text-stone-800 hover:text-amber-800">
-                            {item.text}
-                            <span aria-hidden="true" className="shrink-0 text-xs text-amber-800">▶</span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                    <details className="mt-2 border-t border-stone-200 pt-2">
-                      <summary className="w-fit cursor-pointer py-1 text-sm text-stone-600 hover:text-amber-800">全部主題（{topics(section).length}）</summary>
-                      <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                        {topics(section).map((item) => (
-                          <li key={item.text}>
-                            <Link href={listenHref(section.passage, item)} className="block py-1.5 text-sm text-stone-700 hover:text-amber-800 hover:underline">
-                              {item.text}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </div>
-                </div>
-              ) : (
-              <Link
-                href={listenHref(section.passage)}
-                className="flex flex-col gap-2 px-4 py-3 hover:bg-amber-50/60 sm:flex-row sm:items-baseline sm:gap-4 sm:px-5"
-              >
-                <span className="flex shrink-0 items-baseline gap-2 sm:min-w-[7.5rem]">
-                  <span className="font-serif text-lg font-bold text-stone-900">{section.label.split(" ").pop()}{section.passage === "mat-16-28" && !aiVoice && " · 登山變像"}</span>
+              <div className="grid gap-2 px-4 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 sm:px-5">
+                <Link href={listenHref(section.passage)} className="flex w-fit flex-wrap items-baseline gap-2 self-start hover:text-amber-800">
+                  <span className="font-serif text-lg font-bold">{section.label.split(" ").pop()}</span>
                   <span className="font-mono text-xs text-stone-500">
                     {minutes(section.sermons.reduce((sum, row) => sum + row.seconds, 0))}
                   </span>
-                </span>
-                {/* 題目排成會換行的小標籤，填滿一行再往下：一行一個，右邊大半是空的。 */}
-                <span className="flex flex-1 flex-wrap gap-1.5">
-                  {topics(section)
-                    .slice(0, MOST_TOPICS)
-                    .map((item) => (
-                      <span
-                        key={item.text}
-                        className="rounded-full bg-stone-100 px-2.5 py-0.5 text-[0.85rem] leading-6 text-stone-700"
-                      >
-                        {item.text}
-                      </span>
+                </Link>
+                {Boolean(section.topics?.length) && (
+                  <ul className="divide-y divide-stone-100">
+                    {section.topics?.slice(0, 3).map((topic) => (
+                      <li key={topic.text}>
+                        <Link href={listenHref(section.passage, { sourceId: topic.source_id, at: topic.at })} className="flex items-center justify-between gap-3 py-2 text-sm text-stone-800 hover:text-amber-800">
+                          {topic.text}
+                          <span aria-hidden="true" className="shrink-0 text-xs text-amber-800">▶</span>
+                        </Link>
+                      </li>
                     ))}
-                  {topics(section).length > MOST_TOPICS && (
-                    <span className="px-1 text-[0.85rem] leading-6 text-stone-500">
-                      +{topics(section).length - MOST_TOPICS}
-                    </span>
-                  )}
-                </span>
-              </Link>
-              )}
+                  </ul>
+                )}
+              </div>
             </li>
           ))}
         </ol>

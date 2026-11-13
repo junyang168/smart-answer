@@ -39,15 +39,16 @@ def index(passage: str, source: str | None = None) -> dict[str, Any]:
     的验收条件，不是可选项。
     """
 
-    from backend.pipeline import notes_chapter
+    from backend.pipeline import chapter_topics, notes_chapter
 
     if source == notes_chapter.NOTES_SOURCE:
         # 教授釋經筆記：AI 朗读母本，另一份章的清单（`notes_chapters.json`）。
         found = original_audio_index.build_notes_index(Path(DATA_BASE_PATH), passage)
         if found is None:
             raise HTTPException(status_code=404, detail="這段經文還沒有筆記的朗讀頁面。")
-        return found
+        return chapter_topics.attach(found, Path(DATA_BASE_PATH), notes=True)
     if passage not in {slug for slug, _ in original_audio_index.passages()}:
         raise HTTPException(status_code=404, detail="這段經文還沒有原聲頁面。")
     store = PostgresKnowledgeStore()
-    return original_audio_index.build_index(store, Path(DATA_BASE_PATH), passage)
+    data_root = Path(DATA_BASE_PATH)
+    return chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
