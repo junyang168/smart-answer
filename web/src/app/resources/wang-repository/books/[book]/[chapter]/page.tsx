@@ -20,7 +20,6 @@ type ChapterData = {
   name: string;
   chapter: number;
   sources: Source[];
-  articles: { title: string; href: string }[];
 };
 
 export default function ChapterPage() {
@@ -115,17 +114,6 @@ function Chapter() {
                 );
               })}
             </div>
-            )}
-
-            {data.articles.length > 0 && (
-              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-stone-700">
-                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[13px] font-medium text-amber-900">綜合文章</span>
-                {data.articles.map((article) => (
-                  <Link key={article.href} href={article.href} className="text-amber-800 hover:text-amber-900">
-                    {article.title}
-                  </Link>
-                ))}
-              </p>
             )}
 
             {slug === "mat" && (number === "17" || (number === "16" && current.page?.kind === "chapter")) && current.name === "紐約靈命進深會" && (
