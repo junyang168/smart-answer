@@ -756,7 +756,7 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
                        if set(edit.fragment_ids) & set(job['required_fragment_ids'])]
                 if not ids and edit.fragment_ids:
                     paragraphs = {paragraphs_by_fragment.get(fid) for fid in edit.fragment_ids}
-                    if len(paragraphs) == 1:
+                    if None not in paragraphs:
                         ids = [job['job_id'] for job in jobs
                                if job['unit']['paragraph_key'] in paragraphs]
                 matches.append(ids)
