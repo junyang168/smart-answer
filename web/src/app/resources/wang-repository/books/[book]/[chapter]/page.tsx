@@ -121,7 +121,7 @@ function Chapter() {
                 className="w-fit text-sm font-medium text-amber-900 underline-offset-4 hover:underline"
                 href={`/resources/wang-repository/books/mat/16/listen?source=${encodeURIComponent(current.name)}&section=mat-16-28&recording=SRC-2016_NYSC_3-f35be4755f9b&at=2391.69`}
               >
-                登山變像（太 16:28–17:8）
+                登山變像（太 16:28–17:2）
               </Link>
             )}
 
