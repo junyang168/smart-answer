@@ -261,7 +261,7 @@ export default function OriginalAudio({
   source?: string;
   embedded?: boolean;
   /** 按章页面：每一段进聆听模式的地址。 */
-  listenHref?: (section: string, cue?: { sourceId: string; at: number }) => string;
+  listenHref?: (section: string) => string;
 }) {
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
@@ -472,20 +472,9 @@ export default function OriginalAudio({
                 </Link>
                 {Boolean(section.topics?.length) && (
                   <ul className="divide-y divide-stone-100">
-                    {section.topics?.slice(0, 3).map((topic) => {
-                      const transfiguration = !aiVoice && section.passage === "mat-16-28" && topic.text.includes("登山變像");
-                      const cue = transfiguration
-                        ? { sourceId: "SRC-2016_NYSC_3-f35be4755f9b", at: 2391.69 }
-                        : { sourceId: topic.source_id, at: topic.at };
-                      return (
-                      <li key={topic.text}>
-                        <Link href={listenHref(section.passage, cue)} className="flex items-center justify-between gap-3 py-2 text-sm text-stone-800 hover:text-amber-800">
-                          {topic.text}
-                          <span aria-hidden="true" className="shrink-0 text-xs text-amber-800">▶</span>
-                        </Link>
-                      </li>
-                      );
-                    })}
+                    {section.topics?.slice(0, 3).map((topic) => (
+                      <li key={topic.text} className="py-2 text-sm text-stone-800">{topic.text}</li>
+                    ))}
                   </ul>
                 )}
               </div>
