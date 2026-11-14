@@ -1,4 +1,118 @@
+## #652 physical iPad installation; first launch awaits device trust (2026-11-04)
+
+The owner connected an iPad Air (5th generation), iPadOS 27.2 (24B119), enabled
+Developer Mode, paired it over USB, signed in to Xcode and authorized Keychain.
+Xcode lists the real device and developer disk image services are available.
+The signed Debug device build succeeds and strict/deep codesign verification
+passes. Official devicectl installation confirms Sunday Remote 0.1.0 build 1.
+First launch was denied with an iPadOS signature/entitlement/profile-trust
+security error; the owner has been asked to explicitly trust their development
+profile on iPad. No real-device launch/video/control pass is claimed yet.
+The Personal Team profile expires 2026-11-11 19:47 UTC (13:47 Chicago).
+
+DeviceSupport processing exhausted internal space during this setup. Its
+finalized data was copied and checksum-verified on SSD before replacing the
+internal directory with a symlink. Closing the owned test simulator and Xcode
+also released space. Internal free space recovered to roughly 27 GiB. Measured
+sizes and limits of the disk accounting are recorded in [iPad setup](ipad/README.md#physical-device-setup-and-disk-usage-2026-11-04).
+No unrelated user data was deleted. Source project generation remains free of
+personal team/signing settings; the installed app is a development build.
+
+## #652 iPad simulator runtime verified (2026-11-04)
+
+The owner completed Mac system authorization. Xcode 26.6 first-launch status now
+passes; iOS 26.5 (23F77) boots an iPad (A16) simulator. Simulator and unsigned
+physical-device architecture builds succeed. DerivedData is on the SSD; Xcode
+remains in `/Applications`, with no global toolchain or OS change.
+
+Real simulator UI verification against a development Presenter and actual Office
+PPT passed pairing, video, observer-default disabled navigation, explicit touch
+Next/Previous, expanded viewer, portrait/landscape, Home/app return and process
+termination/relaunch with remembered pairing and recovered image. Saved host
+identity also reconnected after host restart. The simulator initially failed
+Keychain saves with signing disabled; normal Xcode ad-hoc simulator signing fixed
+that failure. UIKit compilation also caught a stored `next` property conflicting
+with UIResponder; it is now `nextButton`.
+
+The old installed 0.6.1 host's Office source was black after overnight idle; a
+fresh Office presentation restored real video. Close/quit also reproduced missing
+`webContents` during destroyed-view callbacks. Stage now handles that lifecycle,
+removes closed pages before notifying observers, and preserves another live deck.
+Two regression counterexamples pass, and all 53 regression tests pass. No claim
+is made that the idle black source is resolved. Installed app bytes were not
+replaced; the currently running demonstration host uses this worktree source.
+
+No physical iPad, minimum-iPadOS, hardware keyboard, real hotspot/network change
+or full-service iPad acceptance is claimed. No microphone, recording, Meet or
+YouTube session was started. Keep the existing two-laptop Meet service workflow.
+See [iPad build and acceptance](ipad/README.md). Earlier entries below retain the
+failed/intermediate evidence and are not the current setup status.
+
 # Sunday Presenter acceptance evidence
+
+## #652 agreement confirmed; administrator authorization required (2026-11-04)
+
+The owner explicitly replied agreeing to the displayed Xcode and Apple SDKs
+Agreement. The normal Xcode UI's Agree button was pressed. It became disabled,
+but first-launch status remains exit 69 and SDK lookup still reports that the
+license has not been recorded. Xcode 26.6 / build 17F113 is readable; that fact
+alone does not establish successful first-launch setup.
+
+The computer-use tool explicitly refuses access to com.apple.SecurityAgent for
+safety reasons. An independent supported CLI path was checked with the owner's
+agreement authority: `xcodebuild -license accept` reports that administrator
+privileges are required. A noninteractive administrator attempt fails immediately
+with "sudo: a password is required". No password was read, entered, guessed or
+requested in chat; no authorization/security setting was altered. Further
+first-launch setup needs the owner to complete the Mac's system authorization.
+Simulator installation/build/run and SSD relocation remain pending. Source and
+installed Presenter behavior are unchanged; the existing tests do not become
+an iPad runtime pass. The prior pending-agreement observations below are history.
+
+## #652 Xcode installed; first-launch agreement pending (2026-11-04)
+
+The owner authorized installing Xcode and the iPad simulator. The signed-in Mac
+App Store offered its last compatible Xcode release because the current listing
+requires macOS 26.6. After the normal Download confirmation, installation completed
+and the app's Info.plist identifies version 26.6. It is currently in
+`/Applications/Xcode.app`; macOS remains 26.5.2, and no OS update was initiated.
+The installed bundle occupies about 4.0 GiB of allocated disk blocks; the internal
+volume still showed about 36 GiB free after installation. Relocation to SSD is
+pending first-launch setup; no completed SSD move is claimed.
+
+Opening Xcode showed its Xcode and Apple SDKs Agreement, identifier EA1990 dated
+2026-01-21. Agree has not been pressed; explicit action-time confirmation was
+requested, separately from software-install authorization. No password, account
+agreement or security control was bypassed. Simulator setup, iOS compilation and
+actual app testing remain outstanding. Earlier missing-toolchain observations
+below are historical; they are not a claim that Xcode is still uninstalled.
+
+## #652 iPad-first pilot source — not an iPad build (2026-11-04)
+
+The owner identified iPad as the primary Remote target. The iPad-only UIKit
+project reuses the existing bundled WebRTC receiver and host protocol. It provides
+Bonjour host selection, per-host Keychain pairing, exact-certificate/endpoint pin,
+no HTTP redirects, touch/keyboard controls with live binding, observer mode on
+by default, expanded viewer and foreground reconnection. Background/resign-active
+stops the local viewer and cancels the URLSession; the host's existing lease can
+expire within 15 seconds. No remote microphone, recording or streaming outlet
+was introduced. The installed Mac apps and their permissions were not changed.
+
+Available validation: all 51 unit/regression tests pass, including 38 iPad
+production-scope/TLS/redirect assertions. The actual Foundation/Security client
+compiles on the Mac SDK; production scope and TLS-delegate tests exercise a generated real test
+certificate, wrong pin/endpoint/port, missing trust, redirects, host-switch/stale
+state rejection, observer gating and background invalidation. Project/plist and
+resource paths validate, UIKit source parses, and both existing Mac Remote
+architectures build. These checks do not type-check UIKit against an iOS SDK or
+establish iPad WebRTC/permissions/layout behavior.
+
+The development Mac has Command Line Tools only; no Xcode was found by application
+inventory/Spotlight, and both iphoneos and iphonesimulator SDK lookup fail. The
+simulator build command correctly exits nonzero instead of producing an artifact.
+Actual iOS build, signing, installation, hardware/network and full-service
+acceptance remain outstanding. The first-Sunday plan stays unchanged until those
+checks finish. Source, commands and Apple references are in `ipad/README.md`.
 
 ## #643 refined three-step rollout (2026-11-04)
 
@@ -1038,3 +1152,136 @@ latest.json now selects 0.3.8. Presenter DMG: 131544108 bytes,
 SHA256 aa14483f181134a5d0db0c1f993fd7e4abc9df2dc6e0bd2ce8c17754bebbeaed.
 Remote ZIP: 464105 bytes,
 SHA256 8b4251f4f167da558af83fa3ac5bc775e305ce5197db57470600807ffc7622b1.
+
+## Mac/iPad release alignment — 0.6.2 (2026-11-05)
+
+The owner requested synchronizing the Mac counterpart with iPad and keeping all
+versions equal. Presenter, universal Mac Remote, signed iPad device bundle and
+simulator bundle now have both version fields set to 0.6.2. The single authority
+is package.json; the generated Xcode project no longer carries a separate 0.1.0.
+
+Mac keeps its existing window/UI and now supports observer mode and per-host
+pair storage through the same production PairStore/RemoteScope used on iPad.
+It preserves the old Mac single-host item only for that exact fingerprint;
+forget/revocation does not erase another host. The Mac network session uses the
+shared immutable endpoint/certificate delegate, rejects redirects and cancels
+old sessions on host changes. The existing destroyed-view close/quit repair is
+included in the Presenter release.
+
+Validation: 56 Node regression tests pass. They compile and exercise the actual
+Mac button/keyboard command path, host switching and late responses; preserve
+multiple in-memory host pairs without writing test credentials to the user's
+Keychain; exercise legacy-pair decoding; and use the built Mac executable with
+real local TLS to verify correct pin acceptance, wrong-pin rejection and denied
+redirects. The shared scope suite has 42 checks. Mac builds both arm64/x86_64;
+Xcode 26.6 builds the simulator and signs the physical-device architecture using
+the existing owner team. Device bundle deep/strict signature verification passes.
+Builds use explicit DEVELOPER_DIR and SSD DerivedData; global CLT selection is
+unchanged. Website tsc was attempted; this unchanged frontend checkout has its
+existing missing cytoscape/react-quill-new dependencies, not a native App error.
+
+At this checkpoint the physical iPad is paired but disconnected in devicectl.
+Device installation and post-update pairing/video retention are not inferred
+from a successful signed build. The existing #655 automatic-renewal hold remains;
+its frozen source snapshot must be intentionally brought to the accepted release
+before renewal is re-enabled. No renewal schedule, Meet session, microphone,
+recording, website deployment or download publication was started.
+
+Installation follow-up: the paired iPad became reachable through a direct
+lock-state query. It was passcode-locked and unlocked since boot. The signed
+0.6.2 bundle was installed over the existing app, without uninstalling it;
+devicectl readback confirms both version and bundleVersion are 0.6.2. Bundle ID,
+owner team and target-device profile binding were checked before installation.
+The app was not launched while locked, so post-update pairing/video retention
+remains unverified. The automatic-renewal hold is unchanged.
+
+The idle installed Mac Presenter and both existing Mac Remote paths
+(/Applications and ~/Applications) were updated to 0.6.2. Deep/strict signatures,
+both plist version fields, matching Remote executable SHAs, installed Presenter
+stage.cjs equality and the installed Remote's actual control-gate probe pass.
+Previous app bundles were retained as rollback ZIPs on SSD, not extra launchable
+App copies. Release/install receipts are under the private local test artifact
+folder, not a public download. No website release was published.
+
+## Coordinated Mac/iPad deployment — 0.6.3 (2026-11-05)
+
+The owner requested the slideshow-end fix on iPad and the current Mac version
+on the church website. The 0.6.2 Mac/iPad pilot is the release base; publishing
+0.4.1 alone did not update that pilot. Presenter now includes the exact reviewed
+end-notice protection from Phase 1 PR #663. The iPad sends slide commands to
+this same protected host page; it does not open or dismiss a separate Office
+slideshow. All three products keep the common 0.6.3 version authority.
+
+All 56 Node regressions, the 42 production Swift scope/redirect checks, and
+the full Electron smoke pass. Smoke includes an opaque-origin slideshow frame,
+extra advances/clicks at the end, backward navigation, invisible end-text
+counterexamples, and the previous switching/navigation/crash protections.
+The prior real Office end-of-show verification is recorded under #598 / PR #663.
+
+The new iPad bundle was signed with the existing team and application identity;
+its profile includes the existing target iPad. Signature verification passed.
+It was installed over the existing app without uninstalling; physical-device
+readback confirms both version fields are 0.6.3. The device was passcode-locked,
+so launch and post-update pairing/video acceptance are not inferred from that
+readback. No signing identity, account or developer permissions were added.
+The #655 automatic-renewal hold remains unchanged.
+
+Final 0.6.3 deployment readback: the exact packaged Mac app played the real
+29-slide OneDrive sermon to its end. Extra native Right, Space, Enter and canvas
+click stayed on the same OUTPUT; Left returned to slide 29. No recording or
+microphone was enabled. The idle installed Mac Presenter and both existing Mac
+Remote copies were updated to 0.6.3, with prior bundles saved as rollback ZIPs
+on SSD. All installed version fields and deep/strict signatures verify.
+
+The owner-authorized website publication selects 0.6.3 with pilot status.
+The authenticated production admin page displays v0.6.3; an actual browser
+download returned Sunday-Presenter-0.6.3-mac-arm64.dmg. Its SHA256 equals the
+published manifest (05e478eb996fbe089b331b4f6a993a2fc66e204e4a9681b3809af2516aa55c9e).
+Remote ZIP SHA256 is 3b9d230d38cf165ad318438073569a32b60b863666d615b872cd3fa9404f92dd.
+Both published file sizes and hashes were independently read back. No website
+code changed or website service restart was needed. Private receipts and
+screenshots are on SSD under SundayPresenterTests/releases/0.6.3-89402585.
+The code artifact is bound to commit 89402585; this subsequent documentation
+update does not change packaged code. PR #653 remains stacked on #644; publication
+was expressly requested and does not imply completion of the remaining physical
+service/hotspot/renewal acceptance gates.
+
+
+## 2026-11-07 — 0.6.10 slide-only OUTPUT regression fix (#652 / PR #653)
+
+The owner supplied TV and Meet photos showing a colored frame, the PowerPoint
+reader status bar, and later the PowerPoint logo/account. Their Meet picker
+explicitly selected Sunday Presenter — OUTPUT. The worship deck is 13 1/3 ×
+7.5 inches (16:9); the speaker deck is 10 × 7.5 inches (4:3). Only the latter
+requires pillarboxing on a 16:9 surface.
+
+The 0.6.7 embedview default did not provide a true slide-only output: it retained
+a status bar and lacked the normal Start Slide Show entry. 0.6.10 uses the
+read-only preparation page and an explicit first-click action which requests
+browser-native fullscreen on Office's live SlidePanel. This does not edit the
+PPT, crop it into screenshots, inject slide layout CSS or open a coauthoring
+editor. The audience guard reads the actual frame's fullscreen element before
+arming or taking an Office preparation page. Exiting fullscreen/navigation
+revokes readiness. A stalled frame action has a bounded three-second timeout.
+
+Preparation also had a real viewport mismatch: on this Mac's 1920×1080 primary
+LG ULTRAFINE display, macOS limited the preparation window to 971 logical pixels
+high while its child view remained 1080 pixels high. Native screenshots were
+3840×1942 pixels. Matching actual output bounds with larger-than-screen enabled
+restored a 3840×2160 preparation surface. Re-preparing the same preview keeps
+its live view attached rather than reparenting it twice.
+
+Real Office validation used the owner's saved 2026-11-08 worship and speaker
+files. Both entered slide-only fullscreen, armed and played. Native arrow input
+advanced each from slide 1 to slide 2. Switching worship → sermon → worship →
+sermon retained both slide-2 positions and fullscreen; saved OUTPUT screenshots
+showed no PowerPoint logo, account or status bar, and preserved content/aspect.
+The private evidence directory is ~/.local/share/smart-answer/remote-652-upgrade/.
+This local observation is not a new independent Meet-receiver or on-site TV
+acceptance claim. The clean final 0.6.10 packages were published through the authenticated website;
+the DMG downloaded there matched the release SHA256 (131250022 bytes). The app
+installed under /Applications also passed the actual Office fullscreen audience
+check. Existing host pairing identity remained unchanged. Code artifact:
+7142c681; this documentation update does not change packaged code. The previous
+0.6.7 app bundle is preserved privately for rollback. iPad remains installed at
+0.6.9; this is a Mac update.

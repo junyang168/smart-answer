@@ -115,3 +115,45 @@ test('video signaling requires the existing pair, rejects browser origins and st
   assert.equal((await request(f.remote, '/key', { key: 'Right', id: crypto.randomUUID(), binding: f.binding }, f.token)).status, 200);
   assert.equal(f.calls.length, 1);
 });
+
+test('Mac and iPad pairings survive app upgrade/restart without replacing one another', async t => {
+  const f=await fixture(t);
+  const first=f.token, originalID=f.remote.identity.id;
+  f.remote.openPairing();
+  assert.equal((await request(f.remote,'/state',undefined,first)).status,200);
+  const second=await request(f.remote,'/pair',{code:f.remote.snapshot().code});
+  assert.equal(second.status,200);
+  assert.equal((await request(f.remote,'/state',undefined,first)).status,200);
+  assert.equal((await request(f.remote,'/state',undefined,second.data.token)).status,200);
+  const saved=fs.readFileSync(path.join(f.directory,'remote-peer.json'),'utf8');
+  assert.ok(!saved.includes(first)&&!saved.includes(second.data.token));
+  assert.equal(JSON.parse(saved).peerHashes.length,2);
+  await f.remote.stop();
+  const again=new RemoteControl({identity:identity(f.directory),state:()=>f.state,key:async()=>{},advertise:()=>()=>{}});
+  await again.start({host:'127.0.0.1'});t.after(()=>again.stop());
+  assert.equal(again.identity.id,originalID);
+  assert.equal(again.snapshot().rememberedCount,2);
+  for(const token of [first,second.data.token])assert.equal((await request(again,'/state',undefined,token)).status,200);
+  await again.forget();
+  for(const token of [first,second.data.token])assert.equal((await request(again,'/state',undefined,token)).status,401);
+});
+
+test('upgrading legacy single-peer storage preserves the original approved token', async t => {
+  const f=await fixture(t);await f.remote.stop();
+  const pathName=path.join(f.directory,'remote-peer.json');
+  const legacy={peerHash:JSON.parse(fs.readFileSync(pathName)).peerHash};
+  fs.writeFileSync(pathName,JSON.stringify(legacy));
+  const nextIdentity=identity(f.directory);assert.deepEqual(nextIdentity.peerHashes,[legacy.peerHash]);
+  nextIdentity.remember('a'.repeat(64));
+  assert.deepEqual(JSON.parse(fs.readFileSync(pathName)).peerHashes,[legacy.peerHash,'a'.repeat(64)]);
+});
+
+test('additional pairing remains single-use and expires without revoking an existing device', async t=>{
+  let clock=100000;const f=await fixture(t,{now:()=>clock});
+  f.remote.openPairing();const code=f.remote.snapshot().code;clock+=301000;
+  assert.equal((await request(f.remote,'/pair',{code})).status,401);
+  assert.equal((await request(f.remote,'/state',undefined,f.token)).status,200);
+  const invalid=path.join(f.directory,'remote-peer.json');
+  fs.writeFileSync(invalid,JSON.stringify({peerHashes:['not-a-hash']}));
+  assert.throws(()=>identity(f.directory),/配對資料無效/);
+});

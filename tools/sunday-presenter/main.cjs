@@ -4,9 +4,12 @@ const { pathToFileURL } = require('node:url');
 const { Stage, allowedURL } = require('./stage.cjs');
 const { identifyFiles, fileElements, isDocumentURL, sameFolderURL } = require('./folder-wizard.js');
 const { Website } = require('./website.cjs');
+const { protectSlideshowEnd } = require('./slideshow-end.js');
 const { RemoteControl } = require('./remote.cjs');
 const { identity } = require('./remote-identity.cjs');
 const { HostVideo } = require('./host-video.cjs');
+const { installOfficeView, viewDocumentURL, isOfficeDocument } = require('./office-view.cjs');
+const { enterOfficeSlideShow, officeSlideShowActive, runOfficeAction } = require('./office-slideshow.cjs');
 
 const smoke = process.argv.includes('--smoke');
 if (smoke) app.setPath('userData', require('node:fs').mkdtempSync(path.join(app.getPath('temp'), 'sunday-presenter-')));
@@ -73,7 +76,7 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
     // Repeated GET clicks reuse the existing private document; never replace a
     // POST popup or destroy its opener/body. Authentication popups stay parked.
     if (!postBody && isDocumentURL(url)) {
-      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === url);
+      const existing = [...stage.pages.values()].find(p => p.view.webContents.getURL() === viewDocumentURL(url));
       if (existing) {
         if (stage.preview === page.id && !existing.ready) {
           stage.prepare(existing.id); controller.moveTop();
@@ -112,6 +115,14 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
     }
     changed();
   });
+  // Office renders the show inside a cross-origin iframe. Protect its own
+  // document as well as the outer page, without replacing/reloading either.
+  wc.on('did-frame-finish-load', (_event, _mainFrame, processId, routingId) => {
+    try {
+      const frame = require('electron').webFrameMain.fromId(processId, routingId);
+      frame?.executeJavaScript(`(${protectSlideshowEnd.toString()})()`).catch(() => {});
+    } catch { /* A frame may detach while its load event is being delivered. */ }
+  });
   wc.on('did-stop-loading', changed);
   wc.on('page-title-updated', (_event, title) => { page.title = title.slice(0, 180); changed(); });
   wc.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
@@ -140,6 +151,18 @@ function createPage(deck, popupOptions = {}, followFrom = null) {
   // The operator opens the appropriate new row with Prepare when needed.
   if (!popup) { stage.prepare(page.id); controller.moveTop(); }
   return page;
+}
+
+async function verifyAudiencePage(page) {
+  const wc = page.view.webContents;
+  if (!isOfficeDocument(wc.getURL())) return;
+  const states = await Promise.all(wc.mainFrame.framesInSubtree.map(async frame => {
+    try {
+      if (new URL(frame.url).hostname !== 'powerpoint.officeapps.live.com') return false;
+      return await runOfficeAction(frame, `(${officeSlideShowActive.toString()})(document)`);
+    } catch { return false; }
+  }));
+  if (!states.some(Boolean)) throw Error('請先按「開始投影片放映」；含有 PowerPoint 標誌與帳號的準備頁不能播給觀眾。');
 }
 
 async function act(action, args = {}) {
@@ -172,6 +195,7 @@ async function act(action, args = {}) {
     case 'record-stop': await hostVideo.recording.stop(); break;
     case 'record-reveal': hostVideo.recording.reveal(); break;
     case 'remote-forget': await remoteControl.forget(); break;
+    case 'remote-pair': remoteControl.openPairing(); break;
     case 'remote-start': await remoteControl.start(); break;
     case 'remote-stop': await remoteControl.stop(); break;
     case 'refresh-folder': await website.refresh(); break;
@@ -187,14 +211,41 @@ async function act(action, args = {}) {
           args.url === 'about:blank' || !allowedURL(args.url, testOrigin)) throw Error('請貼上 HTTPS 的 Microsoft 365 / OneDrive 簡報連結。');
       const page = createPage(args.deck);
       // Failure details are surfaced by did-fail-load; never log private URLs.
-      page.view.webContents.loadURL(args.url).catch(() => {});
+      page.view.webContents.loadURL(viewDocumentURL(args.url)).catch(() => {});
       break;
     }
     case 'prepare': stage.prepare(args.id); controller.moveTop(); break;
-    case 'confirm-play': { const page = stage.get(args.id); stage.arm(page.id); stage.take(page.deck); break; }
-    case 'arm': stage.arm(args.id); break;
+    case 'start-slideshow': {
+      const page = stage.get(args.id), wc = page.view.webContents;
+      if (!isOfficeDocument(wc.getURL())) throw Error('請先開啟 PowerPoint 唯讀準備頁。');
+      controller.hide(); stage.prepare(page.id);
+      try {
+        let entered = false;
+        for (const frame of wc.mainFrame.framesInSubtree) {
+          let officeFrame = false;
+          try { officeFrame = new URL(frame.url).hostname === 'powerpoint.officeapps.live.com'; } catch {}
+          if (!officeFrame) continue;
+          entered = await runOfficeAction(frame, `(${enterOfficeSlideShow.toString()})(document)`, true);
+          if (entered) break;
+        }
+        if (!entered) throw Error('PowerPoint 投影片尚未完成載入，請稍後再按一次。');
+        page.officeFullscreen = true;
+      } finally { toggleControls(); }
+      break;
+    }
+    case 'confirm-play': {
+      const page = stage.get(args.id);
+      await verifyAudiencePage(page);
+      stage.arm(page.id); stage.take(page.deck); break;
+    }
+    case 'arm': {
+      const page = stage.get(args.id);
+      await verifyAudiencePage(page);
+      stage.arm(page.id); break;
+    }
     case 'take':
       if (!Object.hasOwn(labels, args.deck)) throw Error('Unknown deck');
+      await verifyAudiencePage(stage.get(stage.selected[args.deck]));
       stage.take(args.deck); break;
     case 'close': {
       const page = stage.get(args.id);
@@ -291,6 +342,7 @@ app.whenReady().then(async () => {
     ] }, { role: 'windowMenu' }
   ]));
   officeSession = session.fromPartition(smoke ? 'smoke-office' : 'persist:office');
+  installOfficeView(officeSession);
   const permissionAllowed = (wc, permission) => permission === 'fullscreen' && wc &&
     (stage?.preview === wc.id || stage?.active === wc.id);
   officeSession.setPermissionRequestHandler((wc, permission, callback) => callback(!!permissionAllowed(wc, permission)));
@@ -313,7 +365,7 @@ app.whenReady().then(async () => {
       else if (!output.isFullScreen()) output.setFullScreen(true);
     }
   });
-  preparation = new BaseWindow({ ...hostOptions, frame: false,
+  preparation = new BaseWindow({ ...hostOptions, frame: false, enableLargerThanScreen: true, hasShadow: false,
     title: 'Sunday Presenter — PRIVATE PREPARATION', show: false });
   controller = new BrowserWindow({ width: 760, height: 650, show: false, alwaysOnTop: true,
     type: process.platform === 'darwin' ? 'panel' : 'normal',

@@ -1,3 +1,4 @@
+const { isOfficeDocument } = require('./office-view.cjs');
 // No Electron import: the switching rules can also be exercised with fake views.
 class Stage {
   constructor(output, preparation, changed = () => {}) {
@@ -12,7 +13,7 @@ class Stage {
 
   get(id) {
     const page = this.pages.get(Number(id));
-    if (!page || page.view.webContents.isDestroyed()) throw Error('頁面已關閉，請重新載入。');
+    if (!page?.view.webContents || page.view.webContents.isDestroyed()) throw Error('頁面已關閉，請重新載入。');
     return page;
   }
 
@@ -39,14 +40,20 @@ class Stage {
   }
 
   layout() {
-    // Keep the same viewport in both hosts; Office handles the deck's own ratio.
+    // Both hosts must really have the same bounds, not just a requested size:
+    // macOS otherwise clamps preparation to the work area and clips a larger
+    // child view's bottom controls. Office keeps the deck's own aspect ratio.
+    this.preparation.setBounds(this.output.getBounds());
     const [width, height] = this.output.getContentSize();
     for (const page of this.pages.values()) page.view.setBounds({ x: 0, y: 0, width, height });
-    this.preparation.setContentSize(width, height);
   }
 
   prepare(id) {
     const page = this.get(id);
+    if (this.preview === page.id && page.host === this.preparation) {
+      this.preparation.show(); this.preparation.focus?.();
+      page.view.webContents.focus(); this.changed(); return;
+    }
     if (this.active === page.id) this.black();
     if (this.preview !== null) {
       const previous = this.pages.get(this.preview);
@@ -58,7 +65,7 @@ class Stage {
     this.preview = page.id;
     this.move(page, this.preparation);
     page.view.setVisible(true);
-    this.preparation.show();
+    this.preparation.show(); this.preparation.focus?.();
     page.view.webContents.focus();
     this.changed();
   }
@@ -91,7 +98,8 @@ class Stage {
 
   black(emit = true, hideOutput = true) {
     for (const page of this.pages.values()) {
-      if (!page.view.webContents.isDestroyed()) page.view.webContents.setAudioMuted(true);
+      const wc = page.view.webContents;
+      if (wc && !wc.isDestroyed()) wc.setAudioMuted(true);
       if (page.host === this.output) page.view.setVisible(false);
     }
     this.active = null;
@@ -104,6 +112,7 @@ class Stage {
     if (!page) return;
     if (this.active === id) this.black(false);
     page.ready = false;
+    page.officeFullscreen = false;
     page.error = error;
     this.changed();
   }
@@ -111,19 +120,24 @@ class Stage {
   remove(id) {
     const page = this.pages.get(id);
     if (!page) return;
-    this.invalidate(id);
-    if (this.preview === id) { this.preview = null; this.preparation.hide(); }
-    page.host.contentView.removeChildView(page.view);
+    // Electron can clear view.webContents before emitting its destroyed event.
+    // Remove it before any changed callback takes a snapshot, and make a
+    // reentrant destroyed event a no-op.
     this.pages.delete(id);
+    page.ready = false;
+    if (this.active === id) this.black(false);
+    if (this.preview === id) { this.preview = null; this.preparation.hide(); }
+    page.host?.contentView?.removeChildView(page.view);
     if (this.selected[page.deck] === id) this.selected[page.deck] = null;
     this.changed();
   }
 
   snapshot() {
     return { active: this.active, preview: this.preview, selected: this.selected,
-      pages: [...this.pages.values()].map(({ id, deck, title, ready, loaded, error, view }) =>
+      pages: [...this.pages.values()].map(({ id, deck, title, ready, loaded, error, view, officeFullscreen }) =>
         ({ id, deck, title, ready, loaded, error,
-          muted: view.webContents.isDestroyed() || view.webContents.isAudioMuted() })) };
+          officePreparation: !!view.webContents && !view.webContents.isDestroyed() && isOfficeDocument(view.webContents.getURL?.()) && !officeFullscreen,
+          muted: !view.webContents || view.webContents.isDestroyed() || view.webContents.isAudioMuted() })) };
   }
 }
 

@@ -59,8 +59,9 @@ function render(state) {
     recording.status === 'error' ? `${recording.error}${recording.partialPath ? ' · 未完成檔案：' + recording.partialPath : ''}` :
     '本機錄影未啟動；需要 MP4 副本時才手動開始。';
   const remote = state.remote;
-  document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired ? '講員已連線，可以翻頁。' :
-    remote?.enabled ? (remote.remembered ? '已記住講員電腦，等待自動連線。' : `請講員打開 Sunday Remote，輸入 ${remote.code}（五分鐘內）。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
+  document.querySelector('#remote-status').textContent = remote?.error || (remote?.paired && !remote?.code ? 'Remote 已連線，可以翻頁。' :
+    remote?.enabled ? (remote.code ? `請在新 Remote 輸入 ${remote.code}（五分鐘內）；既有配對會保留。` : `已記住 ${remote.rememberedCount || 1} 台 Remote，等待自動連線。`) : '按「開啟講員翻頁」，講員即可用 Sunday Remote 控制上一頁／下一頁。');
+  document.querySelector('#remote-pair').hidden = !remote?.enabled;
   document.querySelector('#remote-start').hidden = !!remote?.enabled;
   document.querySelector('#remote-stop').hidden = !remote?.enabled;
   const website = state.website;
@@ -92,8 +93,9 @@ function render(state) {
       } else if (candidate.ready) {
         action = 'take'; args = { deck }; buttonLabel = `播放${label}`; hint = '畫面已確認，可以播放。';
       } else if (state.preview === candidate.id && candidate.loaded && !candidate.error && /\.pptx?\b/i.test(candidate.title)) {
-        action = 'confirm-play'; buttonLabel = `確認並播放${label}`;
-        hint = '請先在 PowerPoint 啟動投影片放映。確認畫面只有投影片，再按下方按鈕。';
+        action = candidate.officePreparation ? 'start-slideshow' : 'confirm-play';
+        buttonLabel = candidate.officePreparation ? '開始投影片放映' : `確認並播放${label}`;
+        hint = candidate.officePreparation ? '首次點一次開始放映；正式放映頁不含 PowerPoint 標誌、帳號與工具列。' : '確認只有完整投影片，再按下方按鈕播放。';
       } else {
         action = 'prepare'; buttonLabel = candidate.error ? '查看問題／重試' : '繼續準備 PPT';
         hint = candidate.error || '打開準備畫面，在 PowerPoint 啟動投影片放映，回到設定窗口確認畫面，播放後會自動隱藏設定。';

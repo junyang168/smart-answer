@@ -27,6 +27,15 @@ local filesystem path. This uses the existing Sunday-services API's access
 policy and returns an ordinary OneDrive folder URL, not a sharing token or new
 permission. Microsoft still requires the user's access to the files.
 
+Presenter opens OneDrive/SharePoint document pages in Office's read-only
+`action=view` mode. This applies to manual links, file-picker GET popups and
+document redirects (`Doc.aspx` and `doc2.aspx`). Existing viewer/presentation
+actions, authentication POST requests and Office slideshow frames are preserved.
+This is a playback default, not a change to sharing permissions. Opening an
+editor can hold a shared-use lock that blocks replacing the entire generated
+PPTX, even though Office coauthoring itself is allowed. A local generated file
+is not proof that the cloud version has updated; verify upload before reopening.
+
 The date is the next Sunday including today, in `America/Chicago`, independent
 of browser/laptop timezone or the existence of a service record. The directory
 name is unpadded `month-day-year`. A missing week never falls back to an old one.
