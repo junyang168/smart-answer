@@ -2,7 +2,7 @@
 
 > **讀者**：Developer、流程設計者。
 > **類型**：記錄。
-> **狀態**：當前。
+> **狀態**：當前；第 5 節的結論已由第 8 節更正。
 > **與代碼對齊**：2026-11-14（讀取與 Jev 傳輸沿用 `a65375a2` 的 `claim_flash_common`、`claim_flash_pairs`、`claim_update_flash.orphans`；試驗 driver 未進 repo）。
 > **權威範圍**：第 2–4 講孤立 Evidence／Observation 的一次唯讀查漏試驗；不是連接或新 Claim 的正式處置，未寫正式庫。
 
@@ -15,6 +15,7 @@
 - [5. Agent 最終判定](#5-agent-最終判定)
 - [6. 現行查找的請求超限](#6-現行查找的請求超限)
 - [7. 消耗與限制](#7-消耗與限制)
+- [8. 更正：對照 Claim 層既有判定](#8-更正對照-claim-層既有判定)
 
 ## 1. 問題
 
@@ -145,3 +146,28 @@ Agent 另指出一條 Jev 前三名以外的可能連接：第 3 講 P04-E005「
 `report.json`（排序與對照）、`route.json`（Jev 分流答覆）、`unlinked-routing-result.json`（分流結果）、
 `agent-packet-lecture{2,3,4}.json`、`agent-verdict-lecture{2,3,4}.json`、`final-result.json`（彙總）。
 Jev 請求與原始答覆在各講的 `noul/jev`、`route/jev`、`choice/jev`。
+
+## 8. 更正：對照 Claim 層既有判定
+
+第 5 節的 5 條連接與 3 條 Claim 不成立為「既有流程漏掉」的證據，不能作為補線或建卡的依據。
+
+第 2–4 講都已做過論證層更新：第 2、3 講是 2026-11-05、11-06 的 Claim Management 雙模型更新，
+第 4 講是 2026-11-13 的 Flash 正式更新。查第 4 講該次執行的 GPT 請求，三項 Agent 結論涉及的記錄都在
+GPT 的檢查範圍內，GPT 當時的判定成立：
+
+| 記錄 | 2026-11-13 GPT | 本次 Agent | 原因 |
+| --- | --- | --- | --- |
+| P05-OBS003 希臘文名詞有三性 | 對 P05-CL003 判「既有路線已由性別不一致與整句回指」承載；另移除一條邊，理由是「兩端重述教授對希臘文名詞三種語法性別的同一陳述」 | 補論證連接 | 這筆是重複；Agent 只看到 CL003 的材料 |
+| P05-E027 加爾文：恩典不可抗拒 | 未連 P01-CL006；同一反方立場已作為被反駁材料連到 P01-CL007 | 補論證連接 | Agent 只看到 CL006 的材料 |
+| P02-E004 煉獄、贖罪券 | `retain_evidence`：「教授直接斷言煉獄不存在，未另作論證」 | 新建 Claim | Agent 的指示缺少粒度規則 |
+
+由此得到三點：
+
+1. Claim 層的判斷沒有記到記錄上。GPT 判出重複時只移除邊，被移除的一端變成孤立；
+   判為保留 Evidence 的記錄也仍是孤立。反向查漏看不到這些判定，只能重判。
+2. 送 Agent 的材料只有候選 Claim 自己的已有材料，看不到由其他 Claim 承載的同一內容。
+3. Agent 的指示缺少「只斷言、未另給論據的判斷保留為 Evidence」的粒度規則。
+
+第 2、3 講的論證層更新用另一套流程，本次沒有逐項對照；其中的 5 項 Agent 結論同樣不能直接採用。
+規格據此改為先記錄 Claim 層判定，反向查漏只看沒有判定的記錄，見
+[Claim Update Flash 第 4.3 節](./claim_update_flash.md#43-從孤立-evidenceobservation-主動查漏)。
