@@ -1,5 +1,103 @@
 # Sunday Remote for iPad — pilot source (#652)
 
+## Free owner-only automatic renewal pilot (#655)
+
+The owner tested real iPad PPT video/control on Wi-Fi and an iPhone hotspot.
+For this single-user pilot, the Mac now has a free Personal Team renewal helper;
+no paid membership, third-party signing service, password file or security bypass
+is used. **This does not remove Apple's seven-day limit.** It rebuilds a fixed
+source snapshot with Xcode, requests a newer profile, verifies its actual expiry
+and binding, and installs it over the existing app using official devicectl.
+The normal install preserves the app container and Keychain; post-update
+reconnection is an independent check, not inferred from installation success.
+
+On 2026-11-04, a real renewal advanced expiry from November 11 at 13:47 to
+14:31 Chicago time, and installation succeeded over `localNetwork` while iPad
+was passcode-locked after first unlock. No USB or repeated Keychain password
+was needed. The actual helper then performed another successful locked wireless
+renew/install and advanced expiry to 14:36. These were actual runs, not merely
+an unsigned build or reinstallation of a profile with unchanged expiry.
+
+### Operating rules
+
+- A user LaunchAgent checks hourly and at login. If over four days of installed
+  validity remain, it does nothing. It retries availability on later checks;
+  background builds are limited to one attempt per day. A deliberate manual
+  `--force-due` test can retry a build, but cannot bypass lock or Sunday guards.
+- All of Sunday in **America/Chicago** is excluded. iPad must be paired,
+  reachable and passcode-locked, having been unlocked since its last reboot.
+  The lock is checked again immediately before installation. If the user
+  unlocks during compilation, installation waits; it never kills or launches
+  Sunday Remote. This reduces interruption; the lock check and install are
+  separate OS operations, so their boundary is not an atomic foreground lock.
+- Mac must be awake, signed in to the configured user, connected to the Internet,
+  and able to reach iPad on the same local network. Screen-locking the Mac is
+  distinct from logging out; unattended renewal with the Mac screen locked has
+  not yet been independently tested. A locked/expired login Keychain, new Apple
+  sign-in/2FA requirement or certificate problem may still require owner action.
+- Source is a fixed, SHA-checked snapshot. Renewal does **not** pull a branch,
+  upgrade application code or replace a live worktree. New features need an
+  intentionally updated snapshot and separate validation.
+- Only cached profiles for this exact team, bundle and iPad are backed up and
+  temporarily removed so Xcode requests a fresh profile. Original cache entries
+  are restored afterwards if absent. No certificates or server profiles are
+  revoked. Wrong bindings, unchanged/short expiry and failed installations never
+  advance the recorded installed expiry. Pending verified artifacts are reused
+  for a later installation attempt rather than signing repeatedly.
+- Runs hold a process lock, use bounded subprocess timeouts and rotating logs,
+  and require at least 3 GiB free at home and 5 GiB on the configured work volume.
+  A timeout/auth failure becomes `needs_attention`, not a false renewal pass.
+
+### Local deployment and storage
+
+Private config, state and deployed script are under
+`~/Library/Application Support/Sunday Remote Renewal/` (config/state mode 0600).
+The LaunchAgent is `~/Library/LaunchAgents/org.dallas-hlc.sunday-remote.renewal.plist`.
+No team/device identifiers, credentials or signing artifacts are committed.
+
+The initial SSD-based helper succeeded when run interactively, but a real
+LaunchAgent attempt failed with `Operation not permitted` on the removable
+volume. That failed attempt is retained as evidence, not counted as background
+success. The small dedicated snapshot/build workspace was therefore moved to
+the private application-support directory (initial measured build size ~81 MiB).
+Generic iOS builds avoid fetching physical-device debugging symbols. The large
+DeviceSupport cache remains on SSD. No Full Disk Access grant is requested.
+
+```sh
+CONF="$HOME/Library/Application Support/Sunday Remote Renewal/config.json"
+TOOL="$HOME/Library/Application Support/Sunday Remote Renewal/renew.py"
+/usr/bin/python3 "$TOOL" --config "$CONF" status
+# Manual check; default due/lock/Sunday guards still apply:
+/usr/bin/python3 "$TOOL" --config "$CONF" run
+# Explicit one-off engineering test, retaining lock/Sunday guards:
+/usr/bin/python3 "$TOOL" --config "$CONF" run --force-due
+# Register/re-register the hourly user agent:
+/usr/bin/python3 "$TOOL" --config "$CONF" install-agent
+# Disable the schedule (does not uninstall the iPad app):
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.dallas-hlc.sunday-remote.renewal.plist"
+```
+
+`state.json` records actual installed expiry separately from the latest check,
+build attempt and error. Inspect it after a missed renewal; an enabled schedule
+alone is not evidence of success. Run deterministic guard/failure/timeout tests
+with `/usr/bin/python3 tools/sunday-presenter/ipad/test_renew.py`.
+
+The original pilot description and historical checkpoints follow.
+
+**Current operational hold (2026-11-04):** both the hourly agent and the one-off
+background verifier were unloaded after the owner reported that the iPad could
+discover the MacBook but repeatedly requested a six-digit code. The owner then
+reported successful connection after pairing again. Initial, renewed and
+background-candidate app signatures have the same application/team identifiers;
+this comparison does not establish why the old pairing was unavailable or
+rejected. The client also selects the first discovered host on foreground return,
+which can select the Mac mini instead of MacBook; host selection and pair retention
+need separate verification. Do not call this an expiry failure or a proven
+Keychain-loss bug. The background verifier had signed a newer candidate but
+deferred installation when the iPad was unlocked; it did not install that
+candidate. Keep automatic updates disabled until reconnect/pair retention on the
+intended MacBook is checked. The existing iPad app remains installed.
+
 iPad is the intended speaker device. The existing Mac app remains available
 for the current service; it is not a requirement for the future speaker setup.
 This target depends on the unmerged Presenter/video pilot in #643 / PR #644.
