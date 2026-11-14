@@ -318,7 +318,7 @@ def run(store,source_id,relation_root,root,ports,*,apply=False,max_new_claims=No
         with store.connect() as conn:
             conn.execute('SET TRANSACTION READ ONLY')
             rows=conn.execute("SELECT object_id,revision,content_sha256,payload,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection='claims' AND retired_at IS NOT NULL AND payload @> ANY(%s::jsonb[])",
-                ([json.dumps({'occurrences':[{'source_id':a}]}) for a in aliases],)).fetchall()
+                (f.occurrence_needles(aliases),)).fetchall()
         for oid,rev,sha,p,retired in rows:
             key='claims/'+oid;records[key]={'revision':rev,'content_sha256':sha,'payload':p,'retired':retired};peers[key]=p
         read.update(peers)

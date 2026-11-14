@@ -454,7 +454,7 @@ def run_group(store,source_id,claim_ids,lower_root,root,ports,*,apply=False,max_
         aliases=set(c.source_aliases(records,source_id))
         for key in target_keys:
             p=records[key]['payload']
-            if any(o.get('source_id') not in aliases for o in p.get('occurrences',[])):
+            if any(f.occurrence_source(o) not in aliases for o in p.get('occurrences',[])):
                 raise ValueError('cross-source Claim requires explicit reconciliation')
             if any('evidence_steps/'+eid not in records for eid in p.get('evidence_step_ids',[])):
                 raise ValueError('Claim has missing Evidence')

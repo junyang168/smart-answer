@@ -1458,6 +1458,21 @@ def test_campaign_recovers_missing_occurrence_only_from_complete_owned_source_ch
     assert not f.belongs_to_source(claim,foreign,'S')
 
 
+def test_transcript_only_occurrence_is_a_source_member(sample):
+    # Claims written before Flash name their source by transcript_id only.
+    store,root,_=sample
+    claim=deepcopy(store.get_record_state('claims','C')['payload'])
+    claim['occurrences']=[{'transcript_id':'S','lecture':'test','anchors':[]}]
+    store.apply_plan(store.plan_package({'package_id':'transcript-only-occurrence','claims':[claim]}))
+    records,_=f.load_source(store,'S');assert 'claims/C' in records
+    assert f.belongs_to_source(claim,records,'S')
+    assert not f.belongs_to_source({**claim,'occurrences':[{'transcript_id':'OTHER','anchors':[]}]},records,'S')
+    result=flash.run(store,'S',[['C']],root,Ports(),apply=True)
+    assert result['status']=='completed'
+    saved=store.get_record_state('claims','C')['payload']
+    assert saved['occurrences'][0]['source_id']=='S' and saved['occurrences'][0]['anchors']
+
+
 def test_legacy_status_has_no_sampling_gate_or_forced_write(sample):
     from backend.tests.test_claim_legacy_ai_reopen import seed
     store,root,_=sample

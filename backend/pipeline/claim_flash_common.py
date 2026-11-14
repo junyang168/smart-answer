@@ -8,7 +8,8 @@ from pathlib import Path
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_refresh as c
 from backend.pipeline import claim_flash_questions as jevq
-from backend.api.canonical_repository.source_claim_membership import belongs_to_source, load_source_claims
+from backend.api.canonical_repository.source_claim_membership import (
+    belongs_to_source, load_source_claims, occurrence_needles, occurrence_source)
 
 VERSION = 'claim_update_flash_v1'
 LOWER = {'evidence_steps', 'observations', 'questions', 'position_nodes'}

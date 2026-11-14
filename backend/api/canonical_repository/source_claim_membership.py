@@ -4,10 +4,20 @@ import json
 from .knowledge_models import evidence_fragment_ids
 
 
+def occurrence_source(occurrence):
+    """Claims written before Flash name their source by transcript_id only."""
+    return occurrence.get('source_id') or occurrence.get('transcript_id')
+
+
+def occurrence_needles(aliases):
+    return [json.dumps({'occurrences':[{field:alias}]}) for alias in aliases
+            for field in ('source_id','transcript_id')]
+
+
 def belongs_to_source(claim,records,sid):
     aliases={sid,records['source_documents/'+sid]['payload'].get('transcript_id') or sid}
     occurrences=claim.get('occurrences',[])
-    if occurrences:return all(o.get('source_id') in aliases for o in occurrences)
+    if occurrences:return all(occurrence_source(o) in aliases for o in occurrences)
     eids=claim.get('evidence_step_ids',[])
     if not eids:return False
     for eid in eids:
@@ -44,8 +54,7 @@ def load_source_claims(cursor,sid,records=None):
     document=working.get('source_documents/'+sid)
     if not document:raise ValueError('source Claim membership requires a registered source')
     aliases=sorted({sid,document['payload'].get('transcript_id') or sid})
-    result=fetch("collection='claims' AND payload @> ANY(%s::jsonb[])",
-        ([json.dumps({'occurrences':[{'source_id':alias}]}) for alias in aliases],))
+    result=fetch("collection='claims' AND payload @> ANY(%s::jsonb[])",(occurrence_needles(aliases),))
     eids=sorted(k.split('/',1)[1] for k in working if k.startswith('evidence_steps/'))
     for start in range(0,len(eids),8):
         candidates=fetch("collection='claims' AND (NOT payload ? 'occurrences' OR payload->'occurrences'='[]'::jsonb) "
