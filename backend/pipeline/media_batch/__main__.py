@@ -26,12 +26,18 @@ def main():
     plan = sub.add_parser("plan")
     plan.add_argument("--folder", type=Path, required=True)
     plan.add_argument("--title")
+    plan.add_argument("--review-root", type=Path,
+                      help="Override the configured production Editor destination for a test run")
+    deliver = sub.add_parser("deliver-upgrade", help="Append a verified merged draft to the production Editor")
+    for name in ("incoming-root", "backup-root", "merge-run"):
+        deliver.add_argument("--" + name, type=Path, required=True)
+    deliver.add_argument("--item", required=True)
+    deliver.add_argument("--actor", required=True)
     plan.add_argument("--editor-origin", help="Optional editor host for an isolated review destination")
     plan.add_argument('--playback-timing-policy',choices=['complete-paragraph-playback.v1','strict'],default='complete-paragraph-playback.v1',help='Complete paragraph playback with brief context warnings; strict preserves exact-boundary review')
     for name in (
         "artifact-root",
         "media-root",
-        "review-root",
         "capacity-root",
         "aligner-python",
     ):
@@ -93,6 +99,17 @@ def main():
             cmd.add_argument("--budget-usd", type=float, required=True)
             cmd.add_argument("--reason", required=True)
     args = p.parse_args()
+    if args.command in ("plan", "deliver-upgrade") and not getattr(args, "review_root", None):
+        from .stages import production_editor_root
+        args.review_root = production_editor_root(os.getenv("DATA_BASE_DIR"))
+    if args.command == "deliver-upgrade":
+        from backend.pipeline.transcript_review_promotion import backup, replace_review
+
+        backup(args.incoming_root, args.review_root, args.item, args.backup_root)
+        result = replace_review(args.incoming_root, args.review_root, args.item,
+                                args.backup_root, args.merge_run, actor=args.actor)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     store = Store()
     if args.command == "rough-plan":
         from .rough_plan import create
