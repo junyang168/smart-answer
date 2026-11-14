@@ -28,7 +28,7 @@ from opencc import OpenCC
 from fastapi import HTTPException, UploadFile, status
 from pptx import Presentation
 
-from backend.sunday_data_lock import sunday_write
+from backend.sunday_data_lock import sunday_data_lock, sunday_write
 
 from .gemini_client import gemini_client
 from .models import (
@@ -1633,9 +1633,18 @@ def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-def update_sunday_service(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
+def update_sunday_service(
+    date: str, entry: SundayServiceEntry, *, original_scripture: list[str] | None = None,
+) -> SundayServiceEntry:
     try:
-        return repository.update_sunday_service(date, entry)
+        with sunday_data_lock():
+            if original_scripture is not None:
+                current = repository.get_sunday_service(date)
+                if entry.scripture == original_scripture:
+                    entry = entry.model_copy(update={"scripture": current.scripture})
+                elif current.scripture not in (original_scripture, entry.scripture):
+                    raise HTTPException(409, "讀經經文已在其他地方更新。請重新開啟表單核對後再儲存。")
+            return repository.update_sunday_service(date, entry)
     except ValueError as exc:
         _raise_value_error(exc)
 

@@ -476,6 +476,10 @@ class SundayServiceEntry(BaseModel):
         return normalized
 
 
+class SundayServiceUpdate(SundayServiceEntry):
+    original_scripture: Optional[List[str]] = Field(None, alias="originalScripture")
+
+
 class SundayServiceResources(BaseModel):
     workers: List[SundayWorker] = Field(default_factory=list)
     songs: List[SundaySong] = Field(default_factory=list)
