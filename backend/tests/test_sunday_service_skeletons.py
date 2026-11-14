@@ -160,3 +160,42 @@ def test_ppt_returns_actionable_error_for_ambiguous_manual_song_notes(agent,monk
         agent.repository.services[day]=SundayServiceEntry(date=day,sermonSpeaker='陳牧師',presider='王明',worshipLeader='李芳')
     with pytest.raises(HTTPException,match='演唱說明需核對') as error:service.generate_sunday_service_ppt('2026-11-01')
     assert error.value.status_code==400
+
+
+@pytest.mark.parametrize("submitted,expected,status", [
+    (["gen-1-1-1"], ["acts-20-25-35"], None),
+    ([], ["acts-20-25-35"], 409),
+    (["acts-20-25-35"], ["acts-20-25-35"], None),
+])
+def test_stale_form_cannot_restore_placeholder_or_clear_new_reading(
+    agent, monkeypatch, submitted, expected, status,
+):
+    from fastapi import HTTPException
+    from backend.api import service
+
+    monkeypatch.setattr(service, "repository", agent.repository)
+    day = "2026-11-15"
+    saved = SundayServiceEntry(date=day, scripture=["acts-20-25-35"])
+    agent.repository.services[day] = saved
+    edit = saved.model_copy(update={"scripture": submitted, "sermon_title": "宣教感言"})
+
+    if status:
+        with pytest.raises(HTTPException) as error:
+            service.update_sunday_service(day, edit, original_scripture=["gen-1-1-1"])
+        assert error.value.status_code == status
+    else:
+        result = service.update_sunday_service(day, edit, original_scripture=["gen-1-1-1"])
+        assert result.sermon_title == "宣教感言"
+    assert agent.repository.services[day].scripture == expected
+
+
+def test_operator_can_select_genesis_and_clear_it(agent, monkeypatch):
+    from backend.api import service
+
+    monkeypatch.setattr(service, "repository", agent.repository)
+    day = "2026-11-15"
+    empty = SundayServiceEntry(date=day)
+    agent.repository.services[day] = empty
+    chosen = empty.model_copy(update={"scripture": ["gen-1-1-1"]})
+    assert service.update_sunday_service(day, chosen, original_scripture=[]).scripture == ["gen-1-1-1"]
+    assert service.update_sunday_service(day, empty, original_scripture=chosen.scripture).scripture == []

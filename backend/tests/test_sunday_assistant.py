@@ -22,6 +22,9 @@ class Repo:
     def list_sunday_services(self):
         return [x.model_copy(deep=True) for x in self.services.values()]
 
+    def get_sunday_service(self, day):
+        return self.services[day].model_copy(deep=True)
+
     def list_sunday_songs(self):
         return self.songs
 
@@ -31,6 +34,7 @@ class Repo:
     def update_sunday_service(self, day, service):
         self.services.pop(day)
         self.services[service.date] = service
+        return service
 
     def create_sunday_service(self, service):
         self.services[service.date] = service

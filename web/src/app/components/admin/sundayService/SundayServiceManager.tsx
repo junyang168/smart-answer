@@ -427,6 +427,7 @@ export function SundayServiceManager() {
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [form, setForm] = useState<FormState>(createEmptyForm());
   const [editingDate, setEditingDate] = useState<string | null>(null);
+  const [originalScripture, setOriginalScripture] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -514,6 +515,7 @@ export function SundayServiceManager() {
           const latest = data.find((entry) => entry.date === editingDate);
           if (latest) {
             setForm(toForm(latest));
+            setOriginalScripture(latest.scripture ?? []);
           }
         }
       } catch (err) {
@@ -778,11 +780,8 @@ export function SundayServiceManager() {
 
   const removeScriptureSelection = (index: number) => {
     setForm((prev) => {
-      if (prev.scriptures.length <= 1) {
-        return prev;
-      }
       const updated = prev.scriptures.filter((_, idx) => idx !== index);
-      return { ...prev, scriptures: updated };
+      return { ...prev, scriptures: updated.length ? updated : [createEmptyScriptureSelection()] };
     });
   };
 
@@ -796,6 +795,7 @@ export function SundayServiceManager() {
   const resetForm = () => {
     const base = createEmptyForm();
     setForm(base);
+    setOriginalScripture([]);
     setEditingDate(null);
   };
 
@@ -810,6 +810,7 @@ export function SundayServiceManager() {
     setEditingDate(entry.date);
     const next = toForm(entry);
     setForm(next);
+    setOriginalScripture(entry.scripture ?? []);
     setFeedback(null);
     setError(null);
   };
@@ -853,10 +854,15 @@ export function SundayServiceManager() {
     const payload = fromForm(form);
     try {
       if (editingDate) {
-        await updateSundayService(editingDate, payload);
+        const originalFormValue = composeScriptureValues(parseScriptureValues(originalScripture));
+        if (JSON.stringify(payload.scripture) === JSON.stringify(originalFormValue)) {
+          payload.scripture = originalScripture;
+        }
+        await updateSundayService(editingDate, payload, originalScripture);
         setFeedback("已更新主日服事資訊");
       } else {
-        await createSundayService(payload);
+        const created = await createSundayService(payload);
+        setOriginalScripture(created.scripture ?? []);
         setFeedback("已新增主日服事資訊");
         setEditingDate(payload.date);
       }
@@ -1650,14 +1656,14 @@ export function SundayServiceManager() {
                         onChange={handleScriptureFieldChange(index, "end")}
                         disabled={saving}
                       />
-                      {form.scriptures.length > 1 && (
+                      {(form.scriptures.length > 1 || Object.values(selection).some(Boolean)) && (
                         <button
                           type="button"
                           className="rounded border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
                           onClick={() => removeScriptureSelection(index)}
                           disabled={saving}
                         >
-                          移除
+                          {form.scriptures.length > 1 ? "移除" : "清除經文"}
                         </button>
                       )}
                     </div>

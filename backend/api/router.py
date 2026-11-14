@@ -38,6 +38,7 @@ from .models import (
     GenerateHymnLyricsResponse,
     HymnMetadata,
     SundayServiceEntry,
+    SundayServiceUpdate,
     SundayServiceResources,
     SundayServiceEmailResult,
     SundayServiceEmailBody,
@@ -375,8 +376,11 @@ def write_sunday_service_email_body(date: str, payload: SundayServiceEmailBody) 
 
 
 @sunday_service_router.put("/{date:path}", response_model=SundayServiceEntry)
-def update_sunday_service_entry(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
-    return update_sunday_service(date, entry)
+def update_sunday_service_entry(date: str, entry: SundayServiceUpdate) -> SundayServiceEntry:
+    return update_sunday_service(
+        date, SundayServiceEntry.model_validate(entry.model_dump()),
+        original_scripture=entry.original_scripture,
+    )
 
 
 @sunday_service_router.delete("/{date:path}")

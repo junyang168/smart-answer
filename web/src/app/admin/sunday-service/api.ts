@@ -69,11 +69,12 @@ export async function createSundayService(entry: SundayServiceEntry): Promise<Su
 export async function updateSundayService(
   date: string,
   entry: SundayServiceEntry,
+  originalScripture: string[],
 ): Promise<SundayServiceEntry> {
   const response = await fetch(resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(entry),
+    body: JSON.stringify({ ...entry, originalScripture }),
   });
   return parseJson(response);
 }
