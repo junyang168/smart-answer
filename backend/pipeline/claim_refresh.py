@@ -13,6 +13,7 @@ import unicodedata
 from opencc import OpenCC
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.api.canonical_repository.source_claim_membership import occurrence_source
 from backend.pipeline import evidence_refresh as e
 from backend.pipeline import claim_relation_refresh as relations
 from backend.pipeline import claim_context_refresh as attached
@@ -234,7 +235,7 @@ def anchors(eids, records, sid, *, source_binding=None):
 def refresh_occurrences(claim, eids, records, sid, *, source_binding=None):
     current = anchors(eids, records, sid,source_binding=source_binding)
     old = claim.get('occurrences', [])
-    if any(o.get('source_id') not in source_aliases(records, sid) for o in old):
+    if any(occurrence_source(o) not in source_aliases(records, sid) for o in old):
         raise ValueError('legacy cross-source Claim requires explicit reconciliation')
     available = current[0]['anchors']
     updated, count = deepcopy(old), 0
