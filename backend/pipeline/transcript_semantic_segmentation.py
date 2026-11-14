@@ -10,10 +10,10 @@ from pathlib import Path
 import re
 import time
 
+from backend.pipeline.transcript_subscription_reviewer import TranscriptSubscriptionReviewer
 from backend.pipeline.full_video_transcript import cleanup_generate
 from backend.pipeline.media_batch.runtime import WaitingCapacity
 from backend.pipeline.slide_change_pilot import file_sha, object_sha, read_json, save_json
-from backend.pipeline.slide_pilot_models import VisionReviewer
 from backend.pipeline.slide_visual_evidence import obj
 from backend.pipeline.transcript_gemini_proofreading import saved_response
 
@@ -79,8 +79,8 @@ def apply_ends(text, positions, ends):
 
 def segment(turns, folder):
     text, positions, lines = segmentation_input(turns)
-    model = VisionReviewer("openai", PROMPT, SCHEMA)
-    model.config.update(max_output_tokens=3500, reasoning={"effort": "medium"})
+    model = TranscriptSubscriptionReviewer(PROMPT, SCHEMA)
+    model.config.update(max_output_tokens=3500, reasoning_effort="medium")
     packet = {"turns": lines}
 
     def invoke():
