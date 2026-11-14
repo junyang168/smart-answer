@@ -248,6 +248,7 @@ class GmailInbox:
             sender = parseaddr(message['from'])[1].lower()
             identities = self.sender_workers(sender)
             message['_verified_sender_worker'] = next(iter(identities)) if len(identities) == 1 else None
+            forwarded = source.forwarded_binding(message, services)
             packet_sha = digest(dump(source.match_packet(message, services)).encode())
             policy_sha = digest(Path(source.__file__).read_bytes())
             cached = self.get('match:' + policy_sha + ':' + packet_sha)
@@ -270,11 +271,13 @@ class GmailInbox:
                     valid = (match.service_date and match.service_date.weekday() == 6 and match.speaker and
                              any(s['date'] == str(match.service_date) and s['speaker'] == match.speaker for s in services))
                     same_slot = [m for m in result.attachments if m.kind == 'speaker' and m.service_date == match.service_date and m.speaker == match.speaker]
+                    forwarded_matches = (forwarded and forwarded['date'] == str(match.service_date)
+                                         and forwarded['speaker'] == match.speaker)
                     if not valid:
                         reason, hold_type = '日期或講員無法對回網站安排，請核對', 'calendar'
                     elif len(same_slot) > 1:
                         reason, hold_type = '同一主日有多份講道附件，請選擇要使用的版本', 'versions'
-                    elif identities != {match.speaker}:
+                    elif identities != {match.speaker} and not forwarded_matches:
                         reason, hold_type = '寄件地址尚未對應此講員，請核對完整姓名及 email', 'sender'
                     elif not match.evidence or any(not item or item not in source_text for item in match.evidence):
                         reason, hold_type = '附件歸屬依據無法對回原郵件，請核對', 'grounding'
@@ -287,7 +290,8 @@ class GmailInbox:
                         hold_type = 'grounding'
                         verification = verdict.model_dump()
                         status, reason = ('ready', verdict.reason) if verdict.supported else ('review', verdict.reason)
-                part = next(p for p in message['attachments'] if p['part_id'] == match.part_id)
+                if status == 'ready' and Path(part['filename']).suffix.lower() == '.key':
+                    status, reason, hold_type = 'review', '已收到講員的 Keynote 附件，請匯出 PowerPoint 並放入當週 OneDrive 資料夾', 'input'
                 job_id = digest((row['key'] + ':' + match.part_id).encode())
                 decision = match.model_dump(mode='json')
                 decision['verification'] = verification
@@ -331,9 +335,11 @@ class GmailInbox:
             raise ValueError('此附件需要操作者核對')
         sender = parseaddr(message['from'])[1].lower()
         identities = self.sender_workers(sender)
-        if not sender or ('@' not in sender) or (identities and identities != {speaker}):
+        forwarded = source.forwarded_binding(message, [{'date': str(parsed), 'speaker': speaker}])
+        forwarded = bool(forwarded and (manual or (match.get('verification') or {}).get('supported')))
+        if not sender or ('@' not in sender) or (identities and identities != {speaker} and not forwarded):
             raise ValueError('此寄件地址已對應另一位同工或無效，請核對後再收存')
-        if not manual and identities != {speaker}:
+        if not manual and identities != {speaker} and not forwarded:
             self.hold(job_id, '此寄件地址尚未對應講員，請核對後再收存')
             return
         part = next(p for p in message['attachments'] if p['part_id'] == row['part_id'])
@@ -402,7 +408,7 @@ class GmailInbox:
             if not older and actual_sha != sha:
                 atomic_copy(target, data, expected=baseline)
             with self.db() as db:
-                if manual and not identities:
+                if manual and not identities and not forwarded:
                     db.execute('INSERT INTO mail_senders VALUES (?,?,?,?)', (sender, speaker, job_id, now_text()))
                 db.execute('INSERT OR IGNORE INTO mail_assets VALUES (?,?,?,?)', (str(parsed), speaker, sha, str(archive)))
                 if not older:

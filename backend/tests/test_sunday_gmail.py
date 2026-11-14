@@ -358,3 +358,45 @@ def test_malformed_package_metadata_is_input_error():
         archive.writestr('ppt/presentation.xml','<broken')
     with pytest.raises(ValueError,match='完整'):
         validate_ppt(out.getvalue(),'.pptx')
+
+
+@pytest.mark.parametrize("filename,expected", [
+    ("宣教感言.pptx", "imported"),
+    ("宣教感言 pptx .key", "review"),
+])
+def test_forwarded_sermon_uses_subject_date_and_body_attribution(mail, filename, expected):
+    agent, inbox, client, payloads, _ = mail
+    speaker = '陳國志 牧師'
+    agent.repository.workers[speaker] = SundayWorker(name=speaker)
+    agent.repository.services['2026-11-15'] = SundayServiceEntry(
+        date='2026-11-15', sermonSpeaker=speaker, sermonTitle='宣教感言',
+    )
+    services = [{'date': '2026-11-15', 'speaker': speaker, 'title': '宣教感言'}]
+    message = {
+        'id': 'forward', 'thread_id': 'forward', 'from': 'Jiechao <jiechao@example.com>',
+        'subject': 'Fwd: 11/15 主日证道ppt',
+        'body': '这是陈国志牧师下个主日讲道文件。\n读经经文：徒20:25~35\n'
+                '---------- Forwarded message ---------\nFrom: kc chen\nDate: Nov 2',
+        'sent_at': '2026-11-09T10:00:00-06:00',
+        'attachments': [{'part_id': '0', 'filename': filename, 'size': 2048}],
+    }
+    assert source.forwarded_binding(message, services) == services[0]
+    assert source.forwarded_binding({**message, 'body': '請看附件'}, services) is None
+    assert source.forwarded_binding({**message, 'subject': 'Fwd: 11/8 主日证道ppt'}, services) is None
+    inbox.classifier = lambda *_: source.Matches(attachments=[
+        source.Match(part_id='0', kind='speaker', service_date='2026-11-15',
+                     speaker=speaker, evidence=['11/15 主日证道ppt', '陈国志牧师'], reason='明確歸屬'),
+    ])
+    payloads['forward'] = deck()
+    with inbox.db() as db:
+        db.execute("INSERT INTO mail_messages VALUES (?,?,?,?,NULL,'queued',NULL,?)",
+                   ('forward', 'jun@example.com', 'forward', dump(message), now_text()))
+        row = dict(db.execute("SELECT * FROM mail_messages WHERE key='forward'").fetchone())
+    inbox.process(row, client, services)
+    with inbox.db() as db:
+        record = db.execute('SELECT status,error FROM mail_files').fetchone()
+        assert record['status'] == expected
+        if expected == 'review':
+            assert '已收到講員的 Keynote' in record['error']
+            assert client.calls == 0
+    assert inbox.sender_workers('jiechao@example.com') == set()
