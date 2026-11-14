@@ -55,7 +55,8 @@ def test_crash_after_own_argument_write_resumes_without_repeating_completed_stag
                 self.calls.append(('gpt',request))
                 return {'items':[{'job_id':j['job_id'],'action':'complete','pairs':[{
                     'a':'evidence_steps/'+extra['evidence_step_id'],'b':j['job_id'],'relation_type':'supports','direction':'a_to_b',
-                    'fragment_ids':e.evidence_fragment_ids(extra),'reason':'補上已確認的支持材料。'}],'reason':'完整。'} for j in request['input']['jobs']]}
+                    'fragment_ids':e.evidence_fragment_ids(extra),'reason':'補上已確認的支持材料。'}],'reason':'完整。'} for j in request['input']['jobs']],
+                        'material_dispositions':[]}
             return super().repair(request)
     from backend.pipeline import claim_candidate_workspace as workspace
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore

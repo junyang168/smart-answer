@@ -423,9 +423,21 @@ Evidence／Observation，並對它們作出判斷；這些判斷必須逐筆記�
 | 保留 Evidence | 教授的斷言，未另給論據，不建 Claim | GPT 的理由 |
 | 背景 | 只交代敘事或背景 | GPT 的理由 |
 
-論證完整性檢查的輸出目前只有新連接，沒有重複或保留的欄位；GPT 已判出的重複只表現為移除一條邊，
-被移除的一端因此變成孤立。輸出須加上這些去向。漏抽檢查已有 `retain_evidence`，須把它記到對應記錄上。
-資料模型目前沒有去向欄位，接入前先寫入每組的結果檔。
+資料模型目前沒有去向欄位，各階段把去向寫進自己的結果檔 `lower_dispositions`，每項帶
+`object_key`、去向、`reason` 及 `stage`：
+
+- **論證完整性檢查**（`argument_completeness`）：請求附 `unrouted_material`，即本組材料中目前沒有
+  論證路線通向任何 Claim 的記錄。GPT 對本次未連接者，能判定時各給一項 `duplicate`
+  （`duplicate_of` 指向另一筆記錄）、`retain_evidence` 或 `background`。可能屬於組外 Claim、
+  或可能是未建 Claim 的材料不判，留給反向查漏。程式拒收清單以外的記錄、本次已連接的記錄、
+  重複判定，以及沒有指向另一筆記錄的 `duplicate`。寫在 `verification.json`。
+- **連接審查移除邊**：被移除的邊若使一端失去全部論證路線，記 `relation_removed`，
+  附另一端與 GPT 移除時的理由。理由可能是重複，也可能是無關；程式不替它分類。
+- **漏抽檢查**：GPT 已回的 `retain_evidence` 與 `represented`，按 `support_keys` 逐筆展開，
+  `represented` 另記 `claim_id`。寫在 `draft.json`；不增加模型呼叫。
+
+在此之前已開始的論證檢查目錄按原請求格式重放，沒有 `lower_dispositions`；
+其中的記錄由反向查漏照常處理。
 
 所有組完成後，程式找出仍無論證路徑、也沒有任何去向的記錄，只對這些作反向查漏。
 主要是不屬於任何組的記錄，以及本次檢查沒有送入的記錄。

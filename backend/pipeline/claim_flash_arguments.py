@@ -30,9 +30,54 @@ class Route(BaseModel):
     action:Literal['complete','needs_source','needs_material']
     pairs:list[Proposed]
     reason:str=Field(min_length=1)
+class LegacyRoutes(BaseModel):
+    """Wire contract of roots started before material dispositions; replayed unchanged."""
+    model_config=ConfigDict(extra='forbid',strict=True)
+    items:list[Route]
+class Disposition(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    object_key:str
+    disposition:Literal['duplicate','retain_evidence','background']
+    duplicate_of:str
+    reason:str=Field(min_length=1)
 class Routes(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     items:list[Route]
+    material_dispositions:list[Disposition]
+LEGACY_POLICY_SHA256=e.digest([PROMPT,LegacyRoutes.model_json_schema()])
+# The reverse lookup runs only on lower records nobody has judged; record what
+# this stage judged so that lookup does not judge it again (claim_update_flash.md §4.3).
+DISPOSITION_PROMPT=('unrouted_material列出目前沒有論證路線通向任何Claim的下層材料。'
+ '其中本次未在pairs連接者，能判定時在material_dispositions各給一項：'
+ 'duplicate＝與nodes中另一筆說同一件事，duplicate_of填那筆的object_key；'
+ 'retain_evidence＝教授的斷言，未另給論據，保留為Evidence而不連到本組Claim；'
+ 'background＝只交代敘事或背景。非duplicate時duplicate_of留空字串。'
+ '可能支持本組以外Claim或可能是未建Claim的材料不列，交後續查漏；不為湊齊而判定。')
+POLICY_SHA256=e.digest([PROMPT+DISPOSITION_PROMPT,Routes.model_json_schema()])
+
+
+def checked_dispositions(reply,unrouted,nodes,batch):
+    """One judgement per unrouted record GPT chose to judge; never for a record it linked here."""
+    linked={k for item in reply.items for p in item.pairs for k in (p.a,p.b)}
+    seen=set();result=[]
+    for item in reply.material_dispositions:
+        if item.object_key not in unrouted or item.object_key in linked or item.object_key in seen:
+            raise ValueError('material disposition names a record outside unrouted_material, a linked record or a repeat')
+        if (item.disposition=='duplicate')!=bool(item.duplicate_of) or (item.duplicate_of and
+                (item.duplicate_of not in nodes or item.duplicate_of==item.object_key)):
+            raise ValueError('duplicate disposition requires one other provided record')
+        seen.add(item.object_key)
+        result.append({**item.model_dump(),'stage':'argument_completeness','job_ids':[j['job_id'] for j in batch]})
+    return result
+
+
+def removed_relation_dispositions(working,outcomes,pool):
+    """A removed edge is GPT's judgement on that record; keep it when the record is left without a route."""
+    orphaned=flash.orphans(working)&pool
+    return [{'object_key':key,'disposition':'relation_removed','other_end':other,'reason':o['reason'],
+             'basis':o['basis'],'stage':'pairs_review'}
+            for o in outcomes if o.get('action')=='remove' and 'a' in o
+            for key,other in ((o['a'],o['b']),(o['b'],o['a'])) if key in orphaned]
 
 
 def material_paragraphs(keys,records):
@@ -462,11 +507,12 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);pin=f.bind_source(store,source_id,root)
         saved=json.loads((root/'intent.json').read_text()) if (root/'intent.json').exists() else None
         expanded=not saved or saved.get('candidate_scope')==CANDIDATE_SCOPE
+        legacy=bool(saved) and saved.get('policy_sha256')==LEGACY_POLICY_SHA256
         e.save(root/'intent.json',{'version':VERSION,'source':pin,'group':group,'models':ports.identity,
             **({'claim_ids':ids} if claim_ids is not None else {}),
             **({'retained_claim_ids':ids} if retained.exists() else {}),
             'evidence_root':str(Path(evidence_root).resolve()),'statement_root':str(Path(statement_root).resolve()),
-            'policy_sha256':e.digest([PROMPT,Routes.model_json_schema()]),
+            'policy_sha256':LEGACY_POLICY_SHA256 if legacy else POLICY_SHA256,
             **({'candidate_scope':CANDIDATE_SCOPE} if expanded else {}),
             **({'parent_verification_sha256':e.digest(parent),
                 'continuation_policy_sha256':e.digest([CONTINUATION_PROMPT,CANDIDATE_SCOPE])} if parent is not None else {})})
@@ -598,6 +644,12 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         proposals=[];pending=[];routes=[];claim_handoffs={}
         jobs=[{'job_id':k,**({'remaining_findings':[p for p in parent['pending'] if p['object_key']==k]} if parent is not None else {})} for k in sorted(remaining)]
         prompt=PROMPT
+        schema=LegacyRoutes if legacy else Routes
+        unrouted=set()
+        if not legacy:
+            unrouted=completion_pool&flash.orphans(records)
+            shared['unrouted_material']=sorted(unrouted)
+            prompt+=DISPOSITION_PROMPT
         if parent is None and old_checks['pending']:
             for job in jobs:
                 key=job['job_id']
@@ -617,8 +669,11 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
                            '若前段只是背景，保留既有路線；已有間接承載，不重複加邊。'
                            '區分教授的前段解釋、結尾禱告與任何超出原文的推論。')
         route_map={p['job_id']:deepcopy(p) for p in parent['routes']} if parent is not None else {}
-        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,Routes.model_json_schema(),prompt,shared=shared,semantic_review=False):
-            replies=Routes.model_validate(raw).items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
+        material_dispositions=[]
+        for batch,raw in f.gpt(root/'completeness',ports,'argument_completeness',jobs,schema.model_json_schema(),prompt,shared=shared,semantic_review=False):
+            reply=schema.model_validate(raw);replies=reply.items;f.exactly([x.model_dump() for x in replies],[j['job_id'] for j in batch],'job_id')
+            if not legacy:
+                material_dispositions+=checked_dispositions(reply,unrouted,completion_nodes,batch)
             for item in replies:
                 value=item.model_dump()
                 prior=route_map.get(item.job_id,{}).get('pairs',[])
@@ -727,9 +782,11 @@ def run(store,source_id,plan,group_id,evidence_root,statement_root,root,ports,*,
         for key in pool&set(updates):
             if {k:v for k,v in updates[key].items() if k!='produced_claim_ids'}!={k:v for k,v in records[key]['payload'].items() if k!='produced_claim_ids'}:
                 raise ValueError('argument stage modified lower content')
+        lower_dispositions=material_dispositions+removed_relation_dispositions(working,outcomes,pool)
         result={'version':VERSION,'status':'needs_attention' if pending else 'verified','source_id':source_id,'claim_ids':ids,
             'updates':updates,'new_fragments':{},'retiring_keys':sorted(set(retiring)),'pending':pending,'routes':routes,'outcomes':outcomes,
             'claim_pair_handoffs':list(claim_handoffs.values()),
+            **({'lower_dispositions':lower_dispositions} if not legacy else {}),
             'completion_scope':'group_lower_argument_routes_only','claim_qualification':'not_granted','applied':False,
             'resolved_statement_handoffs':[x for x in old_checks['pending'] if x['object_key'] in targets and not pending],
             'commit_reason':'Group argument completeness and typed pairs; preserve lower content and Claim statements'}
