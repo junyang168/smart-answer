@@ -19,6 +19,7 @@ from .store import dump
 SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 MAX_ATTACHMENT = 35 * 1024 * 1024
 EXTENSIONS = {'.ppt', '.pptx', '.key'}
+PACKET_VERSION = 2
 
 
 def config_path():
@@ -82,7 +83,7 @@ def message_packet(raw):
     return {'id': raw['id'], 'thread_id': raw.get('threadId'),
             'sent_at': datetime.fromtimestamp(int(raw['internalDate']) / 1000, ZONE).isoformat(),
             'from': headers.get('from', ''), 'subject': headers.get('subject', ''),
-            'body': '\n'.join(text)[:16000], 'attachments': files,
+            'body': '\n'.join(text)[:16000], 'attachments': files, 'packet_version': PACKET_VERSION,
             'intake_review': '同一封郵件有超過八份 PPT，請人工核對' if len(files) > 8 else None}
 
 

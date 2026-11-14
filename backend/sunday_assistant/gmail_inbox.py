@@ -1,4 +1,4 @@
-"""Durable speaker attachment intake; originals are never converted or merged."""
+"""Durable speaker attachment intake with versioned originals and Keynote exports."""
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
@@ -19,6 +19,7 @@ import zipfile
 from backend.sunday_data_lock import sunday_data_lock
 from backend.sunday_presenter import OneDrivePpts, service_day
 from . import gmail_source as source
+from .keynote_export import KeynoteExportError, export_keynote, validate_keynote
 from .models import ZONE
 from .store import dump, now_text
 
@@ -191,7 +192,15 @@ class GmailInbox:
                 if interrupted:
                     self.publish(interrupted['id'], client=client)
                 with self.db() as db:
-                    row = db.execute("SELECT * FROM mail_messages WHERE mailbox=? AND status='queued' ORDER BY updated LIMIT 1", (mailbox,)).fetchone()
+                    row = db.execute(
+                        "SELECT * FROM mail_messages WHERE mailbox=? AND (status='queued' OR "
+                        "(status='error' AND julianday(updated) < julianday('now','-10 minutes') AND EXISTS ("
+                        "SELECT 1 FROM mail_files f JOIN mail_kv k ON k.key='keynote-retry:' || f.id "
+                        "WHERE f.message_key=mail_messages.key AND f.status='error' "
+                        "AND f.error LIKE '已收到 Keynote，待轉檔%' AND CAST(k.value AS INTEGER) < 3))) "
+                        "ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END,updated LIMIT 1",
+                        (mailbox,),
+                    ).fetchone()
                 if row:
                     self.process(dict(row), client, services)
                 self.put('status:' + mailbox, {'status': 'ready', 'at': now_text(), 'error': None})
@@ -210,6 +219,15 @@ class GmailInbox:
             for item in page.get('messages', []):
                 key = digest((mailbox + ':' + item['id']).encode())
                 db.execute("INSERT OR IGNORE INTO mail_messages VALUES (?,?,?,NULL,NULL,'queued',NULL,?)", (key, mailbox, item['id'], now_text()))
+                # Messages previously indexed without supported attachments
+                # can now contain a Keynote file. Keep terminal file rows intact.
+                db.execute(
+                    "UPDATE mail_messages SET payload=NULL,status='queued',updated=? "
+                    "WHERE key=? AND status='ignored' "
+                    "AND COALESCE(json_extract(payload,'$.packet_version'),1) < ?",
+                    (now_text(), key, source.PACKET_VERSION),
+                )
+
         self.put('cursor:' + mailbox, page.get('nextPageToken'))
 
     def resume_waiting(self, services):
@@ -290,8 +308,6 @@ class GmailInbox:
                         hold_type = 'grounding'
                         verification = verdict.model_dump()
                         status, reason = ('ready', verdict.reason) if verdict.supported else ('review', verdict.reason)
-                if status == 'ready' and Path(part['filename']).suffix.lower() == '.key':
-                    status, reason, hold_type = 'review', '已收到講員的 Keynote 附件，請匯出 PowerPoint 並放入當週 OneDrive 資料夾', 'input'
                 job_id = digest((row['key'] + ':' + match.part_id).encode())
                 decision = match.model_dump(mode='json')
                 decision['verification'] = verification
@@ -305,6 +321,8 @@ class GmailInbox:
                 if status == 'ready':
                     try:
                         self.publish(job_id, client=client)
+                    except KeynoteExportError:
+                        raise
                     except ValueError as exc:
                         self.hold(job_id, str(exc))
                     except Exception:
@@ -315,7 +333,7 @@ class GmailInbox:
                 db.execute("UPDATE mail_messages SET status='processed',error=NULL,updated=? WHERE key=?", (now_text(), row['key']))
         except Exception as exc:
             with self.db() as db:
-                db.execute("UPDATE mail_messages SET status='error',error=?,updated=? WHERE key=?", (type(exc).__name__ + ': 郵件判讀或收存失敗，請重試', now_text(), row['key']))
+                db.execute("UPDATE mail_messages SET status='error',error=?,updated=? WHERE key=?", (str(exc) if isinstance(exc, KeynoteExportError) else type(exc).__name__ + ': 郵件判讀或收存失敗，請重試', now_text(), row['key']))
             raise
 
     def publish(self, job_id, *, client=None, manual=False, day=None, speaker=None):
@@ -344,17 +362,46 @@ class GmailInbox:
             return
         part = next(p for p in message['attachments'] if p['part_id'] == row['part_id'])
         extension = Path(part['filename']).suffix.lower()
-        cache = self.root / 'blobs' / (row['sha'] + extension) if row.get('sha') else None
+        is_keynote = extension == '.key'
+        original_key = 'keynote-original:' + job_id
+        cached_sha = self.get(original_key) if is_keynote else row.get('sha')
+        cache = self.root / 'blobs' / (cached_sha + extension) if cached_sha else None
         if cache and cache.exists():
             data = cache.read_bytes()
-            if digest(data) != row['sha']:
+            if digest(data) != cached_sha:
                 raise ValueError('已儲存附件 SHA 不符，未收存')
         else:
             client = client or self.client_factory(row['mailbox'], source.token_path(config, row['mailbox']))
             data = client.attachment(message['id'], part)
+        blobs = self.root / 'blobs'; blobs.mkdir(mode=0o700, exist_ok=True)
+        if is_keynote:
+            validate_keynote(data)
+            original_sha = digest(data)
+            original = blobs / (original_sha + '.key')
+            if not original.exists():
+                atomic_copy(original, data)
+            self.put(original_key, original_sha)
+            # Keep a bounded retry count across restarts.
+            retry_key = 'keynote-retry:' + job_id
+            # Bind the export to this immutable original, including after a restart.
+            converted = blobs / (original_sha + '.key.pptx')
+            if converted.exists():
+                data = converted.read_bytes()
+            else:
+                try:
+                    data = export_keynote(data)
+                    validate_ppt(data, '.pptx')
+                    atomic_copy(converted, data)
+                except KeynoteExportError as exc:
+                    attempts = self.get(retry_key, 0) + 1
+                    self.put(retry_key, attempts)
+                    with self.db() as db:
+                        db.execute("UPDATE mail_files SET status='error',error=?,updated=? WHERE id=?",
+                                   ('已收到 Keynote，待轉檔：' + str(exc), now_text(), job_id))
+                    raise
+            extension = '.pptx'
         validate_ppt(data, extension)
         sha = digest(data)
-        blobs = self.root / 'blobs'; blobs.mkdir(mode=0o700, exist_ok=True)
         cache = blobs / (sha + extension)
         if not cache.exists():
             atomic_copy(cache, data)
