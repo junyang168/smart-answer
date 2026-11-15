@@ -33,7 +33,8 @@ CLEAR_MARGIN = 3         # a parallel quote matching this many more characters o
 RECENT = 3               # an announced chapter stays current for this many paragraphs
 BARE_REACH = S.BARE_VERSE_REACH * 4
 INTRO_CHARS = 60
-NEIGHBOURS = 2           # a held citation is repaired only on a record this close to it
+NEIGHBOURS = 2           # paragraphs either side: where a fragment can show a citation, and where a repair may go
+READING_PAIRS = 6        # two-character words of the verse a fragment must share to show his reading
 
 SPEAKER = (r'(?:主耶穌|耶穌|主|保羅|彼得|約翰|雅各|摩西|大衛|以賽亞|耶利米|先知|使徒|天使|神|上帝|祂|'
            r'聖經|經上|經文|律法|舊約|新約)')
@@ -278,7 +279,7 @@ def build(records, sources, sid, root, ports, *, holy=None):
             unresolved.append({'paragraph_key': pk, 'reason': 'parallel_passage', 'candidates': [label(k) for k in members]})
         for key, pos, end in marks.get(pk, []):
             citations.append({'paragraph_key': pk, 'basis': 'spoken', 'ref': label(key), 'key': list(key),
-                              'quote': quote_sentence(text, position=pos)})
+                              'quote': quote_sentence(text, position=pos), 'mark': text[pos:end]})
         near = announced | set(primary)
         for m in INTRODUCTION.finditer(text):
             segment = text[m.end():m.end() + INTRO_CHARS]
@@ -289,6 +290,7 @@ def build(records, sources, sid, root, ports, *, holy=None):
             cands = introduction_candidates(segment, holy, near)
             if cands:
                 questions.append({'paragraph_key': pk, 'position': m.start(), 'marker': m.group(0),
+                                  'mark': text[m.start():m.end() + QUOTE_CHARS],
                                   'segment': segment, 'candidates': cands})
     by_paragraph = defaultdict(list)
     for q in questions:
@@ -308,7 +310,7 @@ def build(records, sources, sid, root, ports, *, holy=None):
             if pick.startswith('V'):
                 key = q['candidates'][int(pick[1:])]
                 citations.append({'paragraph_key': pk, 'basis': 'introduced', 'ref': label(key), 'key': list(key),
-                                  'quote': quote_sentence(text_of[pk], position=q['position'])})
+                                  'quote': quote_sentence(text_of[pk], position=q['position']), 'mark': q['mark']})
             elif pick == 'other_verse':
                 unresolved.append({'paragraph_key': pk, 'reason': 'introduced_other_verse',
                                    'quote': quote_sentence(text_of[pk], position=q['position'])})
@@ -341,17 +343,20 @@ def quote_sentence(text, *, position=None, verse_text=None):
 
 
 def visible(citation, fragments, holy):
-    """A held citation is visible when a holder's fragment contains its sentence
-    or, for a read verse, a run of the verse text."""
-    quote = norm(citation['quote'])
+    """A held citation is visible when a holder's fragment contains the citation
+    itself: the words naming the verse, the introduced words, or a run of the
+    verse text he reads. The rest of the sentence is not required."""
+    quote = norm(citation.get('mark') or citation['quote'])
     key = tuple(citation['key'])
     v = norm(holy.verses.get(key, ''))
-    grams = {v[i:i + QUOTE_CHARS] for i in range(len(v) - QUOTE_CHARS + 1)}
+    pairs = {v[i:i + 2] for i in range(len(v) - 1)}
+    # A loose reading (「聽了這話就憂愁走了」, 爲／為) shares many two-character words.
+    enough = min(READING_PAIRS, max(1, len(pairs) // 2))
     for text in fragments:
         t = norm(text)
         if quote and quote in t:
             return True
-        if any(g in t for g in grams):
+        if pairs and len(pairs & {t[i:i + 2] for i in range(len(t) - 1)}) >= enough:
             return True
     return False
 
@@ -378,7 +383,7 @@ def fragment_check(records, sources, sid, listing, *, holy=None):
         if not owners:
             unheld.append(c)
             continue
-        near = set(order[max(0, index[pk] - 1):index[pk] + 2])
+        near = set(order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1])
         shown = [text for k in owners for p, text in fragments_of[k] if p in near]
         if visible(c, shown, holy):
             visible_count += 1

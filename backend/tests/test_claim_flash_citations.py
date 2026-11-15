@@ -48,6 +48,7 @@ def keys(listing, basis=None):
 def test_spoken_reference_carries_book_and_chapter_across_paragraphs(tmp_path):
     listing = cit.build({}, sources('我們來看馬太福音十九章。', '第六節說得很清楚。'), 'S', tmp_path, Jev(), holy=HOLY)
     assert ('S0002', 'Matt 19:6') in keys(listing, 'spoken')
+    assert next(c['mark'] for c in listing['citations'] if c['ref'] == 'Matt 19:6') == '第六節'
 
 
 @pytest.mark.parametrize('text', ['馬太福音十九章，就兩三節聖經。', '馬太福音十九章，三節的聖經講妻子。',
@@ -100,16 +101,25 @@ def lower(fragment_text, refs, *, pk='S0001', status='candidate'):
             'evidence_steps/E': {'payload': {'source_fragment_ids': ['F'], 'scripture_refs': refs, 'review_status': status}}}
 
 
-def listing_of(pk, ref, quote):
+def listing_of(pk, ref, quote, mark=None):
     b, cv = ref.split(' ')
     c, v = cv.split(':')
-    return {'citations': [{'paragraph_key': pk, 'basis': 'spoken', 'ref': ref, 'key': [b, int(c), int(v)], 'quote': quote}]}
+    return {'citations': [{'paragraph_key': pk, 'basis': 'spoken', 'ref': ref, 'key': [b, int(c), int(v)], 'quote': quote,
+                           'mark': mark or quote}]}
 
 
 def test_held_citation_inside_a_fragment_is_visible():
     src = sources('馬太福音十九章六節，神配合的人不可分開。')
     checked = cit.fragment_check(lower('馬太福音十九章六節，神配合的人不可分開。', ['Matt 19:3-9']), src, 'S',
                                  listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節，神配合的人不可分開。'), holy=HOLY)
+    assert checked['visible'] == 1 and not checked['jobs']
+
+
+def test_fragment_holding_the_reference_but_not_the_sentence_end_is_visible():
+    # Lecture 1 S0128: the fragment stops before 「，跟你們講。」 yet holds the citation.
+    sentence = '所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事，跟你們講。'
+    checked = cit.fragment_check(lower('所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事', ['Matt 19:6']),
+                                 sources(sentence), 'S', listing_of('S0001', 'Matt 19:6', sentence, '馬太十九章六節'), holy=HOLY)
     assert checked['visible'] == 1 and not checked['jobs']
 
 
@@ -172,3 +182,12 @@ def test_program_citation_attaches_the_sentence_without_models_or_new_refs(sampl
     assert '你沒有聽從祂的話，你根本沒信。' in texts
     missing = stage.run(store, 'S', [{**job, 'job_id': 'd', 'quote': '不在原文。'}], root / 'absent', Jev(), apply=True)
     assert missing['status'] == 'needs_attention' and not missing['updates']
+
+
+def test_loose_reading_two_paragraphs_away_is_visible():
+    # Lecture 4 S0135: he names 19:22; the holder's fragment has his loose reading of it.
+    holy = cit.Bible({('Matt', 19, 22): '那少年人聽見這話，就憂憂愁愁地走了；因為他的產業很多。'})
+    src = sources('十九章第二十二節。', '別的。', '那少年人聽了這話就憂愁走了，因為他的財產甚多。')
+    checked = cit.fragment_check(lower('那少年人聽了這話就憂愁走了，因為他的財產甚多。', ['Matt 19:22'], pk='S0003'), src, 'S',
+                                 listing_of('S0001', 'Matt 19:22', '十九章第二十二節。', '十九章第二十二節'), holy=holy)
+    assert checked['visible'] == 1 and not checked['jobs']
