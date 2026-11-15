@@ -17,7 +17,7 @@ Structure rules (owner discussion 2026-11-15):
   R4 No repeats: a Claim does not restate an Evidence/Observation linked to it,
      and an Evidence/Observation does not restate the Claim it links to.
   R5 An Observation is only what the text he reads says; his own words are Evidence.
-  R6 A version, language or grammar term in a statement (和合本, 希臘文, 語態 ...)
+  R6 A version, language or grammar term in a statement (希臘文, 語態 ...; 中文翻譯 may be written 和合本)
      appears in its quotes.  (program)
 R1, R3, R4, R5: Jev answers one narrow question per piece or link; GPT rules
 only on what Jev does not pass. Every answer is saved.
@@ -56,7 +56,7 @@ GAP = ('你核對從王教授講課逐字稿整理出的記錄是否漏了內容
     '念經文本身、轉場、口頭禪、重複、未展開的預告不必列。沒有就回傳空的 gaps。不要評價他的觀點。')
 
 
-TERMS = ('和合本', '新譯本', '思高', '呂振中', '英文', '希臘文', '希伯來文', '亞蘭文', '語態', '被動', '主動', '時態', '不定過去式')
+TERMS = ('新譯本', '思高', '呂振中', '英文', '希臘文', '希伯來文', '亞蘭文', '語態', '被動', '主動', '時態', '不定過去式')
 PASS = 'pass'
 RULES = {
     'R1': ('one_assertion', '`statement` 是否只說一件可以單獨判斷真假的事？引用的一段經文算一件，除非經文的不同部分各有不同用途。',
