@@ -309,3 +309,13 @@ def test_a_verse_number_he_also_reads_keeps_its_book(tmp_path):
                                     '又說：「豈不曉得凡從外面進入的，不能污穢人。」'}}
     listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
     assert {c['ref'] for c in listing['citations'] if c['key'][2]} == {'Matt 5:18', 'Mark 7:18'}
+
+
+def test_a_dropped_mark_is_removed_from_the_store(sample):
+    from backend.pipeline import claim_flash_citation_tags as tags
+    store, root, _ = sample
+    p = store.get_record_state('source_fragments', 'F')['payload']
+    store.apply_plan(store.plan_package({'package_id': 'mark', 'source_fragments': [{**p, 'scripture_refs': ['Gal 2:1']}]}))
+    result = tags.run(store, 'S', root / 'drop', holy=cit.Bible({}), apply=True, drop=[('S0001', 'Gal 2:1')])
+    assert result['status'] == 'applied'
+    assert store.get_record_state('source_fragments', 'F')['payload']['scripture_refs'] == []

@@ -78,8 +78,8 @@ def run(store, source_id, root, ports=None, *, holy=None, apply=False, drop=()):
             refs = sorted(kept | found.get(key, set()))
             if refs == payload.get('scripture_refs', []):
                 continue
-            post = {k:v for k,v in payload.items() if k != 'scripture_refs'}
-            updates[key] = {**post, 'scripture_refs': refs} if refs else post
+            # The store reads a missing field as unchanged; no marks left is [].
+            updates[key] = {**payload, 'scripture_refs': refs}
         f.source_unchanged(sources)
         read_keys = sorted({'source_documents/'+source_id, *updates})
         result = {'version':VERSION, 'source_id':source_id, 'status':'verified', 'items':[],
