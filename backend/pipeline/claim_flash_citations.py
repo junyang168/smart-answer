@@ -8,11 +8,9 @@ person's words. A retold story, an explanation or a resemblance is not one.
 The list is built once per source version from the whole sermon, so a book or
 chapter he announced earlier carries into later paragraphs. Jev is asked only
 which verse an introduced quotation is; it never decides a reference alone.
-Layers above the source see the source only through SourceFragments, so a
-lower record holding a cited verse must have a fragment containing the citing
-sentence. Missing ones become literal `claim_flash_scripture` jobs: the program
-locates the sentence and attaches the fragment, with no model call and no new
-reference.
+Layers above the source see the transcript only through SourceFragments, so
+every explicit citation must sit inside one. Uncovered citation sentences are saved as literal SourceFragments by the
+source fill, with no model call; linking them to Evidence is a later layer.
 """
 from collections import Counter, defaultdict
 from functools import lru_cache
@@ -33,7 +31,7 @@ CLEAR_MARGIN = 3         # a parallel quote matching this many more characters o
 RECENT = 3               # an announced chapter stays current for this many paragraphs
 BARE_REACH = S.BARE_VERSE_REACH * 4
 INTRO_CHARS = 60
-NEIGHBOURS = 2           # paragraphs either side: where a fragment can show a citation, and where a repair may go
+NEIGHBOURS = 2           # paragraphs either side where a SourceFragment can show a citation
 READING_PAIRS = 6        # two-character words of the verse a fragment must share to show his reading
 
 SPEAKER = (r'(?:主耶穌|耶穌|主|保羅|彼得|約翰|雅各|摩西|大衛|以賽亞|耶利米|先知|使徒|天使|神|上帝|祂|'
@@ -363,41 +361,26 @@ def visible(citation, fragments, holy):
 
 def fragment_check(records, sources, sid, listing, *, holy=None):
     """Source layer, text -> fragment: is every explicit citation inside some
-    SourceFragment of this source? Uncovered citations become literal
-    attachment jobs on a nearby record that already holds the verse; the rest
-    are reported for the missing-material step, never written here."""
+    SourceFragment of this source? Uncovered citation sentences become literal
+    SourceFragments; which Evidence or Observation uses them is the Evidence
+    layer's question, not this one."""
     holy = holy or default_bible()
     order = sorted(sources[sid]['paragraphs'])
     index = {pk: i for i, pk in enumerate(order)}
-    # Only SourceFragment against the transcript; which Evidence or Observation
-    # a fragment belongs to is not this layer's question.
-    in_use = defaultdict(list)
+    fragments = defaultdict(list)
     for key, row in records.items():
         if key.startswith('source_fragments/') and not row.get('retired') and row['payload'].get('source_id') == sid:
-            in_use[row['payload']['paragraph_key']].append(row['payload'].get('verbatim_excerpt') or '')
-    holders = held_refs(records, sid)
-    near_of = {}
-    for key in holders:
-        rows = [records.get('source_fragments/' + fid) for fid in e.evidence_fragment_ids(records[key]['payload'])]
-        near_of[key] = {r['payload']['paragraph_key'] for r in rows
-                        if r and not r.get('retired') and r['payload'].get('source_id') == sid}
-    jobs, uncovered, visible_count = [], [], 0
+            fragments[row['payload']['paragraph_key']].append(row['payload'].get('verbatim_excerpt') or '')
+    spans, visible_count = [], 0
     for c in listing['citations']:
-        key = tuple(c['key'])
-        if key[2] is None:
+        if c['key'][2] is None:
             continue
         pk = c['paragraph_key']
         near = order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1]
-        if visible(c, [text for p in near for text in in_use.get(p, [])], holy):
+        if visible(c, [text for p in near for text in fragments.get(p, [])], holy):
             visible_count += 1
             continue
-        close = [k for k, refs in holders.items() if holds(refs, key)
-                 and any(abs(index.get(p, -10**6) - index[pk]) <= NEIGHBOURS for p in near_of[k])
-                 and records[k]['payload'].get('review_status') not in f.PROTECTED]
-        if not close:
-            uncovered.append(c)
-            continue
-        jobs.append({'job_id': e.digest([CONTRACT, pk, c['ref'], c['quote']]), 'reference': c['ref'],
-                     'quote': c['quote'], 'paragraph_key': pk, 'target_keys': sorted(close),
-                     'program_citation': True})
-    return {'version': CONTRACT, 'jobs': jobs, 'visible': visible_count, 'uncovered': uncovered}
+        span = {'reference': c['ref'], 'paragraph_key': pk, 'quote': c['quote']}
+        if span not in spans:
+            spans.append(span)
+    return {'version': CONTRACT, 'spans': spans, 'visible': visible_count}

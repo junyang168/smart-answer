@@ -261,10 +261,11 @@ owners、revision等記帳變化不重做內容審閱。拆分按statement快取
 操作沿既有 pins、ChangeSet、回讀及同 root 答覆復用；受保護目標與失效／刪除來源不藉引用匹配放行。
 上述綁定之後，新開的 Flash root 再跑程式經文引用清單（`claim_flash_citations`，契約 `claim_flash_citation_list_v1`）：
 全篇讀一次，記教授明說的書卷章節、逐字念出的經文，以及「耶穌說」「保羅明講」等引出的話（只此一項由 Jev 選節）。
-上層只透過 SourceFragment 看原文，所以掛著某節的 Evidence／Observation 必須有片段包住引用句；
-沒有包住且記錄在引用段前後兩段內時，以 `program_citation` 作業交 `claim_flash_scripture.run`：
-程式按原句定位、編譯片段，不調 Jev 或 GPT，不新增出處。沒有記錄掛該節、記錄太遠或受保護者只記入
-`citations/fragment-check.json`，不寫入。已開始的 root 不帶此契約，按原 intent 重放，不補跑。
+上層只透過 SourceFragment 看原文，所以每處明確引用都必須在某個 SourceFragment 之內；
+這一步只比對 SourceFragment 與原文，不看它屬於哪個 Evidence／Observation。不在任何 SourceFragment 內的引用句，
+由原文補齊（`claim_flash_source_fill.run_citations`）按原句存為 SourceFragment，不調 Jev 或 GPT，
+不建立或修改 Evidence、Observation、Claim；新片段由哪個 Evidence 使用，屬 Evidence 層。
+已開始的 root 不帶此契約，按原 intent 重放，不補跑。
 定義與試驗見 [Flash 經文引用清單方案](./claim_flash_scripture_citation_solution.md)。
 這個入口只報告，不修改資料，不啟動下文歷史 lower 的補建、連接或 Claim 流程。
 原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。

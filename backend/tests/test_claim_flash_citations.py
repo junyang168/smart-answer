@@ -5,7 +5,7 @@ import json
 import pytest
 
 from backend.pipeline import claim_flash_citations as cit, claim_flash_flow as flow
-from backend.pipeline import claim_flash_scripture as stage, evidence_refresh as e
+from backend.pipeline import claim_flash_source_fill as fill, evidence_refresh as e
 
 VERSES = {
     ('Matt', 19, 3): '有法利賽人來試探耶穌說：人無論甚麼緣故都可以休妻嗎？',
@@ -96,9 +96,8 @@ def test_not_quote_adds_nothing(tmp_path):
     assert not keys(listing, 'introduced')
 
 
-def lower(fragment_text, refs, *, pk='S0001', status='candidate'):
-    return {'source_fragments/F': {'payload': {'source_id': 'S', 'paragraph_key': pk, 'verbatim_excerpt': fragment_text}},
-            'evidence_steps/E': {'payload': {'source_fragment_ids': ['F'], 'scripture_refs': refs, 'review_status': status}}}
+def fragment(text, pk='S0001', fid='F'):
+    return {f'source_fragments/{fid}': {'payload': {'source_id': 'S', 'paragraph_key': pk, 'verbatim_excerpt': text}}}
 
 
 def listing_of(pk, ref, quote, mark=None):
@@ -108,47 +107,38 @@ def listing_of(pk, ref, quote, mark=None):
                            'mark': mark or quote}]}
 
 
-def test_held_citation_inside_a_fragment_is_visible():
-    src = sources('馬太福音十九章六節，神配合的人不可分開。')
-    checked = cit.fragment_check(lower('馬太福音十九章六節，神配合的人不可分開。', ['Matt 19:3-9']), src, 'S',
-                                 listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節，神配合的人不可分開。'), holy=HOLY)
-    assert checked['visible'] == 1 and not checked['jobs']
+def test_any_source_fragment_shows_the_citation_whoever_links_it():
+    src = sources('馬太福音十九章六節講得很清楚。')
+    checked = cit.fragment_check(fragment('馬太福音十九章六節講得很清楚。'), src, 'S',
+                                 listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
+    assert checked['visible'] == 1 and not checked['spans']
 
 
 def test_fragment_holding_the_reference_but_not_the_sentence_end_is_visible():
     # Lecture 1 S0128: the fragment stops before 「，跟你們講。」 yet holds the citation.
     sentence = '所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事，跟你們講。'
-    checked = cit.fragment_check(lower('所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事', ['Matt 19:6']),
-                                 sources(sentence), 'S', listing_of('S0001', 'Matt 19:6', sentence, '馬太十九章六節'), holy=HOLY)
-    assert checked['visible'] == 1 and not checked['jobs']
+    checked = cit.fragment_check(fragment('所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事'), sources(sentence), 'S',
+                                 listing_of('S0001', 'Matt 19:6', sentence, '馬太十九章六節'), holy=HOLY)
+    assert checked['visible'] == 1 and not checked['spans']
 
 
-def test_held_citation_outside_every_fragment_becomes_a_literal_job():
-    src = sources('馬太福音十九章六節講得很清楚。我們看下去。')
-    checked = cit.fragment_check(lower('我們看下去。', ['Matt 19:6']), src, 'S',
-                                 listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
-    [job] = checked['jobs']
-    assert job['target_keys'] == ['evidence_steps/E'] and job['program_citation']
-    assert job['quote'] == '馬太福音十九章六節講得很清楚。'
+def test_loose_reading_two_paragraphs_away_is_visible():
+    # Lecture 4 S0135: he names 19:22; a fragment two paragraphs on has his loose reading.
+    holy = cit.Bible({('Matt', 19, 22): '那少年人聽見這話，就憂憂愁愁地走了；因為他的產業很多。'})
+    src = sources('十九章第二十二節。', '別的。', '那少年人聽了這話就憂愁走了，因為他的財產甚多。')
+    checked = cit.fragment_check(fragment('那少年人聽了這話就憂愁走了，因為他的財產甚多。', pk='S0003'), src, 'S',
+                                 listing_of('S0001', 'Matt 19:22', '十九章第二十二節。', '十九章第二十二節'), holy=holy)
+    assert checked['visible'] == 1 and not checked['spans']
 
 
-def test_any_source_fragment_shows_the_citation():
-    # Source layer: SourceFragment against transcript only, whoever links it.
-    src = sources('馬太福音十九章六節講得很清楚。')
-    records = {'source_fragments/F': {'payload': {'source_id': 'S', 'paragraph_key': 'S0001',
-                                                  'verbatim_excerpt': '馬太福音十九章六節講得很清楚。'}}}
-    checked = cit.fragment_check(records, src, 'S', listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
-    assert checked['visible'] == 1 and not checked['jobs'] and not checked['uncovered']
-
-
-def test_uncovered_citation_without_a_nearby_unprotected_holder_is_reported_not_written():
-    src = sources(*['段落。'] * 6)
-    listing = listing_of('S0001', 'Matt 19:6', '段落。')
-    assert cit.fragment_check(lower('另一段。', ['Matt 5:32'], pk='S0002'), src, 'S', listing, holy=HOLY)['uncovered']
-    far = cit.fragment_check(lower('另一段。', ['Matt 19:6'], pk='S0006'), src, 'S', listing, holy=HOLY)
-    assert far['uncovered'] and not far['jobs']
-    locked = cit.fragment_check(lower('另一段。', ['Matt 19:6'], pk='S0002', status='human_approved'), src, 'S', listing, holy=HOLY)
-    assert locked['uncovered'] and not locked['jobs']
+def test_uncovered_citation_becomes_a_fragment_span_without_any_evidence():
+    # Lecture 1 S0030: he names 5:32 and no SourceFragment holds the sentence.
+    src = sources('其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。', '別的。')
+    checked = cit.fragment_check(fragment('別的。', pk='S0002'), src, 'S',
+                                 listing_of('S0001', 'Matt 19:6', '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。', '馬太福音十九章六節'),
+                                 holy=HOLY)
+    assert checked['spans'] == [{'reference': 'Matt 19:6', 'paragraph_key': 'S0001',
+                                 'quote': '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。'}]
 
 
 def test_bible_cache_must_be_complete(tmp_path):
@@ -173,30 +163,22 @@ from backend.tests.test_evidence_refresh import sample  # noqa: E402
 from backend.tests.test_claim_management_postgres import postgres_store, _temporary_postgres  # noqa: E402,F401
 
 
-def test_program_citation_attaches_the_sentence_without_models_or_new_refs(sample):
+def test_citation_fill_saves_only_a_source_fragment(sample):
     store, root, _ = sample
     p = store.get_record_state('source_fragments', 'F')['payload']
     p['verbatim_excerpt'] = '你不知道神的旨意，怎麼遵行？'
     p['verbatim_excerpt_sha256'] = hashlib.sha256(p['verbatim_excerpt'].encode()).hexdigest()
     store.apply_plan(store.plan_package({'package_id': 'short', 'source_fragments': [p]}))
-    before = store.get_record_state('evidence_steps', 'E')['payload']
-    ports = Jev()
-    job = {'job_id': 'c', 'reference': 'John 8:44', 'quote': '你沒有聽從祂的話，你根本沒信。', 'paragraph_key': 'S0001',
-           'target_keys': ['evidence_steps/E'], 'program_citation': True}
-    result = stage.run(store, 'S', [job], root / 'cite', ports, apply=True)
-    assert result['status'] == 'applied' and not ports.calls and result['new_fragments']
-    after = store.get_record_state('evidence_steps', 'E')['payload']
-    assert after.get('scripture_refs', []) == before.get('scripture_refs', [])
-    texts = {store.get_record_state('source_fragments', fid)['payload']['verbatim_excerpt'] for fid in after['source_fragment_ids']}
-    assert '你沒有聽從祂的話，你根本沒信。' in texts
-    missing = stage.run(store, 'S', [{**job, 'job_id': 'd', 'quote': '不在原文。'}], root / 'absent', Jev(), apply=True)
-    assert missing['status'] == 'needs_attention' and not missing['updates']
-
-
-def test_loose_reading_two_paragraphs_away_is_visible():
-    # Lecture 4 S0135: he names 19:22; the holder's fragment has his loose reading of it.
-    holy = cit.Bible({('Matt', 19, 22): '那少年人聽見這話，就憂憂愁愁地走了；因為他的產業很多。'})
-    src = sources('十九章第二十二節。', '別的。', '那少年人聽了這話就憂愁走了，因為他的財產甚多。')
-    checked = cit.fragment_check(lower('那少年人聽了這話就憂愁走了，因為他的財產甚多。', ['Matt 19:22'], pk='S0003'), src, 'S',
-                                 listing_of('S0001', 'Matt 19:22', '十九章第二十二節。', '十九章第二十二節'), holy=holy)
-    assert checked['visible'] == 1 and not checked['jobs']
+    evidence = store.get_record_state('evidence_steps', 'E')
+    spans = [{'reference': 'John 8:44', 'paragraph_key': 'S0001', 'quote': '你沒有聽從祂的話，你根本沒信。'}]
+    result = fill.run_citations(store, 'S', spans, root / 'cite', apply=True)
+    assert result['status'] == 'applied' and result['model_calls'] == 0 and not result['updates']
+    [new] = result['new_fragments'].values()
+    assert new['verbatim_excerpt'] == '你沒有聽從祂的話，你根本沒信。'
+    assert store.get_record_state('source_fragments', new['fragment_id'])['payload']['verbatim_excerpt'] == new['verbatim_excerpt']
+    assert store.get_record_state('evidence_steps', 'E') == evidence
+    assert fill.run_citations(store, 'S', spans, root / 'cite', apply=True)['status'] == 'applied'
+    again = fill.run_citations(store, 'S', spans, root / 'again', apply=True)
+    assert not again['new_fragments'] and again['items'][0]['status'] == 'already_covered'
+    missing = fill.run_citations(store, 'S', [{**spans[0], 'quote': '不在原文。'}], root / 'absent', apply=True)
+    assert missing['status'] == 'needs_attention' and not missing['new_fragments']

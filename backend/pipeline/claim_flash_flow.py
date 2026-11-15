@@ -441,13 +441,12 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 listing=citations.build(records,sources,source_id,root/'citations',ports)
                 checked=citations.fragment_check(records,sources,source_id,listing)
                 stages['citations']={'status':'verified','pending':[],'citations':len(listing['citations']),
-                    'unresolved':len(listing['unresolved']),'visible':checked['visible'],'repairs':len(checked['jobs']),
-                    'uncovered':len(checked['uncovered'])}
+                    'unresolved':len(listing['unresolved']),'visible':checked['visible'],'new_fragments':len(checked['spans'])}
                 e.save(root/'citations'/'fragment-check.json',checked)
-                if checked['jobs']:
-                    shown=scripture.run(store,source_id,checked['jobs'],root/'citation-fragments',ports,apply=True)
-                    stages['citation_fragments']=shown
-                    if not complete(shown):return finish(stages,[{'layer':'source','findings':shown['pending']}])
+                if checked['spans']:
+                    filled=fill.run_citations(store,source_id,checked['spans'],root/'citation-fragments',apply=True)
+                    stages['citation_fragments']=filled
+                    if not complete(filled):return finish(stages,[{'layer':'source','findings':filled['pending']}])
             recovery.lower_checkpoint(root,intent,stages,source_only=True)
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
