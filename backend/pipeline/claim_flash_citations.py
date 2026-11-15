@@ -23,7 +23,7 @@ from backend.pipeline import claim_flash_common as f, evidence_refresh as e
 from backend.pipeline.claim_flash_scripture import references
 from backend.pipeline.transcript_evidence_migration import script_layout
 
-CONTRACT = 'claim_flash_citation_list_v1'
+CONTRACT = 'claim_flash_citation_list_v2'
 CUV_CHAPTERS = 1189
 QUOTE_CHARS = 8          # a verbatim quote: this many consecutive characters of one verse
 COMMON_VERSES = 4        # a run found in more verses is a formula, not a quote
@@ -257,6 +257,30 @@ def holds(refs, cite):
     return any(x[0] == b and x[1] == c and (v is None or x[2] is None or x[2] == v) for x in refs)
 
 
+AMEN = re.compile(r'(阿們|阿门|amen)\W*$', re.I)
+
+
+def prayers(root, ports, paragraphs, matched):
+    """Paragraphs Jev judges to be his prayer, among those with a word-for-word
+    match: the first two, the last, and any ending in 阿們／Amen (a prayer
+    between sessions). Without Jev, none."""
+    if ports is None or not paragraphs:
+        return set()
+    keys = [pk for pk, _ in paragraphs]
+    asked = [pk for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t.strip())])
+             if pk in matched]
+    text_of = dict(paragraphs)
+    found = set()
+    for pk in asked:
+        answer = f.jev(Path(root) / 'prayers', ports, {'paragraph': text_of[pk]}, {'Q0': {'type': 'choice',
+            'criteria': {'prayer': '這一段是禱告：向神說話，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。',
+                         'not_prayer': '這一段不是禱告：是講課、念經文、問答或其他內容。'},
+            'instructions': '`paragraph` 這一段整段是不是禱告？'}})
+        if answer['Q0'] == 'prayer':
+            found.add(pk)
+    return found
+
+
 def build(records, sources, sid, root, ports, *, holy=None):
     """The citation list for this source version, saved and reused."""
     holy = holy or default_bible()
@@ -280,10 +304,18 @@ def build(records, sources, sid, root, ports, *, holy=None):
     keys = [pk for pk, _ in paragraphs]
     text_of = dict(paragraphs)
     citations, unresolved, questions = [], [], []
+    found = {}
     for i, (pk, text) in enumerate(paragraphs):
         announced = {current[k] for k in keys[max(0, i - RECENT):i + 1] if current.get(k)}
         announced |= {r[0][:2] for r in marks.get(pk, [])}
-        quoted, ambiguous, spans = verbatim(text, holy, announced, primary, held)
+        found[pk] = announced, verbatim(text, holy, announced, primary, held)
+    # His opening or closing prayer shares words with verses
+    # (「奉我們的主耶穌基督的聖名」); it is not a reading.
+    praying = prayers(root, ports, paragraphs, {pk for pk, (_, (q, a, _)) in found.items() if q or a})
+    for i, (pk, text) in enumerate(paragraphs):
+        announced, (quoted, ambiguous, spans) = found[pk]
+        if pk in praying:
+            quoted, ambiguous = {}, []
         for key in sorted(quoted):
             citations.append({'paragraph_key': pk, 'basis': 'verbatim', 'ref': label(key), 'key': list(key),
                               'quote': quote_sentence(text, verse_text=holy.verses[key])})
@@ -351,7 +383,7 @@ def build(records, sources, sid, root, ports, *, holy=None):
     unique = [c for c in unique if c['key'][2] is not None or not any(
         d['paragraph_key'] == c['paragraph_key'] and d['key'][:2] == c['key'][:2] and d['key'][2] for d in unique)]
     result = {'version': CONTRACT, 'source_id': sid, 'input_sha256': pin, 'main_book': main_book,
-              'citations': unique, 'unresolved': unresolved,
+              'citations': unique, 'unresolved': unresolved, 'prayers': sorted(praying),
               **({'introduced': 'not_judged', 'introduced_questions': len(questions)} if ports is None else {})}
     e.save(path, result)
     return result

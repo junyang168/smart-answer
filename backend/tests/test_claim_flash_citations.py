@@ -28,7 +28,11 @@ class Jev:
         self.calls.append(req)
         answers = {}
         for q, spec in req['questions'].items():
-            choice = self.picks.get(q, 'not_quote')
+            if 'prayer' in spec['criteria']:
+                praying = self.picks.get('prayer') and '禱告' in req['state'].get('paragraph', '')
+                choice = 'prayer' if praying else 'not_prayer'
+            else:
+                choice = self.picks.get(q, 'not_quote')
             answers[q] = {'type': 'choice', 'choice': choice,
                           'probabilities': {k: float(k == choice) for k in spec['criteria']}}
         return {'model': e.MODEL, 'answers': answers}
@@ -85,7 +89,8 @@ def test_introduced_quote_asks_jev_once_and_replays(tmp_path):
     text = '耶穌明講嘛，說謊是魔鬼的兒子，魔鬼是說謊之人的父嘛。'
     ports = Jev({'Q0': 'V0'})
     listing = cit.build({}, sources(text), 'S', tmp_path, ports, holy=HOLY)
-    assert ('S0001', 'John 8:44') in keys(listing, 'introduced') and len(ports.calls) == 1
+    asked = [c for c in ports.calls if 'prayer' not in c['questions']['Q0']['criteria']]
+    assert ('S0001', 'John 8:44') in keys(listing, 'introduced') and len(asked) == 1
     assert cit.build({}, sources(text), 'S', tmp_path, Jev(), holy=HOLY) == listing
     with pytest.raises(ValueError, match='source changed'):
         cit.build({}, sources(text + '改了'), 'S', tmp_path, Jev(), holy=HOLY)
@@ -256,3 +261,14 @@ def test_reading_overrides_a_misspoken_chapter(tmp_path):
     paragraphs = {'S0001': {'text': '但以理書第七章。然後有第三個獸，第二章……然後第十三節：「我在夜間的異象中觀看，見有一位像人子的，駕著天雲而來。」'}}
     listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
     assert {c['ref'] for c in listing['citations'] if c['key'][2]} == {'Dan 7:13'}
+
+
+def test_a_prayer_jev_recognizes_is_not_read_as_scripture(tmp_path):
+    holy = cit.Bible({('2Cor', 1, 3): '願頌讚歸與我們的主耶穌基督的父神，就是發慈悲的父，賜各樣安慰的神。',
+                      ('Matt', 16, 13): '耶穌到了該撒利亞腓立比的境內，就問門徒說：人說我人子是誰？'})
+    paragraphs = {'S0001': {'text': '我們這樣禱告，奉我們的主耶穌基督的聖名求，阿們。'},
+                  'S0002': {'text': '耶穌到了該撒利亞腓立比的境內，就問門徒。'}}
+    for picks, expected in (({}, {'2Cor 1:3', 'Matt 16:13'}), ({'prayer': True}, {'Matt 16:13'})):
+        root = tmp_path / str(len(picks))
+        listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', root, Jev(picks), holy=holy)
+        assert {c['ref'] for c in listing['citations']} == expected
