@@ -44,7 +44,7 @@ function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) 
   return (
     <div>
       {parts}{text.slice(cursor)}
-      {matched.map((note, index) => (
+      {matched.filter(({ original, explanation, reading }) => original || explanation || reading).map((note, index) => (
         <div key={index} className="mt-1 text-sm leading-5 text-amber-100/90">
           {[note.original, note.explanation].filter(Boolean).join(" · ")}
           {note.reading && <p>教授講解中的讀法 · {note.reading}</p>}
