@@ -272,3 +272,16 @@ def test_a_prayer_jev_recognizes_is_not_read_as_scripture(tmp_path):
         root = tmp_path / str(len(picks))
         listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', root, Jev(picks), holy=holy)
         assert {c['ref'] for c in listing['citations']} == expected
+
+
+def test_two_verses_in_one_new_sentence_are_both_marked(sample):
+    store, root, _ = sample
+    p = store.get_record_state('source_fragments', 'F')['payload']
+    p['verbatim_excerpt'] = '你不知道神的旨意，怎麼遵行？'
+    p['verbatim_excerpt_sha256'] = hashlib.sha256(p['verbatim_excerpt'].encode()).hexdigest()
+    store.apply_plan(store.plan_package({'package_id': 'short', 'source_fragments': [p]}))
+    quote = '你沒有聽從祂的話，你根本沒信。'
+    spans = [{'reference': r, 'paragraph_key': 'S0001', 'quote': quote} for r in ('John 8:44', 'John 8:47')]
+    result = fill.run_citations(store, 'S', spans, root / 'two', apply=True)
+    [new] = result['new_fragments'].values()
+    assert store.get_record_state('source_fragments', new['fragment_id'])['payload']['scripture_refs'] == ['John 8:44', 'John 8:47']

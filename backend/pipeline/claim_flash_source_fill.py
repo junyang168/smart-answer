@@ -72,7 +72,14 @@ def literal_spans(records, sources, source_id, source, entries, valid, pins):
                 raise ValueError('confirmed quote is not literal current source text')
             existing = covered_by(span, paragraph, valid)
             if existing:
-                pins.update(existing)
+                # A second verse in a sentence just saved in this run joins that
+                # SourceFragment's verses (「第十一章二十五節到三十節」).
+                for key in existing:
+                    if key in generated and base.get('citation_ref'):
+                        refs = generated[key].get('scripture_refs', [])
+                        generated[key] = {**generated[key], 'scripture_refs': sorted(set(refs) | {base['citation_ref']})}
+                        valid[key] = generated[key]
+                pins.update(k for k in existing if k not in generated)
                 item.update(status='already_covered', fragment_ids=[key.split('/',1)[1] for key in existing])
             else:
                 # Use the existing literal fragment builder; discard its synthetic
