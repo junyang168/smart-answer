@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；已有獨立入口、隔離測試及指定來源的正式 refresh，不授予舊 Claim／CVP 資格
-> **與代碼對齊**：部分；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
+> **與代碼對齊**：部分；2026-11-14 加入程式經文引用清單及片段檢查（#702）；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -259,6 +259,13 @@ owners、revision等記帳變化不重做內容審閱。拆分按statement快取
 只定位及補書目資料，不修改 statement、Claim 或論證關係，不另調 GPT 定位。查找只限當前來源及已知引用段落；來源變更仍走 migration。
 已確認的出處是入口先決條件；匹配片段不等於辨識出處。未知出處、無匹配及 Jev 不確定不強填，保留具體結果。
 操作沿既有 pins、ChangeSet、回讀及同 root 答覆復用；受保護目標與失效／刪除來源不藉引用匹配放行。
+上述綁定之後，新開的 Flash root 再跑程式經文引用清單（`claim_flash_citations`，契約 `claim_flash_citation_list_v1`）：
+全篇讀一次，記教授明說的書卷章節、逐字念出的經文，以及「耶穌說」「保羅明講」等引出的話（只此一項由 Jev 選節）。
+上層只透過 SourceFragment 看原文，所以掛著某節的 Evidence／Observation 必須有片段包住引用句；
+沒有包住且記錄在引用段前後兩段內時，以 `program_citation` 作業交 `claim_flash_scripture.run`：
+程式按原句定位、編譯片段，不調 Jev 或 GPT，不新增出處。沒有記錄掛該節、記錄太遠或受保護者只記入
+`citations/fragment-check.json`，不寫入。已開始的 root 不帶此契約，按原 intent 重放，不補跑。
+定義與試驗見 [Flash 經文引用清單方案](./claim_flash_scripture_citation_solution.md)。
 這個入口只報告，不修改資料，不啟動下文歷史 lower 的補建、連接或 Claim 流程。
 原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。
 

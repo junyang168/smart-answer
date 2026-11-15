@@ -119,7 +119,8 @@ def prepare(records,sources,sid,jobs,root,ports):
         if not matched:
             needle=normalized(job['quote'])
             matched=[k for k,p in local.items() if needle and needle in normalized_fragments[k]]
-        if not matched:
+        literal=job.get('program_citation')
+        if not matched and not literal:
             selected=select(root/token/'fragments',ports,job['quote'],
                 {'F'+str(n):{'key':k,'quote':p['verbatim_excerpt'],'paragraph_key':p['paragraph_key']} for n,(k,p) in enumerate(local.items())})
             matched=[x['key'] for x in selected];basis='jev_fragment'
@@ -127,7 +128,11 @@ def prepare(records,sources,sid,jobs,root,ports):
             found=locator.unique(job['quote']);basis='program_source'
             if found and pk and found['paragraph_key']!=pk:found=None
             spans=[found] if found else []
-            if not spans:
+            if not spans and literal:
+                # A program-built citation is a literal sentence of its paragraph.
+                text=paragraphs.get(pk,{}).get('text','')
+                spans=[{'paragraph_key':pk,'quote':job['quote']}] if text.count(job['quote'])==1 else []
+            elif not spans:
                 # Program supplies literal sentence spans. Jev selects locations, not rewritten quotes.
                 candidates={}
                 for paragraph_key,p in paragraphs.items():
@@ -152,8 +157,10 @@ def prepare(records,sources,sid,jobs,root,ports):
             if extra:
                 payload['source_fragment_ids']=list(dict.fromkeys(e.evidence_fragment_ids(payload)+extra))
                 payload['source_fragment_id']=None
-            existing={r.osis for raw in payload.get('scripture_refs',[]) for r in references(raw)}
-            payload['scripture_refs']=list(payload.get('scripture_refs',[]))+[_display_for_ref(ref) for ref in refs if ref.osis not in existing]
+            if not literal:
+                # A program citation only makes an already held reference visible.
+                existing={r.osis for raw in payload.get('scripture_refs',[]) for r in references(raw)}
+                payload['scripture_refs']=list(payload.get('scripture_refs',[]))+[_display_for_ref(ref) for ref in refs if ref.osis not in existing]
             if payload!=records[key]['payload']:updates[key]=payload
         outcomes.append({'job_id':job['job_id'],'basis':basis,'reference_osis':[r.osis for r in refs],
                          'fragment_keys':matched,'target_keys':job['target_keys']})

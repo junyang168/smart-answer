@@ -19,6 +19,7 @@ from backend.pipeline import claim_flash_evidence as eo, claim_flash_statements 
 from backend.pipeline import claim_flash_arguments as arguments, claim_flash_relations as relations
 from backend.pipeline import claim_flash_missing as missing, claim_flash_source_disposition as disposition
 from backend.pipeline import claim_flash_recovery as recovery, claim_flash_scripture as scripture
+from backend.pipeline import claim_flash_citations as citations
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.pipeline.knowledge_package_merge import validate_merged_package, KnowledgePackageMergeError, ID_FIELDS
 
@@ -30,6 +31,13 @@ def read(path):return json.loads(Path(path).read_text())
 
 def complete(result):
     return result.get('status') in {'verified','applied','completed'} and not result.get('pending')
+
+
+def with_citation_contract(root,intent):
+    """New roots run the citation check; a root started before it replays its saved intent unchanged."""
+    path=Path(root)/'flow-intent.json'
+    if path.exists() and 'citation_contract' not in read(path):return intent
+    return {**intent,'citation_contract':citations.CONTRACT}
 
 
 def source_handoff_batches(result,root):
@@ -136,7 +144,8 @@ def accounting(root, provider_root=None, evidence_provider_root=None):
         for started in paths:
             folder = started.parent
             stage = started.relative_to(root).parts[0]
-            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings'}
+            layer = ('source' if stage in {'grouping', 'source', 'calibration', 'coverage', 'fill', 'scripture-bindings',
+                                           'citations', 'citation-fragments'}
                      else 'evidence' if stage in {'evidence', 'source-handoffs'}
                      else 'claims' if stage == 'claims' else 'unclassified')
             seconds = None
@@ -286,6 +295,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
             records,sources=snapshot(store,source_id)
         intent={'version':VERSION,'source_id':source_id,'source_file':sources[source_id]['file'],
                 'models':ports.identity,'candidate_sha256':e.digest(candidate) if candidate else None,'supplied_plan':plan,'mode':mode}
+        intent=with_citation_contract(root,intent)
         e.save(root/'flow-intent.json',intent)
         data_root=os.getenv('DATA_BASE_DIR')
         canonical_url=os.getenv('KNOWLEDGE_DATABASE_URL') or os.getenv('DATABASE_URL')
@@ -425,6 +435,19 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 bound=scripture.run(store,source_id,citation_jobs,root/'scripture-bindings',ports,apply=True)
                 stages['scripture_bindings']=bound
                 if not complete(bound):return finish(stages,[{'layer':'source','findings':bound['pending']}])
+            if intent.get('citation_contract'):
+                # Every held explicit citation must be visible through a fragment.
+                records,sources=snapshot(store,source_id)
+                listing=citations.build(records,sources,source_id,root/'citations',ports)
+                checked=citations.fragment_check(records,sources,source_id,listing)
+                stages['citations']={'status':'verified','pending':[],'citations':len(listing['citations']),
+                    'unresolved':len(listing['unresolved']),'visible':checked['visible'],'repairs':len(checked['jobs']),
+                    'unheld':len(checked['unheld']),'distant':len(checked['distant'])}
+                e.save(root/'citations'/'fragment-check.json',checked)
+                if checked['jobs']:
+                    shown=scripture.run(store,source_id,checked['jobs'],root/'citation-fragments',ports,apply=True)
+                    stages['citation_fragments']=shown
+                    if not complete(shown):return finish(stages,[{'layer':'source','findings':shown['pending']}])
             recovery.lower_checkpoint(root,intent,stages,source_only=True)
         # Finish the original batch after a crash, before EO can change which
         # records it hands back. Reuse the original saved requests and answers.
