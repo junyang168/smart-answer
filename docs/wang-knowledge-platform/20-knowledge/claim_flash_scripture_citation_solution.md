@@ -2,8 +2,8 @@
 
 > **讀者**：Developer、流程設計者。
 > **類型**：規範。
-> **狀態**：第 3 節清單（引出語的 GPT 核對除外）、第 4.1 節補齊、第 4.2 節新建時標記已實作（#702）；待實作：引出語的 GPT 核對、第 4.1 節「只說到章不補」、第 4.2 節既有片段補標與改正、第 5 節原文層整合與「只跑原文層」入口、第 4.3、6、7 節。
-> **與代碼對齊**：2026-11-15，第 3、4.1、4.2 節對照 `claim_flash_citations`、`claim_flash_citation_tags`、`claim_flash_source_fill.run_citations`、`source_editorial_transition`（`7884b099`）；第 5 節的現況對照 `claim_flash_flow` 原文層，其餘為設計。
+> **狀態**：第 3、4.1、4.2、5 節已實作（#702）；待實作：第 4.3、6、7 節。
+> **與代碼對齊**：2026-11-15，第 3–5 節對照 `claim_flash_citations`、`claim_flash_citation_tags`、`claim_flash_source_fill.run_citations`、`claim_flash_flow.citation_steps`／`run_source_only`、`source_editorial_transition`；其餘為設計。
 > **權威範圍**：經文引用的定義、引用清單的產生方式、SourceFragment 的經文標記、Update Claim 原文層的引用步驟、下層記錄出處的核對、Claim 經文檢查何時送 GPT，以及 Jev 不得單獨移除連接。
 > 試驗與補標數據見 [Flash 的 Jev 用法核對與經文引用試驗（2026-11-14）](./claim_flash_jev_audit_20261114.md)。
 
@@ -149,7 +149,8 @@ Evidence／Observation 上的每個出處：
 
 ### 5.4 版本與重放
 
-清單契約 `claim_flash_citation_list_v2` 起帶禱告判定；第 5.1 節第 2、3 步啟用時契約再升版。
+清單契約 `claim_flash_citation_list_v2` 起帶禱告判定，`claim_flash_citation_list_v3` 起帶引出語的 GPT 核對；
+標記契約 `claim_flash_citation_tags_v2` 起按第 4.2 節改正；只跑原文層的結果為 `claim_flash_citation_source_only_v1`。
 已開始的 root 按原 intent 重放，不換題重發；新 root 才用新版。
 
 ## 6. Claim 經文檢查何時送 GPT

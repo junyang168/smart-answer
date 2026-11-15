@@ -1,7 +1,8 @@
-"""One-time backfill (#702): mark every existing SourceFragment that holds an
-explicit Scripture citation with `scripture_refs`, the field Evidence and
-Observation use. New citation SourceFragments are marked when created
-(`claim_flash_source_fill.run_citations`); this covers the ones saved earlier.
+"""Update Claim source layer, step 3 (#702): mark every existing SourceFragment
+that holds an explicit Scripture citation with `scripture_refs`, the field
+Evidence and Observation use, and remove a mark the paragraph's current
+citation list no longer supports. New citation SourceFragments are marked when
+created (`claim_flash_source_fill.run_citations`).
 
 Source layer only: SourceFragment updates, no Evidence, Observation or Claim
 changes. Without Jev ports, quotes introduced by 「耶穌說」 etc. are not judged
@@ -13,7 +14,7 @@ from pathlib import Path
 from backend.pipeline import claim_flash_citations as cit, claim_flash_common as f
 from backend.pipeline import claim_flash_source_fill as fill, evidence_refresh as e
 
-VERSION = 'claim_flash_citation_tags_v1'
+VERSION = 'claim_flash_citation_tags_v2'
 NUMERALS = set('零〇一二三四五六七八九十百0123456789')
 
 
@@ -31,6 +32,21 @@ def holds(citation, excerpt, holy):
     return any(t[i:i + n] in verse for i in range(len(t) - n + 1))
 
 
+def parse(ref):
+    """'Matt 19:6' -> ('Matt', 19, 6); 'Matt 19' -> ('Matt', 19, None)."""
+    book, _, place = ref.rpartition(' ')
+    chapter, _, verse = place.partition(':')
+    return book, int(chapter), int(verse) if verse else None
+
+
+def supported(ref, cited):
+    """The paragraph's current list still cites this verse, or for a chapter
+    mark, some verse of that chapter. `scripture_refs` is written only by this
+    flow, so no older list is needed to correct it."""
+    key = parse(ref)
+    return key in cited or (key[2] is None and any(k[:2] == key[:2] for k in cited))
+
+
 def tags(listing, valid, holy):
     by_paragraph = {}
     for key, payload in valid.items():
@@ -43,12 +59,15 @@ def tags(listing, valid, holy):
     return found
 
 
-def run(store, source_id, root, ports=None, *, holy=None, apply=False, drop=()):
+def run(store, source_id, root, ports=None, *, holy=None, apply=False, listing=None):
+    """`listing` is the citation list the source layer just built; without it
+    the list is built here (Jev introduced picks only with ports)."""
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with (root/'tags.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         pin = f.bind_source(store, source_id, root)
-        intent = {'version':VERSION, 'source':pin, 'introduced_judged':ports is not None, **({'drop':sorted(map(list, drop))} if drop else {})}
+        intent = {'version':VERSION, 'source':pin,
+                  **({'listing':e.digest(listing)} if listing is not None else {'introduced_judged':ports is not None})}
         if (root/'verification.json').exists():
             if json.loads((root/'intent.json').read_text()) != intent:
                 raise ValueError('citation tag saved input differs')
@@ -62,21 +81,20 @@ def run(store, source_id, root, ports=None, *, holy=None, apply=False, drop=()):
         if pin != {'source_id':source_id, **sources[source_id]['file']}:
             raise ValueError('source changed between binding and census')
         e.save(root/'intent.json', intent)
-        listing = cit.build(records, sources, source_id, root, ports, holy=holy)
+        if listing is None:
+            listing = cit.build(records, sources, source_id, root, ports, holy=holy)
         valid = fill.valid_fragments(records, sources, source_id)
-        updates = {}
+        cited = {}
+        for c in listing['citations']:
+            cited.setdefault(c['paragraph_key'], set()).add(tuple(c['key']))
         found = tags(listing, valid, holy)
-        # drop: (paragraph, ref) pairs a corrected list no longer cites, e.g.
-        # Gal 2:1 for 「《約翰一書》第二章一節」. Other marks stay.
-        drop = {tuple(x) for x in drop}
-        keys = set(found) | {k for k in valid if any((valid[k].get('paragraph_key'), r) in drop
-                                                     for r in records[k]['payload'].get('scripture_refs', []))}
-        for key in sorted(keys):
+        updates = {}
+        for key in sorted(valid):
             payload = records[key]['payload']
-            pk = payload.get('paragraph_key')
-            kept = {r for r in payload.get('scripture_refs', []) if (pk, r) not in drop}
+            current = payload.get('scripture_refs') or []
+            kept = {r for r in current if supported(r, cited.get(payload.get('paragraph_key'), set()))}
             refs = sorted(kept | found.get(key, set()))
-            if refs == payload.get('scripture_refs', []):
+            if refs == sorted(current):
                 continue
             # The store reads a missing field as unchanged; no marks left is [].
             updates[key] = {**payload, 'scripture_refs': refs}

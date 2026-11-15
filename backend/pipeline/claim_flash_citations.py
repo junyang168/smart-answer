@@ -23,7 +23,7 @@ from backend.pipeline import claim_flash_common as f, evidence_refresh as e
 from backend.pipeline.claim_flash_scripture import references
 from backend.pipeline.transcript_evidence_migration import script_layout
 
-CONTRACT = 'claim_flash_citation_list_v2'
+CONTRACT = 'claim_flash_citation_list_v3'
 CUV_CHAPTERS = 1189
 QUOTE_CHARS = 8          # a verbatim quote: this many consecutive characters of one verse
 COMMON_VERSES = 4        # a run found in more verses is a formula, not a quote
@@ -123,8 +123,9 @@ def names_chapter(mark):
 
 def spoken(paragraphs, holy, start_book=None):
     """Book/chapter/verse he says, carried across paragraphs. A chapter the
-    carried book does not have falls back to the sermon's main book; a verse
-    the chapter does not have is dropped."""
+    carried book does not have falls back to the sermon's main book; one the
+    book he just named does not have (「提摩太後書第六章」, a slip) and a verse
+    the chapter does not have are dropped."""
     book, chapter, at, offset = start_book, None, -10**9, 0
     out, current = defaultdict(list), {}
     for pk, text in paragraphs:
@@ -146,7 +147,7 @@ def spoken(paragraphs, holy, start_book=None):
             if b:
                 book = b
             if c:
-                if book and (book, c) not in holy.chapters and start_book and (start_book, c) in holy.chapters:
+                if not b and book and (book, c) not in holy.chapters and start_book and (start_book, c) in holy.chapters:
                     book = start_book
                 chapter, at = c, offset + pos
             if not book or not chapter or (book, chapter) not in holy.chapters:
@@ -265,28 +266,89 @@ def holds(refs, cite):
     return any(x[0] == b and x[1] == c and (v is None or x[2] is None or x[2] == v) for x in refs)
 
 
-AMEN = re.compile(r'(阿們|阿门|amen)\W*$', re.I)
+AMEN = re.compile(r'(阿們|阿门|amen)', re.I)
 
 
 def prayers(root, ports, paragraphs, matched):
-    """Paragraphs Jev judges to be his prayer, among those with a word-for-word
-    match: the first two, the last, and any ending in 阿們／Amen (a prayer
-    between sessions). Without Jev, none."""
+    """{paragraph: length of his prayer in normalized characters}, as Jev judges,
+    among paragraphs with a word-for-word match: the first two, the last, and
+    any with 阿們／Amen (a prayer between sessions). A prayer often runs into
+    the teaching in one paragraph (「…奉主耶穌基督的聖名求，Amen。我們昨天看到…」),
+    so Jev is asked about the text up to the first Amen. Without Jev, none."""
     if ports is None or not paragraphs:
-        return set()
+        return {}
     keys = [pk for pk, _ in paragraphs]
-    asked = [pk for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t.strip())])
+    asked = [pk for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t)])
              if pk in matched]
     text_of = dict(paragraphs)
-    found = set()
+    found = {}
     for pk in asked:
-        answer = f.jev(Path(root) / 'prayers', ports, {'paragraph': text_of[pk]}, {'Q0': {'type': 'choice',
+        amen = AMEN.search(text_of[pk])
+        part = text_of[pk][:amen.end()] if amen else text_of[pk]
+        answer = f.jev(Path(root) / 'prayers', ports, {'paragraph': part}, {'Q0': {'type': 'choice',
             'criteria': {'prayer': '這一段是禱告：向神說話，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。',
                          'not_prayer': '這一段不是禱告：是講課、念經文、問答或其他內容。'},
             'instructions': '`paragraph` 這一段整段是不是禱告？'}})
         if answer['Q0'] == 'prayer':
-            found.add(pk)
+            found[pk] = len(norm(part))
     return found
+
+
+CHECK_INSTRUCTION = (
+    '你核對講道逐字稿中的一處經文引用。每個工作給出教授講的一段（paragraph），前後各一段，'
+    '該處的引出語與其後的話（mark、sentence），以及另一個模型認為他在引的經文（ref、verse_text，和合本）。\n'
+    '負責人的規則：明確引用是念出經文原句，或經文中某人說的話被當作那人的話說出來'
+    '（措辭不必與和合本相同，不論是教授、聽眾還是轉述者在說）。\n'
+    '只敘述發生了什麼事而沒有任何人的話、解釋、評論、應用、提問（如「彼得說什麼？」之後若沒有說出那句話），'
+    '或只是字詞相似、呼應某節，都不算引用。\n'
+    '只看 mark 所在這一處：\n'
+    '- quote：這一處教授確實說出了 ref 這一節中某人的話或經文原句。\n'
+    '- other_verse：這一處是在引經文的話，但不是 ref 這一節（例如是相鄰的一節或平行經文）。\n'
+    '- not_quote：這一處不是在引經文。\n'
+    '用一句話說明依據。不要猜測其他節次。')
+CHECK_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['items'], 'properties': {'items': {
+    'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
+        'required': ['job_id', 'decision', 'reason'], 'properties': {
+            'job_id': {'type': 'string'}, 'decision': {'type': 'string', 'enum': ['quote', 'other_verse', 'not_quote']},
+            'reason': {'type': 'string'}}}}}}
+
+
+def confirm_introduced(root, ports, citations, keys, text_of, holy):
+    """GPT checks each Jev-picked introduced quote. Without GPT none stays."""
+    picked = [c for c in citations if c['basis'] == 'introduced']
+    if not picked:
+        return citations, []
+    decisions = {}
+    if ports is not None and 'gpt' in getattr(ports, 'identity', {}):
+        index = {pk: i for i, pk in enumerate(keys)}
+        jobs = []
+        for c in picked:
+            i = index[c['paragraph_key']]
+            jobs.append({'job_id': f"{c['paragraph_key']}#{c['ref']}#{c['mark']}",
+                         'previous': text_of[keys[i - 1]] if i else '', 'paragraph': text_of[c['paragraph_key']],
+                         'next': text_of[keys[i + 1]] if i + 1 < len(keys) else '',
+                         'mark': c['mark'], 'sentence': c['quote'], 'ref': c['ref'],
+                         'verse_text': holy.verses[tuple(c['key'])]})
+        for batch, reply in f.gpt(Path(root) / 'introduced-check', ports, 'introduced_quote_check', jobs,
+                                  CHECK_SCHEMA, CHECK_INSTRUCTION, semantic_review=False):
+            asked = {j['job_id'] for j in batch}
+            for item in reply['items']:
+                if item['job_id'] in asked:
+                    decisions[item['job_id']] = item
+            if not asked <= set(decisions):
+                raise ValueError('introduced quote check left a job unanswered')
+    kept, rejected = [], []
+    for c in citations:
+        if c['basis'] != 'introduced':
+            kept.append(c)
+            continue
+        answer = decisions.get(f"{c['paragraph_key']}#{c['ref']}#{c['mark']}")
+        if answer and answer['decision'] == 'quote':
+            kept.append({**c, 'check': answer['reason']})
+        else:
+            rejected.append({'paragraph_key': c['paragraph_key'], 'reason': 'introduced_' + (answer['decision'] if answer else 'unchecked'),
+                             'ref': c['ref'], 'quote': c['quote'], **({'check': answer['reason']} if answer else {})})
+    return kept, rejected
 
 
 def build(records, sources, sid, root, ports, *, holy=None):
@@ -323,7 +385,10 @@ def build(records, sources, sid, root, ports, *, holy=None):
     for i, (pk, text) in enumerate(paragraphs):
         announced, (quoted, ambiguous, spans) = found[pk]
         if pk in praying:
-            quoted, ambiguous = {}, []
+            # Only matches inside the prayer are dropped; a reading after it stays.
+            cut = praying[pk]
+            quoted = [k for k in quoted if max(spans[k]) >= cut]
+            ambiguous = ambiguous if cut < len(norm(text)) else []
         for key in sorted(quoted):
             citations.append({'paragraph_key': pk, 'basis': 'verbatim', 'ref': label(key), 'key': list(key),
                               'quote': quote_sentence(text, verse_text=holy.verses[key])})
@@ -366,6 +431,11 @@ def build(records, sources, sid, root, ports, *, holy=None):
             elif pick == 'other_verse':
                 unresolved.append({'paragraph_key': pk, 'reason': 'introduced_other_verse',
                                    'quote': quote_sentence(text_of[pk], position=q['position'])})
+    # Jev alone picks wrongly about a third of the time (the lead-in itself, a
+    # question, the next verse); GPT checks every pick and only a confirmed
+    # one stays.
+    citations, rejected = confirm_introduced(root, ports, citations, keys, text_of, holy)
+    unresolved.extend(rejected)
     # 「五章十九節」 after an earlier book, then Matthew 5:19 read aloud; or a
     # misspoken 「第二章」 and 「第十三節」, then Daniel 7:13 read aloud: what he
     # reads decides. A verse number without a book loses to a reading of the
@@ -457,6 +527,9 @@ def fragment_check(records, sources, sid, listing, *, holy=None, valid=None):
         near = order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1]
         if visible(c, [text for p in near for text in fragments.get(p, [])], holy):
             visible_count += 1
+            continue
+        if c['key'][2] is None:
+            # Only the chapter («我們今天開始來看馬太福音第十六章»): an opening, not needed.
             continue
         span = {'reference': c['ref'], 'paragraph_key': pk, 'quote': c['quote']}
         if span not in spans:

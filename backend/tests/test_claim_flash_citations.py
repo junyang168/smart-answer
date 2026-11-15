@@ -19,7 +19,7 @@ HOLY = cit.Bible(VERSES)
 
 
 class Jev:
-    identity = {'jev': 'test'}
+    identity = {'jev': 'test', 'gpt': {'backend': 'test'}}
 
     def __init__(self, picks=None):
         self.calls, self.picks = [], picks or {}
@@ -38,7 +38,11 @@ class Jev:
         return {'model': e.MODEL, 'answers': answers}
 
     def repair(self, req):
-        pytest.fail('the citation list never calls GPT')
+        # GPT checks only Jev's introduced picks; 'check' maps a ref to its decision.
+        assert req['input']['task'] == 'introduced_quote_check'
+        self.calls.append(req)
+        return {'items': [{'job_id': j['job_id'], 'decision': self.picks.get('check', {}).get(j['ref'], 'quote'),
+                           'reason': 'test'} for j in req['input']['jobs']]}
 
 
 def sources(*texts):
@@ -89,11 +93,20 @@ def test_introduced_quote_asks_jev_once_and_replays(tmp_path):
     text = '耶穌明講嘛，說謊是魔鬼的兒子，魔鬼是說謊之人的父嘛。'
     ports = Jev({'Q0': 'V0'})
     listing = cit.build({}, sources(text), 'S', tmp_path, ports, holy=HOLY)
-    asked = [c for c in ports.calls if 'prayer' not in c['questions']['Q0']['criteria']]
-    assert ('S0001', 'John 8:44') in keys(listing, 'introduced') and len(asked) == 1
+    asked = [c for c in ports.calls if 'questions' in c and 'prayer' not in c['questions']['Q0']['criteria']]
+    checked = [c for c in ports.calls if 'questions' not in c]
+    assert ('S0001', 'John 8:44') in keys(listing, 'introduced') and len(asked) == len(checked) == 1
     assert cit.build({}, sources(text), 'S', tmp_path, Jev(), holy=HOLY) == listing
     with pytest.raises(ValueError, match='source changed'):
         cit.build({}, sources(text + '改了'), 'S', tmp_path, Jev(), holy=HOLY)
+
+
+def test_introduced_quote_gpt_rejects_stays_out(tmp_path):
+    # Jev picks; GPT finds it is not a quote (the lead-in itself, a question...): it is not listed.
+    text = '耶穌明講嘛，說謊是魔鬼的兒子，魔鬼是說謊之人的父嘛。'
+    listing = cit.build({}, sources(text), 'S', tmp_path, Jev({'Q0': 'V0', 'check': {'John 8:44': 'not_quote'}}), holy=HOLY)
+    assert not keys(listing, 'introduced')
+    assert any(u['reason'] == 'introduced_not_quote' and u['ref'] == 'John 8:44' for u in listing['unresolved'])
 
 
 def test_not_quote_adds_nothing(tmp_path):
@@ -162,13 +175,13 @@ def test_uncovered_citation_becomes_a_fragment_span_without_any_evidence():
                                  'quote': '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。'}]
 
 
-def test_named_chapter_without_a_fragment_becomes_a_span():
-    # Lecture 1 S0029: 「我們從《馬太福音》第五章開始的處理。」 is in no SourceFragment.
+def test_named_chapter_without_a_fragment_is_not_added():
+    # Owner: a line that only names the chapter (「我們從《馬太福音》第五章開始」) is not added.
     src = sources('我們從《馬太福音》第十九章開始的處理。')
     listing = {'citations': [
         {'paragraph_key': 'S0001', 'basis': 'spoken', 'ref': 'Matt 19', 'key': ['Matt', 19, None],
          'quote': '我們從《馬太福音》第十九章開始的處理。', 'mark': '馬太福音》第十九章'}]}
-    assert check({}, src, listing)['spans'][0]['quote'] == '我們從《馬太福音》第十九章開始的處理。'
+    assert check({}, src, listing)['spans'] == []
 
 
 def test_bible_cache_must_be_complete(tmp_path):
@@ -311,11 +324,54 @@ def test_a_verse_number_he_also_reads_keeps_its_book(tmp_path):
     assert {c['ref'] for c in listing['citations'] if c['key'][2]} == {'Matt 5:18', 'Mark 7:18'}
 
 
-def test_a_dropped_mark_is_removed_from_the_store(sample):
+def test_a_mark_the_current_list_does_not_support_is_removed(sample):
+    # 2012 NYSC lectures: Gal 2:1 marked for 「《約翰一書》第二章一節」; the corrected list cites 1John 2:1.
     from backend.pipeline import claim_flash_citation_tags as tags
     store, root, _ = sample
     p = store.get_record_state('source_fragments', 'F')['payload']
-    store.apply_plan(store.plan_package({'package_id': 'mark', 'source_fragments': [{**p, 'scripture_refs': ['Gal 2:1']}]}))
-    result = tags.run(store, 'S', root / 'drop', holy=cit.Bible({}), apply=True, drop=[('S0001', 'Gal 2:1')])
+    store.apply_plan(store.plan_package({'package_id': 'mark', 'source_fragments': [{**p, 'scripture_refs': ['Gal 2:1', 'John 8']}]}))
+    listing = {'citations': [{'paragraph_key': 'S0001', 'basis': 'spoken', 'ref': 'John 8:30', 'key': ['John', 8, 30],
+                              'quote': 'x', 'mark': '不在片段裡的引出語'}]}
+    result = tags.run(store, 'S', root / 'mark', holy=cit.Bible({}), apply=True, listing=listing)
     assert result['status'] == 'applied'
+    # The chapter mark stays: the paragraph still cites a verse of John 8.
+    assert store.get_record_state('source_fragments', 'F')['payload']['scripture_refs'] == ['John 8']
+    result = tags.run(store, 'S', root / 'empty', holy=cit.Bible({}), apply=True, listing={'citations': []})
     assert store.get_record_state('source_fragments', 'F')['payload']['scripture_refs'] == []
+
+
+def test_source_only_lists_then_applies_in_the_same_root(sample, monkeypatch):
+    store, root, _ = sample
+    holy = cit.Bible({('John', 8, 47): '出於神的，必聽神的話；你們不聽，因為你們沒有聽從祂的話，你根本沒信。'})
+    monkeypatch.setattr(cit, 'default_bible', lambda: holy)
+    evidence = store.get_record_state('evidence_steps', 'E')
+    dry = flow.run_source_only(store, 'S', root / 'only', Jev())
+    assert dry['status'] == 'verified' and not dry['applied']
+    assert dry['stages']['citation_marks']['updates']['source_fragments/F']['scripture_refs'] == ['John 8:47']
+    assert 'scripture_refs' not in store.get_record_state('source_fragments', 'F')['payload']
+    done = flow.run_source_only(store, 'S', root / 'only', Jev(), apply=True)
+    assert done['status'] == 'applied' and done['stages']['citation_marks']['status'] == 'applied'
+    assert store.get_record_state('source_fragments', 'F')['payload']['scripture_refs'] == ['John 8:47']
+    assert store.get_record_state('evidence_steps', 'E') == evidence
+    assert not (root / 'only' / 'result.json').exists()
+
+
+def test_a_chapter_the_named_book_lacks_is_dropped(tmp_path):
+    # 2021 NYSC 4-1 S0022: 「提摩太後書第六章第14節」 (2 Timothy has four chapters) is not Matthew 6:14.
+    holy = cit.Bible({('Matt', 6, 14): '你們饒恕人的過犯，你們的天父也必饒恕你們的過犯。',
+                      ('2Tim', 4, 1): '我在神面前，並在將來審判活人死人的基督耶穌面前，憑著他的顯現和他的國度囑咐你：'})
+    paragraphs = {'S0001': {'text': '馬太福音第六章。'}, 'S0002': {'text': '提摩太後書第六章第14節，來提接聖徒。'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    assert not [c for c in listing['citations'] if c['paragraph_key'] == 'S0002']
+
+
+def test_a_prayer_running_into_the_teaching_drops_only_the_prayer(tmp_path):
+    # 2016 NYSC 3 S0001: the opening prayer and the lecture share one paragraph.
+    holy = cit.Bible({('2Cor', 1, 3): '願頌讚歸與我們的主耶穌基督的父神，就是發慈悲的父，賜各樣安慰的神。',
+                      ('Matt', 16, 16): '西門彼得回答說：你是基督，是永生神的兒子。'})
+    text = '我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen。我們昨天看到彼得說：「你是基督，是永生神的兒子。」'
+    ports = Jev({'prayer': True})
+    listing = cit.build({}, {'S': {'paragraphs': {'S0001': {'text': text}}}}, 'S', tmp_path, ports, holy=holy)
+    assert {c['ref'] for c in listing['citations']} == {'Matt 16:16'}
+    asked = [c['state']['paragraph'] for c in ports.calls if 'questions' in c and 'prayer' in c['questions']['Q0']['criteria']]
+    assert asked == ['我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen']
