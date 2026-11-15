@@ -100,6 +100,16 @@ def fragment(text, pk='S0001', fid='F'):
     return {f'source_fragments/{fid}': {'payload': {'source_id': 'S', 'paragraph_key': pk, 'verbatim_excerpt': text}}}
 
 
+def literal(records, src):
+    """Test stand-in for the literal binding check: text present in its paragraph."""
+    return {k: r['payload'] for k, r in records.items() if k.startswith('source_fragments/')
+            and r['payload']['verbatim_excerpt'] in src['S']['paragraphs'][r['payload']['paragraph_key']]['text']}
+
+
+def check(records, src, listing, holy=HOLY):
+    return cit.fragment_check(records, src, 'S', listing, holy=holy, valid=literal(records, src))
+
+
 def listing_of(pk, ref, quote, mark=None):
     b, cv = ref.split(' ')
     c, v = cv.split(':')
@@ -109,16 +119,15 @@ def listing_of(pk, ref, quote, mark=None):
 
 def test_any_source_fragment_shows_the_citation_whoever_links_it():
     src = sources('馬太福音十九章六節講得很清楚。')
-    checked = cit.fragment_check(fragment('馬太福音十九章六節講得很清楚。'), src, 'S',
-                                 listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
+    checked = check(fragment('馬太福音十九章六節講得很清楚。'), src, listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'))
     assert checked['visible'] == 1 and not checked['spans']
 
 
 def test_fragment_holding_the_reference_but_not_the_sentence_end_is_visible():
     # Lecture 1 S0128: the fragment stops before 「，跟你們講。」 yet holds the citation.
     sentence = '所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事，跟你們講。'
-    checked = cit.fragment_check(fragment('所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事'), sources(sentence), 'S',
-                                 listing_of('S0001', 'Matt 19:6', sentence, '馬太十九章六節'), holy=HOLY)
+    checked = check(fragment('所以我現在告訴各位說，馬太十九章六節所講是一樣，同樣的事'), sources(sentence),
+                    listing_of('S0001', 'Matt 19:6', sentence, '馬太十九章六節'))
     assert checked['visible'] == 1 and not checked['spans']
 
 
@@ -126,19 +135,35 @@ def test_loose_reading_two_paragraphs_away_is_visible():
     # Lecture 4 S0135: he names 19:22; a fragment two paragraphs on has his loose reading.
     holy = cit.Bible({('Matt', 19, 22): '那少年人聽見這話，就憂憂愁愁地走了；因為他的產業很多。'})
     src = sources('十九章第二十二節。', '別的。', '那少年人聽了這話就憂愁走了，因為他的財產甚多。')
-    checked = cit.fragment_check(fragment('那少年人聽了這話就憂愁走了，因為他的財產甚多。', pk='S0003'), src, 'S',
-                                 listing_of('S0001', 'Matt 19:22', '十九章第二十二節。', '十九章第二十二節'), holy=holy)
+    checked = check(fragment('那少年人聽了這話就憂愁走了，因為他的財產甚多。', pk='S0003'), src,
+                    listing_of('S0001', 'Matt 19:22', '十九章第二十二節。', '十九章第二十二節'), holy)
     assert checked['visible'] == 1 and not checked['spans']
+
+
+def test_fragment_from_an_earlier_transcript_version_covers_nothing():
+    # Lecture 1 S0029 carries two replaced fragments whose text is not in it.
+    src = sources('我們從馬太福音十九章六節開始。')
+    records = fragment('馬太福音十九章六節開始，已經過去了。')
+    assert not literal(records, src)
+    assert check(records, src, listing_of('S0001', 'Matt 19:6', '我們從馬太福音十九章六節開始。', '馬太福音十九章六節'))['spans']
 
 
 def test_uncovered_citation_becomes_a_fragment_span_without_any_evidence():
     # Lecture 1 S0030: he names 5:32 and no SourceFragment holds the sentence.
     src = sources('其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。', '別的。')
-    checked = cit.fragment_check(fragment('別的。', pk='S0002'), src, 'S',
-                                 listing_of('S0001', 'Matt 19:6', '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。', '馬太福音十九章六節'),
-                                 holy=HOLY)
+    checked = check(fragment('別的。', pk='S0002'), src,
+                    listing_of('S0001', 'Matt 19:6', '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。', '馬太福音十九章六節'))
     assert checked['spans'] == [{'reference': 'Matt 19:6', 'paragraph_key': 'S0001',
                                  'quote': '其實這節聖經啊，馬太福音十九章六節，耶穌也是在談這個問題。'}]
+
+
+def test_named_chapter_without_a_fragment_becomes_a_span():
+    # Lecture 1 S0029: 「我們從《馬太福音》第五章開始的處理。」 is in no SourceFragment.
+    src = sources('我們從《馬太福音》第十九章開始的處理。')
+    listing = {'citations': [
+        {'paragraph_key': 'S0001', 'basis': 'spoken', 'ref': 'Matt 19', 'key': ['Matt', 19, None],
+         'quote': '我們從《馬太福音》第十九章開始的處理。', 'mark': '馬太福音》第十九章'}]}
+    assert check({}, src, listing)['spans'][0]['quote'] == '我們從《馬太福音》第十九章開始的處理。'
 
 
 def test_bible_cache_must_be_complete(tmp_path):

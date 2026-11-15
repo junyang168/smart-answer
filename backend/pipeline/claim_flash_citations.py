@@ -134,7 +134,9 @@ def spoken(paragraphs, holy, start_book=None):
             if not book or not chapter or (book, chapter) not in holy.chapters:
                 continue
             if v is None:
-                if c:
+                # A bare 「第一章」 with a carried book is too often not Scripture
+                # (「我第一章給他們」 is his thesis); a chapter counts when he names the book.
+                if c and b:
                     out[pk].append(((book, chapter, None), pos, end))
                 continue
             if not c and offset + pos - at > BARE_REACH:
@@ -359,7 +361,7 @@ def visible(citation, fragments, holy):
     return False
 
 
-def fragment_check(records, sources, sid, listing, *, holy=None):
+def fragment_check(records, sources, sid, listing, *, holy=None, valid=None):
     """Source layer, text -> fragment: is every explicit citation inside some
     SourceFragment of this source? Uncovered citation sentences become literal
     SourceFragments; which Evidence or Observation uses them is the Evidence
@@ -367,14 +369,17 @@ def fragment_check(records, sources, sid, listing, *, holy=None):
     holy = holy or default_bible()
     order = sorted(sources[sid]['paragraphs'])
     index = {pk: i for i, pk in enumerate(order)}
+    # Only SourceFragments whose text is literally in the current transcript;
+    # a fragment left from an earlier transcript version covers nothing.
+    if valid is None:
+        from backend.pipeline.claim_flash_source_fill import valid_fragments
+        valid = valid_fragments(records, sources, sid)
     fragments = defaultdict(list)
-    for key, row in records.items():
-        if key.startswith('source_fragments/') and not row.get('retired') and row['payload'].get('source_id') == sid:
-            fragments[row['payload']['paragraph_key']].append(row['payload'].get('verbatim_excerpt') or '')
+    for row in valid.values():
+        fragments[row['paragraph_key']].append(row.get('verbatim_excerpt') or '')
     spans, visible_count = [], 0
     for c in listing['citations']:
-        if c['key'][2] is None:
-            continue
+        # A named chapter (「馬太福音第五章」) is a citation too and must be visible.
         pk = c['paragraph_key']
         near = order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1]
         if visible(c, [text for p in near for text in fragments.get(p, [])], holy):
