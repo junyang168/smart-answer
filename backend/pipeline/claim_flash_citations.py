@@ -362,21 +362,19 @@ def visible(citation, fragments, holy):
 
 
 def fragment_check(records, sources, sid, listing, *, holy=None):
-    """Source layer, text -> fragment: is every explicit citation inside a
-    SourceFragment of an active record? Uncovered citations become literal
+    """Source layer, text -> fragment: is every explicit citation inside some
+    SourceFragment of this source? Uncovered citations become literal
     attachment jobs on a nearby record that already holds the verse; the rest
     are reported for the missing-material step, never written here."""
     holy = holy or default_bible()
     order = sorted(sources[sid]['paragraphs'])
     index = {pk: i for i, pk in enumerate(order)}
+    # Only SourceFragment against the transcript; which Evidence or Observation
+    # a fragment belongs to is not this layer's question.
     in_use = defaultdict(list)
     for key, row in records.items():
-        if key.split('/')[0] not in {'evidence_steps', 'observations', 'claims'} or row.get('retired'):
-            continue
-        for fid in e.evidence_fragment_ids(row['payload']):
-            fragment = records.get('source_fragments/' + fid)
-            if fragment and not fragment.get('retired') and fragment['payload'].get('source_id') == sid:
-                in_use[fragment['payload']['paragraph_key']].append(fragment['payload'].get('verbatim_excerpt') or '')
+        if key.startswith('source_fragments/') and not row.get('retired') and row['payload'].get('source_id') == sid:
+            in_use[row['payload']['paragraph_key']].append(row['payload'].get('verbatim_excerpt') or '')
     holders = held_refs(records, sid)
     near_of = {}
     for key in holders:

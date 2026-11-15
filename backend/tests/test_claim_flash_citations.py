@@ -132,11 +132,11 @@ def test_held_citation_outside_every_fragment_becomes_a_literal_job():
     assert job['quote'] == '馬太福音十九章六節講得很清楚。'
 
 
-def test_citation_inside_another_records_fragment_is_visible():
-    # Source layer: any active record's fragment shows the citation.
+def test_any_source_fragment_shows_the_citation():
+    # Source layer: SourceFragment against transcript only, whoever links it.
     src = sources('馬太福音十九章六節講得很清楚。')
-    records = {**lower('馬太福音十九章六節講得很清楚。', ['Matt 5:32']),
-               'claims/C': {'payload': {'source_fragment_ids': ['F']}}}
+    records = {'source_fragments/F': {'payload': {'source_id': 'S', 'paragraph_key': 'S0001',
+                                                  'verbatim_excerpt': '馬太福音十九章六節講得很清楚。'}}}
     checked = cit.fragment_check(records, src, 'S', listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
     assert checked['visible'] == 1 and not checked['jobs'] and not checked['uncovered']
 
