@@ -209,3 +209,50 @@ def test_citation_fill_saves_only_a_source_fragment(sample):
     assert not again['new_fragments'] and again['items'][0]['status'] == 'already_covered'
     missing = fill.run_citations(store, 'S', [{**spans[0], 'quote': '不在原文。'}], root / 'absent', apply=True)
     assert missing['status'] == 'needs_attention' and not missing['new_fragments']
+
+
+def test_tag_needs_the_citation_itself_in_the_fragment():
+    from backend.pipeline import claim_flash_citation_tags as tags
+    spoken = {'basis': 'spoken', 'key': ['Matt', 5, 32], 'ref': 'Matt 5:32', 'mark': '馬太福音三十二節'}
+    assert tags.holds(spoken, '其實這節聖經啊，OK，馬太福音三十二節，耶稣也是在談這個問題', HOLY)
+    assert not tags.holds(spoken, '耶稣也是在談這個問題，談到離婚的問題。', HOLY)
+    read = {'basis': 'verbatim', 'key': ['Matt', 19, 6], 'ref': 'Matt 19:6', 'quote': '...'}
+    assert tags.holds(read, '他說神配合的，人不可分開，所以不能離婚', HOLY)
+    assert not tags.holds(read, '夫妻是一體，神配合', HOLY)
+
+
+def test_backfill_marks_only_existing_source_fragments(sample):
+    from backend.pipeline import claim_flash_citation_tags as tags
+    store, root, _ = sample
+    holy = cit.Bible({('John', 8, 47): '出於神的，必聽神的話；你們不聽，因為你們沒有聽從祂的話，你根本沒信。'})
+    before = store.get_record_state('source_fragments', 'F')['payload']
+    evidence = store.get_record_state('evidence_steps', 'E')
+    result = tags.run(store, 'S', root / 'tags', holy=holy, apply=True)
+    assert result['status'] == 'applied' and result['introduced'] == 'not_judged' and not result['new_fragments']
+    after = store.get_record_state('source_fragments', 'F')['payload']
+    assert after['scripture_refs'] == ['John 8:47']
+    assert {k: v for k, v in after.items() if k not in ('scripture_refs', 'revision')} == \
+        {k: v for k, v in before.items() if k != 'revision'}
+    assert store.get_record_state('evidence_steps', 'E') == evidence
+    assert tags.run(store, 'S', root / 'tags', holy=holy, apply=True)['status'] == 'applied'
+    again = tags.run(store, 'S', root / 'again', holy=holy, apply=True)
+    assert again['status'] == 'verified' and not again['updates']
+
+
+def test_reading_decides_the_book_of_a_carried_verse_number(tmp_path):
+    holy = cit.Bible({('Lev', 18, 6): '你們都不可露骨肉之親的下體，親近他們。我是耶和華。',
+                      ('Lev', 5, 19): '這是贖愆祭；他實在在耶和華面前有了罪。',
+                      ('Matt', 5, 19): '所以，無論何人廢掉這誡命中最小的一條，又教訓人這樣做，他在天國要稱為最小的。'})
+    paragraphs = {'S0001': {'text': '利未記十八章所禁戒的那些東西。'},
+                  'S0002': {'text': '五章十九節說：「所以，無論何人廢掉這誡命中最小的一條，又教訓人這樣做。」'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    refs = {c['ref'] for c in listing['citations'] if c['paragraph_key'] == 'S0002'}
+    assert refs == {'Matt 5:19'}
+
+
+def test_reading_overrides_a_misspoken_chapter(tmp_path):
+    holy = cit.Bible({('Dan', 2, 13): '於是命令發出，要殺戮哲士。',
+                      ('Dan', 7, 13): '我在夜間的異象中觀看，見有一位像人子的，駕著天雲而來，被領到亙古常在者面前，'})
+    paragraphs = {'S0001': {'text': '但以理書第七章。然後有第三個獸，第二章……然後第十三節：「我在夜間的異象中觀看，見有一位像人子的，駕著天雲而來。」'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    assert {c['ref'] for c in listing['citations'] if c['key'][2]} == {'Dan 7:13'}

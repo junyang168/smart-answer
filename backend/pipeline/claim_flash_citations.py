@@ -107,6 +107,16 @@ def resolve_book(token):
     return None
 
 
+def names_book(mark):
+    m = S._SPOKEN_REFERENCE_PATTERN.search(mark)
+    return bool(m and m.group('book'))
+
+
+def names_chapter(mark):
+    m = S._SPOKEN_REFERENCE_PATTERN.search(mark)
+    return bool(m and m.group('chapter'))
+
+
 def spoken(paragraphs, holy, start_book=None):
     """Book/chapter/verse he says, carried across paragraphs. A chapter the
     carried book does not have falls back to the sermon's main book; a verse
@@ -251,7 +261,9 @@ def build(records, sources, sid, root, ports, *, holy=None):
     """The citation list for this source version, saved and reused."""
     holy = holy or default_bible()
     paragraphs = sorted((pk, p['text']) for pk, p in sources[sid]['paragraphs'].items())
-    pin = e.digest({'contract': CONTRACT, 'paragraphs': paragraphs})
+    # Without Jev (ports=None) introduced quotes are not judged; that list is
+    # saved under a different pin so a full build never reuses it.
+    pin = e.digest({'contract': CONTRACT, 'paragraphs': paragraphs, **({'introduced': False} if ports is None else {})})
     path = Path(root) / 'citations.json'
     if path.exists():
         saved = json.loads(path.read_text())
@@ -295,7 +307,7 @@ def build(records, sources, sid, root, ports, *, holy=None):
     by_paragraph = defaultdict(list)
     for q in questions:
         by_paragraph[q['paragraph_key']].append(q)
-    for pk, items in sorted(by_paragraph.items()):
+    for pk, items in sorted(by_paragraph.items()) if ports is not None else ():
         asked = {}
         for n, q in enumerate(items):
             criteria = {f'V{i}': f'{label(c)}：{holy.verses[c]}' for i, c in enumerate(q['candidates'])}
@@ -320,11 +332,27 @@ def build(records, sources, sid, root, ports, *, holy=None):
         if token not in seen:
             seen.add(token)
             unique.append(c)
+    # 「五章十九節」 after an earlier book, then Matthew 5:19 read aloud; or a
+    # misspoken 「第二章」 and 「第十三節」, then Daniel 7:13 read aloud: what he
+    # reads decides. A verse number without a book loses to a reading of the
+    # same verse number elsewhere in the paragraph (same chapter, if he said one).
+    read = defaultdict(list)
+    for c in unique:
+        if c['basis'] == 'verbatim' and c['key'][2] is not None:
+            read[c['paragraph_key'], c['key'][2]].append(tuple(c['key']))
+    def contradicted(c):
+        if c['basis'] != 'spoken' or c['key'][2] is None or names_book(c.get('mark', '')):
+            return False
+        said_chapter = names_chapter(c.get('mark', ''))
+        return any(k != tuple(c['key']) and (not said_chapter or k[1] == c['key'][1])
+                   for k in read[c['paragraph_key'], c['key'][2]])
+    unique = [c for c in unique if not contradicted(c)]
     # A chapter-only mark adds nothing where the same paragraph cites a verse of it.
     unique = [c for c in unique if c['key'][2] is not None or not any(
         d['paragraph_key'] == c['paragraph_key'] and d['key'][:2] == c['key'][:2] and d['key'][2] for d in unique)]
     result = {'version': CONTRACT, 'source_id': sid, 'input_sha256': pin, 'main_book': main_book,
-              'citations': unique, 'unresolved': unresolved}
+              'citations': unique, 'unresolved': unresolved,
+              **({'introduced': 'not_judged', 'introduced_questions': len(questions)} if ports is None else {})}
     e.save(path, result)
     return result
 
