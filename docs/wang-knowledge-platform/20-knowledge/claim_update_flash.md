@@ -299,6 +299,28 @@ Observation 保存教授指出的經文、措辭、事實或現象；Evidence �
 反駁或說明判斷的材料 statement；它如何參與論證屬 Claim 層，不靠句子深奧程度區分。
 直接由原文支持的 Evidence 不必虛構一條 Observation。
 
+**禱告不是教導**（`claim_flash_evidence_prayer_v1`，已實作）。Evidence 層開始時由 Jev 判定本講的禱告：
+首兩段與末段整段問，含「奉…名求／阿們／Amen」的段落另問該句；判定方式與經文引用清單相同。
+落在禱告內的重要內容清單項不進查漏，不為它建立或增補 Evidence／Observation。
+全部 SourceFragment 都在禱告內的既有 Evidence／Observation 列入結果的 `prayer_only_records`，
+交負責人退役，本層不自行退役。此契約之前開始的 root 照原樣重放。
+2026-11-15 在 33 講中找到 2 條（2017 NYSC 1 開場禱告、2022 NYSC 結尾祝福）及其上的 Claim，已由負責人退役。
+
+**分件規則**（負責人 2026-11-15 定，依一般論證標註做法；檢查尚未實作）。來源是 #783 試驗，
+見 #783 試驗記錄 `10-extraction/claim_creation_agent_spike_783_20261115.md` 第 4 節（PR #784）：
+
+| 規則 | 內容 | 在哪一層、由誰查 |
+| --- | --- | --- |
+| R1 一件一事 | 每條 Evidence／Observation／Claim 只說一件可單獨判斷真假的事；以「並且」「；」連起兩件事就是兩件。一段念出的經文算一件，除非各部分用途不同 | 本層：加進既有記錄 Jev 檢查的同一請求，未通過交 GPT 處置 |
+| R2 有連接 | 每條 Evidence／Observation 至少連到一條 Claim | 已由 [4.3](#43-從孤立-evidenceobservation-主動查漏) 處理孤立記錄，不另查 |
+| R3 用到全部 | 每條連接用到起點那一件的全部內容；只用到一部分就是該拆的那一件。一件可連到多條 Claim | Claim 層：加進 [4.2](#42-claim-與下層連接獨立配對檢查) 的配對檢查 |
+| R4 不重述 | Claim 不重述連到它的 Evidence／Observation，Evidence／Observation 也不只是它所連 Claim 的換句話說 | Claim 層：同上 |
+| R5 Observation 不含判斷 | Observation 只記他指出的經文、措辭、事實；他由此下的判斷是 Evidence 或 Claim | 本層：同 R1 |
+| R6 用詞有據 | statement 中的譯本、語言、文法詞（新譯本、希臘文、語態……）要出現在它的 SourceFragment 裡；「中文翻譯」在他的語境裡就指和合本，可寫成和合本 | 本層：程式，不調模型 |
+
+R1、R5 未通過時，GPT 的處置可以是拆成兩條，各帶自己那部分的 SourceFragment；連接如何改由 Claim 層配對檢查決定。
+GPT 的處置即最終結果，不再複查。
+
 查漏的唯讀Position須帶其實際title與歸屬，不能只帶空statement或attribution便判缺。
 增補既有材料保留其完整來源綁定，所選支持片段必須已提供且已掛載；
 不另要求它逐字覆蓋查漏引文中的全部口頭銜接。原文片段的字面完整覆蓋仍由原文層驗證，
