@@ -221,6 +221,8 @@ def test_tag_needs_the_citation_itself_in_the_fragment():
     spoken = {'basis': 'spoken', 'key': ['Matt', 5, 32], 'ref': 'Matt 5:32', 'mark': '馬太福音三十二節'}
     assert tags.holds(spoken, '其實這節聖經啊，OK，馬太福音三十二節，耶稣也是在談這個問題', HOLY)
     assert not tags.holds(spoken, '耶稣也是在談這個問題，談到離婚的問題。', HOLY)
+    three = {'basis': 'spoken', 'key': ['Matt', 13, 3], 'ref': 'Matt 13:3', 'mark': '三節'}
+    assert not tags.holds(three, 'E，麵酵的比喻，三十三節。', HOLY) and tags.holds(three, '從三節B到', HOLY)
     read = {'basis': 'verbatim', 'key': ['Matt', 19, 6], 'ref': 'Matt 19:6', 'quote': '...'}
     assert tags.holds(read, '他說神配合的，人不可分開，所以不能離婚', HOLY)
     assert not tags.holds(read, '夫妻是一體，神配合', HOLY)
@@ -285,3 +287,25 @@ def test_two_verses_in_one_new_sentence_are_both_marked(sample):
     result = fill.run_citations(store, 'S', spans, root / 'two', apply=True)
     [new] = result['new_fragments'].values()
     assert store.get_record_state('source_fragments', new['fragment_id'])['payload']['scripture_refs'] == ['John 8:44', 'John 8:47']
+
+
+def test_numbered_letter_of_john_is_a_book(tmp_path):
+    holy = cit.Bible({('Gal', 6, 2): '你們各人的重擔要互相擔當，如此，就完全了基督的律法。',
+                      ('Gal', 2, 1): '過了十四年，我同巴拿巴又上耶路撒冷去，並帶著提多同去。',
+                      ('Gal', 2, 2): '我是奉啟示上去的，把我在外邦人中所傳的福音對弟兄們陳說。',
+                      ('1John', 2, 1): '我小子們哪，我將這些話寫給你們，是要叫你們不犯罪。',
+                      ('1John', 2, 2): '他為我們的罪作了挽回祭，不是單為我們的罪，也是為普天下人的罪。'})
+    paragraphs = {'S0001': {'text': '加拉太書第六章第二節。'},
+                  'S0002': {'text': '再給各位看一節聖經，《約翰一書》第二章一節到第二節。'},
+                  'S0003': {'text': '第二章第二節說：在父那裡我們有一位中保。'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    assert {c['ref'] for c in listing['citations']} == {'Gal 6:2', '1John 2:1', '1John 2:2'}
+
+
+def test_a_verse_number_he_also_reads_keeps_its_book(tmp_path):
+    holy = cit.Bible({('Matt', 5, 18): '我實在告訴你們，就是到天地都廢去了，律法的一點一畫也不能廢去，都要成全。',
+                      ('Mark', 7, 18): '耶穌對他們說：你們也是這樣不明白嗎？豈不曉得凡從外面進入的，不能污穢人；'})
+    paragraphs = {'S0001': {'text': '馬太福音第五章。十八節說：「律法的一點一畫也不能廢去，都要成全。」'
+                                    '又說：「豈不曉得凡從外面進入的，不能污穢人。」'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    assert {c['ref'] for c in listing['citations'] if c['key'][2]} == {'Matt 5:18', 'Mark 7:18'}

@@ -14,6 +14,7 @@ from backend.pipeline import claim_flash_citations as cit, claim_flash_common as
 from backend.pipeline import claim_flash_source_fill as fill, evidence_refresh as e
 
 VERSION = 'claim_flash_citation_tags_v1'
+NUMERALS = set('零〇一二三四五六七八九十百0123456789')
 
 
 def holds(citation, excerpt, holy):
@@ -22,7 +23,9 @@ def holds(citation, excerpt, holy):
     t = cit.norm(excerpt)
     if citation['basis'] != 'verbatim':
         mark = cit.norm(citation.get('mark') or '')
-        return bool(mark) and mark in t
+        # 「三節」 must not be the tail of 「三十三節」.
+        return bool(mark) and any(t[i - 1:i] not in NUMERALS
+                                  for i in range(len(t)) if t.startswith(mark, i))
     verse = cit.norm(holy.verses.get(tuple(citation['key']), ''))
     n = cit.QUOTE_CHARS
     return any(t[i:i + n] in verse for i in range(len(t) - n + 1))
@@ -40,12 +43,12 @@ def tags(listing, valid, holy):
     return found
 
 
-def run(store, source_id, root, ports=None, *, holy=None, apply=False):
+def run(store, source_id, root, ports=None, *, holy=None, apply=False, drop=()):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     with (root/'tags.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         pin = f.bind_source(store, source_id, root)
-        intent = {'version':VERSION, 'source':pin, 'introduced_judged':ports is not None}
+        intent = {'version':VERSION, 'source':pin, 'introduced_judged':ports is not None, **({'drop':sorted(map(list, drop))} if drop else {})}
         if (root/'verification.json').exists():
             if json.loads((root/'intent.json').read_text()) != intent:
                 raise ValueError('citation tag saved input differs')
@@ -62,11 +65,21 @@ def run(store, source_id, root, ports=None, *, holy=None, apply=False):
         listing = cit.build(records, sources, source_id, root, ports, holy=holy)
         valid = fill.valid_fragments(records, sources, source_id)
         updates = {}
-        for key, refs in sorted(tags(listing, valid, holy).items()):
+        found = tags(listing, valid, holy)
+        # drop: (paragraph, ref) pairs a corrected list no longer cites, e.g.
+        # Gal 2:1 for 「《約翰一書》第二章一節」. Other marks stay.
+        drop = {tuple(x) for x in drop}
+        keys = set(found) | {k for k in valid if any((valid[k].get('paragraph_key'), r) in drop
+                                                     for r in records[k]['payload'].get('scripture_refs', []))}
+        for key in sorted(keys):
             payload = records[key]['payload']
-            merged = sorted(set(payload.get('scripture_refs', [])) | refs)
-            if merged != payload.get('scripture_refs'):
-                updates[key] = {**payload, 'scripture_refs': merged}
+            pk = payload.get('paragraph_key')
+            kept = {r for r in payload.get('scripture_refs', []) if (pk, r) not in drop}
+            refs = sorted(kept | found.get(key, set()))
+            if refs == payload.get('scripture_refs', []):
+                continue
+            post = {k:v for k,v in payload.items() if k != 'scripture_refs'}
+            updates[key] = {**post, 'scripture_refs': refs} if refs else post
         f.source_unchanged(sources)
         read_keys = sorted({'source_documents/'+source_id, *updates})
         result = {'version':VERSION, 'source_id':source_id, 'status':'verified', 'items':[],

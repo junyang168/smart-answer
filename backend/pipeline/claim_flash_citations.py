@@ -95,6 +95,10 @@ def osis_book(slug):
     return S.BOOK_TO_OSIS.get(slug.upper()) if slug else None
 
 
+JOHN_LETTER = re.compile(r'[約约]翰([一二三壹貳參])書\W{0,2}(?:第)?\s*$')
+JOHN_LETTERS = {'一': '1John', '壹': '1John', '二': '2John', '貳': '2John', '三': '3John', '參': '3John'}
+
+
 def resolve_book(token):
     """Existing aliases first, then the same token with 書／記 added (「瑪拉基」)."""
     if not token:
@@ -126,7 +130,11 @@ def spoken(paragraphs, holy, start_book=None):
     for pk, text in paragraphs:
         marks = []
         for m in S._SPOKEN_REFERENCE_PATTERN.finditer(text):
-            marks.append((m.start(), m.end(), resolve_book(m.group('book')), S.chinese_number(m.group('chapter')),
+            # The book pattern skips numerals, so 「約翰一書」 reaches it as 「書」.
+            numbered = JOHN_LETTER.search(text[:m.start('chapter')])
+            start = numbered.start() if numbered else m.start()
+            named = JOHN_LETTERS[numbered.group(1)] if numbered else resolve_book(m.group('book'))
+            marks.append((start, m.end(), named, S.chinese_number(m.group('chapter')),
                           S.chinese_number(m.group('verse')) if m.group('verse') else None))
         for m in S._BARE_VERSE_PATTERN.finditer(text):
             if any(s <= m.start() < s + 14 for s, _, _, _, v in marks if v):
@@ -358,27 +366,32 @@ def build(records, sources, sid, root, ports, *, holy=None):
             elif pick == 'other_verse':
                 unresolved.append({'paragraph_key': pk, 'reason': 'introduced_other_verse',
                                    'quote': quote_sentence(text_of[pk], position=q['position'])})
-    seen, unique = set(), []
-    for c in citations:
-        token = (c['paragraph_key'], tuple(c['key']))
-        if token not in seen:
-            seen.add(token)
-            unique.append(c)
     # 「五章十九節」 after an earlier book, then Matthew 5:19 read aloud; or a
     # misspoken 「第二章」 and 「第十三節」, then Daniel 7:13 read aloud: what he
     # reads decides. A verse number without a book loses to a reading of the
-    # same verse number elsewhere in the paragraph (same chapter, if he said one).
-    read = defaultdict(list)
-    for c in unique:
+    # same verse number elsewhere in the paragraph (same chapter, if he said
+    # one), unless he also reads that very verse there. Decided before
+    # duplicates go, so a dropped entry never takes its reading with it.
+    read = defaultdict(set)
+    for c in citations:
         if c['basis'] == 'verbatim' and c['key'][2] is not None:
-            read[c['paragraph_key'], c['key'][2]].append(tuple(c['key']))
+            read[c['paragraph_key'], c['key'][2]].add(tuple(c['key']))
     def contradicted(c):
         if c['basis'] != 'spoken' or c['key'][2] is None or names_book(c.get('mark', '')):
             return False
+        readings = read[c['paragraph_key'], c['key'][2]]
         said_chapter = names_chapter(c.get('mark', ''))
-        return any(k != tuple(c['key']) and (not said_chapter or k[1] == c['key'][1])
-                   for k in read[c['paragraph_key'], c['key'][2]])
-    unique = [c for c in unique if not contradicted(c)]
+        return tuple(c['key']) not in readings and any(
+            not said_chapter or k[1] == c['key'][1] for k in readings)
+    citations = [c for c in citations if not contradicted(c)]
+    # One entry per verse and paragraph; the one he says aloud wins, since
+    # its words mark the exact place (「又說第二章一節：『我小子們。』」).
+    best = {}
+    for c in citations:
+        token = (c['paragraph_key'], tuple(c['key']))
+        if token not in best or (c['basis'] == 'spoken' and best[token]['basis'] == 'verbatim'):
+            best[token] = c
+    unique = [c for c in citations if best[(c['paragraph_key'], tuple(c['key']))] is c]
     # A chapter-only mark adds nothing where the same paragraph cites a verse of it.
     unique = [c for c in unique if c['key'][2] is not None or not any(
         d['paragraph_key'] == c['paragraph_key'] and d['key'][:2] == c['key'][:2] and d['key'][2] for d in unique)]
