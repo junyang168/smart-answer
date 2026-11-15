@@ -197,10 +197,12 @@ def test_citation_fill_saves_only_a_source_fragment(sample):
     evidence = store.get_record_state('evidence_steps', 'E')
     spans = [{'reference': 'John 8:44', 'paragraph_key': 'S0001', 'quote': '你沒有聽從祂的話，你根本沒信。'}]
     result = fill.run_citations(store, 'S', spans, root / 'cite', apply=True)
-    assert result['status'] == 'applied' and result['model_calls'] == 0 and not result['updates']
+    assert result['status'] == 'applied', result['items']
+    assert result['model_calls'] == 0 and not result['updates']
     [new] = result['new_fragments'].values()
     assert new['verbatim_excerpt'] == '你沒有聽從祂的話，你根本沒信。'
-    assert store.get_record_state('source_fragments', new['fragment_id'])['payload']['verbatim_excerpt'] == new['verbatim_excerpt']
+    saved = store.get_record_state('source_fragments', new['fragment_id'])['payload']
+    assert saved['verbatim_excerpt'] == new['verbatim_excerpt'] and saved['scripture_refs'] == ['John 8:44']
     assert store.get_record_state('evidence_steps', 'E') == evidence
     assert fill.run_citations(store, 'S', spans, root / 'cite', apply=True)['status'] == 'applied'
     again = fill.run_citations(store, 'S', spans, root / 'again', apply=True)

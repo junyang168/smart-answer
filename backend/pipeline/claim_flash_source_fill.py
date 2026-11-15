@@ -82,6 +82,10 @@ def literal_spans(records, sources, source_id, source, entries, valid, pins):
                     {'statement':'原文片段補齊'}, [span],
                     {'nearby_paragraphs':[{'source_id':source_id,'paragraph_key':pk,**paragraph}]},
                     working, sources)
+                if base.get('citation_ref'):
+                    # A citation's SourceFragment says which verse it cites, in the
+                    # same field Evidence and Observation use.
+                    fragments = {k:{**v, 'scripture_refs':[base['citation_ref']]} for k,v in fragments.items()}
                 generated.update(fragments)
                 item.update(status='prepared', fragment_ids=post['source_fragment_ids'])
                 for fid in post['source_fragment_ids']:
@@ -194,7 +198,7 @@ def fill_inventory_handoff(store,source_id,findings,previous,root,*,apply=False)
         return e.commit_verified(store,root,source_fragments_only=True) if apply else e.publish(root,result)
 
 
-CITATION_VERSION = 'claim_flash_citation_fragments_v1'
+CITATION_VERSION = 'claim_flash_citation_fragments_v2'
 
 
 def run_citations(store, source_id, spans, root, *, apply=False):
@@ -229,8 +233,8 @@ def run_citations(store, source_id, spans, root, *, apply=False):
                   'items':items, 'pending':pending, 'updates':{}, 'new_fragments':generated,
                   'read_keys':sorted(pins-set(generated)), 'applied':False, 'model_calls':0,
                   'claim_qualification':'not_granted',
-                  'scope':'literal SourceFragments for explicit Scripture citations; linking them is the Evidence layer',
-                  'commit_reason':'Save explicit Scripture citation sentences as literal SourceFragments; no Evidence, Observation or Claim changes'}
+                  'scope':'literal SourceFragments for explicit Scripture citations, marked with scripture_refs; linking them is the Evidence layer',
+                  'commit_reason':'Save explicit Scripture citation sentences as literal SourceFragments marked with scripture_refs; no Evidence, Observation or Claim changes'}
         e.save(root/'before.json', {'sources':sources,'records':{k:records[k] for k in result['read_keys']}})
         e.save(root/'verification.json', result)
         return e.commit_verified(store, root, source_fragments_only=True) if apply else e.publish(root, result)
