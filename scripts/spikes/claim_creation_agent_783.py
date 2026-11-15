@@ -6,6 +6,21 @@ Reads <work>/section.json and <work>/rounds/draft-<round>.json; writes
 <work>/rounds/checks-<round>.json. GPT questions and answers are saved under
 <work>/gpt-root and replay on a rerun. The author (Claude Code) never checks
 its own pieces: the program checks text, GPT answers one question per piece.
+
+Structure rules (owner discussion 2026-11-15):
+  R1 One assertion per piece: an Evidence, Observation or Claim states one thing
+     that can be true or false on its own (two things joined by 並且/；are two pieces).
+     A quoted reading stays one piece unless its parts are used differently.
+  R2 Every Evidence and Observation has at least one link.  (program)
+  R3 Each link uses the whole piece it starts from, not only part of it.
+     One piece may link to several Claims.
+  R4 No repeats: a Claim does not restate an Evidence/Observation linked to it,
+     and an Evidence/Observation does not restate the Claim it links to.
+  R5 An Observation is only what the text he reads says; his own words are Evidence.
+  R6 A version, language or grammar term in a statement (和合本, 希臘文, 語態 ...)
+     appears in its quotes.  (program)
+R1, R3, R4, R5: Jev answers one narrow question per piece or link; GPT rules
+only on what Jev does not pass. Every answer is saved.
 """
 import json
 import sys
@@ -41,6 +56,22 @@ GAP = ('你核對從王教授講課逐字稿整理出的記錄是否漏了內容
     '念經文本身、轉場、口頭禪、重複、未展開的預告不必列。沒有就回傳空的 gaps。不要評價他的觀點。')
 
 
+TERMS = ('和合本', '新譯本', '思高', '呂振中', '英文', '希臘文', '希伯來文', '亞蘭文', '語態', '被動', '主動', '時態', '不定過去式')
+PASS = 'pass'
+RULES = {
+    'R1': ('one_assertion', '`statement` 是否只說一件可以單獨判斷真假的事？引用的一段經文算一件，除非經文的不同部分各有不同用途。',
+           {PASS: '只說一件事。', 'fail': '說了兩件或更多可以分開判斷的事。', 'uncertain': '無法確定。'}),
+    'R3': ('whole_used', '`link` 從 `from` 連到 `to`。這條連接是否用到 `from` 的全部內容，而不只其中一部分？',
+           {PASS: '用到全部內容。', 'fail': '只用到其中一部分，其餘部分與這條連接無關。', 'uncertain': '無法確定。'}),
+    'R4': ('no_repeat', '`from` 與 `to` 是否只是同一件事換句話說？',
+           {PASS: '不是重複：兩者各說不同的事。', 'fail': '是重複：一條只是另一條換句話說。', 'uncertain': '無法確定。'}),
+    'R5': ('reading_only', '`statement` 是否只說教授所念經文（或原文）本身的內容，不含教授自己的解釋、強調或評論？',
+           {PASS: '只有經文本身的內容。', 'fail': '含有教授自己的話。', 'uncertain': '無法確定。'}),
+}
+RULE_GPT = COMMON + ('每個工作給一條結構規則（rule）、要核對的記錄（item）與整段講課原文（section）。'
+    '問題：這記錄是否符合這條規則？')
+
+
 def program_checks(section, draft):
     paragraphs = section['paragraphs']
     out = []
@@ -53,6 +84,17 @@ def program_checks(section, draft):
             missing = [x for x in rec['fragments'] if x not in draft['fragments']]
             if missing:
                 out.append({'piece': rid, 'check': 'fragments_exist', 'verdict': 'fail', 'problem': f'缺片段 {missing}'})
+    linked = {l['from'] for l in draft['links']}
+    for rid in [*draft['observations'], *draft['evidence']]:
+        ok = rid in linked
+        out.append({'piece': rid, 'check': 'R2_has_link', 'verdict': 'pass' if ok else 'fail',
+                    'problem': '' if ok else '沒有任何連接'})
+    for kind in ('observations', 'evidence', 'claims'):
+        for rid, rec in draft[kind].items():
+            said = ''.join(draft['fragments'][x]['text'] for x in rec['fragments'] if x in draft['fragments'])
+            extra = [t for t in TERMS if t in rec['statement'] and t not in said]
+            out.append({'piece': rid, 'check': 'R6_terms_in_quotes', 'verdict': 'fail' if extra else 'pass',
+                        'problem': f'引文沒有：{"、".join(extra)}' if extra else ''})
     # Every explicit citation in the section must sit in some fragment (#702 rule).
     listing = cit.build({}, {section['source_id']: {'paragraphs': {k: {'text': t} for k, t in paragraphs.items()}}},
                         section['source_id'], Path(section['work']) / 'citations', None)
@@ -108,6 +150,39 @@ def model_checks(section, draft, ports, root, previous):
     return out, asked, previous
 
 
+def rule_checks(section, draft, ports, root):
+    """Jev asks each rule question; anything Jev does not pass goes to GPT, whose verdict stands."""
+    paragraphs = section['paragraphs']
+    full = '\n'.join(f'{k} {t.strip()}' for k, t in paragraphs.items() if t.strip())
+    quotes = lambda ids: [draft['fragments'][x]['text'] for x in ids]
+    every = {**draft['observations'], **draft['evidence'], **draft['claims']}
+    items = []  # (rule, piece, state)
+    for rid, x in every.items():
+        items.append(('R1', rid, {'statement': x['statement'], 'quotes': quotes(x['fragments'])}))
+    for rid, x in draft['observations'].items():
+        items.append(('R5', rid, {'statement': x['statement'], 'quotes': quotes(x['fragments'])}))
+    for l in draft['links']:
+        pair = {'from': every[l['from']]['statement'], 'to': every[l['to']]['statement'],
+                'link': {'type': l['type'], 'reason': l['reason']}, 'from_quotes': quotes(every[l['from']]['fragments'])}
+        items.append(('R3', f"{l['from']}->{l['to']}", pair))
+        items.append(('R4', f"{l['from']}->{l['to']}", pair))
+    out, flagged = [], []
+    for rule, piece, state in items:
+        name, text, criteria = RULES[rule]
+        answer = f.jev(Path(root) / 'jev' / rule, ports, state, {'Q0': {'type': 'choice', 'instructions': text, 'criteria': criteria}})['Q0']
+        if answer == PASS:
+            out.append({'piece': piece, 'check': f'{rule}_{name}', 'verdict': 'pass', 'problem': '', 'by': 'jev'})
+        else:
+            flagged.append({'job_id': f'{rule}|{piece}', 'rule': text + ' 符合＝' + criteria[PASS], 'item': state, 'section': full})
+    if flagged:
+        for _, reply in f.gpt(Path(root) / 'rules', ports, 'structure_rules', flagged, VERDICT, RULE_GPT, semantic_review=False):
+            for item in reply['items']:
+                rule, piece = item['job_id'].split('|', 1)
+                out.append({'piece': piece, 'check': f'{rule}_{RULES[rule][0]}', 'verdict': item['verdict'],
+                            'problem': item['problem'], 'by': 'gpt (jev flagged)'})
+    return out, len(items), len(flagged)
+
+
 def main():
     load_dotenv('.env')
     work, n = Path(sys.argv[1]), sys.argv[2]
@@ -120,6 +195,9 @@ def main():
         ports, _ = flow.subscription_ports(work / 'gpt-root', ClaimModelCapacity(json.loads(Path(CAPACITY).read_text())))
         found, asked, previous = model_checks(section, draft, ports, work / 'gpt-root', previous)
         checks += found
+        ruled, n_jev, n_gpt = rule_checks(section, draft, ports, work / 'gpt-root')
+        checks += ruled
+        print(n_jev, 'Jev rule questions;', n_gpt, 'sent to GPT')
         memory.write_text(json.dumps({'|'.join(k): v for k, v in previous.items()}, ensure_ascii=False, indent=1))
     (work / 'rounds' / f'checks-{n}.json').write_text(json.dumps({'checks': checks, 'asked': asked}, ensure_ascii=False, indent=1))
     print(len(asked), 'pieces asked this round')
