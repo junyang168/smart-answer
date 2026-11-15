@@ -4,7 +4,7 @@
 > **類型**：記錄。
 > **狀態**：當前。
 > **與代碼對齊**：2026-11-14（讀取 `c86cfc31` 的 `claim_flash_common`、`claim_flash_questions`、`claim_flash_scripture` 及 `backend.api.scripture`；試驗 driver 未進 repo，存於 `/Volumes/Jun SSD/codex-output/claim-flash-jev-audit-702-20261114/scripts/`）。
-> **權威範圍**：一次對照 [Jev cookbook](https://docs.typesafe.ai/cookbooks) 的唯讀核對，以及經文引用清單的四項試驗與下層記錄出處的核對（第 9 節）。未寫正式庫，未改 Flash 代碼。據此提出的方案見 [Flash 經文引用清單方案](./claim_flash_scripture_citation_solution.md)。
+> **權威範圍**：一次對照 [Jev cookbook](https://docs.typesafe.ai/cookbooks) 的唯讀核對，以及經文引用清單的四項試驗與下層記錄出處的核對（第 9 節）；第 1–9 節未寫正式庫。第 10 節記同日起對正式庫的 SourceFragment 補標。據此提出的方案見 [Flash 經文引用清單方案](./claim_flash_scripture_citation_solution.md)。
 
 ## 目錄
 
@@ -186,3 +186,31 @@ Jev 選「第幾節」「別的經文」或「不是引用經文」。
 
 檔案：`/Volumes/Jun SSD/codex-output/claim-flash-layer1-702-20261114/`（`layer1.json`、`layer2.json`、`layer2b-never.json`）、
 `claim-flash-layer2-jev-702-20261114/` 至 `…-jev4-702-20261114/`；driver 為 `scripts/layer1.py`、`layer2.py`、`layer2b.py`、`layer2_gpt.py`、`layer2_jev.py` 至 `layer2_jev4.py`。
+
+## 10. 馬太福音系列 SourceFragment 補標（2026-11-14 至 11-15）
+
+負責人指定範圍：馬太福音 NYSC 系列中論證層已更新的 28 講（2011–2018；2021、2022 未更新，不做）。
+每次寫入前備份 `wang_knowledge` schema；只改或新建 SourceFragment，未動 Evidence、Observation、Claim。
+
+| 順序 | 做了什麼 | 結果 |
+| --- | --- | --- |
+| 1 | 五講缺的引用補為 SourceFragment（負責人逐句核准） | 新建 4 個 |
+| 2 | 程式清單補標既有片段，不判引出語 | 27 講，1,609 個 |
+| 3 | 引出語：Jev 219 次，選中 81 處；GPT 11 次逐處核對 | 確認 55、不是引用 15、別節 11；另標 56 個 |
+| 4 | 2012 NYSC 2：原文檔刪了第一個標題（`## 耶穌差遣十二門徒：傳揚天國與面對逼迫`），教授的話不變；補標題變更證明；Jev 判引出語，GPT 1 次確認 1 處 | 標 84 個 |
+| 5 | 查缺：禱告改由 Jev 判（41 題），剔除只宣布新一章的 7 句及已知錯誤 6 句 | 新建 31 個 |
+| 6 | 改正清單：約翰一書、念讀與節號重複、「三節」與「三十三節」 | 123 個改標記，移除 4 個錯標 |
+
+量到的問題，都已改進第 3、4 節的規則：
+
+- 引出語只用 Jev 時約三分之一錯：「彼得講了一句話很怪」（引出語本身）、「為什麼聖經講這句話？」（提問）、
+  「天使說：你去告訴我的門徒」選了可 16:6（實為 16:7）。
+- 禱告「奉我們的主耶穌基督的聖名求」：「我們的主耶穌基督」在 11 節出現被當套語略過，錯開一字「們的主耶穌基督的」只在林後 1:3，被當作念讀。
+  12 處禱告中 9 處在首末段、2 處在第二段、1 處在第 77 段（2018 NYSC 3，兩堂之間）；Jev 判出 10 處。
+- 「《約翰一書》第二章一節」被當作加 2:1，連帶後兩段的節號。
+- 同段同節的說出與念讀互相抵消：2011 NYSC 1 S0008 太 5:18 一度從清單消失，在寫入前發現。
+- 移除標記時省略欄位，資料庫視為不變；2Tim 2:15 的錯標第一次未移除，改寫空清單後移除。
+
+檔案：`/Volumes/Jun SSD/wang-knowledge-platform-staging/claim-management-519/` 下的
+`citation-fragments-702-20261114*`、`citation-tags-702-20261114-*`、`citation-lists-702-20261114-v*`；
+備份在 `DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/registry-backup-2026111*-before-702-*`。
