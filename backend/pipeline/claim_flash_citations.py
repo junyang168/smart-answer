@@ -91,6 +91,9 @@ def default_bible():
     return Bible(bible())
 
 
+NUMERALS = set('零〇一二三四五六七八九十百0123456789')
+
+
 def osis_book(slug):
     return S.BOOK_TO_OSIS.get(slug.upper()) if slug else None
 
@@ -99,10 +102,15 @@ JOHN_LETTER = re.compile(r'[約约]翰([一二三壹貳參])書\W{0,2}(?:第)?\s
 JOHN_LETTERS = {'一': '1John', '壹': '1John', '二': '2John', '貳': '2John', '三': '3John', '參': '3John'}
 
 
+SPELLINGS = {'哥羅西': '歌羅西'}   # transcript spellings the aliases lack
+
+
 def resolve_book(token):
     """Existing aliases first, then the same token with 書／記 added (「瑪拉基」)."""
     if not token:
         return None
+    for wrong, right in SPELLINGS.items():
+        token = token.replace(wrong, right)
     for i in range(len(token)):
         for suffix in ('', '書', '記'):
             slug = S._spoken_book(token[i:] + suffix)
@@ -139,6 +147,9 @@ def spoken(paragraphs, holy, start_book=None):
                           S.chinese_number(m.group('verse')) if m.group('verse') else None))
         for m in S._BARE_VERSE_PATTERN.finditer(text):
             if any(s <= m.start() < s + 14 for s, _, _, _, v in marks if v):
+                continue
+            # 「那十九節」: the pattern skips 「那…節」 and would match the tail 「九節」.
+            if m.start() and text[m.start() - 1] in NUMERALS:
                 continue
             if COUNTED_VERSES.search(text[max(0, m.start() - 4):m.start()]) or COUNT_NOUN.match(text[m.end():]):
                 continue
@@ -266,31 +277,41 @@ def holds(refs, cite):
     return any(x[0] == b and x[1] == c and (v is None or x[2] is None or x[2] == v) for x in refs)
 
 
-AMEN = re.compile(r'(阿們|阿门|amen)', re.I)
+# A closing prayer ends in 阿們／Amen, or only in 「奉…的聖名求」.
+AMEN = re.compile(r'奉[^。！？!?\n]{0,20}名求(?:[，,\s]*(?:阿們|阿门|amen))?|阿們|阿门|amen', re.I)
+SENTENCE_END = '。！？!?\n'
+PRAYER_QUESTION = {'type': 'choice',
+    'criteria': {'prayer': '這一段是禱告：向神說話，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。',
+                 'not_prayer': '這一段不是禱告：是講課、念經文、問答或其他內容。'},
+    'instructions': '`paragraph` 這一段整段是不是禱告？'}
 
 
 def prayers(root, ports, paragraphs, matched):
-    """{paragraph: length of his prayer in normalized characters}, as Jev judges,
-    among paragraphs with a word-for-word match: the first two, the last, and
-    any with 阿們／Amen (a prayer between sessions). A prayer often runs into
-    the teaching in one paragraph (「…奉主耶穌基督的聖名求，Amen。我們昨天看到…」),
-    so Jev is asked about the text up to the first Amen. Without Jev, none."""
+    """{paragraph: [(start, end)]}, his prayer in normalized characters, as Jev
+    judges, among paragraphs with a word-for-word match. The first two and the
+    last are asked whole; a sentence ending in 阿們／Amen is asked on its own,
+    because the prayer often shares a paragraph with the teaching
+    (「…奉主耶穌基督的聖名求，Amen。我們昨天看到…」). Without Jev, none."""
     if ports is None or not paragraphs:
         return {}
     keys = [pk for pk, _ in paragraphs]
-    asked = [pk for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t)])
-             if pk in matched]
     text_of = dict(paragraphs)
     found = {}
-    for pk in asked:
-        amen = AMEN.search(text_of[pk])
-        part = text_of[pk][:amen.end()] if amen else text_of[pk]
-        answer = f.jev(Path(root) / 'prayers', ports, {'paragraph': part}, {'Q0': {'type': 'choice',
-            'criteria': {'prayer': '這一段是禱告：向神說話，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。',
-                         'not_prayer': '這一段不是禱告：是講課、念經文、問答或其他內容。'},
-            'instructions': '`paragraph` 這一段整段是不是禱告？'}})
-        if answer['Q0'] == 'prayer':
-            found[pk] = len(norm(part))
+
+    def ask(pk, start, end):
+        text = text_of[pk]
+        if f.jev(Path(root) / 'prayers', ports, {'paragraph': text[start:end]}, {'Q0': PRAYER_QUESTION})['Q0'] == 'prayer':
+            found.setdefault(pk, []).append((len(norm(text[:start])), len(norm(text[:end]))))
+            return True
+    for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t)]):
+        if pk not in matched:
+            continue
+        text = text_of[pk]
+        if pk in keys[:2] + keys[-1:] and ask(pk, 0, len(text)):
+            continue
+        amen = AMEN.search(text)
+        if amen:
+            ask(pk, max(text.rfind(c, 0, amen.start()) for c in SENTENCE_END) + 1, amen.end())
     return found
 
 
@@ -385,10 +406,11 @@ def build(records, sources, sid, root, ports, *, holy=None):
     for i, (pk, text) in enumerate(paragraphs):
         announced, (quoted, ambiguous, spans) = found[pk]
         if pk in praying:
-            # Only matches inside the prayer are dropped; a reading after it stays.
-            cut = praying[pk]
-            quoted = [k for k in quoted if max(spans[k]) >= cut]
-            ambiguous = ambiguous if cut < len(norm(text)) else []
+            # Only matches inside the prayer are dropped; a reading next to it stays.
+            inside = lambda k: all(any(a <= i < b for a, b in praying[pk]) for i in spans[k])
+            quoted = [k for k in quoted if not inside(k)]
+            if (0, len(norm(text))) in praying[pk]:
+                ambiguous = []
         for key in sorted(quoted):
             citations.append({'paragraph_key': pk, 'basis': 'verbatim', 'ref': label(key), 'key': list(key),
                               'quote': quote_sentence(text, verse_text=holy.verses[key])})
@@ -467,6 +489,10 @@ def build(records, sources, sid, root, ports, *, holy=None):
         d['paragraph_key'] == c['paragraph_key'] and d['key'][:2] == c['key'][:2] and d['key'][2] for d in unique)]
     result = {'version': CONTRACT, 'source_id': sid, 'input_sha256': pin, 'main_book': main_book,
               'citations': unique, 'unresolved': unresolved, 'prayers': sorted(praying),
+              # Every lead-in the models were asked about, with the verses offered:
+              # their answer alone does not remove a mark these verses already hold.
+              'asked': [{'paragraph_key': q['paragraph_key'], 'mark': q['mark'], 'candidates': [label(c) for c in q['candidates']]}
+                        for q in questions] if ports is not None else [],
               **({'introduced': 'not_judged', 'introduced_questions': len(questions)} if ports is None else {})}
     e.save(path, result)
     return result

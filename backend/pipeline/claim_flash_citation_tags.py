@@ -15,7 +15,7 @@ from backend.pipeline import claim_flash_citations as cit, claim_flash_common as
 from backend.pipeline import claim_flash_source_fill as fill, evidence_refresh as e
 
 VERSION = 'claim_flash_citation_tags_v2'
-NUMERALS = set('零〇一二三四五六七八九十百0123456789')
+NUMERALS = cit.NUMERALS
 
 
 def holds(citation, excerpt, holy):
@@ -88,11 +88,21 @@ def run(store, source_id, root, ports=None, *, holy=None, apply=False, listing=N
         for c in listing['citations']:
             cited.setdefault(c['paragraph_key'], set()).add(tuple(c['key']))
         found = tags(listing, valid, holy)
+        # A mark stays when the fragment holds a lead-in the models were asked
+        # about with that verse offered: a fresh Jev or GPT answer alone never
+        # removes one (2Cor 6:14 for 「保羅說：「信與不信的原不相配」」).
+        asked = {}
+        for q in listing.get('asked', []):
+            for key, payload in valid.items():
+                if payload.get('paragraph_key') == q['paragraph_key'] and holds(
+                        {'basis': 'introduced', 'mark': q['mark']}, payload.get('verbatim_excerpt') or '', holy):
+                    asked.setdefault(key, set()).update(q['candidates'])
         updates = {}
         for key in sorted(valid):
             payload = records[key]['payload']
             current = payload.get('scripture_refs') or []
-            kept = {r for r in current if supported(r, cited.get(payload.get('paragraph_key'), set()))}
+            kept = {r for r in current if supported(r, cited.get(payload.get('paragraph_key'), set()))
+                    or r in asked.get(key, ())}
             refs = sorted(kept | found.get(key, set()))
             if refs == sorted(current):
                 continue

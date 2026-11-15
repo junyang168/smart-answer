@@ -29,7 +29,9 @@ class Jev:
         answers = {}
         for q, spec in req['questions'].items():
             if 'prayer' in spec['criteria']:
-                praying = self.picks.get('prayer') and '禱告' in req['state'].get('paragraph', '')
+                said, text = self.picks.get('prayer'), req['state'].get('paragraph', '')
+                # True: any text with 禱告; a string: text ending with it.
+                praying = said and (text.endswith(said) if isinstance(said, str) else '禱告' in text)
                 choice = 'prayer' if praying else 'not_prayer'
             else:
                 choice = self.picks.get(q, 'not_quote')
@@ -370,8 +372,54 @@ def test_a_prayer_running_into_the_teaching_drops_only_the_prayer(tmp_path):
     holy = cit.Bible({('2Cor', 1, 3): '願頌讚歸與我們的主耶穌基督的父神，就是發慈悲的父，賜各樣安慰的神。',
                       ('Matt', 16, 16): '西門彼得回答說：你是基督，是永生神的兒子。'})
     text = '我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen。我們昨天看到彼得說：「你是基督，是永生神的兒子。」'
-    ports = Jev({'prayer': True})
+    ports = Jev({'prayer': 'Amen'})
     listing = cit.build({}, {'S': {'paragraphs': {'S0001': {'text': text}}}}, 'S', tmp_path, ports, holy=holy)
     assert {c['ref'] for c in listing['citations']} == {'Matt 16:16'}
     asked = [c['state']['paragraph'] for c in ports.calls if 'questions' in c and 'prayer' in c['questions']['Q0']['criteria']]
-    assert asked == ['我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen']
+    assert asked == [text, '我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen']
+
+
+def test_a_closing_prayer_after_the_teaching_is_found(tmp_path):
+    # 2016 NYSC 4 S0018: teaching, then 「我們這樣禱告，奉…的聖名求，阿們。」 in the last paragraph.
+    holy = cit.Bible({('2Cor', 1, 3): '願頌讚歸與我們的主耶穌基督的父神，就是發慈悲的父，賜各樣安慰的神。'})
+    text = '你必須跟神有好關係。求祢賜福。我們這樣禱告，奉我們的主耶穌基督的聖名求，阿們。'
+    listing = cit.build({}, {'S': {'paragraphs': {'S0001': {'text': text}}}}, 'S', tmp_path, Jev({'prayer': '阿們'}), holy=holy)
+    assert not listing['citations']
+
+
+def test_a_verse_number_tail_is_not_a_verse():
+    # 2012 NYSC 1 S0004: 「那十九節說啊」 is verse 19, never verse 9.
+    marks, _ = cit.spoken([('S0001', '馬太福音第八章。那十九節說啊，有一個文士來對祂說。')], HOLY_EIGHT)
+    assert [k for k, _, _ in marks['S0001'] if k[2]] == []
+
+
+HOLY_EIGHT = cit.Bible({('Matt', 8, 9): '因為我在人的權下，也有兵在我以下。', ('Matt', 8, 19): '有一個文士來，對耶穌說：夫子，你無論往哪裡去，我要跟從你。'})
+
+
+def test_a_fresh_answer_does_not_remove_a_mark_it_was_offered(sample):
+    # 2011 NYSC 4 S0011: 2Cor 6:14 held; a new run's Jev picked 1Cor 7:12, GPT said other verse.
+    from backend.pipeline import claim_flash_citation_tags as tags
+    store, root, _ = sample
+    p = store.get_record_state('source_fragments', 'F')['payload']
+    mark = p['verbatim_excerpt'][:4]
+    store.apply_plan(store.plan_package({'package_id': 'mark', 'source_fragments': [{**p, 'scripture_refs': ['2Cor 6:14', 'Gal 2:1']}]}))
+    listing = {'citations': [], 'asked': [{'paragraph_key': 'S0001', 'mark': mark, 'candidates': ['1Cor 7:12', '2Cor 6:14']}]}
+    tags.run(store, 'S', root / 'kept', holy=cit.Bible({}), apply=True, listing=listing)
+    assert store.get_record_state('source_fragments', 'F')['payload']['scripture_refs'] == ['2Cor 6:14']
+
+
+def test_a_closing_prayer_without_amen_is_found(tmp_path):
+    # 2022 NYSC S0126: 「我們這樣感謝禱告，奉我們主耶穌基督的圣名求。」 with no 阿們.
+    holy = cit.Bible({('2Cor', 1, 3): '願頌讚歸與我們的主耶穌基督的父神，就是發慈悲的父，賜各樣安慰的神。'})
+    text = '你要等候主再來。我們這樣感謝禱告，奉我們的主耶穌基督的聖名求。'
+    listing = cit.build({}, {'S': {'paragraphs': {'S0001': {'text': text}}}}, 'S', tmp_path, Jev({'prayer': '名求'}), holy=holy)
+    assert not listing['citations']
+
+
+def test_transcript_spelling_of_colossians(tmp_path):
+    # 2022 NYSC S0014: 「哥羅西二章十六節」 after Galatians is Colossians 2:16.
+    holy = cit.Bible({('Gal', 2, 16): '既知道人稱義不是因行律法，乃是因信耶穌基督，',
+                      ('Col', 2, 16): '所以，不拘在飲食上，或節期、月朔、安息日都不可讓人論斷你們。'})
+    paragraphs = {'S0001': {'text': '加拉太書第二章。'}, 'S0002': {'text': '你再看哥羅西二章十六節。'}}
+    listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
+    assert ('S0002', 'Col 2:16') in keys(listing)
