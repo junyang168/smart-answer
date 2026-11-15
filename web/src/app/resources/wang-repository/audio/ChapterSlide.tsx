@@ -19,6 +19,41 @@ export function shouldShowSlideItem(at: number, seconds: number, clipEnd: number
   return at < clipEnd && at <= seconds + POINT_PREVIEW_SECONDS;
 }
 
+type InlineNote = {
+  at: number;
+  scripture: string;
+  verse: number;
+  span: string;
+  original: string;
+  reading: string;
+  explanation: string;
+};
+
+function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) {
+  const matched = notes.filter(({ span }) => span && text.indexOf(span) >= 0 && text.indexOf(span) === text.lastIndexOf(span));
+  const spans = [...new Set(matched.map(({ span }) => span))]
+    .map((span) => ({ span, start: text.indexOf(span) }))
+    .sort((a, b) => a.start - b.start || b.span.length - a.span.length);
+  let cursor = 0;
+  const parts = spans.map(({ span, start }) => {
+    if (start < cursor) return null;
+    const before = text.slice(cursor, start);
+    cursor = start + span.length;
+    return <span key={span}>{before}<mark className="rounded bg-amber-300/25 text-amber-100">{span}</mark></span>;
+  });
+  return (
+    <div>
+      {parts}{text.slice(cursor)}
+      {matched.map((note, index) => (
+        <div key={index} className="mt-1 text-sm leading-5 text-amber-100/90">
+          {[note.original, note.explanation].filter(Boolean).join(" · ")}
+          {note.reading && <p>教授講解中的讀法 · {note.reading}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export type ChapterSlideData = {
   at: number;
   seconds: number;
@@ -26,6 +61,7 @@ export type ChapterSlideData = {
   /** at 是他开始讲这条要点的时间。 */
   points: { at: number; text: string }[];
   verses: string[];
+  inline_notes?: InlineNote[];
   scriptures: { at: number; scripture: string; label: string }[];
 };
 
@@ -90,10 +126,12 @@ function Verse({
   label,
   latest,
   sentence,
+  notes,
 }: {
   slug: string;
   label: string;
   latest: boolean;
+  notes: InlineNote[];
   /** 逐字稿此刻这一句；只给最新的一段，用来跟着他念到的那一节走。 */
   sentence?: string;
 }) {
@@ -130,7 +168,9 @@ function Verse({
                 {verse.number}
               </span>
             )}
-            <span>{texts ? texts[index] : "……"}</span>
+            {texts ? (
+              <AnnotatedVerse text={texts[index]} notes={notes.filter((note) => note.verse === Number(verse.number))} />
+            ) : <span>……</span>}
           </li>
         ))}
       </ol>
@@ -192,6 +232,8 @@ export default function ChapterSlide({
               slug={item.scripture}
               label={item.label}
               latest={index === 0}
+              notes={(slide.inline_notes ?? []).filter((note) =>
+                note.scripture === item.scripture && note.at < clipEnd && note.at <= seconds)}
               sentence={index === 0 ? sentence : undefined}
             />
           ))}
