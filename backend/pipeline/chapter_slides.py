@@ -111,6 +111,7 @@ def for_lecture(prompt: str, lecture: str) -> str:
 
 
 INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語法與經文結構，寫入 inline_notes。
+只在貼著詞句才能看懂教授的比較或推理時加註。經文已明說的動作、背景介紹、一般釋經摘要，以及要點已講清楚的同一意思，不做短註。結構短註只用來讓讀者直接看到教授指出的重複或對照。像太 5:1「上了山」「坐下」，保留經文及原有要點即可。
 先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
 每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading（教授明說的中文讀法）、explanation（簡短的編輯整理）。無法核實的原文字形或沒有明說的讀法留空。
 跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
@@ -728,7 +729,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
     )
     answer = client.generate_json(for_lecture(review_system, lecture) + "\n\n" + INLINE_NOTE_RULES
-                                  + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。" + extra, prompt, schema)
+                                  + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出應刪的經文複述、背景摘要或與要點重複的短註。" + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
     out = {
