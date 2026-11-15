@@ -442,7 +442,7 @@ def run(store,source_id,root,ports,*,plan=None,candidate=None,evidence_ports=Non
                 checked=citations.fragment_check(records,sources,source_id,listing)
                 stages['citations']={'status':'verified','pending':[],'citations':len(listing['citations']),
                     'unresolved':len(listing['unresolved']),'visible':checked['visible'],'repairs':len(checked['jobs']),
-                    'unheld':len(checked['unheld']),'distant':len(checked['distant'])}
+                    'uncovered':len(checked['uncovered'])}
                 e.save(root/'citations'/'fragment-check.json',checked)
                 if checked['jobs']:
                     shown=scripture.run(store,source_id,checked['jobs'],root/'citation-fragments',ports,apply=True)

@@ -362,38 +362,44 @@ def visible(citation, fragments, holy):
 
 
 def fragment_check(records, sources, sid, listing, *, holy=None):
-    """Literal attachment jobs for held citations no fragment shows, plus a report
-    of citations no lower record holds."""
+    """Source layer, text -> fragment: is every explicit citation inside a
+    SourceFragment of an active record? Uncovered citations become literal
+    attachment jobs on a nearby record that already holds the verse; the rest
+    are reported for the missing-material step, never written here."""
     holy = holy or default_bible()
     order = sorted(sources[sid]['paragraphs'])
     index = {pk: i for i, pk in enumerate(order)}
+    in_use = defaultdict(list)
+    for key, row in records.items():
+        if key.split('/')[0] not in {'evidence_steps', 'observations', 'claims'} or row.get('retired'):
+            continue
+        for fid in e.evidence_fragment_ids(row['payload']):
+            fragment = records.get('source_fragments/' + fid)
+            if fragment and not fragment.get('retired') and fragment['payload'].get('source_id') == sid:
+                in_use[fragment['payload']['paragraph_key']].append(fragment['payload'].get('verbatim_excerpt') or '')
     holders = held_refs(records, sid)
-    fragments_of = {}
+    near_of = {}
     for key in holders:
         rows = [records.get('source_fragments/' + fid) for fid in e.evidence_fragment_ids(records[key]['payload'])]
-        fragments_of[key] = [(r['payload']['paragraph_key'], r['payload'].get('verbatim_excerpt') or '')
-                             for r in rows if r and not r.get('retired') and r['payload'].get('source_id') == sid]
-    jobs, unheld, distant, visible_count = [], [], [], 0
+        near_of[key] = {r['payload']['paragraph_key'] for r in rows
+                        if r and not r.get('retired') and r['payload'].get('source_id') == sid}
+    jobs, uncovered, visible_count = [], [], 0
     for c in listing['citations']:
         key = tuple(c['key'])
         if key[2] is None:
             continue
         pk = c['paragraph_key']
-        owners = [k for k, refs in holders.items() if holds(refs, key)]
-        if not owners:
-            unheld.append(c)
-            continue
-        near = set(order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1])
-        shown = [text for k in owners for p, text in fragments_of[k] if p in near]
-        if visible(c, shown, holy):
+        near = order[max(0, index[pk] - NEIGHBOURS):index[pk] + NEIGHBOURS + 1]
+        if visible(c, [text for p in near for text in in_use.get(p, [])], holy):
             visible_count += 1
             continue
-        close = [k for k in owners if any(abs(index.get(p, -10**6) - index[pk]) <= NEIGHBOURS for p, _ in fragments_of[k])
+        close = [k for k, refs in holders.items() if holds(refs, key)
+                 and any(abs(index.get(p, -10**6) - index[pk]) <= NEIGHBOURS for p in near_of[k])
                  and records[k]['payload'].get('review_status') not in f.PROTECTED]
         if not close:
-            distant.append({**c, 'holders': sorted(owners)})
+            uncovered.append(c)
             continue
         jobs.append({'job_id': e.digest([CONTRACT, pk, c['ref'], c['quote']]), 'reference': c['ref'],
                      'quote': c['quote'], 'paragraph_key': pk, 'target_keys': sorted(close),
                      'program_citation': True})
-    return {'version': CONTRACT, 'jobs': jobs, 'visible': visible_count, 'unheld': unheld, 'distant': distant}
+    return {'version': CONTRACT, 'jobs': jobs, 'visible': visible_count, 'uncovered': uncovered}

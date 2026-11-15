@@ -132,14 +132,23 @@ def test_held_citation_outside_every_fragment_becomes_a_literal_job():
     assert job['quote'] == '馬太福音十九章六節講得很清楚。'
 
 
-def test_unheld_distant_and_protected_citations_are_reported_not_written():
+def test_citation_inside_another_records_fragment_is_visible():
+    # Source layer: any active record's fragment shows the citation.
+    src = sources('馬太福音十九章六節講得很清楚。')
+    records = {**lower('馬太福音十九章六節講得很清楚。', ['Matt 5:32']),
+               'claims/C': {'payload': {'source_fragment_ids': ['F']}}}
+    checked = cit.fragment_check(records, src, 'S', listing_of('S0001', 'Matt 19:6', '馬太福音十九章六節講得很清楚。'), holy=HOLY)
+    assert checked['visible'] == 1 and not checked['jobs'] and not checked['uncovered']
+
+
+def test_uncovered_citation_without_a_nearby_unprotected_holder_is_reported_not_written():
     src = sources(*['段落。'] * 6)
     listing = listing_of('S0001', 'Matt 19:6', '段落。')
-    assert cit.fragment_check(lower('段落。', ['Matt 5:32']), src, 'S', listing, holy=HOLY)['unheld']
+    assert cit.fragment_check(lower('另一段。', ['Matt 5:32'], pk='S0002'), src, 'S', listing, holy=HOLY)['uncovered']
     far = cit.fragment_check(lower('另一段。', ['Matt 19:6'], pk='S0006'), src, 'S', listing, holy=HOLY)
-    assert far['distant'] and not far['jobs']
+    assert far['uncovered'] and not far['jobs']
     locked = cit.fragment_check(lower('另一段。', ['Matt 19:6'], pk='S0002', status='human_approved'), src, 'S', listing, holy=HOLY)
-    assert locked['distant'] and not locked['jobs']
+    assert locked['uncovered'] and not locked['jobs']
 
 
 def test_bible_cache_must_be_complete(tmp_path):
