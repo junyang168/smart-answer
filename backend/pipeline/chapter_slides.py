@@ -245,6 +245,10 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
+                  "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 列的經文都要放進投影片的 scriptures，"
+                  "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
+                  "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
+                  "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
                   json.dumps(claim_context, ensure_ascii=False)]
     elif claim_context is not None:
         from backend.pipeline.chapter_slide_claims import claim_source_ranges
@@ -589,6 +593,9 @@ def save(
     claim_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
+    if not problems and claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import evidence_scripture_gaps
+        problems = evidence_scripture_gaps(claim_context, slides)
     record = {
         "schema_version": SCHEMA_VERSION,
         "passage": chapter.passage,
@@ -811,6 +818,9 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
     response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
     problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
+    if not problems and context is not None:
+        from backend.pipeline.chapter_slide_claims import evidence_scripture_gaps
+        problems = evidence_scripture_gaps(context, slides)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
         rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},

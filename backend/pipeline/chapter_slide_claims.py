@@ -253,6 +253,74 @@ def compile_outline_context(passage: str, lecture: str, lecture_number: int, *,
     return context
 
 
+#: 他報段落結構時說的跨章範圍（「五章十三節到七章二十九節」）：是結構標記，不是要放全文的經文。
+_CROSS_CHAPTER = re.compile(r"\d+\s*[:：]\s*\d+\s*[-–—~～]\s*\d+\s*[:：]\s*\d+")
+def _bigrams(text: str) -> set[str]:
+    han = "".join(re.findall(r"[\u3400-\u9fff]", text))
+    return {han[i:i + 2] for i in range(len(han) - 1)}
+
+
+def read_aloud(slug: str, lines: list[str], cuv_root: Path | None = None) -> list[str]:
+    """這段經文裡他在本堂念出來的各節（單節 slug）：有一句逐字稿，一半以上的相鄰兩字出現在那一節。
+
+    與聆聽頁判斷「他此刻念到哪一節」用同一個準則。只報出處、說段落範圍不算。"""
+    from backend.api.scripture import parse_reference
+
+    if cuv_root is None:
+        from backend.bible_study.paths import cuv_dir
+        cuv_root = cuv_dir()
+    ref = parse_reference(slug)
+    try:
+        chapter = json.loads((cuv_root / ref["slug_book"].upper() / f"{ref['chapter']}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    said = [pairs for pairs in map(_bigrams, lines) if len(pairs) >= 5]
+    read = []
+    for number in range(ref["start"], ref["end"] + 1):
+        verse = _bigrams(chapter.get(str(number), ""))
+        if verse and any(len(pairs & verse) / len(pairs) >= 0.5 for pairs in said):
+            read.append(f"{slug.split('-')[0]}-{ref['chapter']}-{number}")
+    return read
+
+
+def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None = None) -> tuple[list[str], list[str]]:
+    """Evidence 引的經文中，他在本堂念出來的 → 投影片必須顯示（負責人 2026-11-16）。另回讀不出的出處。
+
+    跨章範圍（「五章十三節到七章二十九節」）是他在講段落範圍，不是念經文。"""
+    from backend.api.scripture import reference_slugs
+
+    shown, unread = [], []
+    for ref in refs:
+        if _CROSS_CHAPTER.search(ref):
+            continue
+        slugs = reference_slugs(ref)
+        if len(slugs) != 1:
+            unread.append(ref)
+            continue
+        shown += [verse for verse in read_aloud(slugs[0], lines, cuv_root) if verse not in shown]
+    return shown, unread
+
+
+def evidence_scripture_gaps(context: dict | None, slides: list[dict]) -> list[str]:
+    """負責人 2026-11-16：Evidence 用到的經文都要出現在投影片上。回沒出現的。"""
+    from backend.api.scripture import parse_reference
+
+    if not context:
+        return []
+    shown = [parse_reference(item["slug"]) for slide in slides for item in slide.get("scriptures", [])]
+    gaps = []
+    for claim in context.get("claims", []):
+        for step in claim.get("evidence_steps", []):
+            for slug in step.get("scriptures", []):
+                wanted = parse_reference(slug)
+                covered = any(item["slug_book"] == wanted["slug_book"] and item["chapter"] == wanted["chapter"]
+                              and item["start"] <= wanted["start"] and wanted["end"] <= item["end"] for item in shown)
+                note = f"{claim['claim_id']} 的 Evidence 引用 {slug}，投影片沒有顯示"
+                if not covered and note not in gaps:
+                    gaps.append(note)
+    return gaps
+
+
 def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, runs: list[Path]) -> dict:
     """Outline context from Claim-creation runs (files): each run is one argument group.
 
@@ -263,6 +331,7 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
     decisions = json.loads(path.read_text())
     text, spans = retained_spans(decisions)
+    spoken = [line["text"] for line in chapter_slides.sentences(chapter_slides.kept_pieces(decisions))]
     groups, claims, excluded, sources = [], [], [], []
     for number, run in enumerate(runs, 1):
         run = Path(run)
@@ -277,11 +346,13 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
         fragments = {f["fragment_id"]: f for f in package["source_fragments"]}
         records = {}
         for step in package["evidence_steps"]:
-            records[step["evidence_step_id"]] = (step["statement"], step["step_type"], step["source_fragment_ids"])
+            records[step["evidence_step_id"]] = (step["statement"], step["step_type"], step["source_fragment_ids"],
+                                                 step.get("scripture_refs") or [])
         for row in package["observations"]:
-            records[row["observation_id"]] = (row["statement"], row["observation_type"], row["source_fragment_ids"])
+            records[row["observation_id"]] = (row["statement"], row["observation_type"], row["source_fragment_ids"],
+                                              row.get("scripture_refs") or [])
         for row in package["position_nodes"]:
-            records[row["position_id"]] = (row["title"], "opposed_position", row["source_fragment_ids"])
+            records[row["position_id"]] = (row["title"], "opposed_position", row["source_fragment_ids"], [])
         support = {}
         for rel in package["knowledge_relations"]:
             if rel["relation_type"] == "supports":
@@ -299,7 +370,7 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                     queue += support.get(rid, [])
             evidence = []
             for rid in behind + claim["opposed_position_ids"]:
-                statement, kind, fids = records[rid]
+                statement, kind, fids, refs = records[rid]
                 anchors = []
                 for fid in fids:
                     quote = fragments[fid]["verbatim_excerpt"]
@@ -309,7 +380,13 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                     elif ids:
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
-                    evidence.append({"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors})
+                    entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
+                    scriptures, unread = evidence_scriptures(refs, spoken)
+                    if scriptures:
+                        entry["scriptures"] = scriptures
+                    excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"}
+                                 for ref in unread]
+                    evidence.append(entry)
             stated_quote = candidates[short]["conclusion_anchor"]["verbatim_excerpt"]
             stated = locate(text, spans, stated_quote) or []
             claims.append({"claim_id": cid, "group_id": gid, "statement": claim["title"],
@@ -329,7 +406,7 @@ def review_contract(context: dict, slides: list[dict]) -> tuple[str, dict]:
     schema["properties"]["claim_checks"] = {"type": "array", "items": {
         "type": "object", "properties": {
             "claim_id": {"type": "string"},
-            "status": {"type": "string", "enum": ["covered", "missing", "not_supported"]},
+            "status": {"type": "string", "enum": ["covered", "missing", "not_supported", "contradicts"]},
             "slides": {"type": "array", "items": {"type": "string"}},
             "reason": {"type": "string"}},
         "required": ["claim_id", "status", "slides", "reason"], "additionalProperties": False}}
@@ -338,6 +415,8 @@ def review_contract(context: dict, slides: list[dict]) -> tuple[str, dict]:
 covered：保留原文支持且投影片已表達重要結論、理由和限定，slides 列投影片 first。
 missing：保留原文支持但漏了重要內容，必須同時列一條「完整」finding 並標 blocking。
 not_supported：這條提示不受保留原文支持，不得補進幻燈；reason 說明原文依據。
+contradicts：投影片的論證與這條 Claim 的 evidence_steps 相違——例如把 opposed_position（他反駁的看法）寫成他的主張、把理由和結論倒過來、或寫出與某步證據相反的推論；必須同時列一條「忠實」finding 並標 blocking，reason 指出是哪一步。
+判 covered 之前先確認沒有這種相違。
 每條恰好一次，不因 Claim 已經審核就信它。不要為逐條覆蓋重複要點、硬加標題或改講課次序。
 """
     return instruction, schema
@@ -351,7 +430,7 @@ def check_review(answer: dict, context: dict, slides: list[dict]) -> None:
         raise ValueError("Review must check every supplied Claim exactly once")
     firsts = {s["first"] for s in slides}
     for check in checks:
-        if check.get("status") not in {"covered", "missing", "not_supported"} or not check.get("reason"):
+        if check.get("status") not in {"covered", "missing", "not_supported", "contradicts"} or not check.get("reason"):
             raise ValueError("Invalid Claim disposition")
         if not set(check.get("slides", [])) <= firsts:
             raise ValueError("Claim check references unknown slide")
@@ -361,6 +440,10 @@ def check_review(answer: dict, context: dict, slides: list[dict]) -> None:
             f.get("kind") == "完整" for f in answer.get("findings", [])
         )):
             raise ValueError("Missing Claim requires a blocking completeness finding")
+        if check["status"] == "contradicts" and (not answer.get("blocking") or not any(
+            f.get("kind") == "忠實" for f in answer.get("findings", [])
+        )):
+            raise ValueError("Contradicted Evidence requires a blocking fidelity finding")
 
 
 def saved_context(record: dict, decisions: dict, decisions_sha: str) -> dict | None:

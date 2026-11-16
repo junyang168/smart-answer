@@ -231,3 +231,26 @@ def test_unplaceable_fragment_is_recorded_and_incomplete_run_is_refused(tmp_path
     assert context['excluded'] == [{'claim_id': 'G01-CL0002', 'object_id': 'F2', 'reason': 'excerpt missing or ambiguous'}]
     with pytest.raises(ValueError, match='not complete'):
         hints.compile_package_context(CHAPTER.passage, 'L', data_base_dir=tmp_path, runs=[creation_run(tmp_path / 'b', complete=False)])
+
+
+def test_only_verses_he_reads_aloud_must_be_on_a_slide(tmp_path):
+    cuv = tmp_path / 'cuv' / 'MAT'
+    cuv.mkdir(parents=True)
+    (cuv / '5.json').write_text(json.dumps({'3': '虛心的人有福了！因為天國是他們的。', '4': '哀慟的人有福了！因為他們必得安慰。'}, ensure_ascii=False))
+    lines = ['五章三節說：虛心的人有福了，因為天國是他們的。', '第五章三節到第十二節講的是彌賽亞的身份。']
+    # 5:3 is read aloud, 5:4 only falls inside a range he names; a cross-chapter range is him giving scope.
+    assert hints.evidence_scriptures(['太5:3-4', '太5:13-7:29', '路15'], lines, tmp_path / 'cuv') == (['mat-5-3'], ['路15'])
+    context = {'claims': [{'claim_id': 'G01-CL0001', 'evidence_steps': [{'scriptures': ['mat-5-3']}]}]}
+    assert hints.evidence_scripture_gaps(context, [{'scriptures': [{'slug': 'mat-5-3-10'}]}]) == []
+    assert hints.evidence_scripture_gaps(context, [{'scriptures': [{'slug': 'mat-5-4'}]}]) == [
+        'G01-CL0001 的 Evidence 引用 mat-5-3，投影片沒有顯示']
+
+
+def test_review_that_finds_slides_contradicting_evidence_must_block():
+    context = {'claims': [{'claim_id': 'C1'}]}
+    slides = [{'first': 'S0001'}]
+    check = {'claim_id': 'C1', 'status': 'contradicts', 'slides': ['S0001'], 'reason': '把反方寫成他的主張'}
+    with pytest.raises(ValueError, match='blocking fidelity'):
+        hints.check_review({'claim_checks': [check], 'blocking': False, 'findings': []}, context, slides)
+    hints.check_review({'claim_checks': [check], 'blocking': True,
+                        'findings': [{'kind': '忠實', 'slide': 'S0001', 'problem': 'p', 'fix': 'f'}]}, context, slides)
