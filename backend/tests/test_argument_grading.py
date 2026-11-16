@@ -46,3 +46,8 @@ def test_fragment_matching_ignores_punctuation_and_needs_the_same_paragraph():
     index = {'1': {('1', g.norm('甲一句。'))}}
     assert g.fragment_sentences({'verbatim_excerpt': '甲一句，'}, '1', index) == {('1', '甲一句')}
     assert g.fragment_sentences({'verbatim_excerpt': '甲一句'}, '2', index) == set()
+
+
+def test_a_steps_closing_sentence_kept_as_the_claims_own_words_still_counts():
+    found = verdicts({'E1': keys('甲一句。'), 'E2': keys('乙一句。', '乙二句。')}, own={'C': keys('結論。', '甲二句。')})
+    assert ('a', 'partial') not in found and ('a', 'missed') not in found

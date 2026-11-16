@@ -102,7 +102,10 @@ def grade_group(group, records, own):
                 verdict, detail = 'split', f'{len(hits)} records: ' + ', '.join(r[1] for r in sorted(hits))
             else:
                 (rid, got), = hits.items()
-                best = max(len(records[rid] & v) / len(v) for v in variants[it['id']])
+                # Owner 2026-11-15: a 所以 that sums up a Claim belongs to that Claim, so a
+                # step's concluding sentences kept as a Claim's own words still count.
+                held = records[rid] | owned
+                best = max(len(held & v) / len(v) for v in variants[it['id']])
                 if best < COVERED:
                     verdict, detail = 'partial', f'{rid[1]} holds {len(got)}/{len(want)} sentences'
         elif it['kind'] == 'claim_text':
