@@ -60,6 +60,8 @@ export type ChapterSlideData = {
   title: string;
   /** at 是他开始讲这条要点的时间。 */
   points: { at: number; text: string }[];
+  /** 本堂地圖：預告，要點一起出現，不逐條亮。 */
+  overview?: boolean;
   verses: string[];
   inline_notes?: InlineNote[];
   scriptures: { at: number; scripture: string; label: string }[];
@@ -195,7 +197,7 @@ export default function ChapterSlide({
 }) {
   // The speech anchor stays exact while points get a short reading lead.
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
-  const activePoint = points.filter((item) => item.at <= seconds).at(-1);
+  const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
   const shown = [...read].reverse();
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
@@ -213,7 +215,7 @@ export default function ChapterSlide({
               <li
                 key={point.text}
                 ref={point === activePoint ? newestPoint : undefined}
-                className={`flex gap-3 ${point === activePoint ? "text-white" : "text-slate-400"}`}
+                className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
               >
                 <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
                   {index + 1}

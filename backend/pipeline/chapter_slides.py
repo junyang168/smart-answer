@@ -475,8 +475,13 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
-    for slide in slides_record["slides"]:
+    outline = (slides_record.get("claim_context") or {}).get("schema_version") == "chapter-slide-outline-context.v1"
+    for number, slide in enumerate(slides_record["slides"]):
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
+        if outline and number == 0:
+            # 本堂地圖是預告，不是他此刻講的話：要點一起出現，不跟錄音逐條亮。
+            slide = {**slide, "overview": True,
+                     "points": [{**item, "sentence": slide["first"]} for item in slide["points"]]}
         for line in own:
             piece_verses.setdefault(line["piece"], slide["verses"])
         timed.append({
