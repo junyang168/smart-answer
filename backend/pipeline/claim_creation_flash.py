@@ -22,7 +22,7 @@ VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
-STEPS_CONTRACT = 'claim_creation_argument_steps_v1'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v2_program_fragments'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -78,7 +78,14 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
             'sentence_ids':array(deepcopy(sid)),'supports':array({'type':'string'})})),
         'claim_text':array(object_schema({'claim_id':{'type':'string'},'sentence_ids':array(deepcopy(sid))})),
         'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}}))})
-    return {'steps': steps, 'claims': schema('claims', {'candidates': array(claim)}),
+    obs_types=BASE['observations']['items']['properties']['observation_type']['enum']
+    step_types=BASE['evidence_steps']['items']['properties']['step_type']['enum']
+    records=schema('step_records',{'records':array(object_schema({'step_id':{'type':'string'},
+        'kind':{'type':'string','enum':['observation','evidence','position']},'statement':{'type':'string'},
+        'observation_type':{'type':['string','null'],'enum':obs_types+[None]},
+        'step_type':{'type':['string','null'],'enum':step_types+[None]},
+        'attribution':{'type':'string'},'scripture_refs':array({'type':'string'})}))})
+    return {'steps': steps, 'step_records': records, 'claims': schema('claims', {'candidates': array(claim)}),
             'materials': schema('single_pass_group_v1' if single_pass else 'group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
             'connections': schema('connections', {'connections': array(connection),
                 'observation_roles':array(object_schema({'observation_id':{'type':'string'},
@@ -139,12 +146,13 @@ MATERIALS += '\n歸屬規則：'+_existing_prompt.split('归属规则：',1)[1].
 # Steps first: one narrow task divides his argument; the package task then
 # builds records inside those boundaries. Examples are owner-reviewed.
 STEPS = RULES + (Path(__file__).parent/'prompts'/'argument_steps.md').read_text(encoding='utf-8')
-STEPS_PACKAGE = (
-    'argument_steps是已劃好的論證步驟，照它建記錄，不重新劃分：每一步至少一筆記錄，一筆記錄的句子只來自同一步；'
-    '「事實」一步建Observation，「反方」一步建Position，其餘各步建Evidence（同一步可另加一筆Question）；'
-    'connections按各步supports連到Claim或其他步的記錄。claim_text與other的句子以excluded_sentences排除，'
-    'claim_text用duplicate_of並寫明是哪條Claim。反方一步建的Position，由supports所列的Claim以refutes連到它。'
-    '同一段中一字不差重複出現的句子（如再唸一遍的經文），引文要與相鄰句連成一段，使引文在該段只出現一次；同一記錄不放兩條相同引文。')
+STEP_RECORDS = RULES + (
+    '唯一任務：argument_steps已劃好，為每一步填一筆記錄的類型與文字。原文片段由程式依各步sentence_ids從原文切出，'
+    '你不複製原文、不改步驟、不建連接；連接由程式依各步supports建立。'
+    'kind：字詞、原文、經文結構等事實→observation，填observation_type；他所反駁的看法→position，statement寫那個看法，'
+    'attribution寫持有者（如「很多人」）；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
+    'statement用一兩句寫出這一步的內容，忠於他的話，不加他沒說的。'
+    'scripture_refs只列他在這一步親口說出的經文出處（如「太5:3」）；他沒說出處的不補，即使你知道出處。')
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
@@ -365,18 +373,66 @@ def check_steps(result, sentence_ids, claim_ids):
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
-def check_step_boundaries(audit, step_of):
-    """A record stays inside one step; every step yields a record; Claim text and asides are excluded."""
-    record_steps={}
-    for row in audit:
-        sid=row['sentence_id']
-        if row['status']=='extracted' and sid not in step_of:raise ValueError(f'{sid} is Claim text or an aside but was made material')
-        for rid in row['covered_by']:
-            if sid in step_of:record_steps.setdefault(rid,set()).add(step_of[sid])
-    for rid,owned in record_steps.items():
-        if len(owned)>1:raise ValueError(f'{rid} spans argument steps {sorted(owned)}')
-    missing=set(step_of.values())-{s for owned in record_steps.values() for s in owned}
-    if missing:raise ValueError(f'argument steps without a record: {sorted(missing)}')
+def step_fragments(sentence_ids, by_id, paragraphs):
+    """Cut each step's SourceFragments from the transcript; nothing is copied by a model.
+
+    Consecutive sentences in one paragraph become one fragment. A fragment is
+    stored by its text alone, so a run that also occurs earlier in the paragraph
+    is widened by the sentences before it until it names one place."""
+    anchors=[]
+    for pk in dict.fromkeys(by_id[s].segment_index for s in sentence_ids):
+        row=[v for v in by_id.values() if v.segment_index==pk]
+        picked=sorted(row.index(by_id[s]) for s in sentence_ids if by_id[s].segment_index==pk)
+        runs=[[picked[0]]]
+        for i in picked[1:]:
+            if i==runs[-1][-1]+1:runs[-1].append(i)
+            else:runs.append([i])
+        text=paragraphs[pk]
+        for run in runs:
+            first,last=run[0],run[-1]
+            while text.find(text[row[first].char_start:row[last].char_end])!=row[first].char_start:
+                if first>0:first-=1
+                elif last+1<len(row):last+=1
+                else:raise ValueError(f'{pk}: cannot make a unique SourceFragment')
+            anchors.append({'segment_index':pk,'start_time':None,'end_time':None,
+                'verbatim_excerpt':text[row[first].char_start:row[last].char_end]})
+    return anchors
+
+
+def build_step_records(steps, records, sentences, paragraphs):
+    """Compile steps + typed records to the grouped package format the flow already accepts."""
+    f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
+    by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
+    out={'questions':[],'positions':[],'observations':[],'evidence_steps':[],'coverage_by_record':[],'excluded_sentences':[],'connections':[]}
+    for step in steps['steps']:
+        sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs)
+        if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
+        if r['kind']=='observation':
+            if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
+            out['observations'].append({'observation_id':sid,'statement':r['statement'],'observation_type':r['observation_type'],
+                'argument_role':'load_bearing' if step['supports'] else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
+        elif r['kind']=='evidence':
+            if not r['step_type']:raise ValueError(f'{sid}: evidence needs step_type')
+            out['evidence_steps'].append({'evidence_step_id':sid,'statement':r['statement'],'step_type':r['step_type'],
+                'speaker':'professor','stance':'asserted','discourse_role':step['line'],
+                'support_eligibility':'eligible_candidate' if step['supports'] else 'context_only',
+                'scripture_refs':r['scripture_refs'],'anchors':anchors})
+        else:
+            if not r['attribution'].strip():raise ValueError(f'{sid}: position needs attribution')
+            out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':r['attribution'],'anchors':anchors})
+        out['coverage_by_record'].append({'record_id':sid,'sentence_ids':step['sentence_ids']})
+    positions={r['position_id'] for r in out['positions']}
+    for step in steps['steps']:
+        for target in step['supports']:
+            if step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
+            elif target in positions:edge=(step['step_id'],target,'refutes')
+            else:edge=(step['step_id'],target,'supports')
+            out['connections'].append({'from_id':edge[0],'to_id':edge[1],'relation_type':edge[2],'reason':step['line']})
+    for row in steps['claim_text']:
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'duplicate_of','reason':f"{row['claim_id']}本身的話"} for s in row['sentence_ids']]
+    for row in steps['other']:
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'structural_markup','reason':row['why']} for s in row['sentence_ids']]
+    return out
 
 
 def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False):
@@ -399,12 +455,11 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         compact_audit=compact_audit or grouped_package
         contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package,single_pass=single_pass)
         material_prompt = single_pass_prompt() if single_pass else group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
-        if steps_first:material_prompt+=STEPS_PACKAGE
         e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id,
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
             'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
-            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]+([STEPS] if steps_first else [])), 'supplied_groups': groups,
+            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]+([STEPS, STEP_RECORDS] if steps_first else [])), 'supplied_groups': groups,
             **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
             **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {}),
             **({'single_pass_contract':SINGLE_PASS} if single_pass else {}),
@@ -515,14 +570,19 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
-                step_of=None
                 if steps_first:
                     steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
                         'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]}},contracts['steps'],STEPS,source_check)
-                    step_of=check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
-                    payload['argument_steps']=steps
-                if single_pass:
+                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
+                    text={v.sentence_id:v.text for v in sentences}
+                    records=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
+                        'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
+                            'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
+                        contracts['step_records'],STEP_RECORDS,source_check)
+                    result=build_step_records(steps,records['records'],sentences,paragraphs)
+                elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
                         raise ValueError('material IDs collide with allocated Claim aliases')
@@ -538,7 +598,6 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
                     result=expand_material_audit(result,[v.sentence_id for v in sentences])
-                    if step_of is not None:check_step_boundaries(result['sentence_audit'],step_of)
                     e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'audit-expansion.json',{
                         'contract':COMPACT_AUDIT,'raw_response_sha256':raw_sha,'sentence_audit':result['sentence_audit']})
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
@@ -608,7 +667,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
-            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS+(STEPS if steps_first else ''), model_id=ports.identity['gpt']['model'],
+            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS+(STEPS+STEP_RECORDS if steps_first else ''), model_id=ports.identity['gpt']['model'],
             reasoning_effort=ports.identity['gpt']['effort'],max_output_tokens=getattr(getattr(ports,'gpt',None),'max_output_tokens',6000),
             section_plan={'groups':groups},response_schema={'name':VERSION,'schema':contracts},
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
@@ -641,7 +700,7 @@ def main():
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
     parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
-    parser.add_argument('--steps-first',action='store_true',help='Divide each group into argument steps first; the package task builds records inside them')
+    parser.add_argument('--steps-first',action='store_true',help='Divide each group into argument steps; GPT only types each step, the program cuts SourceFragments and links')
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
