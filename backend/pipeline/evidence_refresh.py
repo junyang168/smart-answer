@@ -398,7 +398,8 @@ def commit_verified(store, root, *, source_fragments_only=False):
     updates, fragments = result['updates'], result['new_fragments']
     retiring = result.get('retiring_keys', [])
     source_kind = result['version']
-    if source_fragments_only and (updates or retiring or any(not k.startswith('source_fragments/') for k in fragments)):
+    # Source-only work may create or mark SourceFragments, never touch the layers above.
+    if source_fragments_only and (retiring or any(not k.startswith('source_fragments/') for k in {**updates, **fragments})):
         raise ValueError('source-only commit cannot write or retire upper-layer records')
     if result['status'] == 'verified' and (updates or retiring or source_fragments_only and fragments):
         if (root / 'commit.json').exists():

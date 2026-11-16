@@ -183,7 +183,7 @@ def test_compact_transport_compiles_full_legacy_ledger_and_replays_without_calls
 
 
 def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
-    reason=next(iter(d.REASON_CODES))
+    reason='not_exegesis'
     raw={'observations':[],'coverage_by_record':[{'record_id':'O','sentence_ids':['A','B']},
         {'record_id':'EXISTING','sentence_ids':['B']}],
         'excluded_sentences':[{'sentence_id':'C','reason_code':reason,'reason':'純轉場，不是實質內容。'}]}
@@ -196,7 +196,7 @@ def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
 
 @pytest.mark.parametrize('defect',['missing','foreign','duplicate_record','duplicate_sentence','overlap','empty_reason','unknown_reason'])
 def test_bad_compact_audit_is_rejected_without_inventing_a_decision(defect):
-    row={'record_id':'O','sentence_ids':['A']};reason=next(iter(d.REASON_CODES))
+    row={'record_id':'O','sentence_ids':['A']};reason='not_exegesis'
     result={'observations':[{'anchors':[{'segment_index':'S0001','verbatim_excerpt':'原句。'}]}],
         'coverage_by_record':[row],'excluded_sentences':[{'sentence_id':'B','reason_code':reason,'reason':'口頭語。'}]}
     if defect=='missing':result['coverage_by_record']=[]
@@ -443,3 +443,143 @@ def test_reference_material_cannot_be_silently_regenerated_without_owned_anchor(
         return out
     with pytest.raises(ValueError,match='owned primary'):
         creation.run('T',p,tmp_path/'run',Ports(source,out_of_scope),groups=g)
+
+
+class StepsPorts(Ports):
+    """Steps first, then one record type and statement per step; the program cuts the fragments."""
+    def __init__(self,source,steps_mutation=None,records_mutation=None):
+        super().__init__(source);self.steps_mutation=steps_mutation;self.records_mutation=records_mutation
+    def repair(self,request):
+        task=request['input']['task']
+        if task=='creation_argument_steps':
+            self.calls.append(task)
+            assert set(request['input']['claims'])=={'CL0001'} and '先写论证，再分句子' in request['system']
+            out={'steps':[
+                {'step_id':'T1','line':'反方：人子只強調人性','sentence_ids':['S0001#001'],'supports':['CL0001']},
+                {'step_id':'T2','line':'回答：不對','sentence_ids':['S0001#002'],'supports':['CL0001']},
+                {'step_id':'T3','line':'經文事實：但以理書的人子領受永遠權柄','sentence_ids':['S0002#003'],'supports':['CL0001','T2']}],
+                'claim_text':[],'other':[{'sentence_ids':['S0003#004'],'why':'聽眾提問，下段回答。'}]}
+            return self.steps_mutation(out) if self.steps_mutation else out
+        if task=='creation_step_records':
+            self.calls.append(task)
+            assert '你不複製原文' in request['system'] and 'verbatim_excerpt' not in json.dumps(request['schema'])
+            assert request['input']['argument_steps'][0]['text']=='有人说人子只强调人性。'
+            out={'records':[
+                {'step_id':'T1','kind':'position','statement':'人子只強調人性','observation_type':None,'step_type':None,'attribution':'有人','scripture_refs':[]},
+                {'step_id':'T2','kind':'evidence','statement':'他說這看法不對','observation_type':None,'step_type':'answer','attribution':'','scripture_refs':[]},
+                {'step_id':'T3','kind':'observation','statement':'但以理書的人子領受永遠權柄','observation_type':'scripture_text','step_type':None,'attribution':'','scripture_refs':['但7:13-14']}]}
+            return self.records_mutation(out) if self.records_mutation else out
+        return super().repair(request)
+
+
+def run_steps(tmp_path,**kw):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    ports=StepsPorts(source,**kw)
+    return ports,root,(lambda:creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True))
+
+
+def test_steps_first_cuts_fragments_and_links_from_the_steps(tmp_path):
+    ports,root,go=run_steps(tmp_path);result=go()
+    assert ports.calls==['creation_claims','creation_argument_steps','creation_step_records']
+    package=json.loads((root/'candidate.json').read_text());claim=package['claims'][0]
+    assert len(claim['evidence_step_ids'])==1 and claim['opposed_position_ids']
+    assert package['observations'][0]['argument_role']=='load_bearing'
+    text={f['fragment_id']:f for f in package['source_fragments']}
+    assert all(a['source_fragment_id'] in text for a in claim['occurrences'][0]['anchors'])
+    assert json.loads((root/'intent.json').read_text())['argument_steps_contract']==creation.STEPS_CONTRACT
+    ports.calls=[];assert go()==result and ports.calls==[]
+
+
+@pytest.mark.parametrize('fault',['sentence_twice','sentence_missing','two_comparisons','unknown_support'])
+def test_bad_steps_stop_before_the_records_call(tmp_path,fault):
+    def mutate(out):
+        if fault=='sentence_twice':out['steps'][1]['sentence_ids'].append('S0001#001')
+        if fault=='sentence_missing':out['other']=[]
+        if fault=='two_comparisons':out['steps'][2]['line']='甲 ↔ 乙 → 一；丙 ↔ 丁 → 二'
+        if fault=='unknown_support':out['steps'][0]['supports']=['CL9999']
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate)
+    with pytest.raises(ValueError):go()
+    assert 'creation_step_records' not in ports.calls and not (root/'creation-result.json').exists()
+
+
+def test_every_claim_needs_a_step_before_the_records_call(tmp_path):
+    def mutate(out):
+        for step in out['steps']:step['supports']=[s for s in step['supports'] if s!='CL0001']
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate)
+    with pytest.raises(ValueError,match='every Claim needs a step'):go()
+
+
+@pytest.mark.parametrize('fault',['missing_record','untyped_observation','unattributed_position','only_refuted'])
+def test_incomplete_records_never_become_a_candidate(tmp_path,fault):
+    steps=None
+    def records(out):
+        if fault=='missing_record':out['records']=out['records'][:2]
+        if fault=='untyped_observation':out['records'][2]['observation_type']=None
+        if fault=='unattributed_position':out['records'][0]['attribution']=' '
+        if fault=='only_refuted':  # a Claim whose only step is the view it refutes has no Evidence
+            for r in out['records'][1:]:r['kind']='position';r['attribution']='有人'
+        return out
+    ports,root,go=run_steps(tmp_path,records_mutation=records)
+    with pytest.raises(ValueError):go()
+    assert not (root/'creation-result.json').exists()
+
+
+def test_repeated_words_get_a_fragment_that_names_one_place():
+    source={'metadata':{'title':'t','status':'published'},'script':[
+        {'index':1,'start_time':0.0,'end_time':1.0,'text':'怎麼處理？我們來看。所以很混亂。怎麼處理？'}]}
+    sentences=x.section_sentences(source,Section(1,0,1,'all'));by={v.sentence_id:v for v in sentences}
+    text={'S0001':source['script'][0]['text']}
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#004'],by,text)]==['所以很混亂。怎麼處理？']
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#001','S0001#002'],by,text)]==['怎麼處理？我們來看。']
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#002','S0001#004'],by,text)]==['我們來看。','所以很混亂。怎麼處理？']
+
+
+def test_steps_first_requires_the_grouped_package(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
+    with pytest.raises(ValueError,match='grouped'):creation.run('T',path,tmp_path/'run',StepsPorts(source),groups=groups(),steps_first=True)
+
+
+def test_a_sentence_spoken_twice_is_located_at_its_own_position():
+    source={'metadata':{'title':'t','status':'published'},'script':[
+        {'index':1,'start_time':0.0,'end_time':1.0,'text':'怎麼處理？我們來看。所以很混亂。怎麼處理？'}]}
+    sentences=x.section_sentences(source,Section(1,0,1,'all'))
+    assert [s.text for s in sentences]==['怎麼處理？','我們來看。','所以很混亂。','怎麼處理？']
+    def response(excerpt):
+        r={k:[] for k in ('questions','positions','observations','evidence_steps')}
+        r['evidence_steps']=[{'evidence_step_id':'E1','anchors':[{'segment_index':'S0001','verbatim_excerpt':excerpt}]}]
+        r['sentence_audit']=[{'sentence_id':s.sentence_id,'status':'extracted' if i==3 else 'not_extracted',
+            'covered_by':['E1'] if i==3 else [],'reason_code':None if i==3 else 'structural_markup','reason':'測試。'}
+            for i,s in enumerate(sentences)]
+        return r
+    d.validate_sentence_audit(response('所以很混亂。怎麼處理？'),source,sentences)
+    with pytest.raises(Exception,match='S0001#004'):d.validate_sentence_audit(response('我們來看。'),source,sentences)
+
+
+def test_his_own_words_of_a_claim_become_its_source_fragments(tmp_path):
+    """2011 NYSC 二-1: his first answer to 「什麼是謙卑？」 went to claim_text and was
+    then excluded as duplicate_of 「CL0001本身的話」, so it was kept nowhere and the
+    slides had nothing to show while he gave it. claim_text is not Evidence, but
+    it is where he says the Claim: it must be one of the Claim's SourceFragments."""
+    def mutate(out):
+        out['other']=[];out['claim_text']=[{'claim_id':'CL0001','sentence_ids':['S0003#004']}]
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate);go()
+    package=json.loads((root/'candidate.json').read_text());claim=package['claims'][0]
+    fragments={f['fragment_id']:f for f in package['source_fragments']}
+    cited=[fragments[a['source_fragment_id']]['verbatim_excerpt'] for o in claim['occurrences'] for a in o['anchors']]
+    said=x.section_sentences(_transcript(),Section(1,0,3,'all'))
+    assert next(v.text for v in said if v.sentence_id=='S0003#004') in ''.join(cited)
+
+
+def test_duplicate_of_must_name_the_record_that_keeps_the_passage():
+    def answer(target):
+        return {'evidence_steps':[{'evidence_step_id':'ST05','anchors':[]}],
+                'coverage_by_record':[{'record_id':'ST05','sentence_ids':['A']}],
+                'excluded_sentences':[{'sentence_id':'B','reason_code':'duplicate_of','reason':'同一定義。',
+                                       'duplicate_of_record_id':target}]}
+    for target in ('CL0001',None,'ELSEWHERE'):
+        with pytest.raises(ValueError,match='duplicate_of must name'):creation.expand_material_audit(answer(target),['A','B'])
+    assert creation.expand_material_audit(answer('ST05'),['A','B'])['sentence_audit'][1]['reason_code']=='duplicate_of'
+    assert creation.expand_material_audit(answer('CL0001'),['A','B'],{'CL0001'})['sentence_audit'][1]['status']=='not_extracted'

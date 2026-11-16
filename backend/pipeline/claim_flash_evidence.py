@@ -15,6 +15,7 @@ from backend.pipeline import claim_human_source as human
 
 VERSION = 'claim_flash_grouped_evidence_v1'
 COLLECTIONS = {'evidence_steps','observations'}
+PRAYER_CONTRACT = 'claim_flash_evidence_prayer_v1'
 FIELDS = ('statement','speaker','stance','attribution','scripture_refs')
 SOURCE_INTERPRETATION = (
     'human_source_decisions是已保存的人工來源澄清，只在applicability=current的指定段落內解釋原文。'
@@ -852,6 +853,21 @@ def run_group(store, records, sources, group, targets, units, root, ports, previ
     return e.commit_verified(store,stage) if apply else e.publish(stage,result)
 
 
+def prayer_spans(root, ports, paragraphs):
+    """His prayer, as Jev judges it (first two and last paragraphs, and Amen
+    sentences), in normalized characters. A prayer is not teaching, so nothing
+    in it becomes Evidence or Observation."""
+    from backend.pipeline import claim_flash_citations as cit
+    order=[(pk,p['text']) for pk,p in paragraphs.items() if p['text'].strip()]
+    return cit.prayers(Path(root)/'prayers',ports,order,{pk for pk,_ in order})
+
+
+def in_prayer(spans, paragraph, quote):
+    from backend.pipeline import claim_flash_citations as cit
+    n,q=cit.norm(paragraph),cit.norm(quote);i=n.find(q)
+    return bool(q) and i>=0 and any(a<=i and i+len(q)<=b for a,b in spans)
+
+
 def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=False):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     with (root/'run.lock').open('a') as lock:
@@ -876,6 +892,7 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
                 'source_completion_policy':completion_policy(quote_action=quote_action,legacy_speaker=legacy_speaker)} if complete_source else {}),
             **({'wire_schema': PROGRAM_VALIDATED_SCHEMA} if program_validated else {}),
             **({'quote_action_contract': QUOTE_ACTION_CONTRACT} if quote_action else {}),
+            **({'prayer_contract': PRAYER_CONTRACT} if not saved_intent or saved_intent.get('prayer_contract')==PRAYER_CONTRACT else {}),
             'previous':str(Path(previous).resolve())})
         for started in root.rglob('started.json'):
             if not (started.parent/'response.json').exists():
@@ -905,7 +922,17 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             if recovered.get('applied'):
                 for key in recovered['updates']:records[key]=store.get_record_state(*key.split('/',1))
                 for key in recovered['new_fragments']:records[key]=store.get_record_state(*key.split('/',1))
-        units=inventory(previous,sources,source_id);owners={}
+        units=inventory(previous,sources,source_id);owners={};praying={};prayer_records=[]
+        if not saved_intent or saved_intent.get('prayer_contract')==PRAYER_CONTRACT:
+            # Roots started before this contract replay unchanged.
+            paragraphs=sources[source_id]['paragraphs'];praying=prayer_spans(root,ports,paragraphs)
+            units=[u for u in units if not in_prayer(praying.get(u['paragraph_key'],[]),paragraphs[u['paragraph_key']]['text'],u['quote'])]
+            for key,r in records.items():
+                if key.split('/')[0] not in COLLECTIONS:continue
+                frs=[records.get('source_fragments/'+fid,{}).get('payload',{}) for fid in e.evidence_fragment_ids(r['payload'])]
+                if frs and all(fr.get('paragraph_key') in praying and in_prayer(praying[fr['paragraph_key']],
+                        paragraphs[fr['paragraph_key']]['text'],fr.get('verbatim_excerpt','')) for fr in frs):
+                    prayer_records.append(key)
         for g in plan['groups']:
             for key in g.get('lower_record_keys',[]):
                 if key.split('/')[0] in COLLECTIONS:
@@ -945,5 +972,6 @@ def run(store, source_id, plan, root, ports, previous, *, group_ids=None, apply=
             if not result['pending']:finished.add(group['group_id']);affected.discard(group['group_id'])
         return e.publish(root,{'version':VERSION,'source_id':source_id,'groups':results,
             'requested_group_ids':selected,'authorized_group_ids':authorized,'affected_prior_group_ids':sorted(affected),
+            **({'prayer_only_records':sorted(prayer_records)} if prayer_records else {}),
             'status':'completed' if not affected and len(results)==len(selected) and all(not g['pending'] for g in results) and (apply or not any(g['updates'] for g in results)) else 'needs_attention',
             'claim_qualification':'not_granted'})

@@ -283,3 +283,36 @@ def test_flash_claim_occurrences_consume_explicit_exact_binding(sample,monkeypat
         assert c.refresh_occurrences({'occurrences':[]},['E'],records,'source-1',source_binding=binding)==result
         # Legacy callers do not silently acquire transition authority.
         with pytest.raises(ValueError):c.candidate_occurrences(candidate,records,'source-1')
+
+
+def test_removing_an_ai_heading_with_a_new_save_stamp_is_a_heading_edit(tmp_path):
+    heading = {'index': 'subtitle-1', 'type': 'subtitle', 'text': '## 差遣十二門徒', 'user_id': 'worker'}
+    body = [{'index': 1, 'start_time': 0, 'text': '教授的原話。'}, {'index': 2, 'end_time': 4.0, 'text': '所以，這是結論。'}]
+    before = {'metadata': {'title': 't', 'last_updated': '2026-01-29T13:36:03Z'}, 'script': [heading, *body]}
+    after = {'metadata': {'title': 't', 'last_updated': '2026-11-09T18:49:05Z'}, 'script': copy.deepcopy(body)}
+    facts = transition.heading_facts(before, after)
+    assert facts['kind'] == 'heading_edit' and facts['removed_rows'] == [heading] and not facts['inserted_rows']
+    path = tmp_path / 'source.json'
+    path.write_bytes(encode(before))
+    source = {'source_id': 's', 'source_type': 'sermon_transcript', 'source_path': str(path),
+              'source_file_sha256': transition.file_binding(path)['file_sha256'],
+              'source_body_sha256': project_script(before['script']).body_sha256, 'locator_space': 'spoken_body_v1'}
+    old = transition.file_binding(path)
+    transition.publish_transition(source=source, before_raw=encode(before), after_raw=encode(after),
+                                  authorization='Headings are AI metadata', root=tmp_path / 'proofs')
+    path.write_bytes(encode(after))
+    assert transition.verify_current_source_binding(old, root=tmp_path / 'proofs') == transition.file_binding(path)
+
+
+@pytest.mark.parametrize('change', ['text', 'title'])
+def test_heading_edit_still_rejects_content_or_metadata_changes(change):
+    heading = {'index': 'subtitle-1', 'type': 'subtitle', 'text': '## 差遣', 'user_id': 'worker'}
+    body = [{'index': 1, 'start_time': 0, 'text': '教授的原話。'}]
+    before = {'metadata': {'title': 't', 'last_updated': 'a'}, 'script': [heading, *body]}
+    after = {'metadata': {'title': 't', 'last_updated': 'b'}, 'script': copy.deepcopy(body)}
+    if change == 'text':
+        after['script'][0]['text'] = '教授的話。'
+    else:
+        after['metadata']['title'] = 'u'
+    with pytest.raises(ValueError):
+        transition.heading_facts(before, after)

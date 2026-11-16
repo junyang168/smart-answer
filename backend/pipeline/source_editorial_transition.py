@@ -78,6 +78,56 @@ def insertion_facts(before, after):
             'after_editorial_structure_sha256': right.editorial_structure_sha256}
 
 
+# The editor stamps this on every save; it is not content.
+SAVE_STAMP = 'last_updated'
+
+
+def _is_heading(row):
+    return row.get('type') == 'subtitle' and heading_level(row.get('text')) in {2, 3}
+
+
+def heading_facts(before, after):
+    """Headings are AI-written metadata: adding or removing them, and the
+    editor's save stamp, never change the transcript. A pure insertion keeps
+    the original facts so existing proofs reproduce exactly."""
+    try:
+        return insertion_facts(before, after)
+    except ValueError:
+        pass
+    old, new = _rows(before), _rows(after)
+    if isinstance(before, dict) != isinstance(after, dict):
+        raise ValueError('editorial transition changed transcript wrapper')
+    if isinstance(before, dict):
+        def meta(doc):
+            value = {k:v for k,v in doc.items() if k != 'script'}
+            if isinstance(value.get('metadata'), dict):
+                value['metadata'] = {k:v for k,v in value['metadata'].items() if k != SAVE_STAMP}
+            return sha256_json(value)
+        if meta(before) != meta(after):
+            raise ValueError('editorial transition changed transcript metadata')
+    if sha256_json([r for r in old if not _is_heading(r)]) != sha256_json([r for r in new if not _is_heading(r)]):
+        raise ValueError('editorial transition changed rows other than headings')
+    known_old = {sha256_json(r) for r in old if _is_heading(r)}
+    known_new = {sha256_json(r) for r in new if _is_heading(r)}
+    inserted = [r for r in new if _is_heading(r) and sha256_json(r) not in known_old]
+    removed = [r for r in old if _is_heading(r) and sha256_json(r) not in known_new]
+    if not inserted and not removed:
+        raise ValueError('editorial transition changed no headings')
+    for row in inserted:
+        if (set(row) - {'index','type','text','user_id'} or not str(row['index']).startswith('subtitle-')):
+            raise ValueError('editorial transition inserted an invalid subtitle row')
+    left, right = project_script(old), project_script(new)
+    if (left.body_rows != right.body_rows or left.spoken_rows != right.spoken_rows
+            or left.body_sha256 != right.body_sha256
+            or left.visual_content_sha256 != right.visual_content_sha256):
+        raise ValueError('editorial transition changed body, coordinates or visual content')
+    return {'kind': 'heading_edit', 'inserted_rows': inserted, 'removed_rows': removed,
+            'body_sha256': left.body_sha256, 'spoken_text_sha256': left.spoken_text_sha256,
+            'visual_content_sha256': left.visual_content_sha256,
+            'before_editorial_structure_sha256': left.editorial_structure_sha256,
+            'after_editorial_structure_sha256': right.editorial_structure_sha256}
+
+
 def build_proof(*, source, before, after, authorization):
     """Build a sealed proof from frozen before/after file bindings.
 
@@ -91,7 +141,7 @@ def build_proof(*, source, before, after, authorization):
         raise ValueError('editorial transition requires an explicit body-coordinate transcript descriptor')
     if not authorization or before['file_sha256'] != source.get('source_file_sha256'):
         raise ValueError('editorial transition lacks exact registered before generation/authority')
-    facts = insertion_facts(_read(before), _read(after))
+    facts = heading_facts(_read(before), _read(after))
     if facts['body_sha256'] != source.get('source_body_sha256'):
         raise ValueError('editorial transition body differs from registered source')
     if before['file_sha256'] == after['file_sha256']:
@@ -174,7 +224,7 @@ def publish_transition(*, source, before_raw, after_raw, authorization, root=Non
     bound = {'path': logical, 'file_sha256': before_sha}
     path = receipt_path(bound, root=root)
     # Validate first so even a rejected plan does not leave partial archives.
-    insertion_facts(json.loads(before_raw), json.loads(after_raw))
+    heading_facts(json.loads(before_raw), json.loads(after_raw))
     if before_sha != source.get('source_file_sha256'):
         raise ValueError('editorial transition before bytes differ from registered generation')
     archives = path.parent / 'raw'

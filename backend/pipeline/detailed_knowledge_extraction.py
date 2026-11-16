@@ -356,7 +356,12 @@ def validate_sentence_audit(
             covered = bool(spans.get(sentence.segment_index))
         else:
             text = segments.get(sentence.segment_index, "")
-            start = text.find(sentence.text)
+            # A sentence spoken twice in one paragraph is located by its own
+            # position; searching would land every copy on the first one.
+            start = sentence.char_start if (
+                sentence.char_start is not None
+                and text[sentence.char_start:sentence.char_start + len(sentence.text)] == sentence.text
+            ) else text.find(sentence.text)
             covered = False
             if start >= 0:
                 end = start + len(sentence.text)

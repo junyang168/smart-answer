@@ -3,7 +3,7 @@
 > **讀者**：Developer、流程設計者
 > **類型**：流程
 > **狀態**：當前流程；已有獨立入口、隔離測試及指定來源的正式 refresh，不授予舊 Claim／CVP 資格
-> **與代碼對齊**：部分；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
+> **與代碼對齊**：部分；2026-11-14 加入程式經文引用清單及片段檢查（#702）；2026-11-09 核對 #702 分層任務及 #723 的共用分層入口。99ae359a 已補主詞防錯及片段級角色派生，完成單組 Creation→隔離 Update 測試；不代表整篇成本對照或正式批次啟用。不追認舊結果已受新版提示核對，見第 7 節。
 > **權威範圍**：自下而上的原文、Evidence／Observation、Claim 及關係更新；不授予舊 Claim Management 資格，不維護 CVP，不裁定神學對錯。
 
 ## Overview
@@ -259,6 +259,17 @@ owners、revision等記帳變化不重做內容審閱。拆分按statement快取
 只定位及補書目資料，不修改 statement、Claim 或論證關係，不另調 GPT 定位。查找只限當前來源及已知引用段落；來源變更仍走 migration。
 已確認的出處是入口先決條件；匹配片段不等於辨識出處。未知出處、無匹配及 Jev 不確定不強填，保留具體結果。
 操作沿既有 pins、ChangeSet、回讀及同 root 答覆復用；受保護目標與失效／刪除來源不藉引用匹配放行。
+上述綁定之後，新開的 Flash root 再跑程式經文引用清單（`claim_flash_citations`，契約 `claim_flash_citation_list_v3`）：
+全篇讀一次，記教授明說的書卷章節、逐字念出的經文，以及「耶穌說」「保羅明講」等引出的話；
+引出語由 Jev 選節、再由 GPT 逐處核對，只留核對為引用的；首末段等可能是禱告的段落由 Jev 判定，禱告不算引用。
+既有 SourceFragment 含引用本身的，在 `scripture_refs` 補標；所在段的當前清單已不引的標記移除。
+上層只透過 SourceFragment 看原文，所以每處明確引用都必須在某個 SourceFragment 之內；
+這一步只比對 SourceFragment 與原文，不看它屬於哪個 Evidence／Observation。不在任何 SourceFragment 內的引用句，
+由原文補齊（`claim_flash_source_fill.run_citations`）按原句存為 SourceFragment，不調 Jev 或 GPT，
+不建立或修改 Evidence、Observation、Claim；新片段建立時即在 `scripture_refs` 記所引經文，由哪個 Evidence 使用，屬 Evidence 層。
+四步的順序，以及只跑這四步的入口（`--source-only`，任何講道可用，不帶 `--apply` 只列出會寫的內容），見該方案第 5 節。
+已開始的 root 不帶此契約，按原 intent 重放，不補跑。
+定義與試驗見 [Flash 經文引用清單方案](./claim_flash_scripture_citation_solution.md)。
 這個入口只報告，不修改資料，不啟動下文歷史 lower 的補建、連接或 Claim 流程。
 原文層與查漏可分開執行；入口不把未解決定位、查漏結果或範圍外線索冒稱整體資格。
 
@@ -287,6 +298,28 @@ Jev 提供覆蓋疑點，GPT 只處置本項漏記或有據保留；不能因原
 Observation 保存教授指出的經文、措辭、事實或現象；Evidence 保存教授支持、限定、
 反駁或說明判斷的材料 statement；它如何參與論證屬 Claim 層，不靠句子深奧程度區分。
 直接由原文支持的 Evidence 不必虛構一條 Observation。
+
+**禱告不是教導**（`claim_flash_evidence_prayer_v1`，已實作）。Evidence 層開始時由 Jev 判定本講的禱告：
+首兩段與末段整段問，含「奉…名求／阿們／Amen」的段落另問該句；判定方式與經文引用清單相同。
+落在禱告內的重要內容清單項不進查漏，不為它建立或增補 Evidence／Observation。
+全部 SourceFragment 都在禱告內的既有 Evidence／Observation 列入結果的 `prayer_only_records`，
+交負責人退役，本層不自行退役。此契約之前開始的 root 照原樣重放。
+2026-11-15 在 33 講中找到 2 條（2017 NYSC 1 開場禱告、2022 NYSC 結尾祝福）及其上的 Claim，已由負責人退役。
+
+**分件規則**（負責人 2026-11-15 定，依一般論證標註做法；檢查尚未實作）。來源是 #783 試驗，
+見 #783 試驗記錄 `10-extraction/claim_creation_agent_spike_783_20261115.md` 第 4 節（PR #784）：
+
+| 規則 | 內容 | 在哪一層、由誰查 |
+| --- | --- | --- |
+| R1 一件一事 | 每條 Evidence／Observation 只說一件可單獨判斷真假的事；以「並且」「；」連起兩件事就是兩件。一段念出的經文算一件，除非各部分用途不同。Claim 是講課提綱上的一點：它自己的限定寫在同一條；能單獨回答一個問題的部分才另立一條（負責人 2026-11-15，見 [creation 設計 3.2](../10-extraction/claim_creation_flash_design.md#32-生成候選-claim-與原文範圍)） | 本層：加進既有記錄 Jev 檢查的同一請求，未通過交 GPT 處置 |
+| R2 有連接 | 每條 Evidence／Observation 至少連到一條 Claim | 已由 [4.3](#43-從孤立-evidenceobservation-主動查漏) 處理孤立記錄，不另查 |
+| R3 用到全部 | 每條連接用到起點那一件的全部內容；只用到一部分就是該拆的那一件。一件可連到多條 Claim | Claim 層：加進 [4.2](#42-claim-與下層連接獨立配對檢查) 的配對檢查 |
+| R4 不重述 | Claim 不重述連到它的 Evidence／Observation，Evidence／Observation 也不只是它所連 Claim 的換句話說 | Claim 層：同上 |
+| R5 Observation 不含判斷 | Observation 只記他指出的經文、措辭、事實；他由此下的判斷是 Evidence 或 Claim | 本層：同 R1 |
+| R6 用詞有據 | statement 中的譯本、語言、文法詞（新譯本、希臘文、語態……）要出現在它的 SourceFragment 裡；「中文翻譯」在他的語境裡就指和合本，可寫成和合本 | 本層：程式，不調模型 |
+
+R1、R5 未通過時，GPT 的處置可以是拆成兩條，各帶自己那部分的 SourceFragment；連接如何改由 Claim 層配對檢查決定。
+GPT 的處置即最終結果，不再複查。
 
 查漏的唯讀Position須帶其實際title與歸屬，不能只帶空statement或attribution便判缺。
 增補既有材料保留其完整來源綁定，所選支持片段必須已提供且已掛載；
@@ -423,9 +456,21 @@ Evidence／Observation，並對它們作出判斷；這些判斷必須逐筆記�
 | 保留 Evidence | 教授的斷言，未另給論據，不建 Claim | GPT 的理由 |
 | 背景 | 只交代敘事或背景 | GPT 的理由 |
 
-論證完整性檢查的輸出目前只有新連接，沒有重複或保留的欄位；GPT 已判出的重複只表現為移除一條邊，
-被移除的一端因此變成孤立。輸出須加上這些去向。漏抽檢查已有 `retain_evidence`，須把它記到對應記錄上。
-資料模型目前沒有去向欄位，接入前先寫入每組的結果檔。
+資料模型目前沒有去向欄位，各階段把去向寫進自己的結果檔 `lower_dispositions`，每項帶
+`object_key`、去向、`reason` 及 `stage`：
+
+- **論證完整性檢查**（`argument_completeness`）：請求附 `unrouted_material`，即本組材料中目前沒有
+  論證路線通向任何 Claim 的記錄。GPT 對本次未連接者，能判定時各給一項 `duplicate`
+  （`duplicate_of` 指向另一筆記錄）、`retain_evidence` 或 `background`。可能屬於組外 Claim、
+  或可能是未建 Claim 的材料不判，留給反向查漏。程式拒收清單以外的記錄、本次已連接的記錄、
+  重複判定，以及沒有指向另一筆記錄的 `duplicate`。寫在 `verification.json`。
+- **連接審查移除邊**：被移除的邊若使一端失去全部論證路線，記 `relation_removed`，
+  附另一端與 GPT 移除時的理由。理由可能是重複，也可能是無關；程式不替它分類。
+- **漏抽檢查**：GPT 已回的 `retain_evidence` 與 `represented`，按 `support_keys` 逐筆展開，
+  `represented` 另記 `claim_id`。寫在 `draft.json`；不增加模型呼叫。
+
+在此之前已開始的論證檢查目錄按原請求格式重放，沒有 `lower_dispositions`；
+其中的記錄由反向查漏照常處理。
 
 所有組完成後，程式找出仍無論證路徑、也沒有任何去向的記錄，只對這些作反向查漏。
 主要是不屬於任何組的記錄，以及本次檢查沒有送入的記錄。
