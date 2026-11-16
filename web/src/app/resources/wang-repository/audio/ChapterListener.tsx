@@ -495,9 +495,9 @@ export default function ChapterListener({
             </span>
           )}
         </h1>
-        {/* 手機上收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        <span className="text-sm font-semibold text-stone-700 sm:hidden">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
-        <label className="hidden items-center gap-2 text-sm sm:flex">
+        {/* 比 iPhone Pro Max（440px）窄的手機才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
+        <span className="text-sm font-semibold text-stone-700 min-[430px]:hidden">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        <label className="hidden items-center gap-2 text-sm min-[430px]:flex">
           <span className="text-stone-600">段落</span>
           <select
             value={section}
@@ -512,7 +512,7 @@ export default function ChapterListener({
           </select>
         </label>
         {hasLeftOut && (
-          <label className="hidden cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto sm:flex">
+          <label className="hidden cursor-pointer items-center gap-2 text-sm text-stone-600 min-[430px]:flex sm:ml-auto">
             <input
               type="checkbox"
               role="switch"
@@ -691,7 +691,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={`${button} hidden sm:inline-flex`}
+            className={`${button} hidden min-[430px]:inline-flex`}
           >
             ⏮
           </button>
@@ -714,7 +714,7 @@ export default function ChapterListener({
             value={rate}
             onChange={(event) => changeRate(Number(event.target.value))}
             aria-label="速度"
-            className="hidden min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm sm:block"
+            className="hidden min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm min-[430px]:block"
           >
             {SPEEDS.map((speed) => (
               <option key={speed} value={speed}>
