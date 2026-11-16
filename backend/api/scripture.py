@@ -641,6 +641,11 @@ SPOKEN_BOOK_ALIASES: Dict[str, str] = {
     "羅馬": "rom", "罗马": "rom",
     "希伯來": "heb", "希伯来": "heb",
     "啟示錄": "rev", "启示录": "rev",
+    # 先知書也常省「書」：「以賽亞六十一章第七節」（2011（二）1）。
+    "以賽亞": "isa", "以赛亚": "isa",
+    "耶利米": "jer",
+    "以西結": "ezk", "以西结": "ezk",
+    "但以理": "dan",
 }
 
 _CHINESE_DIGITS: Dict[str, int] = {c: i for i, c in enumerate("零一二三四五六七八九")}

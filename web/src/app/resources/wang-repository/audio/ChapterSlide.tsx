@@ -201,7 +201,9 @@ export default function ChapterSlide({
   // 他開始新要點後又念新經文，前面要點的經文就收起，免得看起來屬於現在講的。
   const current = read.filter((item) => !read.some((later) => slide.points.some(
     (point) => item.at < point.at && point.at <= later.at)));
-  const shown = [...current].reverse();
+  // 同一段經文再念一次，只留最近的那一次。
+  const shown = [...current].reverse().filter((item, index, all) =>
+    all.findIndex((other) => other.scripture === item.scripture) === index);
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {

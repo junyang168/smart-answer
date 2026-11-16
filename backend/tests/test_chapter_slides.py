@@ -389,3 +389,16 @@ def test_inline_notes_follow_the_cited_verse_and_sentence(tmp_path):
     draft["inline_notes"] = [{**note, "sentence": "S0002"}]
     problems, _, slides = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
     assert not problems and slides[0]["inline_notes"] == [{**note, "sentence": "S0003"}]
+
+
+def test_a_verse_read_again_later_on_the_slide_appears_again():
+    kept = [{"id": "U001", "start": 0.0, "end": 100.0,
+             "text": "以賽亞書六十一章七節。接著講別的。馬太五章五節。又是以賽亞六十一章第七節所預言的。"}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U001", "keep": True}]}
+    record = {"slides": [dict(slide("S0001", points=({"sentence": "S0001", "text": "一"},
+                                                     {"sentence": "S0003", "text": "二"})),
+                              last="S0004", scriptures=[{"sentence": "S0001", "slug": "isa-61-7"},
+                                                        {"sentence": "S0003", "slug": "mat-5-5"}])]}
+    _, timed = chapter_slides.placed(decisions, record)
+    assert [(s["sentence"], s["slug"]) for s in timed[0]["scriptures"]] == [
+        ("S0001", "isa-61-7"), ("S0003", "mat-5-5"), ("S0004", "isa-61-7")]

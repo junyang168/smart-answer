@@ -497,12 +497,26 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
                 for item in slide.get("inline_notes", [])
             ],
-            "scriptures": [
-                {**item, "at": lines[index[item["sentence"]]]["start"]}
-                for item in slide["scriptures"]
-            ],
+            "scriptures": _reread(slide["scriptures"], own, lines, index),
         })
     return piece_verses, timed
+
+
+def _reread(scriptures: list[dict[str, Any]], own: list[dict[str, Any]], lines: list[dict[str, Any]],
+            index: dict[str, int]) -> list[dict[str, Any]]:
+    """經文出現的時間；他在同一張裡再念一次已顯示的經文時，經文也再出現一次。"""
+
+    from backend.api.scripture import parse_reference, spoken_references
+
+    timed = [{**item, "at": lines[index[item["sentence"]]]["start"]} for item in scriptures]
+    for line in own:
+        for _, slug in spoken_references(line["text"]):
+            wanted = parse_reference(slug)
+            earlier = [item for item in scriptures if index[item["sentence"]] < index[line["id"]]
+                       and _covers([parse_reference(item["slug"])], wanted)]
+            if earlier and not any(item["sentence"] == line["id"] for item in scriptures):
+                timed.append({**earlier[-1], "sentence": line["id"], "at": line["start"]})
+    return sorted(timed, key=lambda item: item["at"])
 
 
 def decide(
