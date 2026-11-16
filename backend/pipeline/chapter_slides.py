@@ -496,6 +496,10 @@ def checked(
         problems = evidence_scripture_gaps(claim_context, slides)
         if outline:
             problems += argument_alignment(claim_context, slides)
+            # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
+            from backend.pipeline import chapter_slide_eval
+            problems += chapter_slide_eval.evaluate(
+                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context))["problems"]
     return problems, unshown, slides
 
 
