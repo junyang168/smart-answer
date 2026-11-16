@@ -241,7 +241,7 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         lines += ["", "# 本堂講課提綱（論證層 Claims）",
                   "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
-                  "- 第一張是本堂地圖：要點按講的次序列出各部分，每條一句話寫出該部分的蓋子；蓋子在其他講講出、本堂只提出問題的，寫成問題。",
+                  "- 不另做本堂地圖或總覽：第一張照他開頭實際講的內容做，每一張都是他此刻在講的。",
                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
@@ -491,13 +491,8 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
-    outline = (slides_record.get("claim_context") or {}).get("schema_version") == "chapter-slide-outline-context.v1"
-    for number, slide in enumerate(slides_record["slides"]):
+    for slide in slides_record["slides"]:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
-        if outline and number == 0:
-            # 本堂地圖是預告，不是他此刻講的話：要點一起出現，不跟錄音逐條亮。
-            slide = {**slide, "overview": True,
-                     "points": [{**item, "sentence": slide["first"]} for item in slide["points"]]}
         for line in own:
             piece_verses.setdefault(line["piece"], slide["verses"])
         timed.append({

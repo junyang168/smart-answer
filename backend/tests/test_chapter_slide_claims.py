@@ -166,7 +166,7 @@ def test_outline_claims_are_placed_on_retained_sentences_without_a_store(tmp_pat
     assert {c['claim_id']: c['parent'] for c in context['claims']}['A:CL2'] == 'A:CL1'
     client = FakeClient([{'slides': [slide('S0001')]}])
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
-    assert '本堂地圖' in client.prompts[0] and 'A:CL1' in client.prompts[0]
+    assert '不另做本堂地圖' in client.prompts[0] and 'A:CL1' in client.prompts[0]
 
 
 def test_outline_claim_whose_sentence_was_not_kept_is_excluded(tmp_path):
@@ -177,16 +177,14 @@ def test_outline_claim_whose_sentence_was_not_kept_is_excluded(tmp_path):
     assert context['excluded'] == [{'claim_id': 'A:CL1', 'reason': 'stated sentence not in retained transcript'}]
 
 
-def test_outline_map_slide_shows_all_points_at_once_without_following_the_audio(tmp_path):
+def test_outline_has_no_lecture_map_slide(tmp_path):
+    """負責人 2026-11-16：本堂地圖是編輯整理、他沒有講；聆聽頁按經文段落組織，與講課時間不重合。"""
     _decided(tmp_path)
     record = {'claim_context': {'schema_version': hints.OUTLINE_SCHEMA},
-              'slides': [dict(slide('S0001', points=({'sentence': 'S0001', 'text': '一'}, {'sentence': 'S0002', 'text': '二'})), last='S0002'),
-                         dict(slide('S0003', points=({'sentence': 'S0003', 'text': '三'}, {'sentence': 'S0004', 'text': '四'})), last='S0004')]}
+              'slides': [dict(slide('S0001', points=({'sentence': 'S0001', 'text': '一'}, {'sentence': 'S0002', 'text': '二'})), last='S0002')]}
     decisions = json.loads(chapter_exposition.record_path(tmp_path, CHAPTER.passage, 'L').read_text())
     _, timed = chapter_slides.placed(decisions, record)
-    assert timed[0]['overview'] and {p['at'] for p in timed[0]['points']} == {timed[0]['at']}
-    assert 'overview' not in timed[1] and timed[1]['points'][0]['at'] != timed[1]['points'][1]['at']
-
+    assert 'overview' not in timed[0] and timed[0]['points'][0]['at'] != timed[0]['points'][1]['at']
 
 def creation_run(root, complete=True, quote_e2='我們看以賽亞書六十一章一節。'):
     """A minimal Claim-creation output folder: one group, cover CL0001 and point CL0002."""
@@ -221,7 +219,7 @@ def test_creation_runs_become_an_outline_with_their_evidence_on_retained_sentenc
     assert [e['evidence_step_id'] for e in point['evidence_steps']] == ['E2', 'O1']
     client = FakeClient([{'slides': [slide('S0001')]}])
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
-    assert '本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
+    assert '不另做本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
 
 
 def test_unplaceable_fragment_is_recorded_and_incomplete_run_is_refused(tmp_path):
