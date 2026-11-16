@@ -11,6 +11,7 @@ type Question = {
   sentences: Sentence[];
   audio: { url: string; start: number | null; end: number | null };
   disagreement?: string | null;
+  viewpoints?: string[];
 };
 type Followup = { followup_id: number; kind: "confirm" | "ask"; text: string; suggested_choice: string | null };
 type Next =
@@ -88,6 +89,20 @@ function Player({ audio }: { audio: Question["audio"] }) {
 }
 
 const CONTEXT_CHARS = 60;
+
+function Viewpoints({ items }: { items?: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <div className="rounded-xl border-l-4 border-blue-700 bg-blue-50 p-3">
+      <p className="text-sm text-blue-900">教授在這裡要說明的觀點：</p>
+      {items.map((v) => (
+        <p key={v} className="text-lg font-semibold text-slate-900">
+          「{v}」
+        </p>
+      ))}
+    </div>
+  );
+}
 
 function Passage({ sentences }: { sentences: Sentence[] }) {
   // Context only orients the reader; long grey text buries the highlighted part on a phone.
@@ -249,6 +264,7 @@ function Review() {
           <p className="text-sm text-slate-500">
             {redo ? "重新決定" : next.mode === "followup" || next.mode === "clarifying" ? "想再請教你一下" : `第 ${number} 題，共 ${next.progress.total} 題`}
           </p>
+          <Viewpoints items={question.viewpoints} />
           <Player audio={question.audio} />
           <Passage sentences={question.sentences} />
           {!redo && next.mode === "clarifying" ? (
@@ -399,6 +415,7 @@ function OwnerItem({ row, onDone }: { row: Overview; onDone: () => void }) {
         <Player audio={row.question.audio} />
         <span className="text-sm text-slate-500">{row.question.group_id}</span>
       </div>
+      <Viewpoints items={row.question.viewpoints} />
       <Passage sentences={row.question.sentences} />
       <p className="font-semibold">{row.question.question}</p>
       {row.question.disagreement && <p className="text-sm text-slate-500">{row.question.disagreement}</p>}
