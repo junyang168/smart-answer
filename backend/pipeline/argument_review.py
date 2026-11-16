@@ -24,19 +24,19 @@ MAX_FOLLOWUPS = 2   # questions asked of one reviewer about one answer
 
 # One plain question per kind of answer. Options never show IDs or terms.
 QUESTIONS = {
-    'step': ('教授這一段（底色）是在講一個理由嗎？', [
+    'step': ('教授這一段（黃色標示的）是在講一個理由嗎？', [
         ('one', '是，這是一個理由'),
         ('several', '不是，裡面有兩個以上的理由'),
         ('conclusion', '這是在下結論，不是在講理由'),
         ('aside', '這是題外話，不是在講經文')]),
-    'claim_text': ('這幾句（底色）是教授在說結論嗎？', [
+    'claim_text': ('這幾句（黃色標示的）是教授在說結論嗎？', [
         ('conclusion', '是，在說結論'),
         ('reason', '不是，是在講理由、經文或例子'),
         ('filler', '只是過場話')]),
-    'other': ('這幾句（底色）只是過場話嗎？', [
+    'other': ('這幾句（黃色標示的）只是過場話嗎？', [
         ('filler', '是，只是過場話，可以略過'),
         ('content', '不是，裡面有內容')]),
-    'aside': ('這一段（底色）是在講經文，還是題外話？', [
+    'aside': ('這一段（黃色標示的）是在講經文，還是題外話？', [
         ('aside', '題外話，聽眾可以略過'),
         ('exegesis', '在講經文')]),
 }

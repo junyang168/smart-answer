@@ -423,7 +423,7 @@ export default function ArgumentReviewPage() {
     <main className="mx-auto grid max-w-2xl gap-5 px-4 py-6">
       <header className="grid gap-1">
         <h1 className="text-2xl font-semibold">同工審閱</h1>
-        <p className="text-base text-slate-600">先聽一聽，再看底色的那幾句，選一個最接近你想法的答案。不確定時，用自己的話說就可以。</p>
+        <p className="text-base text-slate-600">先聽一聽，再看黃色標示的那幾句，選一個最接近你想法的答案。不確定時，用自己的話說就可以。</p>
       </header>
       {isOwner && (
         <nav className="flex gap-2">
