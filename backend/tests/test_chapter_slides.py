@@ -381,7 +381,11 @@ def test_inline_notes_follow_the_cited_verse_and_sentence(tmp_path):
     decisions = {"pieces": KEPT, "decisions": [{"id": p["id"], "keep": True} for p in KEPT]}
     _, timed = chapter_slides.placed(decisions, {"slides": slides})
     assert timed[0]["inline_notes"] == [{**note, "at": chapter_slides.sentences(KEPT)[3]["start"]}]
-    for change in ({"sentence": "S0002"}, {"span": "虛心"}, {"verse": 2}):
+    for change in ({"span": "虛心"}, {"verse": 2}):
         draft["inline_notes"] = [{**note, **change}]
         problems, _, _ = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
         assert problems
+    # 綁在經文讀出之前的註解：只把時間移到讀出那一句，文字不變。
+    draft["inline_notes"] = [{**note, "sentence": "S0002"}]
+    problems, _, slides = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
+    assert not problems and slides[0]["inline_notes"] == [{**note, "sentence": "S0003"}]

@@ -401,6 +401,11 @@ def check(
         for note in slide.get("inline_notes", []):
             scripture = next((item for item in scriptures if item["slug"] == note["scripture"]
                               and item["sentence"] <= note["sentence"]), None)
+            later = next((item for item in scriptures if item["slug"] == note["scripture"]), None)
+            if scripture is None and later is not None and note["sentence"] in own_ids:
+                # 註解綁在經文讀出之前一兩句：時間移到讀出那一句，文字不變。
+                note = {**note, "sentence": later["sentence"]}
+                scripture = later
             ref = parse_reference(scripture["slug"]) if scripture else None
             if (note["sentence"] not in own_ids or ref is None
                     or not ref["start"] <= note["verse"] <= ref["end"]
