@@ -262,7 +262,8 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
-                  "sentence 綁他講出這條要點內容的那一句——不是這一步開始的引子句：他先念經文、後下結論時，結論要點綁下結論那一句。"
+                  "sentence 綁他講出這條要點內容的那一句；但他一開始講新的一步（含為這一步念經文），畫面最新的要點就要換成屬於這一步的，"
+                  "所以每一步的第一條要點綁這一步 anchors 的第一句，同一步後面的要點再綁他講出它們的那一句。同一張不可兩條綁同一句。"
                   "這一句必須落在 source 那一步的 anchors 句子範圍內（Claim 則在它各步與 stated 句的範圍內）。",
                   "- 他講任何一步論證（某個 Claim 的 stated 句或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
                   "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
@@ -495,8 +496,9 @@ def checked(
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
         problems = evidence_scripture_gaps(claim_context, slides)
         if outline:
-            from backend.pipeline.chapter_slide_claims import point_spans
-            problems += point_spans(claim_context, slides) + argument_alignment(claim_context, slides)
+            from backend.pipeline.chapter_slide_claims import point_spans, stale_points
+            problems += (point_spans(claim_context, slides) + argument_alignment(claim_context, slides)
+                         + stale_points(claim_context, slides, sentences(kept)))
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(

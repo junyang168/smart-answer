@@ -278,3 +278,20 @@ def test_points_are_timed_by_the_argument_step_they_show_and_unrelated_slides_ar
     result = chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
     assert result['status'] == 'saved' and len(client.prompts) == 2
     assert '程序核對不通過' in client.prompts[1] and 'G01-CL0001' in client.prompts[1]
+
+
+def test_a_point_left_over_from_another_step_is_reported(tmp_path):
+    """他已講到另一步，畫面最新的要點還屬於別的 Claim：三句以上就報；兩條綁同一句也報。"""
+    context = {"claims": [
+        {"claim_id": "C1", "evidence_steps": [{"evidence_step_id": "E1", "anchors": [{"sentences": ["S0001", "S0002"]}]}]},
+        {"claim_id": "C2", "evidence_steps": [{"evidence_step_id": "E2", "anchors": [{"sentences": ["S0003", "S0004", "S0005", "S0006"]}]}]},
+    ]}
+    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    late = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0001", "text": "一", "source": "E1"},
+                                                         {"sentence": "S0006", "text": "二", "source": "E2"}]}]
+    assert hints.stale_points(context, late, lines) == [
+        "甲（S0003–S0005）: 他已講到另一步（C2、E2），畫面還停在要點「一」；那一步的第一條要點要在 S0003 或更早出現"]
+    on_time = [dict(late[0], points=[late[0]["points"][0], dict(late[0]["points"][1], sentence="S0003")])]
+    assert hints.stale_points(context, on_time, lines) == []
+    together = [dict(late[0], points=[dict(p, sentence="S0001") for p in late[0]["points"]])]
+    assert any("兩條要點都綁在 S0001" in p for p in hints.stale_points(context, together, lines))

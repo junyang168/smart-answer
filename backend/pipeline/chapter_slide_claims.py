@@ -397,6 +397,52 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     return problems
 
 
+#: 他已講進另一步論證，畫面上的要點還停在別的 Claim，這麼多句以上才報（一兩句的過門不算）。
+STALE_SENTENCES = 3
+
+
+def stale_points(context: dict, slides: list[dict], lines: list[dict]) -> list[str]:
+    """他講進一步新的論證，目前那條要點卻還是別處的（負責人 2026-11-16：他講 A，畫面亮著 B）。
+
+    逐句看：這一句落在哪些步驟的 SourceFragment 裡；畫面此刻最新的要點，source 要是其中
+    一步或它們的 Claim。沒有 source 的要點（故事、插話）和不屬任何一步的句子不查。
+    另查同一張兩條要點綁同一句：那等於兩條一起亮。"""
+    cover: dict[str, set] = {}
+    for claim in context.get("claims", []):
+        for step in claim.get("evidence_steps", []):
+            if not step.get("evidence_step_id"):
+                continue
+            for anchor in step.get("anchors", []):
+                for sentence in anchor.get("sentences", []):
+                    cover.setdefault(sentence, set()).update({step["evidence_step_id"], claim["claim_id"]})
+    problems, run = [], None
+
+    def close():
+        if run and run["count"] >= STALE_SENTENCES:
+            problems.append(f"{run['slide']}（{run['first']}–{run['last']}）: 他已講到另一步（{'、'.join(sorted(run['steps']))}），"
+                            f"畫面還停在要點「{run['text']}」；那一步的第一條要點要在 {run['first']} 或更早出現")
+
+    for line in lines:
+        sid = line["id"]
+        slide = next((s for s in reversed(slides) if s["first"] <= sid), None)
+        shown = [p for p in (slide or {}).get("points", []) if p["sentence"] <= sid]
+        source = shown[-1].get("source") if shown else ""
+        if not source or sid not in cover or source in cover[sid]:
+            close(); run = None
+            continue
+        if run and run["text"] == shown[-1]["text"]:
+            run.update(last=sid, count=run["count"] + 1)
+        else:
+            close()
+            run = {"slide": slide["title"], "first": sid, "last": sid, "count": 1, "text": shown[-1]["text"], "steps": cover[sid]}
+    close()
+    for slide in slides:
+        bound = [p["sentence"] for p in slide["points"]]
+        for sentence in sorted({s for s in bound if bound.count(s) > 1}):
+            problems.append(f"{slide['title']}: 有兩條要點都綁在 {sentence}，會一起亮；每條綁他講出它的那一句")
+    return problems
+
+
 def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, runs: list[Path]) -> dict:
     """Outline context from Claim-creation runs (files): each run is one argument group.
 
