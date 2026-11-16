@@ -495,7 +495,9 @@ export default function ChapterListener({
             </span>
           )}
         </h1>
-        <label className="flex items-center gap-2 text-sm">
+        {/* 手機上收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
+        <span className="text-sm font-semibold text-stone-700 sm:hidden">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        <label className="hidden items-center gap-2 text-sm sm:flex">
           <span className="text-stone-600">段落</span>
           <select
             value={section}
@@ -510,7 +512,7 @@ export default function ChapterListener({
           </select>
         </label>
         {hasLeftOut && (
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto">
+          <label className="hidden cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto sm:flex">
             <input
               type="checkbox"
               role="switch"
@@ -689,7 +691,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={button}
+            className={`${button} hidden sm:inline-flex`}
           >
             ⏮
           </button>
@@ -712,7 +714,7 @@ export default function ChapterListener({
             value={rate}
             onChange={(event) => changeRate(Number(event.target.value))}
             aria-label="速度"
-            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm"
+            className="hidden min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm sm:block"
           >
             {SPEEDS.map((speed) => (
               <option key={speed} value={speed}>
