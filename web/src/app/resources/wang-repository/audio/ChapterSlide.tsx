@@ -198,7 +198,10 @@ export default function ChapterSlide({
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
   const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
-  const shown = [...read].reverse();
+  // 他開始新要點後又念新經文，前面要點的經文就收起，免得看起來屬於現在講的。
+  const current = read.filter((item) => !read.some((later) => slide.points.some(
+    (point) => item.at < point.at && point.at <= later.at)));
+  const shown = [...current].reverse();
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
