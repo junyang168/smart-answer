@@ -16,6 +16,7 @@ type Followup = { followup_id: number; kind: "confirm" | "ask"; text: string; su
 type Next =
   | { mode: "question"; progress: Progress; question: Question; is_owner: boolean }
   | { mode: "followup"; progress: Progress; question: Question; followup: Followup; your_answer: { choice: string | null; opinion: string | null }; is_owner: boolean }
+  | { mode: "clarifying"; progress: Progress; question: Question; answer_id: number; your_words: string; is_owner: boolean }
   | { mode: "done"; progress: Progress; is_owner: boolean };
 type Progress = { answered: number; total: number };
 type Mine = { question_id: string; choice: string | null; opinion: string | null; focus: string; choice_label: string | null };
@@ -191,6 +192,23 @@ function Review() {
     void load();
   }, [load]);
 
+  // After someone writes their view, stay on the question and ask the follow-up right away.
+  const [thinking, setThinking] = useState<"idle" | "asking" | "failed">("idle");
+  const waitingId = next?.mode === "clarifying" ? next.answer_id : null;
+  const askFollowup = useCallback(async (answerId: number) => {
+    setThinking("asking");
+    try {
+      await call("clarify", { answer_id: answerId });
+      setThinking("idle");
+      await load();
+    } catch {
+      setThinking("failed");
+    }
+  }, [load]);
+  useEffect(() => {
+    if (waitingId !== null) void askFollowup(waitingId);
+  }, [waitingId, askFollowup]);
+
   const send = async (path: string, body: unknown, message: string) => {
     setBusy(true);
     try {
@@ -225,15 +243,33 @@ function Review() {
         <article
           // A new key per question and per follow-up gives each one fresh state, so text typed
           // for one question never shows up in the next one's box.
-          key={`${question.question_id}:${redo ? "redo" : next.mode === "followup" ? next.followup.followup_id : "q"}`}
+          key={`${question.question_id}:${redo ? "redo" : next.mode === "followup" ? next.followup.followup_id : next.mode === "clarifying" ? `c${next.answer_id}` : "q"}`}
           className="grid gap-5 rounded-2xl bg-white p-5 shadow-sm"
         >
           <p className="text-sm text-slate-500">
-            {redo ? "重新決定" : next.mode === "followup" ? "想再請教你一下" : `第 ${number} 題，共 ${next.progress.total} 題`}
+            {redo ? "重新決定" : next.mode === "followup" || next.mode === "clarifying" ? "想再請教你一下" : `第 ${number} 題，共 ${next.progress.total} 題`}
           </p>
           <Player audio={question.audio} />
           <Passage sentences={question.sentences} />
-          {!redo && next.mode === "followup" ? (
+          {!redo && next.mode === "clarifying" ? (
+            <div className="grid gap-4">
+              <p className="rounded-xl bg-slate-50 p-3 text-base text-slate-600">你說：「{next.your_words}」</p>
+              {thinking === "failed" ? (
+                <div className="grid gap-3">
+                  <p className="text-lg text-red-800">暫時無法讀取你的看法。你的話已經存下來了。</p>
+                  <button
+                    type="button"
+                    onClick={() => void askFollowup(next.answer_id)}
+                    className="min-h-14 rounded-xl bg-blue-700 px-4 text-lg font-semibold text-white"
+                  >
+                    再試一次
+                  </button>
+                </div>
+              ) : (
+                <p className="animate-pulse text-lg text-slate-600">正在讀你的看法，大約半分鐘…</p>
+              )}
+            </div>
+          ) : !redo && next.mode === "followup" ? (
             <div className="grid gap-4">
               {next.your_answer.opinion && (
                 <p className="rounded-xl bg-slate-50 p-3 text-base text-slate-600">你上次說：「{next.your_answer.opinion}」</p>
@@ -252,7 +288,7 @@ function Review() {
                   <Opinion
                     busy={busy}
                     prompt="不是，我再說清楚一點"
-                    onSend={(text) => send("reply", { followup_id: next.followup.followup_id, text }, "謝謝，我們會再看看。")}
+                    onSend={(text) => send("reply", { followup_id: next.followup.followup_id, text }, "")}
                   />
                 </div>
               ) : (
@@ -265,7 +301,7 @@ function Review() {
                   <Opinion
                     busy={busy}
                     prompt="用自己的話回答"
-                    onSend={(text) => send("reply", { followup_id: next.followup.followup_id, text }, "謝謝，我們會再看看。")}
+                    onSend={(text) => send("reply", { followup_id: next.followup.followup_id, text }, "")}
                   />
                 </div>
               )}
@@ -281,7 +317,7 @@ function Review() {
               <Opinion
                 busy={busy}
                 prompt="我想說說我的看法"
-                onSend={(opinion) => send("answer", { question_id: question.question_id, opinion }, "謝謝，我們讀過後可能會再請教你。")}
+                onSend={(opinion) => send("answer", { question_id: question.question_id, opinion }, "")}
               />
             </div>
           )}

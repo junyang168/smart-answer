@@ -264,6 +264,11 @@ def next_for(conn, reviewer):
     done = conn.execute('''SELECT count(DISTINCT question_id) FROM argument_review.answers
         WHERE reviewer=%s AND superseded_at IS NULL''', (reviewer,)).fetchone()[0]
     progress = {'answered': done, 'total': total}
+    waiting = None if f else waiting_answer(conn, reviewer)
+    if waiting:
+        # The reviewer wrote their view and no follow-up exists yet: stay on this question.
+        return {'mode': 'clarifying', 'progress': progress, 'question': question(conn, waiting[1]), 'answer_id': waiting[0],
+                'your_words': waiting[2]}
     if f:
         q = question(conn, f[4])
         return {'mode': 'followup', 'progress': progress, 'question': q,
@@ -320,30 +325,67 @@ CLARIFY_SCHEMA = {'name': 'review_followup', 'schema': {'type': 'object', 'addit
         'suggested_choice': {'type': ['string', 'null']}, 'text': {'type': 'string'}}}}
 
 
+CLARIFY_MODEL = 'gpt-6.1-sol'
+
+
+def default_client():
+    """The subscription model that writes follow-ups; one short JSON answer, so a small budget."""
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    return CodexSubscriptionClient(model=CLARIFY_MODEL, reasoning_effort='medium', max_output_tokens=2000,
+                                   timeout_seconds=180, executable=os.getenv('CODEX_EXECUTABLE'))
+
+
+def clarify_answer(conn, client, answer_id):
+    """One model call for one opinion that is not yet clear; persist and return the follow-up.
+
+    The answer row is locked so a double tap or a page reload cannot ask twice. Returns None
+    when nothing needs asking (already clear, already asked, or the follow-up limit reached).
+    """
+    row = conn.execute('''SELECT question_id, choice, opinion FROM argument_review.answers
+        WHERE answer_id=%s AND superseded_at IS NULL FOR UPDATE''', (answer_id,)).fetchone()
+    if not row:
+        return None
+    qid, choice, opinion = row
+    followups = followups_for(conn, answer_id)
+    if not needs_clarifying({'choice': choice, 'opinion': opinion}, followups):
+        return None
+    q = question(conn, qid)
+    payload = {'question': q['question'], 'options': q['options'],
+               'passage': [s['text'] for s in q['sentences'] if s['focus']],
+               'context': [s['text'] for s in q['sentences'] if not s['focus']],
+               'reviewer_choice': next((o['label'] for o in q['options'] if o['key'] == choice), None),
+               'reviewer_words': opinion,
+               'earlier_followups': [{'asked': f['text'], 'reply': f['reply_text']} for f in followups]}
+    out = client.generate_json(CLARIFY_PROMPT, json.dumps(payload, ensure_ascii=False), CLARIFY_SCHEMA)
+    if out['kind'] == 'confirm' and out['suggested_choice'] not in {o['key'] for o in q['options']}:
+        out = {**out, 'kind': 'ask', 'suggested_choice': None}
+    conn.execute('''INSERT INTO argument_review.followups (answer_id, kind, text, suggested_choice, model)
+        VALUES (%s,%s,%s,%s,%s)''', (answer_id, out['kind'], out['text'], out['suggested_choice'],
+                                    getattr(client, 'model', 'unknown')))
+    return {'answer_id': answer_id, **out}
+
+
+def waiting_answer(conn, reviewer):
+    """This reviewer's answer whose words still need a follow-up, if any: the page stays on it."""
+    rows = conn.execute('''SELECT answer_id, question_id, choice, opinion FROM argument_review.answers
+        WHERE reviewer=%s AND superseded_at IS NULL AND opinion IS NOT NULL ORDER BY answer_id''', (reviewer,)).fetchall()
+    for answer_id, qid, choice, opinion in rows:
+        if needs_clarifying({'choice': choice, 'opinion': opinion}, followups_for(conn, answer_id)):
+            return answer_id, qid, opinion
+    return None
+
+
 def clarify_pending(conn, client, *, limit=20):
-    """Ask the model one narrow question per opinion that is not yet clear; persist the follow-up."""
-    rows = conn.execute('''SELECT a.answer_id, a.question_id, a.reviewer, a.choice, a.opinion FROM argument_review.answers a
-        WHERE a.superseded_at IS NULL AND a.opinion IS NOT NULL ORDER BY a.answer_id''').fetchall()
+    """Batch form of ``clarify_answer`` for opinions left waiting (e.g. the model was down)."""
+    rows = conn.execute('''SELECT answer_id FROM argument_review.answers
+        WHERE superseded_at IS NULL AND opinion IS NOT NULL ORDER BY answer_id''').fetchall()
     made = []
-    for answer_id, qid, reviewer, choice, opinion in rows:
-        answer = {'choice': choice, 'opinion': opinion}
-        followups = followups_for(conn, answer_id)
-        if not needs_clarifying(answer, followups) or len(made) >= limit:
-            continue
-        q = question(conn, qid)
-        payload = {'question': q['question'], 'options': q['options'],
-                   'passage': [s['text'] for s in q['sentences'] if s['focus']],
-                   'context': [s['text'] for s in q['sentences'] if not s['focus']],
-                   'reviewer_choice': next((o['label'] for o in q['options'] if o['key'] == choice), None),
-                   'reviewer_words': opinion,
-                   'earlier_followups': [{'asked': f['text'], 'reply': f['reply_text']} for f in followups]}
-        out = client.generate_json(CLARIFY_PROMPT, json.dumps(payload, ensure_ascii=False), CLARIFY_SCHEMA)
-        if out['kind'] == 'confirm' and out['suggested_choice'] not in {o['key'] for o in q['options']}:
-            out = {**out, 'kind': 'ask', 'suggested_choice': None}
-        conn.execute('''INSERT INTO argument_review.followups (answer_id, kind, text, suggested_choice, model)
-            VALUES (%s,%s,%s,%s,%s)''', (answer_id, out['kind'], out['text'], out['suggested_choice'],
-                                        getattr(client, 'model', 'unknown')))
-        made.append({'answer_id': answer_id, **out})
+    for (answer_id,) in rows:
+        if len(made) >= limit:
+            break
+        out = clarify_answer(conn, client, answer_id)
+        if out:
+            made.append(out)
     return made
 
 
@@ -417,10 +459,7 @@ def main():
                                  disagreements=disagreements_from(a.grading_report))
             print(json.dumps({'questions': len(qs), 'added': publish_questions(conn, qs, hashlib.sha256(Path(a.cases).read_bytes()).hexdigest())}))
         elif a.command == 'clarify':
-            from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-            client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=2000,
-                                             executable=os.getenv('CODEX_EXECUTABLE'))
-            print(json.dumps(clarify_pending(conn, client, limit=a.limit), ensure_ascii=False, indent=1))
+            print(json.dumps(clarify_pending(conn, default_client(), limit=a.limit), ensure_ascii=False, indent=1))
         elif a.command == 'export':
             print(json.dumps(export(conn, a.cases), ensure_ascii=False, indent=1))
 

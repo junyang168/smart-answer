@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from backend.pipeline import argument_review as review
@@ -31,13 +32,17 @@ class Reply(BaseModel):
     text: str | None = None
 
 
+class Clarify(BaseModel):
+    answer_id: int
+
+
 class Ruling(BaseModel):
     question_id: str
     choice: str
     reason: str
 
 
-def create_argument_review_router(root: Path, *, connect=review.connect):
+def create_argument_review_router(root: Path, *, connect=review.connect, client_factory=review.default_client):
     router = APIRouter(prefix='/argument_review')
 
     def roles(actor):
@@ -80,6 +85,24 @@ def create_argument_review_router(root: Path, *, connect=review.connect):
         with connect() as conn:
             errors(lambda: review.reply_followup(conn, body.followup_id, actor, choice=body.choice, text=body.text))
             return {'ok': True}
+
+    @router.post('/clarify')
+    async def clarify(body: Clarify, request: Request):
+        """Ask the follow-up now, while the reviewer waits on the same question."""
+        actor, _ = await reviewer(request)
+
+        def run():
+            with connect() as conn:
+                owner = conn.execute('SELECT reviewer FROM argument_review.answers WHERE answer_id=%s', (body.answer_id,)).fetchone()
+                if not owner or owner[0] != actor:
+                    raise KeyError('找不到你的這個回答')
+                return review.clarify_answer(conn, client_factory(), body.answer_id)
+        try:
+            return {'followup': await run_in_threadpool(run)}
+        except KeyError as exc:
+            raise HTTPException(404, str(exc.args[0])) from exc
+        except Exception as exc:  # model or CLI failure: the answer stays waiting, the page offers a retry
+            raise HTTPException(503, '暫時無法讀取你的看法，請稍後再按一次') from exc
 
     @router.get('/mine')
     async def mine(request: Request):
