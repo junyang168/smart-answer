@@ -443,3 +443,73 @@ def test_reference_material_cannot_be_silently_regenerated_without_owned_anchor(
         return out
     with pytest.raises(ValueError,match='owned primary'):
         creation.run('T',p,tmp_path/'run',Ports(source,out_of_scope),groups=g)
+
+
+class StepsPorts(PackagePorts):
+    """Steps first: one step per argument move in the fixture, then the package inside them."""
+    def __init__(self,source,steps_mutation=None,group_mutation=None):
+        super().__init__(source,group_mutation);self.steps_mutation=steps_mutation
+    def repair(self,request):
+        task=request['input']['task']
+        if task=='creation_argument_steps':
+            self.calls.append(task)
+            assert set(request['input']['claims'])=={'CL0001'} and '先写论证，再分句子' in request['system']
+            out={'steps':[
+                {'step_id':'T1','line':'反方：只強調人性；回答：人子領受永遠權柄','sentence_ids':['S0001#001','S0001#002'],'supports':['CL0001']},
+                {'step_id':'T2','line':'原文事實：但以理書七章','sentence_ids':['S0002#003'],'supports':['T1']},
+                {'step_id':'T3','line':'人子是誰 ↔ 但以理書 → 回答身份問題','sentence_ids':['S0003#004'],'supports':['CL0001']}],
+                'claim_text':[],'other':[]}
+            return self.steps_mutation(out) if self.steps_mutation else out
+        if task=='creation_group_package':
+            assert request['input']['argument_steps']['steps'][0]['step_id']=='T1'
+            assert '照它建記錄，不重新劃分' in request['system']
+        return super().repair(request)
+
+
+def test_steps_first_divides_then_builds_records_inside_steps(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    ports=StepsPorts(source);result=creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True)
+    assert result['status']=='creation_complete'
+    assert ports.calls==['creation_claims','creation_argument_steps','creation_group_package']
+    assert json.loads((root/'intent.json').read_text())['argument_steps_contract']==creation.STEPS_CONTRACT
+    ports.calls=[];assert creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True)==result
+    assert ports.calls==[]
+
+
+@pytest.mark.parametrize('fault',['sentence_twice','sentence_missing','two_comparisons','unknown_support'])
+def test_bad_steps_stop_before_the_package_call(tmp_path,fault):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    def mutate(out):
+        if fault=='sentence_twice':out['steps'][1]['sentence_ids'].append('S0001#001')
+        if fault=='sentence_missing':out['steps'][2]['sentence_ids']=[];out['other']=[]
+        if fault=='two_comparisons':out['steps'][2]['line']='甲 ↔ 乙 → 一；丙 ↔ 丁 → 二'
+        if fault=='unknown_support':out['steps'][0]['supports']=['CL9999']
+        return out
+    ports=StepsPorts(source,steps_mutation=mutate)
+    with pytest.raises(ValueError):creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True)
+    assert 'creation_group_package' not in ports.calls and not (root/'creation-result.json').exists()
+
+
+@pytest.mark.parametrize('fault',['record_spans_steps','step_without_record','claim_text_made_material'])
+def test_package_must_stay_inside_the_steps(tmp_path,fault):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    def steps(out):
+        if fault=='claim_text_made_material':
+            out['steps'][2]['sentence_ids']=[];out['steps']=out['steps'][:2]
+            out['claim_text']=[{'claim_id':'CL0001','sentence_ids':['S0003#004']}]
+        return out
+    def package(result):
+        cov={r['record_id']:r for r in result['coverage_by_record']}
+        if fault=='record_spans_steps':cov['OBS001']['sentence_ids'].append('S0003#004')
+        if fault=='step_without_record':
+            result['coverage_by_record']=[r for r in result['coverage_by_record'] if r['record_id']!='OBS001']
+            result['excluded_sentences'].append({'sentence_id':'S0002#003','reason_code':sorted(d.REASON_CODES)[0],'reason':'測試。'})
+        return result
+    ports=StepsPorts(source,steps_mutation=steps,group_mutation=package)
+    with pytest.raises(ValueError):creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True)
+    assert not (root/'creation-result.json').exists()
+
+
+def test_steps_first_requires_the_grouped_package(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
+    with pytest.raises(ValueError,match='grouped'):creation.run('T',path,tmp_path/'run',StepsPorts(source),groups=groups(),steps_first=True)

@@ -22,6 +22,7 @@ VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v1'
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -71,7 +72,13 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     if single_pass:
         candidate=deepcopy(claim);candidate['properties']['claim_id']={'type':'string'}
         candidate['required'].append('claim_id');materials['candidates']=array(candidate)
-    return {'claims': schema('claims', {'candidates': array(claim)}),
+    sid=deepcopy(BASE['sentence_audit']['items']['properties']['sentence_id'])
+    steps=schema('argument_steps',{
+        'steps':array(object_schema({'step_id':{'type':'string'},'line':{'type':'string'},
+            'sentence_ids':array(deepcopy(sid)),'supports':array({'type':'string'})})),
+        'claim_text':array(object_schema({'claim_id':{'type':'string'},'sentence_ids':array(deepcopy(sid))})),
+        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}}))})
+    return {'steps': steps, 'claims': schema('claims', {'candidates': array(claim)}),
             'materials': schema('single_pass_group_v1' if single_pass else 'group_package_v1' if grouped_package else 'materials_compact_audit_v1' if compact_audit else 'materials', materials),
             'connections': schema('connections', {'connections': array(connection),
                 'observation_roles':array(object_schema({'observation_id':{'type':'string'},
@@ -128,6 +135,15 @@ MATERIALS = RULES + (
 _existing_prompt=x.PROMPT_PATH.read_text(encoding='utf-8')
 MATERIALS += '\n1. `questions`'+_existing_prompt.split('1. `questions`',1)[1].split('5. `claims`',1)[0]
 MATERIALS += '\n歸屬規則：'+_existing_prompt.split('归属规则：',1)[1].split('观察与论证的关系',1)[0]
+
+# Steps first: one narrow task divides his argument; the package task then
+# builds records inside those boundaries. Examples are owner-reviewed.
+STEPS = RULES + (Path(__file__).parent/'prompts'/'argument_steps.md').read_text(encoding='utf-8')
+STEPS_PACKAGE = (
+    'argument_steps是已劃好的論證步驟，照它建記錄，不重新劃分：每一步至少一筆記錄，一筆記錄的句子只來自同一步；'
+    '「事實」一步建Observation，「反方」一步建Position，其餘各步建Evidence（同一步可另加一筆Question）；'
+    'connections按各步supports連到Claim或其他步的記錄。claim_text與other的句子以excluded_sentences排除，'
+    'claim_text用duplicate_of並寫明是哪條Claim。')
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
@@ -328,7 +344,38 @@ def bind_conclusions(package,candidates,projection):
 
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False):
+def check_steps(result, sentence_ids, claim_ids):
+    """Each sentence in exactly one place; supports name real Claims or steps."""
+    ids=[r['step_id'] for r in result['steps']]
+    if len(ids)!=len(set(ids)) or not all(i.strip() for i in ids) or set(ids)&set(claim_ids):
+        raise ValueError('argument steps need unique step IDs distinct from Claim IDs')
+    placed=[s for r in result['steps'] for s in r['sentence_ids']]+[s for r in result['claim_text'] for s in r['sentence_ids']]+[s for r in result['other'] for s in r['sentence_ids']]
+    if len(placed)!=len(set(placed)) or set(placed)!=set(sentence_ids):
+        raise ValueError('argument steps must place every sentence exactly once')
+    for r in result['steps']:
+        if not r['sentence_ids'] or not r['line'].strip():raise ValueError('argument step needs sentences and a line')
+        if r['line'].count('↔')>1:raise ValueError(f"argument step {r['step_id']} holds two comparisons; split it")
+        if not set(r['supports'])<=set(ids)|set(claim_ids)-{r['step_id']}:raise ValueError('argument step supports unknown Claim or step')
+    if not {r['claim_id'] for r in result['claim_text']}<=set(claim_ids):raise ValueError('claim_text names an unknown Claim')
+    if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
+    return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
+
+
+def check_step_boundaries(audit, step_of):
+    """A record stays inside one step; every step yields a record; Claim text and asides are excluded."""
+    record_steps={}
+    for row in audit:
+        sid=row['sentence_id']
+        if row['status']=='extracted' and sid not in step_of:raise ValueError(f'{sid} is Claim text or an aside but was made material')
+        for rid in row['covered_by']:
+            if sid in step_of:record_steps.setdefault(rid,set()).add(step_of[sid])
+    for rid,owned in record_steps.items():
+        if len(owned)>1:raise ValueError(f'{rid} spans argument steps {sorted(owned)}')
+    missing=set(step_of.values())-{s for owned in record_steps.values() for s in owned}
+    if missing:raise ValueError(f'argument steps without a record: {sorted(missing)}')
+
+
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -344,17 +391,20 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
         grouped_package=grouped_package or single_pass
+        if steps_first and (single_pass or not grouped_package):raise ValueError('steps-first divides the grouped package task; use --grouped-package')
         compact_audit=compact_audit or grouped_package
         contracts = schemas(compact_audit=compact_audit,grouped_package=grouped_package,single_pass=single_pass)
         material_prompt = single_pass_prompt() if single_pass else group_package_prompt() if grouped_package else compact_material_prompt() if compact_audit else MATERIALS
+        if steps_first:material_prompt+=STEPS_PACKAGE
         e.save(root/'intent.json', {'version': VERSION, 'source_id': source_id,
             'source_file': str(path), 'source_file_sha256': hashlib.sha256(raw).hexdigest(),
             'models': ports.identity, 'material_sentence_budget':None if grouped_package else 24,
             'gpt_output_limit':getattr(getattr(ports,'gpt',None),'max_output_tokens',None), 'schemas': e.digest(contracts),
-            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]), 'supplied_groups': groups,
+            'prompts': e.digest([RULES, CLAIMS, material_prompt, CONNECTIONS]+([STEPS] if steps_first else [])), 'supplied_groups': groups,
             **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
             **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {}),
-            **({'single_pass_contract':SINGLE_PASS} if single_pass else {})})
+            **({'single_pass_contract':SINGLE_PASS} if single_pass else {}),
+            **({'argument_steps_contract':STEPS_CONTRACT} if steps_first else {})})
         if (root/'creation-result.json').exists():
             saved = json.loads((root/'creation-result.json').read_text())
             package = json.loads((root/'candidate.json').read_text())
@@ -461,6 +511,13 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index} for v in sentences],
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
+                step_of=None
+                if steps_first:
+                    steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
+                        'sentences':[{'id':v.sentence_id,'text':v.text} for v in sentences],
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]}},contracts['steps'],STEPS,source_check)
+                    step_of=check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
+                    payload['argument_steps']=steps
                 if single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
@@ -477,6 +534,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
                     result=expand_material_audit(result,[v.sentence_id for v in sentences])
+                    if step_of is not None:check_step_boundaries(result['sentence_audit'],step_of)
                     e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'audit-expansion.json',{
                         'contract':COMPACT_AUDIT,'raw_response_sha256':raw_sha,'sentence_audit':result['sentence_audit']})
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
@@ -546,7 +604,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
-            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS, model_id=ports.identity['gpt']['model'],
+            prompt=RULES+CLAIMS+material_prompt+CONNECTIONS+(STEPS if steps_first else ''), model_id=ports.identity['gpt']['model'],
             reasoning_effort=ports.identity['gpt']['effort'],max_output_tokens=getattr(getattr(ports,'gpt',None),'max_output_tokens',6000),
             section_plan={'groups':groups},response_schema={'name':VERSION,'schema':contracts},
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
@@ -579,6 +637,7 @@ def main():
     parser.add_argument('--groups',help='Optional source paragraph grouping JSON, not Claim-ID lists')
     parser.add_argument('--compact-audit',action='store_true',help='Experimental grouped coverage output; compile the existing full sentence ledger')
     parser.add_argument('--grouped-package',action='store_true',help='One complete shared material/argument task per source group; implies compact audit')
+    parser.add_argument('--steps-first',action='store_true',help='Divide each group into argument steps first; the package task builds records inside them')
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
@@ -586,7 +645,7 @@ def main():
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)
