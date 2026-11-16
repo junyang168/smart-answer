@@ -65,6 +65,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
         materials['coverage_by_record']=array(object_schema({'record_id':{'type':'string'},
             'sentence_ids':array(deepcopy(audit['sentence_id']))}))
         materials['excluded_sentences']=array(object_schema({'sentence_id':deepcopy(audit['sentence_id']),
+            'duplicate_of_record_id':{'type':['string','null']},
             'reason_code':{'type':'string','enum':sorted(d.REASON_CODES)},'reason':deepcopy(audit['reason'])}))
     connection = object_schema({'from_id': {'type': 'string'}, 'to_id': {'type': 'string'},
         'relation_type': {'type': 'string', 'enum': d.RELATION_TYPES}, 'reason': {'type': 'string'}})
@@ -180,11 +181,22 @@ def compact_material_prompt():
         '每個本組sentence_id必須被覆蓋或列入excluded_sentences，不能兩者兼有，不能遺漏；不列參考段落的句子。').replace(
         'not_extracted給具體reason與既有reason_code；不得為避免處理而全排除。',
         'excluded_sentences每句只列一次，給具體reason與既有reason_code；不得為避免處理而全排除。'
-        '不輸出逐句status、covered_by、null或制式reason；程式只展開你明示的覆蓋關係，不從引文自動推定內容已保存。')
+        '不輸出逐句status、covered_by、null或制式reason；程式只展開你明示的覆蓋關係，不從引文自動推定內容已保存。'
+        'duplicate_of須在duplicate_of_record_id指名本次生成或existing_materials裡、錨點已保存同一意思的那筆材料；'
+        'Claim候選的statement只是摘要，不是來源，指名Claim或不指名都會被程式退回；其他reason_code填null。'
+        '教授重述或展開同一論點時，各段都作為同一筆材料的anchors保存（可多段），不丟掉任何一段。')
 
 
-def expand_material_audit(result, sentence_ids):
-    """Expand explicit model decisions, never infer coverage from source quotes."""
+def expand_material_audit(result, sentence_ids, keepers=()):
+    """Expand explicit model decisions, never infer coverage from source quotes.
+
+    `duplicate_of` is terminal without a human because a machine can verify it
+    (sentence_ledger_vocabulary): it names the record whose SourceFragment keeps
+    the same meaning. `keepers` are those records beyond this result's own
+    materials -- existing materials, or Claims whose statement SourceFragments the
+    program binds. Naming anything else, or nothing, leaves the passage anchored
+    nowhere: his first answer to 「什麼是謙卑？」 (2011 NYSC 二-1) was lost so."""
+    keep={r.get(IDS[col]) for col in COLLECTIONS[:4] for r in result.get(col,[])}|set(keepers);keep.discard(None)
     result=deepcopy(result);expected=set(sentence_ids);covered={};excluded={};seen=set()
     for row in result.pop('coverage_by_record'):
         rid=row['record_id'];ids=row['sentence_ids']
@@ -198,6 +210,9 @@ def expand_material_audit(result, sentence_ids):
             raise ValueError('compact audit has duplicate, foreign or also-covered exclusion')
         if row['reason_code'] not in d.REASON_CODES or not row['reason'].strip():
             raise ValueError('compact audit exclusion requires a valid reason')
+        if row['reason_code']=='duplicate_of' and row.get('duplicate_of_record_id') not in keep:
+            raise ValueError(f"{sid}: duplicate_of must name the record whose SourceFragment keeps it, "
+                             f"got {row.get('duplicate_of_record_id')!r}")
         excluded[sid]=row
     if set(covered)|set(excluded)!=expected:raise ValueError('compact audit omitted a source sentence')
     result['sentence_audit']=[{'sentence_id':sid,'status':'extracted','covered_by':covered[sid],
@@ -328,25 +343,30 @@ def attach(response, connections):
     return additional
 
 
-def bind_conclusions(package,candidates,projection):
-    """Retain the Claim's own selected source, not just its supporting passages."""
+def bind_conclusions(package,candidates,projection,statements=None):
+    """Retain the Claim's own selected source, not just its supporting passages.
+
+    `statements` adds every passage where he says the Claim itself (steps-first
+    claim_text), in his order after the selected conclusion anchor."""
     namespace=package['extraction']['record_namespace'];sid=package['source_documents'][0]['source_id']
     fragments=package['source_fragments']
     for alias,candidate in candidates.items():
-        cid=namespace+'-'+alias;anchor=candidate['conclusion_anchor']
-        fragment=next((p for p in fragments if p['paragraph_key']==anchor['segment_index']
-            and p['verbatim_excerpt']==anchor['verbatim_excerpt']),None)
-        if fragment is None:
-            fid='FR-'+e.digest([sid,cid,anchor])[:32]
-            fragment=x._anchored_fragment(fragment_id=fid,source_id=sid,anchor=anchor,
-                source_rows=projection.body_rows,visual_blocks={},source_sha256=projection.body_sha256)
-            fragments.append(fragment)
+        cid=namespace+'-'+alias;own=[]
+        for anchor in [candidate['conclusion_anchor']]+list((statements or {}).get(alias,[])):
+            fragment=next((p for p in fragments if p['paragraph_key']==anchor['segment_index']
+                and p['verbatim_excerpt']==anchor['verbatim_excerpt']),None)
+            if fragment is None:
+                fid='FR-'+e.digest([sid,cid,anchor])[:32]
+                fragment=x._anchored_fragment(fragment_id=fid,source_id=sid,anchor=anchor,
+                    source_rows=projection.body_rows,visual_blocks={},source_sha256=projection.body_sha256)
+                fragments.append(fragment)
+            if fragment['fragment_id'] not in own:own.append(fragment['fragment_id'])
         claim=next(p for p in package['claims'] if p['claim_id']==cid)
         from backend.api.canonical_repository.postgres_store import normalize_package
         records={col+'/'+oid:{'payload':p,'retired':False} for col,values in normalize_package(package).items() for oid,p in values.items()}
         observation_ids={p['observation_id'] for p in package['observations']}
         source_candidate={'evidence_step_ids':claim['evidence_step_ids'],
-            '_statement_fragment_ids':[fragment['fragment_id']],
+            '_statement_fragment_ids':own,
             '_observation_ids':[r['from_id'] for r in package['knowledge_relations']
                 if r['to_id']==cid and r['relation_type']=='supports' and r['from_id'] in observation_ids]}
         claim['occurrences']=f.c.candidate_occurrences(source_candidate,records,sid)
@@ -428,8 +448,14 @@ def build_step_records(steps, records, sentences, paragraphs):
             elif target in positions:edge=(step['step_id'],target,'refutes')
             else:edge=(step['step_id'],target,'supports')
             out['connections'].append({'from_id':edge[0],'to_id':edge[1],'relation_type':edge[2],'reason':step['line']})
+    # His own words of a Claim are not its Evidence, but they are where he says
+    # it: they become the Claim's statement SourceFragments, so no sentence of
+    # the teaching is dropped (S0195-S0199, 他第一次定義謙卑).
+    out['claim_statements']={}
     for row in steps['claim_text']:
-        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'duplicate_of','reason':f"{row['claim_id']}本身的話"} for s in row['sentence_ids']]
+        out['claim_statements'].setdefault(row['claim_id'],[]).extend(step_fragments(row['sentence_ids'],by_id,paragraphs))
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'duplicate_of','duplicate_of_record_id':row['claim_id'],
+            'reason':f"{row['claim_id']}本身的話，保存為它的SourceFragment"} for s in row['sentence_ids']]
     for row in steps['other']:
         out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'structural_markup','reason':row['why']} for s in row['sentence_ids']]
     return out
@@ -496,7 +522,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
         single_outputs={};claim_aliases={}
-        response = empty(); candidates = {}; group_claims = {}; group_materials = {}
+        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}
         for n, group in enumerate(groups, 1):
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
@@ -582,6 +608,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
                         contracts['step_records'],STEP_RECORDS,source_check)
                     result=build_step_records(steps,records['records'],sentences,paragraphs)
+                    for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
+                    keepers=set(result.pop('claim_statements'))
                 elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
@@ -597,7 +625,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 raw_sha=e.digest(single_outputs[gid]) if single_pass else e.digest(result)
                 local_edges=result.pop('connections') if grouped_package else []
                 if compact_audit:
-                    result=expand_material_audit(result,[v.sentence_id for v in sentences])
+                    result=expand_material_audit(result,[v.sentence_id for v in sentences],
+                        keepers if steps_first else payload['existing_materials'])
                     e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'audit-expansion.json',{
                         'contract':COMPACT_AUDIT,'raw_response_sha256':raw_sha,'sentence_audit':result['sentence_audit']})
                 e.save(root/gid/'materials'/f'batch-{ordinal:03d}'/'quote-calibration.json',
@@ -674,7 +703,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         source_check()
         package=x.compile_package(transcript_id=source_id,transcript_path=path,transcript=source,raw=raw,
             response=response,extraction=identity,additional_relations=additional)
-        bind_conclusions(package,candidates,projection)
+        bind_conclusions(package,candidates,projection,claim_statements)
         validate_merged_package(package,native_relations=True);source_check()
         e.save(root/'extraction-response.json',response);e.save(root/'additional-relations.json',additional);e.save(root/'candidate.json',package)
         result={'version':VERSION,'status':'creation_complete','candidate_path':str(root/'candidate.json'),

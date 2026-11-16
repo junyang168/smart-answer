@@ -183,7 +183,7 @@ def test_compact_transport_compiles_full_legacy_ledger_and_replays_without_calls
 
 
 def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
-    reason=next(iter(d.REASON_CODES))
+    reason='not_exegesis'
     raw={'observations':[],'coverage_by_record':[{'record_id':'O','sentence_ids':['A','B']},
         {'record_id':'EXISTING','sentence_ids':['B']}],
         'excluded_sentences':[{'sentence_id':'C','reason_code':reason,'reason':'純轉場，不是實質內容。'}]}
@@ -196,7 +196,7 @@ def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
 
 @pytest.mark.parametrize('defect',['missing','foreign','duplicate_record','duplicate_sentence','overlap','empty_reason','unknown_reason'])
 def test_bad_compact_audit_is_rejected_without_inventing_a_decision(defect):
-    row={'record_id':'O','sentence_ids':['A']};reason=next(iter(d.REASON_CODES))
+    row={'record_id':'O','sentence_ids':['A']};reason='not_exegesis'
     result={'observations':[{'anchors':[{'segment_index':'S0001','verbatim_excerpt':'原句。'}]}],
         'coverage_by_record':[row],'excluded_sentences':[{'sentence_id':'B','reason_code':reason,'reason':'口頭語。'}]}
     if defect=='missing':result['coverage_by_record']=[]
@@ -555,3 +555,31 @@ def test_a_sentence_spoken_twice_is_located_at_its_own_position():
         return r
     d.validate_sentence_audit(response('所以很混亂。怎麼處理？'),source,sentences)
     with pytest.raises(Exception,match='S0001#004'):d.validate_sentence_audit(response('我們來看。'),source,sentences)
+
+
+def test_his_own_words_of_a_claim_become_its_source_fragments(tmp_path):
+    """2011 NYSC 二-1: his first answer to 「什麼是謙卑？」 went to claim_text and was
+    then excluded as duplicate_of 「CL0001本身的話」, so it was kept nowhere and the
+    slides had nothing to show while he gave it. claim_text is not Evidence, but
+    it is where he says the Claim: it must be one of the Claim's SourceFragments."""
+    def mutate(out):
+        out['other']=[];out['claim_text']=[{'claim_id':'CL0001','sentence_ids':['S0003#004']}]
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate);go()
+    package=json.loads((root/'candidate.json').read_text());claim=package['claims'][0]
+    fragments={f['fragment_id']:f for f in package['source_fragments']}
+    cited=[fragments[a['source_fragment_id']]['verbatim_excerpt'] for o in claim['occurrences'] for a in o['anchors']]
+    said=x.section_sentences(_transcript(),Section(1,0,3,'all'))
+    assert next(v.text for v in said if v.sentence_id=='S0003#004') in ''.join(cited)
+
+
+def test_duplicate_of_must_name_the_record_that_keeps_the_passage():
+    def answer(target):
+        return {'evidence_steps':[{'evidence_step_id':'ST05','anchors':[]}],
+                'coverage_by_record':[{'record_id':'ST05','sentence_ids':['A']}],
+                'excluded_sentences':[{'sentence_id':'B','reason_code':'duplicate_of','reason':'同一定義。',
+                                       'duplicate_of_record_id':target}]}
+    for target in ('CL0001',None,'ELSEWHERE'):
+        with pytest.raises(ValueError,match='duplicate_of must name'):creation.expand_material_audit(answer(target),['A','B'])
+    assert creation.expand_material_audit(answer('ST05'),['A','B'])['sentence_audit'][1]['reason_code']=='duplicate_of'
+    assert creation.expand_material_audit(answer('CL0001'),['A','B'],{'CL0001'})['sentence_audit'][1]['status']=='not_extracted'
