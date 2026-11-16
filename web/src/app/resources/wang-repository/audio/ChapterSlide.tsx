@@ -157,7 +157,7 @@ function Verse({
   return (
     <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
       <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
-      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200" : "text-[0.9rem] leading-6 text-slate-500"}`}>
+      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200 lg:text-xl lg:leading-9" : "text-[0.9rem] leading-6 text-slate-500 lg:text-base lg:leading-7"}`}>
         {verses.map((verse, index) => (
           <li
             key={verse.slug}
@@ -210,18 +210,18 @@ export default function ChapterSlide({
     if (activePoint) bringIntoView(newestPoint.current);
   }, [activePoint, slide.at]);
   return (
-    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6`}>
+    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
       <header>
-        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
+        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
         {points.length > 0 && (
-          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed">
+          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl">
             {points.map((point, index) => (
               <li
                 key={point.text}
                 ref={point === activePoint ? newestPoint : undefined}
                 className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
               >
-                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
+                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
                   {index + 1}
                 </span>
                 <span>{point.text}</span>

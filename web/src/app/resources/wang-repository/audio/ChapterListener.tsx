@@ -523,7 +523,7 @@ export default function ChapterListener({
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,2fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,2fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
         <div
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
