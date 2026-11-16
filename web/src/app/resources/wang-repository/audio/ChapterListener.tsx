@@ -435,7 +435,7 @@ export default function ChapterListener({
     const line = currentLine.current;
     if (!container || !line) return;
     container.scrollTo({
-      top: line.offsetTop - container.clientHeight / 4,
+      top: line.offsetTop - (container.clientHeight - line.offsetHeight) / 2,
       behavior: smooth ? "smooth" : "auto",
     });
   }
@@ -523,7 +523,7 @@ export default function ChapterListener({
         )}
       </header>
 
-      <div className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,2fr)_minmax(0,1fr)] gap-3 p-3 lg:mx-auto lg:max-w-6xl lg:grid-rows-[minmax(0,5fr)_minmax(0,2fr)] lg:gap-4 lg:p-4">
+      <div className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3 lg:mx-auto lg:max-w-6xl lg:gap-4 lg:p-4">
         <div
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
@@ -581,7 +581,8 @@ export default function ChapterListener({
           ) : null}
         </div>
 
-        <div className="relative min-h-0">
+        {/* 逐字稿只留三行高：他此刻那一句在中間，前後各一句（負責人 2026-11-16）。 */}
+        <div className="relative h-[8.25rem]">
           <div
             ref={box}
             onWheel={userScrolled}
