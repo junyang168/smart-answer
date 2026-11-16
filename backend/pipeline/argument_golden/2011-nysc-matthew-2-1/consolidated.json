@@ -500,7 +500,10 @@
       "CL1"
      ],
      "status": "owner",
-     "note": "owner 2026-11-16: what humility is matters and must show on the slides; it is kept as the Claim's own SourceFragments"
+     "note": "owner 2026-11-16: what humility is matters and must show on the slides; it is kept as the Claim's own SourceFragments. Owner 2026-11-16: the second statement (#34–37) elaborates the definition, so a step is also accepted; what matters is that it is kept.",
+     "accept_kind": [
+      "step"
+     ]
     },
     {
      "id": "ct4",

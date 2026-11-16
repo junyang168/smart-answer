@@ -2260,7 +2260,7 @@
       "CL1"
      ],
      "status": "owner",
-     "note": "owner 2026-11-16: what humility is matters and must show on the slides; it is kept as the Claim's own SourceFragments",
+     "note": "owner 2026-11-16: what humility is matters and must show on the slides; it is kept as the Claim's own SourceFragments. Owner 2026-11-16: the second statement (#34–37) elaborates the definition, so a step is also accepted; what matters is that it is kept.",
      "sentences": [
       {
        "script_index": 481,
@@ -2322,6 +2322,9 @@
        "trial_number": 37,
        "text": "他就說，認為啊，我所有的恩賜是神給我的，而且我使用恩賜的時候，我需要依靠耶和華。"
       }
+     ],
+     "accept_kind": [
+      "step"
      ]
     },
     {
