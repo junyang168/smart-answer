@@ -113,10 +113,22 @@ const HANDS_OFF_MS = 6000;
  * 把一个元素转到投影片框里看得见的地方。只滚投影片自己的框（`data-slide-scroll`），
  * 不动整页；不在聆听模式里（没有这个框）就什么都不做。
  */
+const wanted = new WeakMap<HTMLElement, HTMLElement>();
+
 function bringIntoView(element: HTMLElement | null) {
   const frame = element?.closest<HTMLElement>("[data-slide-scroll]");
   if (!element || !frame) return;
-  if (Date.now() - Number(frame.dataset.handsOff ?? 0) < HANDS_OFF_MS) return;
+  // 手指剛碰過：先記下這時該看的，等手放開後再轉過去——不然他這期間出的要點
+  // 會一直留在框外（負責人 2026-11-16，iPhone 上 inclusio 那條被捲出視野）。
+  wanted.set(frame, element);
+  const wait = HANDS_OFF_MS - (Date.now() - Number(frame.dataset.handsOff ?? 0));
+  if (wait > 0) {
+    window.setTimeout(() => {
+      if (wanted.get(frame) === element) bringIntoView(element);
+    }, wait + 50);
+    return;
+  }
+  if (!element.isConnected) return;
   const top = element.getBoundingClientRect().top - frame.getBoundingClientRect().top + frame.scrollTop;
   frame.scrollTo({ top: Math.max(0, top - frame.clientHeight / 4), behavior: "smooth" });
 }
