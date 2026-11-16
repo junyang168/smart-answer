@@ -1,0 +1,702 @@
+{
+ "lecture": "2011 NYSC 專題：馬太福音釋經（二）1",
+ "note": "Consolidated from the trial keys G0N-steps.md (2026-11-15/16). '#N' is the trial request's own sentence number; resolve.py converts it to the real paragraph and sentence text. status: owner = the owner ruled it; draft = Claude drafted it, not yet reviewed by 同工.",
+ "groups": [
+  {
+   "group": "G01",
+   "paragraphs": {
+    "S0002": "S0002"
+   },
+   "claims": {
+    "CL1": "五3–七29 分兩部分：先講彌賽亞是誰，再講門徒的使命",
+    "CL2": "八福說明彌賽亞的身份",
+    "CL3": "先身份後使命，因為認識神必帶來生活的回應"
+   },
+   "items": [
+    {
+     "id": "bg",
+     "kind": "step",
+     "sentences": "#1-4",
+     "supports": [],
+     "status": "owner",
+     "note": "background: 五1 sat down to teach as rabbis did; one or two records are both right"
+    },
+    {
+     "id": "part1",
+     "kind": "step",
+     "sentences": "#9-14",
+     "supports": [
+      "CL2",
+      "CL1"
+     ],
+     "status": "owner",
+     "accept": [
+      "#9-15"
+     ]
+    },
+    {
+     "id": "part2",
+     "kind": "step",
+     "sentences": "#16-18",
+     "supports": [
+      "CL3",
+      "CL1"
+     ],
+     "status": "owner",
+     "note": "#17 opens with 因為: the reason belongs to #16's step"
+    },
+    {
+     "id": "sub",
+     "kind": "step",
+     "sentences": "#21-22",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft",
+     "optional": true,
+     "note": "五13–16 general, 五17–七29 detail; may be one structure Observation"
+    },
+    {
+     "id": "ct1",
+     "kind": "claim_text",
+     "sentences": "#7-8",
+     "supports": [
+      "CL1"
+     ],
+     "status": "owner"
+    },
+    {
+     "id": "ct2",
+     "kind": "claim_text",
+     "sentences": "#15",
+     "supports": [
+      "CL2"
+     ],
+     "status": "owner"
+    },
+    {
+     "id": "ct3",
+     "kind": "claim_text",
+     "sentences": "#19-20",
+     "supports": [
+      "CL1"
+     ],
+     "status": "owner",
+     "note": "所以 sums up both parts = CL1 restated"
+    },
+    {
+     "id": "other",
+     "kind": "other",
+     "sentences": "#5-6,#23-24",
+     "status": "draft",
+     "note": "transitions"
+    }
+   ]
+  },
+  {
+   "group": "G02",
+   "paragraphs": {
+    "S0001": "S0005",
+    "S0002": "S0007"
+   },
+   "claims": {
+    "CL1": "耶穌明知並明講祂就是彌賽亞，而且是神",
+    "CL2": "八福藉以賽亞六十一章的祝福宣告祂是彌賽亞",
+    "CL3": "ptochos：馬太用以賽亞六十一章希臘文的罕用字",
+    "CL4": "因我受逼迫與先知並列 → 為耶穌就是為神"
+   },
+   "items": [
+    {
+     "id": "a",
+     "kind": "step",
+     "sentences": "#1-9",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "accept": [
+      "#1-10"
+     ],
+     "note": "both runs: an Observation (word fact) plus an Evidence (Matthew uses the same word) is accepted"
+    },
+    {
+     "id": "b",
+     "kind": "step",
+     "sentences": "#11-16",
+     "supports": [
+      "CL2"
+     ],
+     "status": "draft",
+     "accept": [
+      "#11-18"
+     ]
+    },
+    {
+     "id": "c1",
+     "kind": "step",
+     "sentences": "#21-28",
+     "supports": [
+      "CL2"
+     ],
+     "status": "owner",
+     "note": "賽61:7 blessing ↔ 「我來把這個恩典給你」: one comparison is one step"
+    },
+    {
+     "id": "c2",
+     "kind": "step",
+     "sentences": "#29-35",
+     "supports": [
+      "CL2"
+     ],
+     "status": "owner",
+     "note": "太5:5 承受地土 ↔ 賽61:7 加倍的產業"
+    },
+    {
+     "id": "d",
+     "kind": "step",
+     "sentences": "#37-49",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "aside",
+     "kind": "aside",
+     "sentences": "#56-93",
+     "status": "owner",
+     "accept": [
+      "#55-93"
+     ],
+     "note": "owner 2026-11-16: scholars' blind eyes, trained eyes and the heart-slides story are not exegesis. This supersedes the trial key (story = Evidence for a trained-eyes Claim) and the owner's earlier personal view that #56–59 is its own step. Exact boundary still to be confirmed by 同工."
+    },
+    {
+     "id": "pos",
+     "kind": "step",
+     "sentences": "#94-95",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft",
+     "note": "Position 「有些人說耶穌從來沒有說祂是神」 with his rebuttal 「哪裡沒有？一大堆」; accepted from both runs"
+    },
+    {
+     "id": "bg",
+     "kind": "step",
+     "sentences": "#99-100",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft",
+     "note": "因為猶太人的觀念彌賽亞不一定是神: Claude's call, offered to the owner"
+    },
+    {
+     "id": "ct3",
+     "kind": "claim_text",
+     "sentences": "#10",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct2",
+     "kind": "claim_text",
+     "sentences": "#17-20",
+     "supports": [
+      "CL2"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct4",
+     "kind": "claim_text",
+     "sentences": "#50-52",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct1",
+     "kind": "claim_text",
+     "sentences": "#53-54,#96-98",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "other",
+     "kind": "other",
+     "sentences": "#36,#55",
+     "status": "draft",
+     "note": "#55 「求主讓我們有眼睛看」 opens the aside; joining it is accepted"
+    }
+   ]
+  },
+  {
+   "group": "G03",
+   "paragraphs": {
+    "S0001": "S0003",
+    "S0002": "S0004"
+   },
+   "claims": {
+    "CL1": "八福都是天國的福",
+    "CL2": "五3 與五10 首尾呼應（inclusio）",
+    "CL3": "哀慟不是一般的受苦得安慰",
+    "CL4": "首尾現在式、其餘將來式",
+    "CL5": "天國＝神的國",
+    "CL6": "天國現在已有，將來才完全來到"
+   },
+   "items": [
+    {
+     "id": "read",
+     "kind": "other",
+     "sentences": "#1-17",
+     "status": "draft",
+     "note": "he reads 五3–10 aloud; a reading may also join s2"
+    },
+    {
+     "id": "def",
+     "kind": "step",
+     "sentences": "#18-24",
+     "supports": [
+      "CL2"
+     ],
+     "status": "owner",
+     "note": "inclusio definition as a fact step, accepted like ptochos"
+    },
+    {
+     "id": "s2",
+     "kind": "step",
+     "sentences": "#25-30",
+     "supports": [
+      "CL2"
+     ],
+     "status": "owner",
+     "accept": [
+      "#18-30"
+     ]
+    },
+    {
+     "id": "s3",
+     "kind": "step",
+     "sentences": "#31-48",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "s4",
+     "kind": "step",
+     "sentences": "#52-58",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "note": "Position #52–56, rebuttal #57–58; not an aside, because he answers with the inclusio"
+    },
+    {
+     "id": "s5",
+     "kind": "step",
+     "sentences": "#59-79",
+     "supports": [
+      "CL4"
+     ],
+     "status": "owner",
+     "note": "the tense contrast as one fact"
+    },
+    {
+     "id": "s6a",
+     "kind": "step",
+     "sentences": "#81-83,#89-90",
+     "supports": [
+      "CL5"
+     ],
+     "status": "owner",
+     "accept_merge": [
+      "s6b"
+     ],
+     "note": "owner: either way is right; prefers two steps"
+    },
+    {
+     "id": "s6b",
+     "kind": "step",
+     "sentences": "#84-88",
+     "supports": [
+      "CL5"
+     ],
+     "status": "owner",
+     "note": "路15 得罪了天 ↔ 得罪了神"
+    },
+    {
+     "id": "s7",
+     "kind": "step",
+     "sentences": "#97-101",
+     "supports": [
+      "CL6"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "s8",
+     "kind": "step",
+     "sentences": "#105-109",
+     "supports": [
+      "CL4"
+     ],
+     "status": "owner",
+     "note": "tense changes because the kingdom is present now and comes in full later"
+    },
+    {
+     "id": "ct1",
+     "kind": "claim_text",
+     "sentences": "#49-51",
+     "supports": [
+      "CL1"
+     ],
+     "status": "owner"
+    },
+    {
+     "id": "ct4",
+     "kind": "claim_text",
+     "sentences": "#80",
+     "supports": [
+      "CL4"
+     ],
+     "status": "owner"
+    },
+    {
+     "id": "ct5",
+     "kind": "claim_text",
+     "sentences": "#91-96",
+     "supports": [
+      "CL5"
+     ],
+     "status": "owner",
+     "accept_kind": [
+      "step"
+     ],
+     "note": "owner has no view: step or Claim text"
+    },
+    {
+     "id": "ct6",
+     "kind": "claim_text",
+     "sentences": "#102-104",
+     "supports": [
+      "CL6"
+     ],
+     "status": "owner",
+     "accept_kind": [
+      "step"
+     ],
+     "note": "owner has no view: step or Claim text"
+    },
+    {
+     "id": "next",
+     "kind": "other",
+     "sentences": "#110-115",
+     "status": "owner",
+     "note": "pointer to the next group"
+    }
+   ]
+  },
+  {
+   "group": "G04",
+   "paragraphs": {
+    "S0001": "S0006"
+   },
+   "claims": {
+    "CL1": "溫柔＝謙卑＝等候耶和華；謙卑是什麼",
+    "CL2": "詩37:11 ↔ 37:9",
+    "CL3": "推說不會是推辭，不是謙卑",
+    "CL4": "等候不是坐著等",
+    "CL5": "雅1:21 溫柔＝teachable",
+    "CL6": "承受地土＝蒙神之福",
+    "CL7": "查經看關鍵字的前後文"
+   },
+   "items": [
+    {
+     "id": "k1",
+     "kind": "step",
+     "sentences": "#2-6",
+     "supports": [
+      "CL2",
+      "CL1"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "story",
+     "kind": "step",
+     "sentences": "#12-22",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "note": "the 師大 music student's 「我不會彈琴」 illustrates the misreading; it is argument, not an aside"
+    },
+    {
+     "id": "pos1",
+     "kind": "step",
+     "sentences": "#30-32",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "accept": [
+      "#11,#30-32"
+     ]
+    },
+    {
+     "id": "pos2",
+     "kind": "step",
+     "sentences": "#38-40",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "k6",
+     "kind": "step",
+     "sentences": "#55-57,#61-65",
+     "supports": [
+      "CL5"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ans3",
+     "kind": "claim_text",
+     "sentences": "#23,#33",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "accept_kind": [
+      "step"
+     ]
+    },
+    {
+     "id": "ans4",
+     "kind": "claim_text",
+     "sentences": "#41-43",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft",
+     "accept_kind": [
+      "step"
+     ]
+    },
+    {
+     "id": "humble",
+     "kind": "claim_text",
+     "sentences": "#24-29,#34-37",
+     "supports": [
+      "CL1"
+     ],
+     "status": "owner",
+     "note": "owner 2026-11-16: what humility is matters and must show on the slides; it is kept as the Claim's own SourceFragments"
+    },
+    {
+     "id": "ct4",
+     "kind": "claim_text",
+     "sentences": "#44",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct6",
+     "kind": "claim_text",
+     "sentences": "#47-53",
+     "supports": [
+      "CL6"
+     ],
+     "status": "owner",
+     "accept_kind": [
+      "step"
+     ],
+     "note": "owner has no view: step or Claim text"
+    },
+    {
+     "id": "ct7",
+     "kind": "claim_text",
+     "sentences": "#58-60",
+     "supports": [
+      "CL7"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "other",
+     "kind": "other",
+     "sentences": "#1,#7-9,#45,#54",
+     "status": "draft"
+    },
+    {
+     "id": "intro",
+     "kind": "other",
+     "sentences": "#10-11,#46",
+     "status": "draft",
+     "note": "lead-ins to the misreadings; #11 may join pos1"
+    }
+   ]
+  },
+  {
+   "group": "G05",
+   "paragraphs": {
+    "S0001": "S0008",
+    "S0002": "S0009"
+   },
+   "claims": {
+    "CL1": "張力：五17–19 與食物、獻祭的改變",
+    "CL2": "太5:18 是「直到成全」",
+    "CL3": "摩西律法有一部分今天不再遵守",
+    "CL4": "讀經要用理性"
+   },
+   "items": [
+    {
+     "id": "p1",
+     "kind": "step",
+     "sentences": "#8-16",
+     "supports": [
+      "CL2"
+     ],
+     "status": "draft",
+     "note": "fact + comparison may be two"
+    },
+    {
+     "id": "pos",
+     "kind": "step",
+     "sentences": "#5,#20-24,#69-70",
+     "supports": [
+      "CL2",
+      "CL1"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "p3",
+     "kind": "step",
+     "sentences": "#25-32",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "p4",
+     "kind": "step",
+     "sentences": "#34-35",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "p5",
+     "kind": "step",
+     "sentences": "#36-59,#90-94",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "note": "translation fact + step may be two"
+    },
+    {
+     "id": "p6",
+     "kind": "step",
+     "sentences": "#64-67",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "p7",
+     "kind": "step",
+     "sentences": "#95-110",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft",
+     "note": "Peter's vision; slide case S0397 requires it shown"
+    },
+    {
+     "id": "tension",
+     "kind": "step",
+     "sentences": "#71-75",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft",
+     "accept": [
+      "#71-75,#118-125"
+     ]
+    },
+    {
+     "id": "tension2",
+     "kind": "step",
+     "sentences": "#118-125",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft",
+     "optional": true
+    },
+    {
+     "id": "ct4",
+     "kind": "claim_text",
+     "sentences": "#17-18,#76",
+     "supports": [
+      "CL4"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct3",
+     "kind": "claim_text",
+     "sentences": "#60",
+     "supports": [
+      "CL3"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "ct1",
+     "kind": "claim_text",
+     "sentences": "#77-89,#126-127",
+     "supports": [
+      "CL1"
+     ],
+     "status": "draft"
+    },
+    {
+     "id": "other",
+     "kind": "other",
+     "sentences": "#1,#19,#33,#63,#112-117",
+     "status": "draft"
+    },
+    {
+     "id": "read",
+     "kind": "other",
+     "sentences": "#2-4,#6-7",
+     "status": "draft",
+     "note": "he reads 太5:17–18 twice; a reading may join p1 or pos"
+    },
+    {
+     "id": "filler",
+     "kind": "other",
+     "sentences": "#61-62,#68,#111",
+     "status": "draft"
+    }
+   ]
+  }
+ ]
+}
