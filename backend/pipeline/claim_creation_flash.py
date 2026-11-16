@@ -103,7 +103,7 @@ CLAIMS = RULES + (
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
-    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
+    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用，但只追加範圍，不掛到本組蓋子下面；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
     '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。')
 MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
@@ -132,7 +132,7 @@ CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
     '先依原文判定本組主要結論是哪條Claim；本組其他Claim是分論點，以supports或qualifies'
     '連到它直接支持的Claim（主要結論或另一分論點），使每條分論點都有路線通到主要結論，不只用contextualizes。'
-    '他陳述的問題或張力不是解答的論據，不以supports連到解答。沿用的其他組Claim不掛在本組分論點底下。'
+    '他陳述的問題或張力不是解答的論據，不以supports連到解答。沿用的其他組Claim不掛在本組分論點底下；只因離題提到而沿用的，本組不為它建連接。'
     '每條一次輸出from_id、to_id、relation_type及完整但簡短reason，方向由端點表達。'
     '不要重複completed_connections。只使用提供的端點，不重抽Claim或材料。'
     '對local_observation_ids逐項判argument_role並給簡短理由，恰好一次。'
