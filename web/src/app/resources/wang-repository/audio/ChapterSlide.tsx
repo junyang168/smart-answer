@@ -115,16 +115,18 @@ const HANDS_OFF_MS = 6000;
  */
 const wanted = new WeakMap<HTMLElement, HTMLElement>();
 
-function bringIntoView(element: HTMLElement | null) {
+function bringIntoView(element: HTMLElement | null, { yieldToReading = false } = {}) {
   const frame = element?.closest<HTMLElement>("[data-slide-scroll]");
   if (!element || !frame) return;
+  // 他正在念的經節優先：念到太5:10 時新出的要點不把那一節捲走（負責人 2026-11-16）。
+  if (yieldToReading && frame.dataset.reading) return;
   // 手指剛碰過：先記下這時該看的，等手放開後再轉過去——不然他這期間出的要點
   // 會一直留在框外（負責人 2026-11-16，iPhone 上 inclusio 那條被捲出視野）。
   wanted.set(frame, element);
   const wait = HANDS_OFF_MS - (Date.now() - Number(frame.dataset.handsOff ?? 0));
   if (wait > 0) {
     window.setTimeout(() => {
-      if (wanted.get(frame) === element) bringIntoView(element);
+      if (wanted.get(frame) === element) bringIntoView(element, { yieldToReading });
     }, wait + 50);
     return;
   }
@@ -163,11 +165,22 @@ function Verse({
   // 手机上一段经文常比投影片框高：他念到哪一节，就亮那一节、滚到那一节（负责人 2026-11-09）。
   const reading = latest && texts && sentence ? verseBeingRead(sentence, texts) : -1;
   const readingLine = useRef<HTMLLIElement | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    if (!frame || sentence === undefined) return;
+    frame.dataset.reading = reading >= 0 ? "1" : "";
     if (reading >= 0) bringIntoView(readingLine.current);
   }, [reading, slug]);
+  useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    return () => {
+      if (frame && sentence !== undefined) frame.dataset.reading = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
+    <div ref={box} className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
       <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
       <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200 lg:text-xl lg:leading-9" : "text-[0.9rem] leading-6 text-slate-500 lg:text-base lg:leading-7"}`}>
         {verses.map((verse, index) => (
@@ -219,7 +232,7 @@ export default function ChapterSlide({
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
-    if (activePoint) bringIntoView(newestPoint.current);
+    if (activePoint) bringIntoView(newestPoint.current, { yieldToReading: true });
   }, [activePoint, slide.at]);
   return (
     <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
