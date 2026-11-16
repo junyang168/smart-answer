@@ -40,6 +40,11 @@ QUESTIONS = {
         ('aside', '題外話，聽眾可以略過'),
         ('exegesis', '在講經文')]),
 }
+# Two cuts of the same passage, side by side. Which cut is the draft is hidden from the reviewer.
+CUT_QUESTION = ('下面兩種分法，哪一種比較接近教授講這段的思路？', [
+    ('first', '第一種'), ('second', '第二種'), ('both', '兩種都可以'), ('neither', '兩種都不對')])
+ROLE_LABEL = {'step': '理由', 'claim_text': '結論', 'other': '過場話', 'aside': '題外話', None: '沒有用到'}
+
 # The answer each draft already holds, so a majority can be read as agree/disagree.
 DRAFT_CHOICE = {'step': 'one', 'claim_text': 'conclusion', 'other': 'filler', 'aside': 'aside'}
 # A kind change the program can apply to the case without a human edit.
@@ -136,6 +141,86 @@ def build_questions(cases, *, media_url, paragraphs, context=2, statuses=('draft
                             'draft_choice': DRAFT_CHOICE[item['kind']],
                             'disagreement': (disagreements or {}).get((group['group'], item['id']))},
             })
+    return out
+
+
+def cut_question_id(lecture, group_id, item_id):
+    return question_id(lecture, group_id, 'cut:' + item_id)
+
+
+def cut_questions(cases, group_id, candidate, *, item_ids, media_url, paragraphs, source_path=None):
+    """Side-by-side questions where a run drew its boundaries elsewhere than the draft.
+
+    The span is the disputed item plus every run record touching it and every draft item those
+    records touch, so both cuts cover the same sentences. Each cut is a list of segments in
+    reading order; the reviewer sees roles (理由/結論/…) only, never which side wrote it.
+    """
+    from backend.pipeline import argument_grading as grading
+    lecture = cases['lecture']
+    group = next(g for g in cases['groups'] if g['group'] == group_id)
+    by_index = {}
+    for it in group['items']:
+        for s in it['sentences']:
+            by_index.setdefault(str(s['script_index']), set()).add(grading.key(s))
+    records, own = grading.coverage(candidate, grading.paragraph_indexes(candidate, source_path), by_index)
+    run_label = {}
+    for (collection, rid), held in records.items():
+        for k in held:
+            run_label.setdefault(k, ('step', f'r:{rid}'))
+    for cid, held in own.items():
+        for k in held:
+            run_label[k] = ('claim_text', f'c:{cid}')
+    seq, seen = [], set()
+    for s, owner in ordered_sentences(group, paragraphs):
+        if grading.key(s) not in seen:  # a quote repeated in two items is one sentence on screen
+            seen.add(grading.key(s))
+            seq.append((s, owner))
+    kind_of = {it['id']: it['kind'] for it in group['items']}
+    out = []
+    for item_id in item_ids:
+        mine = {grading.key(s) for s, owner in seq if owner == item_id}
+        # One hop only: the item plus the run records holding a substantial share of it. Growing
+        # further pulled whole groups (a thousand seconds of lecture) into one question.
+        span = set(mine)
+        for (collection, rid), held in records.items():
+            if len(held & mine) >= grading.SUBSTANTIAL * len(mine):
+                span |= held
+        positions = [i for i, (s, _) in enumerate(seq) if grading.key(s) in span]
+        chosen = seq[min(positions):max(positions) + 1]  # one contiguous passage
+
+        def segments(label_of):
+            segs = []
+            for s, owner in chosen:
+                role, label = label_of(s, owner)
+                if segs and segs[-1]['label'] == label:
+                    segs[-1]['text'] += s['text']
+                else:
+                    segs.append({'label': label, 'role': role, 'text': s['text']})
+            n = 0
+            for seg in segs:
+                if seg['role'] == 'step':
+                    n += 1
+                    seg['name'] = f'理由{n}'
+                else:
+                    seg['name'] = ROLE_LABEL[seg['role']]
+                del seg['label']
+            return segs
+        draft = segments(lambda s, owner: (kind_of[owner], owner))
+        run = segments(lambda s, owner: run_label.get(grading.key(s), (None, f'none:{owner}')))
+        qid = cut_question_id(lecture, group_id, item_id)
+        draft_first = int(qid, 16) % 2 == 0  # stable, and not always the draft first
+        cuts = [draft, run] if draft_first else [run, draft]
+        times = [sentence_times(s, paragraphs) for s, _ in chosen]
+        ask, options = CUT_QUESTION
+        out.append({
+            'question_id': qid, 'lecture': lecture, 'group_id': group_id, 'item_id': 'cut:' + item_id, 'kind': 'cut',
+            'payload': {'question': ask, 'options': [{'key': k, 'label': v} for k, v in options],
+                        'sentences': [{'text': s['text'], 'focus': True} for s, _ in chosen],
+                        'cuts': cuts, 'draft_option': 'first' if draft_first else 'second',
+                        'audio': {'url': media_url, 'start': min(t[0] for t in times if t[0] is not None),
+                                  'end': max(t[1] for t in times if t[1] is not None)},
+                        'draft_choice': 'first' if draft_first else 'second'},
+        })
     return out
 
 
@@ -399,9 +484,21 @@ def export(conn, cases_path):
     for group in cases['groups']:
         for item in group['items']:
             qid = question_id(cases['lecture'], group['group'], item['id'])
-            if not conn.execute('SELECT 1 FROM argument_review.questions WHERE question_id=%s', (qid,)).fetchone():
+            cut = cut_question_id(cases['lecture'], group['group'], item['id'])
+            row = conn.execute('SELECT question_id, payload FROM argument_review.questions WHERE question_id IN (%s,%s)'
+                               ' ORDER BY question_id=%s DESC LIMIT 1', (cut, qid, cut)).fetchone()
+            if not row:
                 continue
-            s = state(conn, qid)
+            s = state(conn, row[0])
+            if row[0] == cut and s['status'] in ('final', 'ruled'):
+                item['review'] = {'cut': s['choice'], 'status': s['status'], 'settled': s.get('settled')}
+                if s['choice'] == row[1]['draft_option']:
+                    item['status'] = 'final'
+                    applied.append((group['group'], item['id'], 'draft cut agreed'))
+                else:
+                    item['status'] = 'reviewed_needs_edit'
+                    needs_edit.append((group['group'], item['id'], f"cut: {s['choice']}"))
+                continue
             if s['status'] not in ('final', 'ruled'):
                 continue
             item['review'] = {k: s[k] for k in ('status', 'choice', 'settled') if k in s}
@@ -441,6 +538,13 @@ def main():
     pub.add_argument('--cases', required=True)
     pub.add_argument('--media-url', required=True)
     pub.add_argument('--grading-report', action='append', help='argument_grading output whose disagreements also become questions')
+    cu = sub.add_parser('publish-cuts', help='Side-by-side questions where a run cut the passage differently')
+    cu.add_argument('--cases', required=True)
+    cu.add_argument('--media-url', required=True)
+    cu.add_argument('--group', required=True)
+    cu.add_argument('--candidate', required=True)
+    cu.add_argument('--source-file')
+    cu.add_argument('--item', action='append', required=True)
     cl = sub.add_parser('clarify', help='Ask follow-up questions about free-text opinions (model calls)')
     cl.add_argument('--limit', type=int, default=20)
     ex = sub.add_parser('export', help='Write settled answers into cases.json')
@@ -457,6 +561,11 @@ def main():
             cases = json.loads(Path(a.cases).read_text())
             qs = build_questions(cases, media_url=a.media_url, paragraphs=transcript(cases['lecture']),
                                  disagreements=disagreements_from(a.grading_report))
+            print(json.dumps({'questions': len(qs), 'added': publish_questions(conn, qs, hashlib.sha256(Path(a.cases).read_bytes()).hexdigest())}))
+        elif a.command == 'publish-cuts':
+            cases = json.loads(Path(a.cases).read_text())
+            qs = cut_questions(cases, a.group, json.loads(Path(a.candidate).read_text()), item_ids=a.item,
+                               media_url=a.media_url, paragraphs=transcript(cases['lecture']), source_path=a.source_file)
             print(json.dumps({'questions': len(qs), 'added': publish_questions(conn, qs, hashlib.sha256(Path(a.cases).read_bytes()).hexdigest())}))
         elif a.command == 'clarify':
             print(json.dumps(clarify_pending(conn, default_client(), limit=a.limit), ensure_ascii=False, indent=1))

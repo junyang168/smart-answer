@@ -67,8 +67,9 @@ def coverage(candidate, paragraph_index, sentences_by_index):
             records[(collection, r[id_field])] = held(ids)
     own = {}
     for c in candidate.get('claims', []):
+        # An anchor tied to Evidence or to an observation is support, not the Claim's own words.
         ids = [a['source_fragment_id'] for o in c.get('occurrences', []) for a in o.get('anchors', [])
-               if not a.get('evidence_id')]
+               if not a.get('evidence_id') and not a.get('observation_id')]
         own[c['claim_id']] = held(ids)
     return records, own
 
