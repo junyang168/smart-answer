@@ -143,7 +143,8 @@ STEPS_PACKAGE = (
     'argument_steps是已劃好的論證步驟，照它建記錄，不重新劃分：每一步至少一筆記錄，一筆記錄的句子只來自同一步；'
     '「事實」一步建Observation，「反方」一步建Position，其餘各步建Evidence（同一步可另加一筆Question）；'
     'connections按各步supports連到Claim或其他步的記錄。claim_text與other的句子以excluded_sentences排除，'
-    'claim_text用duplicate_of並寫明是哪條Claim。')
+    'claim_text用duplicate_of並寫明是哪條Claim。反方一步建的Position，由supports所列的Claim以refutes連到它。'
+    '同一段中一字不差重複出現的句子（如再唸一遍的經文），引文要與相鄰句連成一段，使引文在該段只出現一次；同一記錄不放兩條相同引文。')
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
@@ -357,6 +358,9 @@ def check_steps(result, sentence_ids, claim_ids):
         if r['line'].count('↔')>1:raise ValueError(f"argument step {r['step_id']} holds two comparisons; split it")
         if not set(r['supports'])<=set(ids)|set(claim_ids)-{r['step_id']}:raise ValueError('argument step supports unknown Claim or step')
     if not {r['claim_id'] for r in result['claim_text']}<=set(claim_ids):raise ValueError('claim_text names an unknown Claim')
+    # The package rule: every Claim needs Evidence that supports it directly.
+    unsupported=set(claim_ids)-{c for r in result['steps'] for c in r['supports']}
+    if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
@@ -514,7 +518,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 step_of=None
                 if steps_first:
                     steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
-                        'sentences':[{'id':v.sentence_id,'text':v.text} for v in sentences],
+                        'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]}},contracts['steps'],STEPS,source_check)
                     step_of=check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
                     payload['argument_steps']=steps

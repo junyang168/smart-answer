@@ -45,3 +45,4 @@
 
 ## 输出
 按给定 schema 输出 `steps`、`claim_text`、`other`。`supports` 写这一步支持的 Claim ID，或它所支持的另一步的 step_id。
+每条 Claim 至少有一步直接写它的 ID：上层那条（例如把几部分合起来的结论）也要写进支持它的各部分那几步的 `supports`；他用一段经文或例子示范一个读经方法时，那一步也支持这条方法 Claim。反方一步的 `supports` 写驳斥它的那条 Claim。

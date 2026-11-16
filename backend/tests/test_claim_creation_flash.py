@@ -513,3 +513,31 @@ def test_package_must_stay_inside_the_steps(tmp_path,fault):
 def test_steps_first_requires_the_grouped_package(tmp_path):
     source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
     with pytest.raises(ValueError,match='grouped'):creation.run('T',path,tmp_path/'run',StepsPorts(source),groups=groups(),steps_first=True)
+
+
+def test_every_claim_needs_a_step_before_the_package_call(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    def mutate(out):
+        for step in out['steps']:step['supports']=[s for s in step['supports'] if s!='CL0001'] or ['T1']
+        out['steps'][0]['supports']=[]
+        return out
+    ports=StepsPorts(source,steps_mutation=mutate)
+    with pytest.raises(ValueError,match='every Claim needs a step'):
+        creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True)
+    assert 'creation_group_package' not in ports.calls
+
+
+def test_a_sentence_spoken_twice_is_located_at_its_own_position():
+    source={'metadata':{'title':'t','status':'published'},'script':[
+        {'index':1,'start_time':0.0,'end_time':1.0,'text':'怎麼處理？我們來看。所以很混亂。怎麼處理？'}]}
+    sentences=x.section_sentences(source,Section(1,0,1,'all'))
+    assert [s.text for s in sentences]==['怎麼處理？','我們來看。','所以很混亂。','怎麼處理？']
+    def response(excerpt):
+        r={k:[] for k in ('questions','positions','observations','evidence_steps')}
+        r['evidence_steps']=[{'evidence_step_id':'E1','anchors':[{'segment_index':'S0001','verbatim_excerpt':excerpt}]}]
+        r['sentence_audit']=[{'sentence_id':s.sentence_id,'status':'extracted' if i==3 else 'not_extracted',
+            'covered_by':['E1'] if i==3 else [],'reason_code':None if i==3 else 'structural_markup','reason':'測試。'}
+            for i,s in enumerate(sentences)]
+        return r
+    d.validate_sentence_audit(response('所以很混亂。怎麼處理？'),source,sentences)
+    with pytest.raises(Exception,match='S0001#004'):d.validate_sentence_audit(response('我們來看。'),source,sentences)
