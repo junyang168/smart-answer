@@ -164,7 +164,8 @@ def test_outline_claims_are_placed_on_retained_sentences_without_a_store(tmp_pat
     stated = {c['claim_id']: c['stated'] for c in context['claims']}
     assert stated == {'A:CL1': 'S0003', 'A:CL2': 'S0002', 'A:CL3': '其他講（L2-S0005）'}
     assert {c['claim_id']: c['parent'] for c in context['claims']}['A:CL2'] == 'A:CL1'
-    client = FakeClient([{'slides': [slide('S0001')]}])
+    client = FakeClient([{'slides': [slide('S0001', points=({'sentence': 'S0001', 'text': '一', 'source': 'A:CL2'},
+                                                            {'sentence': 'S0001', 'text': '二', 'source': 'A:CL1'}))]}])
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
     assert '不另做本堂地圖' in client.prompts[0] and 'A:CL1' in client.prompts[0]
 
@@ -217,7 +218,8 @@ def test_creation_runs_become_an_outline_with_their_evidence_on_retained_sentenc
     assert [(e['evidence_step_id'], e['step_type'], e['anchors'][0]['sentences']) for e in cover['evidence_steps']] == [
         ('E1', 'answer', ['S0003']), ('P1', 'opposed_position', ['S0002'])]
     assert [e['evidence_step_id'] for e in point['evidence_steps']] == ['E2', 'O1']
-    client = FakeClient([{'slides': [slide('S0001')]}])
+    client = FakeClient([{'slides': [slide('S0001', points=({'sentence': 'S0001', 'text': '反方', 'source': 'P1'},
+                                                            {'sentence': 'S0001', 'text': '引經', 'source': 'E2'}))]}])
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
     assert '不另做本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
 
@@ -252,3 +254,27 @@ def test_review_that_finds_slides_contradicting_evidence_must_block():
         hints.check_review({'claim_checks': [check], 'blocking': False, 'findings': []}, context, slides)
     hints.check_review({'claim_checks': [check], 'blocking': True,
                         'findings': [{'kind': '忠實', 'slide': 'S0001', 'problem': 'p', 'fix': 'f'}]}, context, slides)
+
+
+def test_points_are_timed_by_the_argument_step_they_show_and_unrelated_slides_are_sent_back(tmp_path):
+    """負責人 2026-11-16：他講要點 A、投影片亮著 B，或他論證 X、投影片顯示不相關的，都不行。"""
+    _decided(tmp_path)
+    context = hints.compile_package_context(CHAPTER.passage, 'L', data_base_dir=tmp_path, runs=[creation_run(tmp_path / 'run')])
+    # The model binds both points to S0001; the program moves each to where he says its step.
+    raw = [slide('S0001', points=({'sentence': 'S0001', 'text': '引經', 'source': 'E2'},
+                                  {'sentence': 'S0001', 'text': '反方', 'source': 'P1'}))]
+    timed = hints.retime(raw, context)
+    assert [(p['text'], p['sentence']) for p in timed[0]['points']] == [('反方', 'S0002'), ('引經', 'S0004')]
+    # Two slides: the second covers his answer (E1, Claim CL0001) but carries only the other Claim's point.
+    first = dict(slide('S0001', points=({'sentence': 'S0001', 'text': '經文事實', 'source': 'O1'},
+                                        {'sentence': 'S0002', 'text': '反方', 'source': 'P1'})), last='S0002')
+    second = dict(slide('S0003', points=({'sentence': 'S0004', 'text': '引經', 'source': 'E2'},
+                                         {'sentence': 'S0004', 'text': '插話', 'source': ''})), last='S0004')
+    problems = hints.argument_alignment(context, [first, second])
+    assert len(problems) == 1 and 'S0003' in problems[0] and 'G01-CL0001' in problems[0]
+    # decide sends the problems back once with the previous answer, and keeps the corrected one.
+    fixed = dict(second, points=[{'sentence': 'S0003', 'text': '回答', 'source': 'E1'}, {'sentence': 'S0004', 'text': '引經', 'source': 'E2'}])
+    client = FakeClient([{'slides': [first, second]}, {'slides': [first, fixed]}])
+    result = chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
+    assert result['status'] == 'saved' and len(client.prompts) == 2
+    assert '程序核對不通過' in client.prompts[1] and 'G01-CL0001' in client.prompts[1]

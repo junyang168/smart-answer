@@ -130,6 +130,22 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     return for_lecture(prompt, lecture) + "\n\n" + INLINE_NOTE_RULES
 
 
+#: 程序核對不通過時，把問題交回模型改的次數上限。
+REPAIRS = 2
+
+
+def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
+    """Claim 提綱模式下，每條要點多一個 source（它呈現的 Claim 或論證步驟）。"""
+    if not claim_context or claim_context.get("schema_version") != "chapter-slide-outline-context.v1":
+        return RESPONSE_SCHEMA
+    import copy
+    schema = copy.deepcopy(RESPONSE_SCHEMA)
+    point = schema["properties"]["slides"]["items"]["properties"]["points"]["items"]
+    point["properties"]["source"] = {"type": "string"}
+    point["required"].append("source")
+    return schema
+
+
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -245,6 +261,11 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
+                  "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id。有 source 的要點，"
+                  "出現時間由程序按那一步在逐字稿的位置決定（就是他開始講它的那一句），所以要點要放在含那一句的投影片上；"
+                  "故事、插話等不屬任何一步的要點，source 填空字串，sentence 綁他講出它的那一句。",
+                  "- 他講任何一步論證（某個 Claim 的 stated 句或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
+                  "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
                   "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 列的經文都要放進投影片的 scriptures，"
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
@@ -370,6 +391,8 @@ def check(
                 problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
                 continue
             point = {"sentence": item["sentence"], "text": text}
+            if str(item.get("source") or "").strip():
+                point["source"] = str(item["source"]).strip()
             earlier = _earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
             if earlier:
                 problems.append(
@@ -453,6 +476,27 @@ _VARIANTS = str.maketrans({"着": "著", "裏": "裡", "峯": "峰", "綫": "線
 
 def _fold_variants(text: str) -> str:
     return text.translate(_VARIANTS)
+
+
+def checked(
+    raw: list[dict[str, Any]],
+    kept: list[dict[str, Any]],
+    chapter: Chapter,
+    claim_context: dict[str, Any] | None,
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """初稿、修正稿共用的程序核對：一般核對之外，有 Claim 提綱時按論證步驟定要點時間，
+    再查 Evidence 經文與「此刻畫面與他此刻的論證相關」。"""
+    outline = claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1"
+    if outline:
+        from backend.pipeline.chapter_slide_claims import retime
+        raw = retime(raw, claim_context)
+    problems, unshown, slides = check(raw, kept, chapter)
+    if not problems and claim_context is not None:
+        from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
+        problems = evidence_scripture_gaps(claim_context, slides)
+        if outline:
+            problems += argument_alignment(claim_context, slides)
+    return problems, unshown, slides
 
 
 def record_path(data_base_dir: Path, passage: str, lecture: str) -> Path:
@@ -554,8 +598,19 @@ def decide(
         validate_context(claim_context, chapter.passage, lecture, decisions_record,
                          decisions_sha(data_base_dir, chapter.passage, lecture))
     prompt = user_prompt(lecture, decisions_record, claim_context)
-    response = client.generate_json(system_prompt(chapter, lecture), prompt, RESPONSE_SCHEMA)
-    return save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    schema = response_schema(claim_context)
+    response = client.generate_json(system_prompt(chapter, lecture), prompt, schema)
+    result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    # 程序核對不通過：把問題和上一份交回模型改，最多 REPAIRS 次。改的是同一份，不換提示詞。
+    for _ in range(REPAIRS if claim_context is not None else 0):
+        if result["status"] != "rejected":
+            break
+        repair = (prompt + "\n\n上一份投影片（JSON）：\n" + json.dumps(response, ensure_ascii=False)
+                  + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n"
+                  + "\n".join(f"- {p}" for p in result["problems"]))
+        response = client.generate_json(system_prompt(chapter, lecture), repair, schema)
+        result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
+    return result
 
 
 def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str, Any]:
@@ -599,10 +654,7 @@ def save(
     model: str,
     claim_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
-    if not problems and claim_context is not None:
-        from backend.pipeline.chapter_slide_claims import evidence_scripture_gaps
-        problems = evidence_scripture_gaps(claim_context, slides)
+    problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, claim_context)
     record = {
         "schema_version": SCHEMA_VERSION,
         "passage": chapter.passage,
@@ -823,11 +875,8 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     rejected_attempt = path.with_suffix(f".revision-{revision + 1}.rejected.json")
     if context is not None and rejected_attempt.exists():
         return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
-    response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, RESPONSE_SCHEMA)
-    problems, unshown, slides = check(response.get("slides") or [], kept, chapter)
-    if not problems and context is not None:
-        from backend.pipeline.chapter_slide_claims import evidence_scripture_gaps
-        problems = evidence_scripture_gaps(context, slides)
+    response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
+    problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
         rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},

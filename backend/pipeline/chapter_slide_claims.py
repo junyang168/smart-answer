@@ -321,6 +321,70 @@ def evidence_scripture_gaps(context: dict | None, slides: list[dict]) -> list[st
     return gaps
 
 
+def argument_index(context: dict) -> dict[str, dict]:
+    """Claim 與每一步論證在本堂的位置：id → 他開始講它的那一句、它屬於哪些 Claim、說的是什麼。"""
+    index: dict[str, dict] = {}
+    for claim in context.get("claims", []):
+        cid = claim["claim_id"]
+        stated = claim.get("stated", "")
+        if stated.startswith("S"):
+            index.setdefault(cid, {"first": stated, "claims": set(), "statement": claim["statement"]})["claims"].add(cid)
+        for step in claim.get("evidence_steps", []):
+            sentences = sorted(s for anchor in step.get("anchors", []) for s in anchor.get("sentences", []))
+            if not step.get("evidence_step_id") or not sentences:
+                continue  # 結構檔提綱的步驟沒有 id：只按 Claim 對齊
+            entry = index.setdefault(step["evidence_step_id"], {"first": sentences[0], "claims": set(),
+                                                                "statement": step["statement"]})
+            entry["claims"].add(cid)
+    return index
+
+
+def retime(raw_slides: list[dict], context: dict) -> list[dict]:
+    """有 source 的要點，出現時間由程序按那一步在逐字稿的位置決定，不用模型猜的句子。
+
+    負責人 2026-11-16：他講要點 A、投影片卻亮著 B 不行。模型決定寫什麼，何時出現由
+    已定位的 Claim／Evidence 決定；之後照時間排。"""
+    index = argument_index(context)
+    slides = []
+    for slide in raw_slides:
+        points = []
+        for point in slide.get("points") or []:
+            source = (point.get("source") or "").strip() if isinstance(point, dict) else ""
+            if source in index:
+                point = {**point, "sentence": index[source]["first"]}
+            points.append(point)
+        points.sort(key=lambda p: str(p.get("sentence") or "") if isinstance(p, dict) else "")
+        slides.append({**slide, "points": points})
+    return slides
+
+
+def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
+    """他講某一步論證時，畫面上那一張要有一條要點屬於同一個 Claim（負責人 2026-11-16：
+    教授論證的是 X，投影片顯示不相關的，不行）。另報不認得的 source。"""
+    index = argument_index(context)
+    problems = []
+    for slide in slides:
+        for point in slide["points"]:
+            if point.get("source") and point["source"] not in index:
+                problems.append(f"{slide['title']}: 要點「{point['text']}」的 source {point['source']} 不是本堂的 Claim 或論證步驟")
+    steps_of: dict[str, set] = {}
+    for rid, entry in index.items():
+        for cid in entry["claims"]:
+            steps_of.setdefault(cid, set()).add(rid)
+    reported = set()
+    for rid, entry in sorted(index.items(), key=lambda kv: (kv[1]["first"], kv[0])):
+        slide = next((s for s in slides if s["first"] <= entry["first"] <= s["last"]), None)
+        if slide is None or entry["first"] in reported:
+            continue
+        related = {rid} | entry["claims"] | {r for cid in entry["claims"] for r in steps_of.get(cid, ())}
+        if not any(point.get("source") in related for point in slide["points"]):
+            problem = (f"{slide['title']}（{entry['first']}）: 他在講「{entry['statement'][:40]}」（{rid}），"
+                       f"這一張沒有要點屬於它的 Claim（{'、'.join(sorted(entry['claims']))}）")
+            problems.append(problem)
+            reported.add(entry["first"])
+    return problems
+
+
 def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, runs: list[Path]) -> dict:
     """Outline context from Claim-creation runs (files): each run is one argument group.
 
