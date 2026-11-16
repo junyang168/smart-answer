@@ -311,7 +311,7 @@ Observation 保存教授指出的經文、措辭、事實或現象；Evidence �
 
 | 規則 | 內容 | 在哪一層、由誰查 |
 | --- | --- | --- |
-| R1 一件一事 | 每條 Evidence／Observation／Claim 只說一件可單獨判斷真假的事；以「並且」「；」連起兩件事就是兩件。一段念出的經文算一件，除非各部分用途不同 | 本層：加進既有記錄 Jev 檢查的同一請求，未通過交 GPT 處置 |
+| R1 一件一事 | 每條 Evidence／Observation 只說一件可單獨判斷真假的事；以「並且」「；」連起兩件事就是兩件。一段念出的經文算一件，除非各部分用途不同。Claim 是講課提綱上的一點：它自己的限定寫在同一條；能單獨回答一個問題的部分才另立一條（負責人 2026-11-15，見 [creation 設計 3.2](../10-extraction/claim_creation_flash_design.md#32-生成候選-claim-與原文範圍)） | 本層：加進既有記錄 Jev 檢查的同一請求，未通過交 GPT 處置 |
 | R2 有連接 | 每條 Evidence／Observation 至少連到一條 Claim | 已由 [4.3](#43-從孤立-evidenceobservation-主動查漏) 處理孤立記錄，不另查 |
 | R3 用到全部 | 每條連接用到起點那一件的全部內容；只用到一部分就是該拆的那一件。一件可連到多條 Claim | Claim 層：加進 [4.2](#42-claim-與下層連接獨立配對檢查) 的配對檢查 |
 | R4 不重述 | Claim 不重述連到它的 Evidence／Observation，Evidence／Observation 也不只是它所連 Claim 的換句話說 | Claim 層：同上 |

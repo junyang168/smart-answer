@@ -85,15 +85,26 @@ RULES = (
     '逐字引文只從所給S定位碼連續複製，不補標點，不拼接；時間欄位必須null。'
     + f.KNOWLEDGE_TEXT_RULES)
 CLAIMS = RULES + (
-    '唯一任務：識別本組Claim候選及完整相關原文範圍，不生成Evidence、Fragment或關係。'
+    '唯一任務：還原教授講這一組時心中的講課提綱，提綱上每一點寫成一條Claim候選及完整相關原文範圍；'
+    '不生成Evidence、Fragment或關係。'
+    '提綱頂層是他在這裡要聽眾明白的主要結論，通常一到兩條，列在最前；兩個互不從屬的結論各為頂層，不硬合成一條；其下是他為講明它而逐一講出的要點，'
+    '例如各部分、理由、前提。檢驗：若為這段錄音做投影片帶聽眾跟上，會寫上投影片的點就是提綱上的點。'
+    'statement寫出這一點的內容，不只寫題目：「分為幾部分」要寫出各部分是什麼；'
+    '他接著逐一講解的部分（給了說明或理由），各成一條分論點，只列出、未講解的部分留在上層那條；已各成分論點的部分，上層只點出名稱，不重述其內容。'
+    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），每一步落腳的判斷各成一條分論點，上層那條只寫結論，不把各步塞進去。'
+    '拆不拆拿不準時問：這一部分能單獨回答一個問題嗎？能，就另立一條；只是上層的理由、限定或說明，限定寫進上層那條，理由與說明掛在它下面；描述同一結構的幾句算一個。不同要點不合併，同一要點的不同說法不另立。'
+    '他從經文、字詞或對照得出的推論是Claim，statement簡要寫出觀察及其意義；單純的引經、字詞資料、譯法留給論據。'
+    '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導。'
+    '但他明白教導、並在本組用來得出要點的讀經原則，是提綱上的點；他在案例後以「所以……」得出的一般原則（讀經、倫理或教義）是本組結論之一，案例支持它，不掛在案例底下。'
+    '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，即使離題也是Claim，掛在它所應用或支持的那條下面，與本組結論無關才另成頂層；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
+    '他只指出問題或張力、本組沒有給出解答時，Claim只寫他陳述的雙方及張力本身，'
+    '不寫任何解答、裁決或傾向；問題本身留給後續材料記為Question。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
+    '講課安排與經文內容的轉述不立Claim。'
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
-    '只有支持上層的一句斷言，沒有教授另給論據時保留為後續材料，不必升級Claim；'
-    '有經文、觀察、例子或推理另行支持才考慮獨立Claim，不設兩條Evidence門檻。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
-    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；'
-    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。'
-    + f.CLAIM_DISCOVERY_RULES)
+    '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
+    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。')
 MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
@@ -119,6 +130,9 @@ MATERIALS += '\n歸屬規則：'+_existing_prompt.split('归属规则：',1)[1].
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
+    '先依原文判定本組主要結論是哪條Claim；本組其他Claim是分論點，以supports或qualifies'
+    '連到它直接支持的Claim（主要結論或另一分論點），使每條分論點都有路線通到主要結論，不只用contextualizes。'
+    '他陳述的問題或張力不是解答的論據，不以supports連到解答。沿用的其他組Claim不掛在本組分論點底下。'
     '每條一次輸出from_id、to_id、relation_type及完整但簡短reason，方向由端點表達。'
     '不要重複completed_connections。只使用提供的端點，不重抽Claim或材料。'
     '對local_observation_ids逐項判argument_role並給簡短理由，恰好一次。'
@@ -352,7 +366,11 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             initial = sections.plan_sections(list(paragraphs.values()), headings=projection.headings)
             contract = {'name': VERSION+'_groups', 'strict': True, 'schema': SemanticGroups.model_json_schema()}
             request = {'identity': ports.identity['gpt'], 'system': RULES+
-                '唯一任務：依論證將全部原文分組，小標題只是線索。每段恰好歸一組，不重疊不遺漏；'
+                '唯一任務：依論證將全部原文分組，小標題只是線索。一組是一個主要結論及他為建立它所講的全部內容：'
+                '一個論證跨幾個小標題就合為一組；只提出問題或預告要講什麼的段落，與回答它的段落同組；'
+                '插在別的論證中間、證明另一個結論的段落，歸它所證明的那組；兩處在證明同一結論就合為一組；'
+                '回答另一個問題、只用到別組已建立的結論的，另成一組；彼此不支持的主題分開。'
+                '每段恰好歸一組，不重疊不遺漏；'
                 '後文回到同一論點可用多個範圍。每組提供title、topic_key、paragraph_ranges及整體reason。',
                 'input': {'task': 'creation_grouping', 'paragraphs': paragraphs,
                           'headings': [sections.section_payload(s) for s in initial.sections]}, 'schema': contract}
