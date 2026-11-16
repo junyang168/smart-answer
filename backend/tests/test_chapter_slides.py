@@ -366,3 +366,22 @@ def test_argument_evidence_spans_adjacent_selection_pieces():
     assert evidence["U001"] == evidence["U002"]
     assert evidence["U001"][0]["role"] == "reasoning"
     assert evidence["U001"][0]["fragment_id"] == "F1"
+
+
+def test_inline_notes_follow_the_cited_verse_and_sentence(tmp_path):
+    book = tmp_path / "ISA"
+    book.mkdir()
+    (book / "61.json").write_text(json.dumps({"1": "叫我傳好信息給謙卑的人"}))
+    draft = slide("S0001", scriptures=[{"sentence": "S0003", "ref": "以賽亞書 61:1"}])
+    note = {"sentence": "S0004", "scripture": "isa-61-1", "verse": 1, "span": "謙卑",
+            "original": "anawim", "reading": "", "explanation": "教授指出以賽亞所用的詞。"}
+    draft["inline_notes"] = [note]
+    problems, _, slides = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
+    assert not problems
+    decisions = {"pieces": KEPT, "decisions": [{"id": p["id"], "keep": True} for p in KEPT]}
+    _, timed = chapter_slides.placed(decisions, {"slides": slides})
+    assert timed[0]["inline_notes"] == [{**note, "at": chapter_slides.sentences(KEPT)[3]["start"]}]
+    for change in ({"sentence": "S0002"}, {"span": "虛心"}, {"verse": 2}):
+        draft["inline_notes"] = [{**note, **change}]
+        problems, _, _ = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
+        assert problems

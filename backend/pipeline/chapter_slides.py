@@ -110,6 +110,13 @@ def for_lecture(prompt: str, lecture: str) -> str:
     return prompt
 
 
+INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語法與經文結構，寫入 inline_notes。
+經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
+先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
+每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading（教授明說的中文讀法）、explanation（簡短的編輯整理）。無法核實的原文字形或沒有明說的讀法留空。
+跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
+
+
 def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
@@ -120,7 +127,7 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
         .replace("〈整章〉", f"{number}:{start}-{end}")
         .replace("〈章〉", str(number))
     )
-    return for_lecture(prompt, lecture)
+    return for_lecture(prompt, lecture) + "\n\n" + INLINE_NOTE_RULES
 
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -163,6 +170,19 @@ RESPONSE_SCHEMA: dict[str, Any] = {
     "required": ["slides"],
     "additionalProperties": False,
 }
+
+
+_INLINE_FIELDS = {
+    **{name: {"type": "string"} for name in ("sentence", "scripture", "span", "original", "reading", "explanation")},
+    "verse": {"type": "integer"},
+}
+_SLIDE_SCHEMA = RESPONSE_SCHEMA["properties"]["slides"]["items"]
+_SLIDE_SCHEMA["properties"]["inline_notes"] = {
+    "type": "array",
+    "items": {"type": "object", "properties": _INLINE_FIELDS, "required": list(_INLINE_FIELDS),
+              "additionalProperties": False},
+}
+_SLIDE_SCHEMA["required"].append("inline_notes")
 
 
 def kept_pieces(decisions_record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -284,6 +304,8 @@ def check(
     slides: list[dict[str, Any]],
     kept: list[dict[str, Any]],
     chapter: Chapter,
+    *,
+    cuv_root: Path | None = None,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -319,6 +341,7 @@ def check(
         return problems, unshown, []
 
     normalised: list[dict[str, Any]] = []
+    verse_cache: dict[Path, dict[str, str]] = {}
     for index, slide in enumerate(slides):
         a = starts[index]
         b = starts[index + 1] if index + 1 < len(starts) else len(lines)
@@ -365,6 +388,31 @@ def check(
             for _, slug in spoken_references(line["text"]):
                 if not _covers(shown, parse_reference(slug)):
                     unshown.append(f"{title}（{line['id']}）：逐字稿裡有 {slug}")
+        inline_notes = []
+        for note in slide.get("inline_notes", []):
+            scripture = next((item for item in scriptures if item["slug"] == note["scripture"]
+                              and item["sentence"] <= note["sentence"]), None)
+            ref = parse_reference(scripture["slug"]) if scripture else None
+            if (note["sentence"] not in own_ids or ref is None
+                    or not ref["start"] <= note["verse"] <= ref["end"]
+                    or not note["span"].strip()):
+                problems.append(f"{title}: 經文註解未對應本張已顯示的經節或句子（{note['sentence']}）")
+                continue
+            if cuv_root is None:
+                from backend.bible_study.paths import cuv_dir
+
+                cuv_root = cuv_dir()
+            path = cuv_root / ref["slug_book"].upper() / f"{ref['chapter']}.json"
+            if path not in verse_cache:
+                try:
+                    verse_cache[path] = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    verse_cache[path] = {}
+            text = verse_cache[path].get(str(note["verse"]), "")
+            if text.count(note["span"]) != 1:
+                problems.append(f"{title}: 無法在和合本 {note['scripture']} 第 {note['verse']} 節唯一定位「{note['span']}」")
+                continue
+            inline_notes.append(note)
         normalised.append({
             "first": own_ids[0],
             "last": own_ids[-1],
@@ -372,6 +420,7 @@ def check(
             "points": points,
             "verses": verses or [],
             "scriptures": scriptures,
+            **({"inline_notes": inline_notes} if inline_notes else {}),
         })
     return problems, unshown, normalised
 
@@ -424,6 +473,10 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
             "points": [
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
                 for item in slide["points"]
+            ],
+            "inline_notes": [
+                {**item, "at": lines[index[item["sentence"]]]["start"]}
+                for item in slide.get("inline_notes", [])
             ],
             "scriptures": [
                 {**item, "at": lines[index[item["sentence"]]]["start"]}
@@ -612,6 +665,8 @@ def show_slides(slides: list[dict[str, Any]]) -> str:
             lines.append(f"  · [{point['sentence']}] {point['text']}")
         for item in slide["scriptures"]:
             lines.append(f"  經文 [{item['sentence']}] {format_chinese_reference(item['slug'])}")
+        for note in slide.get("inline_notes", []):
+            lines.append("  經文註解 " + json.dumps(note, ensure_ascii=False))
     return "\n".join(lines)
 
 
@@ -625,6 +680,7 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "first": slide["first"],
             "title": slide["title"],
             "points": slide["points"],
+            "inline_notes": slide.get("inline_notes", []),
             "verses": ", ".join(v.split("-", 1)[1].replace("-", ":", 1) for v in slide["verses"]),
             "scriptures": [
                 {"sentence": item["sentence"], "ref": format_chinese_reference(item["slug"])}
@@ -671,7 +727,8 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
     )
-    answer = client.generate_json(for_lecture(review_system, lecture) + extra, prompt, schema)
+    answer = client.generate_json(for_lecture(review_system, lecture) + "\n\n" + INLINE_NOTE_RULES
+                                  + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。" + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
     out = {

@@ -1460,6 +1460,7 @@ def _chapter_slides(
                 "seconds": until - at,
                 "title": slide["title"],
                 "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
+                **({"inline_notes": slide["inline_notes"]} if slide.get("inline_notes") else {}),
                 "verses": slide["verses"],
                 "scriptures": [
                     {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
@@ -1504,7 +1505,8 @@ def _retimed(convert: Any, row: dict[str, Any]) -> dict[str, Any]:
             {**slide, "at": round(convert(slide["at"]), 2),
              "seconds": round(convert(slide["at"] + slide["seconds"]) - convert(slide["at"]), 2),
              "points": at(slide["points"], "at"),
-             "scriptures": at(slide["scriptures"], "at")}
+             "scriptures": at(slide["scriptures"], "at"),
+             **({"inline_notes": at(slide["inline_notes"], "at")} if slide.get("inline_notes") else {})}
             for slide in row["slides"]
         ]
     return out
