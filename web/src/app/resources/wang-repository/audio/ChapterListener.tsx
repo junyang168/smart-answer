@@ -435,7 +435,7 @@ export default function ChapterListener({
     const line = currentLine.current;
     if (!container || !line) return;
     container.scrollTo({
-      top: line.offsetTop - container.clientHeight / 3,
+      top: line.offsetTop - container.clientHeight / 4,
       behavior: smooth ? "smooth" : "auto",
     });
   }
@@ -523,7 +523,7 @@ export default function ChapterListener({
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,2fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
         <div
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
@@ -610,7 +610,7 @@ export default function ChapterListener({
                         ? "bg-amber-100 text-stone-950"
                         : line.left_out
                           ? "text-stone-400 hover:bg-stone-50"
-                          : "text-stone-800 hover:bg-stone-50"
+                          : "text-stone-500 hover:bg-stone-50"
                     }`}
                   >
                     {line.text}
