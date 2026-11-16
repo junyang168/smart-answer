@@ -73,7 +73,7 @@ def coverage(candidate, paragraph_index, sentences_by_index):
     return records, own
 
 
-def grade_group(group, records, own):
+def grade_group(group, records, own, proposed=None):
     """One verdict per answer item, plus records that hold only non-argument sentences."""
     items = group['items']
     sets = {it['id']: {key(s) for s in it['sentences']} for it in items}
@@ -113,6 +113,8 @@ def grade_group(group, records, own):
             loose = want - owned - (in_records if 'step' in it.get('accept_kind', []) else set())
             if loose:
                 verdict, detail = 'missed', f'{len(loose)}/{len(want)} sentences are not a Claim\'s own words'
+        elif it['kind'] == 'aside' and proposed is not None and len(want & proposed) < COVERED * len(want):
+            verdict, detail = 'digression_not_proposed', f'{len(want & proposed)}/{len(want)} sentences proposed as 題外話'
         elif it['kind'] == 'aside':
             accepted = set().union(*variants[it['id']])
             leaked = {rid[1] for rid, cov in records.items() if cov & want and cov <= accepted}
@@ -122,6 +124,12 @@ def grade_group(group, records, own):
         results.append({'group': group['group'], 'item': it['id'], 'kind': it['kind'], 'status': it['status'],
                         'verdict': verdict, 'detail': detail,
                         'first': it['sentences'][0]['text'][:30]})
+    if proposed is not None:
+        for it in items:
+            if it['kind'] in ('step', 'claim_text') and sets[it['id']] & proposed:
+                results.append({'group': group['group'], 'item': it['id'], 'kind': it['kind'], 'status': it['status'],
+                                'verdict': 'false_digression', 'detail': f"{len(sets[it['id']] & proposed)} argument sentences proposed as 題外話",
+                                'first': it['sentences'][0]['text'][:30]})
     merges = {it['id']: set(it.get('accept_merge', [])) for it in items}
     for rid, ids in touching.items():
         ids = set(ids)
@@ -147,14 +155,21 @@ def paragraph_indexes(candidate, source_path=None):
     return {k: str(p.get('index', p.get('source_index'))) for k, p in snap['paragraphs'].items()}
 
 
-def grade(cases, group_id, candidate, source_path=None):
+def grade(cases, group_id, candidate, source_path=None, digressions=None):
     group = next(g for g in cases['groups'] if g['group'] == group_id)
     by_index = defaultdict(set)
     for it in group['items']:
         for s in it['sentences']:
             by_index[str(s['script_index'])].add(key(s))
-    records, own = coverage(candidate, paragraph_indexes(candidate, source_path), by_index)
-    return grade_group(group, records, own)
+    index = paragraph_indexes(candidate, source_path)
+    records, own = coverage(candidate, index, by_index)
+    proposed = None
+    if digressions is not None:
+        proposed = set()
+        for d in digressions:
+            for a in d['anchors']:
+                proposed |= fragment_sentences(a, index[a.get('paragraph_key') or a['segment_index']], by_index)
+    return grade_group(group, records, own, proposed)
 
 
 def summary(results):
@@ -174,9 +189,11 @@ def main():
     p.add_argument('--group', required=True)
     p.add_argument('--candidate', required=True)
     p.add_argument('--source-file', help='Transcript file when the candidate\'s recorded path has moved')
+    p.add_argument('--digressions', help='digression-proposals.json from the creation run')
     a = p.parse_args()
+    digressions = json.loads(Path(a.digressions).read_text())['proposals'] if a.digressions else None
     results = grade(json.loads(Path(a.cases).read_text()), a.group, json.loads(Path(a.candidate).read_text()),
-                    a.source_file)
+                    a.source_file, digressions)
     print(json.dumps({'summary': summary(results), 'errors': [r for r in results if r['verdict'] != 'correct']},
                      ensure_ascii=False, indent=1))
 

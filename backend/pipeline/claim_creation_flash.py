@@ -22,7 +22,11 @@ VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
-STEPS_CONTRACT = 'claim_creation_argument_steps_v2_program_fragments'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v3_digressions'
+# 題外話 (owner 2026-11-16): an attack on others with no scripture or reasoning,
+# and a personal story told to back such a comment. Proposals only: a 同工
+# approves each before it changes slides or playback.
+DIGRESSION_KINDS = ('unsupported_comment', 'personal_story')
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -78,7 +82,9 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
         'steps':array(object_schema({'step_id':{'type':'string'},'line':{'type':'string'},
             'sentence_ids':array(deepcopy(sid)),'supports':array({'type':'string'})})),
         'claim_text':array(object_schema({'claim_id':{'type':'string'},'sentence_ids':array(deepcopy(sid))})),
-        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}}))})
+        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}})),
+        'digressions':array(object_schema({'sentence_ids':array(deepcopy(sid)),
+            'kind':{'type':'string','enum':list(DIGRESSION_KINDS)},'why':{'type':'string'}}))})
     obs_types=BASE['observations']['items']['properties']['observation_type']['enum']
     step_types=BASE['evidence_steps']['items']['properties']['step_type']['enum']
     records=schema('step_records',{'records':array(object_schema({'step_id':{'type':'string'},
@@ -114,7 +120,7 @@ CLAIMS = RULES + (
     '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，與本組主題相關的是Claim；這類回答及其他回答聽眾問題的Claim，掛在它所應用或支持的那條下面，與本組結論無關的不在本組立Claim；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
     '他只指出問題或張力、本組沒有給出解答時，Claim只寫他陳述的雙方及張力本身，'
     '不寫任何解答、裁決或傾向；問題本身留給後續材料記為Question。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
-    '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。'
+    '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。題外話不立Claim：他批評學者或別人，卻沒有給經文或推理、只是評論；以及用來襯托這種評論的個人故事（例：「有些學者看聖經眼睛都瞎了」及兒子看心臟幻燈片的故事）。他給了經文或推理的批評不是題外話（例：「很多人解經完全搞錯」之後用首尾呼應證明），照常立Claim。'
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
@@ -378,7 +384,7 @@ def check_steps(result, sentence_ids, claim_ids):
     ids=[r['step_id'] for r in result['steps']]
     if len(ids)!=len(set(ids)) or not all(i.strip() for i in ids) or set(ids)&set(claim_ids):
         raise ValueError('argument steps need unique step IDs distinct from Claim IDs')
-    placed=[s for r in result['steps'] for s in r['sentence_ids']]+[s for r in result['claim_text'] for s in r['sentence_ids']]+[s for r in result['other'] for s in r['sentence_ids']]
+    placed=[s for part in ('steps','claim_text','other','digressions') for r in result.get(part,[]) for s in r['sentence_ids']]
     if len(placed)!=len(set(placed)) or set(placed)!=set(sentence_ids):
         raise ValueError('argument steps must place every sentence exactly once')
     for r in result['steps']:
@@ -390,6 +396,8 @@ def check_steps(result, sentence_ids, claim_ids):
     unsupported=set(claim_ids)-{c for r in result['steps'] for c in r['supports']}
     if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
+    if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
+        raise ValueError('a 題外話 needs sentences, a kind and a reason')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
@@ -458,6 +466,12 @@ def build_step_records(steps, records, sentences, paragraphs):
             'reason':f"{row['claim_id']}本身的話，保存為它的SourceFragment"} for s in row['sentence_ids']]
     for row in steps['other']:
         out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'structural_markup','reason':row['why']} for s in row['sentence_ids']]
+    # A 題外話 is kept with its SourceFragments as a proposal; it is not Evidence.
+    out['digressions']=[]
+    for row in steps.get('digressions',[]):
+        out['digressions'].append({'kind':row['kind'],'why':row['why'],'sentence_ids':row['sentence_ids'],
+            'anchors':step_fragments(row['sentence_ids'],by_id,paragraphs),'review_status':'proposed'})
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'digression','reason':row['why']} for s in row['sentence_ids']]
     return out
 
 
@@ -522,7 +536,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
         single_outputs={};claim_aliases={}
-        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}
+        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
         for n, group in enumerate(groups, 1):
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
@@ -610,6 +624,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     result=build_step_records(steps,records['records'],sentences,paragraphs)
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
+                    digressions.extend({**d,'group_id':gid} for d in result.pop('digressions'))
                 elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
@@ -705,6 +720,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             response=response,extraction=identity,additional_relations=additional)
         bind_conclusions(package,candidates,projection,claim_statements)
         validate_merged_package(package,native_relations=True);source_check()
+        e.save(root/'digression-proposals.json',{'contract':STEPS_CONTRACT,'proposals':digressions});
         e.save(root/'extraction-response.json',response);e.save(root/'additional-relations.json',additional);e.save(root/'candidate.json',package)
         result={'version':VERSION,'status':'creation_complete','candidate_path':str(root/'candidate.json'),
             'candidate_sha256':e.digest(package),'source_id':package['source_documents'][0]['source_id'],

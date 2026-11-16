@@ -458,7 +458,7 @@ class StepsPorts(Ports):
                 {'step_id':'T1','line':'反方：人子只強調人性','sentence_ids':['S0001#001'],'supports':['CL0001']},
                 {'step_id':'T2','line':'回答：不對','sentence_ids':['S0001#002'],'supports':['CL0001']},
                 {'step_id':'T3','line':'經文事實：但以理書的人子領受永遠權柄','sentence_ids':['S0002#003'],'supports':['CL0001','T2']}],
-                'claim_text':[],'other':[{'sentence_ids':['S0003#004'],'why':'聽眾提問，下段回答。'}]}
+                'claim_text':[],'other':[{'sentence_ids':['S0003#004'],'why':'聽眾提問，下段回答。'}],'digressions':[]}
             return self.steps_mutation(out) if self.steps_mutation else out
         if task=='creation_step_records':
             self.calls.append(task)
@@ -583,3 +583,16 @@ def test_duplicate_of_must_name_the_record_that_keeps_the_passage():
         with pytest.raises(ValueError,match='duplicate_of must name'):creation.expand_material_audit(answer(target),['A','B'])
     assert creation.expand_material_audit(answer('ST05'),['A','B'])['sentence_audit'][1]['reason_code']=='duplicate_of'
     assert creation.expand_material_audit(answer('CL0001'),['A','B'],{'CL0001'})['sentence_audit'][1]['status']=='not_extracted'
+
+
+def test_a_digression_is_a_proposal_with_fragments_not_evidence():
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '回答：證據一大堆', 'sentence_ids': ['S0001#003'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [],
+             'digressions': [{'sentence_ids': ['S0001#001', 'S0001#002'], 'kind': 'unsupported_comment', 'why': '批評學者看經眼瞎，沒有給經文或推理'}]}
+    assert c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001']) == {'S0001#003': 'T1'}
+    bad = {**steps, 'digressions': [{**steps['digressions'][0], 'kind': 'story'}]}
+    with pytest.raises(ValueError, match='題外話'):
+        c.check_steps(bad, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'])
+    from backend.pipeline.sentence_ledger_vocabulary import HUMAN_ONLY_REASONS
+    assert 'digression' in HUMAN_ONLY_REASONS

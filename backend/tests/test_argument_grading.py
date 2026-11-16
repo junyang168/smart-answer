@@ -51,3 +51,13 @@ def test_fragment_matching_ignores_punctuation_and_needs_the_same_paragraph():
 def test_a_steps_closing_sentence_kept_as_the_claims_own_words_still_counts():
     found = verdicts({'E1': keys('甲一句。'), 'E2': keys('乙一句。', '乙二句。')}, own={'C': keys('結論。', '甲二句。')})
     assert ('a', 'partial') not in found and ('a', 'missed') not in found
+
+
+def test_digression_proposals_must_cover_the_aside_and_spare_the_argument():
+    records = {('evidence_steps', 'E1'): keys('甲一句。', '甲二句。'), ('evidence_steps', 'E2'): keys('乙一句。', '乙二句。')}
+    own = {'C': keys('結論。')}
+    def found(proposed):
+        return {(r['item'], r['verdict']) for r in g.grade_group(GROUP, records, own, proposed) if r['verdict'] != 'correct'}
+    assert found(keys('題外話。')) == set()
+    assert ('x', 'digression_not_proposed') in found(set())
+    assert ('a', 'false_digression') in found(keys('題外話。', '甲一句。'))
