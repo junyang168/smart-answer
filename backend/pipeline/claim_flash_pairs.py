@@ -194,7 +194,7 @@ def review(records,sources,edge_keys,proposed,root,ports,*,kind,implicit=(),adju
             resolved.append((case,item.action,selected,item.reason,'gpt_disposition'))
     for case,action,choice,reason,basis in resolved:
         original=case['original'];key=case['key']
-        outcomes.append({'job_id':case['job_id'],'action':action,'basis':basis,'reason':reason})
+        outcomes.append({'job_id':case['job_id'],'a':case['a'],'b':case['b'],'action':action,'basis':basis,'reason':reason})
         if action=='needs_source':
             pending.append({'job_id':case['job_id'],'reason':reason});continue
         if action=='keep':

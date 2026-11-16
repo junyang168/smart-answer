@@ -84,6 +84,27 @@ Reviewer-call invariant for the draft-first pipeline (`draft_first_review_runner
 
 For Matthew exposition articles, a programmatically verified editorial review in which every applicable dimension reaches its own minimum in the quality profile (currently 80% of each dimension's weight) and no hard failure is declared, followed by a passing Program Audit with zero errors, triggers automatic Wang repository publication. There is no total-score threshold: `total_score` is reported for a reader and decides nothing, because one number let a weak dimension be carried by the others. The quality profile is the authority for the bars; do not restate a number here that the profile can change. The runner must create an `automated-publication-decision.v1` bound to the manuscript, editorial review, and audit SHAs; it must never label this as human approval. Publishing to the Wang repository is not deploying: do not deploy as part of this workflow.
 
+# A model step starts from its eval
+
+Before building or retuning any step a model performs (Claim creation,
+Evidence, slides, articles), its design document carries an **Eval** section,
+and the owner agrees to it before the first real run:
+
+1. **Criteria** — what a right answer is, each checkable on its own. For
+   Claims: slides built from them let a listener follow the recording without
+   missing a point; one cover Claim per argument group.
+2. **Key** — the right answer written out for one real lecture.
+   The owner signs the key. A key written and graded by the same agent is a
+   draft, not a key.
+3. **Grading** — how each round is scored against the key, and the numbers
+   reported per round (covered, missing, merged, extra), not impressions.
+
+Change the prompt only against a graded failure. When a real output shows a
+criterion was missing (the cover-Claim rule came from 「有兩個問題」), add it
+deliberately, tell the owner, and re-grade the earlier rounds against it.
+This is why the #702 Claim POC worked where earlier prompt rounds, tuned one
+symptom at a time, could not tell an improvement from a regression.
+
 # Where the work happens
 
 Every session shares this checkout, and git keeps HEAD, the index and the stash

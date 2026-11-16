@@ -312,3 +312,13 @@ def test_joint_discovery_refuses_changed_saved_draft_before_model_calls(tmp_path
         stage.continue_joint_discovery(None, 'S', root, ports, apply=True)
     assert not ports.calls
     assert not (root/'joint-discovery-continuations').exists()
+
+
+@pytest.mark.parametrize('action',['retain_evidence','represented'])
+def test_retained_and_represented_material_is_recorded_per_record(ready,action):
+    store,root,rroot=ready
+    item=candidate(action=action,claim_id='C' if action=='represented' else '',reason='教授直接斷言，未另作論證。')
+    stage.run(store,'S',rroot,root/'missing',Ports([item]),apply=True)
+    draft=json.loads((root/'missing'/'draft.json').read_text())
+    assert draft['lower_dispositions']==[{'object_key':'evidence_steps/E','disposition':action,
+        **({'claim_id':'C'} if action=='represented' else {}),'reason':'教授直接斷言，未另作論證。','stage':'missing_claims'}]

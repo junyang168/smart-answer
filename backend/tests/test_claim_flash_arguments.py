@@ -13,11 +13,13 @@ class Ports(BasePorts):
     def __init__(self,proposed=(),**kwargs):
         super().__init__(**kwargs)
         self.proposed=[{'relation_type':'supports','direction':'a_to_b',**p} for p in proposed]
+        self.dispositions=[]
     def repair(self,request):
         task=request['input']['task']
         if task=='argument_completeness':
             self.calls.append(('gpt',request))
-            return {'items':[{'job_id':j['job_id'],'action':'complete','pairs':self.proposed,'reason':'對照原文與實際路線。'} for j in request['input']['jobs']]}
+            return {'items':[{'job_id':j['job_id'],'action':'complete','pairs':self.proposed,'reason':'對照原文與實際路線。'} for j in request['input']['jobs']],
+                    **({'material_dispositions':deepcopy(self.dispositions)} if 'material_dispositions' in request['schema']['properties'] else {})}
         if task.startswith('pair_'):
             self.calls.append(('gpt',request))
             return {'items':[{'job_id':j['job_id'],'action':'set','relation_type':'supports','direction':'a_to_b','reason':'原文的行為觀察支持這項判斷。'} for j in request['input']['jobs']]}
@@ -561,3 +563,48 @@ def test_statement_handoff_rechecks_only_new_source_context(ready, monkeypatch, 
     stage.run(*args, replay, apply=True)
     assert reviewed == ['claims/C']
     assert replay.calls == []
+
+
+def test_unrouted_material_dispositions_are_recorded_for_the_reverse_lookup(ready):
+    store,root,plan,eroot,sroot=ready;ports=Ports()
+    ports.dispositions=[{'object_key':'observations/O','disposition':'background','duplicate_of':'','reason':'只交代背景。'}]
+    assert stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)['status'] in {'verified','applied'}
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert request['input']['unrouted_material']==['observations/O'] and stage.DISPOSITION_PROMPT in request['system']
+    saved=json.loads((root/'arguments'/'verification.json').read_text())
+    assert [(x['object_key'],x['disposition'],x['stage']) for x in saved['lower_dispositions']]==[
+        ('observations/O','background','argument_completeness')]
+
+
+@pytest.mark.parametrize('bad',[
+    {'object_key':'evidence_steps/E','disposition':'background','duplicate_of':''},     # already routed
+    {'object_key':'observations/O','disposition':'duplicate','duplicate_of':''},        # names no record
+    {'object_key':'observations/O','disposition':'duplicate','duplicate_of':'observations/O'},
+    {'object_key':'observations/O','disposition':'background','duplicate_of':'evidence_steps/E'}])
+def test_material_disposition_outside_its_contract_is_rejected(ready,bad):
+    store,root,plan,eroot,sroot=ready;ports=Ports();ports.dispositions=[{**bad,'reason':'理由。'}]
+    with pytest.raises(ValueError,match='disposition'):
+        stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',ports,apply=True)
+
+
+def test_legacy_policy_root_keeps_its_wire_contract(ready):
+    store,root,plan,eroot,sroot=ready;aroot=root/'legacy-policy';aroot.mkdir()
+    intent={'version':stage.VERSION,'source':f.bind_source(store,'S',aroot),'group':plan['groups'][0],'models':Ports.identity,
+            'evidence_root':str(eroot.resolve()),'statement_root':str(sroot.resolve()),
+            'policy_sha256':stage.LEGACY_POLICY_SHA256,'candidate_scope':stage.CANDIDATE_SCOPE}
+    e.save(aroot/'intent.json',intent);ports=Ports()
+    stage.run(store,'S',plan,'G',eroot,sroot,aroot,ports,apply=True)
+    request=next(r for role,r in ports.calls if role=='gpt' and r['input']['task']=='argument_completeness')
+    assert request['schema']==stage.LegacyRoutes.model_json_schema() and 'unrouted_material' not in request['input']
+    assert stage.DISPOSITION_PROMPT not in request['system']
+    assert 'lower_dispositions' not in json.loads((aroot/'verification.json').read_text())
+
+
+def test_removed_edge_records_the_record_it_leaves_without_a_route(ready):
+    store,root,plan,eroot,sroot=ready
+    store.apply_plan(store.plan_package({'package_id':'removable-relation','knowledge_relations':[{
+        'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'舊連接。','record_namespace':f.VERSION}]}))
+    stage.run(store,'S',plan,'G',eroot,sroot,root/'arguments',Ports(choices={'relation':'none'}),apply=True)
+    saved=json.loads((root/'arguments'/'verification.json').read_text())
+    removed=[x for x in saved['lower_dispositions'] if x['object_key']=='observations/O']
+    assert [(x['disposition'],x['other_end'],x['stage']) for x in removed]==[('relation_removed','evidence_steps/E','pairs_review')]

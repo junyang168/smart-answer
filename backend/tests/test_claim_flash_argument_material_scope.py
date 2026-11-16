@@ -127,7 +127,7 @@ def test_legacy_frozen_input_is_not_silently_expanded(ready,monkeypatch):
     pin=f.bind_source(store,'S',aroot)
     intent={'version':stage.VERSION,'source':pin,'group':plan['groups'][0],'models':Ports.identity,
             'evidence_root':str(eroot.resolve()),'statement_root':str(sroot.resolve()),
-            'policy_sha256':e.digest([stage.PROMPT,stage.Routes.model_json_schema()])}
+            'policy_sha256':stage.LEGACY_POLICY_SHA256}
     e.save(aroot/'intent.json',intent)
     def forbidden(*args):raise AssertionError('legacy frozen input expanded')
     monkeypatch.setattr(stage,'material_candidates',forbidden)
