@@ -113,7 +113,7 @@ def for_lecture(prompt: str, lecture: str) -> str:
 INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語法與經文結構，寫入 inline_notes。
 經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
 先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
-每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading（教授明說的中文讀法）、explanation（簡短的編輯整理）。無法核實的原文字形或沒有明說的讀法留空。
+每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading 一律留空、explanation（一句短語，十五字以內，只說原文的意思或文法）。節下文字只佔一行，不重複經文或要點已有的話。無法核實的原文字形留空。
 跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
 
 
@@ -426,7 +426,7 @@ def check(
             if text.count(note["span"]) != 1:
                 problems.append(f"{title}: 無法在和合本 {note['scripture']} 第 {note['verse']} 節唯一定位「{note['span']}」")
                 continue
-            inline_notes.append(note)
+            inline_notes.append({**note, "reading": ""})  # 不另列讀法（負責人 2026-11-15）
         normalised.append({
             "first": own_ids[0],
             "last": own_ids[-1],
