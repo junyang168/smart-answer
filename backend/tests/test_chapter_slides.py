@@ -381,7 +381,37 @@ def test_inline_notes_follow_the_cited_verse_and_sentence(tmp_path):
     decisions = {"pieces": KEPT, "decisions": [{"id": p["id"], "keep": True} for p in KEPT]}
     _, timed = chapter_slides.placed(decisions, {"slides": slides})
     assert timed[0]["inline_notes"] == [{**note, "at": chapter_slides.sentences(KEPT)[3]["start"]}]
-    for change in ({"sentence": "S0002"}, {"span": "虛心"}, {"verse": 2}):
+    for change in ({"span": "虛心"}, {"verse": 2}):
         draft["inline_notes"] = [{**note, **change}]
         problems, _, _ = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
         assert problems
+    # 綁在經文讀出之前的註解：只把時間移到讀出那一句，文字不變。
+    draft["inline_notes"] = [{**note, "sentence": "S0002"}]
+    problems, _, slides = chapter_slides.check([draft], KEPT, CHAPTER, cuv_root=tmp_path)
+    assert not problems and slides[0]["inline_notes"] == [{**note, "sentence": "S0003"}]
+
+
+def test_a_verse_read_again_later_on_the_slide_appears_again():
+    kept = [{"id": "U001", "start": 0.0, "end": 100.0,
+             "text": "以賽亞書六十一章七節。接著講別的。馬太五章五節。又是以賽亞六十一章第七節所預言的。"}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U001", "keep": True}]}
+    record = {"slides": [dict(slide("S0001", points=({"sentence": "S0001", "text": "一"},
+                                                     {"sentence": "S0003", "text": "二"})),
+                              last="S0004", scriptures=[{"sentence": "S0001", "slug": "isa-61-7"},
+                                                        {"sentence": "S0003", "slug": "mat-5-5"}])]}
+    _, timed = chapter_slides.placed(decisions, record)
+    assert [(s["sentence"], s["slug"]) for s in timed[0]["scriptures"]] == [
+        ("S0001", "isa-61-7"), ("S0003", "mat-5-5"), ("S0004", "isa-61-7")]
+
+
+def test_note_span_written_with_a_variant_character_is_located_and_saved_in_cuv_spelling(tmp_path):
+    cuv = tmp_path / "cuv" / "MAT"
+    cuv.mkdir(parents=True)
+    (cuv / "5.json").write_text(json.dumps({"3": "天國是努力進入的，努力的人就得着了。"}, ensure_ascii=False))
+    raw = [slide("S0001", "5:1-48", points=("一", "二"))]
+    raw[0]["scriptures"] = [{"sentence": "S0001", "ref": "太5:3"}]
+    raw[0]["inline_notes"] = [{"sentence": "S0001", "scripture": "mat-5-3", "verse": 3, "span": "努力的人就得著了",
+                               "original": "", "reading": "", "explanation": ""}]
+    problems, _, slides = chapter_slides.check(raw, KEPT, CHAPTER, cuv_root=tmp_path / "cuv")
+    assert problems == []
+    assert slides[0]["inline_notes"][0]["span"] == "努力的人就得着了"

@@ -44,10 +44,9 @@ function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) 
   return (
     <div>
       {parts}{text.slice(cursor)}
-      {matched.filter(({ original, explanation, reading }) => original || explanation || reading).map((note, index) => (
-        <div key={index} className="mt-1 text-sm leading-5 text-amber-100/90">
+      {matched.filter(({ original, explanation }) => original || explanation).map((note, index) => (
+        <div key={index} className="text-xs leading-4 text-amber-100/70">
           {[note.original, note.explanation].filter(Boolean).join(" · ")}
-          {note.reading && <p>教授講解中的讀法 · {note.reading}</p>}
         </div>
       ))}
     </div>
@@ -60,6 +59,8 @@ export type ChapterSlideData = {
   title: string;
   /** at 是他开始讲这条要点的时间。 */
   points: { at: number; text: string }[];
+  /** 本堂地圖：預告，要點一起出現，不逐條亮。 */
+  overview?: boolean;
   verses: string[];
   inline_notes?: InlineNote[];
   scriptures: { at: number; scripture: string; label: string }[];
@@ -112,10 +113,24 @@ const HANDS_OFF_MS = 6000;
  * 把一个元素转到投影片框里看得见的地方。只滚投影片自己的框（`data-slide-scroll`），
  * 不动整页；不在聆听模式里（没有这个框）就什么都不做。
  */
-function bringIntoView(element: HTMLElement | null) {
+const wanted = new WeakMap<HTMLElement, HTMLElement>();
+
+function bringIntoView(element: HTMLElement | null, { yieldToReading = false } = {}) {
   const frame = element?.closest<HTMLElement>("[data-slide-scroll]");
   if (!element || !frame) return;
-  if (Date.now() - Number(frame.dataset.handsOff ?? 0) < HANDS_OFF_MS) return;
+  // 他正在念的經節優先：念到太5:10 時新出的要點不把那一節捲走（負責人 2026-11-16）。
+  if (yieldToReading && frame.dataset.reading) return;
+  // 手指剛碰過：先記下這時該看的，等手放開後再轉過去——不然他這期間出的要點
+  // 會一直留在框外（負責人 2026-11-16，iPhone 上 inclusio 那條被捲出視野）。
+  wanted.set(frame, element);
+  const wait = HANDS_OFF_MS - (Date.now() - Number(frame.dataset.handsOff ?? 0));
+  if (wait > 0) {
+    window.setTimeout(() => {
+      if (wanted.get(frame) === element) bringIntoView(element, { yieldToReading });
+    }, wait + 50);
+    return;
+  }
+  if (!element.isConnected) return;
   const top = element.getBoundingClientRect().top - frame.getBoundingClientRect().top + frame.scrollTop;
   frame.scrollTo({ top: Math.max(0, top - frame.clientHeight / 4), behavior: "smooth" });
 }
@@ -150,13 +165,24 @@ function Verse({
   // 手机上一段经文常比投影片框高：他念到哪一节，就亮那一节、滚到那一节（负责人 2026-11-09）。
   const reading = latest && texts && sentence ? verseBeingRead(sentence, texts) : -1;
   const readingLine = useRef<HTMLLIElement | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    if (!frame || sentence === undefined) return;
+    frame.dataset.reading = reading >= 0 ? "1" : "";
     if (reading >= 0) bringIntoView(readingLine.current);
   }, [reading, slug]);
+  useEffect(() => {
+    const frame = box.current?.closest<HTMLElement>("[data-slide-scroll]");
+    return () => {
+      if (frame && sentence !== undefined) frame.dataset.reading = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
+    <div ref={box} className={`rounded-lg px-4 py-3 ${latest ? "bg-slate-900 ring-1 ring-amber-300/30" : "bg-slate-900/40"}`}>
       <p className="mb-1.5 font-mono text-[0.7rem] text-amber-300/80">{label}</p>
-      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200" : "text-[0.9rem] leading-6 text-slate-500"}`}>
+      <ol className={`space-y-1 font-serif ${latest ? "text-[0.98rem] leading-7 text-slate-200 lg:text-xl lg:leading-9" : "text-[0.9rem] leading-6 text-slate-500 lg:text-base lg:leading-7"}`}>
         {verses.map((verse, index) => (
           <li
             key={verse.slug}
@@ -195,27 +221,32 @@ export default function ChapterSlide({
 }) {
   // The speech anchor stays exact while points get a short reading lead.
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
-  const activePoint = points.filter((item) => item.at <= seconds).at(-1);
+  const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
   const read = slide.scriptures.filter((item) => item.at <= seconds + 1);
-  const shown = [...read].reverse();
+  // 他開始新要點後又念新經文，前面要點的經文就收起，免得看起來屬於現在講的。
+  const current = read.filter((item) => !read.some((later) => slide.points.some(
+    (point) => item.at < point.at && point.at <= later.at)));
+  // 同一段經文再念一次，只留最近的那一次。
+  const shown = [...current].reverse().filter((item, index, all) =>
+    all.findIndex((other) => other.scripture === item.scripture) === index);
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
-    if (activePoint) bringIntoView(newestPoint.current);
+    if (activePoint) bringIntoView(newestPoint.current, { yieldToReading: true });
   }, [activePoint, slide.at]);
   return (
-    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6`}>
+    <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
       <header>
-        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">{slide.title}</h2>
+        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
         {points.length > 0 && (
-          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed">
+          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl">
             {points.map((point, index) => (
               <li
                 key={point.text}
                 ref={point === activePoint ? newestPoint : undefined}
-                className={`flex gap-3 ${point === activePoint ? "text-white" : "text-slate-400"}`}
+                className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
               >
-                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80">
+                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
                   {index + 1}
                 </span>
                 <span>{point.text}</span>

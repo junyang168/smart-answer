@@ -1460,6 +1460,7 @@ def _chapter_slides(
                 "seconds": until - at,
                 "title": slide["title"],
                 "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
+                **({"overview": True} if slide.get("overview") else {}),
                 **({"inline_notes": slide["inline_notes"]} if slide.get("inline_notes") else {}),
                 "verses": slide["verses"],
                 "scriptures": [

@@ -435,7 +435,7 @@ export default function ChapterListener({
     const line = currentLine.current;
     if (!container || !line) return;
     container.scrollTo({
-      top: line.offsetTop - container.clientHeight / 3,
+      top: line.offsetTop - (container.clientHeight - line.offsetHeight) / 2,
       behavior: smooth ? "smooth" : "auto",
     });
   }
@@ -495,7 +495,9 @@ export default function ChapterListener({
             </span>
           )}
         </h1>
-        <label className="flex items-center gap-2 text-sm">
+        {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
+        <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
           <span className="text-stone-600">段落</span>
           <select
             value={section}
@@ -510,7 +512,7 @@ export default function ChapterListener({
           </select>
         </label>
         {hasLeftOut && (
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto [@media(max-width:389px)_and_(max-height:599px)]:hidden">
             <input
               type="checkbox"
               role="switch"
@@ -523,7 +525,7 @@ export default function ChapterListener({
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1 lg:gap-4 lg:p-4">
+      <div className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3 lg:mx-auto lg:max-w-6xl lg:gap-4 lg:p-4">
         <div
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
@@ -581,7 +583,8 @@ export default function ChapterListener({
           ) : null}
         </div>
 
-        <div className="relative min-h-0">
+        {/* 逐字稿只留三行高：他此刻那一句在中間，前後各一句（負責人 2026-11-16）。 */}
+        <div className="relative h-[8.25rem]">
           <div
             ref={box}
             onWheel={userScrolled}
@@ -610,7 +613,7 @@ export default function ChapterListener({
                         ? "bg-amber-100 text-stone-950"
                         : line.left_out
                           ? "text-stone-400 hover:bg-stone-50"
-                          : "text-stone-800 hover:bg-stone-50"
+                          : "text-stone-500 hover:bg-stone-50"
                     }`}
                   >
                     {line.text}
@@ -688,7 +691,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={button}
+            className={`${button} [@media(max-width:389px)_and_(max-height:599px)]:hidden`}
           >
             ⏮
           </button>
@@ -711,7 +714,7 @@ export default function ChapterListener({
             value={rate}
             onChange={(event) => changeRate(Number(event.target.value))}
             aria-label="速度"
-            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm"
+            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden"
           >
             {SPEEDS.map((speed) => (
               <option key={speed} value={speed}>
