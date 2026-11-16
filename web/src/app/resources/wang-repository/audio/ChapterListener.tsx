@@ -495,9 +495,9 @@ export default function ChapterListener({
             </span>
           )}
         </h1>
-        {/* 五吋級小屏（375px，如 iPhone SE、mini）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        <span className="text-sm font-semibold text-stone-700 min-[390px]:hidden">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
-        <label className="hidden items-center gap-2 text-sm min-[390px]:flex">
+        {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
+        <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
           <span className="text-stone-600">段落</span>
           <select
             value={section}
@@ -512,7 +512,7 @@ export default function ChapterListener({
           </select>
         </label>
         {hasLeftOut && (
-          <label className="hidden cursor-pointer items-center gap-2 text-sm text-stone-600 min-[390px]:flex sm:ml-auto">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-stone-600 sm:ml-auto [@media(max-width:389px)_and_(max-height:599px)]:hidden">
             <input
               type="checkbox"
               role="switch"
@@ -691,7 +691,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={`${button} hidden min-[390px]:inline-flex`}
+            className={`${button} [@media(max-width:389px)_and_(max-height:599px)]:hidden`}
           >
             ⏮
           </button>
@@ -714,7 +714,7 @@ export default function ChapterListener({
             value={rate}
             onChange={(event) => changeRate(Number(event.target.value))}
             aria-label="速度"
-            className="hidden min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm min-[390px]:block"
+            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden"
           >
             {SPEEDS.map((speed) => (
               <option key={speed} value={speed}>
