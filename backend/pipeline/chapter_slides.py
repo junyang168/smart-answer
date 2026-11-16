@@ -237,7 +237,16 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         lines.append(f"〔{_clock(piece['start'])}〕")
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
-    if claim_context is not None:
+    if claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+        lines += ["", "# 本堂講課提綱（論證層 Claims）",
+                  "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
+                  "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
+                  "- 第一張是本堂地圖：要點按講的次序列出各部分，每條一句話寫出該部分的蓋子；蓋子在其他講講出、本堂只提出問題的，寫成問題。",
+                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
+                  "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
+                  "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
+                  json.dumps(claim_context, ensure_ascii=False)]
+    elif claim_context is not None:
         from backend.pipeline.chapter_slide_claims import claim_source_ranges
 
         ranges = claim_source_ranges(claim_context, decisions_record)

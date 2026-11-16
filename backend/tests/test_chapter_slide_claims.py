@@ -142,3 +142,36 @@ def test_source_ranges_preserve_roles_and_gaps_in_retained_transcript():
     context["claim_source_ranges"] = [{"claim_id": "C1", "ranges": []}]
     with pytest.raises(ValueError, match="differ from retained evidence"):
         chapter_slides.user_prompt("L", decisions, context)
+
+
+STRUCTURE = """# 測試
+## G01 結構
+- A:CL1 蓋子  〔頂層；L1-S0001,L1-S0002；講出 L1-S0002「答案在這裡」〕
+  - A:CL2 論點  〔supports A:CL1；L1-S0001；講出 L1-S0001「這是問題嗎」〕
+  - A:CL3 別講才講的  〔supports A:CL1；L2-S0005；講出 L2-S0005「別處」〕
+## G02 別講
+- B:CL1 不相干  〔頂層；L2-S0001；講出 L2-S0001「無關」〕
+"""
+
+
+def test_outline_claims_are_placed_on_retained_sentences_without_a_store(tmp_path):
+    _decided(tmp_path)
+    structure = tmp_path / 'structure.md'
+    structure.write_text(STRUCTURE)
+    context = hints.compile_outline_context(CHAPTER.passage, 'L', 1, data_base_dir=tmp_path, structure_path=structure)
+    assert context['schema_version'] == hints.OUTLINE_SCHEMA
+    assert [g['group_id'] for g in context['groups']] == ['G01']
+    stated = {c['claim_id']: c['stated'] for c in context['claims']}
+    assert stated == {'A:CL1': 'S0003', 'A:CL2': 'S0002', 'A:CL3': '其他講（L2-S0005）'}
+    assert {c['claim_id']: c['parent'] for c in context['claims']}['A:CL2'] == 'A:CL1'
+    client = FakeClient([{'slides': [slide('S0001')]}])
+    chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
+    assert '本堂地圖' in client.prompts[0] and 'A:CL1' in client.prompts[0]
+
+
+def test_outline_claim_whose_sentence_was_not_kept_is_excluded(tmp_path):
+    _decided(tmp_path)
+    structure = tmp_path / 'structure.md'
+    structure.write_text(STRUCTURE.replace('答案在這裡', '沒有保留的話'))
+    context = hints.compile_outline_context(CHAPTER.passage, 'L', 1, data_base_dir=tmp_path, structure_path=structure)
+    assert context['excluded'] == [{'claim_id': 'A:CL1', 'reason': 'stated sentence not in retained transcript'}]

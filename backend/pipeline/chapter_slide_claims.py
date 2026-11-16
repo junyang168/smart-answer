@@ -170,6 +170,76 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
 
 
 
+OUTLINE_SCHEMA = "chapter-slide-outline-context.v1"
+_GROUP = re.compile(r"^## (G\d+) (.+)$")
+_CLAIM = re.compile(r"^(\s*)- (\S+) (.+?)  〔(.*?)；(.*?)；講出 (?:(L\d+-S\d{4})「(.*)」|未定位)〕$")
+
+
+def parse_outline(text: str) -> list[dict]:
+    """Read a lecture-outline Claim structure (one cover per argument group, points indented)."""
+    groups, stack = [], []
+    for line in text.splitlines():
+        if match := _GROUP.match(line):
+            groups.append({"group_id": match[1], "title": match[2], "claims": []})
+            stack = []
+            continue
+        match = _CLAIM.match(line)
+        if not match or not groups:
+            continue
+        depth = len(match[1]) // 2
+        stack = stack[:depth]
+        parent = stack[-1] if stack else None
+        groups[-1]["claims"].append({
+            "claim_id": match[2], "statement": match[3], "parent": parent, "depth": depth,
+            "ranges": [r for r in match[5].split(",") if r],
+            "stated_paragraph": match[6], "stated_quote": match[7]})
+        stack.append(match[2])
+    return groups
+
+
+def compile_outline_context(passage: str, lecture: str, lecture_number: int, *,
+                            data_base_dir: Path, structure_path: Path) -> dict:
+    """Place outline Claims on the retained sentences of one lecture; reads no knowledge store."""
+    path = chapter_exposition.record_path(data_base_dir, passage, lecture)
+    decisions = json.loads(path.read_text())
+    lines = chapter_slides.sentences(chapter_slides.kept_pieces(decisions))
+    joined, spans = "", []
+    for line in lines:
+        piece = compact(line["text"])
+        spans.append((len(joined), len(joined) + len(piece), line["id"]))
+        joined += piece
+    prefix = f"L{lecture_number}-"
+    claims, excluded, groups = [], [], []
+    for group in parse_outline(structure_path.read_text(encoding="utf-8")):
+        if not any(r.startswith(prefix) for c in group["claims"] for r in c["ranges"]):
+            continue
+        groups.append({"group_id": group["group_id"], "title": group["title"]})
+        for claim in group["claims"]:
+            entry = {"claim_id": claim["claim_id"], "group_id": group["group_id"],
+                     "statement": claim["statement"], "parent": claim["parent"], "evidence_steps": []}
+            paragraph = claim["stated_paragraph"] or ""
+            if not paragraph.startswith(prefix):
+                entry["stated"] = f"其他講（{paragraph or '未定位'}）"
+                claims.append(entry)
+                continue
+            needle = compact(claim["stated_quote"])
+            if joined.count(needle) != 1:
+                excluded.append({"claim_id": claim["claim_id"], "reason": "stated sentence not in retained transcript"})
+                continue
+            low = joined.index(needle)
+            ids = [sid for a, b, sid in spans if a < low + len(needle) and b > low]
+            entry["stated"] = ids[0]
+            entry["evidence_steps"] = [{"step_type": "stated", "anchors": [{"quote": claim["stated_quote"], "sentences": ids}]}]
+            claims.append(entry)
+    context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
+               "decisions_sha256": chapter_exposition.file_sha256(path),
+               "transcript_sha256": decisions.get("transcript_sha256"),
+               "structure_sha256": hashlib.sha256(structure_path.read_bytes()).hexdigest(),
+               "groups": groups, "claims": claims, "excluded": excluded}
+    context["claim_source_ranges"] = claim_source_ranges(context, decisions)
+    return context
+
+
 def review_contract(context: dict, slides: list[dict]) -> tuple[str, dict]:
     from copy import deepcopy
     schema = deepcopy(chapter_slides.REVIEW_SCHEMA)
@@ -227,11 +297,21 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--allow-unusable-evidence", action="store_true",
                         help="Exclude and record unverifiable evidence instead of aborting")
+    parser.add_argument("--structure", type=Path, help="講課提綱 Claim 結構檔；用它代替知識庫")
+    parser.add_argument("--lecture-number", type=int, help="結構檔段落編號 Ln- 的 n")
+    parser.add_argument("--data-dir", type=Path, help="讀選材紀錄的資料目錄")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output already exists; reuse the frozen context")
-    context = compile_context(args.passage, args.lecture, data_base_dir=Path(DATA_BASE_PATH),
-                              store=PostgresKnowledgeStore(), allow_unusable_evidence=args.allow_unusable_evidence)
+    if args.structure:
+        if not args.lecture_number:
+            parser.error("--structure needs --lecture-number")
+        context = compile_outline_context(args.passage, args.lecture, args.lecture_number,
+                                          data_base_dir=args.data_dir or Path(DATA_BASE_PATH),
+                                          structure_path=args.structure)
+    else:
+        context = compile_context(args.passage, args.lecture, data_base_dir=Path(DATA_BASE_PATH),
+                                  store=PostgresKnowledgeStore(), allow_unusable_evidence=args.allow_unusable_evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(context, ensure_ascii=False, indent=2))
     print(json.dumps({"claims": len(context["claims"]), "excluded": len(context["excluded"]),
