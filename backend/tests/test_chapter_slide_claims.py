@@ -186,3 +186,48 @@ def test_outline_map_slide_shows_all_points_at_once_without_following_the_audio(
     _, timed = chapter_slides.placed(decisions, record)
     assert timed[0]['overview'] and {p['at'] for p in timed[0]['points']} == {timed[0]['at']}
     assert 'overview' not in timed[1] and timed[1]['points'][0]['at'] != timed[1]['points'][1]['at']
+
+
+def creation_run(root, complete=True, quote_e2='我們看以賽亞書六十一章一節。'):
+    """A minimal Claim-creation output folder: one group, cover CL0001 and point CL0002."""
+    root.mkdir(parents=True)
+    frag = lambda fid, quote: {'fragment_id': fid, 'verbatim_excerpt': quote}
+    package = {'complete': complete,
+        'claims': [{'claim_id': 'DK-x-CL0001', 'title': '蓋子', 'evidence_step_ids': ['E1'], 'opposed_position_ids': ['P1']},
+                   {'claim_id': 'DK-x-CL0002', 'title': '論點', 'evidence_step_ids': ['E2'], 'opposed_position_ids': []}],
+        'evidence_steps': [{'evidence_step_id': 'E1', 'statement': '他的回答', 'step_type': 'answer', 'source_fragment_ids': ['F1']},
+                           {'evidence_step_id': 'E2', 'statement': '引經', 'step_type': 'scripture_evidence', 'source_fragment_ids': ['F2']}],
+        'observations': [{'observation_id': 'O1', 'statement': '經文事實', 'observation_type': 'scripture_text', 'source_fragment_ids': ['F3']}],
+        'position_nodes': [{'position_id': 'P1', 'title': '反方', 'source_fragment_ids': ['F4']}],
+        'knowledge_relations': [{'from_id': 'O1', 'to_id': 'E2', 'relation_type': 'supports'}],
+        'source_fragments': [frag('F1', '答案在這裡。'), frag('F2', quote_e2), frag('F3', '耶穌上了山。'), frag('F4', '這是問題嗎？')]}
+    (root / 'candidate.json').write_text(json.dumps(package, ensure_ascii=False))
+    anchor = lambda q: {'conclusion_anchor': {'verbatim_excerpt': q}}
+    (root / 'claim-candidates.json').write_text(json.dumps({'CL0001': anchor('答案在這裡。'), 'CL0002': anchor('沒有保留的話')}, ensure_ascii=False))
+    (root / 'groups.json').write_text(json.dumps([{'title': '第一部分'}], ensure_ascii=False))
+    return root
+
+
+def test_creation_runs_become_an_outline_with_their_evidence_on_retained_sentences(tmp_path):
+    _decided(tmp_path)
+    context = hints.compile_package_context(CHAPTER.passage, 'L', data_base_dir=tmp_path, runs=[creation_run(tmp_path / 'run')])
+    assert context['schema_version'] == hints.OUTLINE_SCHEMA and context['groups'] == [{'group_id': 'G01', 'title': '第一部分'}]
+    cover, point = context['claims']
+    assert (cover['parent'], point['parent']) == (None, 'G01-CL0001')
+    assert cover['stated'] == 'S0003' and point['stated'] == '本堂未保留'
+    # The cover keeps its Evidence and the view it refutes; the point gets the Observation behind its Evidence.
+    assert [(e['evidence_step_id'], e['step_type'], e['anchors'][0]['sentences']) for e in cover['evidence_steps']] == [
+        ('E1', 'answer', ['S0003']), ('P1', 'opposed_position', ['S0002'])]
+    assert [e['evidence_step_id'] for e in point['evidence_steps']] == ['E2', 'O1']
+    client = FakeClient([{'slides': [slide('S0001')]}])
+    chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
+    assert '本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
+
+
+def test_unplaceable_fragment_is_recorded_and_incomplete_run_is_refused(tmp_path):
+    _decided(tmp_path)
+    context = hints.compile_package_context(CHAPTER.passage, 'L', data_base_dir=tmp_path,
+                                            runs=[creation_run(tmp_path / 'a', quote_e2='不在逐字稿裡的話')])
+    assert context['excluded'] == [{'claim_id': 'G01-CL0002', 'object_id': 'F2', 'reason': 'excerpt missing or ambiguous'}]
+    with pytest.raises(ValueError, match='not complete'):
+        hints.compile_package_context(CHAPTER.passage, 'L', data_base_dir=tmp_path, runs=[creation_run(tmp_path / 'b', complete=False)])

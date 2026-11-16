@@ -70,22 +70,11 @@ def claim_source_ranges(context: dict, decisions: dict) -> list[dict]:
             result.append({"claim_id": claim["claim_id"], "ranges": ranges})
     return result
 
-def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: Any, allow_unusable_evidence: bool = False) -> dict:
-    from backend.pipeline.original_audio_index import Sermons
-    path = chapter_exposition.record_path(data_base_dir, passage, lecture)
-    decisions = json.loads(path.read_text())
-    documents = [d for d in store.list_records("source_documents") if d.get("transcript_id") == lecture]
-    if len(documents) != 1:
-        raise ValueError("Expected one source document")
-    document = documents[0]
-    sermons = Sermons(data_base_dir)
-    source_path = sermons.transcript_path(document)
-    if not source_path or chapter_exposition.file_sha256(source_path) != decisions["transcript_sha256"]:
-        raise ValueError("Actual transcript differs from saved keep decisions")
-    if chapter_exposition.cut(sermons.load(document["source_id"], document)) != decisions["pieces"]:
-        raise ValueError("Actual transcript pieces differ from saved keep decisions")
-    # Locate verbatim excerpts in the actual, byte-verified transcript, including
-    # excluded pieces. Only sentences overlapping an excerpt can be cited as hints.
+def retained_spans(decisions: dict) -> tuple[str, list[tuple[int, int, str, str]]]:
+    """The lecture's whole cut text (compacted) and where each retained sentence sits in it.
+
+    Excerpts are located in the actual, byte-verified transcript, including excluded
+    pieces; only sentences overlapping an excerpt can be cited as hints."""
     text = ""
     piece_offsets = {}
     for piece in decisions["pieces"]:
@@ -102,6 +91,33 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
             raise ValueError("Cannot locate a retained sentence")
         low = piece_offsets[line["piece"]] + start
         sentence_spans.append((low, low + len(compact(line["text"])), line["id"], line["piece"]))
+    return text, sentence_spans
+
+
+def locate(text: str, spans: list, quote: str) -> list[str] | None:
+    """Retained sentences an excerpt overlaps; None when it is missing or not unique."""
+    needle = compact(quote)
+    if not needle or text.count(needle) != 1:
+        return None
+    low = text.index(needle)
+    return [sid for a, b, sid, _ in spans if a < low + len(needle) and b > low]
+
+
+def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: Any, allow_unusable_evidence: bool = False) -> dict:
+    from backend.pipeline.original_audio_index import Sermons
+    path = chapter_exposition.record_path(data_base_dir, passage, lecture)
+    decisions = json.loads(path.read_text())
+    documents = [d for d in store.list_records("source_documents") if d.get("transcript_id") == lecture]
+    if len(documents) != 1:
+        raise ValueError("Expected one source document")
+    document = documents[0]
+    sermons = Sermons(data_base_dir)
+    source_path = sermons.transcript_path(document)
+    if not source_path or chapter_exposition.file_sha256(source_path) != decisions["transcript_sha256"]:
+        raise ValueError("Actual transcript differs from saved keep decisions")
+    if chapter_exposition.cut(sermons.load(document["source_id"], document)) != decisions["pieces"]:
+        raise ValueError("Actual transcript pieces differ from saved keep decisions")
+    text, sentence_spans = retained_spans(decisions)
     steps = {e["evidence_step_id"]: e for e in store.list_records("evidence_steps")}
     fragments = {f["fragment_id"]: f for f in store.list_records("source_fragments")}
     included, excluded, unusable = [], [], []
@@ -137,15 +153,12 @@ def compile_context(passage: str, lecture: str, *, data_base_dir: Path, store: A
                     unusable.append({"claim_id": cid, "object_id": fid, "reason": "cross-sermon fragment"})
                     continue
                 quote = fragment.get("verbatim_excerpt") or ""
-                needle = compact(quote)
-                if not needle or text.count(needle) != 1:
+                ids = locate(text, sentence_spans, quote)
+                if ids is None:
                     if not allow_unusable_evidence:
                         raise ValueError(f"Excerpt missing/ambiguous in actual transcript: {fid}")
                     unusable.append({"claim_id": cid, "object_id": fid, "reason": "excerpt missing or ambiguous"})
                     continue
-                low = text.index(needle)
-                high = low + len(needle)
-                ids = [sid for a, b, sid, _ in sentence_spans if a < high and b > low]
                 if ids:
                     anchors.append({"fragment_id": fid, "fragment_sha256": digest(fragment),
                                     "quote": quote, "sentences": ids})
@@ -240,6 +253,76 @@ def compile_outline_context(passage: str, lecture: str, lecture_number: int, *,
     return context
 
 
+def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, runs: list[Path]) -> dict:
+    """Outline context from Claim-creation runs (files): each run is one argument group.
+
+    The run's first Claim is the group's cover and the rest sit under it. Each Claim
+    carries the records that support it, directly or through other records, and the
+    views it refutes; their SourceFragments are placed on this lecture's retained
+    sentences. Reads files only."""
+    path = chapter_exposition.record_path(data_base_dir, passage, lecture)
+    decisions = json.loads(path.read_text())
+    text, spans = retained_spans(decisions)
+    groups, claims, excluded, sources = [], [], [], []
+    for number, run in enumerate(runs, 1):
+        run = Path(run)
+        package = json.loads((run / "candidate.json").read_text())
+        if not package.get("complete"):
+            raise ValueError(f"{run}: creation candidate is not complete")
+        candidates = json.loads((run / "claim-candidates.json").read_text())
+        title = json.loads((run / "groups.json").read_text())[0]["title"]
+        sources.append({"run": str(run), "candidate_sha256": digest(package)})
+        gid = f"G{number:02d}"
+        groups.append({"group_id": gid, "title": title})
+        fragments = {f["fragment_id"]: f for f in package["source_fragments"]}
+        records = {}
+        for step in package["evidence_steps"]:
+            records[step["evidence_step_id"]] = (step["statement"], step["step_type"], step["source_fragment_ids"])
+        for row in package["observations"]:
+            records[row["observation_id"]] = (row["statement"], row["observation_type"], row["source_fragment_ids"])
+        for row in package["position_nodes"]:
+            records[row["position_id"]] = (row["title"], "opposed_position", row["source_fragment_ids"])
+        support = {}
+        for rel in package["knowledge_relations"]:
+            if rel["relation_type"] == "supports":
+                support.setdefault(rel["to_id"], []).append(rel["from_id"])
+        cover = None
+        for claim in package["claims"]:
+            short = claim["claim_id"].rsplit("-", 1)[1]
+            cid = f"{gid}-{short}"
+            cover = cover or cid
+            behind, queue = [], list(claim["evidence_step_ids"]) + support.get(claim["claim_id"], [])
+            while queue:
+                rid = queue.pop(0)
+                if rid in records and rid not in behind:
+                    behind.append(rid)
+                    queue += support.get(rid, [])
+            evidence = []
+            for rid in behind + claim["opposed_position_ids"]:
+                statement, kind, fids = records[rid]
+                anchors = []
+                for fid in fids:
+                    quote = fragments[fid]["verbatim_excerpt"]
+                    ids = locate(text, spans, quote)
+                    if ids is None:
+                        excluded.append({"claim_id": cid, "object_id": fid, "reason": "excerpt missing or ambiguous"})
+                    elif ids:
+                        anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
+                if anchors:
+                    evidence.append({"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors})
+            stated_quote = candidates[short]["conclusion_anchor"]["verbatim_excerpt"]
+            stated = locate(text, spans, stated_quote) or []
+            claims.append({"claim_id": cid, "group_id": gid, "statement": claim["title"],
+                           "parent": None if cid == cover else cover,
+                           "stated": stated[0] if stated else "本堂未保留", "evidence_steps": evidence})
+    context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
+               "decisions_sha256": chapter_exposition.file_sha256(path),
+               "transcript_sha256": decisions.get("transcript_sha256"),
+               "creation_runs": sources, "groups": groups, "claims": claims, "excluded": excluded}
+    context["claim_source_ranges"] = claim_source_ranges(context, decisions)
+    return context
+
+
 def review_contract(context: dict, slides: list[dict]) -> tuple[str, dict]:
     from copy import deepcopy
     schema = deepcopy(chapter_slides.REVIEW_SCHEMA)
@@ -300,10 +383,15 @@ def main():
     parser.add_argument("--structure", type=Path, help="講課提綱 Claim 結構檔；用它代替知識庫")
     parser.add_argument("--lecture-number", type=int, help="結構檔段落編號 Ln- 的 n")
     parser.add_argument("--data-dir", type=Path, help="讀選材紀錄的資料目錄")
+    parser.add_argument("--creation-run", type=Path, action="append", default=[],
+                        help="Claim 建立的一組輸出資料夾（含 candidate.json）；按論證次序給，每組一次")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output already exists; reuse the frozen context")
-    if args.structure:
+    if args.creation_run:
+        context = compile_package_context(args.passage, args.lecture, data_base_dir=args.data_dir or Path(DATA_BASE_PATH),
+                                          runs=args.creation_run)
+    elif args.structure:
         if not args.lecture_number:
             parser.error("--structure needs --lecture-number")
         context = compile_outline_context(args.passage, args.lecture, args.lecture_number,
