@@ -326,9 +326,10 @@ def argument_index(context: dict) -> dict[str, dict]:
     index: dict[str, dict] = {}
     for claim in context.get("claims", []):
         cid = claim["claim_id"]
-        stated = claim.get("stated", "")
-        if stated.startswith("S"):
-            index.setdefault(cid, {"first": stated, "last": stated, "claims": set(),
+        said = [s for s in [claim.get("stated", "")] if s.startswith("S")]
+        said += [s for passage in claim.get("own_passages", []) for s in passage["sentences"]]
+        if said:
+            index.setdefault(cid, {"first": min(said), "last": max(said), "claims": set(),
                                    "statement": claim["statement"]})["claims"].add(cid)
         for step in claim.get("evidence_steps", []):
             sentences = sorted(s for anchor in step.get("anchors", []) for s in anchor.get("sentences", []))
@@ -409,6 +410,9 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict]) -> list[s
     另查同一張兩條要點綁同一句：那等於兩條一起亮。"""
     cover: dict[str, set] = {}
     for claim in context.get("claims", []):
+        for passage in claim.get("own_passages", []):
+            for sentence in passage["sentences"]:
+                cover.setdefault(sentence, set()).add(claim["claim_id"])
         for step in claim.get("evidence_steps", []):
             if not step.get("evidence_step_id"):
                 continue
@@ -511,9 +515,21 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                     evidence.append(entry)
             stated_quote = candidates[short]["conclusion_anchor"]["verbatim_excerpt"]
             stated = locate(text, spans, stated_quote) or []
+            # 他直接講這條 Claim 的地方：Claim 自己的 SourceFragment，不屬於它任何一筆 Evidence。
+            # 他第一次定義謙卑（S0195–S0199）就只在這裡，沒有它畫面那幾句無從顯示。
+            borrowed = {fid for rid in behind + claim["opposed_position_ids"] for fid in records[rid][2]}
+            own = []
+            for anchor in (a for o in claim.get("occurrences", []) for a in o["anchors"]):
+                fid = anchor["source_fragment_id"]
+                if fid in borrowed or fid not in fragments or any(p["fragment_id"] == fid for p in own):
+                    continue
+                ids = locate(text, spans, fragments[fid]["verbatim_excerpt"])
+                if ids:
+                    own.append({"fragment_id": fid, "quote": fragments[fid]["verbatim_excerpt"], "sentences": ids})
             claims.append({"claim_id": cid, "group_id": gid, "statement": claim["title"],
                            "parent": None if cid == cover else cover,
-                           "stated": stated[0] if stated else "本堂未保留", "evidence_steps": evidence})
+                           "stated": stated[0] if stated else "本堂未保留",
+                           "own_passages": sorted(own, key=lambda p: p["sentences"][0]), "evidence_steps": evidence})
     context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
                "decisions_sha256": chapter_exposition.file_sha256(path),
                "transcript_sha256": decisions.get("transcript_sha256"),

@@ -295,3 +295,23 @@ def test_a_point_left_over_from_another_step_is_reported(tmp_path):
     assert hints.stale_points(context, on_time, lines) == []
     together = [dict(late[0], points=[dict(p, sentence="S0001") for p in late[0]["points"]])]
     assert any("兩條要點都綁在 S0001" in p for p in hints.stale_points(context, together, lines))
+
+
+def test_where_he_states_a_claim_itself_the_slide_must_show_that_claim():
+    """2011 NYSC 二-1: 「什麼是謙卑？謙卑的人呢，是什麼？他知道…」 is the Claim's own
+    SourceFragment, in none of its Evidence. While he says it, the newest point on
+    screen must come from that Claim, and a point from it may be timed there."""
+    context = {"claims": [
+        {"claim_id": "C1", "statement": "謙卑", "stated": "S0001",
+         "own_passages": [{"quote": "什麼是謙卑？", "sentences": ["S0004", "S0005", "S0006"]}],
+         "evidence_steps": [{"evidence_step_id": "E1", "statement": "推辭", "anchors": [{"sentences": ["S0001", "S0002", "S0003"]}]}]},
+        {"claim_id": "C2", "statement": "推辭不是謙卑", "stated": "S0003",
+         "evidence_steps": [{"evidence_step_id": "E2", "statement": "例子", "anchors": [{"sentences": ["S0002", "S0003"]}]}]},
+    ]}
+    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    assert hints.argument_index(context)["C1"]["last"] == "S0006"
+    stale = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0002", "text": "推辭", "source": "E2"}]}]
+    assert hints.stale_points(context, stale, lines) == [
+        "甲（S0004–S0006）: 他已講到另一步（C1），畫面還停在要點「推辭」；那一步的第一條要點要在 S0004 或更早出現"]
+    shown = [dict(stale[0], points=stale[0]["points"] + [{"sentence": "S0004", "text": "謙卑的人知道恩賜是神給的", "source": "C1"}])]
+    assert hints.stale_points(context, shown, lines) == [] and hints.point_spans(context, shown) == []

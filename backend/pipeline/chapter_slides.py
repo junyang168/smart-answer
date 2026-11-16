@@ -264,8 +264,10 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
                   "sentence 綁他講出這條要點內容的那一句；但他一開始講新的一步（含為這一步念經文），畫面最新的要點就要換成屬於這一步的，"
                   "所以每一步的第一條要點綁這一步 anchors 的第一句，同一步後面的要點再綁他講出它們的那一句。同一張不可兩條綁同一句。"
-                  "這一句必須落在 source 那一步的 anchors 句子範圍內（Claim 則在它各步與 stated 句的範圍內）。",
-                  "- 他講任何一步論證（某個 Claim 的 stated 句或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
+                  "這一句必須落在 source 那一步的 anchors 句子範圍內（Claim 則在它各步、stated 句與 own_passages 的範圍內）。"
+                  "own_passages 是他直接講這條 Claim 本身的地方（例如自問「什麼是謙卑？」再自己回答）；他講到那裡時，"
+                  "畫面最新的要點要是 source 為這條 Claim 的要點，寫出他在那裡講的內容。",
+                  "- 他講任何一步論證（某個 Claim 的 stated 句、own_passages 或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
                   "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
                   "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 列的經文都要放進投影片的 scriptures，"
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
