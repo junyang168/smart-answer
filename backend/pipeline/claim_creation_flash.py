@@ -126,7 +126,7 @@ MATERIALS = RULES + (
 # Reuse the existing producer definitions/attribution rules, excluding its
 # all-at-once Claim and relationship instructions.
 _existing_prompt=x.PROMPT_PATH.read_text(encoding='utf-8')
-MATERIALS += '\n'+_existing_prompt.split('1. `questions`',1)[1].split('5. `claims`',1)[0]
+MATERIALS += '\n1. `questions`'+_existing_prompt.split('1. `questions`',1)[1].split('5. `claims`',1)[0]
 MATERIALS += '\n歸屬規則：'+_existing_prompt.split('归属规则：',1)[1].split('观察与论证的关系',1)[0]
 
 CONNECTIONS = RULES + (
