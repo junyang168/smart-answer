@@ -17,3 +17,7 @@ Each item has a `status`:
 Accepted variants are recorded as `accept`, `accept_kind`, `accept_merge` or `optional`.
 
 Every trial sentence has exactly one place. 345 sentences, each checked against its transcript paragraph.
+
+`2011-nysc-matthew-2-series-trial/` is the 2026-11-15 grouping and Claim-outline trial for lectures 1–6, copied verbatim from Jun SSD. It holds the blind and final grouping, Claim keys and grades, the question-to-answer digest, and each round's inputs. It is the source for the draft cases of lectures 2–6. Owner rulings on lectures 2–6 are listed in `lectures-2-6-rulings.md`.
+
+The lecture 1 trial's saved model answers, runs and slide versions are archived in `$ARGUMENT_RUN_ROOT/trial-2026-11-lecture1/` (default `/opt/homebrew/var/www/church/web/argument-layer-runs/`). Replays read them from there.
