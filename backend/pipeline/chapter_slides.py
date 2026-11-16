@@ -427,6 +427,10 @@ def check(
                 except (OSError, ValueError):
                     verse_cache[path] = {}
             text = verse_cache[path].get(str(note["verse"]), "")
+            folded = _fold_variants(text).find(_fold_variants(note["span"]))
+            if folded >= 0 and _fold_variants(text).count(_fold_variants(note["span"])) == 1:
+                # 模型寫「得著」、和合本檔是「得着」：同一個字。存和合本的寫法，頁面才找得到。
+                note = {**note, "span": text[folded:folded + len(note["span"])]}
             if text.count(note["span"]) != 1:
                 problems.append(f"{title}: 無法在和合本 {note['scripture']} 第 {note['verse']} 節唯一定位「{note['span']}」")
                 continue
@@ -441,6 +445,14 @@ def check(
             **({"inline_notes": inline_notes} if inline_notes else {}),
         })
     return problems, unshown, normalised
+
+
+#: 和合本檔與模型輸出常用不同寫法的同一個字；逐字等長替換，只用來定位。
+_VARIANTS = str.maketrans({"着": "著", "裏": "裡", "峯": "峰", "綫": "線", "麪": "麵", "衆": "眾", "爲": "為", "僞": "偽"})
+
+
+def _fold_variants(text: str) -> str:
+    return text.translate(_VARIANTS)
 
 
 def record_path(data_base_dir: Path, passage: str, lecture: str) -> Path:

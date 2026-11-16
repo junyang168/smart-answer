@@ -402,3 +402,16 @@ def test_a_verse_read_again_later_on_the_slide_appears_again():
     _, timed = chapter_slides.placed(decisions, record)
     assert [(s["sentence"], s["slug"]) for s in timed[0]["scriptures"]] == [
         ("S0001", "isa-61-7"), ("S0003", "mat-5-5"), ("S0004", "isa-61-7")]
+
+
+def test_note_span_written_with_a_variant_character_is_located_and_saved_in_cuv_spelling(tmp_path):
+    cuv = tmp_path / "cuv" / "MAT"
+    cuv.mkdir(parents=True)
+    (cuv / "5.json").write_text(json.dumps({"3": "天國是努力進入的，努力的人就得着了。"}, ensure_ascii=False))
+    raw = [slide("S0001", "5:1-48", points=("一", "二"))]
+    raw[0]["scriptures"] = [{"sentence": "S0001", "ref": "太5:3"}]
+    raw[0]["inline_notes"] = [{"sentence": "S0001", "scripture": "mat-5-3", "verse": 3, "span": "努力的人就得著了",
+                               "original": "", "reading": "", "explanation": ""}]
+    problems, _, slides = chapter_slides.check(raw, KEPT, CHAPTER, cuv_root=tmp_path / "cuv")
+    assert problems == []
+    assert slides[0]["inline_notes"][0]["span"] == "努力的人就得着了"
