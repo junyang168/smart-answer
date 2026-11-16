@@ -98,10 +98,12 @@ def grade_group(group, records, own, proposed=None):
                     verdict = 'correct'
                 else:
                     verdict, detail = 'missed', 'no record holds this step'
-            elif len(hits) > 1:
+            elif len(hits) > it.get('max_records', 1):
                 verdict, detail = 'split', f'{len(hits)} records: ' + ', '.join(r[1] for r in sorted(hits))
             else:
-                (rid, got), = hits.items()
+                rid, got = max(hits.items(), key=lambda kv: len(kv[1]))
+                if len(hits) > 1:
+                    records = {**records, rid: set().union(*(records[r] for r in hits))}
                 # Owner 2026-11-15: a 所以 that sums up a Claim belongs to that Claim, so a
                 # step's concluding sentences kept as a Claim's own words still count.
                 held = records[rid] | owned
