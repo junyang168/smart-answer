@@ -328,34 +328,46 @@ def argument_index(context: dict) -> dict[str, dict]:
         cid = claim["claim_id"]
         stated = claim.get("stated", "")
         if stated.startswith("S"):
-            index.setdefault(cid, {"first": stated, "claims": set(), "statement": claim["statement"]})["claims"].add(cid)
+            index.setdefault(cid, {"first": stated, "last": stated, "claims": set(),
+                                   "statement": claim["statement"]})["claims"].add(cid)
         for step in claim.get("evidence_steps", []):
             sentences = sorted(s for anchor in step.get("anchors", []) for s in anchor.get("sentences", []))
             if not step.get("evidence_step_id") or not sentences:
                 continue  # 結構檔提綱的步驟沒有 id：只按 Claim 對齊
-            entry = index.setdefault(step["evidence_step_id"], {"first": sentences[0], "claims": set(),
-                                                                "statement": step["statement"]})
+            entry = index.setdefault(step["evidence_step_id"], {"first": sentences[0], "last": sentences[-1],
+                                                                "claims": set(), "statement": step["statement"]})
             entry["claims"].add(cid)
+    # 一個 Claim 的範圍：從它最早一步到它最晚一步或 stated 句。
+    for cid in {c for e in index.values() for c in e["claims"]}:
+        if cid in index:
+            spans = [e for e in index.values() if cid in e["claims"]]
+            index[cid]["first"] = min(e["first"] for e in spans)
+            index[cid]["last"] = max(e["last"] for e in spans)
     return index
 
 
 def retime(raw_slides: list[dict], context: dict) -> list[dict]:
-    """有 source 的要點，出現時間由程序按那一步在逐字稿的位置決定，不用模型猜的句子。
+    """要點照出現的句子排序（模型綁的是他講出這條要點的那一句）。"""
+    return [{**slide, "points": sorted(slide.get("points") or [],
+                                       key=lambda p: str(p.get("sentence") or "") if isinstance(p, dict) else "")}
+            for slide in raw_slides]
 
-    負責人 2026-11-16：他講要點 A、投影片卻亮著 B 不行。模型決定寫什麼，何時出現由
-    已定位的 Claim／Evidence 決定；之後照時間排。"""
+
+def point_spans(context: dict, slides: list[dict]) -> list[str]:
+    """有 source 的要點，綁的句子要落在那一步（或那個 Claim）在逐字稿的範圍裡。
+
+    負責人 2026-11-16：他講要點 A、投影片卻亮著 B 不行。一步論證的 SourceFragment 常
+    從引子開始，要點講的多是後面的結論，所以時間不能取這一步的第一句；由模型指出
+    他講出這條要點的那一句，程序只核對它沒有跑出這一步。"""
     index = argument_index(context)
-    slides = []
-    for slide in raw_slides:
-        points = []
-        for point in slide.get("points") or []:
-            source = (point.get("source") or "").strip() if isinstance(point, dict) else ""
-            if source in index:
-                point = {**point, "sentence": index[source]["first"]}
-            points.append(point)
-        points.sort(key=lambda p: str(p.get("sentence") or "") if isinstance(p, dict) else "")
-        slides.append({**slide, "points": points})
-    return slides
+    problems = []
+    for slide in slides:
+        for point in slide["points"]:
+            entry = index.get(point.get("source") or "")
+            if entry and not entry["first"] <= point["sentence"] <= entry["last"]:
+                problems.append(f"{slide['title']}: 要點「{point['text']}」綁在 {point['sentence']}，"
+                                f"但它的 source {point['source']} 在 {entry['first']}–{entry['last']}")
+    return problems
 
 
 def argument_alignment(context: dict, slides: list[dict]) -> list[str]:

@@ -261,9 +261,9 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
-                  "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id。有 source 的要點，"
-                  "出現時間由程序按那一步在逐字稿的位置決定（就是他開始講它的那一句），所以要點要放在含那一句的投影片上；"
-                  "故事、插話等不屬任何一步的要點，source 填空字串，sentence 綁他講出它的那一句。",
+                  "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
+                  "sentence 綁他講出這條要點內容的那一句——不是這一步開始的引子句：他先念經文、後下結論時，結論要點綁下結論那一句。"
+                  "這一句必須落在 source 那一步的 anchors 句子範圍內（Claim 則在它各步與 stated 句的範圍內）。",
                   "- 他講任何一步論證（某個 Claim 的 stated 句或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
                   "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
                   "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 列的經文都要放進投影片的 scriptures，"
@@ -495,7 +495,8 @@ def checked(
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
         problems = evidence_scripture_gaps(claim_context, slides)
         if outline:
-            problems += argument_alignment(claim_context, slides)
+            from backend.pipeline.chapter_slide_claims import point_spans
+            problems += point_spans(claim_context, slides) + argument_alignment(claim_context, slides)
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(
