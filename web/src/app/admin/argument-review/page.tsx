@@ -222,7 +222,12 @@ function Review() {
         </div>
       )}
       {question && (
-        <article className="grid gap-5 rounded-2xl bg-white p-5 shadow-sm">
+        <article
+          // A new key per question and per follow-up gives each one fresh state, so text typed
+          // for one question never shows up in the next one's box.
+          key={`${question.question_id}:${redo ? "redo" : next.mode === "followup" ? next.followup.followup_id : "q"}`}
+          className="grid gap-5 rounded-2xl bg-white p-5 shadow-sm"
+        >
           <p className="text-sm text-slate-500">
             {redo ? "重新決定" : next.mode === "followup" ? "想再請教你一下" : `第 ${number} 題，共 ${next.progress.total} 題`}
           </p>
