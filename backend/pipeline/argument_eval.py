@@ -102,7 +102,7 @@ def check(case_check, request, answer, match=None):
             return any(match(s, 'a') for s in new) and any(match(s, 'b') for s in new) and not any(match(s, 'a') and match(s, 'b') for s in new)
         if kind == 'no_word':
             return not any(re.search(case_check['pattern'], s) for s in new)
-    if kind in ('in_digression', 'not_digression', 'evidence_for', 'returned', 'kept', 'question_open'):
+    if kind in ('in_digression', 'not_digression', 'evidence_for', 'returned', 'kept', 'question_open', 'question_answered'):
         claims = _claims(request, answer)
         if kind in ('returned', 'kept'):
             back = {r['claim_id']: r['kind'] for r in answer['not_claims']}
@@ -122,6 +122,10 @@ def check(case_check, request, answer, match=None):
         if kind == 'question_open':
             return bool(steps) and all(s['line'].lstrip().startswith(('问题：', '問題：')) and
                                        not [t for t in s['supports'] if t in claims] for s in steps)
+        if kind == 'question_answered':
+            want = {cid for cid, s in claims.items() if match(s, 'claim')}
+            return bool(steps) and all(s['line'].lstrip().startswith(('问题：', '問題：')) and set(s['supports']) & want
+                                       for s in steps)
         if kind == 'evidence_for':
             want = {cid for cid, s in claims.items() if match(s, 'claim')}
             return bool(steps) and all(set(s['supports']) & want for s in steps)

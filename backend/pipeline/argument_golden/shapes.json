@@ -493,6 +493,27 @@
      "石頭"
     ]
    ]
+  },
+  {
+   "id": "L2-audience-question",
+   "shape": "聽眾提的問題",
+   "use": "train",
+   "confirmed": true,
+   "run": "gpt-20261117-lecture2-v7/creation",
+   "group": "G007",
+   "stage": "steps",
+   "ruling": "Owner 2026-11-17: 「this is surely a question, although his answer made it feel like he thinks she just use her own idea」. The audience's question is a Question answered by the Claim on subjectivity and evidence, not a Position, even though his answer says she may be taking her own idea for the Spirit. v7 wrote 反方.",
+   "checks": [
+    {
+     "check": "question_answered",
+     "sentence": "有的時候他會拿不出證據",
+     "claim": [
+      "主觀",
+      "證據"
+     ],
+     "meaning": "人容易把自己的主觀當作聖靈的感動，所以必須找證據"
+    }
+   ]
   }
  ]
 }
