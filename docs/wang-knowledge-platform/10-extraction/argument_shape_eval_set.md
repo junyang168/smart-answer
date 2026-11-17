@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer。
 > **類型**：規範。
 > **狀態**：當前。
-> **與代碼對齊**：未核對（尚未實作）。
+> **與代碼對齊**：2026-11-16（`backend/pipeline/argument_eval.py`，案例在 `argument_golden/shapes.json`）。
 > **權威範圍**：生成論證層的 prompt 改動怎麼驗證：評測集收什麼、案例怎麼寫、怎麼評、怎麼增長。每講怎麼評見 [論證層重建設計](./argument_layer_rebuild_design.md) 第八節。
 
 ## 一、為什麼
