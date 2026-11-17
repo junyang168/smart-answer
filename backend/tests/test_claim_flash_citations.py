@@ -40,9 +40,14 @@ class Jev:
         return {'model': e.MODEL, 'answers': answers}
 
     def repair(self, req):
-        # GPT checks only Jev's introduced picks; 'check' maps a ref to its decision.
-        assert req['input']['task'] == 'introduced_quote_check'
+        # GPT decides prayers (owner 2026-11-17) and checks Jev's introduced picks; 'check' maps a ref to its decision.
         self.calls.append(req)
+        if req['input']['task'] == 'prayer_check':
+            said = self.picks.get('prayer')
+            pray = lambda text: bool(said) and (text.endswith(said) if isinstance(said, str) else '禱告' in text)
+            return {'items': [{'job_id': j['job_id'], 'decision': 'prayer' if pray(j['text']) else 'not_prayer', 'reason': 'test'}
+                              for j in req['input']['jobs']]}
+        assert req['input']['task'] == 'introduced_quote_check'
         return {'items': [{'job_id': j['job_id'], 'decision': self.picks.get('check', {}).get(j['ref'], 'quote'),
                            'reason': 'test'} for j in req['input']['jobs']]}
 
@@ -375,7 +380,7 @@ def test_a_prayer_running_into_the_teaching_drops_only_the_prayer(tmp_path):
     ports = Jev({'prayer': 'Amen'})
     listing = cit.build({}, {'S': {'paragraphs': {'S0001': {'text': text}}}}, 'S', tmp_path, ports, holy=holy)
     assert {c['ref'] for c in listing['citations']} == {'Matt 16:16'}
-    asked = [c['state']['paragraph'] for c in ports.calls if 'questions' in c and 'prayer' in c['questions']['Q0']['criteria']]
+    asked = [j['text'] for c in ports.calls if c.get('input', {}).get('task') == 'prayer_check' for j in c['input']['jobs']]
     assert asked == [text, '我們這樣禱告，奉我們的主耶穌基督的聖名求，Amen']
 
 
@@ -423,3 +428,21 @@ def test_transcript_spelling_of_colossians(tmp_path):
     paragraphs = {'S0001': {'text': '加拉太書第二章。'}, 'S0002': {'text': '你再看哥羅西二章十六節。'}}
     listing = cit.build({}, {'S': {'paragraphs': paragraphs}}, 'S', tmp_path, None, holy=holy)
     assert ('S0002', 'Col 2:16') in keys(listing)
+
+
+def test_gpt_not_jev_decides_which_paragraph_is_a_prayer(monkeypatch, tmp_path):
+    """Owner 2026-11-17: Jev is not used for a decision. One GPT call decides."""
+    from backend.pipeline import claim_flash_citations as cit
+    asked = []
+
+    def gpt(root, ports, task, jobs, schema, instruction, semantic_review=False):
+        asked.append(task)
+        yield jobs, {'items': [{'job_id': j['job_id'], 'decision': 'prayer' if '阿們' in j['text'] else 'not_prayer', 'reason': ''}
+                               for j in jobs]}
+    monkeypatch.setattr(cit.f, 'gpt', gpt)
+    monkeypatch.setattr(cit.f, 'jev', lambda *a, **k: (_ for _ in ()).throw(AssertionError('Jev must not decide')))
+    ports = type('P', (), {'identity': {'gpt': {}}})()
+    paragraphs = [('p1', '今天講太五章。'), ('p2', '我們看經文。'), ('p3', '耶穌說話。'), ('p4', '我們禱告，奉主耶穌的名求，阿們。下次再見。')]
+    found = cit.prayers(tmp_path, ports, paragraphs, {'p1', 'p4'})
+    assert asked == ['prayer_check'] and set(found) == {'p4'}
+    assert cit.prayers(tmp_path, type('P', (), {'identity': {}})(), paragraphs, {'p4'}) == {}

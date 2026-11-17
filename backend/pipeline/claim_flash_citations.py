@@ -7,7 +7,8 @@ person's words. A retold story, an explanation or a resemblance is not one.
 
 The list is built once per source version from the whole sermon, so a book or
 chapter he announced earlier carries into later paragraphs. Jev is asked only
-which verse an introduced quotation is; it never decides a reference alone.
+which verse an introduced quotation is, and GPT confirms every pick; it never
+decides a reference alone. Whether a paragraph is a prayer is GPT's call.
 Layers above the source see the transcript only through SourceFragments, so
 every explicit citation must sit inside one. Uncovered citation sentences are saved as literal SourceFragments by the
 source fill, with no model call; linking them to Evidence is a later layer.
@@ -280,38 +281,57 @@ def holds(refs, cite):
 # A closing prayer ends in 阿們／Amen, or only in 「奉…的聖名求」.
 AMEN = re.compile(r'奉[^。！？!?\n]{0,20}名求(?:[，,\s]*(?:阿們|阿门|amen))?|阿們|阿门|amen', re.I)
 SENTENCE_END = '。！？!?\n'
-PRAYER_QUESTION = {'type': 'choice',
-    'criteria': {'prayer': '這一段是禱告：向神說話，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。',
-                 'not_prayer': '這一段不是禱告：是講課、念經文、問答或其他內容。'},
-    'instructions': '`paragraph` 這一段整段是不是禱告？'}
+PRAYER_INSTRUCTION = (
+    '你判斷講道逐字稿中的一段話是不是禱告。每個工作給出一段（text）。\n'
+    '- prayer：整段是向神說話的禱告，例如「我們這樣禱告，奉主耶穌基督的名，阿們」。\n'
+    '- not_prayer：講課、念經文、問答、講故事或其他內容；只是提到禱告、講別人怎麼禱告，都不算。\n'
+    '用一句話說明依據。')
+PRAYER_SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['items'], 'properties': {'items': {
+    'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
+        'required': ['job_id', 'decision', 'reason'], 'properties': {
+            'job_id': {'type': 'string'}, 'decision': {'type': 'string', 'enum': ['prayer', 'not_prayer']},
+            'reason': {'type': 'string'}}}}}}
 
 
 def prayers(root, ports, paragraphs, matched):
-    """{paragraph: [(start, end)]}, his prayer in normalized characters, as Jev
-    judges, among paragraphs with a word-for-word match. The first two and the
-    last are asked whole; a sentence ending in 阿們／Amen is asked on its own,
-    because the prayer often shares a paragraph with the teaching
-    (「…奉主耶穌基督的聖名求，Amen。我們昨天看到…」). Without Jev, none."""
-    if ports is None or not paragraphs:
+    """{paragraph: [(start, end)]}, his prayer in normalized characters, among
+    paragraphs with a word-for-word match. The first two and the last are asked
+    whole; a sentence ending in 阿們／Amen is asked on its own, because the prayer
+    often shares a paragraph with the teaching
+    (「…奉主耶穌基督的聖名求，Amen。我們昨天看到…」).
+
+    GPT decides, in one batched call (owner 2026-11-17: Jev is not used for a
+    decision). Before, Jev alone answered this and removed a prayer's Scripture
+    from the citation list on its own say. Without GPT, none."""
+    if ports is None or not paragraphs or 'gpt' not in getattr(ports, 'identity', {}):
         return {}
     keys = [pk for pk, _ in paragraphs]
     text_of = dict(paragraphs)
-    found = {}
-
-    def ask(pk, start, end):
-        text = text_of[pk]
-        if f.jev(Path(root) / 'prayers', ports, {'paragraph': text[start:end]}, {'Q0': PRAYER_QUESTION})['Q0'] == 'prayer':
-            found.setdefault(pk, []).append((len(norm(text[:start])), len(norm(text[:end]))))
-            return True
+    spans = {}
     for pk in dict.fromkeys(keys[:2] + keys[-1:] + [pk for pk, t in paragraphs if AMEN.search(t)]):
         if pk not in matched:
             continue
         text = text_of[pk]
-        if pk in keys[:2] + keys[-1:] and ask(pk, 0, len(text)):
-            continue
+        if pk in keys[:2] + keys[-1:]:
+            spans[f'{pk}#whole'] = (pk, 0, len(text))
         amen = AMEN.search(text)
         if amen:
-            ask(pk, max(text.rfind(c, 0, amen.start()) for c in SENTENCE_END) + 1, amen.end())
+            spans[f'{pk}#amen'] = (pk, max(text.rfind(c, 0, amen.start()) for c in SENTENCE_END) + 1, amen.end())
+    if not spans:
+        return {}
+    jobs = [{'job_id': jid, 'text': text_of[pk][s:e]} for jid, (pk, s, e) in spans.items()]
+    decided = {}
+    for batch, reply in f.gpt(Path(root) / 'prayers', ports, 'prayer_check', jobs, PRAYER_SCHEMA, PRAYER_INSTRUCTION,
+                              semantic_review=False):
+        asked = {j['job_id'] for j in batch}
+        decided.update({i['job_id']: i['decision'] for i in reply['items'] if i['job_id'] in asked})
+        if not asked <= set(decided):
+            raise ValueError('prayer check left a job unanswered')
+    found = {}
+    for jid, (pk, s, e) in spans.items():
+        whole = decided.get(f'{pk}#whole') == 'prayer'
+        if decided[jid] == 'prayer' and (jid.endswith('#whole') or not whole):
+            found.setdefault(pk, []).append((len(norm(text_of[pk][:s])), len(norm(text_of[pk][:e]))))
     return found
 
 
