@@ -57,7 +57,9 @@ function playlist(sections: Section[], showLeftOut: boolean): Clip[] {
 }
 
 /** 「馬太福音 5:13-16」→「5:13-16」：按鈕上書名是多餘的。 */
-const shortLabel = (label: string) => label.split(" ").pop() || label;
+const shortLabel = (label: string) => /^\d+\.\d+ /.test(label)
+  ? `${label.split(" ")[0]}${label.endsWith("（續）") ? "（續）" : ""}`
+  : label.split(" ").pop() || label;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 /** ⏮ 在一段開頭幾秒內再按，就回到整章開頭。 */
@@ -84,6 +86,7 @@ export default function ChapterListener({
   initialSection,
   initialRecording,
   initialTime,
+  unitPreview = false,
 }: {
   passage: string;
   title: string;
@@ -92,6 +95,7 @@ export default function ChapterListener({
   initialSection?: string;
   initialRecording?: string;
   initialTime?: number;
+  unitPreview?: boolean;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
@@ -115,7 +119,7 @@ export default function ChapterListener({
     // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
     // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
     let alive = true;
-    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}`, { cache: "no-store" })
+    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}${unitPreview ? "&units=true" : ""}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data) => {
         if (!alive) return;
@@ -140,7 +144,7 @@ export default function ChapterListener({
     };
     // 只在進來時讀一次；換段由頁面自己處理，不重新讀。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [passage]);
+  }, [passage, unitPreview]);
 
   // ---- 跳轉 ----------------------------------------------------------------
 
@@ -498,13 +502,19 @@ export default function ChapterListener({
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
         <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
         <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
-          <span className="text-stone-600">段落</span>
+          <span className="text-stone-600">{unitPreview ? "單元" : "段落"}</span>
           <select
             value={section}
             onChange={(event) => goSection(Number(event.target.value))}
-            className="min-h-11 rounded-lg border border-stone-300 bg-white px-3 font-semibold"
+            className="min-h-11 max-w-[75vw] rounded-lg border border-stone-300 bg-white px-3 font-semibold sm:max-w-[40rem]"
           >
-            {sectionsWithAudio.map(({ item, index }) => (
+            {unitPreview ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
+              <optgroup key={unit} label={sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label}>
+                {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
+                  <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}</option>
+                ))}
+              </optgroup>
+            )) : sectionsWithAudio.map(({ item, index }) => (
               <option key={item.passage} value={index}>
                 {item.label} · {minutes(sectionSeconds(index))}
               </option>
