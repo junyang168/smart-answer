@@ -2759,8 +2759,8 @@
      "supports": [
       "CL3"
      ],
-     "status": "owner",
-     "note": "translation fact + step may be two; owner 2026-11-16: answered on the spot (「還要不要遵行？不需要了」), so Evidence for CL3, not part of the Question",
+     "status": "draft",
+     "note": "translation fact + step may be two",
      "sentences": [
       {
        "script_index": 715,
@@ -2944,7 +2944,7 @@
      "supports": [
       "CL3"
      ],
-     "status": "owner",
+     "status": "draft",
      "sentences": [
       {
        "script_index": 715,
@@ -2979,8 +2979,8 @@
      "supports": [
       "CL3"
      ],
-     "status": "owner",
-     "note": "Peter's vision; slide case S0397 requires it shown; owner 2026-11-16: answered on the spot (「還要不要遵行？不需要了」), so Evidence for CL3, not part of the Question",
+     "status": "draft",
+     "note": "Peter's vision; slide case S0397 requires it shown",
      "sentences": [
       {
        "script_index": 843,
