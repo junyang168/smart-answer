@@ -66,6 +66,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
       "review_candidate",
       "review_mode",
       "review_public",
+      "argument_review",
     ].includes(reviewEndpoint || "");
   if (guarded && !["GET", "HEAD"].includes(request.method)) {
     const origin = request.headers.get("origin");
@@ -96,7 +97,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (
     guarded &&
     process.env.NODE_ENV === "production" &&
-    (reviewEndpoint === "media_batches"
+    (reviewEndpoint === "media_batches" || reviewEndpoint === "argument_review"
       ? !hasEditorAccess(session?.user?.role)
       : !hasTranscriptBetaAccess(actor, session?.user?.role))
   )

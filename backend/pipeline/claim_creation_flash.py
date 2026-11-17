@@ -3,6 +3,7 @@
 Reuse the extraction schema, literal validation, sentence ledger and compiler;
 this module only separates producer tasks and joins their answers.
 """
+from collections import defaultdict
 from copy import deepcopy
 import fcntl
 import hashlib
@@ -22,7 +23,13 @@ VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
-STEPS_CONTRACT = 'claim_creation_argument_steps_v2_program_fragments'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v5_not_claims'
+# What the sentence-by-sentence pass may say about an entry on the Claim list it was given.
+NOT_CLAIM_KINDS = ('evidence', 'digression', 'restates')
+# 題外話 (owner 2026-11-16): an attack on others with no scripture or reasoning,
+# and a personal story told to back such a comment. Proposals only: a 同工
+# approves each before it changes slides or playback.
+DIGRESSION_KINDS = ('unsupported_comment', 'personal_story')
 COLLECTIONS = ('questions', 'positions', 'observations', 'evidence_steps',
                'claims', 'evidence_relations', 'claim_relations')
 IDS = dict(zip(COLLECTIONS, ('question_id', 'position_id', 'observation_id',
@@ -78,11 +85,15 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
         'steps':array(object_schema({'step_id':{'type':'string'},'line':{'type':'string'},
             'sentence_ids':array(deepcopy(sid)),'supports':array({'type':'string'})})),
         'claim_text':array(object_schema({'claim_id':{'type':'string'},'sentence_ids':array(deepcopy(sid))})),
-        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}}))})
+        'other':array(object_schema({'sentence_ids':array(deepcopy(sid)),'why':{'type':'string'}})),
+        'digressions':array(object_schema({'sentence_ids':array(deepcopy(sid)),
+            'kind':{'type':'string','enum':list(DIGRESSION_KINDS)},'why':{'type':'string'}})),
+        'not_claims':array(object_schema({'claim_id':{'type':'string'},'kind':{'type':'string','enum':list(NOT_CLAIM_KINDS)},
+            'target':{'type':'string'},'why':{'type':'string'}}))})
     obs_types=BASE['observations']['items']['properties']['observation_type']['enum']
     step_types=BASE['evidence_steps']['items']['properties']['step_type']['enum']
     records=schema('step_records',{'records':array(object_schema({'step_id':{'type':'string'},
-        'kind':{'type':'string','enum':['observation','evidence','position']},'statement':{'type':'string'},
+        'kind':{'type':'string','enum':['observation','evidence','position','question']},'statement':{'type':'string'},
         'observation_type':{'type':['string','null'],'enum':obs_types+[None]},
         'step_type':{'type':['string','null'],'enum':step_types+[None]},
         'attribution':{'type':'string'},'scripture_refs':array({'type':'string'})}))})
@@ -102,19 +113,20 @@ RULES = (
 CLAIMS = RULES + (
     '唯一任務：還原教授講這一組時心中的講課提綱，提綱上每一點寫成一條Claim候選及完整相關原文範圍；'
     '不生成Evidence、Fragment或關係。'
-    '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子寫出這幾點合起來說明了什麼，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子寫內容，不只寫目錄（不寫「有兩個問題」，要寫兩個問題各是什麼、結論是什麼）；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
+    '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子只寫這幾點合起來得出的那一個結論，一兩句，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子寫結論，不寫目錄，也不把下面各條的內容再寫一遍（下面已有的點，蓋子不重述）；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
     '例如各部分、理由、前提。檢驗：用這些Claim做投影片，聽眾能跟上這段錄音、不漏他講的要點；不要求Claim與投影片一一對應。他後面補充前面講過的點時，把範圍加到那一條，或作分論點掛在它下面，不另立頂層。'
     'statement寫出這一點的內容，不只寫題目：「分為幾部分」要寫出各部分是什麼；'
     '他接著逐一講解的部分（給了說明或理由），各成一條分論點，只列出、未講解的部分留在上層那條；已各成分論點的部分，上層只點出名稱，不重述其內容。'
-    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），每一步落腳的判斷各成一條分論點，上層那條只寫結論，不把各步塞進去。'
+    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），推理中的前提與中間環節是論據，不另立Claim，只寫推出的那個結論；只有另有自己的論據、能單獨回答一個問題的判斷，才另立一條分論點。'
     '拆不拆拿不準時問：這一部分能單獨回答一個問題嗎？能，就另立一條；只是上層的理由、限定或說明，限定寫進上層那條，理由與說明掛在它下面；描述同一結構的幾句算一個。不同要點不合併，同一要點的不同說法不另立。'
     '他從經文、字詞或對照得出的推論是Claim，statement簡要寫出觀察及其意義；單純的引經、字詞資料、譯法留給論據。'
     '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導。'
-    '但他明白教導、並在本組用來得出要點的讀經原則，是提綱上的點；他說出的一般原則（讀經、倫理或教義，適用範圍超出本段經文），不論在案例前、中、後，是本組結論之一，案例支持它，不掛在案例底下。'
+    '解說一種結構或方法是什麼（例：「inclusio……就是一段聖經……它的開頭跟它的最後……字完全一樣，或者是觀念完全一樣」）是定義，是論據，不立Claim；'
+    '但他明白教導、要聽眾照著做、並在本組用來得出要點的讀經原則（例：「讀經要用理性」「要看關鍵字的前後文」），是提綱上的點；他說出的一般原則（讀經、倫理或教義，適用範圍超出本段經文），不論在案例前、中、後，是本組結論之一，案例支持它，不掛在案例底下。'
     '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，與本組主題相關的是Claim；這類回答及其他回答聽眾問題的Claim，掛在它所應用或支持的那條下面，與本組結論無關的不在本組立Claim；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
-    '他只指出問題或張力、本組沒有給出解答時，Claim只寫他陳述的雙方及張力本身，'
-    '不寫任何解答、裁決或傾向；問題本身留給後續材料記為Question。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
-    '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。'
+    '他提出問題或指出張力而不當場回答時（例：「那不是矛盾嗎？」「耶穌來了之後，我們還要不要遵守摩西的律法？」），那是Question，不是Claim：不立「兩者有張力」之類的Claim，問題留給後續材料記為Question；他後面的回答才是Claim。'
+    '問題或張力在本組沒有回答時，不寫任何解答、裁決或傾向。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
+    '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。題外話不立Claim：他批評學者或別人，卻沒有給經文或推理、只是評論；以及用來襯托這種評論的個人故事（例：「有些學者看聖經眼睛都瞎了」及兒子看心臟幻燈片的故事）。他給了經文或推理的批評不是題外話（例：「很多人解經完全搞錯」之後用首尾呼應證明），照常立Claim。說出對方為什麼錯（動機、身份、不懂什麼）不算依據；依據是證明對方說法錯的經文或推理。'
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
@@ -151,7 +163,7 @@ STEP_RECORDS = RULES + (
     '唯一任務：argument_steps已劃好，為每一步填一筆記錄的類型與文字。原文片段由程式依各步sentence_ids從原文切出，'
     '你不複製原文、不改步驟、不建連接；連接由程式依各步supports建立。'
     'kind：字詞、原文、經文結構等事實→observation，填observation_type；他所反駁的看法→position，statement寫那個看法，'
-    'attribution寫持有者（如「很多人」）；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
+    'attribution寫持有者（如「很多人」）；line以「问题：」開頭的→question，statement寫他問的問題；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
     'statement用一兩句寫出這一步的內容，忠於他的話，不加他沒說的。'
     'scripture_refs只列他在這一步親口說出的經文出處（如「太5:3」）；他沒說出處的不補，即使你知道出處。')
 
@@ -373,12 +385,97 @@ def bind_conclusions(package,candidates,projection,statements=None):
 
 
 
-def check_steps(result, sentence_ids, claim_ids):
-    """Each sentence in exactly one place; supports name real Claims or steps."""
+def citation_listing(source_id, paragraphs, root, ports):
+    """The verse list for this source, made by the existing citation code
+    (claim_flash_citations: spoken references, readings, introduced quotes).
+    A run does not split his argument without it."""
+    from backend.pipeline import claim_flash_citations as c
+    listing = c.build(None, {source_id: {'paragraphs': {pk: {'text': t} for pk, t in paragraphs.items()}}},
+                      source_id, Path(root)/'citations', ports)
+    if not (Path(root)/'citations'/'citations.json').exists() or 'citations' not in listing:
+        raise ValueError('scripture citation list was not generated')
+    return listing
+
+
+def cited_sentences(listing, sentences, paragraphs):
+    """sentence_id -> verses: the sentences that carry a verse he cites explicitly.
+    A chapter named on its own (「我們今天開始來看第十六章」) is an opening, not a verse."""
+    by_pk = defaultdict(list)
+    for v in sentences:
+        by_pk[v.segment_index].append(v)
+    out = defaultdict(list)
+    for c in listing['citations']:
+        if c['key'][2] is None or c['paragraph_key'] not in by_pk:
+            continue
+        text = paragraphs[c['paragraph_key']]
+        # The cited sentence can open with the previous quote's closing mark (「」再看一節聖經」).
+        quote = c['quote'].strip().lstrip('」』）)').strip()
+        at = text.find(quote)
+        if at < 0:
+            raise ValueError(f"citation sentence not found in {c['paragraph_key']}: {c['quote'][:20]}")
+        end = at + len(quote)
+        for v in by_pk[c['paragraph_key']]:
+            if v.char_start is not None and v.char_start < end and at < v.char_end and c['ref'] not in out[v.sentence_id]:
+                out[v.sentence_id].append(c['ref'])
+    return dict(out)
+
+
+def check_citations_held(listing, records, owned):
+    """Every verse he cites in these paragraphs shows in a SourceFragment of the argument:
+    a record's, or a Claim's own words."""
+    from backend.pipeline import claim_flash_citations as c
+    holy = c.default_bible()
+    shown = defaultdict(list)
+    for col in ('evidence_steps', 'observations', 'positions', 'questions'):
+        for r in records[col]:
+            for a in r['anchors']:
+                shown[a['segment_index']].append(a['verbatim_excerpt'])
+    for anchors in records.get('claim_statements', {}).values():
+        for a in anchors:
+            shown[a['segment_index']].append(a['verbatim_excerpt'])
+    missing = [x['ref'] for x in listing['citations']
+               if x['paragraph_key'] in owned and x['key'][2] is not None
+               and not c.visible(x, shown[x['paragraph_key']], holy)]
+    if missing:
+        raise ValueError(f'scripture he cites is not in any SourceFragment of the argument: {sorted(set(missing))}')
+
+
+def is_question(step):
+    return step['line'].lstrip().startswith(('问题：', '問題：'))
+
+
+def check_not_claims(result, claim_ids, own_ids):
+    """The Claim list is written before anyone reads sentence by sentence; this pass may
+    return an entry that is not a Claim (lecture 2: a 題外話 and verse readings used as
+    Evidence became Claims, and a step then had to support them). Returns the IDs removed."""
+    rows=result.get('not_claims',[])
+    gone=[r['claim_id'] for r in rows]
+    if len(gone)!=len(set(gone)) or not set(gone)<=set(own_ids):
+        raise ValueError('not_claims may name each Claim first made in this group once')
+    kept=set(claim_ids)-set(gone)
+    if not kept:raise ValueError('not_claims would leave this group without a Claim')
+    for r in rows:
+        if not r['why'].strip():raise ValueError(f"{r['claim_id']}: not_claims needs a reason")
+        if r['kind']=='digression':
+            if r['target']:raise ValueError(f"{r['claim_id']}: a 題外話 has no target")
+        elif r['target'] not in kept:
+            raise ValueError(f"{r['claim_id']}: {r['kind']} must name a Claim that stays")
+    if {c for r in result['claim_text'] for c in [r['claim_id']]}&set(gone):
+        raise ValueError('a Claim returned as not a Claim has no claim_text')
+    if {c for r in result['steps'] for c in r['supports']}&set(gone):
+        raise ValueError('no step may support a Claim returned as not a Claim')
+    return set(gone)
+
+
+def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
+    """Each sentence in exactly one place; supports name real Claims or steps;
+    a sentence carrying scripture he cites belongs to an argument step."""
+    gone=check_not_claims(result, claim_ids, claim_ids if own_ids is None else own_ids)
+    claim_ids=[c for c in claim_ids if c not in gone]
     ids=[r['step_id'] for r in result['steps']]
     if len(ids)!=len(set(ids)) or not all(i.strip() for i in ids) or set(ids)&set(claim_ids):
         raise ValueError('argument steps need unique step IDs distinct from Claim IDs')
-    placed=[s for r in result['steps'] for s in r['sentence_ids']]+[s for r in result['claim_text'] for s in r['sentence_ids']]+[s for r in result['other'] for s in r['sentence_ids']]
+    placed=[s for part in ('steps','claim_text','other','digressions') for r in result.get(part,[]) for s in r['sentence_ids']]
     if len(placed)!=len(set(placed)) or set(placed)!=set(sentence_ids):
         raise ValueError('argument steps must place every sentence exactly once')
     for r in result['steps']:
@@ -387,9 +484,18 @@ def check_steps(result, sentence_ids, claim_ids):
         if not set(r['supports'])<=set(ids)|set(claim_ids)-{r['step_id']}:raise ValueError('argument step supports unknown Claim or step')
     if not {r['claim_id'] for r in result['claim_text']}<=set(claim_ids):raise ValueError('claim_text names an unknown Claim')
     # The package rule: every Claim needs Evidence that supports it directly.
-    unsupported=set(claim_ids)-{c for r in result['steps'] for c in r['supports']}
+    # An open question names the Claims that answer it; that is not support for them.
+    unsupported=set(claim_ids)-{c for r in result['steps'] if not is_question(r) for c in r['supports']}
     if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
+    if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
+        raise ValueError('a 題外話 needs sentences, a kind and a reason')
+    # Owner 2026-11-16: any element of the argument may hold it (Evidence, Question,
+    # Position, a Claim's own words); filler and a 題外話 may not.
+    loose = sorted(s for part in ('other', 'digressions') for r in result.get(part, [])
+                   for s in r['sentence_ids'] if s in scripture)
+    if loose:
+        raise ValueError(f'scripture he cites must be in the argument, not filler or a 題外話: {loose}')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
@@ -424,27 +530,38 @@ def build_step_records(steps, records, sentences, paragraphs):
     f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
     by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
     out={'questions':[],'positions':[],'observations':[],'evidence_steps':[],'coverage_by_record':[],'excluded_sentences':[],'connections':[]}
+    # A step that only lays out a question he raises proves nothing yet: it is context
+    # for that Question, not load-bearing Evidence (G03: 「這些話是從以賽亞的話來的」).
+    asked={s['step_id'] for s in steps['steps'] if kind[s['step_id']]['kind']=='question'}
+    proves=lambda step:any(t not in asked for t in step['supports'])
     for step in steps['steps']:
         sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs)
         if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
         if r['kind']=='observation':
             if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
             out['observations'].append({'observation_id':sid,'statement':r['statement'],'observation_type':r['observation_type'],
-                'argument_role':'load_bearing' if step['supports'] else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
+                'argument_role':'load_bearing' if proves(step) else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
         elif r['kind']=='evidence':
             if not r['step_type']:raise ValueError(f'{sid}: evidence needs step_type')
             out['evidence_steps'].append({'evidence_step_id':sid,'statement':r['statement'],'step_type':r['step_type'],
                 'speaker':'professor','stance':'asserted','discourse_role':step['line'],
-                'support_eligibility':'eligible_candidate' if step['supports'] else 'context_only',
+                'support_eligibility':'eligible_candidate' if proves(step) else 'context_only',
                 'scripture_refs':r['scripture_refs'],'anchors':anchors})
+        elif r['kind']=='question':
+            out['questions'].append({'question_id':sid,'text':r['statement'],'questioner':'professor',
+                'question_type':'open_question','answer_state':'answered' if step['supports'] else 'unanswered',
+                'answer_claim_ids':[],'anchors':anchors})
         else:
             if not r['attribution'].strip():raise ValueError(f'{sid}: position needs attribution')
             out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':r['attribution'],'anchors':anchors})
         out['coverage_by_record'].append({'record_id':sid,'sentence_ids':step['sentence_ids']})
     positions={r['position_id'] for r in out['positions']}
+    questions={r['question_id'] for r in out['questions']}
     for step in steps['steps']:
         for target in step['supports']:
-            if step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
+            if step['step_id'] in questions:edge=(target,step['step_id'],'answers')
+            elif target in questions:edge=(step['step_id'],target,'contextualizes')
+            elif step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
             elif target in positions:edge=(step['step_id'],target,'refutes')
             else:edge=(step['step_id'],target,'supports')
             out['connections'].append({'from_id':edge[0],'to_id':edge[1],'relation_type':edge[2],'reason':step['line']})
@@ -458,6 +575,12 @@ def build_step_records(steps, records, sentences, paragraphs):
             'reason':f"{row['claim_id']}本身的話，保存為它的SourceFragment"} for s in row['sentence_ids']]
     for row in steps['other']:
         out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'structural_markup','reason':row['why']} for s in row['sentence_ids']]
+    # A 題外話 is kept with its SourceFragments as a proposal; it is not Evidence.
+    out['digressions']=[]
+    for row in steps.get('digressions',[]):
+        out['digressions'].append({'kind':row['kind'],'why':row['why'],'sentence_ids':row['sentence_ids'],
+            'anchors':step_fragments(row['sentence_ids'],by_id,paragraphs),'review_status':'proposed'})
+        out['excluded_sentences']+=[{'sentence_id':s,'reason_code':'digression','reason':row['why']} for s in row['sentence_ids']]
     return out
 
 
@@ -521,8 +644,10 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if single_pass and len(groups)!=1:
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
-        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}
+        response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
+        new_claims = {}; not_claims = []; claim_seq = 0
         for n, group in enumerate(groups, 1):
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
@@ -546,7 +671,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             else:
                 result = call(root/gid/'claims', ports, 'creation_claims', payload, contracts['claims'], CLAIMS, source_check)
             e.save(root/gid/'claims'/'quote-calibration.json',calibrate(result['candidates'],paragraphs))
-            group_claims[gid] = []
+            group_claims[gid] = []; new_claims[gid] = []
             for candidate in result['candidates']:
                 cid = candidate.pop('existing_claim_id'); related = ranges(candidate['related_ranges'], keys)
                 if not related or not set(related) <= set(owned+context) or not candidate['support_hint'].strip():
@@ -563,7 +688,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     prior = candidates[cid]
                     prior['related_ranges'] = _ranges(set(ranges(prior['related_ranges'],keys)) | set(related), keys)
                 else:
-                    cid=f'CL{len(candidates)+1:04d}'; candidates[cid]=candidate
+                    # Numbered by a counter: a Claim the steps pass returns is removed, and its ID is not reused.
+                    claim_seq+=1; cid=f'CL{claim_seq:04d}'; candidates[cid]=candidate; new_claims[gid].append(cid)
                     response['claims'].append({k:deepcopy(candidate[k]) for k in BASE['claims']['items']['properties'] if k in candidate} |
                         {'claim_id':cid,'evidence_step_ids':[],'opposed_position_ids':[],'review_status':'candidate'})
                 group_claims[gid].append(cid)
@@ -597,10 +723,19 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
                 if steps_first:
+                    scripture=cited_sentences(listing,sentences,paragraphs)
                     steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
                         'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
-                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]}},contracts['steps'],STEPS,source_check)
-                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
+                        'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
+                    # Only a Claim this group made and no other group reuses may be returned.
+                    own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
+                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own)
+                    gone={r['claim_id'] for r in steps.get('not_claims',[])}
+                    for r in steps.get('not_claims',[]):
+                        not_claims.append({**r,'group_id':gid,'statement':candidates.pop(r['claim_id'])['statement']})
+                    response['claims']=[c for c in response['claims'] if c['claim_id'] not in gone]
+                    group_claims[gid]=[c for c in group_claims[gid] if c not in gone]
                     text={v.sentence_id:v.text for v in sentences}
                     records=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
@@ -608,8 +743,10 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
                         contracts['step_records'],STEP_RECORDS,source_check)
                     result=build_step_records(steps,records['records'],sentences,paragraphs)
+                    check_citations_held(listing,result,set(owned))
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
+                    digressions.extend({**d,'group_id':gid} for d in result.pop('digressions'))
                 elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
                     if {r[IDS[col]] for col in COLLECTIONS[:4] for r in result[col]}&set(claim_aliases[gid].values()):
@@ -705,12 +842,17 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             response=response,extraction=identity,additional_relations=additional)
         bind_conclusions(package,candidates,projection,claim_statements)
         validate_merged_package(package,native_relations=True);source_check()
+        e.save(root/'digression-proposals.json',{'contract':STEPS_CONTRACT,'proposals':digressions});
+        if steps_first:e.save(root/'not-claims.json',{'contract':STEPS_CONTRACT,'returned':not_claims})
         e.save(root/'extraction-response.json',response);e.save(root/'additional-relations.json',additional);e.save(root/'candidate.json',package)
         result={'version':VERSION,'status':'creation_complete','candidate_path':str(root/'candidate.json'),
             'candidate_sha256':e.digest(package),'source_id':package['source_documents'][0]['source_id'],
             'source_file_sha256':hashlib.sha256(raw).hexdigest(),'groups':groups,
             'claim_candidates':candidates,'group_claim_ids':group_claims,
-            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted'}
+            **({'not_claims':not_claims} if steps_first else {}),
+            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted',
+            **({'scripture_citations':{'listed':len(listing['citations']),'unresolved':len(listing['unresolved']),
+                'all_in_argument_fragments':True}} if listing else {})}
         from backend.pipeline.claim_flash_flow import accounting
         result['accounting']=accounting(root,getattr(ports,'root',None))
         result['wall_seconds_this_invocation']=round(time.monotonic()-started,3)

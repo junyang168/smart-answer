@@ -17,6 +17,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import ReactMarkdown, { type Components as ReactMarkdownComponents, type ExtraProps as ReactMarkdownExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { pairSoftDeletions } from "./soft-deletions";
 import rehypeRaw from "rehype-raw";
 import "easymde/dist/easymde.min.css";
 import { useSession, signIn } from "next-auth/react";
@@ -2966,7 +2967,7 @@ export const SurmonEditor = ({ item, viewChanges, legacyView = false }: SurmonEd
           components={surmonMarkdownComponents}
           className="prose prose-sm max-w-none"
         >
-          {paragraph.text}
+          {pairSoftDeletions(paragraph.text)}
         </ReactMarkdown>
       );
     },
