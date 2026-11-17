@@ -606,3 +606,20 @@ def test_an_open_question_is_a_question_answered_by_its_claim_not_support():
         c.check_steps(steps, ['S0001#001'], ['CL0001'])
     steps['steps'].append({'step_id': 'T2', 'line': '耶稣洁净了所有食物，因为……', 'sentence_ids': ['S0001#002'], 'supports': ['CL0001']})
     assert c.check_steps(steps, ['S0001#001', 'S0001#002'], ['CL0001'])
+
+
+def test_a_sentence_carrying_scripture_must_be_in_an_argument_step():
+    from types import SimpleNamespace as N
+    from backend.pipeline import claim_creation_flash as c
+    paragraphs = {'S0001': '還容易。」再看一節聖經，馬可七章十八到十九節。好。'}
+    sents = [N(sentence_id='S0001#001', segment_index='S0001', text='還容易。」', char_start=0, char_end=5),
+             N(sentence_id='S0001#002', segment_index='S0001', text='再看一節聖經，馬可七章十八到十九節。', char_start=5, char_end=23),
+             N(sentence_id='S0001#003', segment_index='S0001', text='好。', char_start=23, char_end=25)]
+    listing = {'citations': [{'paragraph_key': 'S0001', 'key': ['Mark', 7, 19], 'ref': 'Mark 7:19',
+                              'quote': '」再看一節聖經，馬可七章十八到十九節。'}]}
+    scripture = c.cited_sentences(listing, sents, paragraphs)
+    assert scripture == {'S0001#002': ['Mark 7:19']}  # the closing 」 does not drag in the sentence before
+    steps = {'steps': [{'step_id': 'T1', 'line': '可7:19 → 食物潔淨', 'sentence_ids': ['S0001#001', 'S0001#003'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [{'sentence_ids': ['S0001#002'], 'why': '過場'}], 'digressions': []}
+    with pytest.raises(ValueError, match='scripture he cites'):
+        c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)

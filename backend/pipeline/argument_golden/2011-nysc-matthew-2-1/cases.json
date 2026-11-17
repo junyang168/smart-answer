@@ -1101,9 +1101,9 @@
    "items": [
     {
      "id": "read",
-     "kind": "other",
+     "kind": "step",
      "status": "draft",
-     "note": "he reads 五3–10 aloud; a reading may also join s2",
+     "note": "he reads 五3–10 aloud; a reading may also join s2; owner 2026-11-16: scripture he reads aloud must be Evidence, never filler; it may join the step that uses it",
      "sentences": [
       {
        "script_index": 93,
@@ -1207,6 +1207,10 @@
        "trial_number": 17,
        "text": "因為天國是他們的。」"
       }
+     ],
+     "optional": true,
+     "accept_merge": [
+      "s2"
      ]
     },
     {
@@ -1323,6 +1327,9 @@
        "trial_number": 30,
        "text": "所以啊，這裡就表示這段聖經啊，是一個整段的聖經。"
       }
+     ],
+     "accept_merge": [
+      "read"
      ]
     },
     {
@@ -2621,7 +2628,10 @@
        "text": "就是都要發生了。"
       }
      ],
-     "max_records": 2
+     "max_records": 2,
+     "accept_merge": [
+      "read"
+     ]
     },
     {
      "id": "pos",
@@ -3403,9 +3413,9 @@
     },
     {
      "id": "read",
-     "kind": "other",
+     "kind": "step",
      "status": "draft",
-     "note": "he reads 太5:17–18 twice; a reading may join p1 or pos",
+     "note": "he reads 太5:17–18 twice; a reading may join p1 or pos; owner 2026-11-16: scripture he reads aloud must be Evidence, never filler; it may join the step that uses it",
      "sentences": [
       {
        "script_index": 715,
@@ -3437,6 +3447,10 @@
        "trial_number": 7,
        "text": "下面講：「我實在告訴你們，就是到天地都廢去了，律法的一點一畫也不能廢去。」"
       }
+     ],
+     "optional": true,
+     "accept_merge": [
+      "p1"
      ]
     },
     {

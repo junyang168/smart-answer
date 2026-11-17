@@ -3,6 +3,7 @@
 Reuse the extraction schema, literal validation, sentence ledger and compiler;
 this module only separates producer tasks and joins their answers.
 """
+from collections import defaultdict
 from copy import deepcopy
 import fcntl
 import hashlib
@@ -22,7 +23,7 @@ VERSION = 'claim_creation_flash_v4'
 COMPACT_AUDIT = 'claim_creation_grouped_sentence_coverage_v1'
 GROUP_PACKAGE = 'claim_creation_material_argument_package_v1'
 SINGLE_PASS = 'claim_creation_single_pass_group_v1'
-STEPS_CONTRACT = 'claim_creation_argument_steps_v3_digressions'
+STEPS_CONTRACT = 'claim_creation_argument_steps_v4_scripture'
 # 題外話 (owner 2026-11-16): an attack on others with no scripture or reasoning,
 # and a personal story told to back such a comment. Proposals only: a 同工
 # approves each before it changes slides or playback.
@@ -379,12 +380,64 @@ def bind_conclusions(package,candidates,projection,statements=None):
 
 
 
+def citation_listing(source_id, paragraphs, root, ports):
+    """The verse list for this source, made by the existing citation code
+    (claim_flash_citations: spoken references, readings, introduced quotes).
+    A run does not split his argument without it."""
+    from backend.pipeline import claim_flash_citations as c
+    listing = c.build(None, {source_id: {'paragraphs': {pk: {'text': t} for pk, t in paragraphs.items()}}},
+                      source_id, Path(root)/'citations', ports)
+    if not (Path(root)/'citations'/'citations.json').exists() or 'citations' not in listing:
+        raise ValueError('scripture citation list was not generated')
+    return listing
+
+
+def cited_sentences(listing, sentences, paragraphs):
+    """sentence_id -> verses: the sentences that carry a verse he cites explicitly.
+    A chapter named on its own (「我們今天開始來看第十六章」) is an opening, not a verse."""
+    by_pk = defaultdict(list)
+    for v in sentences:
+        by_pk[v.segment_index].append(v)
+    out = defaultdict(list)
+    for c in listing['citations']:
+        if c['key'][2] is None or c['paragraph_key'] not in by_pk:
+            continue
+        text = paragraphs[c['paragraph_key']]
+        # The cited sentence can open with the previous quote's closing mark (「」再看一節聖經」).
+        quote = c['quote'].strip().lstrip('」』）)').strip()
+        at = text.find(quote)
+        if at < 0:
+            raise ValueError(f"citation sentence not found in {c['paragraph_key']}: {c['quote'][:20]}")
+        end = at + len(quote)
+        for v in by_pk[c['paragraph_key']]:
+            if v.char_start is not None and v.char_start < end and at < v.char_end and c['ref'] not in out[v.sentence_id]:
+                out[v.sentence_id].append(c['ref'])
+    return dict(out)
+
+
+def check_citations_held(listing, records, owned):
+    """Every verse he cites in these paragraphs shows in a record's SourceFragment."""
+    from backend.pipeline import claim_flash_citations as c
+    holy = c.default_bible()
+    shown = defaultdict(list)
+    for col in ('evidence_steps', 'observations', 'positions', 'questions'):
+        for r in records[col]:
+            for a in r['anchors']:
+                shown[a['segment_index']].append(a['verbatim_excerpt'])
+    missing = [x['ref'] for x in listing['citations']
+               if x['paragraph_key'] in owned and x['key'][2] is not None
+               and not c.visible(x, shown[x['paragraph_key']], holy)]
+    if missing:
+        raise ValueError(f'scripture he cites is not in any record SourceFragment: {sorted(set(missing))}')
+
+
 def is_question(step):
     return step['line'].lstrip().startswith(('问题：', '問題：'))
 
 
-def check_steps(result, sentence_ids, claim_ids):
-    """Each sentence in exactly one place; supports name real Claims or steps."""
+def check_steps(result, sentence_ids, claim_ids, scripture=()):
+    """Each sentence in exactly one place; supports name real Claims or steps;
+    a sentence carrying scripture he cites belongs to an argument step."""
     ids=[r['step_id'] for r in result['steps']]
     if len(ids)!=len(set(ids)) or not all(i.strip() for i in ids) or set(ids)&set(claim_ids):
         raise ValueError('argument steps need unique step IDs distinct from Claim IDs')
@@ -403,6 +456,10 @@ def check_steps(result, sentence_ids, claim_ids):
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
         raise ValueError('a 題外話 needs sentences, a kind and a reason')
+    loose = sorted(s for part in ('claim_text', 'other', 'digressions') for r in result.get(part, [])
+                   for s in r['sentence_ids'] if s in scripture)
+    if loose:
+        raise ValueError(f'scripture he cites must be in an argument step, not claim_text/other/題外話: {loose}')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
@@ -546,6 +603,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if single_pass and len(groups)!=1:
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
         response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
         for n, group in enumerate(groups, 1):
@@ -622,10 +680,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     'existing_materials':{r[IDS[col]]: {'statement':r.get('statement',r.get('text',r.get('title',''))),'anchors':r.get('anchors',[])}
                         for col in COLLECTIONS[:4] for r in response[col]}}
                 if steps_first:
+                    scripture=cited_sentences(listing,sentences,paragraphs)
                     steps=call(root/gid/'steps',ports,'creation_argument_steps',{'group_id':gid,
                         'sentences':[{'sentence_id':v.sentence_id,'text':v.text} for v in sentences],
-                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]}},contracts['steps'],STEPS,source_check)
-                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid])
+                        'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
+                        'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
+                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture)
                     text={v.sentence_id:v.text for v in sentences}
                     records=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
@@ -633,6 +693,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
                         contracts['step_records'],STEP_RECORDS,source_check)
                     result=build_step_records(steps,records['records'],sentences,paragraphs)
+                    check_citations_held(listing,result,set(owned))
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
                     digressions.extend({**d,'group_id':gid} for d in result.pop('digressions'))
@@ -737,7 +798,9 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             'candidate_sha256':e.digest(package),'source_id':package['source_documents'][0]['source_id'],
             'source_file_sha256':hashlib.sha256(raw).hexdigest(),'groups':groups,
             'claim_candidates':candidates,'group_claim_ids':group_claims,
-            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted'}
+            'production_writes':0,'flash_started':False,'claim_qualification':'not_granted',
+            **({'scripture_citations':{'listed':len(listing['citations']),'unresolved':len(listing['unresolved']),
+                'all_in_record_fragments':True}} if listing else {})}
         from backend.pipeline.claim_flash_flow import accounting
         result['accounting']=accounting(root,getattr(ports,'root',None))
         result['wall_seconds_this_invocation']=round(time.monotonic()-started,3)
