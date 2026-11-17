@@ -849,7 +849,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
             "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]), "file": str(target)}
 
 
-def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
+def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
     path = record_path(data_base_dir, chapter.passage, lecture)
@@ -865,7 +865,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
         return {"lecture": lecture, "status": "review_is_for_other_slides"}
     if not verdict["findings"]:
         return {"lecture": lecture, "status": "nothing_to_fix"}
-    if revision >= MOST_ROUNDS:
+    if revision >= most_rounds:
         return {"lecture": lecture, "status": "rounds_used_up", "findings": len(verdict["findings"])}
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
@@ -911,6 +911,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
     parser.add_argument("--claims-context", type=Path, help="本堂凍結的主張提示包；只可選一堂")
     parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
+    parser.add_argument("--owner-extra-round", action="store_true",
+                        help="轮数用完后，负责人批准的一轮：按最后一次审阅修正一次，再审一次，不再继续")
     parser.add_argument(
         "--recheck", action="store_true",
         help="被程序拒收的那一份回答，用现在的核对再过一遍；不调用模型",
@@ -945,6 +947,12 @@ def main(argv: list[str] | None = None) -> int:
         client = RecordedClient(client, data_root.parent / "calls")
     failed = False
     for lecture in lectures:
+        if args.owner_extra_round:
+            report = revise(chapter, lecture, data_base_dir=data_root, client=client, most_rounds=MOST_ROUNDS + 1)
+            print(json.dumps(report, ensure_ascii=False))
+            if report["status"] == "revised":
+                print(json.dumps(review(chapter, lecture, data_base_dir=data_root, client=client), ensure_ascii=False))
+            continue
         if args.review:
             data = data_root
             while True:
