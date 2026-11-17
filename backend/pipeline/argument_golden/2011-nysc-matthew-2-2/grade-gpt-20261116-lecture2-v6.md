@@ -32,7 +32,7 @@ Both are on the review page, with 4 sampled items it agreed with.
 | Question | Owner | GPT | Gemini reviewer | Claude's reading |
 | --- | --- | --- | --- | --- |
 | 5:27–28 Question answered here? | open | answered (wrong) | open (right) | open |
-| 「講清楚能得釋放」 | story summary, not a Claim | Claim (wrong) | Claim (wrong) | not a Claim |
+| 「講清楚能得釋放」 | story summary, not a Claim; the stories are Evidence for 「異性吸引不是姦淫」 | Claim (wrong) | Claim (wrong) | not a Claim |
 | CL0003 舊約要求／新約要求 (sampled) | not a Claim of its own | Claim (wrong) | Claim (wrong) | Claim (wrong) |
 | CL0020 神造男造女 (owner in chat) | not a Claim of its own | Claim (wrong) | Claim (wrong) | Claim (wrong) |
 | CL0026 盡本分, CL0027 主觀 (sampled) | Claims | right | right | right |

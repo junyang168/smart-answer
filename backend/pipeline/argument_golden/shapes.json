@@ -275,7 +275,7 @@
    "shape": "他沒說出的教訓",
    "use": "train",
    "confirmed": true,
-   "ruling": "owner review page 2026-11-16 「黄色的是故事的总结啊」: 「誤解…痛苦；把經文講清楚能幫助人得到釋放」 is a summary of the two stories, which he tells 「看到這個事情的嚴重性」; not a Claim",
+   "ruling": "owner 2026-11-16: 「黄色的是故事的总结啊」, then 「這是一個故事的總結，但是這個故事 illustrate 教授的觀點——異性吸引不是姦淫」. The summary 「誤解…痛苦；講清楚能得釋放」 is not a Claim; the two stories are Evidence for 「覺得異性漂亮不等於心裡犯姦淫」.",
    "run": "gpt-20261116-lecture2-v6/creation",
    "group": "G004",
    "stage": "claims",
@@ -399,6 +399,34 @@
     {
      "check": "question_open",
      "sentence": "那到底耶穌講的是什麼意思"
+    }
+   ]
+  },
+  {
+   "id": "L2-stories-support-attraction-claim",
+   "shape": "故事作論據，結尾屬故事",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16: the stories illustrate 「異性吸引不是姦淫」 — both the Taiwan brother and the engineer are Evidence for that Claim",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "evidence_for",
+     "sentence": "大聲的喊叫",
+     "claim": [
+      "漂亮",
+      "姦淫"
+     ]
+    },
+    {
+     "check": "evidence_for",
+     "sentence": "閉著眼睛走路",
+     "claim": [
+      "漂亮",
+      "姦淫"
+     ]
     }
    ]
   }
