@@ -596,3 +596,13 @@ def test_a_digression_is_a_proposal_with_fragments_not_evidence():
         c.check_steps(bad, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'])
     from backend.pipeline.sentence_ledger_vocabulary import HUMAN_ONLY_REASONS
     assert 'digression' in HUMAN_ONLY_REASONS
+
+
+def test_an_open_question_is_a_question_answered_by_its_claim_not_support():
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '问题：还要不要遵守摩西的律法？', 'sentence_ids': ['S0001#001'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [], 'digressions': []}
+    with pytest.raises(ValueError, match='every Claim needs a step'):
+        c.check_steps(steps, ['S0001#001'], ['CL0001'])
+    steps['steps'].append({'step_id': 'T2', 'line': '耶稣洁净了所有食物，因为……', 'sentence_ids': ['S0001#002'], 'supports': ['CL0001']})
+    assert c.check_steps(steps, ['S0001#001', 'S0001#002'], ['CL0001'])

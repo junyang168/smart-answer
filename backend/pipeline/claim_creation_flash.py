@@ -88,7 +88,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     obs_types=BASE['observations']['items']['properties']['observation_type']['enum']
     step_types=BASE['evidence_steps']['items']['properties']['step_type']['enum']
     records=schema('step_records',{'records':array(object_schema({'step_id':{'type':'string'},
-        'kind':{'type':'string','enum':['observation','evidence','position']},'statement':{'type':'string'},
+        'kind':{'type':'string','enum':['observation','evidence','position','question']},'statement':{'type':'string'},
         'observation_type':{'type':['string','null'],'enum':obs_types+[None]},
         'step_type':{'type':['string','null'],'enum':step_types+[None]},
         'attribution':{'type':'string'},'scripture_refs':array({'type':'string'})}))})
@@ -118,8 +118,8 @@ CLAIMS = RULES + (
     '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導。'
     '但他明白教導、並在本組用來得出要點的讀經原則，是提綱上的點；他說出的一般原則（讀經、倫理或教義，適用範圍超出本段經文），不論在案例前、中、後，是本組結論之一，案例支持它，不掛在案例底下。'
     '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，與本組主題相關的是Claim；這類回答及其他回答聽眾問題的Claim，掛在它所應用或支持的那條下面，與本組結論無關的不在本組立Claim；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
-    '他只指出問題或張力、本組沒有給出解答時，Claim只寫他陳述的雙方及張力本身，'
-    '不寫任何解答、裁決或傾向；問題本身留給後續材料記為Question。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
+    '他提出問題或指出張力而不當場回答時（例：「那不是矛盾嗎？」「耶穌來了之後，我們還要不要遵守摩西的律法？」），那是Question，不是Claim：不立「兩者有張力」之類的Claim，問題留給後續材料記為Question；他後面的回答才是Claim。'
+    '問題或張力在本組沒有回答時，不寫任何解答、裁決或傾向。他陳述張力後給出解答時，他對張力各方所作的解釋是解答下的分論點。'
     '講課安排與經文內容的轉述不立Claim。釋經與神學要忠實、完整：他講出的每個釋經判斷、神學論點及其理由、限定都要有；他的釋經或神學論點所依據的背景（拿掉它論點就失去理由）屬釋經，同樣忠實完整；只作點綴的背景與生活應用要簡化：生活應用只有與本組主題相關的才進論證層，每項應用一條簡短Claim，掛在它所應用的那條下面，不寫故事細節；與主題無關的生活經歷、見聞、閒談及離題的應用，不立Claim，不硬掛到蓋子下面。題外話不立Claim：他批評學者或別人，卻沒有給經文或推理、只是評論；以及用來襯托這種評論的個人故事（例：「有些學者看聖經眼睛都瞎了」及兒子看心臟幻燈片的故事）。他給了經文或推理的批評不是題外話（例：「很多人解經完全搞錯」之後用首尾呼應證明），照常立Claim。'
     '保留claim_kind、attribution、scripture_refs、topic_terms既有意義。'
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
@@ -157,7 +157,7 @@ STEP_RECORDS = RULES + (
     '唯一任務：argument_steps已劃好，為每一步填一筆記錄的類型與文字。原文片段由程式依各步sentence_ids從原文切出，'
     '你不複製原文、不改步驟、不建連接；連接由程式依各步supports建立。'
     'kind：字詞、原文、經文結構等事實→observation，填observation_type；他所反駁的看法→position，statement寫那個看法，'
-    'attribution寫持有者（如「很多人」）；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
+    'attribution寫持有者（如「很多人」）；line以「问题：」開頭的→question，statement寫他問的問題；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
     'statement用一兩句寫出這一步的內容，忠於他的話，不加他沒說的。'
     'scripture_refs只列他在這一步親口說出的經文出處（如「太5:3」）；他沒說出處的不補，即使你知道出處。')
 
@@ -379,6 +379,10 @@ def bind_conclusions(package,candidates,projection,statements=None):
 
 
 
+def is_question(step):
+    return step['line'].lstrip().startswith(('问题：', '問題：'))
+
+
 def check_steps(result, sentence_ids, claim_ids):
     """Each sentence in exactly one place; supports name real Claims or steps."""
     ids=[r['step_id'] for r in result['steps']]
@@ -393,7 +397,8 @@ def check_steps(result, sentence_ids, claim_ids):
         if not set(r['supports'])<=set(ids)|set(claim_ids)-{r['step_id']}:raise ValueError('argument step supports unknown Claim or step')
     if not {r['claim_id'] for r in result['claim_text']}<=set(claim_ids):raise ValueError('claim_text names an unknown Claim')
     # The package rule: every Claim needs Evidence that supports it directly.
-    unsupported=set(claim_ids)-{c for r in result['steps'] for c in r['supports']}
+    # An open question names the Claims that answer it; that is not support for them.
+    unsupported=set(claim_ids)-{c for r in result['steps'] if not is_question(r) for c in r['supports']}
     if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
@@ -445,14 +450,20 @@ def build_step_records(steps, records, sentences, paragraphs):
                 'speaker':'professor','stance':'asserted','discourse_role':step['line'],
                 'support_eligibility':'eligible_candidate' if step['supports'] else 'context_only',
                 'scripture_refs':r['scripture_refs'],'anchors':anchors})
+        elif r['kind']=='question':
+            out['questions'].append({'question_id':sid,'text':r['statement'],'questioner':'professor',
+                'question_type':'open_question','answer_state':'answered' if step['supports'] else 'unanswered',
+                'answer_claim_ids':[],'anchors':anchors})
         else:
             if not r['attribution'].strip():raise ValueError(f'{sid}: position needs attribution')
             out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':r['attribution'],'anchors':anchors})
         out['coverage_by_record'].append({'record_id':sid,'sentence_ids':step['sentence_ids']})
     positions={r['position_id'] for r in out['positions']}
+    questions={r['question_id'] for r in out['questions']}
     for step in steps['steps']:
         for target in step['supports']:
-            if step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
+            if step['step_id'] in questions:edge=(target,step['step_id'],'answers')
+            elif step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
             elif target in positions:edge=(step['step_id'],target,'refutes')
             else:edge=(step['step_id'],target,'supports')
             out['connections'].append({'from_id':edge[0],'to_id':edge[1],'relation_type':edge[2],'reason':step['line']})
