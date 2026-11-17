@@ -101,9 +101,14 @@ def records(candidate):
     out = []
     for kind, key, field, label in KINDS:
         for r in candidate[kind]:
-            ids = list(r.get('source_fragment_ids') or [])
+            # A Claim's own words first: past MAX_WORDS a long story would otherwise push out the
+            # sentence where he states it (lecture 3 CL0007: 「理性的根基……做我們信仰根基非常的重要」).
+            own, behind = [], []
             for occ in r.get('occurrences', []):
-                ids += [a['source_fragment_id'] for a in occ.get('anchors', []) if a.get('source_fragment_id')]
+                for a in occ.get('anchors', []):
+                    if a.get('source_fragment_id'):
+                        (behind if a.get('evidence_id') or a.get('observation_id') else own).append(a['source_fragment_id'])
+            ids = own + list(r.get('source_fragment_ids') or []) + behind
             ids = list(dict.fromkeys(i for i in ids if i in text))
             if not ids:
                 raise ValueError(f'{r[key]}: no SourceFragment to check it against')
