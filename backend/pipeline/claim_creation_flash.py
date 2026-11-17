@@ -59,7 +59,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     claim['properties'].update(related_ranges=array(object_schema({
         'first': {'type': 'string'}, 'last': {'type': 'string'}})),
         conclusion_anchor=deepcopy(d.ANCHOR_SCHEMA), support_hint={'type': 'string'},
-        existing_claim_id={'type': ['string', 'null']})
+        existing_claim_id={'type': ['string', 'null']}, answers_question={'type': 'string'})
     claim['required'] = list(claim['properties'])
     materials = {k: deepcopy(BASE[k]) for k in ('questions', 'positions', 'observations', 'evidence_steps', 'sentence_audit')}
     for col, field in (('questions', 'answer_claim_ids'), ('evidence_steps', 'produced_claim_ids')):
@@ -115,6 +115,7 @@ CLAIMS = RULES + (
     '不生成Evidence、Fragment或關係。'
     '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子只寫這幾點合起來得出的那一個結論，一兩句，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子寫結論，不寫目錄，也不把下面各條的內容再寫一遍（下面已有的點，蓋子不重述）；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
     '例如各部分、理由、前提。檢驗：用這些Claim做投影片，聽眾能跟上這段錄音、不漏他講的要點；不要求Claim與投影片一一對應。他後面補充前面講過的點時，把範圍加到那一條，或作分論點掛在它下面，不另立頂層。'
+    '一條Claim是他對一個問題的回答。每條先寫answers_question：這條回答的是什麼問題——他自己問過的用他的話，沒明問的寫成他在回答的那個問題。故事、例子、理由、經文的讀法是這個回答的論據，不另立Claim；兩條回答同一個問題的合成一條（例：「覺得異性漂亮是不是犯姦淫？」只有一條Claim，「神造男造女」是它的理由，兩個故事是它的例子）；回答不同問題的分開列（例：「神為什麼禁血？」與「哪些外邦人要禁戒？」是兩條）；不回答他提出或正在回答的任何問題的說法——例如故事的總結——不立Claim。蓋子回答本組的主要問題。重用既有Claim時，answers_question寫它回答的問題。'
     'statement直接寫他的判斷，像他自己對聽眾說的一句結論：不寫「教授認為」「教授判斷」「他解為」，不寫故事裡的人和情節（「那位弟兄求……」），故事、例子與他對故事中人的評語是支持這個判斷的論據；例：寫「覺得異性漂亮是神造男造女的本性，不等於心裡犯姦淫」，不寫「那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽」。'
     'statement寫出這一點的內容，不只寫題目：「分為幾部分」要寫出各部分是什麼；'
     '他接著逐一講解的部分（給了說明或理由），各成一條分論點，只列出、未講解的部分留在上層那條；已各成分論點的部分，上層只點出名稱，不重述其內容。'

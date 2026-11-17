@@ -11,8 +11,10 @@ VIEW = {'group_id': 'G001',
 
 
 def answer(**change):
-    a = {'claims': [{'id': 'CL0001', 'verdict': 'his_claim', 'target': '', 'quote': '基督的律法跟摩西的律法有重疊', 'why': ''},
-                    {'id': 'CL0002', 'verdict': 'digression', 'target': '', 'quote': '記者聖經不懂', 'why': '沒有理由'}],
+    a = {'claims': [{'id': 'CL0001', 'verdict': 'his_claim', 'target': '', 'quote': '基督的律法跟摩西的律法有重疊', 'why': '',
+                     'question': '兩種律法有什麼關係？', 'same_question_as': ''},
+                    {'id': 'CL0002', 'verdict': 'digression', 'target': '', 'quote': '記者聖經不懂', 'why': '沒有理由',
+                     'question': '', 'same_question_as': ''}],
          'others': [{'id': 'D1', 'verdict': 'unsupported', 'target': '', 'quote': '亂扯', 'why': ''}], 'missing': []}
     a.update(change)
     return a
@@ -73,3 +75,14 @@ def test_a_claim_that_reports_him_or_retells_a_story_is_flagged_without_a_call()
     view = {**VIEW, 'claims': [{'id': 'CL0001', 'statement': '那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽', 'his_words': [], 'support_lines': []},
                                {'id': 'CL0002', 'statement': '覺得異性漂亮是神造男造女的本性', 'his_words': [], 'support_lines': []}]}
     assert [(w['item'], w['words']) for w in r.wording(view)] == [('CL0001', ['教授', '那位弟兄'])]
+
+
+def test_two_claims_answering_one_question_are_flagged_as_a_pair():
+    a = answer()
+    a['claims'][1].update(verdict='his_claim', same_question_as='CL0001', question='兩種律法有什麼關係？')
+    r.check(VIEW, a)
+    found = r.disagreements(VIEW, a)
+    assert [(d['item'], d['verdict'], d['target']) for d in found] == [('CL0002', 'restates', 'CL0001')]
+    a['claims'][1]['same_question_as'] = 'CL0009'
+    with pytest.raises(ValueError, match='another Claim'):
+        r.check(VIEW, a)

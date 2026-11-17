@@ -103,10 +103,13 @@ def schema():
                              'required': ['id', 'verdict', 'target', 'quote', 'why'],
                              'properties': {'id': {'type': 'string'}, 'verdict': {'type': 'string', 'enum': sorted(verdicts)},
                                             'target': {'type': 'string'}, 'quote': {'type': 'string'}, 'why': {'type': 'string'}}}
+    claim = item(CLAIM_VERDICTS)
+    claim['properties'].update(question={'type': 'string'}, same_question_as={'type': 'string'})
+    claim['required'] += ['question', 'same_question_as']
     every = set(CLAIM_VERDICTS) | {v for d in OTHER_VERDICTS.values() for v in d}
     return {'name': 'argument_review', 'schema': {
         'type': 'object', 'additionalProperties': False, 'required': ['claims', 'others', 'missing'],
-        'properties': {'claims': {'type': 'array', 'items': item(CLAIM_VERDICTS)},
+        'properties': {'claims': {'type': 'array', 'items': claim},
                        'others': {'type': 'array', 'items': item(every)},
                        'missing': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
                                    'required': ['statement', 'quote', 'why'],
@@ -116,7 +119,11 @@ def schema():
 
 def prompt(view):
     lines = ['## 原文（本組）'] + [f"{s['sentence_id']} {s['text']}" for s in view['sentences']]
-    lines += ['', '## 每條 Claim：選一個 verdict', *[f'- {k}：{v}' for k, v in CLAIM_VERDICTS.items()],
+    lines += ['', '## 每條 Claim：先寫它回答的問題，再選一個 verdict',
+              '一條 Claim 是他對一個問題的回答。question 寫這條回答的問題（他問過的用他的話）；'
+              '若本組另一條 Claim 回答的是同一個問題，same_question_as 寫那條的 ID，否則留空。'
+              '不回答他提出或正在回答的任何問題的（例如故事的總結），選 unstated_lesson。',
+              *[f'- {k}：{v}' for k, v in CLAIM_VERDICTS.items()],
               'evidence_for 與 restates 在 target 寫那條 Claim 的 ID；其餘 target 留空。他為這一條本身給了理由（原文字義、另一處經文）的，或把它當作一條教導說出（「聖經的觀念是……」）的，即使也用來支持別的 Claim，仍是 his_claim。', '']
     for c in view['claims']:
         lines.append(f"{c['id']}：{c['statement']}")
@@ -151,6 +158,9 @@ def check(view, answer):
             raise ValueError(f"{view['group_id']}: quote is not in the transcript: {a['quote'][:40]}")
     ids = want
     for a in answer['claims']:
+        same = a.get('same_question_as', '')
+        if same and (same not in ids or same == a['id']):
+            raise ValueError(f"{view['group_id']}/{a['id']}: same_question_as must name another Claim of this group")
         if a['verdict'] in ('evidence_for', 'restates') and (a['target'] not in ids or a['target'] == a['id']):
             raise ValueError(f"{view['group_id']}/{a['id']}: {a['verdict']} must name another Claim of this group")
 
@@ -169,9 +179,14 @@ def wording(view):
 def disagreements(view, answer):
     out = []
     for a in answer['claims']:
+        c = next(c for c in view['claims'] if c['id'] == a['id'])
         if a['verdict'] != 'his_claim':
-            c = next(c for c in view['claims'] if c['id'] == a['id'])
             out.append({'group_id': view['group_id'], 'item': a['id'], 'kind': 'claim', 'gpt': c['statement'], **a})
+        elif a.get('same_question_as'):
+            # Two Claims answering one question: the program flags the pair, whatever the verdict said.
+            out.append({'group_id': view['group_id'], 'item': a['id'], 'kind': 'claim', 'gpt': c['statement'],
+                        **a, 'verdict': 'restates', 'target': a['same_question_as'],
+                        'why': f"與另一條回答同一個問題：{a.get('question', '')}。{a['why']}"})
     for a in answer['others']:
         o = next(o for o in view['others'] if o['id'] == a['id'])
         gpt = GPT_SAYS.get(o['kind']) or ('answered' if o.get('answered_by') else 'open')
