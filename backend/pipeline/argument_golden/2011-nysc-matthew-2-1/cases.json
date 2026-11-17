@@ -139,9 +139,8 @@
      "supports": [
       "CL1"
      ],
-     "status": "draft",
-     "optional": true,
-     "note": "五13–16 general, 五17–七29 detail; may be one structure Observation",
+     "status": "owner",
+     "note": "owner 2026-11-16: 五13–16 general and 五17–七29 detail are one Evidence",
      "sentences": [
       {
        "script_index": 17,
@@ -272,7 +271,7 @@
      "supports": [
       "CL3"
      ],
-     "status": "draft",
+     "status": "owner",
      "accept": [
       [
        "你看以賽亞書六十一章一節，其實要仔細看，看一節到第七節，不過我跳過去，把重點拿出來。",
@@ -287,7 +286,7 @@
        "很清楚地，馬太講這句話的時候，或者說耶穌講這句話的時候，耶穌乃是頭腦想著以賽亞書六十一章，這是很好的證據。"
       ]
      ],
-     "note": "both runs: an Observation (word fact) plus an Evidence (Matthew uses the same word) is accepted",
+     "note": "owner 2026-11-16 pause rule: the word study and his pause 「那裡表示什麼？」 with its meaning are one Evidence",
      "sentences": [
       {
        "script_index": 351,
@@ -884,26 +883,37 @@
     },
     {
      "id": "pos",
-     "kind": "step",
+     "kind": "position",
+     "status": "owner",
      "supports": [
-      "CL1"
+      "P1"
      ],
-     "status": "draft",
-     "note": "Position 「有些人說耶穌從來沒有說祂是神」 with his rebuttal 「哪裡沒有？一大堆」; accepted from both runs",
      "sentences": [
       {
        "script_index": 595,
        "paragraph_alias_in_trial": "S0002",
        "trial_number": 94,
        "text": "我要講就是說，其實聖經裡面有一大堆，有些人說耶穌從來沒有說祂就是神，我說哪裡沒有？"
-      },
+      }
+     ],
+     "note": "owner 2026-11-16: a Position, with his retort 「我說哪裡沒有？」; the 以賽亞 61 Evidence before it answers it"
+    },
+    {
+     "id": "posct",
+     "kind": "claim_text",
+     "status": "owner",
+     "supports": [
+      "CL1"
+     ],
+     "sentences": [
       {
        "script_index": 595,
        "paragraph_alias_in_trial": "S0002",
        "trial_number": 95,
        "text": "一大堆！"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: 「一大堆！」 restates the Claim already proved; not new Evidence"
     },
     {
      "id": "bg",
@@ -1012,7 +1022,7 @@
      "supports": [
       "CL1"
      ],
-     "status": "draft",
+     "status": "owner",
      "sentences": [
       {
        "script_index": 595,
@@ -1044,7 +1054,8 @@
        "trial_number": 98,
        "text": "所以只要我們有眼睛看，有很多的證據，知道耶穌自己明明知道祂是彌賽亞，耶穌明明知道祂就是神。"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: 所以 summaries and the restatement 「其中這裡有一個」 are the Claim's own words"
     },
     {
      "id": "other",
@@ -1072,6 +1083,9 @@
     "CL2": "八福藉以賽亞六十一章的祝福宣告祂是彌賽亞",
     "CL3": "ptochos：馬太用以賽亞六十一章希臘文的罕用字",
     "CL4": "因我受逼迫與先知並列 → 為耶穌就是為神"
+   },
+   "positions": {
+    "P1": "耶穌從來沒有說過自己是神"
    }
   },
   {
@@ -1370,14 +1384,8 @@
       {
        "script_index": 93,
        "paragraph_alias_in_trial": "S0001",
-       "trial_number": 39,
-       "text": "「"
-      },
-      {
-       "script_index": 93,
-       "paragraph_alias_in_trial": "S0001",
        "trial_number": 40,
-       "text": "憐恤人的人有福了！"
+       "text": "「憐恤人的人有福了！"
       },
       {
        "script_index": 93,
@@ -2556,7 +2564,7 @@
       "CL2"
      ],
      "status": "draft",
-     "note": "fact + comparison may be two",
+     "note": "the translation 「直到成全」 and the comparison with 太24:34 may be two Evidence",
      "sentences": [
       {
        "script_index": 715,
@@ -2612,7 +2620,8 @@
        "trial_number": 16,
        "text": "就是都要發生了。"
       }
-     ]
+     ],
+     "max_records": 2
     },
     {
      "id": "pos",
@@ -2760,7 +2769,7 @@
       "CL3"
      ],
      "status": "owner",
-     "note": "translation fact + step may be two; owner 2026-11-16 on the review page (Mark 7:19): answered on the spot, so Evidence for CL3, not part of the Question",
+     "note": "owner 2026-11-16 on the review page: answered on the spot, so Evidence for CL3; the translation fact and its meaning are one Evidence (pause rule)",
      "sentences": [
       {
        "script_index": 715,
@@ -2971,7 +2980,7 @@
        "text": "不要了。"
       }
      ],
-     "note": "owner 2026-11-16: answered on the spot (「還要不要遵行？不需要了」), so Evidence for CL3, not part of the Question; by the owner rule of 2026-11-16 (Mark 7:19 ruling): answered on the spot, so Evidence for CL3, not part of the Question"
+     "note": "by the owner rule of 2026-11-16 (Mark 7:19 ruling): answered on the spot, so Evidence for CL3"
     },
     {
      "id": "p7",
@@ -2980,7 +2989,7 @@
       "CL3"
      ],
      "status": "owner",
-     "note": "Peter's vision; slide case S0397 requires it shown; by the owner rule of 2026-11-16 (Mark 7:19 ruling): answered on the spot, so Evidence for CL3, not part of the Question",
+     "note": "Peter's vision; slide case S0397 requires it shown. By the owner rule of 2026-11-16: answered on the spot, so Evidence for CL3",
      "sentences": [
       {
        "script_index": 843,

@@ -142,3 +142,11 @@ def test_a_long_paragraph_is_timed_by_its_raw_segments():
     p = {'text': '甲一句。乙二句。', 'start_time': '0', 'end_time': '600',
          'segments': [(10.0, 12.0, '甲一句'), (500.0, 503.0, '乙二句')]}
     assert review.sentence_times({'script_index': 1, 'text': '乙二句。'}, {'1': p}) == (500.0, 503.0)
+
+
+def test_a_repeated_quote_is_timed_where_this_item_says_it():
+    p = {'text': '經文。甲說明。經文。', 'start_time': '0', 'end_time': '30',
+         'segments': [(0.0, 3.0, '經文'), (10.0, 13.0, '甲說明'), (20.0, 23.0, '經文')]}
+    group = {'items': [{'id': 'x', 'sentences': [{'script_index': 1, 'text': '甲說明。'}, {'script_index': 1, 'text': '經文。'}]}]}
+    seq = review.ordered_sentences(group, {'1': p})
+    assert [review.sentence_times(s, {'1': p}) for s, _ in seq] == [(10.0, 13.0), (20.0, 23.0)]

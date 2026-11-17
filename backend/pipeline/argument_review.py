@@ -115,15 +115,16 @@ def sentence_times(sentence, paragraphs):
     p = paragraphs.get(str(sentence['script_index']))
     if not p:
         return None, None
+    raw_at = sentence.get('_raw_at')
     if p.get('segments'):
         para, at = _segment_map(p)
-        start = para.find(norm(sentence['text']))
+        start = len(norm(p['text'][:raw_at])) if raw_at is not None else para.find(norm(sentence['text']))
         if start >= 0:
             hits = [n for n in at[start:start + len(norm(sentence['text']))] if n is not None]
             if hits:
                 return p['segments'][min(hits)][0], p['segments'][max(hits)][1]
     text = p['text']
-    at = text.find(sentence['text'])
+    at = raw_at if raw_at is not None else text.find(sentence['text'])
     if at < 0:
         at = norm(text).find(norm(sentence['text']))
         text = norm(text)
@@ -147,7 +148,8 @@ def ordered_sentences(group, paragraphs):
             if at < 0:
                 at = p['text'].find(s['text'])
             after[index] = at + len(s['text']) if at >= 0 else after.get(index, 0)
-            out.append((order.get(index, 10**6), at, s, it['id']))
+            # Keep where it was found, so its clip is timed at this occurrence, not the first.
+            out.append((order.get(index, 10**6), at, {**s, '_raw_at': at} if at >= 0 else s, it['id']))
     return [(s, item) for _, _, s, item in sorted(out, key=lambda x: (x[0], x[1]))]
 
 
