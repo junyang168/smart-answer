@@ -69,8 +69,9 @@ def group_views(creation):
     for gid in sorted(result['group_claim_ids']):
         request, steps = _saved(creation / gid, 'steps')
         _, records = _saved(creation / gid, 'materials')
-        if steps is None or records is None:
+        if steps is None or (records is None and steps['steps']):
             raise ValueError(f'{gid}: saved step or record answers are missing')
+        records = records or {'records': []}  # a group of only 題外話 has no step to type
         sentences = request['input']['sentences']
         text = {s['sentence_id']: s['text'] for s in sentences}
         kind = {r['step_id']: r for r in records['records']}
@@ -309,7 +310,7 @@ def _spans(creation, gid):
     """Sentence IDs for each item of a group, from the saved step answer."""
     request, steps = _saved(Path(creation) / gid, 'steps')
     _, records = _saved(Path(creation) / gid, 'materials')
-    kind = {r['step_id']: r['kind'] for r in records['records']}
+    kind = {r['step_id']: r['kind'] for r in (records or {'records': []})['records']}
     span = {}
     for row in steps['claim_text']:
         span.setdefault(row['claim_id'], []).extend(row['sentence_ids'])
