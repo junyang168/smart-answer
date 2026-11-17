@@ -64,3 +64,18 @@ def test_keywords_and_jev_must_agree_or_the_case_needs_a_look(monkeypatch, tmp_p
     monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: False), {}))
     row = ev.grade(case, request, answer, root=tmp_path, ports=object())[0]
     assert row['pass'] is False and not row['needs_look']
+
+
+def test_a_needs_a_look_goes_to_the_review_page_and_the_answer_settles_it(monkeypatch, tmp_path):
+    from backend.pipeline import argument_eval as ev
+    check = {'check': 'claim', 'all': ['同住'], 'meaning': '外邦人禁血只限於與猶太人同住的人'}
+    case = {'id': 'L2-blood', 'run': 'gpt-20261116-lecture2-v6/g003/creation', 'group': 'G003', 'checks': [check]}
+    answer = {'candidates': [{'statement': '禁血只施於與猶太人住在一起的外邦人'}]}
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: True), {}))
+    row = {'id': 'L2-blood', 'checks': ev.grade(case, {'input': {}}, answer, root=tmp_path, ports=object())}
+    [q] = ev.look_questions([row], [case])
+    assert q['lecture'].endswith('2') and q['payload']['viewpoints'] == ['禁血只施於與猶太人住在一起的外邦人']
+    doc = {'cases': [case]}
+    assert ev.apply_rulings(doc, [(q['payload']['eval'], 'says')]) == 1
+    again = ev.grade(case, {'input': {}}, answer, root=tmp_path, ports=object())[0]
+    assert again['pass'] is True and not again['needs_look']

@@ -13,6 +13,7 @@ survives regrouping. A keyword list means all of them; "a|b" means either.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -86,7 +87,7 @@ def check(case_check, request, answer, match=None):
     """``match(statement, side)`` says whether a Claim states one side of the check.
     By default it looks for the check's keywords; ``meaning_matcher`` asks Jev instead."""
     kind = case_check['check']
-    match = match or (lambda s, side: has(s, case_check[side]))
+    match = ruled(case_check, match or (lambda s, side: has(s, case_check[side])))
     if kind in ('claim', 'no_claim', 'at_most', 'every_with', 'apart', 'no_word'):
         new = [c['statement'] for c in answer['candidates'] if not c.get('existing_claim_id')]
         if kind == 'claim':
@@ -138,6 +139,24 @@ MEANING = ('`meaning` 是負責人裁定的一個意思。`claim` 是另一個�
 THRESHOLD = 0.5
 
 
+def ruled(case_check, match):
+    """The owner's answer on the review page wins for a Claim he was asked about."""
+    rulings = case_check.get('ruled') or {}
+    return lambda s, side: rulings[side][s] if s in rulings.get(side, {}) else match(s, side)
+
+
+def disputed(case_check, request, answer, match):
+    """(side, Claim) pairs where the keywords and Jev say different things, not yet ruled."""
+    rulings = case_check.get('ruled') or {}
+    out = []
+    for side, field in SIDES.items():
+        if side in case_check and field in case_check:
+            for s in dict.fromkeys(statements_of(request, answer)):
+                if s not in rulings.get(side, {}) and has(s, case_check[side]) != match(s, side):
+                    out.append({'side': side, 'meaning': case_check[field], 'statement': s})
+    return out
+
+
 def statements_of(request, answer):
     new = [c['statement'] for c in answer.get('candidates', []) if not c.get('existing_claim_id')]
     return new + list(_claims(request, answer).values())
@@ -182,6 +201,8 @@ def grade(case, request, answer, *, root=None, ports=None):
                 row['scores'] = {f'{side}: {s[:30]}': round(p, 2) for (s, side), p in table.items() if p >= 0.2}
                 row['pass'] = row['keyword'] if row['keyword'] == row['meaning'] else None
                 row['needs_look'] = row['keyword'] != row['meaning']
+                if row['needs_look']:
+                    row['disputed'] = disputed(c, request, answer, match)
             else:
                 row['pass'] = row['keyword']
         except ValueError as exc:
@@ -291,6 +312,47 @@ def grade_all(cases, answers=None, *, out=None, jev=False):
     return rows
 
 
+LECTURE = {'lecture1': '2011 NYSC 專題：馬太福音釋經（二）1', 'lecture2': '2011 NYSC 專題：馬太福音釋經（二）2'}
+SAYS = [{'key': 'says', 'label': '說了這個意思'}, {'key': 'not_says', 'label': '沒有說這個意思'}]
+
+
+def lecture_of(run):
+    return next(v for k, v in LECTURE.items() if k in run.split('/')[0])
+
+
+def look_questions(rows, cases):
+    """One review-page question per disputed (case, check, side, Claim)."""
+    from backend.pipeline.argument_review import question_id
+    by_id = {c['id']: c for c in cases}
+    out = []
+    for r in rows:
+        case = by_id[r['id']]
+        for n, check_row in enumerate(r['checks']):
+            for d in check_row.get('disputed', []):
+                item = f"eval:{case['id']}:{n}:{d['side']}:{hashlib.sha256(d['statement'].encode()).hexdigest()[:8]}"
+                lecture = lecture_of(case['run'])
+                out.append({'question_id': question_id(lecture, case['group'], item), 'lecture': lecture,
+                            'group_id': case['group'], 'item_id': item, 'kind': 'rule',
+                            'payload': {'question': f"上面這條 Claim 有沒有說出這個意思：「{d['meaning']}」？",
+                                        'options': SAYS, 'sentences': [], 'viewpoints': [d['statement']],
+                                        'eval': {'case': case['id'], 'check': n, 'side': d['side'], 'statement': d['statement']}}})
+    return out
+
+
+def apply_rulings(cases_doc, decided):
+    """Write settled eval answers into the cases: ``decided`` is [(payload['eval'], choice)]."""
+    by_id = {c['id']: c for c in cases_doc['cases']}
+    changed = 0
+    for ev, choice in decided:
+        if choice not in ('says', 'not_says'):
+            continue
+        side = by_id[ev['case']]['checks'][ev['check']].setdefault('ruled', {}).setdefault(ev['side'], {})
+        if side.get(ev['statement']) != (choice == 'says'):
+            side[ev['statement']] = choice == 'says'
+            changed += 1
+    return changed
+
+
 def main():
     p = argparse.ArgumentParser(description='Run the argument-shape eval set against the current prompts')
     p.add_argument('--out', required=True, help='folder for this eval run')
@@ -299,7 +361,21 @@ def main():
     p.add_argument('--saved', action='store_true', help='grade the answers the named runs saved (the old prompt); no GPT call')
     p.add_argument('--grade', help='grade the answers in this earlier eval folder; no GPT call')
     p.add_argument('--jev', action='store_true', help='also check each stated meaning with Jev; disagreements need a look')
+    p.add_argument('--to-review', action='store_true', help='put each needs-a-look Claim on the review page')
+    p.add_argument('--from-review', action='store_true', help='write the review page answers into the cases; no grading')
     a = p.parse_args()
+    if a.from_review:
+        from dotenv import load_dotenv
+        from backend.pipeline import argument_review as ar
+        load_dotenv('.env')
+        doc = json.loads(Path(a.cases).read_text())
+        with ar.connect() as conn:
+            rows = conn.execute("SELECT question_id, payload->'eval' FROM argument_review.questions WHERE item_id LIKE 'eval:%%'").fetchall()
+            decided = [(ev, ar.state(conn, qid)['choice']) for qid, ev in rows]
+        changed = apply_rulings(doc, decided)
+        Path(a.cases).write_text(json.dumps(doc, ensure_ascii=False, indent=1) + '\n')
+        print(json.dumps({'questions': len(rows), 'settled': sum(c is not None for _, c in decided), 'written': changed}))
+        return
     if a.saved or a.grade:
         from dotenv import load_dotenv
         load_dotenv('.env')
@@ -310,6 +386,11 @@ def main():
                   [(c['check'], c.get('keyword'), c.get('meaning'), c.get('scores')) for c in r['checks'] if c['pass'] is not True])
         Path(a.out).mkdir(parents=True, exist_ok=True)
         (Path(a.out) / 'grade.json').write_text(json.dumps(rows, ensure_ascii=False, indent=1))
+        if a.to_review:
+            from backend.pipeline import argument_review as ar
+            qs = look_questions(rows, json.loads(Path(a.cases).read_text())['cases'])
+            with ar.connect() as conn:
+                print(json.dumps({'questions': len(qs), 'added': ar.publish_questions(conn, qs, hashlib.sha256(Path(a.cases).read_bytes()).hexdigest())}))
         return
     from dotenv import load_dotenv
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
