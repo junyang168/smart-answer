@@ -23,7 +23,7 @@ from pathlib import Path
 CLAIM_VERDICTS = {
     'his_claim': '他自己說出、並在這裡證明或講明的判斷',
     'evidence_for': '用來證明另一條 Claim 的論據（經文讀法、律例的出處或目的、另一位使徒的規定、定義、例子）',
-    'restates': '重述另一條 Claim，或把幾條捆在一起',
+    'restates': '把另一條 Claim 再說一遍（說的是同一件事）；幾部分合起來得出的結論（蓋子）不是重述',
     'others_words': '故事或引述裡別人說的話，不是他的判斷',
     'unstated_lesson': '從故事或例子推出、他自己沒有說出的教訓',
     'digression': '題外話：批評別人卻沒有給經文或推理',
@@ -42,7 +42,7 @@ GPT_SAYS = {'claim': 'his_claim', 'digression': 'unsupported', 'position': 'refu
 SYSTEM = (
     '你是獨立評審。王守仁教授是口語講課。另一個模型已經把這一段整理成論證層；你逐條回答下面的問題，'
     '只依原文和給定的定義判斷，不評他講得對不對，不打總分。'
-    '每條都要從原文逐字引一句支持你的答案（quote 必須是原文中連續的一段，可以只取半句）。'
+    '每條都要從原文逐字引一句支持你的答案（quote 必須是原文中連續的一段，可以只取半句；跳過中間的話用「……」連接）。'
     '拿不準時照另一個模型的歸類回答。'
 )
 
@@ -116,7 +116,7 @@ def schema():
 def prompt(view):
     lines = ['## 原文（本組）'] + [f"{s['sentence_id']} {s['text']}" for s in view['sentences']]
     lines += ['', '## 每條 Claim：選一個 verdict', *[f'- {k}：{v}' for k, v in CLAIM_VERDICTS.items()],
-              'evidence_for 與 restates 在 target 寫那條 Claim 的 ID；其餘 target 留空。他為這一條本身給了理由（原文字義、另一處經文）的，是 his_claim。', '']
+              'evidence_for 與 restates 在 target 寫那條 Claim 的 ID；其餘 target 留空。他為這一條本身給了理由（原文字義、另一處經文）的，或把它當作一條教導說出（「聖經的觀念是……」）的，即使也用來支持別的 Claim，仍是 his_claim。', '']
     for c in view['claims']:
         lines.append(f"{c['id']}：{c['statement']}")
         lines.append(f"  被歸為他本人說的話：{' / '.join(c['his_words']) or '（無）'}")
@@ -145,7 +145,8 @@ def check(view, answer):
         if a['verdict'] not in OTHER_VERDICTS[kinds[a['id']]]:
             raise ValueError(f"{view['group_id']}/{a['id']}: verdict {a['verdict']} does not fit a {kinds[a['id']]}")
     for a in answer['claims'] + answer['others'] + answer['missing']:
-        if not norm(a['quote']) or norm(a['quote']) not in spoken:
+        pieces = [norm(x) for x in re.split(r'…+|\.{3,}', a['quote'])]
+        if not any(pieces) or any(x not in spoken for x in pieces if x):
             raise ValueError(f"{view['group_id']}: quote is not in the transcript: {a['quote'][:40]}")
     ids = want
     for a in answer['claims']:

@@ -58,3 +58,12 @@ def test_a_refused_group_is_listed_as_not_reviewed(tmp_path, monkeypatch):
             raise r.Blocked('SAFETY')
     report = r.review('run', tmp_path, Client())
     assert report['not_reviewed'] == ['G001'] and report['disagreements'] == [] and report['calls'] == 1
+
+
+def test_a_quote_may_skip_words_with_an_ellipsis():
+    a = answer()
+    a['claims'][0]['quote'] = '基督的律法……有重疊'
+    r.check(VIEW, a)
+    a['claims'][0]['quote'] = '基督的律法……全部廢掉'
+    with pytest.raises(ValueError, match='not in the transcript'):
+        r.check(VIEW, a)
