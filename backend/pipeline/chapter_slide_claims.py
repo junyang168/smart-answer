@@ -554,7 +554,7 @@ def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
     for collection, payload, status in conn.execute(
             """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.objects o
                JOIN wang_knowledge.object_versions v USING (collection, object_id, revision)
-               WHERE v.change_set_id=%s""", (change_set_id,)).fetchall():
+               WHERE v.change_set_id=%s ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
         if status not in INSTANCE_DEAD:
             records.setdefault(collection, []).append(payload)
     return records, row[0]
