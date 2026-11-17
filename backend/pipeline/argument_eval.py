@@ -79,28 +79,33 @@ def _claims(request, answer):
     return dict(given)
 
 
-def check(case_check, request, answer):
+SIDES = {'all': 'meaning', 'a': 'a_meaning', 'b': 'b_meaning', 'if': 'if_meaning', 'then': 'then_meaning', 'claim': 'meaning'}
+
+
+def check(case_check, request, answer, match=None):
+    """``match(statement, side)`` says whether a Claim states one side of the check.
+    By default it looks for the check's keywords; ``meaning_matcher`` asks Jev instead."""
     kind = case_check['check']
+    match = match or (lambda s, side: has(s, case_check[side]))
     if kind in ('claim', 'no_claim', 'at_most', 'every_with', 'apart', 'no_word'):
         new = [c['statement'] for c in answer['candidates'] if not c.get('existing_claim_id')]
         if kind == 'claim':
-            return any(has(s, case_check['all']) for s in new)
+            return any(match(s, 'all') for s in new)
         if kind == 'no_claim':
-            return not any(has(s, case_check['all']) for s in new)
+            return not any(match(s, 'all') for s in new)
         if kind == 'at_most':
-            return sum(has(s, case_check['all']) for s in new) <= case_check['max']
+            return sum(match(s, 'all') for s in new) <= case_check['max']
         if kind == 'every_with':
-            return all(has(s, case_check['then']) for s in new if has(s, case_check['if']))
+            return all(match(s, 'then') for s in new if match(s, 'if'))
         if kind == 'apart':
-            a, b = case_check['a'], case_check['b']
-            return any(has(s, a) for s in new) and any(has(s, b) for s in new) and not any(has(s, a) and has(s, b) for s in new)
+            return any(match(s, 'a') for s in new) and any(match(s, 'b') for s in new) and not any(match(s, 'a') and match(s, 'b') for s in new)
         if kind == 'no_word':
             return not any(re.search(case_check['pattern'], s) for s in new)
     if kind in ('in_digression', 'not_digression', 'evidence_for', 'returned', 'kept', 'question_open'):
         claims = _claims(request, answer)
         if kind in ('returned', 'kept'):
             back = {r['claim_id']: r['kind'] for r in answer['not_claims']}
-            ids = [cid for cid, s in claims.items() if has(s, case_check['all'])]
+            ids = [cid for cid, s in claims.items() if match(s, 'all')]
             if not ids:
                 raise ValueError(f"no Claim given to this call says {case_check['all']}")
             if kind == 'kept':
@@ -117,7 +122,7 @@ def check(case_check, request, answer):
             return bool(steps) and all(s['line'].lstrip().startswith(('问题：', '問題：')) and
                                        not [t for t in s['supports'] if t in claims] for s in steps)
         if kind == 'evidence_for':
-            want = {cid for cid, s in claims.items() if has(s, case_check['claim'])}
+            want = {cid for cid, s in claims.items() if match(s, 'claim')}
             return bool(steps) and all(set(s['supports']) & want for s in steps)
     if kind == 'record_kind':
         steps = request['input']['argument_steps']
@@ -126,6 +131,61 @@ def check(case_check, request, answer):
             raise ValueError(f"no step holds 「{case_check['sentence']}」")
         return all(r['kind'] == case_check['kind'] for r in answer['records'] if r['step_id'] in ids)
     raise ValueError(f'unknown check {kind}')
+
+
+MEANING = ('`meaning` 是負責人裁定的一個意思。`claim` 是另一個模型寫的一條 Claim。'
+           '`claim` 有沒有說出 `meaning` 這個意思？措辭可以完全不同；只說了其中一小部分、說了相反的意思，或只是提到同一個題目，都不算。')
+THRESHOLD = 0.5
+
+
+def statements_of(request, answer):
+    new = [c['statement'] for c in answer.get('candidates', []) if not c.get('existing_claim_id')]
+    return new + list(_claims(request, answer).values())
+
+
+def meaning_matcher(case_check, request, answer, root, ports):
+    """Jev's view of which Claims state each side's meaning: one Noul per Claim.
+
+    Jev only scores; ``grade`` keeps a result only when it agrees with the
+    keyword check, and lists every disagreement for a person (owner
+    2026-11-17: Jev is not used for a decision).
+    """
+    from backend.pipeline import claim_flash_common as f
+    table = {}
+    statements = list(dict.fromkeys(statements_of(request, answer)))
+    for side, field in SIDES.items():
+        if side not in case_check or field not in case_check:
+            continue
+        questions = {f'Q{i}': {'type': 'noul', 'instructions': MEANING.replace('`claim`', f'`C{i}`')}
+                     for i in range(len(statements))}
+        if not questions:
+            continue
+        state = {'meaning': case_check[field], **{f'C{i}': s for i, s in enumerate(statements)}}
+        scores = f.jev(Path(root) / 'meaning', ports, state, questions)
+        for i, s in enumerate(statements):
+            table[s, side] = scores[f'Q{i}']
+    return (lambda s, side: table.get((s, side), 0.0) >= THRESHOLD), table
+
+
+def grade(case, request, answer, *, root=None, ports=None):
+    """Each check by keywords and, where the case states a meaning, by Jev; they must agree."""
+    out = []
+    for c in case['checks']:
+        row = dict(c)
+        try:
+            row['keyword'] = check(c, request, answer)
+            if ports is not None and any(field in c for field in SIDES.values()):
+                match, table = meaning_matcher(c, request, answer, root, ports)
+                row['meaning'] = check(c, request, answer, match=match)
+                row['scores'] = {f'{side}: {s[:30]}': round(p, 2) for (s, side), p in table.items() if p >= 0.2}
+                row['pass'] = row['keyword'] if row['keyword'] == row['meaning'] else None
+                row['needs_look'] = row['keyword'] != row['meaning']
+            else:
+                row['pass'] = row['keyword']
+        except ValueError as exc:
+            row.update({'pass': None, 'error': str(exc)})
+        out.append(row)
+    return out
 
 
 # ---------------------------------------------------------------- running
@@ -190,18 +250,64 @@ def run(cases, out, ports, *, only=None, workers=4):
     return report
 
 
+def saved_answer(case, answers=None):
+    """The request and answer a case grades: from an eval run's folder, or the run it names (old prompt)."""
+    if answers is None:
+        request = without_claims(saved_request(case), case.get('drop_claims'))
+        folder = next(p.parent for p in (RUNS / case['run'] / case['group'] / FOLDER[case['stage']]).rglob('request.json')
+                      if json.loads(p.read_text()) == saved_request(case))
+    else:
+        want = without_claims(current_request(saved_request(case), case['stage']), case.get('drop_claims'))['input']
+        found = [p.parent for p in (Path(answers) / case['run'] / case['group'] / case['stage']).rglob('request.json')
+                 if json.loads(p.read_text())['input'] == want and (p.parent / 'response.json').exists()]
+        if not found:
+            raise ValueError(f"{case['id']}: no answer in {answers} for this input")
+        folder = found[-1]
+        request = json.loads((folder / 'request.json').read_text())
+    answer = json.loads((folder / 'response.json').read_text())
+    return request, answer.get('response', answer)
+
+
+class JevOnly:
+    """Jev's endpoint without a GPT client: grading asks Jev only."""
+    from backend.pipeline.evidence_refresh import Models as _M
+    judge, judge_preflight = _M.judge, _M.judge_preflight
+
+
+def grade_all(cases, answers=None, *, out=None, jev=False):
+    rows = []
+    for case in cases:
+        try:
+            request, answer = saved_answer(case, answers)
+            checks = grade(case, request, answer, root=out, ports=JevOnly() if jev else None)
+            error = None
+        except ValueError as exc:
+            checks, error = [], str(exc)
+        rows.append({'id': case['id'], 'shape': case['shape'], 'confirmed': case.get('confirmed', True), 'error': error,
+                     'checks': checks, 'pass': None if error or any(c.get('needs_look') for c in checks) else all(c['pass'] for c in checks),
+                     'needs_look': any(c.get('needs_look') for c in checks)})
+    return rows
+
+
 def main():
     p = argparse.ArgumentParser(description='Run the argument-shape eval set against the current prompts')
     p.add_argument('--out', required=True, help='folder for this eval run')
     p.add_argument('--stage', action='append', choices=sorted(TASKS), help='only cases of this stage (repeatable)')
     p.add_argument('--cases', default=str(CASES))
-    p.add_argument('--saved', action='store_true', help='grade the saved answers (the old prompt), no calls')
+    p.add_argument('--saved', action='store_true', help='grade the answers the named runs saved (the old prompt); no GPT call')
+    p.add_argument('--grade', help='grade the answers in this earlier eval folder; no GPT call')
+    p.add_argument('--jev', action='store_true', help='also check each stated meaning with Jev; disagreements need a look')
     a = p.parse_args()
-    if a.saved:
-        report = run(json.loads(Path(a.cases).read_text())['cases'], a.out, None, only=a.stage)
-        for r in report['rows']:
-            print('PASS' if r['pass'] else 'FAIL', 'confirmed' if r['confirmed'] else 'unconfirmed', r['id'], r['error'] or '',
-                  [(c['check'], c.get('error')) for c in r['checks'] if not c['pass']])
+    if a.saved or a.grade:
+        from dotenv import load_dotenv
+        load_dotenv('.env')
+        rows = grade_all(json.loads(Path(a.cases).read_text())['cases'], a.grade, out=Path(a.out), jev=a.jev)
+        for r in rows:
+            mark = 'LOOK' if r['needs_look'] else 'PASS' if r['pass'] else 'FAIL'
+            print(mark, 'confirmed' if r['confirmed'] else 'unconfirmed', r['id'], r['error'] or '',
+                  [(c['check'], c.get('keyword'), c.get('meaning'), c.get('scores')) for c in r['checks'] if c['pass'] is not True])
+        Path(a.out).mkdir(parents=True, exist_ok=True)
+        (Path(a.out) / 'grade.json').write_text(json.dumps(rows, ensure_ascii=False, indent=1))
         return
     from dotenv import load_dotenv
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
