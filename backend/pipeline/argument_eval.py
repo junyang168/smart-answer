@@ -129,6 +129,11 @@ def plan(cases, only=None):
 
 
 def run(cases, out, ports, *, only=None, workers=4):
+    """``ports`` is a function giving a fresh client per call, or None to grade saved answers.
+
+    One client per call, never shared: the subscription client keeps its working
+    folder on itself, and four threads sharing one wrote into each other's
+    folders (2026-11-16 eval run, three calls refused for schema drift)."""
     from backend.pipeline import evidence_refresh as e
     out = Path(out)
     calls = plan(cases, only)
@@ -144,7 +149,7 @@ def run(cases, out, ports, *, only=None, workers=4):
             return key, saved, answer.get('response', answer), None
         request = current_request(saved_request(calls[key][0]), stage)
         try:
-            answer = e.recorded_call(out / run_name / group / stage, 'gpt', request, ports.repair)
+            answer = e.recorded_call(out / run_name / group / stage, 'gpt', request, ports().repair)
         except Exception as exc:  # a failed call fails its cases; it is reported, never retried
             return key, request, None, f'{type(exc).__name__}: {exc}'
         return key, request, answer, None
@@ -189,8 +194,8 @@ def main():
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
     from backend.pipeline.claim_refresh import Models
     load_dotenv('.env')
-    client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
-    ports = Models(client, Path(a.out).resolve())
+    ports = lambda: Models(CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000),
+                           Path(a.out).resolve())
     report = run(json.loads(Path(a.cases).read_text())['cases'], a.out, ports, only=a.stage)
     for r in report['rows']:
         mark = 'PASS' if r['pass'] else 'FAIL'
