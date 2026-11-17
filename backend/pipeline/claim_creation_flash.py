@@ -500,18 +500,22 @@ def build_step_records(steps, records, sentences, paragraphs):
     f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
     by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
     out={'questions':[],'positions':[],'observations':[],'evidence_steps':[],'coverage_by_record':[],'excluded_sentences':[],'connections':[]}
+    # A step that only lays out a question he raises proves nothing yet: it is context
+    # for that Question, not load-bearing Evidence (G03: 「這些話是從以賽亞的話來的」).
+    asked={s['step_id'] for s in steps['steps'] if kind[s['step_id']]['kind']=='question'}
+    proves=lambda step:any(t not in asked for t in step['supports'])
     for step in steps['steps']:
         sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs)
         if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
         if r['kind']=='observation':
             if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
             out['observations'].append({'observation_id':sid,'statement':r['statement'],'observation_type':r['observation_type'],
-                'argument_role':'load_bearing' if step['supports'] else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
+                'argument_role':'load_bearing' if proves(step) else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
         elif r['kind']=='evidence':
             if not r['step_type']:raise ValueError(f'{sid}: evidence needs step_type')
             out['evidence_steps'].append({'evidence_step_id':sid,'statement':r['statement'],'step_type':r['step_type'],
                 'speaker':'professor','stance':'asserted','discourse_role':step['line'],
-                'support_eligibility':'eligible_candidate' if step['supports'] else 'context_only',
+                'support_eligibility':'eligible_candidate' if proves(step) else 'context_only',
                 'scripture_refs':r['scripture_refs'],'anchors':anchors})
         elif r['kind']=='question':
             out['questions'].append({'question_id':sid,'text':r['statement'],'questioner':'professor',
@@ -526,6 +530,7 @@ def build_step_records(steps, records, sentences, paragraphs):
     for step in steps['steps']:
         for target in step['supports']:
             if step['step_id'] in questions:edge=(target,step['step_id'],'answers')
+            elif target in questions:edge=(step['step_id'],target,'contextualizes')
             elif step['step_id'] in positions:edge=(target,step['step_id'],'refutes')
             elif target in positions:edge=(step['step_id'],target,'refutes')
             else:edge=(step['step_id'],target,'supports')
