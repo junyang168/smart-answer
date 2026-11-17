@@ -1,6 +1,6 @@
 """Independent review of a generated argument layer, one narrow question per item.
 
-GPT writes the argument layer; a different model (Claude, subscription CLI) reads
+GPT writes the argument layer; a different model (Gemini 4 Argon, owner 2026-11-16) reads
 the transcript and GPT's result and answers, for each item, one question the
 project's rules can settle: does he state this Claim himself, is this 題外話
 unsupported, is this Question answered, is this Position someone else's view that
@@ -168,9 +168,51 @@ def disagreements(view, answer):
     return out
 
 
+MODEL = 'gemini-4-argon'
+GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+
+
+class Blocked(RuntimeError):
+    """The provider's safety filter refused the request: the group was not reviewed."""
+
+
+class GeminiClient:
+    """One request per group, no retry: a refusal or a failure is reported, never re-asked."""
+
+    def __init__(self, model=MODEL, timeout=600):
+        import os, ssl
+        from dotenv import dotenv_values
+        self.model = model; self.timeout = timeout
+        self.key = os.environ.get('GEMINI_API_KEY1') or dotenv_values('.env').get('GEMINI_API_KEY1')
+        if not self.key:
+            raise ValueError('GEMINI_API_KEY1 is not set')
+        try:
+            import certifi
+            self.ssl = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            self.ssl = ssl.create_default_context()
+        self.last_raw_response = None
+
+    def generate_json(self, system, user, schema):
+        import urllib.request
+        body = json.dumps({'systemInstruction': {'parts': [{'text': system}]},
+                           'contents': [{'role': 'user', 'parts': [{'text': user}]}],
+                           'generationConfig': {'temperature': 0, 'responseMimeType': 'application/json',
+                                                'responseJsonSchema': schema['schema']}}, ensure_ascii=False).encode()
+        request = urllib.request.Request(GEMINI_ENDPOINT.format(model=self.model) + '?key=' + self.key, data=body,
+                                         headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(request, timeout=self.timeout, context=self.ssl) as reply:
+            raw = json.loads(reply.read().decode())
+        self.last_raw_response = raw
+        candidates = raw.get('candidates') or []
+        if (raw.get('promptFeedback') or {}).get('blockReason') or any(c.get('finishReason') == 'SAFETY' for c in candidates):
+            raise Blocked(json.dumps(raw.get('promptFeedback') or [c.get('finishReason') for c in candidates]))
+        return json.loads(''.join(part.get('text', '') for part in candidates[0]['content']['parts']))
+
+
 def review(creation, out_dir, client, *, call=True):
     """Review every group; a saved answer is reused, so a re-run makes no new call."""
-    out_dir = Path(out_dir); found = []; calls = 0
+    out_dir = Path(out_dir); found = []; calls = 0; blocked = []
     for view in group_views(creation):
         text = prompt(view)
         digest = hashlib.sha256(json.dumps([SYSTEM, text, schema()], ensure_ascii=False).encode()).hexdigest()[:16]
@@ -183,11 +225,18 @@ def review(creation, out_dir, client, *, call=True):
         else:
             folder.mkdir(parents=True, exist_ok=True)
             (folder / 'request.json').write_text(json.dumps({'system': SYSTEM, 'user': text, 'schema': schema()}, ensure_ascii=False, indent=1))
-            answer = client.generate_json(SYSTEM, text, schema())
-            saved.write_text(json.dumps(answer, ensure_ascii=False, indent=1)); calls += 1
+            calls += 1
+            try:
+                answer = client.generate_json(SYSTEM, text, schema())
+            except Blocked as refusal:
+                # Not reviewed is not a pass: the group is listed for a person to read.
+                (folder / 'blocked.json').write_text(json.dumps({'model': getattr(client, 'model', None), 'reason': str(refusal)}, ensure_ascii=False))
+                blocked.append(view['group_id']); continue
+            saved.write_text(json.dumps(answer, ensure_ascii=False, indent=1))
         check(view, answer)
         found += disagreements(view, answer)
-    report = {'creation': str(creation), 'calls': calls, 'disagreements': found}
+    report = {'creation': str(creation), 'model': getattr(client, 'model', None), 'calls': calls,
+              'not_reviewed': blocked, 'disagreements': found}
     (out_dir / 'disagreements.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
     return report
 
@@ -196,13 +245,12 @@ def main():
     p = argparse.ArgumentParser(description='Independent per-item review of a generated argument layer')
     p.add_argument('--creation', required=True, help='a run\'s creation folder')
     p.add_argument('--out', required=True)
-    p.add_argument('--model', default='opus')
+    p.add_argument('--model', default=MODEL)
     p.add_argument('--no-calls', action='store_true', help='only replay saved answers')
     a = p.parse_args()
     client = None
     if not a.no_calls:
-        from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
-        client = ClaudeSubscriptionClient(model=a.model, reasoning_effort='high', timeout_seconds=1800)
+        client = GeminiClient(a.model)
     print(json.dumps(review(a.creation, a.out, client, call=not a.no_calls), ensure_ascii=False, indent=1))
 
 

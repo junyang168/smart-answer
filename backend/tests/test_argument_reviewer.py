@@ -48,3 +48,13 @@ def test_saved_review_is_replayed_without_a_call(tmp_path, monkeypatch):
     again = r.review('run', tmp_path, None, call=False)
     assert Client.calls == 1 and first['calls'] == 1 and again['calls'] == 0
     assert again['disagreements'] == first['disagreements']
+
+
+def test_a_refused_group_is_listed_as_not_reviewed(tmp_path, monkeypatch):
+    monkeypatch.setattr(r, 'group_views', lambda creation: [VIEW])
+    class Client:
+        model = 'gemini-4-argon'
+        def generate_json(self, system, user, schema):
+            raise r.Blocked('SAFETY')
+    report = r.review('run', tmp_path, Client())
+    assert report['not_reviewed'] == ['G001'] and report['disagreements'] == [] and report['calls'] == 1
