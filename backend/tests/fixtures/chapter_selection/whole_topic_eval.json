@@ -1,0 +1,12 @@
+{
+  "target_section": "mat-5-1-12",
+  "lecture": "2011 NYSC 專題：馬太福音釋經（二）1",
+  "authority": "Owner 2026-11-17: do not split a complete top-level argument, including Sermon on the Mount structure",
+  "expected": {
+    "G001": {"accepted_placements": ["context"], "meaning": "完整保留先彌賽亞身份、再門徒使命的整體結構作為背景；需編輯確認整組取捨"},
+    "G002": {"accepted_placements": ["direct"], "meaning": "八福如何顯明彌賽亞身份，包括跨卷經文及兩次對照，整組選入"},
+    "G003": {"accepted_placements": ["direct", "context"], "meaning": "溫柔的講解服務於太5:5，整組選入，保留詩篇與雅各書"},
+    "G004": {"accepted_placements": ["omit"], "meaning": "律法的成全及是否遵行摩西律法屬太5:17起，整組排除"}
+  },
+  "held_for_later": "第六講7:12、7:13–27、7:28–29的三層結論需等該講新論證圖可用後，驗證整組歸屬。"
+}
