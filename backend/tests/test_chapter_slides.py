@@ -415,3 +415,27 @@ def test_note_span_written_with_a_variant_character_is_located_and_saved_in_cuv_
     problems, _, slides = chapter_slides.check(raw, KEPT, CHAPTER, cuv_root=tmp_path / "cuv")
     assert problems == []
     assert slides[0]["inline_notes"][0]["span"] == "努力的人就得着了"
+
+
+def test_timing_findings_block_only_when_the_recording_shows_a_real_gap():
+    lines = [{"id": "S0001", "start": 0.0}, {"id": "S0002", "start": 12.0}, {"id": "S0003", "start": 47.0},
+             {"id": "S0004", "start": 115.0}]
+    def timing(now, proposed):
+        return {"slide": "S0001", "kind": "出現時間", "problem": "p", "fix": "f",
+                "current_sentence": now, "proposed_sentence": proposed}
+    # The lecture 2 rounds that went back and forth: 12 s early, 47 s late. Neither blocks.
+    small = [timing("S0001", "S0002"), timing("S0003", "S0001")]
+    chapter_slides.measure_timing(small, lines)
+    review = {"grade": "B", "blocking": True, "findings": small}
+    assert [f["measured_seconds"] for f in small] == [12.0, -47.0]
+    assert not chapter_slides.review_blocks_publication(review)
+    assert chapter_slides.actionable(review) == []
+    # A point that gives away what he says over a minute later blocks; so does one placed nowhere.
+    real = [timing("S0003", "S0004"), timing("S0001", "S9999")]
+    chapter_slides.measure_timing(real, lines)
+    assert [f["timing_blocks"] for f in real] == [True, True]
+    assert chapter_slides.review_blocks_publication({"blocking": False, "findings": real})
+    # Another kind of finding still follows the reviewer's flag.
+    other = {"slide": "S0001", "kind": "完整", "problem": "p", "fix": "f", "current_sentence": "", "proposed_sentence": ""}
+    assert chapter_slides.review_blocks_publication({"blocking": True, "findings": small + [other]})
+    assert not chapter_slides.review_blocks_publication({"blocking": False, "findings": [other]})
