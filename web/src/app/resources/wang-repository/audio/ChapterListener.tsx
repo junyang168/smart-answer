@@ -495,7 +495,7 @@ export default function ChapterListener({
   const subUnitParts = sectionsWithAudio.filter(({item}) => item.sub_unit_id === sections[section]?.sub_unit_id);
 
   const button =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-3 text-stone-700 hover:bg-stone-100 disabled:opacity-30";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3";
 
   return (
     <div className={frame}>
@@ -505,7 +505,7 @@ export default function ChapterListener({
         </Link>
         <h1 className="font-serif text-lg font-bold">
           {title}
-          <span className="ml-2 font-sans text-sm font-normal text-stone-500">{source}</span>
+          <span className={`ml-2 font-sans text-sm font-normal text-stone-500 ${unitPreview ? "[@media(max-width:389px)_and_(max-height:599px)]:hidden" : ""}`}>{source}</span>
           {aiVoice && (
             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
               AI 朗讀
@@ -514,10 +514,10 @@ export default function ChapterListener({
         </h1>
         {unitPreview && <p className="w-full text-sm font-semibold text-stone-700">
           {sections[section]?.unit_label}
-          {subUnitParts.length > 1 && <span className="ml-2 font-normal">小節 {sections[section]?.sub_unit_id} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
+          {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">小節 {sections[section]?.sub_unit_id}{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
         </p>}
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        {!(unitPreview && subUnitParts.length > 1) && <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
         <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
           <span className="text-stone-600">{unitPreview ? "單元" : "段落"}</span>
           <select
@@ -528,8 +528,7 @@ export default function ChapterListener({
             {unitPreview ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
               <optgroup key={unit} label={sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label}>
                 {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
-                  <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}{sectionsWithAudio.filter(({item: other}) => other.sub_unit_id === item.sub_unit_id).length > 1
-                    ? `（本小節合計 ${minutes(sectionsWithAudio.filter(({item: other}) => other.sub_unit_id === item.sub_unit_id).reduce((sum, other) => sum + sectionSeconds(other.index), 0))}）` : ""}</option>
+                  <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}</option>
                 ))}
               </optgroup>
             )) : sectionsWithAudio.map(({ item, index }) => (
@@ -719,7 +718,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={`${button} [@media(max-width:389px)_and_(max-height:599px)]:hidden`}
+            className={`${button} hidden sm:inline-flex`}
           >
             ⏮
           </button>
@@ -731,7 +730,7 @@ export default function ChapterListener({
             onClick={toggle}
             title="播放／暫停（空白鍵）"
             aria-label={playing ? "暫停" : "播放"}
-            className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-stone-900 text-xl text-white hover:bg-stone-700"
+            className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xl text-white hover:bg-stone-700"
           >
             {playing ? "❚❚" : "▶"}
           </button>
