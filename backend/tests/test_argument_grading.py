@@ -68,3 +68,15 @@ def test_a_question_he_raises_must_be_held_as_a_question_not_as_evidence():
     as_evidence = g.grade_group(group, {('evidence_steps', 'E1'): keys('要不要遵守？')}, {})
     as_question = g.grade_group(group, {('questions', 'Q1'): keys('要不要遵守？')}, {})
     assert as_evidence[0]['verdict'] == 'missed' and as_question[0]['verdict'] == 'correct'
+
+
+def test_a_repeated_short_line_belongs_only_to_the_fragment_that_holds_it():
+    group = {'group': 'G', 'items': [
+        {'id': 'a', 'kind': 'step', 'status': 'owner', 'sentences': [s(1, '甲一句長長長。'), s(1, '有沒有？')]},
+        {'id': 'b', 'kind': 'step', 'status': 'owner', 'sentences': [s(1, '乙一句長長長。'), s(1, '有沒有？')]}]}
+    texts = {'1': g.norm('甲一句長長長。有沒有？乙一句長長長。有沒有？')}
+    g.place(group, texts)
+    assert [x['_at'] for it in group['items'] for x in it['sentences']] == [0, 6, 9, 15]
+    index = {'1': {g.key(x) for it in group['items'] for x in it['sentences']}}
+    held = g.fragment_sentences({'verbatim_excerpt': '乙一句長長長。有沒有？'}, '1', index, texts)
+    assert held == {g.key(group['items'][1]['sentences'][0]), g.key(group['items'][1]['sentences'][1])}

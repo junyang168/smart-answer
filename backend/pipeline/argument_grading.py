@@ -27,23 +27,88 @@ def norm(text):
 
 
 def key(sentence):
-    return (str(sentence['script_index']), norm(sentence['text']))
+    """A sentence is its paragraph and text, plus where it sits once placed: he repeats
+    short lines (「有沒有？」 three times in one paragraph), and text alone merges them."""
+    k = (str(sentence['script_index']), norm(sentence['text']))
+    return k + (sentence['_at'],) if '_at' in sentence else k
 
 
-def fragment_sentences(fragment, script_index, sentences_by_index):
-    """Sentences of the golden answer that this fragment's excerpt holds."""
+LONG = 6  # a sentence this long is placed first: it is rarely repeated
+
+
+def place(group, texts):
+    """Give each answer sentence its own place in its paragraph's normalized text.
+
+    Long sentences are placed first, each item in its own reading order; a short one
+    then goes between its placed neighbours in the same item. No place is used twice."""
+    used = defaultdict(set)
+
+    def spots(idx, text):
+        para = texts.get(idx, '')
+        out, at = [], para.find(text)
+        while text and at >= 0:
+            out.append(at)
+            at = para.find(text, at + 1)
+        return [a for a in out if a not in used[idx]]
+
+    def take(s, lo=0, hi=None):
+        idx, text = str(s['script_index']), norm(s['text'])
+        free = spots(idx, text)
+        pick = next((a for a in free if a >= lo and (hi is None or a < hi)), None)
+        pick = pick if pick is not None else next((a for a in free if a >= lo), free[0] if free else None)
+        if pick is not None:
+            used[idx].add(pick)
+            s['_at'] = pick
+
+    items = [it['sentences'] for it in group['items']]
+    for ss in items:
+        cursor = defaultdict(int)
+        for s in ss:
+            if len(norm(s['text'])) >= LONG:
+                take(s, cursor[str(s['script_index'])])
+                if '_at' in s:
+                    cursor[str(s['script_index'])] = s['_at'] + len(norm(s['text']))
+    for ss in items:
+        for n, s in enumerate(ss):
+            if '_at' in s:
+                continue
+            idx = str(s['script_index'])
+            before = [x for x in ss[:n] if '_at' in x and str(x['script_index']) == idx]
+            after = [x for x in ss[n + 1:] if '_at' in x and str(x['script_index']) == idx]
+            lo = before[-1]['_at'] + len(norm(before[-1]['text'])) if before else 0
+            take(s, lo, after[0]['_at'] if after else None)
+
+
+def fragment_sentences(fragment, script_index, sentences_by_index, texts=None):
+    """Sentences of the golden answer that this fragment's excerpt holds.
+
+    With the paragraph text, a placed sentence is held only where the excerpt
+    actually lies, not by any excerpt that happens to contain the same words."""
     excerpt = norm(fragment.get('verbatim_excerpt'))
     if not excerpt:
         return set()
+    para = (texts or {}).get(str(script_index))
+    spans = []
+    if para:
+        at = para.find(excerpt)
+        while at >= 0:
+            spans.append((at, at + len(excerpt)))
+            at = para.find(excerpt, at + 1)
     out = set()
     for s in sentences_by_index.get(str(script_index), ()):
         text = s[1]
-        if text and (text in excerpt or (len(excerpt) >= 6 and excerpt in text)):
+        if not text:
+            continue
+        if len(s) > 2 and spans:
+            start, end = s[2], s[2] + len(text)
+            if any((a <= start and end <= b) or (len(excerpt) >= LONG and start <= a and b <= end) for a, b in spans):
+                out.add(s)
+        elif text in excerpt or (len(excerpt) >= LONG and excerpt in text):
             out.add(s)
     return out
 
 
-def coverage(candidate, paragraph_index, sentences_by_index):
+def coverage(candidate, paragraph_index, sentences_by_index, texts=None):
     """Map each record (and each Claim's own words) to the answer sentences it holds."""
     fragments = {f['fragment_id']: f for f in candidate.get('source_fragments', [])}
 
@@ -56,7 +121,7 @@ def coverage(candidate, paragraph_index, sentences_by_index):
             index = paragraph_index.get(f['paragraph_key'])
             if index is None:
                 raise ValueError(f"SourceFragment {fid} names an unknown paragraph {f['paragraph_key']}")
-            out |= fragment_sentences(f, index, sentences_by_index)
+            out |= fragment_sentences(f, index, sentences_by_index, texts)
         return out
 
     records = {}
@@ -79,9 +144,22 @@ def grade_group(group, records, own, proposed=None):
     """One verdict per answer item, plus records that hold only non-argument sentences."""
     items = group['items']
     sets = {it['id']: {key(s) for s in it['sentences']} for it in items}
-    by_text = {norm(s['text']): key(s) for it in items for s in it['sentences']}
-    variants = {it['id']: [sets[it['id']]] + [{by_text[norm(t)] for t in alt} for alt in it.get('accept', [])]
-                for it in items}
+    by_text = {}
+    for it in items:
+        for s in it['sentences']:
+            by_text.setdefault(norm(s['text']), key(s))
+
+    def accepted(it, alt):
+        # A repeated line in an accepted variant is the item's own copy when it has one.
+        own = {}
+        for s in it['sentences']:
+            own.setdefault(norm(s['text']), []).append(key(s))
+        out = set()
+        for t in alt:
+            mine = [k for k in own.get(norm(t), []) if k not in out]
+            out.add(mine[0] if mine else by_text[norm(t)])
+        return out
+    variants = {it['id']: [sets[it['id']]] + [accepted(it, alt) for alt in it.get('accept', [])] for it in items}
     owned = set().union(*own.values()) if own else set()
     results = []
     touching = defaultdict(set)  # record -> step items it substantially covers
@@ -156,29 +234,32 @@ def grade_group(group, records, own, proposed=None):
     return results
 
 
-def paragraph_indexes(candidate, source_path=None):
+def paragraph_indexes(candidate, source_path=None, with_text=False):
     from backend.pipeline import evidence_refresh as e
     import hashlib
     doc = candidate['source_documents'][0]
     path = Path(source_path or doc['source_path'])
     snap = e.source_snapshot({'path': str(path), 'file_sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-    return {k: str(p.get('index', p.get('source_index'))) for k, p in snap['paragraphs'].items()}
+    index = {k: str(p.get('index', p.get('source_index'))) for k, p in snap['paragraphs'].items()}
+    return (index, {index[k]: norm(p.get('text')) for k, p in snap['paragraphs'].items()}) if with_text else index
 
 
 def grade(cases, group_id, candidate, source_path=None, digressions=None):
-    group = next(g for g in cases['groups'] if g['group'] == group_id)
+    from copy import deepcopy
+    group = deepcopy(next(g for g in cases['groups'] if g['group'] == group_id))
+    index, texts = paragraph_indexes(candidate, source_path, with_text=True)
+    place(group, texts)
     by_index = defaultdict(set)
     for it in group['items']:
         for s in it['sentences']:
             by_index[str(s['script_index'])].add(key(s))
-    index = paragraph_indexes(candidate, source_path)
-    records, own = coverage(candidate, index, by_index)
+    records, own = coverage(candidate, index, by_index, texts)
     proposed = None
     if digressions is not None:
         proposed = set()
         for d in digressions:
             for a in d['anchors']:
-                proposed |= fragment_sentences(a, index[a.get('paragraph_key') or a['segment_index']], by_index)
+                proposed |= fragment_sentences(a, index[a.get('paragraph_key') or a['segment_index']], by_index, texts)
     return grade_group(group, records, own, proposed)
 
 
