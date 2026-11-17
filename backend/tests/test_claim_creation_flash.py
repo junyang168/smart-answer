@@ -623,3 +623,5 @@ def test_a_sentence_carrying_scripture_must_be_in_an_argument_step():
              'claim_text': [], 'other': [{'sentence_ids': ['S0001#002'], 'why': '過場'}], 'digressions': []}
     with pytest.raises(ValueError, match='scripture he cites'):
         c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)
+    as_claim = {**steps, 'other': [], 'claim_text': [{'claim_id': 'CL0001', 'sentence_ids': ['S0001#002']}]}
+    assert c.check_steps(as_claim, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)

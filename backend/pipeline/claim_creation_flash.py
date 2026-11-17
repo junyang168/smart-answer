@@ -416,7 +416,8 @@ def cited_sentences(listing, sentences, paragraphs):
 
 
 def check_citations_held(listing, records, owned):
-    """Every verse he cites in these paragraphs shows in a record's SourceFragment."""
+    """Every verse he cites in these paragraphs shows in a SourceFragment of the argument:
+    a record's, or a Claim's own words."""
     from backend.pipeline import claim_flash_citations as c
     holy = c.default_bible()
     shown = defaultdict(list)
@@ -424,11 +425,14 @@ def check_citations_held(listing, records, owned):
         for r in records[col]:
             for a in r['anchors']:
                 shown[a['segment_index']].append(a['verbatim_excerpt'])
+    for anchors in records.get('claim_statements', {}).values():
+        for a in anchors:
+            shown[a['segment_index']].append(a['verbatim_excerpt'])
     missing = [x['ref'] for x in listing['citations']
                if x['paragraph_key'] in owned and x['key'][2] is not None
                and not c.visible(x, shown[x['paragraph_key']], holy)]
     if missing:
-        raise ValueError(f'scripture he cites is not in any record SourceFragment: {sorted(set(missing))}')
+        raise ValueError(f'scripture he cites is not in any SourceFragment of the argument: {sorted(set(missing))}')
 
 
 def is_question(step):
@@ -456,10 +460,12 @@ def check_steps(result, sentence_ids, claim_ids, scripture=()):
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
         raise ValueError('a 題外話 needs sentences, a kind and a reason')
-    loose = sorted(s for part in ('claim_text', 'other', 'digressions') for r in result.get(part, [])
+    # Owner 2026-11-16: any element of the argument may hold it (Evidence, Question,
+    # Position, a Claim's own words); filler and a 題外話 may not.
+    loose = sorted(s for part in ('other', 'digressions') for r in result.get(part, [])
                    for s in r['sentence_ids'] if s in scripture)
     if loose:
-        raise ValueError(f'scripture he cites must be in an argument step, not claim_text/other/題外話: {loose}')
+        raise ValueError(f'scripture he cites must be in the argument, not filler or a 題外話: {loose}')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
@@ -800,7 +806,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             'claim_candidates':candidates,'group_claim_ids':group_claims,
             'production_writes':0,'flash_started':False,'claim_qualification':'not_granted',
             **({'scripture_citations':{'listed':len(listing['citations']),'unresolved':len(listing['unresolved']),
-                'all_in_record_fragments':True}} if listing else {})}
+                'all_in_argument_fragments':True}} if listing else {})}
         from backend.pipeline.claim_flash_flow import accounting
         result['accounting']=accounting(root,getattr(ports,'root',None))
         result['wall_seconds_this_invocation']=round(time.monotonic()-started,3)
