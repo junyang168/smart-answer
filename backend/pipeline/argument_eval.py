@@ -99,7 +99,9 @@ def check(case_check, request, answer, match=None):
         if kind == 'every_with':
             return all(match(s, 'then') for s in new if match(s, 'if'))
         if kind == 'apart':
-            return any(match(s, 'a') for s in new) and any(match(s, 'b') for s in new) and not any(match(s, 'a') and match(s, 'b') for s in new)
+            # Two points, two Claims: one says a without b, and one says b. The b Claim may
+            # mention a (「不可殺人涉及內心的恨」) when another Claim states a by itself.
+            return any(match(s, 'a') and not match(s, 'b') for s in new) and any(match(s, 'b') for s in new)
         if kind == 'no_word':
             return not any(re.search(case_check['pattern'], s) for s in new)
     if kind in ('in_digression', 'not_digression', 'evidence_for', 'returned', 'kept', 'question_open', 'question_answered'):
