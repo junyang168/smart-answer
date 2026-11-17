@@ -260,30 +260,50 @@ def _bigrams(text: str) -> set[str]:
     return {han[i:i + 2] for i in range(len(han) - 1)}
 
 
-def read_aloud(slug: str, lines: list[str], cuv_root: Path | None = None) -> list[str]:
+def _chapter_verses(cuv_root: Path, book: str, chapter: int) -> dict:
+    try:
+        return json.loads((cuv_root / book.upper() / f"{chapter}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def read_aloud(slug: str, lines: list[str], cuv_root: Path | None = None, passage: str | None = None) -> list[str]:
     """這段經文裡他在本堂念出來的各節（單節 slug）：有一句逐字稿，一半以上的相鄰兩字出現在那一節。
 
-    與聆聽頁判斷「他此刻念到哪一節」用同一個準則。只報出處、說段落範圍不算。"""
+    與聆聽頁判斷「他此刻念到哪一節」用同一個準則。只報出處、說段落範圍不算。
+    他念的是本章經文（passage）時，一句短經文會碰巧與別卷的一節共用一半的相鄰兩字
+    （太 5:9「因為他們必稱為神的兒子」對 賽 61:6「人必稱你們為我們神的僕役」）：
+    那一句與本章某節更相符，就算他念本章，不算念這一節。"""
     from backend.api.scripture import parse_reference
 
     if cuv_root is None:
         from backend.bible_study.paths import cuv_dir
         cuv_root = cuv_dir()
     ref = parse_reference(slug)
-    try:
-        chapter = json.loads((cuv_root / ref["slug_book"].upper() / f"{ref['chapter']}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    chapter = _chapter_verses(cuv_root, ref["slug_book"], ref["chapter"])
+    if not chapter:
         return []
     said = [pairs for pairs in map(_bigrams, lines) if len(pairs) >= 5]
+    own = []
+    if passage:
+        home = parse_reference(passage)
+        if (home["slug_book"], home["chapter"]) != (ref["slug_book"], ref["chapter"]):
+            own = [_bigrams(text) for text in _chapter_verses(cuv_root, home["slug_book"], home["chapter"]).values()]
+
+    def own_better(pairs: set, share: float) -> bool:
+        return any(v and len(pairs & v) / len(pairs) > share for v in own)
+
     read = []
     for number in range(ref["start"], ref["end"] + 1):
         verse = _bigrams(chapter.get(str(number), ""))
-        if verse and any(len(pairs & verse) / len(pairs) >= 0.5 for pairs in said):
+        if verse and any(len(pairs & verse) / len(pairs) >= 0.5 and not own_better(pairs, len(pairs & verse) / len(pairs))
+                         for pairs in said):
             read.append(f"{slug.split('-')[0]}-{ref['chapter']}-{number}")
     return read
 
 
-def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None = None) -> tuple[list[str], list[str]]:
+def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None = None,
+                        passage: str | None = None) -> tuple[list[str], list[str]]:
     """Evidence 引的經文中，他在本堂念出來的 → 投影片必須顯示（負責人 2026-11-16）。另回讀不出的出處。
 
     跨章範圍（「五章十三節到七章二十九節」）是他在講段落範圍，不是念經文。"""
@@ -297,7 +317,7 @@ def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None
         if len(slugs) != 1:
             unread.append(ref)
             continue
-        shown += [verse for verse in read_aloud(slugs[0], lines, cuv_root) if verse not in shown]
+        shown += [verse for verse in read_aloud(slugs[0], lines, cuv_root, passage) if verse not in shown]
     return shown, unread
 
 
@@ -503,7 +523,7 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    scriptures, unread = evidence_scriptures(refs, spoken)
+                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
                     if scriptures:
                         entry["scriptures"] = scriptures
                     excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"}
@@ -603,7 +623,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    scriptures, unread = evidence_scriptures(refs, spoken)
+                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
                     if scriptures:
                         entry["scriptures"] = scriptures
                     excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"} for ref in unread]

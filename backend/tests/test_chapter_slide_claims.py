@@ -295,3 +295,17 @@ def test_a_point_left_over_from_another_step_is_reported(tmp_path):
     assert hints.stale_points(context, on_time, lines) == []
     together = [dict(late[0], points=[dict(p, sentence="S0001") for p in late[0]["points"]])]
     assert any("兩條要點都綁在 S0001" in p for p in hints.stale_points(context, together, lines))
+
+
+def test_a_verse_of_the_chapter_he_reads_is_not_counted_as_another_books_verse(tmp_path):
+    (tmp_path / "MAT").mkdir(); (tmp_path / "ISA").mkdir()
+    (tmp_path / "MAT" / "5.json").write_text(json.dumps({"9": "使人和睦的人有福了！因為他們必稱為神的兒子。"}))
+    (tmp_path / "ISA" / "61.json").write_text(json.dumps({
+        "6": "你們倒要稱為耶和華的祭司；人必稱你們為我們神的僕役。你們必喫用列國的財物，因得他們的榮耀自誇。",
+        "7": "你們必得加倍的好處，代替所受的羞辱；分中所得的喜樂必代替所受的凌辱。"}))
+    lines = ["因為他們必稱為神的兒子。」", "你們必得加倍的好處，代替所受的羞辱"]
+    # Without the chapter in view, Matthew 5:9 reads as Isaiah 61:6 (half its pairs are shared).
+    assert hints.read_aloud("isa-61-6-7", lines, tmp_path) == ["isa-61-6", "isa-61-7"]
+    assert hints.read_aloud("isa-61-6-7", lines, tmp_path, passage="mat-5-1-48") == ["isa-61-7"]
+    # A cited verse in the expounded chapter itself is still read.
+    assert hints.read_aloud("mat-5-9", lines, tmp_path, passage="mat-5-1-48") == ["mat-5-9"]
