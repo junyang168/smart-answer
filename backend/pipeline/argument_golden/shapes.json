@@ -514,6 +514,33 @@
      "meaning": "人容易把自己的主觀當作聖靈的感動，所以必須找證據"
     }
    ]
+  },
+  {
+   "id": "L2-translation-as-reason",
+   "shape": "順帶的小問題",
+   "use": "train",
+   "confirmed": true,
+   "run": "gpt-20261117-lecture2-v7/creation",
+   "group": "G001",
+   "stage": "claims",
+   "ruling": "Owner 2026-11-17 (「agreed」): 林前9:20 「翻錯了，應該是『我乃在基督律法之下』」 is his reason; 「所以啊，基督徒乃在基督的律法底下」 is his point. One Claim, with the translation as its Evidence. v7 wrote both as Claims (CL0001, CL0003).",
+   "checks": [
+    {
+     "check": "no_claim",
+     "all": [
+      "正在律法之下"
+     ],
+     "meaning": "林前九章二十節「在基督面前，正在律法之下」翻錯了，應是「我乃在基督律法之下」"
+    },
+    {
+     "check": "claim",
+     "all": [
+      "基督的律法|基督律法",
+      "摩西"
+     ],
+     "meaning": "基督徒不在摩西律法之下，而在基督的律法之下"
+    }
+   ]
   }
  ]
 }
