@@ -27,7 +27,52 @@ def _on_screen(slides: list[dict], sentence: str) -> dict | None:
     return next((s for s in reversed(slides) if s["first"] <= sentence), None)
 
 
-def check_cases(slides: list[dict[str, Any]], cases: list[dict[str, Any]]) -> list[str]:
+def resolve_cases(cases, source_sentences):
+    """Resolve text-bound owner requirements without silently trusting old IDs."""
+    resolved = []
+    for case in cases:
+        if case.get('source_text'):
+            matches = [line['id'] for line in (source_sentences or []) if line['text'] == case['source_text']]
+            if len(matches) != 1:
+                raise ValueError('Owner case source quote is missing or ambiguous')
+            case = {**case, 'at': matches[0]}
+        resolved.append(case)
+    return resolved
+
+
+def timing_corrections(slides, cases, source_sentences):
+    """Only uniquely identified, text-bound owner timing prescriptions are executable."""
+    corrections = []
+    for case in resolve_cases(cases, source_sentences):
+        if not case.get('source_text') or case['kind'] not in ('point', 'not_before'):
+            continue
+        if not check_cases(slides, [case], source_sentences):
+            continue
+        if case['kind'] == 'point':
+            slide = _on_screen(slides, case['at'])
+            candidates = [(slide, p) for p in (slide or {}).get('points', [])
+                          if (p['text'] == case['point_text'] if case.get('point_text')
+                              else re.search(case['pattern'], p['text']))]
+        else:
+            candidates = [(s, p) for s in slides for p in s['points']
+                          if p['sentence'] < case['at'] and re.search(case['pattern'], p['text'])]
+            if not candidates:
+                continue
+        if len(candidates) != 1:
+            raise ValueError('Owner timing requirement has no unique existing point')
+        slide, point = candidates[0]
+        if point['sentence'] != case['at']:
+            corrections.append({'slide': slide['first'], 'current_sentence': point['sentence'],
+                                'proposed_sentence': case['at'], 'authority': 'owner_case',
+                                'source_text': case['source_text'], 'requirement': case['why']})
+    return corrections
+
+
+def check_cases(slides: list[dict[str, Any]], cases: list[dict[str, Any]], source_sentences=None) -> list[str]:
+    try:
+        cases = resolve_cases(cases, source_sentences)
+    except ValueError as error:
+        return [str(error)]
     problems = []
     for case in cases:
         kind, why = case["kind"], case["why"]

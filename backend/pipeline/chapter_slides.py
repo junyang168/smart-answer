@@ -507,7 +507,7 @@ def checked(
                 slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context))["problems"]
             # 負責人指出過的問題（chapter_slide_cases.json），每次都查，不再回來。
             from backend.pipeline.chapter_slide_cases import cases_for, check_cases
-            problems += check_cases(slides, cases_for(claim_context.get("lecture", "")))
+            problems += check_cases(slides, cases_for(claim_context.get("lecture", "")), sentences(kept))
     return problems, unshown, slides
 
 

@@ -148,3 +148,21 @@ def test_fractional_first_sentence_remains_inside_its_clip_after_audio_retiming(
     recording['retime'] = lambda t: t * 10
     row = project(plan, recordings)['sections'][0]['sermons'][0]
     assert row['transcript'][0]['at'] == row['stretches'][0]['start'] == round(start * 10, 2)
+
+
+def test_owner_timing_corrects_unique_quote_and_keeps_all_other_owner_cases_enforced(monkeypatch):
+    from backend.pipeline.chapter_listening_units import owner_timing
+    from backend.pipeline import chapter_slide_cases
+    selection, record, _ = timing_example()
+    selection['lecture'] = 'test'
+    cases = [{'kind': 'point', 'at': 'S0001', 'source_text': '乙。', 'pattern': '乙',
+              'point_text': '乙', 'why': 'Follow the spoken sentence'}]
+    monkeypatch.setattr(chapter_slide_cases, 'cases_for', lambda lecture: cases)
+    before = copy.deepcopy(record)
+    derived, corrections = owner_timing(record, selection)
+    assert derived['slides'][0]['points'][1]['sentence'] == 'S0002'
+    assert corrections[0]['authority'] == 'owner_case'
+    assert record == before
+    assert owner_timing(derived, selection)[1] == []
+    cases.append({'kind': 'no_title', 'pattern': '測試', 'why': 'Unresolved non-timing requirement'})
+    with pytest.raises(ValueError): owner_timing(derived, selection)

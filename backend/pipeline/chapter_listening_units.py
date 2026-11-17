@@ -17,8 +17,8 @@ from backend.pipeline import original_audio_index as audio
 from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
 
 
-def reviewed_timing(slides: dict, review: dict, selection: dict) -> tuple[dict, list]:
-    """Apply only the reviewer's unambiguous sentence-anchor prescriptions.
+def _reanchor(slides: dict, prescriptions: list, selection: dict) -> tuple[dict, list]:
+    """Apply only explicit owner/reviewer sentence-anchor prescriptions.
 
     Original model slides and verdict remain immutable. No reader-visible words
     change; checked() validates the full derived result against the same source.
@@ -28,11 +28,7 @@ def reviewed_timing(slides: dict, review: dict, selection: dict) -> tuple[dict, 
     corrections = []
     lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
     positions = {line['id']: i for i, line in enumerate(lines)}
-    for finding in review['findings']:
-        if not chapter_slides.finding_blocks(finding):
-            continue
-        if finding['kind'] != '出現時間':
-            raise ValueError('Supplement still has unresolved content findings')
+    for finding in prescriptions:
         own = [s for s in derived['slides'] if s['first'] == finding['slide']]
         now, proposed = finding['current_sentence'], finding['proposed_sentence']
         if len(own) != 1 or proposed not in positions:
@@ -48,16 +44,51 @@ def reviewed_timing(slides: dict, review: dict, selection: dict) -> tuple[dict, 
             raise ValueError('Raw and normalized timing anchors disagree')
         raw_point[0]['sentence'] = proposed
         corrections.append({'slide': finding['slide'], 'text': points[0]['text'],
-                            'from_sentence': now, 'to_sentence': proposed})
+                            'from_sentence': now, 'to_sentence': proposed,
+                            'authority': finding.get('authority', 'saved_review')})
     if corrections:
         from backend.pipeline.chapter_material import CHAPTERS
         problems, _, checked = chapter_slides.checked(
-            derived['raw_slides'], chapter_slides.kept_pieces(selection), CHAPTERS[selection['passage']], None)
+            derived['raw_slides'], chapter_slides.kept_pieces(selection), CHAPTERS[selection['passage']], slides.get('claim_context'))
         if problems or checked != derived['slides']:
             raise ValueError(f'Reviewed timing correction failed source checks: {problems}')
-    elif chapter_slides.review_blocks_publication(review):
-        raise ValueError('Blocking review has no mechanically resolvable timing prescription')
     return derived, corrections
+
+
+def reviewed_timing(slides: dict, review: dict, selection: dict) -> tuple[dict, list]:
+    prescriptions = [f for f in review['findings'] if chapter_slides.finding_blocks(f)]
+    if any(f['kind'] != '出現時間' for f in prescriptions):
+        raise ValueError('Supplement still has unresolved content findings')
+    if not prescriptions and chapter_slides.review_blocks_publication(review):
+        raise ValueError('Blocking review has no mechanically resolvable timing prescription')
+    return _reanchor(slides, prescriptions, selection)
+
+
+def owner_timing(slides: dict, selection: dict) -> tuple[dict, list]:
+    from backend.pipeline.chapter_slide_cases import cases_for, timing_corrections, check_cases
+    lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+    cases = cases_for(selection['lecture'])
+    prescriptions = timing_corrections(slides['slides'], cases, lines)
+    derived, corrections = _reanchor(slides, prescriptions, selection)
+    case_problems = check_cases(derived['slides'], cases, lines)
+    if case_problems:
+        raise ValueError(f'Saved owner Slide Eval failed: {case_problems}')
+    if not corrections:
+        from backend.pipeline.chapter_material import CHAPTERS
+        problems, _, normalized = chapter_slides.checked(
+            derived['raw_slides'], chapter_slides.kept_pieces(selection),
+            CHAPTERS[selection['passage']], derived.get('claim_context'))
+        if problems or normalized != derived['slides']:
+            raise ValueError(f'Saved slide Eval failed: {problems}')
+    if not derived.get('claim_context'):
+        from backend.pipeline import chapter_slide_eval
+        result = chapter_slide_eval.evaluate(derived['slides'], chapter_slides.kept_pieces(selection),
+                    candidates=chapter_slide_eval.candidate_chapters(derived['slides'], None))
+        if result['problems']:
+            raise ValueError(f'Saved slide Eval failed: {result["problems"]}')
+    return derived, [{**correction, 'source_text': prescription['source_text'],
+                      'requirement': prescription['requirement']}
+                     for correction, prescription in zip(corrections, prescriptions, strict=True)]
 
 
 def project(plan: dict, recordings: dict) -> dict:
@@ -157,6 +188,8 @@ def build(data_root: Path, passage: str) -> dict:
         sermon = sermons.load(source, document)
         if not sermon or not sermon.get('media_url'):
             raise ValueError('Unit recording is unavailable')
+        slides, owner_corrections = owner_timing(slides, selection)
+        timing_corrections.extend({'source_id': source, **c} for c in owner_corrections)
         _, timed = chapter_slides.placed(selection, slides)
         supplement_root = data_root / 'chapter_exposition' / passage / 'unit-supplements'
         extra_selection_path = supplement_root / f'{title}.selection.json'

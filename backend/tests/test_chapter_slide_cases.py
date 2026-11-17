@@ -24,3 +24,27 @@ def test_the_case_file_reads_and_every_case_is_a_known_kind():
     cases = [case for lecture in data["lectures"].values() for case in lecture]
     assert cases and all(case["why"] and case["owner"] for case in cases)
     c.check_cases([{"first": "S0001", "title": "t", "points": [], "inline_notes": []}], cases)
+
+
+def test_owner_timing_uses_unique_source_quote_not_stale_sentence_number():
+    source = [{'id': 'S0005', 'text': '教授現在開始說結論。'}]
+    case = {'kind': 'point', 'at': 'S0002', 'source_text': '教授現在開始說結論。',
+            'pattern': '結論', 'point_text': '這是結論', 'why': '結論須在教授講到時出現'}
+    before = [{'first': 'S0001', 'last': 'S0009', 'points': [
+        {'sentence': 'S0001', 'text': '背景'}, {'sentence': 'S0008', 'text': '這是結論'}]}]
+    assert c.check_cases(before, [case], source)
+    changes = c.timing_corrections(before, [case], source)
+    assert changes[0]['current_sentence'] == 'S0008'
+    assert changes[0]['proposed_sentence'] == 'S0005'
+    assert case['at'] == 'S0002'  # Preserve the historical reference.
+    before[0]['points'][1]['sentence'] = 'S0005'
+    assert c.check_cases(before, [case], source) == []
+    assert c.timing_corrections(before, [case], source) == []
+
+
+def test_missing_or_duplicated_owner_source_quote_cannot_fall_back_to_old_id():
+    import pytest
+    case = {'kind': 'point', 'at': 'S0002', 'source_text': '原話', 'pattern': '結論', 'why': 'why'}
+    for source in [[], [{'id': 'S0001', 'text': '原話'}, {'id': 'S0002', 'text': '原話'}]]:
+        assert c.check_cases([], [case], source)
+        with pytest.raises(ValueError): c.timing_corrections([], [case], source)
