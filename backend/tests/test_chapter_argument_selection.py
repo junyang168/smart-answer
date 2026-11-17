@@ -1,4 +1,7 @@
 import pytest
+import json
+from pathlib import Path
+from itertools import groupby
 
 from backend.pipeline.chapter_argument_selection import compile_selection, RULES
 from backend.pipeline.chapter_material import CHAPTERS
@@ -74,3 +77,24 @@ def test_settled_structure_must_not_be_sent_for_owner_review_again():
     assert not evaluate(record, case)['passed']
     record['raw_decisions'][0]['editor_review'] = ''
     assert evaluate(record, case)['passed']
+
+
+def test_owner_golden_unit1_keeps_resumed_argument_in_original_source_order():
+    path = Path(__file__).parent / 'fixtures/chapter_selection/unit1_sub_units_golden.json'
+    case = json.loads(path.read_text())
+    record = compile_selection(
+        CHAPTERS['mat-5-1-48'], case['target_section'], case['topics'],
+        case['paragraphs'], case['owners'], case['answer'],
+        {'title': case['lecture'], 'source_id': case['source_id']}, case['source_sha256'])
+    sub_units = {s['group_id']: s['id'] for s in case['sub_units']}
+    assert len(sub_units) == len(case['sub_units']) == 3
+    source_keys = list(case['paragraphs'])
+    kept = [(source_keys[i], sub_units[p['argument_group_id']])
+            for i, (p, d) in enumerate(zip(record['pieces'], record['decisions'], strict=True))
+            if d['keep']]
+    assert [key for key, _ in kept] == case['expected_kept_paragraphs']
+    runs = [{'sub_unit_id': sid, 'paragraphs': [key for key, _ in rows]}
+            for sid, rows in groupby(kept, key=lambda row: row[1])]
+    assert runs == case['expected_playback_runs']
+    assert [r['sub_unit_id'] for r in runs] == ['1.1', '1.2', '1.3', '1.2']
+    assert not record['editor_review']
