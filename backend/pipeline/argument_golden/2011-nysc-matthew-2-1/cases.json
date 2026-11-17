@@ -1998,7 +1998,6 @@
    "group": "G04",
    "claims": {
     "CL1": "溫柔就是謙卑，就是等候耶和華",
-    "CL2": "詩篇37篇11節「溫柔的人承受地土」對照37篇9節「等候耶和華的人承受地土」",
     "CL3": "推說自己不行是推辭，不是謙卑",
     "CL4": "等候耶和華不是坐著等",
     "CL5": "雅各書1章21節的「溫柔」是受教",
@@ -2010,7 +2009,6 @@
      "id": "k1",
      "kind": "step",
      "supports": [
-      "CL2",
       "CL1"
      ],
      "status": "draft",
@@ -2548,13 +2546,15 @@
    ],
    "claims_shorthand": {
     "CL1": "溫柔＝謙卑＝等候耶和華；謙卑是什麼",
-    "CL2": "詩37:11 ↔ 37:9",
     "CL3": "推說不會是推辭，不是謙卑",
     "CL4": "等候不是坐著等",
     "CL5": "雅1:21 溫柔＝teachable",
     "CL6": "承受地土＝蒙神之福",
     "CL7": "查經看關鍵字的前後文"
-   }
+   },
+   "notes": [
+    "2026-11-16: the 詩37:11 ↔ 37:9 comparison is Evidence for CL1, not a Claim (a comparison he uses to prove a point is Evidence)"
+   ]
   },
   {
    "group": "G05",
