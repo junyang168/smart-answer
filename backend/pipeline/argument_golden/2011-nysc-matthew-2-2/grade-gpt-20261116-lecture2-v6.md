@@ -27,3 +27,18 @@ Both are on the review page, with 4 sampled items it agreed with.
 - CL0020 「那位弟兄求……教授判斷神不會聽……因為神造男造女」 is a second wrong Claim: the reason for CL0019 split off, and written as a story. **31/33, 2 wrong Claims.**
 - Rounds 4 and 5 kept it inside the 「覺得漂亮不等於犯姦淫」 Claim, so their content grade stands; round 5's version said 「教授認為」.
 - Program wording check (new, no model): 5 Claims here report him (「教授認為／教授解為」) instead of stating his judgement — CL0003, CL0013, CL0014, CL0015, CL0020. Not counted in the score; the Claims prompt now forbids it.
+
+## Owner rulings on the review page (2026-11-16) and what they grade
+| Question | Owner | GPT | Gemini reviewer | Claude's reading |
+| --- | --- | --- | --- | --- |
+| 5:27–28 Question answered here? | open | answered (wrong) | open (right) | open |
+| 「講清楚能得釋放」 | story summary, not a Claim | Claim (wrong) | Claim (wrong) | not a Claim |
+| CL0003 舊約要求／新約要求 (sampled) | not a Claim of its own | Claim (wrong) | Claim (wrong) | Claim (wrong) |
+| CL0020 神造男造女 (owner in chat) | not a Claim of its own | Claim (wrong) | Claim (wrong) | Claim (wrong) |
+| CL0026 盡本分, CL0027 主觀 (sampled) | Claims | right | right | right |
+| Blood: one point or two | two | two (right) | — | one (wrong) |
+| 內心 and 恨人: one point or two | two | two (right) | — | one (wrong) |
+
+- **GPT on lecture 2 by the owner's rulings:** 4 wrong items (the Question, three Claims).
+- **Gemini reviewer, first held-out use:** its one flag was right (1/1); it missed the 3 wrong Claims, and 2 of the 4 items it agreed with were wrong. Sampling the agreed items is what found CL0003. It is not yet a reliable filter for Claims.
+- **My reading:** wrong on both splits; my key had both as one Claim.
