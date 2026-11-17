@@ -1431,12 +1431,11 @@
     },
     {
      "id": "s4",
-     "kind": "step",
+     "kind": "position",
+     "status": "owner",
      "supports": [
-      "CL3"
+      "P1"
      ],
-     "status": "draft",
-     "note": "Position #52–56, rebuttal #57–58; not an aside, because he answers with the inclusio",
      "sentences": [
       {
        "script_index": 93,
@@ -1473,14 +1472,26 @@
        "paragraph_alias_in_trial": "S0001",
        "trial_number": 57,
        "text": "完全是搞錯！"
-      },
+      }
+     ],
+     "note": "owner 2026-11-16: the misreading he rejects is a Position; 「完全搞錯」 is a remark against others, recorded, never primary Evidence. He answers it with the inclusio (s2)."
+    },
+    {
+     "id": "s4ct",
+     "kind": "claim_text",
+     "status": "owner",
+     "supports": [
+      "CL3"
+     ],
+     "sentences": [
       {
        "script_index": 93,
        "paragraph_alias_in_trial": "S0001",
        "trial_number": 58,
        "text": "這裡所說的哀慟的人，是跟天國有關係，他們必得安慰，也是跟天國有關係。"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16 on the review page: the closing sentence states the Claim"
     },
     {
      "id": "s5",
@@ -1963,6 +1974,9 @@
     "CL4": "首尾現在式、其餘將來式",
     "CL5": "天國＝神的國",
     "CL6": "天國現在已有，將來才完全來到"
+   },
+   "positions": {
+    "P1": "「哀慟的人有福」是說一般受苦的人將來會得安慰"
    }
   },
   {
