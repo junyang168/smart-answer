@@ -49,3 +49,6 @@ CREATE TABLE IF NOT EXISTS argument_review.rulings (
     reason text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- A question can be set aside (e.g. replaced by a rule question) without losing its answers.
+ALTER TABLE argument_review.questions ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true;

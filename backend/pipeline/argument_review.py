@@ -102,9 +102,17 @@ def ordered_sentences(group, paragraphs):
     out = []
     order = {k: i for i, k in enumerate(paragraphs)}
     for it in group['items']:
+        # An item lists its sentences in reading order, so a repeated quote is searched for
+        # after the item's previous sentence in that paragraph, not at its first occurrence.
+        after = {}
         for s in it['sentences']:
-            p = paragraphs.get(str(s['script_index']), {'text': ''})
-            out.append((order.get(str(s['script_index']), 10**6), p['text'].find(s['text']), s, it['id']))
+            index = str(s['script_index'])
+            p = paragraphs.get(index, {'text': ''})
+            at = p['text'].find(s['text'], after.get(index, 0))
+            if at < 0:
+                at = p['text'].find(s['text'])
+            after[index] = at + len(s['text']) if at >= 0 else after.get(index, 0)
+            out.append((order.get(index, 10**6), at, s, it['id']))
     return [(s, item) for _, _, s, item in sorted(out, key=lambda x: (x[0], x[1]))]
 
 
@@ -236,6 +244,35 @@ def refresh_wording(conn, questions):
     return changed
 
 
+RULE_OPTIONS = [('claim', '他在直接講上面這個觀點'), ('evidence', '他在為這個觀點提出根據'),
+                ('filler', '只是帶出下文的過場話')]
+
+
+def rule_question(cases, group_id, key, *, claim_id, focus, ask, media_url, paragraphs, options=RULE_OPTIONS, context=2):
+    """One question that settles a rule for the model: the passage is located by its sentences' text."""
+    group = next(g for g in cases['groups'] if g['group'] == group_id)
+    # No de-duplication: he repeats quotes, and the repeat belongs where he says it. The focus
+    # is the first run that starts at focus[0] and meets the rest in order, nothing skipped.
+    seq = [s for s, _ in ordered_sentences(group, paragraphs)]
+    want = [norm(t) for t in focus]
+    hits = None
+    for start, s in enumerate(seq):
+        if norm(s['text']) == want[0] and [norm(x['text']) for x in seq[start:start + len(want)]] == want:
+            hits = list(range(start, start + len(want)))
+            break
+    if hits is None:
+        raise ValueError(f'{group_id}/{key}: focus sentences are not one run in reading order')
+    lo, hi = max(0, hits[0] - context), min(len(seq), hits[-1] + context + 1)
+    times = [sentence_times(s, paragraphs) for s in seq[lo:hi]]
+    return {'question_id': question_id(cases['lecture'], group_id, 'rule:' + key), 'lecture': cases['lecture'],
+            'group_id': group_id, 'item_id': 'rule:' + key, 'kind': 'rule',
+            'payload': {'question': ask, 'options': [{'key': k, 'label': v} for k, v in options],
+                        'sentences': [{'text': s['text'], 'focus': hits[0] <= i + lo <= hits[-1]} for i, s in enumerate(seq[lo:hi])],
+                        'viewpoints': [group['claims'][claim_id]],
+                        'audio': {'url': media_url, 'start': min(t[0] for t in times if t[0] is not None),
+                                  'end': max(t[1] for t in times if t[1] is not None)}}}
+
+
 def publish_questions(conn, questions, cases_sha256):
     """Insert new questions; an existing question keeps its answers and history."""
     added = 0
@@ -357,9 +394,10 @@ def next_for(conn, reviewer):
         FROM argument_review.followups f JOIN argument_review.answers a USING (answer_id)
         WHERE a.reviewer=%s AND a.superseded_at IS NULL AND f.replied_at IS NULL ORDER BY f.followup_id LIMIT 1''',
         (reviewer,)).fetchone()
-    total = conn.execute('SELECT count(*) FROM argument_review.questions').fetchone()[0]
-    done = conn.execute('''SELECT count(DISTINCT question_id) FROM argument_review.answers
-        WHERE reviewer=%s AND superseded_at IS NULL''', (reviewer,)).fetchone()[0]
+    total = conn.execute('SELECT count(*) FROM argument_review.questions WHERE active').fetchone()[0]
+    done = conn.execute('''SELECT count(DISTINCT a.question_id) FROM argument_review.answers a
+        JOIN argument_review.questions q USING (question_id)
+        WHERE a.reviewer=%s AND a.superseded_at IS NULL AND q.active''', (reviewer,)).fetchone()[0]
     progress = {'answered': done, 'total': total}
     waiting = None if f else waiting_answer(conn, reviewer)
     if waiting:
@@ -371,7 +409,7 @@ def next_for(conn, reviewer):
         return {'mode': 'followup', 'progress': progress, 'question': q,
                 'followup': {'followup_id': f[0], 'kind': f[1], 'text': f[2], 'suggested_choice': f[3]},
                 'your_answer': {'choice': f[5], 'opinion': f[6]}}
-    row = conn.execute('''SELECT question_id FROM argument_review.questions q WHERE NOT EXISTS (
+    row = conn.execute('''SELECT question_id FROM argument_review.questions q WHERE q.active AND NOT EXISTS (
         SELECT 1 FROM argument_review.answers a WHERE a.question_id=q.question_id AND a.reviewer=%s AND a.superseded_at IS NULL)
         ORDER BY lecture, group_id, created_at, question_id LIMIT 1''', (reviewer,)).fetchone()
     if not row:
@@ -397,7 +435,7 @@ def my_answers(conn, reviewer):
 
 
 def overview(conn):
-    ids = [r[0] for r in conn.execute('SELECT question_id FROM argument_review.questions ORDER BY lecture, group_id, created_at').fetchall()]
+    ids = [r[0] for r in conn.execute('SELECT question_id FROM argument_review.questions WHERE active ORDER BY lecture, group_id, created_at').fetchall()]
     out = []
     for qid in ids:
         q = question(conn, qid)
