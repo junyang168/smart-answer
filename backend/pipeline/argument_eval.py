@@ -144,26 +144,28 @@ def statements_of(request, answer):
 
 
 def meaning_matcher(case_check, request, answer, root, ports):
-    """Jev's view of which Claims state each side's meaning: one Noul per Claim.
+    """Jev picks which one Claim, if any, states each side's meaning.
 
-    Jev only scores; ``grade`` keeps a result only when it agrees with the
-    keyword check, and lists every disagreement for a person (owner
-    2026-11-17: Jev is not used for a decision).
+    A choice among the Claims, not a score per Claim: scored one by one, Jev
+    matched any Claim on the same topic (「心裡恨人」 for 「看重內心」), so the
+    best match is asked for instead. Jev only picks; ``grade`` keeps a result
+    only when it agrees with the keyword check and lists every disagreement for
+    a person (owner 2026-11-17: Jev is not used for a decision).
     """
     from backend.pipeline import claim_flash_common as f
     table = {}
     statements = list(dict.fromkeys(statements_of(request, answer)))
     for side, field in SIDES.items():
-        if side not in case_check or field not in case_check:
+        if side not in case_check or field not in case_check or not statements:
             continue
-        questions = {f'Q{i}': {'type': 'noul', 'instructions': MEANING.replace('`claim`', f'`C{i}`')}
-                     for i in range(len(statements))}
-        if not questions:
-            continue
-        state = {'meaning': case_check[field], **{f'C{i}': s for i, s in enumerate(statements)}}
-        scores = f.jev(Path(root) / 'meaning', ports, state, questions)
+        criteria = {f'C{i}': s for i, s in enumerate(statements)}
+        criteria['none'] = '沒有任何一條說出這個意思。'
+        question = {'type': 'choice', 'criteria': criteria, 'instructions':
+                    '`meaning` 是負責人裁定的一個意思。下面每個選項是另一個模型寫的一條 Claim。哪一條說出了 `meaning` 這個意思？'
+                    '措辭可以完全不同；只說了其中一小部分、說了相反的意思，或只是談同一個題目，都不算；都不算就選 none。'}
+        pick = f.jev(Path(root) / 'meaning', ports, {'meaning': case_check[field]}, {'Q0': question})['Q0']
         for i, s in enumerate(statements):
-            table[s, side] = scores[f'Q{i}']
+            table[s, side] = float(pick == f'C{i}')
     return (lambda s, side: table.get((s, side), 0.0) >= THRESHOLD), table
 
 

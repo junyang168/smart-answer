@@ -50,3 +50,17 @@ def test_every_case_points_at_one_saved_call_and_its_words_exist():
         for c in case['checks']:
             if 'sentence' in c and c['check'] != 'record_kind':
                 ev._sentences(request, c['sentence'])
+
+
+def test_keywords_and_jev_must_agree_or_the_case_needs_a_look(monkeypatch, tmp_path):
+    """Owner 2026-11-17: Jev never passes a case alone."""
+    from backend.pipeline import argument_eval as ev
+    case = {'checks': [{'check': 'claim', 'all': ['同住'], 'meaning': '外邦人禁血只限於與猶太人同住的人'}]}
+    request = {'input': {}}
+    answer = {'candidates': [{'statement': '禁血只施於與猶太人住在一起的外邦人'}]}
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: True), {}))
+    row = ev.grade(case, request, answer, root=tmp_path, ports=object())[0]
+    assert row['keyword'] is False and row['meaning'] is True and row['pass'] is None and row['needs_look']
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: False), {}))
+    row = ev.grade(case, request, answer, root=tmp_path, ports=object())[0]
+    assert row['pass'] is False and not row['needs_look']
