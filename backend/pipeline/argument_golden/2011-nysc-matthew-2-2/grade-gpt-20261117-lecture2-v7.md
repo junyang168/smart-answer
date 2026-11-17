@@ -18,8 +18,8 @@ Code f0c95ee0 (a Claim answers a question of its own; eval set 22/22). 25 GPT ca
 Also right: Time Magazine wholly 題外話; the engineer story keeps its ending; Eph 4:13 handed back as Evidence for CL0023; no Claim reports him (「教授認為」) — the wording check finds none.
 
 ## Still wrong
-- **CL0003**, the 1 Cor 9:20 translation fix 「應理解為『我乃在基督律法之下』」, is a Claim. Key: Evidence for CL0001. It is the part of v6's CL0003 the owner ruled 「not its own」 that survived the merge; a step already carries the same reading.
-- **The audience's question** 「如何處理有時拿不出證據的聖靈感動？」 is written as a Position (反方). The owner ruled it a Question. Rounds 4–6 had it right: a regression, run-to-run.
+- **CL0003**, the 1 Cor 9:20 translation fix 「應理解為『我乃在基督律法之下』」, is a Claim. Key: Evidence for CL0001. It is the part of v6's CL0003 the owner ruled 「not its own」 that survived the merge; a step already carries the same reading. Under the question rule it can be read as answering 「林前九章二十節該怎麼譯？」, as Rom 8:4 does; open for the owner.
+- **The audience's question** 「如何處理有時拿不出證據的聖靈感動？」 is written as a Position (反方). The key calls it a Question — but that is Claude's key correction of 2026-11-16 (grade-gpt-20261116-lecture2.md), not an owner ruling; the reading first had it as a Position. Rounds 4–6 wrote a Question. Open for the owner.
 - Half: Rom 8:4 (CL0005) carries the 「verses that seem to require the law are the overlap」 Claim with it. Counted right, as the content is there.
 
 Neither shape is in the eval set yet.
