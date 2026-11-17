@@ -98,3 +98,11 @@ def test_owner_golden_unit1_keeps_resumed_argument_in_original_source_order():
     assert runs == case['expected_playback_runs']
     assert [r['sub_unit_id'] for r in runs] == ['1.1', '1.2', '1.3', '1.2']
     assert not record['editor_review']
+    from backend.pipeline.chapter_argument_selection import evaluate
+    assert evaluate(record, case)['passed']
+    # A prompt that moves law into Beatitudes must fail, as must reordered playback.
+    record['raw_decisions'][-1]['placement'] = 'direct'
+    assert not evaluate(record, case)['passed']
+    record['raw_decisions'][-1]['placement'] = 'omit'
+    record['pieces'][3], record['pieces'][4] = record['pieces'][4], record['pieces'][3]
+    assert not evaluate(record, case)['passed']

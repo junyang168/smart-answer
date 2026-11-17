@@ -99,7 +99,8 @@ def compile_selection(chapter, target_section, topics, paragraphs, owners, answe
         row = decisions[owners[key]]
         uid = f'U{len(pieces)+1:03d}'
         pieces.append({'id': uid, 'start': float(para['start_time']), 'end': float(para['end_time']),
-                       'text': para['text'], 'argument_group_id': owners[key]})
+                       'text': para['text'], 'argument_group_id': owners[key],
+                       'source_paragraph_key': key})
         keep = row['placement'] != 'omit'
         expanded.append({'id': uid, 'keep': keep, 'verses': [target_section] if keep else [],
                          'kind': '釋經' if keep else None, 'reason': row['reason'],
@@ -132,6 +133,16 @@ def evaluate(record, case):
         if expected.get('editor_review_empty') and row and row['editor_review'].strip():
             checks[-1]['pass'] = False
             checks[-1]['unexpected_editor_review'] = row['editor_review']
+    if 'expected_playback_runs' in case:
+        from itertools import groupby
+        sub_units = {s['group_id']: s['id'] for s in case['sub_units']}
+        kept = [(p.get('source_paragraph_key'), sub_units.get(p['argument_group_id']))
+                for p, d in zip(record['pieces'], record['decisions'], strict=True) if d['keep']]
+        runs = [{'sub_unit_id': sid, 'paragraphs': [key for key, _ in rows]}
+                for sid, rows in groupby(kept, key=lambda row: row[1])]
+        checks.append({'meaning': 'Owner golden Sub-unit playback order and complete source coverage',
+                       'actual': runs, 'expected': case['expected_playback_runs'],
+                       'pass': runs == case['expected_playback_runs']})
     return {'passed': all(c['pass'] for c in checks), 'checks': checks,
             'held_for_later': case.get('held_for_later')}
 

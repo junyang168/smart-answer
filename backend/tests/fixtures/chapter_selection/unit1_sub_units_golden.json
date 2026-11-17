@@ -151,5 +151,34 @@
       ]
     }
   ],
-  "timing_note": "Paragraph envelopes, not approved precise audio cuts; durations are descriptive, not golden timing requirements."
+  "timing_note": "Paragraph envelopes, not approved precise audio cuts; durations are descriptive, not golden timing requirements.",
+  "expected": {
+    "G001": {
+      "accepted_placements": [
+        "context"
+      ],
+      "meaning": "第一讲完整结构说明已定归5:1–12，包含门徒使命后半，不再重复请人决定",
+      "editor_review_empty": true
+    },
+    "G002": {
+      "accepted_placements": [
+        "direct"
+      ],
+      "meaning": "八福如何顯明彌賽亞身份，包括跨卷經文及兩次對照，整組選入"
+    },
+    "G003": {
+      "accepted_placements": [
+        "direct",
+        "context"
+      ],
+      "meaning": "溫柔的講解服務於太5:5，整組選入，保留詩篇與雅各書"
+    },
+    "G004": {
+      "accepted_placements": [
+        "omit"
+      ],
+      "meaning": "律法的成全及是否遵行摩西律法屬太5:17起，整組排除"
+    }
+  },
+  "prompt_change_policy": "Changing selection prompts requires a fresh model answer evaluated against this owner-approved case. Replaying old answers or mechanical tests alone does not establish semantic regression safety. Do not change expected results to accommodate model drift; golden changes require owner approval."
 }
