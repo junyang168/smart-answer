@@ -52,12 +52,6 @@ def test_every_topic_must_have_exactly_one_choice(error):
         compile(topics, paragraphs, owners, answer)
 
 
-def test_prompt_teaches_cross_reference_and_whole_topic_boundaries():
-    assert 'context' in RULES and '整組保留為引言' in RULES
-    assert '三層結論' in RULES and '經文相交' not in RULES
-    assert '經文清單包含被解釋的經文和用作證據的經文' in RULES
-
-
 def test_eval_catches_wrong_placement_and_a_partially_kept_topic():
     from backend.pipeline.chapter_argument_selection import evaluate
     record = compile(*material())
@@ -70,3 +64,13 @@ def test_eval_catches_wrong_placement_and_a_partially_kept_topic():
     record['decisions'][1]['keep'] = True
     record['raw_decisions'][0]['placement'] = 'omit'
     assert not evaluate(record, case)['passed']
+
+
+def test_settled_structure_must_not_be_sent_for_owner_review_again():
+    from backend.pipeline.chapter_argument_selection import evaluate
+    record = compile(*material())
+    case = {'lecture': '測試', 'target_section': 'mat-5-1-12', 'expected': {
+        'G001': {'accepted_placements': ['context'], 'meaning': '已定整組結構背景', 'editor_review_empty': True}}}
+    assert not evaluate(record, case)['passed']
+    record['raw_decisions'][0]['editor_review'] = ''
+    assert evaluate(record, case)['passed']

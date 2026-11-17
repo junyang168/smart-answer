@@ -1,0 +1,14 @@
+{
+  "target_section": "mat-5-17-20",
+  "lecture": "2011 NYSC 專題：馬太福音釋經（二）2",
+  "authority": "Owner clarification 2026-11-17; chapter listening solution sections 4.1–4.4; preserve complete evidence serving Matthew exposition",
+  "expected": {
+    "G001": {"accepted_placements": ["direct"], "editor_review_empty": true, "meaning": "两种律法回答太5:19–20的诫命问题"},
+    "G002": {"accepted_placements": ["context", "direct"], "editor_review_empty": true, "meaning": "徒15会议作为摩西律法问题的完整论据保留"},
+    "G003": {"accepted_placements": ["context", "direct"], "editor_review_empty": true, "meaning": "四项禁戒解释何以不在摩西律法之下，随太5:17–20保留"},
+    "G004": {"accepted_placements": ["omit"], "meaning": "淫念、离婚的明日预告不充当本段完成的释经"},
+    "G005": {"accepted_placements": ["omit"], "meaning": "媒体评论不因主题相邻而收入本段"},
+    "G006": {"accepted_placements": ["direct"], "editor_review_empty": true, "meaning": "5:20的义及其动怒等例子保持同组"},
+    "G007": {"accepted_placements": ["omit"], "meaning": "一般圣灵与证据问答没有直接解释本段，排除"}
+  }
+}

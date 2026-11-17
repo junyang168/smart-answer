@@ -9,17 +9,29 @@ from pathlib import Path
 from backend.pipeline import chapter_exposition as exposition
 from backend.pipeline.source_projection import project_script
 
-RULES = '''依論證層為目標經文選材，一個頂層論證主題（group）是一個不可拆開的選材單位。
-先理解本組在回答什麼問題、主要結論、論據怎樣接到結論，再判斷整組是否服務於 target_section。
-- direct：整組直接解釋目標經文，保留完整主題及其論據。
-- context：整組提供理解目標經文所需的背景或整體結構，整組保留為引言／背景。即使講到目標範圍以外的經文，也不得從組內切掉。
-- omit：整組在回答別的問題，不納入目標小節。
-經文清單包含被解釋的經文和用作證據的經文，不可只憑章節相交或起點決定。
-整體結構主題如「先彌賽亞身份，再門徒使命」只可整組保留或整組排除，不能只保留講八福的半段。
-同樣，若一組在解釋七章十二節、十三至二十七節、二十八至二十九節的三層結論，不因它提到登山寶訓或五章就放入八福。
-context 的取捨是編輯提案：editor_review 寫明需同工確認的具體整組取捨；沒有疑義則空字串。
-不修改論點、不重新生成論據、不刪改原文，不以其他組的相似主題取代本組。
-每組恰好返回一次 group_id、placement、reason、editor_review，不提供句子／片段級的刪選。'''
+RULES = '''你在為 NYSC 馬太福音釋經系列的按章聆聽頁選材。頁面按經文次序組織；target_section 是本次要處理的和合本小段，chapter_sections 是既有分段。
+輸入包括這一講完整頂層論證、Claim 的 scripture_refs、論據作用、對應原文及本章經文。讀完前後文，判斷教授藉這一整組在解釋哪段馬太福音，然後決定是否放入 target_section。
+
+判斷順序：
+1. 看教授正在回答什麼經文問題，以及理由和結論怎樣相連。scripture_refs 經常只記他用來作證據的經文；不能把它當主解經文，也不能只按書卷、章節相交或範圍起點判歸屬。
+2. 引別卷書、問答、故事、原文字詞或新舊約背景，只要實際用來解釋目標小段，就是這段釋經的一部分。要連同完整論證保留，不按引用的書卷另分，也不能因原文轉讀別卷就判離題。反之，主題相似而沒有服務目標經文的獨立討論，整組排除。
+3. 每個完整頂層論證組是最小取捨單位，只屬輸入的這一講。不可重新按題材分組、跨講合組，或把同一組分給幾個頁面。跨幾個小標題或經文小段仍是同一論證時，整組判歸屬；不要為了吻合 target_section 截取一半。
+4. 使用 chapter_sections 的既有分段，不新增 overview 或使徒行傳等額外的選材分類。每個小段下仍保留各講自己的完整材料。已定的經文歸屬沿用，不能因為提到別處經文就改掉。
+5. 一般問答須直接關乎目標經文才收；沒有實際解釋的預告不算已完成釋經。教授尚未回答的問題保留為未回答，不借下一講或一般知識補答案。
+
+placement：
+- direct：本組直接講解目標小段，整組保留。
+- context：本組是解釋目標小段所需的完整背景、證據或結構引言，整組保留。它也是本段釋經材料。
+- omit：本組屬另一個既定小段、獨立離題討論或尚未展開的預告，不納入本小節。
+
+既定案例與判準：
+- 2011 馬太福音釋經（二）第一講，開頭完整的「先彌賽亞身份，再門徒使命」結構說明，已定歸 5:1–12。即使後半講到 5:13–7:29 仍整組保留；其他目標小段不再重複取它。此項不再請人重新批准。
+- 用雅各書或詩篇說明八福的溫柔，隨太5:1–12保留。用約、摩西律法與基督律法、徒15會議及四項禁戒，回答太5:17–20的律法問題時，整組作本段論據保留；按實際原文作用判斷，不把所有徒15討論都固定歸馬太。
+- 若一組實際在說明七章十二節、十三至二十七節、二十八至二十九節的三層結論，不能僅因提到整個登山寶訓就放進八福。
+
+reason 指出本組原文實際在回答的馬太經文問題，以及為何 direct/context/omit。editor_review 只記原文和既有規則仍不能決定的具體整組取捨；已定案例、跨卷引用或 context 分類本身不構成待人工理由，沒有疑義傳空字串。
+每組恰好返回一次 group_id、placement、reason、editor_review。不提供句子／片段級刪選，不改論點、論據或原文。'''
+
 SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['groups'], 'properties': {
     'groups': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
         'required': ['group_id', 'placement', 'reason', 'editor_review'], 'properties': {
@@ -117,6 +129,9 @@ def evaluate(record, case):
                                     and len(expanded) == len(pieces) and expanded
                                     and all(d['keep'] == (row['placement'] != 'omit') for d in expanded)),
                        'meaning': expected['meaning']})
+        if expected.get('editor_review_empty') and row and row['editor_review'].strip():
+            checks[-1]['pass'] = False
+            checks[-1]['unexpected_editor_review'] = row['editor_review']
     return {'passed': all(c['pass'] for c in checks), 'checks': checks,
             'held_for_later': case.get('held_for_later')}
 
@@ -128,7 +143,14 @@ def decide(chapter, target_section, *, conn, change_set_id, data_base_dir, clien
     if document["title"] != lecture:
         raise ValueError("ChangeSet 與指定講道不同")
     root = Path(data_base_dir).parent / 'selection'
-    request = {'target_section': target_section, 'lecture': document['title'], 'topics': topics}
+    from backend.api.config import DATA_BASE_PATH
+    from backend.pipeline.chapter_material import verse_range
+    from backend.pipeline.original_audio_index import verse_texts
+    book, number, low, high = verse_range(chapter.passage)
+    request = {'series': chapter.series, 'chapter_sections': list(chapter.sections),
+               'chapter_verses': verse_texts(DATA_BASE_PATH, book, number, low, high),
+               'target_section': target_section, 'source_id': document['source_id'],
+               'lecture': document['title'], 'topics': topics}
     frozen = {'system': RULES, 'request': request, 'schema': SCHEMA}
     root.mkdir(parents=True, exist_ok=True)
     request_path, answer_path = root / 'input.json', root / 'answer.json'
