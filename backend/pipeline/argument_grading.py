@@ -200,7 +200,9 @@ def grade_group(group, records, own, proposed=None):
                 verdict, detail = 'missed', f"{len(held & want)}/{len(want)} sentences in {", ".join(sorted(kinds))}"
         elif it['kind'] == 'claim_text':
             in_records = {s for cov in records.values() for s in cov}
-            loose = want - owned - (in_records if 'step' in it.get('accept_kind', []) else set())
+            # A bare pause (「可是什麼呢？」) may be filler or join the answer; it is never what is lost.
+            optional = {k for k in want if any(norm(x) == k[1] for x in it.get('optional_sentences', []))}
+            loose = want - owned - optional - (in_records if 'step' in it.get('accept_kind', []) else set())
             if loose:
                 verdict, detail = 'missed', f'{len(loose)}/{len(want)} sentences are not a Claim\'s own words'
         elif it['kind'] == 'aside' and proposed is not None and len(want & proposed) < COVERED * len(want):
