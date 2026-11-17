@@ -27,7 +27,10 @@ RULE = ('他是口語講課，這不是法律條文：措辭、語氣、詳略�
         '只問一件事：這句話有沒有改變他的判斷（說成相反、說得比他確定或更廣、換了對象），'
         '或加上一個他沒有說的判斷、理由或結論。引述別人的看法時，照實寫成別人的看法也不算改變。')
 INSTRUCTION = ('你核對另一個模型從講道逐字稿寫出的記錄。每個工作給出記錄的種類（kind）、它寫的一句話（statement），'
-               '和這條記錄所根據的他的原話（his_words）。\n' + RULE + '\n'
+               '這條記錄所根據的他的原話（his_words），和同一段論證裡他前後的話（context）。'
+               '判斷以 his_words 為主；statement 裡的話若在 context 裡他說過，不算添加。\n' + RULE + '\n'
+               'kind 為 Position 時，statement 寫的是別人的看法，本來就不是他的判斷，他反駁它也不寫進 statement：'
+               '只問 statement 是否照實寫出了別人的看法，沒有說得比別人更多或不同。\n'
                '- faithful：沒有改變也沒有添加。\n- changed：改變了他的判斷。\n- added：加上了他沒有說的判斷、理由或結論。\n'
                'changed 和 added 都要在 detail 寫出是哪幾個字，並引他原話中對應的一句（沒有對應就寫「無」）。')
 SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['items'], 'properties': {'items': {
@@ -35,12 +38,15 @@ SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['items']
         'required': ['job_id', 'verdict', 'detail'], 'properties': {
             'job_id': {'type': 'string'}, 'verdict': {'type': 'string', 'enum': ['faithful', 'changed', 'added']},
             'detail': {'type': 'string'}}}}}}
-JEV_QUESTION = ('`statement` 是另一個模型根據 `his_words` 寫的一句話。' + RULE +
+JEV_QUESTION = ('`statement` 是另一個模型根據 `his_words` 寫的一句話，`kind` 是記錄種類，`context` 是同一段論證裡他前後的話；'
+                'statement 裡的話若在 context 裡他說過，不算添加。kind 為 Position 時 statement 寫的是別人的看法，'
+                '只問是否照實寫出別人的看法。' + RULE +
                 '這句話改變了他的判斷，或加上了他沒有說的判斷的可能性有多大？')
 LIKELY = 0.5   # a Jev score at or above this, against GPT's 'faithful', needs a look
 KINDS = (('claims', 'claim_id', 'title', 'Claim'), ('evidence_steps', 'evidence_step_id', 'statement', 'Evidence'),
          ('observations', 'observation_id', 'statement', 'Observation'),
          ('position_nodes', 'position_id', 'title', 'Position'), ('questions', 'question_id', 'text', 'Question'))
+GROUP = __import__('re').compile(r'-P\d+-')
 MAX_WORDS = 4000  # characters of his words per record; a Claim's whole argument rarely needs more
 
 
@@ -57,18 +63,22 @@ def records(candidate):
             if not ids:
                 raise ValueError(f'{r[key]}: no SourceFragment to check it against')
             words = '\n'.join(text[i] for i in ids)
+            # The rest of the same argument group: a Claim or a step may state what he said a few sentences away.
+            groups = {m.group(0) for i in ids for m in [GROUP.search(i)] if m}
+            near = '\n'.join(t for fid, t in text.items() if fid not in ids and any(g in fid for g in groups))
             out.append({'job_id': r[key], 'kind': label, 'statement': r[field],
                         'his_words': words if len(words) <= MAX_WORDS else words[:MAX_WORDS] + '……',
+                        'context': near if len(near) <= MAX_WORDS else near[:MAX_WORDS] + '……',
                         'group': r[key].rsplit('-', 2)[-2] if '-P' in r[key] else 'claims'})
     return out
 
 
-def check(candidate, root, ports, *, jev=True):
+def check(candidate, root, ports, *, jev=True, only=None):
     from backend.pipeline import claim_flash_common as f
-    rows = records(candidate)
+    rows = [r for r in records(candidate) if only is None or r['job_id'] in only]
     decided = {}
     for batch, reply in f.gpt(Path(root) / 'gpt', ports, 'statement_fidelity_check',
-                              [{k: r[k] for k in ('job_id', 'kind', 'statement', 'his_words')} for r in rows],
+                              [{k: r[k] for k in ('job_id', 'kind', 'statement', 'his_words', 'context')} for r in rows],
                               SCHEMA, INSTRUCTION, semantic_review=False):
         asked = {j['job_id'] for j in batch}
         decided.update({i['job_id']: i for i in reply['items'] if i['job_id'] in asked})
@@ -77,7 +87,8 @@ def check(candidate, root, ports, *, jev=True):
     scores = {}
     if jev:
         for r in rows:
-            scores[r['job_id']] = f.jev(Path(root) / 'jev', ports, {'statement': r['statement'], 'his_words': r['his_words']},
+            scores[r['job_id']] = f.jev(Path(root) / 'jev', ports, {'kind': r['kind'], 'statement': r['statement'],
+                                                                     'his_words': r['his_words'], 'context': r['context']},
                                         {'Q0': {'type': 'noul', 'instructions': JEV_QUESTION}})['Q0']
     return report(rows, decided, scores)
 
@@ -128,6 +139,7 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--count', action='store_true', help='only count the records and the calls; no model call')
     p.add_argument('--no-jev', action='store_true')
+    p.add_argument('--recheck', help='an earlier fidelity.json: re-ask only its findings and looks; the rest passed a stricter check')
     a = p.parse_args()
     load_dotenv('.env')
     candidate = json.loads(Path(a.candidate).read_text())
@@ -139,10 +151,14 @@ def main():
     client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
     client.capture_usage_events = True  # codex --json reports token usage
     ports = Models(client, Path(a.out))
-    result = check(candidate, a.out, ports, jev=not a.no_jev)
+    only = None
+    if a.recheck:
+        earlier = json.loads(Path(a.recheck).read_text())
+        only = {f['id'] for f in earlier['findings'] + earlier['needs_look']}
+    result = check(candidate, a.out, ports, jev=not a.no_jev, only=only)
     result['usage'] = usage(a.out)
     Path(a.out).mkdir(parents=True, exist_ok=True)
-    (Path(a.out) / 'fidelity.json').write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    (Path(a.out) / ('fidelity-recheck.json' if a.recheck else 'fidelity.json')).write_text(json.dumps(result, ensure_ascii=False, indent=1))
     print(json.dumps(result, ensure_ascii=False, indent=1))
 
 
