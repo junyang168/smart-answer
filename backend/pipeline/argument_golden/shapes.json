@@ -12,7 +12,7 @@
   {"id": "L1-G03-cover-and-parts", "shape": "蓋子與各部分", "use": "train", "confirmed": true,
    "ruling": "owner key lecture 1 G03 CL1–CL3: inclusio (CL2) and the middle blessings (CL3) are separate Claims under the cover",
    "run": "gpt-20261116-lecture1-v5/g03/creation", "group": "G001", "stage": "claims",
-   "checks": [{"check": "apart", "a": ["首尾"], "b": ["哀慟"]}, {"check": "claim", "all": ["已經", "將來"]}]},
+   "checks": [{"check": "apart", "a": ["首尾"], "b": ["中間"]}, {"check": "claim", "all": ["已經", "將來"]}]},
   {"id": "L1-G03-cover-not-restatement", "shape": "蓋子與各部分", "use": "train", "confirmed": true,
    "ruling": "owner key lecture 1 G03 CL1 is the cover; lecture1-v4 handed it back as a restatement",
    "run": "gpt-20261116-lecture1-v4/g03/creation", "group": "G001", "stage": "steps",
