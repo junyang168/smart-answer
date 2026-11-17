@@ -76,3 +76,44 @@ def test_preview_api_reports_changed_material_instead_of_silently_falling_back(m
     with pytest.raises(HTTPException) as error:
         index('mat-6-1-34', units=True)
     assert error.value.status_code == 404
+
+
+def timing_example():
+    from backend.pipeline import chapter_slides
+    from backend.pipeline.chapter_material import CHAPTERS
+    selection = {'passage': 'mat-5-1-48',
+                 'pieces': [{'id': 'U001', 'text': '甲。乙。丙。', 'start': 0, 'end': 300}],
+                 'decisions': [{'id': 'U001', 'keep': True}]}
+    raw = [{'first': 'S0001', 'title': '測試', 'verses': '5:1-12',
+            'points': [{'sentence': 'S0001', 'text': '甲'}, {'sentence': 'S0003', 'text': '乙'}],
+            'scriptures': [], 'inline_notes': []}]
+    problems, _, normalized = chapter_slides.checked(raw, chapter_slides.kept_pieces(selection), CHAPTERS['mat-5-1-48'], None)
+    assert not problems
+    record = {'raw_slides': raw, 'slides': normalized}
+    review = {'blocking': True, 'findings': [{'kind': '出現時間', 'slide': 'S0001',
+              'current_sentence': 'S0003', 'proposed_sentence': 'S0002', 'timing_blocks': True}]}
+    return selection, record, review
+
+
+def test_reviewer_prescribed_timing_is_mechanical_and_keeps_original_words_and_verdict():
+    from backend.pipeline.chapter_listening_units import reviewed_timing
+    selection, record, review = timing_example()
+    before = copy.deepcopy((record, review))
+    derived, corrections = reviewed_timing(record, review, selection)
+    assert derived['slides'][0]['points'][1] == {'sentence': 'S0002', 'text': '乙'}
+    assert len(corrections) == 1
+    assert (record, review) == before
+    for old, new in zip(record['slides'], derived['slides'], strict=True):
+        assert old['title'] == new['title']
+        assert [p['text'] for p in old['points']] == [p['text'] for p in new['points']]
+        assert old['scriptures'] == new['scriptures']
+
+
+@pytest.mark.parametrize('fault', ['content', 'unknown_target', 'ambiguous'])
+def test_timing_projection_cannot_resolve_content_or_guess_an_anchor(fault):
+    from backend.pipeline.chapter_listening_units import reviewed_timing
+    selection, record, review = timing_example()
+    if fault == 'content': review['findings'][0]['kind'] = '忠實'
+    if fault == 'unknown_target': review['findings'][0]['proposed_sentence'] = 'S9999'
+    if fault == 'ambiguous': record['slides'][0]['points'].append(record['slides'][0]['points'][1].copy())
+    with pytest.raises(ValueError): reviewed_timing(record, review, selection)

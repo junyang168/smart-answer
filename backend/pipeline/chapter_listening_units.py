@@ -7,12 +7,56 @@ and saved slides remain unchanged. It is opt-in until owner acceptance.
 from __future__ import annotations
 
 from itertools import groupby
+from copy import deepcopy
 import json
 from pathlib import Path
 
 from backend.pipeline import chapter_exposition as exposition, chapter_slides
 from backend.pipeline import original_audio_index as audio
 from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
+
+
+def reviewed_timing(slides: dict, review: dict, selection: dict) -> tuple[dict, list]:
+    """Apply only the reviewer's unambiguous sentence-anchor prescriptions.
+
+    Original model slides and verdict remain immutable. No reader-visible words
+    change; checked() validates the full derived result against the same source.
+    Content findings and ambiguous or out-of-slide anchors remain blocked.
+    """
+    derived = deepcopy(slides)
+    corrections = []
+    lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+    positions = {line['id']: i for i, line in enumerate(lines)}
+    for finding in review['findings']:
+        if not chapter_slides.finding_blocks(finding):
+            continue
+        if finding['kind'] != '出現時間':
+            raise ValueError('Supplement still has unresolved content findings')
+        own = [s for s in derived['slides'] if s['first'] == finding['slide']]
+        now, proposed = finding['current_sentence'], finding['proposed_sentence']
+        if len(own) != 1 or proposed not in positions:
+            raise ValueError('Reviewer timing target is not uniquely located')
+        slide = own[0]
+        points = [p for p in slide['points'] if p['sentence'] == now]
+        if (len(points) != 1 or not positions[slide['first']] <= positions[proposed] <= positions[slide['last']]):
+            raise ValueError('Reviewer timing target is ambiguous or outside this slide')
+        points[0]['sentence'] = proposed
+        raw_slide = next(s for s in derived['raw_slides'] if s['first'] == finding['slide'])
+        raw_point = [p for p in raw_slide['points'] if p['sentence'] == now and p['text'] == points[0]['text']]
+        if len(raw_point) != 1:
+            raise ValueError('Raw and normalized timing anchors disagree')
+        raw_point[0]['sentence'] = proposed
+        corrections.append({'slide': finding['slide'], 'text': points[0]['text'],
+                            'from_sentence': now, 'to_sentence': proposed})
+    if corrections:
+        from backend.pipeline.chapter_material import CHAPTERS
+        problems, _, checked = chapter_slides.checked(
+            derived['raw_slides'], chapter_slides.kept_pieces(selection), CHAPTERS[selection['passage']], None)
+        if problems or checked != derived['slides']:
+            raise ValueError(f'Reviewed timing correction failed source checks: {problems}')
+    elif chapter_slides.review_blocks_publication(review):
+        raise ValueError('Blocking review has no mechanically resolvable timing prescription')
+    return derived, corrections
 
 
 def project(plan: dict, recordings: dict) -> dict:
@@ -81,6 +125,7 @@ def build(data_root: Path, passage: str) -> dict:
     path = data_root / 'chapter_exposition' / passage / 'listening-units.json'
     plan = json.loads(path.read_text())
     recordings = {}
+    timing_corrections = []
     sermons = audio.Sermons(data_root)
     for entry in plan['inputs']:
         title, source = entry['lecture'], entry['source_id']
@@ -108,9 +153,10 @@ def build(data_root: Path, passage: str) -> dict:
             review = json.loads((supplement_root / f'{title}.review.json').read_text())
             if (extra['transcript_sha256'] != entry['source_sha256']
                     or extra_slides['decisions_sha256'] != exposition.file_sha256(extra_selection_path)
-                    or review['slides_sha256'] != exposition.file_sha256(extra_slides_path)
-                    or chapter_slides.review_blocks_publication(review)):
-                raise ValueError('Supplement does not have a matching source and passing review')
+                    or review['slides_sha256'] != exposition.file_sha256(extra_slides_path)):
+                raise ValueError('Supplement does not have matching source and review bindings')
+            extra_slides, corrections = reviewed_timing(extra_slides, review, extra)
+            timing_corrections.extend({'source_id': source, **c} for c in corrections)
             _, additional = chapter_slides.placed(extra, extra_slides)
             timed = sorted(timed + additional, key=lambda slide: slide['at'])
         recordings[source] = {
@@ -119,4 +165,6 @@ def build(data_root: Path, passage: str) -> dict:
             # while the old kept sentence IDs still position the reused slides.
             'lines': chapter_slides.sentences(selection['pieces']),
             'slides': timed, 'retime': audio.retimer(sermon, data_root)}
-    return project(plan, recordings)
+    result = project(plan, recordings)
+    result['program_timing_corrections'] = timing_corrections
+    return result
