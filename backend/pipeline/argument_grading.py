@@ -192,10 +192,12 @@ def grade_group(group, records, own, proposed=None):
                     verdict, detail = 'partial', f'{rid[1]} holds {len(got)}/{len(want)} sentences'
         elif it['kind'] in KIND_RECORDS:
             # A Question he raises or a Position he answers is its own record, not Evidence.
-            collection = KIND_RECORDS[it['kind']]
-            held = set().union(*(cov for rid, cov in records.items() if rid[0] == collection))
+            kinds = {KIND_RECORDS[it['kind']]} | {KIND_RECORDS[k] for k in it.get('accept_kind', []) if k in KIND_RECORDS}
+            held = set().union(*(cov for rid, cov in records.items() if rid[0] in kinds))
+            if 'claim_text' in it.get('accept_kind', []):
+                held |= owned
             if len(held & want) < COVERED * len(want):
-                verdict, detail = 'missed', f"{len(held & want)}/{len(want)} sentences in {collection}"
+                verdict, detail = 'missed', f"{len(held & want)}/{len(want)} sentences in {", ".join(sorted(kinds))}"
         elif it['kind'] == 'claim_text':
             in_records = {s for cov in records.values() for s in cov}
             loose = want - owned - (in_records if 'step' in it.get('accept_kind', []) else set())

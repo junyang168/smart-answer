@@ -16,7 +16,7 @@
      "kind": "step",
      "supports": [],
      "status": "owner",
-     "note": "background: 五1 sat down to teach as rabbis did; one or two records are both right",
+     "note": "background: 五1 sat down to teach as rabbis did; one or two records are both right; the opening 「我們今年呢…」 is an introduction and may be left out",
      "sentences": [
       {
        "script_index": 17,
@@ -43,7 +43,14 @@
        "text": "當時猶太人的拉比，他們來教導的時候，拉比是坐著，這是他們教導的那個次序。"
       }
      ],
-     "max_records": 2
+     "max_records": 2,
+     "accept": [
+      [
+       "那個原因呢，就是第五章第一節那裡說：「耶穌看見這許多的人，就上了山，既已坐下，門徒到他跟前來。」",
+       "所以啊，這裡就跟我們提到這個登山寶訓的這個背景。",
+       "當時猶太人的拉比，他們來教導的時候，拉比是坐著，這是他們教導的那個次序。"
+      ]
+     ]
     },
     {
      "id": "part1",
@@ -2988,9 +2995,27 @@
        "paragraph_alias_in_trial": "S0001",
        "trial_number": 67,
        "text": "不要了。"
+      },
+      {
+       "script_index": 843,
+       "paragraph_alias_in_trial": "S0002",
+       "trial_number": 123,
+       "text": "耶穌既然來，為我們獻了一次永遠有效的贖罪祭，所以我們今天不必再獻贖罪祭，雖然摩西律法說要獻贖罪祭。"
+      },
+      {
+       "script_index": 843,
+       "paragraph_alias_in_trial": "S0002",
+       "trial_number": 124,
+       "text": "你今天要不要再遵行摩西律法去獻贖罪祭？"
+      },
+      {
+       "script_index": 843,
+       "paragraph_alias_in_trial": "S0002",
+       "trial_number": 125,
+       "text": "不要了嘛！"
       }
      ],
-     "note": "by the owner rule of 2026-11-16 (Mark 7:19 ruling): answered on the spot, so Evidence for CL3"
+     "note": "by the owner rule of 2026-11-16 (Mark 7:19 ruling): answered on the spot, so Evidence for CL3; owner rule: 「耶穌既然來…不要了嘛！」 restates Heb 10 and answers on the spot, so it is this Evidence"
     },
     {
      "id": "p7",
@@ -3130,15 +3155,12 @@
        "paragraph_alias_in_trial": "S0001",
        "trial_number": 74,
        "text": "那不是矛盾嗎？"
-      },
-      {
-       "script_index": 715,
-       "paragraph_alias_in_trial": "S0001",
-       "trial_number": 75,
-       "text": "有沒有看到問題？"
       }
      ],
-     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
+     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim.; 「如果你把這一節聖經唸成這樣子，出問題了」 may sit with the Position it rebuts",
+     "accept_kind": [
+      "position"
+     ]
     },
     {
      "id": "tension2",
@@ -3177,24 +3199,6 @@
        "paragraph_alias_in_trial": "S0002",
        "trial_number": 122,
        "text": "耶穌剛才說，耶穌潔淨了一些食物，你不必再遵行摩西律法的要求，要分得潔淨不潔淨的東西。"
-      },
-      {
-       "script_index": 843,
-       "paragraph_alias_in_trial": "S0002",
-       "trial_number": 123,
-       "text": "耶穌既然來，為我們獻了一次永遠有效的贖罪祭，所以我們今天不必再獻贖罪祭，雖然摩西律法說要獻贖罪祭。"
-      },
-      {
-       "script_index": 843,
-       "paragraph_alias_in_trial": "S0002",
-       "trial_number": 124,
-       "text": "你今天要不要再遵行摩西律法去獻贖罪祭？"
-      },
-      {
-       "script_index": 843,
-       "paragraph_alias_in_trial": "S0002",
-       "trial_number": 125,
-       "text": "不要了嘛！"
       }
      ],
      "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
@@ -3284,12 +3288,6 @@
       {
        "script_index": 715,
        "paragraph_alias_in_trial": "S0001",
-       "trial_number": 82,
-       "text": "有沒有聽懂？"
-      },
-      {
-       "script_index": 715,
-       "paragraph_alias_in_trial": "S0001",
        "trial_number": 83,
        "text": "因為耶穌自己明講，你看喔，「眾先知和律法說預言，到約翰為止。」"
       },
@@ -3324,12 +3322,6 @@
        "text": "可是耶穌來了之後，我們要不要再遵守摩西的律法？"
       },
       {
-       "script_index": 715,
-       "paragraph_alias_in_trial": "S0001",
-       "trial_number": 89,
-       "text": "有沒有想到這個問題？"
-      },
-      {
        "script_index": 843,
        "paragraph_alias_in_trial": "S0002",
        "trial_number": 126,
@@ -3342,7 +3334,10 @@
        "text": "怎麼處理？"
       }
      ],
-     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
+     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim.; 「那耶穌沒有廢掉律法，沒錯」「律法的一點一畫不會落空」 are his assertions and may be a Claim's own words",
+     "accept_kind": [
+      "claim_text"
+     ]
     },
     {
      "id": "other",
@@ -3481,6 +3476,24 @@
        "paragraph_alias_in_trial": "S0002",
        "trial_number": 111,
        "text": "對不對？"
+      },
+      {
+       "script_index": 715,
+       "paragraph_alias_in_trial": "S0001",
+       "trial_number": 75,
+       "text": "有沒有看到問題？"
+      },
+      {
+       "script_index": 715,
+       "paragraph_alias_in_trial": "S0001",
+       "trial_number": 82,
+       "text": "有沒有聽懂？"
+      },
+      {
+       "script_index": 715,
+       "paragraph_alias_in_trial": "S0001",
+       "trial_number": 89,
+       "text": "有沒有想到這個問題？"
       }
      ]
     }
