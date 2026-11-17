@@ -2530,7 +2530,6 @@
   {
    "group": "G05",
    "claims": {
-    "CL1": "五章17–19節說律法一點一畫都不能廢，耶穌卻改變了食物和獻祭的規定，兩者有張力",
     "CL2": "五章18節原文是「直到成全」",
     "CL3": "摩西律法有一部分今天不再遵守",
     "CL4": "讀經要用理性"
@@ -2603,12 +2602,11 @@
     },
     {
      "id": "pos",
-     "kind": "step",
+     "kind": "position",
      "supports": [
-      "CL2",
-      "CL1"
+      "P1"
      ],
-     "status": "draft",
+     "status": "owner",
      "sentences": [
       {
        "script_index": 715,
@@ -2658,7 +2656,8 @@
        "trial_number": 70,
        "text": "很多人把這一節聖經唸成這樣子。"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: a Position held by others; CL2 「直到成全」 answers it"
     },
     {
      "id": "p3",
@@ -3068,28 +3067,11 @@
     },
     {
      "id": "tension",
-     "kind": "step",
+     "kind": "question",
      "supports": [
-      "CL1"
+      "Q1"
      ],
-     "status": "draft",
-     "accept": [
-      [
-       "如果你把這一節聖經唸成這樣子，出問題了，對不對？",
-       "耶穌說：「天地都廢去了，律法的一點一畫也不能廢去。」",
-       "可是耶穌說，你不必再遵行舊約聖經的分辨潔淨不潔淨的食物，你不必再遵行。",
-       "那不是矛盾嗎？",
-       "有沒有看到問題？",
-       "那，馬太五章十九到二十節說：「所以，無論何人廢掉這誡命中最小的一條，又教訓人這樣做，他在天國要稱為最小的。",
-       "但無論何人遵行這誡命，又教訓人遵行，他在天國要稱為大的。",
-       "我告訴你們，你們的義若不勝於文士和法利賽人的義，斷不能進天國。」",
-       "那我不曉得你們你有沒有看到一個問題？",
-       "耶穌剛才說，耶穌潔淨了一些食物，你不必再遵行摩西律法的要求，要分得潔淨不潔淨的東西。",
-       "耶穌既然來，為我們獻了一次永遠有效的贖罪祭，所以我們今天不必再獻贖罪祭，雖然摩西律法說要獻贖罪祭。",
-       "你今天要不要再遵行摩西律法去獻贖罪祭？",
-       "不要了嘛！"
-      ]
-     ],
+     "status": "owner",
      "sentences": [
       {
        "script_index": 715,
@@ -3121,16 +3103,16 @@
        "trial_number": 75,
        "text": "有沒有看到問題？"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
     },
     {
      "id": "tension2",
-     "kind": "step",
+     "kind": "question",
      "supports": [
-      "CL1"
+      "Q1"
      ],
-     "status": "draft",
-     "optional": true,
+     "status": "owner",
      "sentences": [
       {
        "script_index": 843,
@@ -3180,7 +3162,8 @@
        "trial_number": 125,
        "text": "不要了嘛！"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
     },
     {
      "id": "ct4",
@@ -3228,11 +3211,11 @@
     },
     {
      "id": "ct1",
-     "kind": "claim_text",
+     "kind": "question",
      "supports": [
-      "CL1"
+      "Q1"
      ],
-     "status": "draft",
+     "status": "owner",
      "sentences": [
       {
        "script_index": 715,
@@ -3324,7 +3307,8 @@
        "trial_number": 127,
        "text": "怎麼處理？"
       }
-     ]
+     ],
+     "note": "owner 2026-11-16: 「耶穌來了之後，我們還要不要遵守摩西的律法」 is the overall Question; food, sacrifice and the verses that seem to contradict 5:17–19 are forms of it. It is not a Claim."
     },
     {
      "id": "other",
@@ -3464,10 +3448,15 @@
     }
    ],
    "claims_shorthand": {
-    "CL1": "張力：五17–19 與食物、獻祭的改變",
     "CL2": "太5:18 是「直到成全」",
     "CL3": "摩西律法有一部分今天不再遵守",
     "CL4": "讀經要用理性"
+   },
+   "questions": {
+    "Q1": "耶穌來了之後，我們還要不要遵守摩西的律法？"
+   },
+   "positions": {
+    "P1": "耶穌明講，舊約的律法今天還要遵守"
    }
   }
  ]

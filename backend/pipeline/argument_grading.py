@@ -19,6 +19,7 @@ RECORDS = (('evidence_steps', 'evidence_step_id'), ('observations', 'observation
 COVERED = 0.8      # a step is covered when one record holds this share of it
 SUBSTANTIAL = 0.25 # a record touching less of a step than this is ignored there
 FINAL = {'owner', 'final'}
+KIND_RECORDS = {'question': 'questions', 'position': 'position_nodes'}
 
 
 def norm(text):
@@ -111,6 +112,12 @@ def grade_group(group, records, own, proposed=None):
                 best = max(len(held & v) / len(v) for v in variants[it['id']])
                 if best < COVERED:
                     verdict, detail = 'partial', f'{rid[1]} holds {len(got)}/{len(want)} sentences'
+        elif it['kind'] in KIND_RECORDS:
+            # A Question he raises or a Position he answers is its own record, not Evidence.
+            collection = KIND_RECORDS[it['kind']]
+            held = set().union(*(cov for rid, cov in records.items() if rid[0] == collection))
+            if len(held & want) < COVERED * len(want):
+                verdict, detail = 'missed', f"{len(held & want)}/{len(want)} sentences in {collection}"
         elif it['kind'] == 'claim_text':
             in_records = {s for cov in records.values() for s in cov}
             loose = want - owned - (in_records if 'step' in it.get('accept_kind', []) else set())
@@ -129,7 +136,7 @@ def grade_group(group, records, own, proposed=None):
                         'first': it['sentences'][0]['text'][:30]})
     if proposed is not None:
         for it in items:
-            if it['kind'] in ('step', 'claim_text') and sets[it['id']] & proposed:
+            if it['kind'] in ('step', 'claim_text', *KIND_RECORDS) and sets[it['id']] & proposed:
                 results.append({'group': group['group'], 'item': it['id'], 'kind': it['kind'], 'status': it['status'],
                                 'verdict': 'false_digression', 'detail': f"{len(sets[it['id']] & proposed)} argument sentences proposed as 題外話",
                                 'first': it['sentences'][0]['text'][:30]})
@@ -141,7 +148,7 @@ def grade_group(group, records, own, proposed=None):
                             'status': min(next(i['status'] for i in items if i['id'] == x) for x in ids),
                             'verdict': 'merged', 'detail': f'{rid[1]} holds {len(ids)} steps', 'first': ''})
     non_argument = set().union(*(sets[it['id']] for it in items if it['kind'] in ('other', 'aside'))) if items else set()
-    argument = set().union(*(sets[it['id']] for it in items if it['kind'] in ('step', 'claim_text'))) if items else set()
+    argument = set().union(*(sets[it['id']] for it in items if it['kind'] in ('step', 'claim_text', *KIND_RECORDS))) if items else set()
     for rid, cov in records.items():
         if cov and cov <= non_argument and not cov & argument:
             results.append({'group': group['group'], 'item': rid[1], 'kind': 'record', 'status': 'owner',

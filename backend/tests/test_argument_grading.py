@@ -61,3 +61,10 @@ def test_digression_proposals_must_cover_the_aside_and_spare_the_argument():
     assert found(keys('題外話。')) == set()
     assert ('x', 'digression_not_proposed') in found(set())
     assert ('a', 'false_digression') in found(keys('題外話。', '甲一句。'))
+
+
+def test_a_question_he_raises_must_be_held_as_a_question_not_as_evidence():
+    group = {'group': 'G', 'items': [{'id': 'q', 'kind': 'question', 'status': 'owner', 'sentences': [s(1, '要不要遵守？')]}]}
+    as_evidence = g.grade_group(group, {('evidence_steps', 'E1'): keys('要不要遵守？')}, {})
+    as_question = g.grade_group(group, {('questions', 'Q1'): keys('要不要遵守？')}, {})
+    assert as_evidence[0]['verdict'] == 'missed' and as_question[0]['verdict'] == 'correct'
