@@ -24,5 +24,17 @@ Also right: Time Magazine wholly 題外話; the engineer story keeps its ending;
 
 Neither shape is in the eval set yet.
 
-## Gemini reviewer
-Not run: the Gemini API answered `HTTP 402 Payment Required` on the first call. No retry.
+## Gemini reviewer (`review/lecture2-v7`, 7 calls)
+The first attempt got `HTTP 402 Payment Required`; the owner asked for a re-run and it went through.
+
+**6 disagreements, all wrong; both real errors missed.**
+| Flag | Against |
+| --- | --- |
+| CL0007 Gentiles saved without the law → Evidence for CL0009 | key: Claim |
+| CL0014 the 姦淫 of Acts 15 → Evidence for CL0010 | key: Claim (a reading he gives reasons for) |
+| CL0017 異性漂亮 → unstated lesson | owner: Claim |
+| G005 missing Claim 「基督徒要懂得處理聖經的證據」 | owner: Time Magazine is wholly 題外話 |
+| CL0019 5:19's 誡命 → restates CL0001 | key: Claim, the answer to the Question |
+| CL0022 盡本分 → same question as CL0023 | owner: both Claims |
+
+It raised nothing on CL0003 or on the audience question written as a Position, although its own `question` for CL0022 quotes that audience question. None of the six goes on the review page: each is already settled by a ruling or the key.
