@@ -22,4 +22,4 @@ Held-out score stays 24/33 (first run). This run: 28/33.
 - CL0025 bundles CL0026–CL0031.
 
 ## Open for the owner (review page)
-- Lev 17–18 as the source of the four abstentions (CL0013 returned as Evidence for CL0009). Proposed: Evidence.
+- Lev 17–18 as the source of the four abstentions (CL0013 returned as Evidence). Owner ruled Evidence on the review page, 2026-11-16: GPT was right.
