@@ -236,7 +236,7 @@ def review(creation, out_dir, client, *, call=True):
             saved.write_text(json.dumps(answer, ensure_ascii=False, indent=1))
         check(view, answer)
         found += disagreements(view, answer)
-    report = {'creation': str(creation), 'model': getattr(client, 'model', None), 'calls': calls,
+    report = {'creation': str(creation), 'review_dir': str(out_dir), 'model': getattr(client, 'model', None), 'calls': calls,
               'not_reviewed': blocked, 'disagreements': found}
     (out_dir / 'disagreements.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
     return report
@@ -272,3 +272,142 @@ def calibrate(key_path, run_root, review_root):
             row = (gid, cid, judged['kind'])
             (hits if wrong and cid in flagged else missed if wrong else false_alarms if cid in flagged else [None]).append(row)
     return {'hits': hits, 'missed': missed, 'false_alarms': false_alarms}
+
+
+# ---------------------------------------------------------------- review-page questions
+
+# Plain words for the 同工: no IDs, no project terms beyond 觀點/根據/題外話.
+LABEL = {
+    'his_claim': '教授要證明的一個觀點，應單獨列出',
+    'evidence_for': '根據：用來支持「{target}」',
+    'restates': '重複：和「{target}」是同一個觀點',
+    'others_words': '故事或引述裡別人說的話，不是教授的觀點',
+    'unstated_lesson': '從故事推出的教訓，教授自己沒有這樣說',
+    'digression': '題外話：評論別人，沒有給經文或推理',
+    'unsupported': '題外話：只是評論，沒有給經文或推理',
+    'supported': '是論證：他給了經文或推理',
+    'answered': '他在這一段就回答了',
+    'open': '他留到後面才回答',
+    'not_a_question': '不是一個問題，是他直接講的話或口頭語',
+    'refuted': '別人的看法，教授駁斥了',
+    'not_refuted': '別人的看法，教授沒有駁斥',
+    'not_others_view': '不是別人的看法，是教授自己的話',
+    'add': '要：這是教授要證明的一個觀點，應單獨列出',
+    'skip': '不要：已經包含在別的觀點裡，或只是根據',
+    'not_own': '不是單獨的觀點：是根據、重複，或別人的話',
+}
+ASK = {
+    'claim': '整理結果把下面這條列為教授的一個觀點。黃色是相關的原話。這條是什麼？',
+    'digression': '整理結果把黃色這一段標為題外話。它是什麼？',
+    'question': '黃色是教授提的一個問題。他在這一段回答了嗎？',
+    'position': '整理結果把黃色這一段當作別人的看法。它是什麼？',
+    'missing': '教授在黃色這一段講了下面這個觀點，整理結果裡沒有單獨列出。要不要單獨列出？',
+}
+
+
+def _spans(creation, gid):
+    """Sentence IDs for each item of a group, from the saved step answer."""
+    request, steps = _saved(Path(creation) / gid, 'steps')
+    _, records = _saved(Path(creation) / gid, 'materials')
+    kind = {r['step_id']: r['kind'] for r in records['records']}
+    span = {}
+    for row in steps['claim_text']:
+        span.setdefault(row['claim_id'], []).extend(row['sentence_ids'])
+    for step in steps['steps']:
+        span[step['step_id']] = step['sentence_ids']
+        if kind.get(step['step_id']) not in ('question', 'position'):
+            for c in step['supports']:
+                span.setdefault('support:' + c, []).extend(step['sentence_ids'])
+    for n, d in enumerate(steps.get('digressions', []), 1):
+        span[f'D{n}'] = d['sentence_ids']
+    return request['input']['sentences'], span
+
+
+def _locate(sentences, paragraphs):
+    """Each sentence's transcript paragraph, found in reading order."""
+    from backend.pipeline.argument_review import norm as rnorm
+    keys = list(paragraphs); k = 0; out = []
+    for s in sentences:
+        want = rnorm(s['text']); j = k
+        while j < len(keys) and want not in rnorm(paragraphs[keys[j]]['text']):
+            j += 1
+        if j < len(keys):
+            k = j
+        out.append({**s, 'script_index': keys[k] if j < len(keys) else None})
+    return out
+
+
+def _focus(sentences, ids, quote, limit=14):
+    """Sentences to highlight: the item's own, else the sentence holding the reviewer's quote."""
+    order = {s['sentence_id']: i for i, s in enumerate(sentences)}
+    hit = sorted(order[i] for i in ids if i in order)
+    if not hit and quote:
+        q = norm(re.split(r'…+|\.{3,}', quote)[0])
+        hit = [i for i, s in enumerate(sentences) if q and (q in norm(s['text']) or norm(s['text']) in q)][:1]
+    # A Claim's support can be spread over a group: show its first stretch, not the whole group.
+    if hit and hit[-1] - hit[0] >= limit:
+        run = [hit[0]]
+        for i in hit[1:]:
+            if i - run[-1] > 2 or len(run) >= limit:
+                break
+            run.append(i)
+        hit = run
+    return set(hit)
+
+
+def page_questions(creation, report, *, lecture, media_url, paragraphs, sample=4, seed=0, context=2):
+    """Each disagreement, and a few items the reviewer agreed with, as one review-page question.
+
+    The two answers on offer are GPT's and the reviewer's, in a fixed order that does
+    not say which is whose. The ruling grades both the lecture and the reviewer.
+    """
+    import random
+    from backend.pipeline.argument_review import question_id, sentence_times
+    result = json.loads((Path(creation) / 'creation-result.json').read_text())
+    statement = {k: v['statement'] for k, v in result['claim_candidates'].items()}
+    flagged = {(d['group_id'], d['item']) for d in report['disagreements']}
+    agreed = []
+    for gid in sorted(result['group_claim_ids']):
+        folder = sorted(p for p in (Path(report['review_dir']) / gid).iterdir() if p.is_dir())[0]
+        answer = json.loads((folder / 'response.json').read_text())
+        agreed += [{'group_id': gid, 'item': a['id'], 'kind': 'claim', 'gpt': statement[a['id']], 'verdict': 'his_claim', 'target': '',
+                    'quote': a['quote'], 'why': a['why'], 'agreed': True}
+                   for a in answer['claims'] if (gid, a['id']) not in flagged]
+    picked = random.Random(seed).sample(agreed, min(sample, len(agreed)))
+    cache = {}
+    out = []
+    for d in report['disagreements'] + picked:
+        gid = d['group_id']
+        if gid not in cache:
+            sentences, span = _spans(creation, gid)
+            cache[gid] = (_locate(sentences, paragraphs), span)
+        sentences, span = cache[gid]
+        item = d['item']
+        ids = span.get(item) or span.get('support:' + item) or []
+        focus = _focus(sentences, ids if d['kind'] != 'missing' else [], d['quote'])
+        if not focus:
+            raise ValueError(f'{gid}/{item}: nothing to highlight')
+        lo, hi = max(0, min(focus) - context), min(len(sentences), max(focus) + context + 1)
+        shown = sentences[lo:hi]
+        times = [sentence_times(s, paragraphs) for s in shown if s['script_index']]
+        target = statement.get(d.get('target') or '', '')
+        if d['kind'] == 'claim':
+            gpt_key, reviewer_key = 'his_claim', d['verdict']
+        elif d['kind'] == 'missing':
+            gpt_key, reviewer_key = 'skip', 'add'
+        else:
+            gpt_key, reviewer_key = d['gpt_verdict'], d['verdict']
+        if d.get('agreed'):
+            reviewer_key = 'not_own'
+        options = [(k, LABEL[k].format(target=target or '另一個觀點')) for k in (gpt_key, reviewer_key)]
+        view = d.get('statement') if d['kind'] == 'missing' else d['gpt']
+        out.append({'question_id': question_id(lecture, gid, f'review:{item}'), 'lecture': lecture, 'group_id': gid,
+                    'item_id': f'review:{item}', 'kind': 'rule',
+                    'payload': {'question': ASK[d['kind']], 'options': [{'key': k, 'label': v} for k, v in options],
+                                'sentences': [{'text': s['text'], 'focus': lo + i in focus} for i, s in enumerate(shown)],
+                                'viewpoints': [view],
+                                'audio': {'url': media_url, 'start': min(t[0] for t in times if t[0] is not None),
+                                          'end': max(t[1] for t in times if t[1] is not None)},
+                                'grading': {'gpt': gpt_key, 'reviewer': d['verdict'] if not d.get('agreed') else 'his_claim',
+                                            'sampled_agreement': bool(d.get('agreed')), 'why': d['why']}}})
+    return out
