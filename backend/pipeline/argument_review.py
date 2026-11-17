@@ -409,7 +409,8 @@ def next_for(conn, reviewer):
         return {'mode': 'followup', 'progress': progress, 'question': q,
                 'followup': {'followup_id': f[0], 'kind': f[1], 'text': f[2], 'suggested_choice': f[3]},
                 'your_answer': {'choice': f[5], 'opinion': f[6]}}
-    row = conn.execute('''SELECT question_id FROM argument_review.questions q WHERE q.active AND NOT EXISTS (
+    row = conn.execute('''SELECT question_id FROM argument_review.questions q WHERE q.active
+        AND NOT EXISTS (SELECT 1 FROM argument_review.rulings r WHERE r.question_id=q.question_id) AND NOT EXISTS (
         SELECT 1 FROM argument_review.answers a WHERE a.question_id=q.question_id AND a.reviewer=%s AND a.superseded_at IS NULL)
         ORDER BY lecture, group_id, created_at, question_id LIMIT 1''', (reviewer,)).fetchone()
     if not row:
