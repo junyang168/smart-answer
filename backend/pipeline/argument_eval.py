@@ -152,7 +152,8 @@ def disputed(case_check, request, answer, match):
     for side, field in SIDES.items():
         if side in case_check and field in case_check:
             for s in dict.fromkeys(statements_of(request, answer)):
-                if s not in rulings.get(side, {}) and has(s, case_check[side]) != match(s, side):
+                # Only the Claim Jev picked: one question per side, not one per Claim the words touched.
+                if s not in rulings.get(side, {}) and match(s, side) and not has(s, case_check[side]):
                     out.append({'side': side, 'meaning': case_check[field], 'statement': s})
     return out
 
@@ -339,6 +340,16 @@ def look_questions(rows, cases):
     return out
 
 
+def settled(ar, conn, qid):
+    """An eval question is the owner's to answer: a ruling, or the answers if they all agree.
+    The 同工 quorum is for content review, not for whether a sentence says a ruling."""
+    s = ar.state(conn, qid)
+    if s['status'] in ('ruled', 'final'):
+        return s['choice']
+    choices = {c for a in ar.active_answers(conn, qid) if (c := ar.resolved_choice(a, ar.followups_for(conn, a['answer_id'])))}
+    return choices.pop() if len(choices) == 1 else None
+
+
 def apply_rulings(cases_doc, decided):
     """Write settled eval answers into the cases: ``decided`` is [(payload['eval'], choice)]."""
     by_id = {c['id']: c for c in cases_doc['cases']}
@@ -371,7 +382,7 @@ def main():
         doc = json.loads(Path(a.cases).read_text())
         with ar.connect() as conn:
             rows = conn.execute("SELECT question_id, payload->'eval' FROM argument_review.questions WHERE item_id LIKE 'eval:%%'").fetchall()
-            decided = [(ev, ar.state(conn, qid)['choice']) for qid, ev in rows]
+            decided = [(ev, settled(ar, conn, qid)) for qid, ev in rows]
         changed = apply_rulings(doc, decided)
         Path(a.cases).write_text(json.dumps(doc, ensure_ascii=False, indent=1) + '\n')
         print(json.dumps({'questions': len(rows), 'settled': sum(c is not None for _, c in decided), 'written': changed}))
