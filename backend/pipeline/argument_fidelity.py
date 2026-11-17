@@ -96,6 +96,29 @@ def report(rows, decided, scores):
             'by_kind': {k: sum(r['kind'] == k for r in rows) for _, _, _, k in KINDS}}
 
 
+def usage(root):
+    """Token totals from every call's saved receipt: GPT (codex --json) and Jev."""
+    import re
+    totals = {'gpt_calls': 0, 'gpt_missing': 0, 'gpt_input': 0, 'gpt_cached_input': 0, 'gpt_output': 0, 'gpt_reasoning': 0,
+              'jev_calls': 0, 'jev_input': 0, 'jev_output': 0}
+    for f in Path(root).rglob('provider.json'):
+        u = json.loads(f.read_text()).get('usage')
+        totals['gpt_calls'] += 1
+        if not u:
+            totals['gpt_missing'] += 1
+            continue
+        totals['gpt_input'] += u.get('input_tokens', 0)
+        totals['gpt_cached_input'] += u.get('cached_input_tokens', 0)
+        totals['gpt_output'] += u.get('output_tokens', 0)
+        totals['gpt_reasoning'] += u.get('reasoning_output_tokens', 0)
+    for f in Path(root).rglob('jev/*/response.json'):
+        s = f.read_text()
+        totals['jev_calls'] += 1
+        totals['jev_input'] += sum(map(int, re.findall(r'"input_tokens": (\d+)', s)))
+        totals['jev_output'] += sum(map(int, re.findall(r'"output_tokens": (\d+)', s)))
+    return totals
+
+
 def main():
     from dotenv import load_dotenv
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
@@ -113,8 +136,11 @@ def main():
         print(json.dumps({'records': len(rows), 'his_words_chars': sum(len(r['his_words']) for r in rows),
                           'jev_calls': 0 if a.no_jev else len(rows)}, ensure_ascii=False))
         return
-    ports = Models(CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000), Path(a.out))
+    client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
+    client.capture_usage_events = True  # codex --json reports token usage
+    ports = Models(client, Path(a.out))
     result = check(candidate, a.out, ports, jev=not a.no_jev)
+    result['usage'] = usage(a.out)
     Path(a.out).mkdir(parents=True, exist_ok=True)
     (Path(a.out) / 'fidelity.json').write_text(json.dumps(result, ensure_ascii=False, indent=1))
     print(json.dumps(result, ensure_ascii=False, indent=1))

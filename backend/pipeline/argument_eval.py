@@ -413,8 +413,10 @@ def main():
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
     from backend.pipeline.claim_refresh import Models
     load_dotenv('.env')
-    ports = lambda: Models(CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000),
-                           Path(a.out).resolve())
+    def ports():
+        client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
+        client.capture_usage_events = True  # codex --json reports token usage
+        return Models(client, Path(a.out).resolve())
     report = run(json.loads(Path(a.cases).read_text())['cases'], a.out, ports, only=a.stage)
     for r in report['rows']:
         mark = 'PASS' if r['pass'] else 'FAIL'
