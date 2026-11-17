@@ -136,3 +136,9 @@ def test_a_written_view_keeps_the_reviewer_on_that_question_until_it_settles(con
     assert nxt['mode'] == 'followup' and nxt['question']['item_id'] == 'o'
     review.reply_followup(conn, nxt['followup']['followup_id'], 'p1', text='不完全是')
     assert review.next_for(conn, 'p1')['mode'] == 'clarifying'  # words again: still on the same question
+
+
+def test_a_long_paragraph_is_timed_by_its_raw_segments():
+    p = {'text': '甲一句。乙二句。', 'start_time': '0', 'end_time': '600',
+         'segments': [(10.0, 12.0, '甲一句'), (500.0, 503.0, '乙二句')]}
+    assert review.sentence_times({'script_index': 1, 'text': '乙二句。'}, {'1': p}) == (500.0, 503.0)

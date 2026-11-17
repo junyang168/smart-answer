@@ -79,7 +79,35 @@ def norm(text):
 def transcript(lecture, data_dir=None):
     base = Path(data_dir or os.environ['DATA_BASE_DIR'])
     script = json.loads((base / 'script_published' / f'{lecture}.json').read_text())['script']
-    return {str(p['index']): p for p in script if p.get('type') != 'subtitle' and p.get('start_time') is not None}
+    out = {str(p['index']): p for p in script if p.get('type') != 'subtitle' and p.get('start_time') is not None}
+    # A published paragraph can run for minutes; the raw transcript times each short
+    # segment, so a sentence's clip is found through the segments it came from.
+    raw = base / 'script' / f'{lecture}.json'
+    if raw.exists():
+        entries = json.loads(raw.read_text())['entries']
+        for p in out.values():
+            lo, hi = p.get('start_index'), p.get('end_index')
+            if lo is not None and hi is not None:
+                p['segments'] = [(e['start_ms'] / 1000, e['end_ms'] / 1000, e['text']) for e in entries if lo <= e['index'] <= hi]
+    return out
+
+
+def _segment_map(p):
+    """Per character of the normalized paragraph, the segment it was spoken in (or None)."""
+    if '_segment_map' not in p:
+        from difflib import SequenceMatcher
+        raw, owner = '', []
+        for n, (_, _, text) in enumerate(p['segments']):
+            text = norm(text)
+            raw += text
+            owner += [n] * len(text)
+        para = norm(p['text'])
+        at = [None] * len(para)
+        for a, b, size in SequenceMatcher(None, para, raw, autojunk=False).get_matching_blocks():
+            for k in range(size):
+                at[a + k] = owner[b + k]
+        p['_segment_map'] = (para, at)
+    return p['_segment_map']
 
 
 def sentence_times(sentence, paragraphs):
@@ -87,6 +115,13 @@ def sentence_times(sentence, paragraphs):
     p = paragraphs.get(str(sentence['script_index']))
     if not p:
         return None, None
+    if p.get('segments'):
+        para, at = _segment_map(p)
+        start = para.find(norm(sentence['text']))
+        if start >= 0:
+            hits = [n for n in at[start:start + len(norm(sentence['text']))] if n is not None]
+            if hits:
+                return p['segments'][min(hits)][0], p['segments'][max(hits)][1]
     text = p['text']
     at = text.find(sentence['text'])
     if at < 0:
