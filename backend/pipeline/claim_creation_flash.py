@@ -453,7 +453,9 @@ def check_not_claims(result, claim_ids, own_ids):
     if len(gone)!=len(set(gone)) or not set(gone)<=set(own_ids):
         raise ValueError('not_claims may name each Claim first made in this group once')
     kept=set(claim_ids)-set(gone)
-    if not kept:raise ValueError('not_claims would leave this group without a Claim')
+    # A group may hold no Claim (lecture 2: the Time Magazine aside alone); handing
+    # back every Claim it had is what is refused.
+    if gone and not kept:raise ValueError('not_claims would leave this group without a Claim')
     for r in rows:
         if not r['why'].strip():raise ValueError(f"{r['claim_id']}: not_claims needs a reason")
         if r['kind']=='digression':
@@ -737,7 +739,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     response['claims']=[c for c in response['claims'] if c['claim_id'] not in gone]
                     group_claims[gid]=[c for c in group_claims[gid] if c not in gone]
                     text={v.sentence_id:v.text for v in sentences}
-                    records=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
+                    # A group that is all 題外話 and filler has no step to type: no call.
+                    records={'records':[]} if not steps['steps'] else call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
                         'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},

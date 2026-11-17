@@ -690,3 +690,11 @@ def test_a_returned_claim_leaves_the_candidate_and_is_recorded(tmp_path):
     assert [(r['claim_id'], r['kind'], r['target'], r['statement']) for r in returned] == [
         ('CL0002', 'evidence', 'CL0001', '但以理書七章的人子領受永遠權柄。')]
     assert result['not_claims'] == returned
+
+
+def test_a_group_of_only_a_digression_needs_no_claim():
+    """Lecture 2: GPT made the Time Magazine aside its own group, with no Claim."""
+    from backend.pipeline import claim_creation_flash as flash
+    result = {'steps': [], 'claim_text': [], 'other': [{'sentence_ids': ['S1#2'], 'why': '過場'}],
+              'digressions': [{'kind': 'unsupported_comment', 'sentence_ids': ['S1#1'], 'why': '批評記者，沒有理由'}], 'not_claims': []}
+    assert flash.check_steps(result, ['S1#1', 'S1#2'], []) == {}
