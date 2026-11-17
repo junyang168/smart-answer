@@ -22,3 +22,8 @@ Both are on the review page, with 4 sampled items it agreed with.
 ## Lecture 1 check (run gpt-20261116-lecture1-v5)
 - G01: 4/4 of the owner's Claims; nothing handed back.
 - G03: 5 Claims for the owner's 6: CL2 (inclusio makes one paragraph) merged into CL3. The reviewer flagged nothing.
+
+## Re-grade after the withdrawn key correction (no new calls)
+- CL0020 「那位弟兄求……教授判斷神不會聽……因為神造男造女」 is a second wrong Claim: the reason for CL0019 split off, and written as a story. **31/33, 2 wrong Claims.**
+- Rounds 4 and 5 kept it inside the 「覺得漂亮不等於犯姦淫」 Claim, so their content grade stands; round 5's version said 「教授認為」.
+- Program wording check (new, no model): 5 Claims here report him (「教授認為／教授解為」) instead of stating his judgement — CL0003, CL0013, CL0014, CL0015, CL0020. Not counted in the score; the Claims prompt now forbids it.

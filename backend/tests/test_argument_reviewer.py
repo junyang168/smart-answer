@@ -67,3 +67,9 @@ def test_a_quote_may_skip_words_with_an_ellipsis():
     a['claims'][0]['quote'] = '基督的律法……全部廢掉'
     with pytest.raises(ValueError, match='not in the transcript'):
         r.check(VIEW, a)
+
+
+def test_a_claim_that_reports_him_or_retells_a_story_is_flagged_without_a_call():
+    view = {**VIEW, 'claims': [{'id': 'CL0001', 'statement': '那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽', 'his_words': [], 'support_lines': []},
+                               {'id': 'CL0002', 'statement': '覺得異性漂亮是神造男造女的本性', 'his_words': [], 'support_lines': []}]}
+    assert [(w['item'], w['words']) for w in r.wording(view)] == [('CL0001', ['教授', '那位弟兄'])]

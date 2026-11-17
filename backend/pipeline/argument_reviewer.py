@@ -155,6 +155,17 @@ def check(view, answer):
             raise ValueError(f"{view['group_id']}/{a['id']}: {a['verdict']} must name another Claim of this group")
 
 
+# Program check, no model: a Claim states his judgement, not a report about him
+# or a retelling of a story (owner 2026-11-16, 「那位弟兄求……教授判斷神不會聽」).
+REPORTING = re.compile(r'教授|講者|講員|王守仁|那位弟兄|那個弟兄|故事中')
+
+
+def wording(view):
+    return [{'group_id': view['group_id'], 'item': c['id'], 'statement': c['statement'],
+             'words': sorted(set(REPORTING.findall(c['statement'])))}
+            for c in view['claims'] if REPORTING.search(c['statement'])]
+
+
 def disagreements(view, answer):
     out = []
     for a in answer['claims']:
@@ -214,8 +225,9 @@ class GeminiClient:
 
 def review(creation, out_dir, client, *, call=True):
     """Review every group; a saved answer is reused, so a re-run makes no new call."""
-    out_dir = Path(out_dir); found = []; calls = 0; blocked = []
+    out_dir = Path(out_dir); found = []; calls = 0; blocked = []; worded = []
     for view in group_views(creation):
+        worded += wording(view)
         text = prompt(view)
         digest = hashlib.sha256(json.dumps([SYSTEM, text, schema()], ensure_ascii=False).encode()).hexdigest()[:16]
         folder = out_dir / view['group_id'] / digest
@@ -238,7 +250,7 @@ def review(creation, out_dir, client, *, call=True):
         check(view, answer)
         found += disagreements(view, answer)
     report = {'creation': str(creation), 'review_dir': str(out_dir), 'model': getattr(client, 'model', None), 'calls': calls,
-              'not_reviewed': blocked, 'disagreements': found}
+              'not_reviewed': blocked, 'wording': worded, 'disagreements': found}
     (out_dir / 'disagreements.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
     return report
 
