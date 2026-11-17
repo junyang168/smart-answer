@@ -19,3 +19,12 @@ def test_gpt_decides_and_jev_only_raises_a_look():
     out = af.report(rows, decided, {'DK-x-CL0001': 0.8, 'DK-x-P01-ST01': 0.1})
     assert [f['id'] for f in out['findings']] == ['DK-x-P01-ST01']   # GPT flagged it; Jev's low score does not clear it
     assert [f['id'] for f in out['needs_look']] == ['DK-x-CL0001']   # Jev doubts what GPT passed: a person looks
+
+
+def test_prefilter_sends_records_at_the_measured_risk_to_claude_and_decides_nothing():
+    from backend.pipeline import argument_fidelity as F
+    rows = [{'job_id': 'a', 'kind': 'Claim', 'statement': 's'}, {'job_id': 'b', 'kind': 'Position', 'statement': 't'}]
+    out = F.prefilter_report(rows, {'a': 0.31, 'b': 0.29})
+    assert [x['id'] for x in out['needs_look']] == ['a'] and out['findings'] == []
+    assert F.prefilter_question('Position')['Q0']['criteria'] == F.SUPPORTED['others']['criteria']
+    assert F.prefilter_question('Question')['Q0']['instructions'] == F.SUPPORTED['question']['instructions']

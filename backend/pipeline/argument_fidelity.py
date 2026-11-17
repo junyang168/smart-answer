@@ -43,6 +43,51 @@ JEV_QUESTION = ('`statement` 是另一個模型根據 `his_words` 寫的一句�
                 '只問是否照實寫出別人的看法。' + RULE +
                 '這句話改變了他的判斷，或加上了他沒有說的判斷的可能性有多大？')
 LIKELY = 0.5   # a Jev score at or above this, against GPT's 'faithful', needs a look
+
+# Prefilter (owner 2026-11-17: 「jev is used for prefilter and you are the final judge」), in the shape of
+# the Jev cookbook's "Verifying LLM answers against their source": one positive step-by-step Noul with
+# explicit true/false criteria; risk = 1 - supported; the threshold is measured on planted errors.
+SUPPORTED = {
+    'own': {'instructions': '照 his_words（及 context）一步步讀他的話，會得出 statement 所說的判斷嗎？'
+                            '他是口語講課，措辭、詳略、次序不同都不算。',
+            'criteria': {'true': 'statement 裡每個判斷（結論、理由、適用範圍、確定程度）他都說了，沒有說反',
+                         'false': 'statement 至少有一個判斷他沒有說，或比他說的更廣、更確定，或與他說的相反'}},
+    'others': {'instructions': 'statement 寫的是他轉述、要反駁的別人看法。照 his_words（及 context）一步步讀，'
+                               '他轉述的別人看法就是 statement 寫的嗎？他是口語講課，措辭不同不算。',
+               'criteria': {'true': '他轉述的別人看法就是 statement 寫的，沒有多也沒有不同',
+                            'false': 'statement 寫的看法他沒有轉述，或與他轉述的不同、更多'}},
+    'question': {'instructions': 'statement 是一個在講道中被提出的問題（他自己問，或會眾問）。照 his_words（及 context）讀，'
+                                 '這個問題是這樣被問的嗎？他是口語講課，措辭不同不算。',
+                 'criteria': {'true': '問題問的就是 statement 寫的，沒有多加前提，也沒有問別的',
+                              'false': 'statement 的問題沒有被這樣問，或加了前提、換了對象、問的是另一件事'}},
+}
+FORM = {'Position': 'others', 'Question': 'question'}
+
+
+def prefilter_question(kind):
+    return {'Q0': {'type': 'noul', **SUPPORTED[FORM.get(kind, 'own')]}}
+
+
+PREFILTER_RISK = 0.3  # 2026-11-17 calibration: 18/18 planted errors at or above it, 36/142 faithful records
+
+
+def prefilter_report(rows, risk):
+    """Records at or above the measured risk go to Claude to judge against his words; Jev decides nothing."""
+    looks = [{'id': r['job_id'], 'kind': r['kind'], 'statement': r['statement'], 'jev_risk': risk[r['job_id']]}
+             for r in rows if risk[r['job_id']] >= PREFILTER_RISK]
+    return {'records': len(rows), 'findings': [], 'needs_look': sorted(looks, key=lambda x: -x['jev_risk']),
+            'threshold': PREFILTER_RISK, 'by_kind': {k: sum(r['kind'] == k for r in rows) for _, _, _, k in KINDS},
+            'judge': 'Claude reads each look against his words; owner rules on what Claude finds changed'}
+
+
+def prefilter(rows, root, ports):
+    """Jev's risk for each record: 1 - P(his words lead to the statement)."""
+    from backend.pipeline import claim_flash_common as f
+    out = {}
+    for r in rows:
+        state = {'statement': r['statement'], 'his_words': r['his_words'], 'context': r['context']}
+        out[r['job_id']] = round(1 - f.jev(Path(root) / 'jev', ports, state, prefilter_question(r['kind']))['Q0'], 3)
+    return out
 KINDS = (('claims', 'claim_id', 'title', 'Claim'), ('evidence_steps', 'evidence_step_id', 'statement', 'Evidence'),
          ('observations', 'observation_id', 'statement', 'Observation'),
          ('position_nodes', 'position_id', 'title', 'Position'), ('questions', 'question_id', 'text', 'Question'))
@@ -139,6 +184,7 @@ def main():
     p.add_argument('--out', required=True)
     p.add_argument('--count', action='store_true', help='only count the records and the calls; no model call')
     p.add_argument('--no-jev', action='store_true')
+    p.add_argument('--prefilter', action='store_true', help='Jev prefilter only (owner 2026-11-17); Claude judges the looks')
     p.add_argument('--recheck', help='an earlier fidelity.json: re-ask only its findings and looks; the rest passed a stricter check')
     a = p.parse_args()
     load_dotenv('.env')
@@ -151,6 +197,14 @@ def main():
     client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
     client.capture_usage_events = True  # codex --json reports token usage
     ports = Models(client, Path(a.out))
+    if a.prefilter:
+        rows = records(candidate)
+        result = prefilter_report(rows, prefilter(rows, a.out, ports))
+        result['usage'] = usage(a.out)
+        Path(a.out).mkdir(parents=True, exist_ok=True)
+        (Path(a.out) / 'prefilter.json').write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        print(json.dumps({k: result[k] for k in ('records', 'threshold')} | {'needs_look': len(result['needs_look'])}))
+        return
     only = None
     if a.recheck:
         earlier = json.loads(Path(a.recheck).read_text())
