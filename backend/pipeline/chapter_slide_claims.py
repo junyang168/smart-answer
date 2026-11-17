@@ -612,9 +612,15 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
             own = [a["source_fragment_id"] for o in claim.get("occurrences", []) for a in o.get("anchors", [])
                    if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments]
             stated = next((ids[0] for fid in own for ids in [locate(text, spans, fragments[fid]["verbatim_excerpt"])] if ids), None)
+            if not stated and not evidence:
+                # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
+                excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
+                continue
             claims.append({"claim_id": cid, "group_id": gid, "statement": claim["statement"],
                            "parent": None if cid == cover else cover,
                            "stated": stated or "本堂未保留", "evidence_steps": evidence})
+    used = {c["group_id"] for c in claims}
+    groups = [g for g in groups if g["group_id"] in used]
     context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
                "decisions_sha256": chapter_exposition.file_sha256(path),
                "transcript_sha256": decisions.get("transcript_sha256"),

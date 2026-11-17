@@ -90,7 +90,7 @@ def main():
     candidate = run / 'creation' / 'candidate-owner-corrected.json'
     with psycopg.connect(database_url()) as conn:
         print(json.dumps(load(conn, candidate, receipt_path=candidate.with_suffix('.receipt.json'),
-                              fidelity_path=run / 'fidelity' / 'fidelity.json', run_dir=run), ensure_ascii=False, indent=1))
+                              fidelity_path=run / 'fidelity' / 'fidelity-final.json', run_dir=run), ensure_ascii=False, indent=1))
 
 
 if __name__ == '__main__':
