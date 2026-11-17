@@ -9,6 +9,7 @@ from __future__ import annotations
 from itertools import groupby
 from copy import deepcopy
 import json
+import hashlib
 from pathlib import Path
 
 from backend.pipeline import chapter_exposition as exposition, chapter_slides
@@ -63,6 +64,17 @@ def project(plan: dict, recordings: dict) -> dict:
     """Keep argument identity distinct from its possibly interrupted playback runs."""
     sections = []
     assigned = set()
+    excluded = {}
+    for item in plan.get('non_argument_exclusions', []):
+        lines = recordings[item['source_id']]['lines']
+        texts = item['sentences']
+        if not texts or item['reason'] != 'opening_announcement':
+            raise ValueError('Invalid non-argument exclusion')
+        matches = [i for i in range(len(lines) - len(texts) + 1)
+                   if [line['text'] for line in lines[i:i + len(texts)]] == texts]
+        if len(matches) != 1 or matches[0] != 0:
+            raise ValueError('Opening announcement must uniquely match the source beginning')
+        excluded.setdefault(item['source_id'], set()).update(line['start'] for line in lines[:len(texts)])
     for passage, unit in plan['units'].items():
         groups = {g['key']: g for g in unit['groups']}
         sub_by_group = {}
@@ -88,7 +100,7 @@ def project(plan: dict, recordings: dict) -> dict:
             ranges = list(rows)
             sub = sub_by_group[ranges[0]['group_key']]
             recording = recordings[source]
-            lines = [line for line in recording['lines'] if any(
+            lines = [line for line in recording['lines'] if line['start'] not in excluded.get(source, set()) and any(
                 r['start'] <= line['start'] < r['end'] for r in ranges)]
             if not lines:
                 raise ValueError(f'No existing slide source for Sub-unit {sid}')
@@ -104,7 +116,9 @@ def project(plan: dict, recordings: dict) -> dict:
                 raise ValueError(f'No existing slides for Sub-unit {sid}')
             row = {**recording['media'], 'stretches': stretches,
                    'slides': slides, 'judgements': [],
-                   'transcript': audio._transcript(lines, stretches),
+                   # Keep full precision until the shared audio conversion;
+                   # rounding a sentence first can hide it just before clip start.
+                   'transcript': [{'at': line['start'], 'end': line['end'], 'text': line['text']} for line in lines],
                    'spoken': [], 'readings': [], 'original_language_events': []}
             row = audio._retimed(recording['retime'], row)
             continued = sid in seen
@@ -167,4 +181,9 @@ def build(data_root: Path, passage: str) -> dict:
             'slides': timed, 'retime': audio.retimer(sermon, data_root)}
     result = project(plan, recordings)
     result['program_timing_corrections'] = timing_corrections
+    result['resume_version'] = hashlib.sha256(json.dumps({
+        'sources': [(entry['source_id'], entry['source_sha256']) for entry in plan['inputs']],
+        'playback': [(s['passage'], [(r['source_id'], r['stretches']) for r in s['sermons']])
+                     for s in result['sections']],
+    }, sort_keys=True).encode()).hexdigest()
     return result

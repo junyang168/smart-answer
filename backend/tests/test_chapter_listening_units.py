@@ -117,3 +117,34 @@ def test_timing_projection_cannot_resolve_content_or_guess_an_anchor(fault):
     if fault == 'unknown_target': review['findings'][0]['proposed_sentence'] = 'S9999'
     if fault == 'ambiguous': record['slides'][0]['points'].append(record['slides'][0]['points'][1].copy())
     with pytest.raises(ValueError): reviewed_timing(record, review, selection)
+
+
+def test_exact_opening_announcement_skip_preserves_following_argument():
+    plan, recordings, _ = example()
+    source = next(iter(recordings))
+    recording = recordings[source]
+    intro = {'start': 0, 'end': 20, 'text': '製作機構報幕。'}
+    recording['lines'].insert(0, intro)
+    plan['non_argument_exclusions'] = [{'source_id': source, 'reason': 'opening_announcement',
+                                        'sentences': ['製作機構報幕。']}]
+    # Extend the first range only to exercise playback omission within a selected paragraph.
+    unit = plan['units']['mat-5-1-12']
+    unit['groups'][0]['source_ranges'][0]['start'] = 0
+    unit['playback_order'][0]['start'] = 0
+    result = project(plan, recordings)
+    assert result['sections'][0]['sermons'][0]['transcript'][0]['text'] != intro['text']
+    assert [s['sub_unit_id'] for s in result['sections']] == ['1.1', '1.2', '1.3', '1.2']
+    plan['non_argument_exclusions'][0]['sentences'] = ['猜測的報幕。']
+    with pytest.raises(ValueError, match='uniquely match'): project(plan, recordings)
+
+
+def test_fractional_first_sentence_remains_inside_its_clip_after_audio_retiming():
+    plan, recordings, _ = example()
+    recording = next(iter(recordings.values()))
+    start = 71.234567
+    plan['units']['mat-5-1-12']['groups'][0]['source_ranges'][0]['start'] = start
+    plan['units']['mat-5-1-12']['playback_order'][0]['start'] = start
+    recording['lines'][0]['start'] = start
+    recording['retime'] = lambda t: t * 10
+    row = project(plan, recordings)['sections'][0]['sermons'][0]
+    assert row['transcript'][0]['at'] == row['stretches'][0]['start'] == round(start * 10, 2)
