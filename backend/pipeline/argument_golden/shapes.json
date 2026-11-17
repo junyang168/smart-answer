@@ -62,7 +62,7 @@
       "首尾|開頭跟結束"
      ],
      "then": [
-      "中間|各福|全"
+      "中間|各福|全|整段|都是"
      ]
     }
    ]
@@ -304,7 +304,7 @@
       "贖罪"
      ],
      "b": [
-      "同住"
+      "同住|住在一起"
      ]
     }
    ]
@@ -407,7 +407,7 @@
    "shape": "故事作論據，結尾屬故事",
    "use": "train",
    "confirmed": true,
-   "ruling": "owner 2026-11-16: the stories illustrate 「異性吸引不是姦淫」 — both the Taiwan brother and the engineer are Evidence for that Claim",
+   "ruling": "owner 2026-11-16: the stories illustrate 「異性吸引不是姦淫」 — both the Taiwan brother and the engineer are Evidence for that Claim. The saved step input still lists the story summary and the split prayer Claim (both ruled out), so they are dropped from this case's input.",
    "run": "gpt-20261116-lecture2-v6/creation",
    "group": "G004",
    "stage": "steps",
@@ -428,6 +428,15 @@
       "姦淫"
      ]
     }
+   ],
+   "drop_claims": [
+    [
+     "釋放"
+    ],
+    [
+     "那位弟兄",
+     "石頭"
+    ]
    ]
   }
  ]

@@ -36,7 +36,7 @@ def test_a_check_naming_words_he_never_said_is_an_error_not_a_pass():
 def test_cases_sharing_a_call_share_it():
     cases = [{'run': 'r', 'group': 'G1', 'stage': 'claims'}, {'run': 'r', 'group': 'G1', 'stage': 'claims'},
              {'run': 'r', 'group': 'G1', 'stage': 'steps'}]
-    assert len(ev.plan(cases)) == 2 and len(ev.plan(cases, only=['steps'])) == 1
+    assert len(ev.plan(cases)) == 2 and len(ev.plan(cases, only=["steps"])) == 1
 
 
 def test_every_case_points_at_one_saved_call_and_its_words_exist():

@@ -50,6 +50,18 @@ def current_request(saved, stage):
     return {**saved, 'system': prompt, 'schema': contract}
 
 
+def without_claims(request, drop):
+    """A step case may need the Claim list the owner ruled, not the one the old run made.
+
+    Lecture 2 G004's saved step input still carries the story summary and the
+    divided 神造男造女 Claim, so a step pass reading it must hang the stories
+    somewhere wrong. ``drop`` lists keywords of Claims the owner ruled out."""
+    if not drop:
+        return request
+    claims = {k: v for k, v in request['input']['claims'].items() if not any(has(v, words) for words in drop)}
+    return {**request, 'input': {**request['input'], 'claims': claims}}
+
+
 # ---------------------------------------------------------------- checks
 
 def _sentences(request, fragment):
@@ -119,12 +131,12 @@ def check(case_check, request, answer):
 # ---------------------------------------------------------------- running
 
 def plan(cases, only=None):
-    """The distinct calls these cases need: one per (run, group, stage)."""
+    """The distinct calls these cases need: one per (run, group, stage, dropped Claims)."""
     calls = {}
     for case in cases:
         if only and case['stage'] not in only:
             continue
-        calls.setdefault((case['run'], case['group'], case['stage']), []).append(case)
+        calls.setdefault((case['run'], case['group'], case['stage'], json.dumps(case.get('drop_claims'), ensure_ascii=False)), []).append(case)
     return calls
 
 
@@ -139,7 +151,7 @@ def run(cases, out, ports, *, only=None, workers=4):
     calls = plan(cases, only)
 
     def one(key):
-        run_name, group, stage = key
+        run_name, group, stage, _ = key
         if ports is None:
             # Baseline: grade the answer the run saved under its own prompt, no call.
             saved = saved_request(calls[key][0])
@@ -148,8 +160,9 @@ def run(cases, out, ports, *, only=None, workers=4):
             answer = json.loads((folder / 'response.json').read_text())
             return key, saved, answer.get('response', answer), None
         request = current_request(saved_request(calls[key][0]), stage)
+        request = without_claims(request, calls[key][0].get('drop_claims'))
         try:
-            answer = e.recorded_call(out / run_name / group / stage, 'gpt', request, ports().repair)
+            answer = e.recorded_call(out / run_name / group / stage, 'gpt', request, ports().repair)  # folder is keyed by the request digest
         except Exception as exc:  # a failed call fails its cases; it is reported, never retried
             return key, request, None, f'{type(exc).__name__}: {exc}'
         return key, request, answer, None
