@@ -384,12 +384,12 @@ def test_empty_repair_correction_only_resends_affected_item(campaign):
 
 
 class PrayerPorts(Ports):
-    """Jev judges the only paragraph to be his prayer."""
-    def judge(self,request):
-        if set(request['state'])=={'paragraph'}:
-            self.calls.append(('jev',request))
-            return {'model':e.MODEL,'answers':{'Q0':{'type':'choice','choice':'prayer','probabilities':{'prayer':1.0,'not_prayer':0.0}}}}
-        return super().judge(request)
+    """GPT judges the only paragraph to be his prayer (owner 2026-11-17: Jev decides nothing; 43f41a42)."""
+    def repair(self,request):
+        if request['input']['task']=='prayer_check':
+            self.calls.append(('gpt',request))
+            return {'items':[{'job_id':j['job_id'],'decision':'prayer','reason':'test'} for j in request['input']['jobs']]}
+        return super().repair(request)
 
 
 @pytest.mark.prayer

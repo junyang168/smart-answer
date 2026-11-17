@@ -59,7 +59,7 @@ def schemas(*, compact_audit=False, grouped_package=False, single_pass=False):
     claim['properties'].update(related_ranges=array(object_schema({
         'first': {'type': 'string'}, 'last': {'type': 'string'}})),
         conclusion_anchor=deepcopy(d.ANCHOR_SCHEMA), support_hint={'type': 'string'},
-        existing_claim_id={'type': ['string', 'null']})
+        existing_claim_id={'type': ['string', 'null']}, answers_question={'type': 'string'})
     claim['required'] = list(claim['properties'])
     materials = {k: deepcopy(BASE[k]) for k in ('questions', 'positions', 'observations', 'evidence_steps', 'sentence_audit')}
     for col, field in (('questions', 'answer_claim_ids'), ('evidence_steps', 'produced_claim_ids')):
@@ -115,12 +115,14 @@ CLAIMS = RULES + (
     '不生成Evidence、Fragment或關係。'
     '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子只寫這幾點合起來得出的那一個結論，一兩句，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子寫結論，不寫目錄，也不把下面各條的內容再寫一遍（下面已有的點，蓋子不重述）；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
     '例如各部分、理由、前提。檢驗：用這些Claim做投影片，聽眾能跟上這段錄音、不漏他講的要點；不要求Claim與投影片一一對應。他後面補充前面講過的點時，把範圍加到那一條，或作分論點掛在它下面，不另立頂層。'
+    '一條Claim是他對一個問題的回答。每條先寫answers_question：這條回答的是什麼問題——他自己問過的用他的話，沒明問的寫成他在回答的那個問題。故事、例子、理由、經文的讀法是這個回答的論據，不另立Claim；兩條回答同一個問題的合成一條（例：「覺得異性漂亮是不是犯姦淫？」只有一條Claim，「神造男造女」是它的理由，兩個故事是它的例子）；回答不同問題的分開列（例：「神為什麼禁血？」與「哪些外邦人要禁戒？」是兩條）；不回答他提出或正在回答的任何問題的說法——例如故事的總結——不立Claim。他為了推出一個結論而順帶問、順帶答的小問題（例：林前九章二十節「這句話翻錯了！其實是什麼？……我乃在基督律法之下」，接著「所以啊，基督徒乃在基督的律法底下」），那個回答是結論的論據，不另立Claim；只有經文的讀法本身就是他要落到的結論時，才立Claim（例：羅馬書八章四節「律法的義」是律法正當的要求）。蓋子回答本組的主要問題。重用既有Claim時，answers_question寫它回答的問題。'
+    'statement直接寫他的判斷，像他自己對聽眾說的一句結論：不寫「教授認為」「教授判斷」「他解為」，不寫故事裡的人和情節（「那位弟兄求……」），故事、例子與他對故事中人的評語是支持這個判斷的論據；例：寫「覺得異性漂亮是神造男造女的本性，不等於心裡犯姦淫」，不寫「那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽」。'
     'statement寫出這一點的內容，不只寫題目：「分為幾部分」要寫出各部分是什麼；'
     '他接著逐一講解的部分（給了說明或理由），各成一條分論點，只列出、未講解的部分留在上層那條；已各成分論點的部分，上層只點出名稱，不重述其內容。'
-    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），推理中的前提與中間環節是論據，不另立Claim，只寫推出的那個結論；只有另有自己的論據、能單獨回答一個問題的判斷，才另立一條分論點。'
+    '他逐步推論時（「所以……所以」「第一……第二」「更進一步」），推理中的前提與中間環節是論據，不另立Claim，只寫推出的那個結論；只有另有自己的論據、或他當作一條教導說出（「聖經的觀念是……」）、能單獨回答一個問題的判斷，才另立一條分論點。'
     '拆不拆拿不準時問：這一部分能單獨回答一個問題嗎？能，就另立一條；只是上層的理由、限定或說明，限定寫進上層那條，理由與說明掛在它下面；描述同一結構的幾句算一個。不同要點不合併，同一要點的不同說法不另立。'
     '他從經文、字詞或對照得出的推論是Claim，statement簡要寫出觀察及其意義；單純的引經、字詞資料、譯法留給論據。'
-    '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導。'
+    '他用來講明或證明要點的經文、觀察、例子、術語或方法的定義、背景、引述，以及一條律例或命令的出處，是論據，不是提綱上的點，留給後續材料；解說一種結構或方法是什麼是定義，比喻即使帶有教義內容仍是例子；故事中別人說的話不是他的教導，從故事推出、他自己沒有說出的教訓也不立Claim；故事的總結（他講故事要說明的事）也不立Claim，例：他講兩個故事「看到這個事情的嚴重性」，「誤解這句經文使人痛苦，講清楚能使人得釋放」是這兩個故事的總結，不是Claim。'
     '解說一種結構或方法是什麼（例：「inclusio……就是一段聖經……它的開頭跟它的最後……字完全一樣，或者是觀念完全一樣」）是定義，是論據，不立Claim；'
     '但他明白教導、要聽眾照著做、並在本組用來得出要點的讀經原則（例：「讀經要用理性」「要看關鍵字的前後文」），是提綱上的點；他說出的一般原則（讀經、倫理或教義，適用範圍超出本段經文），不論在案例前、中、後，是本組結論之一，案例支持它，不掛在案例底下。'
     '他順帶回答「這樣算不算罪、可不可以」或給出理由的判斷，與本組主題相關的是Claim；這類回答及其他回答聽眾問題的Claim，掛在它所應用或支持的那條下面，與本組結論無關的不在本組立Claim；只重述已講過的、沒有理由的勸勉不是。他只給結論沒給解釋時，照寫結論及他的保留（如「不一定」），不補理由。'
@@ -453,7 +455,9 @@ def check_not_claims(result, claim_ids, own_ids):
     if len(gone)!=len(set(gone)) or not set(gone)<=set(own_ids):
         raise ValueError('not_claims may name each Claim first made in this group once')
     kept=set(claim_ids)-set(gone)
-    if not kept:raise ValueError('not_claims would leave this group without a Claim')
+    # A group may hold no Claim (lecture 2: the Time Magazine aside alone); handing
+    # back every Claim it had is what is refused.
+    if gone and not kept:raise ValueError('not_claims would leave this group without a Claim')
     for r in rows:
         if not r['why'].strip():raise ValueError(f"{r['claim_id']}: not_claims needs a reason")
         if r['kind']=='digression':
@@ -737,7 +741,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     response['claims']=[c for c in response['claims'] if c['claim_id'] not in gone]
                     group_claims[gid]=[c for c in group_claims[gid] if c not in gone]
                     text={v.sentence_id:v.text for v in sentences}
-                    records=call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
+                    # A group that is all 題外話 and filler has no step to type: no call.
+                    records={'records':[]} if not steps['steps'] else call(root/gid/'materials'/f'batch-{ordinal:03d}',ports,'creation_step_records',{'group_id':gid,
                         'claims':{cid:candidates[cid]['statement'] for cid in group_claims[gid]},
                         'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
@@ -877,6 +882,7 @@ def main():
     parser.add_argument('--codex-executable')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
+    client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
                groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first)

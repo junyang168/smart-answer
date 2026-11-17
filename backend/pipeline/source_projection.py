@@ -664,13 +664,49 @@ def provably_nonspoken_inline_markup(text: str) -> tuple[InlineMarkupSpan, ...]:
     return tuple(merged)
 
 
+_CUV_CHAPTERS: dict[str, list[set[str]]] = {}
+SCRIPTURE_QUOTE_SHARE = 0.8  # share of a quote line's two-character pairs found in one 和合本 chapter
+
+
+def _pairs(text: str) -> set[str]:
+    chars = re.sub(r"[^\u4e00-\u9fff]", "", text)
+    return {chars[i:i + 2] for i in range(len(chars) - 1)}
+
+
+def blockquote_is_scripture(line: str, cuv_root: Path | None = None) -> bool:
+    """A transcript quote line is a verse he read aloud when one 和合本 chapter holds it.
+
+    An editor's slide text is not scripture, so it stays blocked; a verse he reads
+    (太 13:17 in 2011 NYSC 馬太福音釋經（二）3) is his speech."""
+    pairs = _pairs(line)
+    if len(pairs) < 8:
+        return False
+    if cuv_root is None:
+        from backend.bible_study.paths import cuv_dir
+        cuv_root = cuv_dir()
+    key = str(cuv_root)
+    if key not in _CUV_CHAPTERS:
+        chapters = []
+        for path in sorted(Path(cuv_root).glob("*/*.json")):
+            try:
+                chapters.append(_pairs("".join(json.loads(path.read_text(encoding="utf-8")).values())))
+            except (OSError, ValueError, AttributeError, TypeError):
+                continue
+        _CUV_CHAPTERS[key] = chapters
+    return any(len(pairs & chapter) / len(pairs) >= SCRIPTURE_QUOTE_SHARE for chapter in _CUV_CHAPTERS[key])
+
+
 def excerpt_overlaps_inline_markup(
     text: str,
     excerpt: str,
     *,
     blocked_kinds: set[str] | frozenset[str] | None = None,
+    spoken_scripture_quotes: bool = False,
 ) -> bool:
-    """Whether the deterministic first verbatim match lands in inline structure."""
+    """Whether the deterministic first verbatim match lands in inline structure.
+
+    ``spoken_scripture_quotes``: in a lecture transcript, a quote line that is 和合本
+    scripture is a verse he read aloud, not structure."""
 
     value = str(text or "")
     needle = str(excerpt or "")
@@ -682,6 +718,8 @@ def excerpt_overlaps_inline_markup(
         (blocked_kinds is None or span.kind in blocked_kinds)
         and span.start < end
         and start < span.end
+        and not (spoken_scripture_quotes and span.kind == "blockquote"
+                 and blockquote_is_scripture(value[span.start:span.end]))
         for span in inline_markup_spans(value)
     )
 

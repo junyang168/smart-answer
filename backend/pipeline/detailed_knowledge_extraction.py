@@ -673,6 +673,7 @@ def validate_response(
                     if allow_reviewed_notes_blockquote
                     else None
                 ),
+                spoken_scripture_quotes=source_type != "notes_manuscript",
             ):
                 anchor_errors.append(
                     f"{owner}: excerpt lands in provenance-ambiguous inline markup "

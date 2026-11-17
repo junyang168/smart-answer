@@ -260,30 +260,50 @@ def _bigrams(text: str) -> set[str]:
     return {han[i:i + 2] for i in range(len(han) - 1)}
 
 
-def read_aloud(slug: str, lines: list[str], cuv_root: Path | None = None) -> list[str]:
+def _chapter_verses(cuv_root: Path, book: str, chapter: int) -> dict:
+    try:
+        return json.loads((cuv_root / book.upper() / f"{chapter}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def read_aloud(slug: str, lines: list[str], cuv_root: Path | None = None, passage: str | None = None) -> list[str]:
     """這段經文裡他在本堂念出來的各節（單節 slug）：有一句逐字稿，一半以上的相鄰兩字出現在那一節。
 
-    與聆聽頁判斷「他此刻念到哪一節」用同一個準則。只報出處、說段落範圍不算。"""
+    與聆聽頁判斷「他此刻念到哪一節」用同一個準則。只報出處、說段落範圍不算。
+    他念的是本章經文（passage）時，一句短經文會碰巧與別卷的一節共用一半的相鄰兩字
+    （太 5:9「因為他們必稱為神的兒子」對 賽 61:6「人必稱你們為我們神的僕役」）：
+    那一句與本章某節更相符，就算他念本章，不算念這一節。"""
     from backend.api.scripture import parse_reference
 
     if cuv_root is None:
         from backend.bible_study.paths import cuv_dir
         cuv_root = cuv_dir()
     ref = parse_reference(slug)
-    try:
-        chapter = json.loads((cuv_root / ref["slug_book"].upper() / f"{ref['chapter']}.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    chapter = _chapter_verses(cuv_root, ref["slug_book"], ref["chapter"])
+    if not chapter:
         return []
     said = [pairs for pairs in map(_bigrams, lines) if len(pairs) >= 5]
+    own = []
+    if passage:
+        home = parse_reference(passage)
+        if (home["slug_book"], home["chapter"]) != (ref["slug_book"], ref["chapter"]):
+            own = [_bigrams(text) for text in _chapter_verses(cuv_root, home["slug_book"], home["chapter"]).values()]
+
+    def own_better(pairs: set, share: float) -> bool:
+        return any(v and len(pairs & v) / len(pairs) > share for v in own)
+
     read = []
     for number in range(ref["start"], ref["end"] + 1):
         verse = _bigrams(chapter.get(str(number), ""))
-        if verse and any(len(pairs & verse) / len(pairs) >= 0.5 for pairs in said):
+        if verse and any(len(pairs & verse) / len(pairs) >= 0.5 and not own_better(pairs, len(pairs & verse) / len(pairs))
+                         for pairs in said):
             read.append(f"{slug.split('-')[0]}-{ref['chapter']}-{number}")
     return read
 
 
-def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None = None) -> tuple[list[str], list[str]]:
+def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None = None,
+                        passage: str | None = None) -> tuple[list[str], list[str]]:
     """Evidence 引的經文中，他在本堂念出來的 → 投影片必須顯示（負責人 2026-11-16）。另回讀不出的出處。
 
     跨章範圍（「五章十三節到七章二十九節」）是他在講段落範圍，不是念經文。"""
@@ -297,7 +317,7 @@ def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None
         if len(slugs) != 1:
             unread.append(ref)
             continue
-        shown += [verse for verse in read_aloud(slugs[0], lines, cuv_root) if verse not in shown]
+        shown += [verse for verse in read_aloud(slugs[0], lines, cuv_root, passage) if verse not in shown]
     return shown, unread
 
 
@@ -503,7 +523,7 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    scriptures, unread = evidence_scriptures(refs, spoken)
+                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
                     if scriptures:
                         entry["scriptures"] = scriptures
                     excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"}
@@ -518,6 +538,114 @@ def compile_package_context(passage: str, lecture: str, *, data_base_dir: Path, 
                "decisions_sha256": chapter_exposition.file_sha256(path),
                "transcript_sha256": decisions.get("transcript_sha256"),
                "creation_runs": sources, "groups": groups, "claims": claims, "excluded": excluded}
+    context["claim_source_ranges"] = claim_source_ranges(context, decisions)
+    return context
+
+
+INSTANCE_DEAD = ("superseded", "retired", "rejected")
+
+
+def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
+    """The live records one argument-layer ChangeSet wrote, by collection, and its metadata."""
+    row = conn.execute("SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s", (change_set_id,)).fetchone()
+    if not row:
+        raise ValueError(f"no ChangeSet {change_set_id} in the instance")
+    records: dict = {}
+    for collection, payload, status in conn.execute(
+            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.objects o
+               JOIN wang_knowledge.object_versions v USING (collection, object_id, revision)
+               WHERE v.change_set_id=%s ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
+        if status not in INSTANCE_DEAD:
+            records.setdefault(collection, []).append(payload)
+    return records, row[0]
+
+
+def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path, conn, change_set_id: str) -> dict:
+    """Outline context read from the new knowledge instance (rebuild design §六).
+
+    Claims, their supporting records, SourceFragments, scripture and refuted views all
+    come from the instance. Only the group order and titles come from the run the
+    ChangeSet names: the instance has no record for an argument group. The run's
+    candidate SHA must match what the ChangeSet recorded."""
+    path = chapter_exposition.record_path(data_base_dir, passage, lecture)
+    decisions = json.loads(path.read_text())
+    text, spans = retained_spans(decisions)
+    spoken = [line["text"] for line in chapter_slides.sentences(chapter_slides.kept_pieces(decisions))]
+    records, meta = instance_records(conn, change_set_id)
+    [document] = records["source_documents"]
+    if document.get("title") != lecture:
+        raise ValueError(f"ChangeSet {change_set_id} holds {document.get('title')}, not {lecture}")
+    candidate = Path(meta["candidate_path"])
+    if hashlib.sha256(candidate.read_bytes()).hexdigest() != meta["candidate_sha256"]:
+        raise ValueError("the run's candidate changed since it was written to the instance")
+    result = json.loads((candidate.parent / "creation-result.json").read_text())
+    fragments = {f["fragment_id"]: f for f in records.get("source_fragments", [])}
+    by_id = {}
+    for step in records.get("evidence_steps", []):
+        by_id[step["evidence_step_id"]] = (step["statement"], step["step_type"], step["source_fragment_ids"], step.get("scripture_refs") or [])
+    for row in records.get("observations", []):
+        by_id[row["observation_id"]] = (row["statement"], row["observation_type"], row["source_fragment_ids"], row.get("scripture_refs") or [])
+    for row in records.get("position_nodes", []):
+        by_id[row["position_id"]] = (row["title"], "opposed_position", row["source_fragment_ids"], [])
+    claims_by_short = {c["claim_id"].rsplit("-", 1)[1]: c for c in records.get("claims", [])}
+    support = {}
+    for rel in records.get("knowledge_relations", []):
+        if rel["relation_type"] == "supports":
+            support.setdefault(rel["to_id"], []).append(rel["from_id"])
+    groups, claims, excluded = [], [], []
+    for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
+        shorts = [s for s in shorts if s in claims_by_short]  # a Claim the owner ruled out is gone from the instance
+        if not shorts:
+            continue
+        gid = f"G{len(groups) + 1:02d}"
+        groups.append({"group_id": gid, "title": result["groups"][number - 1]["title"]})
+        cover = None
+        for short in shorts:
+            claim = claims_by_short[short]
+            cid = f"{gid}-{short}"
+            cover = cover or cid
+            behind, queue = [], list(claim["evidence_step_ids"]) + support.get(claim["claim_id"], [])
+            while queue:
+                rid = queue.pop(0)
+                if rid in by_id and rid not in behind:
+                    behind.append(rid)
+                    queue += support.get(rid, [])
+            evidence = []
+            for rid in behind + list(claim.get("opposed_position_ids") or []):
+                statement, kind, fids, refs = by_id[rid]
+                anchors = []
+                for fid in fids:
+                    quote = fragments[fid]["verbatim_excerpt"]
+                    ids = locate(text, spans, quote)
+                    if ids is None:
+                        excluded.append({"claim_id": cid, "object_id": fid, "reason": "excerpt missing or ambiguous"})
+                    elif ids:
+                        anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
+                if anchors:
+                    entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
+                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
+                    if scriptures:
+                        entry["scriptures"] = scriptures
+                    excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"} for ref in unread]
+                    evidence.append(entry)
+            # His own words for the Claim: an occurrence anchor that is not a supporting record.
+            own = [a["source_fragment_id"] for o in claim.get("occurrences", []) for a in o.get("anchors", [])
+                   if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments]
+            stated = next((ids[0] for fid in own for ids in [locate(text, spans, fragments[fid]["verbatim_excerpt"])] if ids), None)
+            if not stated and not evidence:
+                # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
+                excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
+                continue
+            claims.append({"claim_id": cid, "group_id": gid, "statement": claim["statement"],
+                           "parent": None if cid == cover else cover,
+                           "stated": stated or "本堂未保留", "evidence_steps": evidence})
+    used = {c["group_id"] for c in claims}
+    groups = [g for g in groups if g["group_id"] in used]
+    context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
+               "decisions_sha256": chapter_exposition.file_sha256(path),
+               "transcript_sha256": decisions.get("transcript_sha256"),
+               "instance": {"change_set_id": change_set_id, "candidate_sha256": meta["candidate_sha256"]},
+               "groups": groups, "claims": claims, "excluded": excluded}
     context["claim_source_ranges"] = claim_source_ranges(context, decisions)
     return context
 
@@ -590,10 +718,19 @@ def main():
     parser.add_argument("--data-dir", type=Path, help="讀選材紀錄的資料目錄")
     parser.add_argument("--creation-run", type=Path, action="append", default=[],
                         help="Claim 建立的一組輸出資料夾（含 candidate.json）；按論證次序給，每組一次")
+    parser.add_argument("--instance-change-set", help="從新知識庫實例讀這一講的論證層（ARGUMENT_DATABASE_URL）")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output already exists; reuse the frozen context")
-    if args.creation_run:
+    if args.instance_change_set:
+        import psycopg
+        from dotenv import load_dotenv
+        from backend.pipeline.argument_review import database_url
+        load_dotenv(".env")
+        with psycopg.connect(database_url()) as conn:
+            context = compile_instance_context(args.passage, args.lecture, data_base_dir=args.data_dir or Path(DATA_BASE_PATH),
+                                               conn=conn, change_set_id=args.instance_change_set)
+    elif args.creation_run:
         context = compile_package_context(args.passage, args.lecture, data_base_dir=args.data_dir or Path(DATA_BASE_PATH),
                                           runs=args.creation_run)
     elif args.structure:

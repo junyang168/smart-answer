@@ -9,7 +9,8 @@ type Question = {
   question: string;
   options: Option[];
   sentences: Sentence[];
-  audio: { url: string; start: number | null; end: number | null };
+  // An eval question compares a ruling with a Claim and has no passage to play.
+  audio?: { url: string; start: number | null; end: number | null };
   disagreement?: string | null;
   viewpoints?: string[];
 };
@@ -43,7 +44,7 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return response.json();
 }
 
-function Player({ audio }: { audio: Question["audio"] }) {
+function Player({ audio }: { audio: NonNullable<Question["audio"]> }) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const start = audio.start ?? 0;
@@ -265,7 +266,7 @@ function Review() {
             {redo ? "重新決定" : next.mode === "followup" || next.mode === "clarifying" ? "想再請教你一下" : `第 ${number} 題，共 ${next.progress.total} 題`}
           </p>
           <Viewpoints items={question.viewpoints} />
-          <Player audio={question.audio} />
+          {question.audio && <Player audio={question.audio} />}
           <Passage sentences={question.sentences} />
           {!redo && next.mode === "clarifying" ? (
             <div className="grid gap-4">
@@ -412,7 +413,7 @@ function OwnerItem({ row, onDone }: { row: Overview; onDone: () => void }) {
   return (
     <article className="grid gap-3 rounded-2xl bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <Player audio={row.question.audio} />
+        {row.question.audio ? <Player audio={row.question.audio} /> : <span />}
         <span className="text-sm text-slate-500">{row.question.group_id}</span>
       </div>
       <Viewpoints items={row.question.viewpoints} />

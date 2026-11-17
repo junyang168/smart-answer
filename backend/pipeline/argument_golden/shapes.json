@@ -1,0 +1,546 @@
+{
+ "about": "Argument-shape eval set (docs/wang-knowledge-platform/10-extraction/argument_shape_eval_set.md). confirmed=false marks Claude's reading, not yet ruled by the owner; it is reported apart and decides nothing.",
+ "cases": [
+  {
+   "id": "L1-G01-teaching-premise",
+   "shape": "他當作教導講的前提",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner key lecture 1 G01 CL3 「認識之後必有回應」",
+   "run": "gpt-20261116-lecture1-v5/g01/creation",
+   "group": "G001",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "claim",
+     "all": [
+      "認識",
+      "反應|回應"
+     ],
+     "meaning": "人認識神或認識一個人之後，就會對他有行為或生命上的反應"
+    }
+   ]
+  },
+  {
+   "id": "L1-G01-teaching-premise-kept",
+   "shape": "他當作教導講的前提",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner key lecture 1 G01 CL3",
+   "run": "gpt-20261116-lecture1-v4/g01/creation",
+   "group": "G001",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "kept",
+     "all": [
+      "認識",
+      "反應|回應"
+     ],
+     "meaning": "人認識神或認識一個人之後，就會對他有行為或生命上的反應"
+    }
+   ]
+  },
+  {
+   "id": "L1-G03-cover-and-parts",
+   "shape": "蓋子與各部分",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner key lecture 1 G03 had inclusio (CL2) and the middle blessings (CL3) apart; owner 2026-11-16 「同意」 to one Claim: same words at both ends, so one passage, so all six are kingdom blessings is one chain, and CL2 answers no question of its own. Either shape passes; the inclusio must be stated with the conclusion it leads to, and the cover stays",
+   "run": "gpt-20261116-lecture1-v5/g03/creation",
+   "group": "G001",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "claim",
+     "all": [
+      "首尾|開頭|前面",
+      "天國"
+     ],
+     "meaning": "八福首尾都說「天國是他們的」，表明整段講的是天國"
+    },
+    {
+     "check": "every_with",
+     "if": [
+      "首尾|開頭跟結束"
+     ],
+     "then": [
+      "中間|各福|全"
+     ],
+     "if_meaning": "八福首尾都說「天國是他們的」",
+     "then_meaning": "沒有提到天國的那幾福，所應許的也是天國的祝福",
+     "ruled": {
+      "then": {
+       "八福首尾的「天國是他們的」表明整段所應許的都是天國的祝福，其中哀慟與得安慰也都與天國有關，不能解作一般人遇到痛苦便有福、將來有人安慰。": true,
+       "第一福與第八福的「天國是他們的」用現在式，虛心的人與為義受逼迫的人現在就能體會天國，其他六福用將來式，要在神國完全臨到時體會所應許的福份。": false,
+       "神的國在耶穌降生、在地上的時候已經開始，現在已經存在，將來才會完全來到。": false,
+       "八福呈現天國已經存在、將來完全臨到所帶來的福氣。": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "L1-G03-cover-not-restatement",
+   "shape": "蓋子與各部分",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner key lecture 1 G03 CL1 is the cover; lecture1-v4 handed it back as a restatement",
+   "run": "gpt-20261116-lecture1-v4/g03/creation",
+   "group": "G001",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "kept",
+     "all": [
+      "八福",
+      "天國"
+     ],
+     "meaning": "八福所講的是天國的福氣（本組的總結論）",
+     "ruled": {
+      "all": {
+       "八福應當放在天國已經存在、將來完全臨到的脈絡中理解，其中的應許都是天國的福氣。": true,
+       "八福第一福與最後一福的「是」用現在式，表示天國現在就是他們的，今天就能體會；其餘各福的應許用將來式，指向神的國將來完全臨到時他們要體會的福份。中文較少表達時態，容易看不出這個分別。": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "L1-G05-open-question",
+   "shape": "留到後面回答的問題",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner, lecture 1 review page: a question not answered on the spot is a Question, not a Claim (G05 「預言到約翰為止…張力」)",
+   "run": "gpt-20261116-lecture1-v2/g05/creation",
+   "group": "G001",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_claim",
+     "all": [
+      "約翰為止"
+     ],
+     "meaning": "眾先知和律法到約翰為止，與律法一點一畫不廢去，兩者之間有張力或矛盾"
+    },
+    {
+     "check": "no_claim",
+     "all": [
+      "張力|矛盾"
+     ],
+     "meaning": "耶穌的話之間看來有矛盾或張力"
+    }
+   ]
+  },
+  {
+   "id": "L1-G02-scholars-aside",
+   "shape": "沒有根據的批評",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16: 「有些學者看經眼瞎」 is a 題外話",
+   "run": "gpt-20261116-lecture1-v2/g02/creation",
+   "group": "G001",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "in_digression",
+     "sentence": "看聖經眼睛都瞎了"
+    }
+   ]
+  },
+  {
+   "id": "L1-G02-refuted-view",
+   "shape": "他駁斥的看法",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner G02: 「耶穌從來沒有說過自己是神」 is a Position",
+   "run": "gpt-20261116-lecture1-v2/g02/creation",
+   "group": "G001",
+   "stage": "records",
+   "checks": [
+    {
+     "check": "record_kind",
+     "sentence": "從來沒有說",
+     "kind": "position"
+    }
+   ]
+  },
+  {
+   "id": "L2-time-magazine-aside",
+   "shape": "沒有根據的批評",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner rule: criticism of others with no scripture or reasoning is a 題外話",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G005",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "in_digression",
+     "sentence": "聖經不懂"
+    }
+   ]
+  },
+  {
+   "id": "L2-time-magazine-no-claim",
+   "shape": "只有題外話的一組",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner rule: an unsupported criticism yields no Claim",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G005",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_claim",
+     "all": [
+      "記者"
+     ],
+     "meaning": "記者不懂聖經，報導是亂扯"
+    }
+   ]
+  },
+  {
+   "id": "L2-story-ending-stays",
+   "shape": "故事作論據，結尾屬故事",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner review page 2026-11-16: the engineer story's ending stays in the story",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "not_digression",
+     "sentence": "幫助教會增長"
+    }
+   ]
+  },
+  {
+   "id": "L2-reason-not-a-claim",
+   "shape": "Claim 的寫法",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16 「這個觀點本身怎麼就是怪怪的」: 「神造男造女」 is the reason for 「覺得漂亮不等於犯姦淫」; no Claim retells the brother's prayer. Owner later: 「神造男造女，不能把覺得女孩子漂亮就當作心裡犯姦淫；求神使自己看見女孩子如同石頭…神不會聽」 「寫的很好」 — the prayer may be named as what he rejects",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_word",
+     "pattern": "那位弟兄|那個弟兄|教授"
+    },
+    {
+     "check": "claim",
+     "all": [
+      "神造男造女",
+      "漂亮",
+      "姦淫"
+     ],
+     "meaning": "覺得異性漂亮不等於心裡犯姦淫，因為神造男造女",
+     "ruled": {
+      "all": {
+       "看見婦女、覺得她漂亮，並不就等於耶穌所說的心裡與她犯姦淫。": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "L2-wording-lecture2",
+   "shape": "Claim 的寫法",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16: a Claim states his judgement, never 「教授認為」 or a story's characters",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G003",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_word",
+     "pattern": "教授|講者|那位弟兄"
+    }
+   ]
+  },
+  {
+   "id": "L2-wording-covenant",
+   "shape": "Claim 的寫法",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16 wording rule",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G001",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_word",
+     "pattern": "教授|講者"
+    }
+   ]
+  },
+  {
+   "id": "L2-abstention-source-evidence",
+   "shape": "經文讀法作論據",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner review page 2026-11-16: Lev 17–18 as the source of the four abstentions is Evidence",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G003",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "every_with",
+     "if": [
+      "利未記十七|利未記17"
+     ],
+     "then": [
+      "跌倒"
+     ],
+     "if_meaning": "四項禁戒出自利未記十七、十八章",
+     "then_meaning": "禁戒是為了不使猶太人跌倒"
+    }
+   ]
+  },
+  {
+   "id": "L2-unstated-lesson",
+   "shape": "他沒說出的教訓",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16: 「黄色的是故事的总结啊」, then 「這是一個故事的總結，但是這個故事 illustrate 教授的觀點——異性吸引不是姦淫」. The summary 「誤解…痛苦；講清楚能得釋放」 is not a Claim; the two stories are Evidence for 「覺得異性漂亮不等於心裡犯姦淫」.",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "no_claim",
+     "all": [
+      "釋放"
+     ],
+     "meaning": "把經文講清楚，能使誤解經文而痛苦的人得到釋放"
+    }
+   ]
+  },
+  {
+   "id": "L2-blood-chain",
+   "shape": "兩個問題，兩條",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner review page 2026-11-16 「兩個觀點」: why God forbade blood (atonement; Noah) and who must abstain (Gentiles living among Jews) answer different questions; two Claims, against Claude's reading",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G003",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "apart",
+     "a": [
+      "贖罪"
+     ],
+     "b": [
+      "同住"
+     ],
+     "a_meaning": "神禁止吃血，是因為血用來贖罪",
+     "b_meaning": "外邦人禁血只限於與猶太人同住的人",
+     "ruled": {
+      "a": {
+       "不能因挪亞在摩西律法以前已被禁止吃血，就認定今天全世界的人仍須禁血；挪亞需要獻贖罪祭，所以不可吃血，今天我們已不再獻贖罪祭，這項禁令便不約束我們。": true
+      },
+      "b": {
+       "禁血的要求不是一律施於所有外邦人，而是施於與猶太人住在一起的外邦人，因為吃血會使猶太人無法接受，妨礙彼此交通；不與猶太人住在一起的外邦人沒有這個限制。": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "L2-food-law-purpose",
+   "shape": "他另給理由的讀法",
+   "use": "train",
+   "confirmed": false,
+   "ruling": "Claude's reading: the food laws' purpose (keep Jews apart) is a Claim",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G002",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "claim",
+     "all": [
+      "潔淨",
+      "分別"
+     ],
+     "meaning": "摩西律法區分潔淨與不潔淨的食物，是要把猶太人與外邦人分別開來"
+    }
+   ]
+  },
+  {
+   "id": "L2-rom-8-4",
+   "shape": "他另給理由的讀法",
+   "use": "train",
+   "confirmed": false,
+   "ruling": "Claude's reading: Rom 8:4 「律法的義」 argued from δικαίωμα is a Claim",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G001",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "claim",
+     "all": [
+      "律法的義"
+     ],
+     "meaning": "羅馬書八章四節「律法的義」指律法正當的要求"
+    }
+   ]
+  },
+  {
+   "id": "L2-eph-4-13",
+   "shape": "經文讀法作論據",
+   "use": "train",
+   "confirmed": false,
+   "ruling": "Claude's reading: Eph 4:13 is Evidence for the one-meaning Claim",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G007",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "returned",
+     "all": [
+      "同歸於一"
+     ],
+     "kind": "evidence",
+     "meaning": "以弗所書四章十三節「在真道上同歸於一」，指對聖經的認識趨於一致"
+    }
+   ]
+  },
+  {
+   "id": "L2-heart-and-anger",
+   "shape": "兩個問題，兩條",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner review page 2026-11-16 「兩個觀點」: 「耶穌看重內心」 and 「恨人就是殺人」 are two points, against Claude's reading",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G006",
+   "stage": "claims",
+   "checks": [
+    {
+     "check": "apart",
+     "a": [
+      "內心|動機"
+     ],
+     "b": [
+      "恨"
+     ],
+     "a_meaning": "耶穌看重人的內心和動機，不只是外表行為",
+     "b_meaning": "心裡恨人就等於殺人",
+     "ruled": {
+      "a": {
+       "文士和法利賽人的義有兩個特點：靠自己的能力遵行，以及只在外表遵行，內心本意卻與誡命的精義相反。": false,
+       "耶穌對不可殺人的解釋涉及內心的恨；即使沒有拿刀或槍殺人，心裡恨人也等於殺人，不能以沒有實際動手自認已遵守誡命。": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "L2-question-left-for-tomorrow",
+   "shape": "留到後面回答的問題",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner review page 2026-11-16: the 5:27–28 Question is left open (「明天我們來回答這個問題」); the Gemini reviewer was right, GPT linked it to a Claim as answered",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "question_open",
+     "sentence": "那到底耶穌講的是什麼意思"
+    }
+   ]
+  },
+  {
+   "id": "L2-stories-support-attraction-claim",
+   "shape": "故事作論據，結尾屬故事",
+   "use": "train",
+   "confirmed": true,
+   "ruling": "owner 2026-11-16: the stories illustrate 「異性吸引不是姦淫」 — both the Taiwan brother and the engineer are Evidence for that Claim. The saved step input still lists the story summary and the split prayer Claim (both ruled out), so they are dropped from this case's input.",
+   "run": "gpt-20261116-lecture2-v6/creation",
+   "group": "G004",
+   "stage": "steps",
+   "checks": [
+    {
+     "check": "evidence_for",
+     "sentence": "大聲的喊叫",
+     "claim": [
+      "漂亮",
+      "姦淫"
+     ],
+     "meaning": "覺得異性漂亮不等於心裡犯姦淫"
+    },
+    {
+     "check": "evidence_for",
+     "sentence": "閉著眼睛走路",
+     "claim": [
+      "漂亮",
+      "姦淫"
+     ],
+     "meaning": "覺得異性漂亮不等於心裡犯姦淫"
+    }
+   ],
+   "drop_claims": [
+    [
+     "釋放"
+    ],
+    [
+     "那位弟兄",
+     "石頭"
+    ]
+   ]
+  },
+  {
+   "id": "L2-audience-question",
+   "shape": "聽眾提的問題",
+   "use": "train",
+   "confirmed": true,
+   "run": "gpt-20261117-lecture2-v7/creation",
+   "group": "G007",
+   "stage": "steps",
+   "ruling": "Owner 2026-11-17: 「this is surely a question, although his answer made it feel like he thinks she just use her own idea」. The audience's question is a Question answered by the Claim on subjectivity and evidence, not a Position, even though his answer says she may be taking her own idea for the Spirit. v7 wrote 反方.",
+   "checks": [
+    {
+     "check": "question_answered",
+     "sentence": "有的時候他會拿不出證據",
+     "claim": [
+      "主觀",
+      "證據"
+     ],
+     "meaning": "人容易把自己的主觀當作聖靈的感動，所以必須找證據"
+    }
+   ]
+  },
+  {
+   "id": "L2-translation-as-reason",
+   "shape": "順帶的小問題",
+   "use": "train",
+   "confirmed": true,
+   "run": "gpt-20261117-lecture2-v7/creation",
+   "group": "G001",
+   "stage": "claims",
+   "ruling": "Owner 2026-11-17 (「agreed」): 林前9:20 「翻錯了，應該是『我乃在基督律法之下』」 is his reason; 「所以啊，基督徒乃在基督的律法底下」 is his point. One Claim, with the translation as its Evidence. v7 wrote both as Claims (CL0001, CL0003).",
+   "checks": [
+    {
+     "check": "no_claim",
+     "all": [
+      "正在律法之下"
+     ],
+     "meaning": "林前九章二十節「在基督面前，正在律法之下」翻錯了，應是「我乃在基督律法之下」"
+    },
+    {
+     "check": "claim",
+     "all": [
+      "基督的律法|基督律法",
+      "摩西"
+     ],
+     "meaning": "基督徒不在摩西律法之下，而在基督的律法之下"
+    }
+   ]
+  }
+ ]
+}
