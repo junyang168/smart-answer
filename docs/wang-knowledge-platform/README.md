@@ -44,6 +44,7 @@
 | --- | --- |
 | [論證層重建設計](./10-extraction/argument_layer_rebuild_design.md) | #787 草案：分步生成寫入新知識庫實例、Flash 在新實例驗證、重放、投影片讀新實例、試作代碼轉正式 |
 | [GPT 第 1 講首次評分 2026 11 16](./10-extraction/argument_layer_gpt_lecture1_20261116.md) | GPT 6.1 sol 對太5 第 1 講：定案答案 20／22 對，題外話正確提出 |
+| [GPT 論證層各輪評分 2026 11 16](./10-extraction/argument_layer_gpt_rounds_20261116.md) | 第 1 講 36／36 通過；第 2 講保留分數 24／33、第二輪 28／33；第 3 講暫停 |
 | [論證層試作經驗 2026 11 16](./10-extraction/argument_layer_poc_lessons_20261116.md) | 太5 第一講試作的十二條經驗：發生了什麼、為什麼、因此怎麼改 |
 | [錄像轉錄與投影片時間軸流程 v1](./10-extraction/video_transcription_pipeline_v1.md) | 繁體逐字稿、中文時間對齊、換頁與逐步顯示、原始投影片自動嵌入的待實作流程與驗收契約 |
 | [錄像轉錄與投影片模型能力查證記錄 2026 10 27](./10-extraction/video_transcription_capabilities_20261027.md) | 官方能力、限制及本機舊流程觀察；不是新管線實測成績 |
