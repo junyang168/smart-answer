@@ -315,3 +315,15 @@ def test_where_he_states_a_claim_itself_the_slide_must_show_that_claim():
         "甲（S0004–S0006）: 他已講到另一步（C1），畫面還停在要點「推辭」；那一步的第一條要點要在 S0004 或更早出現"]
     shown = [dict(stale[0], points=stale[0]["points"] + [{"sentence": "S0004", "text": "謙卑的人知道恩賜是神給的", "source": "C1"}])]
     assert hints.stale_points(context, shown, lines) == [] and hints.point_spans(context, shown) == []
+def test_a_verse_of_the_chapter_he_reads_is_not_counted_as_another_books_verse(tmp_path):
+    (tmp_path / "MAT").mkdir(); (tmp_path / "ISA").mkdir()
+    (tmp_path / "MAT" / "5.json").write_text(json.dumps({"9": "使人和睦的人有福了！因為他們必稱為神的兒子。"}))
+    (tmp_path / "ISA" / "61.json").write_text(json.dumps({
+        "6": "你們倒要稱為耶和華的祭司；人必稱你們為我們神的僕役。你們必喫用列國的財物，因得他們的榮耀自誇。",
+        "7": "你們必得加倍的好處，代替所受的羞辱；分中所得的喜樂必代替所受的凌辱。"}))
+    lines = ["因為他們必稱為神的兒子。」", "你們必得加倍的好處，代替所受的羞辱"]
+    # Without the chapter in view, Matthew 5:9 reads as Isaiah 61:6 (half its pairs are shared).
+    assert hints.read_aloud("isa-61-6-7", lines, tmp_path) == ["isa-61-6", "isa-61-7"]
+    assert hints.read_aloud("isa-61-6-7", lines, tmp_path, passage="mat-5-1-48") == ["isa-61-7"]
+    # A cited verse in the expounded chapter itself is still read.
+    assert hints.read_aloud("mat-5-9", lines, tmp_path, passage="mat-5-1-48") == ["mat-5-9"]

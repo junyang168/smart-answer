@@ -1,0 +1,81 @@
+import pytest
+
+from backend.pipeline import argument_eval as ev
+
+REQ = {'input': {'claims': {'CL1': '覺得漂亮不等於心裡犯姦淫', 'CL2': '以弗所書四13同歸於一'},
+                 'sentences': [{'sentence_id': 'S1', 'text': '記者聖經不懂，亂扯。'}, {'sentence_id': 'S2', 'text': '因為神造男造女。'}]}}
+STEPS = {'steps': [{'step_id': 'ST1', 'line': '理由', 'supports': ['CL1'], 'sentence_ids': ['S2']}],
+         'digressions': [{'sentence_ids': ['S1']}], 'not_claims': [{'claim_id': 'CL2', 'kind': 'evidence'}], 'claim_text': [], 'other': []}
+CLAIMS = {'candidates': [{'statement': '教授認為那位弟兄求神使他看女孩子如石頭', 'existing_claim_id': None},
+                         {'statement': '覺得異性漂亮是神造男造女的本性，不等於犯姦淫', 'existing_claim_id': None},
+                         {'statement': '記者不懂', 'existing_claim_id': 'CL9'}]}
+
+
+@pytest.mark.parametrize('c,ok', [
+    ({'check': 'no_claim', 'all': ['石頭']}, False), ({'check': 'claim', 'all': ['漂亮', '姦淫']}, True),
+    ({'check': 'no_claim', 'all': ['記者']}, True),  # a reused Claim is not this call's new one
+    ({'check': 'no_word', 'pattern': '教授'}, False), ({'check': 'at_most', 'all': ['漂亮|石頭'], 'max': 1}, False),
+    ({'check': 'apart', 'a': ['石頭'], 'b': ['本性']}, True), ({'check': 'every_with', 'if': ['漂亮'], 'then': ['姦淫']}, True)])
+def test_claim_checks_find_claims_by_his_words(c, ok):
+    assert ev.check(c, REQ, CLAIMS) is ok
+
+
+@pytest.mark.parametrize('c,ok', [
+    ({'check': 'in_digression', 'sentence': '亂扯'}, True), ({'check': 'not_digression', 'sentence': '神造男造女'}, True),
+    ({'check': 'evidence_for', 'sentence': '神造男造女', 'claim': ['漂亮']}, True),
+    ({'check': 'returned', 'all': ['同歸於一'], 'kind': 'evidence'}, True), ({'check': 'kept', 'all': ['漂亮']}, True)])
+def test_step_checks_find_sentences_by_his_words(c, ok):
+    assert ev.check(c, REQ, STEPS) is ok
+
+
+def test_a_check_naming_words_he_never_said_is_an_error_not_a_pass():
+    with pytest.raises(ValueError, match='no sentence'):
+        ev.check({'check': 'in_digression', 'sentence': '律法全部廢掉'}, REQ, STEPS)
+
+
+def test_cases_sharing_a_call_share_it():
+    cases = [{'run': 'r', 'group': 'G1', 'stage': 'claims'}, {'run': 'r', 'group': 'G1', 'stage': 'claims'},
+             {'run': 'r', 'group': 'G1', 'stage': 'steps'}]
+    assert len(ev.plan(cases)) == 2 and len(ev.plan(cases, only=["steps"])) == 1
+
+
+def test_every_case_points_at_one_saved_call_and_its_words_exist():
+    import json
+    cases = json.loads(ev.CASES.read_text())['cases']
+    assert len({c['id'] for c in cases}) == len(cases)
+    if not ev.RUNS.exists():
+        pytest.skip('saved runs are not on this machine')
+    for case in cases:
+        request = ev.saved_request(case)
+        for c in case['checks']:
+            if 'sentence' in c and c['check'] != 'record_kind':
+                ev._sentences(request, c['sentence'])
+
+
+def test_keywords_and_jev_must_agree_or_the_case_needs_a_look(monkeypatch, tmp_path):
+    """Owner 2026-11-17: Jev never passes a case alone."""
+    from backend.pipeline import argument_eval as ev
+    case = {'checks': [{'check': 'claim', 'all': ['同住'], 'meaning': '外邦人禁血只限於與猶太人同住的人'}]}
+    request = {'input': {}}
+    answer = {'candidates': [{'statement': '禁血只施於與猶太人住在一起的外邦人'}]}
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: True), {}))
+    row = ev.grade(case, request, answer, root=tmp_path, ports=object())[0]
+    assert row['keyword'] is False and row['meaning'] is True and row['pass'] is None and row['needs_look']
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: False), {}))
+    row = ev.grade(case, request, answer, root=tmp_path, ports=object())[0]
+    assert row['pass'] is False and not row['needs_look']
+
+
+def test_a_needs_a_look_goes_to_the_review_page_and_the_answer_settles_it(monkeypatch, tmp_path):
+    from backend.pipeline import argument_eval as ev
+    check = {'check': 'claim', 'all': ['同住'], 'meaning': '外邦人禁血只限於與猶太人同住的人'}
+    case = {'id': 'L2-blood', 'run': 'gpt-20261116-lecture2-v6/g003/creation', 'group': 'G003', 'checks': [check]}
+    answer = {'candidates': [{'statement': '禁血只施於與猶太人住在一起的外邦人'}]}
+    monkeypatch.setattr(ev, 'meaning_matcher', lambda c, r, a, root, ports: ((lambda s, side: True), {}))
+    row = {'id': 'L2-blood', 'checks': ev.grade(case, {'input': {}}, answer, root=tmp_path, ports=object())}
+    [q] = ev.look_questions([row], [case])
+    assert q['lecture'].endswith('2') and q['payload']['viewpoints'] == ['禁血只施於與猶太人住在一起的外邦人']
+    doc = {'cases': [case]}
+    assert ev.apply_rulings(doc, [(q['payload']['eval'], 'says')]) == 1
+    again = ev.grade(case, {'input': {}}, answer, root=tmp_path, ports=object())[0]
+    assert again['pass'] is True and not again['needs_look']

@@ -23,7 +23,8 @@ AUTO_TERMINAL_REASONS = frozenset({"duplicate_of", "structural_markup"})
 #: A person may approve these in bulk; they are not terminal on their own.
 BULK_APPROVABLE_REASONS = frozenset({"not_exegesis"})
 #: Never terminal without a person, however unremarkable the sentence looks.
-HUMAN_ONLY_REASONS = frozenset({"background_only", "deferred"})
+# "digression": a proposed 題外話; a 同工 must approve it (owner 2026-11-16).
+HUMAN_ONLY_REASONS = frozenset({"background_only", "deferred", "digression"})
 REASON_CODES = AUTO_TERMINAL_REASONS | BULK_APPROVABLE_REASONS | HUMAN_ONLY_REASONS
 
 

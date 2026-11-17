@@ -1,0 +1,88 @@
+import pytest
+
+from backend.pipeline import argument_reviewer as r
+
+VIEW = {'group_id': 'G001',
+        'sentences': [{'sentence_id': 'S1#1', 'text': '記者聖經不懂，亂扯。'},
+                      {'sentence_id': 'S1#2', 'text': '所以基督的律法跟摩西的律法有重疊。'}],
+        'claims': [{'id': 'CL0001', 'statement': '兩種律法有重疊', 'his_words': [], 'support_lines': []},
+                   {'id': 'CL0002', 'statement': '記者不懂聖經', 'his_words': [], 'support_lines': []}],
+        'others': [{'id': 'D1', 'kind': 'digression', 'statement': '批評記者', 'text': '記者聖經不懂，亂扯。'}]}
+
+
+def answer(**change):
+    a = {'claims': [{'id': 'CL0001', 'verdict': 'his_claim', 'target': '', 'quote': '基督的律法跟摩西的律法有重疊', 'why': '',
+                     'question': '兩種律法有什麼關係？', 'same_question_as': ''},
+                    {'id': 'CL0002', 'verdict': 'digression', 'target': '', 'quote': '記者聖經不懂', 'why': '沒有理由',
+                     'question': '', 'same_question_as': ''}],
+         'others': [{'id': 'D1', 'verdict': 'unsupported', 'target': '', 'quote': '亂扯', 'why': ''}], 'missing': []}
+    a.update(change)
+    return a
+
+
+def test_only_disagreements_with_gpt_are_kept():
+    r.check(VIEW, answer())
+    found = r.disagreements(VIEW, answer())
+    assert [(d['item'], d['verdict']) for d in found] == [('CL0002', 'digression')]
+
+
+@pytest.mark.parametrize('fault,match', [
+    ('invented_quote', 'not in the transcript'), ('skipped_claim', 'each Claim once'),
+    ('wrong_kind', 'does not fit'), ('bad_target', 'must name another Claim')])
+def test_a_review_that_skips_an_item_or_quotes_unspoken_words_is_rejected(fault, match):
+    a = answer()
+    if fault == 'invented_quote': a['claims'][0]['quote'] = '律法已經全部廢掉'
+    if fault == 'skipped_claim': a['claims'] = a['claims'][:1]
+    if fault == 'wrong_kind': a['others'][0]['verdict'] = 'answered'
+    if fault == 'bad_target': a['claims'][1].update(verdict='evidence_for', target='CL0002')
+    with pytest.raises(ValueError, match=match):
+        r.check(VIEW, a)
+
+
+def test_saved_review_is_replayed_without_a_call(tmp_path, monkeypatch):
+    monkeypatch.setattr(r, 'group_views', lambda creation: [VIEW])
+    class Client:
+        calls = 0
+        def generate_json(self, system, user, schema):
+            Client.calls += 1
+            return answer()
+    first = r.review('run', tmp_path, Client())
+    again = r.review('run', tmp_path, None, call=False)
+    assert Client.calls == 1 and first['calls'] == 1 and again['calls'] == 0
+    assert again['disagreements'] == first['disagreements']
+
+
+def test_a_refused_group_is_listed_as_not_reviewed(tmp_path, monkeypatch):
+    monkeypatch.setattr(r, 'group_views', lambda creation: [VIEW])
+    class Client:
+        model = 'gemini-4-argon'
+        def generate_json(self, system, user, schema):
+            raise r.Blocked('SAFETY')
+    report = r.review('run', tmp_path, Client())
+    assert report['not_reviewed'] == ['G001'] and report['disagreements'] == [] and report['calls'] == 1
+
+
+def test_a_quote_may_skip_words_with_an_ellipsis():
+    a = answer()
+    a['claims'][0]['quote'] = '基督的律法……有重疊'
+    r.check(VIEW, a)
+    a['claims'][0]['quote'] = '基督的律法……全部廢掉'
+    with pytest.raises(ValueError, match='not in the transcript'):
+        r.check(VIEW, a)
+
+
+def test_a_claim_that_reports_him_or_retells_a_story_is_flagged_without_a_call():
+    view = {**VIEW, 'claims': [{'id': 'CL0001', 'statement': '那位弟兄求神使他不覺得女孩子漂亮，教授判斷神不會聽', 'his_words': [], 'support_lines': []},
+                               {'id': 'CL0002', 'statement': '覺得異性漂亮是神造男造女的本性', 'his_words': [], 'support_lines': []}]}
+    assert [(w['item'], w['words']) for w in r.wording(view)] == [('CL0001', ['教授', '那位弟兄'])]
+
+
+def test_two_claims_answering_one_question_are_flagged_as_a_pair():
+    a = answer()
+    a['claims'][1].update(verdict='his_claim', same_question_as='CL0001', question='兩種律法有什麼關係？')
+    r.check(VIEW, a)
+    found = r.disagreements(VIEW, a)
+    assert [(d['item'], d['verdict'], d['target']) for d in found] == [('CL0002', 'restates', 'CL0001')]
+    a['claims'][1]['same_question_as'] = 'CL0009'
+    with pytest.raises(ValueError, match='another Claim'):
+        r.check(VIEW, a)

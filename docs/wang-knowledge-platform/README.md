@@ -42,6 +42,11 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
+| [論證層重建設計](./10-extraction/argument_layer_rebuild_design.md) | #787 草案：分步生成寫入新知識庫實例、Flash 在新實例驗證、重放、投影片讀新實例、試作代碼轉正式 |
+| [GPT 第 1 講首次評分 2026 11 16](./10-extraction/argument_layer_gpt_lecture1_20261116.md) | GPT 6.1 sol 對太5 第 1 講：定案答案 20／22 對，題外話正確提出 |
+| [論證形態評測集](./10-extraction/argument_shape_eval_set.md) | prompt 改動怎麼驗證：按論證形態收的短案例、程式判的斷言、隨每講增長 |
+| [GPT 論證層各輪評分 2026 11 16](./10-extraction/argument_layer_gpt_rounds_20261116.md) | 第 1 講 36／36 通過；第 2 講保留分數 24／33、第二輪 28／33；第 3 講暫停 |
+| [論證層試作經驗 2026 11 16](./10-extraction/argument_layer_poc_lessons_20261116.md) | 太5 第一講試作的十二條經驗：發生了什麼、為什麼、因此怎麼改 |
 | [錄像轉錄與投影片時間軸流程 v1](./10-extraction/video_transcription_pipeline_v1.md) | 繁體逐字稿、中文時間對齊、換頁與逐步顯示、原始投影片自動嵌入的待實作流程與驗收契約 |
 | [錄像轉錄與投影片模型能力查證記錄 2026 10 27](./10-extraction/video_transcription_capabilities_20261027.md) | 官方能力、限制及本機舊流程觀察；不是新管線實測成績 |
 | [第一遍普查格式 v1](./10-extraction/corpus_survey_format_v1.md) | 全库普查的 JSON 格式 |
@@ -71,6 +76,7 @@
 | --- | --- |
 | ★ [CanonicalViewpoint 设计](./20-knowledge/canonical_viewpoint_design.md) | 观点身份、论证路线、观点关系：怎样判断两条主张是同一个观点，以及谁能读什么 |
 | [Claim／CVP Management 2.0 主控设计](./20-knowledge/claim_cvp_management_2_design.md) | #357 两管理域的目标职责、Claim 多轮修订与独立终审、必要人工出口及完整生命周期验收；尚未启用 |
+| [新知識庫實例與題外話標記：方案](./20-knowledge/knowledge_instance_and_asides_solution.md) | #787 草案：Claim 層寫入新實例並在條件滿足後取代舊實例；無依據的評論與個人插曲經編輯批准後不出投影片、播放時跳過 |
 | [CVP 3.0：主题式 CVP Agent](./20-knowledge/topic_cvp_agent_solution.md) | 主题式 Agent 取代 CVP 2.0 的分批生成：一次处理一个主题，召回、按需读原文、提议、多轮复核修订，拿不准的转负责人；关系须附教授原话；写库后再生成论证路线。2026-10-26 批准 |
 | [主题式 CVP 试跑记录（2026-10-25／26）](./20-knowledge/topic_cvp_agent_pilot_record_20261025.md) | 「人子」九次试跑与一次合并试验的经过和数字 |
 | [CVP 2.0 执行入口与恢复](./20-knowledge/cvp2_recall_preparation_v1.md) | 完整 action、增量召回、共同材料、多轮、维护权限、SQL 提交／恢复及独立质量状态；真实模型验收另行进行 |

@@ -721,7 +721,7 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 每條另查出現時間
 〈要點時間規則〉
-確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文。此類問題未修正前不可發布。
+確認過早或過晚的要點一律列為「出現時間」，寫明目前及應改的句子編號，並引用支持改動的原文；current_sentence 填目前的句子編號，proposed_sentence 填應改的句子編號（其他種類的問題兩欄都填空字串）。程序按錄音時間量這兩句的距離：要點比他講到早 30 秒以上、或晚 60 秒以上才算阻擋，更小的差距只記錄、不再修改。
 
 每張另查標題範圍：
 〈標題規則〉
@@ -749,8 +749,10 @@ REVIEW_SCHEMA: dict[str, Any] = {
                     "kind": {"type": "string", "enum": ["忠實", "完整", "跟得上", "經文", "出現時間"]},
                     "problem": {"type": "string"},
                     "fix": {"type": "string"},
+                    "current_sentence": {"type": "string"},
+                    "proposed_sentence": {"type": "string"},
                 },
-                "required": ["slide", "kind", "problem", "fix"],
+                "required": ["slide", "kind", "problem", "fix", "current_sentence", "proposed_sentence"],
                 "additionalProperties": False,
             },
         },
@@ -802,10 +804,46 @@ def _as_answer(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+EARLY_SECONDS = 30  # a point shown this long before he says it gives the answer away
+LATE_SECONDS = 60   # the review's own bar: about a minute of a slide with no point
+
+
+def measure_timing(findings: list[dict[str, Any]], sentences_: list[dict[str, Any]]) -> None:
+    """Measure each 出現時間 finding on the recording, so the review's guess is checked by the clock.
+
+    A finding the program cannot place (unknown sentence) keeps blocking."""
+    start = {s["id"]: s["start"] for s in sentences_}
+    for finding in findings:
+        if finding.get("kind") != "出現時間":
+            continue
+        now, proposed = finding.get("current_sentence"), finding.get("proposed_sentence")
+        if now not in start or proposed not in start:
+            finding["timing_blocks"] = True
+            finding["measured_seconds"] = None
+            continue
+        gap = round(start[proposed] - start[now], 1)  # > 0: shown too early; < 0: shown too late
+        finding["measured_seconds"] = gap
+        finding["timing_blocks"] = gap >= EARLY_SECONDS or -gap >= LATE_SECONDS
+
+
+def finding_blocks(finding: dict[str, Any]) -> bool:
+    if finding.get("kind") == "出現時間":
+        return finding.get("timing_blocks", True)  # an unmeasured (older) timing finding still blocks
+    return True
+
+
 def review_blocks_publication(review: dict[str, Any]) -> bool:
-    return review.get("blocking") is not False or any(
-        finding.get("kind") == "出現時間" for finding in review["findings"]
-    )
+    """Timing findings block only as measured; the reviewer's own flag decides the rest."""
+    findings = review["findings"]
+    if any(f.get("kind") == "出現時間" and finding_blocks(f) for f in findings):
+        return True
+    only_small_timing = bool(findings) and not any(finding_blocks(f) for f in findings)
+    return review.get("blocking") is not False and not only_small_timing
+
+
+def actionable(review: dict[str, Any]) -> list[dict[str, Any]]:
+    """Findings a revision should act on: all but timing findings measured as too small to matter."""
+    return [f for f in review["findings"] if finding_blocks(f)]
 
 
 def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) -> Path:
@@ -842,6 +880,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
                                   + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。" + extra, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
+    measure_timing(answer["findings"], sentences(kept_pieces(decisions_record)))
     out = {
         "slides_sha256": slides_sha,
         "revision": revision,
@@ -851,10 +890,11 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     }
     target.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"lecture": lecture, "status": "reviewed", "revision": revision, "grade": answer["grade"],
-            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]), "file": str(target)}
+            "blocking": review_blocks_publication(answer), "findings": len(answer["findings"]),
+            "actionable": len(actionable(answer)), "file": str(target)}
 
 
-def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
+def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
     path = record_path(data_base_dir, chapter.passage, lecture)
@@ -868,9 +908,9 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     verdict = json.loads(review_file.read_text(encoding="utf-8"))
     if verdict.get("slides_sha256") != chapter_exposition.file_sha256(path):
         return {"lecture": lecture, "status": "review_is_for_other_slides"}
-    if not verdict["findings"]:
+    if not actionable(verdict):
         return {"lecture": lecture, "status": "nothing_to_fix"}
-    if revision >= MOST_ROUNDS:
+    if revision >= most_rounds:
         return {"lecture": lecture, "status": "rounds_used_up", "findings": len(verdict["findings"])}
     decisions_record = json.loads(
         chapter_exposition.record_path(data_base_dir, chapter.passage, lecture).read_text(encoding="utf-8")
@@ -878,7 +918,9 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     from backend.pipeline.chapter_slide_claims import saved_context
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     kept = kept_pieces(decisions_record)
-    findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in verdict["findings"])
+    # A timing finding measured as too small to matter is not sent back: moving it is how rounds went back and forth.
+    findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}"
+                         for f in actionable(verdict))
     prompt = (
         user_prompt(lecture, decisions_record, context)
         + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
@@ -916,6 +958,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
     parser.add_argument("--claims-context", type=Path, help="本堂凍結的主張提示包；只可選一堂")
     parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
+    parser.add_argument("--owner-extra-round", action="store_true",
+                        help="轮数用完后，负责人批准的一轮：按最后一次审阅修正一次，再审一次，不再继续")
     parser.add_argument(
         "--recheck", action="store_true",
         help="被程序拒收的那一份回答，用现在的核对再过一遍；不调用模型",
@@ -950,12 +994,18 @@ def main(argv: list[str] | None = None) -> int:
         client = RecordedClient(client, data_root.parent / "calls")
     failed = False
     for lecture in lectures:
+        if args.owner_extra_round:
+            report = revise(chapter, lecture, data_base_dir=data_root, client=client, most_rounds=MOST_ROUNDS + 1)
+            print(json.dumps(report, ensure_ascii=False))
+            if report["status"] == "revised":
+                print(json.dumps(review(chapter, lecture, data_base_dir=data_root, client=client), ensure_ascii=False))
+            continue
         if args.review:
             data = data_root
             while True:
                 report = review(chapter, lecture, data_base_dir=data, client=client)
                 print(json.dumps(report, ensure_ascii=False))
-                if report["status"] != "reviewed" or not report["findings"]:
+                if report["status"] != "reviewed" or not report["actionable"]:
                     break
                 report = revise(chapter, lecture, data_base_dir=data, client=client)
                 print(json.dumps(report, ensure_ascii=False))

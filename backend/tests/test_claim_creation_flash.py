@@ -19,7 +19,7 @@ class Ports:
             c=r['claims'][0];c={k:v for k,v in c.items() if k not in ('claim_id','evidence_step_ids','opposed_position_ids','review_status')}
             out={'candidates':[{**c,'related_ranges':[{'first':'S0001','last':'S0003'}],
                 'conclusion_anchor':r['evidence_steps'][0]['anchors'][0],
-                'support_hint':'但以理書人子領受永遠權柄。','existing_claim_id':None}]}
+                'support_hint':'但以理書人子領受永遠權柄。','existing_claim_id':None,'answers_question':'人子是誰？'}]}
         elif task=='creation_materials':
             out={k:r[k] for k in ('questions','positions','observations','evidence_steps')}
             for o in out['observations']:o.pop('argument_role')
@@ -183,7 +183,7 @@ def test_compact_transport_compiles_full_legacy_ledger_and_replays_without_calls
 
 
 def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
-    reason=next(iter(d.REASON_CODES))
+    reason='not_exegesis'
     raw={'observations':[],'coverage_by_record':[{'record_id':'O','sentence_ids':['A','B']},
         {'record_id':'EXISTING','sentence_ids':['B']}],
         'excluded_sentences':[{'sentence_id':'C','reason_code':reason,'reason':'純轉場，不是實質內容。'}]}
@@ -196,7 +196,7 @@ def test_compact_audit_preserves_multiple_supports_exclusion_and_order():
 
 @pytest.mark.parametrize('defect',['missing','foreign','duplicate_record','duplicate_sentence','overlap','empty_reason','unknown_reason'])
 def test_bad_compact_audit_is_rejected_without_inventing_a_decision(defect):
-    row={'record_id':'O','sentence_ids':['A']};reason=next(iter(d.REASON_CODES))
+    row={'record_id':'O','sentence_ids':['A']};reason='not_exegesis'
     result={'observations':[{'anchors':[{'segment_index':'S0001','verbatim_excerpt':'原句。'}]}],
         'coverage_by_record':[row],'excluded_sentences':[{'sentence_id':'B','reason_code':reason,'reason':'口頭語。'}]}
     if defect=='missing':result['coverage_by_record']=[]
@@ -443,3 +443,258 @@ def test_reference_material_cannot_be_silently_regenerated_without_owned_anchor(
         return out
     with pytest.raises(ValueError,match='owned primary'):
         creation.run('T',p,tmp_path/'run',Ports(source,out_of_scope),groups=g)
+
+
+class StepsPorts(Ports):
+    """Steps first, then one record type and statement per step; the program cuts the fragments."""
+    def __init__(self,source,steps_mutation=None,records_mutation=None):
+        super().__init__(source);self.steps_mutation=steps_mutation;self.records_mutation=records_mutation
+    def repair(self,request):
+        task=request['input']['task']
+        if task=='creation_argument_steps':
+            self.calls.append(task)
+            assert set(request['input']['claims'])=={'CL0001'} and '先写论证，再分句子' in request['system']
+            out={'steps':[
+                {'step_id':'T1','line':'反方：人子只強調人性','sentence_ids':['S0001#001'],'supports':['CL0001']},
+                {'step_id':'T2','line':'回答：不對','sentence_ids':['S0001#002'],'supports':['CL0001']},
+                {'step_id':'T3','line':'經文事實：但以理書的人子領受永遠權柄','sentence_ids':['S0002#003'],'supports':['CL0001','T2']}],
+                'claim_text':[],'other':[{'sentence_ids':['S0003#004'],'why':'聽眾提問，下段回答。'}],'digressions':[],'not_claims':[]}
+            return self.steps_mutation(out) if self.steps_mutation else out
+        if task=='creation_step_records':
+            self.calls.append(task)
+            assert '你不複製原文' in request['system'] and 'verbatim_excerpt' not in json.dumps(request['schema'])
+            assert request['input']['argument_steps'][0]['text']=='有人说人子只强调人性。'
+            out={'records':[
+                {'step_id':'T1','kind':'position','statement':'人子只強調人性','observation_type':None,'step_type':None,'attribution':'有人','scripture_refs':[]},
+                {'step_id':'T2','kind':'evidence','statement':'他說這看法不對','observation_type':None,'step_type':'answer','attribution':'','scripture_refs':[]},
+                {'step_id':'T3','kind':'observation','statement':'但以理書的人子領受永遠權柄','observation_type':'scripture_text','step_type':None,'attribution':'','scripture_refs':['但7:13-14']}]}
+            return self.records_mutation(out) if self.records_mutation else out
+        return super().repair(request)
+
+
+def run_steps(tmp_path,**kw):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source));root=tmp_path/'run'
+    ports=StepsPorts(source,**kw)
+    return ports,root,(lambda:creation.run('T',path,root,ports,groups=groups(),grouped_package=True,steps_first=True))
+
+
+def test_steps_first_cuts_fragments_and_links_from_the_steps(tmp_path):
+    ports,root,go=run_steps(tmp_path);result=go()
+    assert ports.calls==['creation_claims','creation_argument_steps','creation_step_records']
+    package=json.loads((root/'candidate.json').read_text());claim=package['claims'][0]
+    assert len(claim['evidence_step_ids'])==1 and claim['opposed_position_ids']
+    assert package['observations'][0]['argument_role']=='load_bearing'
+    text={f['fragment_id']:f for f in package['source_fragments']}
+    assert all(a['source_fragment_id'] in text for a in claim['occurrences'][0]['anchors'])
+    assert json.loads((root/'intent.json').read_text())['argument_steps_contract']==creation.STEPS_CONTRACT
+    ports.calls=[];assert go()==result and ports.calls==[]
+
+
+@pytest.mark.parametrize('fault',['sentence_twice','sentence_missing','two_comparisons','unknown_support'])
+def test_bad_steps_stop_before_the_records_call(tmp_path,fault):
+    def mutate(out):
+        if fault=='sentence_twice':out['steps'][1]['sentence_ids'].append('S0001#001')
+        if fault=='sentence_missing':out['other']=[]
+        if fault=='two_comparisons':out['steps'][2]['line']='甲 ↔ 乙 → 一；丙 ↔ 丁 → 二'
+        if fault=='unknown_support':out['steps'][0]['supports']=['CL9999']
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate)
+    with pytest.raises(ValueError):go()
+    assert 'creation_step_records' not in ports.calls and not (root/'creation-result.json').exists()
+
+
+def test_every_claim_needs_a_step_before_the_records_call(tmp_path):
+    def mutate(out):
+        for step in out['steps']:step['supports']=[s for s in step['supports'] if s!='CL0001']
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate)
+    with pytest.raises(ValueError,match='every Claim needs a step'):go()
+
+
+@pytest.mark.parametrize('fault',['missing_record','untyped_observation','unattributed_position','only_refuted'])
+def test_incomplete_records_never_become_a_candidate(tmp_path,fault):
+    steps=None
+    def records(out):
+        if fault=='missing_record':out['records']=out['records'][:2]
+        if fault=='untyped_observation':out['records'][2]['observation_type']=None
+        if fault=='unattributed_position':out['records'][0]['attribution']=' '
+        if fault=='only_refuted':  # a Claim whose only step is the view it refutes has no Evidence
+            for r in out['records'][1:]:r['kind']='position';r['attribution']='有人'
+        return out
+    ports,root,go=run_steps(tmp_path,records_mutation=records)
+    with pytest.raises(ValueError):go()
+    assert not (root/'creation-result.json').exists()
+
+
+def test_repeated_words_get_a_fragment_that_names_one_place():
+    source={'metadata':{'title':'t','status':'published'},'script':[
+        {'index':1,'start_time':0.0,'end_time':1.0,'text':'怎麼處理？我們來看。所以很混亂。怎麼處理？'}]}
+    sentences=x.section_sentences(source,Section(1,0,1,'all'));by={v.sentence_id:v for v in sentences}
+    text={'S0001':source['script'][0]['text']}
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#004'],by,text)]==['所以很混亂。怎麼處理？']
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#001','S0001#002'],by,text)]==['怎麼處理？我們來看。']
+    assert [a['verbatim_excerpt'] for a in creation.step_fragments(['S0001#002','S0001#004'],by,text)]==['我們來看。','所以很混亂。怎麼處理？']
+
+
+def test_steps_first_requires_the_grouped_package(tmp_path):
+    source=_transcript();path=tmp_path/'source.json';path.write_text(json.dumps(source))
+    with pytest.raises(ValueError,match='grouped'):creation.run('T',path,tmp_path/'run',StepsPorts(source),groups=groups(),steps_first=True)
+
+
+def test_a_sentence_spoken_twice_is_located_at_its_own_position():
+    source={'metadata':{'title':'t','status':'published'},'script':[
+        {'index':1,'start_time':0.0,'end_time':1.0,'text':'怎麼處理？我們來看。所以很混亂。怎麼處理？'}]}
+    sentences=x.section_sentences(source,Section(1,0,1,'all'))
+    assert [s.text for s in sentences]==['怎麼處理？','我們來看。','所以很混亂。','怎麼處理？']
+    def response(excerpt):
+        r={k:[] for k in ('questions','positions','observations','evidence_steps')}
+        r['evidence_steps']=[{'evidence_step_id':'E1','anchors':[{'segment_index':'S0001','verbatim_excerpt':excerpt}]}]
+        r['sentence_audit']=[{'sentence_id':s.sentence_id,'status':'extracted' if i==3 else 'not_extracted',
+            'covered_by':['E1'] if i==3 else [],'reason_code':None if i==3 else 'structural_markup','reason':'測試。'}
+            for i,s in enumerate(sentences)]
+        return r
+    d.validate_sentence_audit(response('所以很混亂。怎麼處理？'),source,sentences)
+    with pytest.raises(Exception,match='S0001#004'):d.validate_sentence_audit(response('我們來看。'),source,sentences)
+
+
+def test_his_own_words_of_a_claim_become_its_source_fragments(tmp_path):
+    """2011 NYSC 二-1: his first answer to 「什麼是謙卑？」 went to claim_text and was
+    then excluded as duplicate_of 「CL0001本身的話」, so it was kept nowhere and the
+    slides had nothing to show while he gave it. claim_text is not Evidence, but
+    it is where he says the Claim: it must be one of the Claim's SourceFragments."""
+    def mutate(out):
+        out['other']=[];out['claim_text']=[{'claim_id':'CL0001','sentence_ids':['S0003#004']}]
+        return out
+    ports,root,go=run_steps(tmp_path,steps_mutation=mutate);go()
+    package=json.loads((root/'candidate.json').read_text());claim=package['claims'][0]
+    fragments={f['fragment_id']:f for f in package['source_fragments']}
+    cited=[fragments[a['source_fragment_id']]['verbatim_excerpt'] for o in claim['occurrences'] for a in o['anchors']]
+    said=x.section_sentences(_transcript(),Section(1,0,3,'all'))
+    assert next(v.text for v in said if v.sentence_id=='S0003#004') in ''.join(cited)
+
+
+def test_duplicate_of_must_name_the_record_that_keeps_the_passage():
+    def answer(target):
+        return {'evidence_steps':[{'evidence_step_id':'ST05','anchors':[]}],
+                'coverage_by_record':[{'record_id':'ST05','sentence_ids':['A']}],
+                'excluded_sentences':[{'sentence_id':'B','reason_code':'duplicate_of','reason':'同一定義。',
+                                       'duplicate_of_record_id':target}]}
+    for target in ('CL0001',None,'ELSEWHERE'):
+        with pytest.raises(ValueError,match='duplicate_of must name'):creation.expand_material_audit(answer(target),['A','B'])
+    assert creation.expand_material_audit(answer('ST05'),['A','B'])['sentence_audit'][1]['reason_code']=='duplicate_of'
+    assert creation.expand_material_audit(answer('CL0001'),['A','B'],{'CL0001'})['sentence_audit'][1]['status']=='not_extracted'
+
+
+def test_a_digression_is_a_proposal_with_fragments_not_evidence():
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '回答：證據一大堆', 'sentence_ids': ['S0001#003'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [],
+             'digressions': [{'sentence_ids': ['S0001#001', 'S0001#002'], 'kind': 'unsupported_comment', 'why': '批評學者看經眼瞎，沒有給經文或推理'}]}
+    assert c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001']) == {'S0001#003': 'T1'}
+    bad = {**steps, 'digressions': [{**steps['digressions'][0], 'kind': 'story'}]}
+    with pytest.raises(ValueError, match='題外話'):
+        c.check_steps(bad, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'])
+    from backend.pipeline.sentence_ledger_vocabulary import HUMAN_ONLY_REASONS
+    assert 'digression' in HUMAN_ONLY_REASONS
+
+
+def test_an_open_question_is_a_question_answered_by_its_claim_not_support():
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '问题：还要不要遵守摩西的律法？', 'sentence_ids': ['S0001#001'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [], 'digressions': []}
+    with pytest.raises(ValueError, match='every Claim needs a step'):
+        c.check_steps(steps, ['S0001#001'], ['CL0001'])
+    steps['steps'].append({'step_id': 'T2', 'line': '耶稣洁净了所有食物，因为……', 'sentence_ids': ['S0001#002'], 'supports': ['CL0001']})
+    assert c.check_steps(steps, ['S0001#001', 'S0001#002'], ['CL0001'])
+
+
+def test_a_sentence_carrying_scripture_must_be_in_an_argument_step():
+    from types import SimpleNamespace as N
+    from backend.pipeline import claim_creation_flash as c
+    paragraphs = {'S0001': '還容易。」再看一節聖經，馬可七章十八到十九節。好。'}
+    sents = [N(sentence_id='S0001#001', segment_index='S0001', text='還容易。」', char_start=0, char_end=5),
+             N(sentence_id='S0001#002', segment_index='S0001', text='再看一節聖經，馬可七章十八到十九節。', char_start=5, char_end=23),
+             N(sentence_id='S0001#003', segment_index='S0001', text='好。', char_start=23, char_end=25)]
+    listing = {'citations': [{'paragraph_key': 'S0001', 'key': ['Mark', 7, 19], 'ref': 'Mark 7:19',
+                              'quote': '」再看一節聖經，馬可七章十八到十九節。'}]}
+    scripture = c.cited_sentences(listing, sents, paragraphs)
+    assert scripture == {'S0001#002': ['Mark 7:19']}  # the closing 」 does not drag in the sentence before
+    steps = {'steps': [{'step_id': 'T1', 'line': '可7:19 → 食物潔淨', 'sentence_ids': ['S0001#001', 'S0001#003'], 'supports': ['CL0001']}],
+             'claim_text': [], 'other': [{'sentence_ids': ['S0001#002'], 'why': '過場'}], 'digressions': []}
+    with pytest.raises(ValueError, match='scripture he cites'):
+        c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)
+    as_claim = {**steps, 'other': [], 'claim_text': [{'claim_id': 'CL0001', 'sentence_ids': ['S0001#002']}]}
+    assert c.check_steps(as_claim, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)
+
+
+NOT_CLAIM_STEPS = {'steps': [{'step_id': 'T1', 'line': '經文事實：……', 'sentence_ids': ['S0001#001', 'S0001#002'], 'supports': ['CL0001']}],
+                   'claim_text': [], 'other': [], 'digressions': [],
+                   'not_claims': [{'claim_id': 'CL0002', 'kind': 'evidence', 'target': 'CL0001', 'why': '一段經文的讀法，用來證明 CL0001'}]}
+
+
+def test_the_steps_pass_may_return_an_entry_that_is_not_a_claim():
+    # Lecture 2: the Claim list is written before the sentence-by-sentence reading, and
+    # a verse reading used as Evidence became a Claim that a step then had to support.
+    from backend.pipeline import claim_creation_flash as c
+    ids = ['S0001#001', 'S0001#002']
+    assert c.check_steps(deepcopy(NOT_CLAIM_STEPS), ids, ['CL0001', 'CL0002'])
+
+
+@pytest.mark.parametrize('fault,match', [
+    ('target_gone', 'must name a Claim that stays'), ('not_own', 'first made in this group'),
+    ('all_gone', 'without a Claim'), ('has_claim_text', 'has no claim_text'),
+    ('still_supported', 'may support a Claim returned'), ('digression_target', 'has no target'), ('no_reason', 'needs a reason')])
+def test_a_returned_claim_is_checked_before_the_records_call(fault, match):
+    from backend.pipeline import claim_creation_flash as c
+    steps = deepcopy(NOT_CLAIM_STEPS); row = steps['not_claims'][0]; own = ['CL0001', 'CL0002']
+    if fault == 'target_gone': row['target'] = 'CL0002'
+    if fault == 'not_own': own = ['CL0001']
+    if fault == 'all_gone': steps['not_claims'].append({'claim_id': 'CL0001', 'kind': 'digression', 'target': '', 'why': '題外話'})
+    if fault == 'has_claim_text': steps['claim_text'] = [{'claim_id': 'CL0002', 'sentence_ids': ['S0001#002']}]; steps['steps'][0]['sentence_ids'] = ['S0001#001']
+    if fault == 'still_supported': steps['steps'][0]['supports'].append('CL0002')
+    if fault == 'digression_target': row['kind'] = 'digression'
+    if fault == 'no_reason': row['why'] = ' '
+    with pytest.raises(ValueError, match=match):
+        c.check_steps(steps, ['S0001#001', 'S0001#002'], ['CL0001', 'CL0002'], own_ids=own)
+
+
+class ReturningPorts(StepsPorts):
+    """The Claims call lists a second entry; the steps pass returns it as Evidence for the first."""
+    def repair(self, request):
+        task = request['input']['task']
+        if task == 'creation_claims':
+            out = Ports.repair(self, request)
+            out['candidates'].append({**out['candidates'][0], 'statement': '但以理書七章的人子領受永遠權柄。'})
+            return out
+        if task == 'creation_argument_steps':
+            self.calls.append(task)
+            assert set(request['input']['claims']) == {'CL0001', 'CL0002'} and 'not_claims' in request['system']
+            return {'steps': [
+                {'step_id': 'T1', 'line': '反方：人子只強調人性', 'sentence_ids': ['S0001#001'], 'supports': ['CL0001']},
+                {'step_id': 'T2', 'line': '回答：不對', 'sentence_ids': ['S0001#002'], 'supports': ['CL0001']},
+                {'step_id': 'T3', 'line': '經文事實：但以理書的人子領受永遠權柄', 'sentence_ids': ['S0002#003'], 'supports': ['CL0001', 'T2']}],
+                'claim_text': [], 'other': [{'sentence_ids': ['S0003#004'], 'why': '聽眾提問，下段回答。'}], 'digressions': [],
+                'not_claims': [{'claim_id': 'CL0002', 'kind': 'evidence', 'target': 'CL0001', 'why': '經文讀法，用來證明 CL0001'}]}
+        if task == 'creation_step_records':
+            assert set(request['input']['claims']) == {'CL0001'}
+        return super().repair(request)
+
+
+def test_a_returned_claim_leaves_the_candidate_and_is_recorded(tmp_path):
+    source = _transcript(); path = tmp_path / 'source.json'; path.write_text(json.dumps(source)); root = tmp_path / 'run'
+    ports = ReturningPorts(source)
+    result = creation.run('T', path, root, ports, groups=groups(), grouped_package=True, steps_first=True)
+    package = json.loads((root / 'candidate.json').read_text())
+    assert [c['claim_id'].rsplit('-', 1)[-1] for c in package['claims']] == ['CL0001'] and set(result['claim_candidates']) == {'CL0001'}
+    returned = json.loads((root / 'not-claims.json').read_text())['returned']
+    assert [(r['claim_id'], r['kind'], r['target'], r['statement']) for r in returned] == [
+        ('CL0002', 'evidence', 'CL0001', '但以理書七章的人子領受永遠權柄。')]
+    assert result['not_claims'] == returned
+
+
+def test_a_group_of_only_a_digression_needs_no_claim():
+    """Lecture 2: GPT made the Time Magazine aside its own group, with no Claim."""
+    from backend.pipeline import claim_creation_flash as flash
+    result = {'steps': [], 'claim_text': [], 'other': [{'sentence_ids': ['S1#2'], 'why': '過場'}],
+              'digressions': [{'kind': 'unsupported_comment', 'sentence_ids': ['S1#1'], 'why': '批評記者，沒有理由'}], 'not_claims': []}
+    assert flash.check_steps(result, ['S1#1', 'S1#2'], []) == {}
