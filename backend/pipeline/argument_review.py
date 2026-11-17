@@ -395,9 +395,11 @@ def next_for(conn, reviewer):
         WHERE a.reviewer=%s AND a.superseded_at IS NULL AND f.replied_at IS NULL ORDER BY f.followup_id LIMIT 1''',
         (reviewer,)).fetchone()
     total = conn.execute('SELECT count(*) FROM argument_review.questions WHERE active').fetchone()[0]
-    done = conn.execute('''SELECT count(DISTINCT a.question_id) FROM argument_review.answers a
-        JOIN argument_review.questions q USING (question_id)
-        WHERE a.reviewer=%s AND a.superseded_at IS NULL AND q.active''', (reviewer,)).fetchone()[0]
+    # A ruled question is settled for everyone, answered or not.
+    done = conn.execute('''SELECT count(*) FROM argument_review.questions q WHERE q.active AND (
+        EXISTS (SELECT 1 FROM argument_review.rulings r WHERE r.question_id=q.question_id)
+        OR EXISTS (SELECT 1 FROM argument_review.answers a WHERE a.question_id=q.question_id
+                   AND a.reviewer=%s AND a.superseded_at IS NULL))''', (reviewer,)).fetchone()[0]
     progress = {'answered': done, 'total': total}
     waiting = None if f else waiting_answer(conn, reviewer)
     if waiting:
