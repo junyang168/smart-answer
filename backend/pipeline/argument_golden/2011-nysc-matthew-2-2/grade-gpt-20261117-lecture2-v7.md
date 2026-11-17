@@ -38,3 +38,10 @@ The first attempt got `HTTP 402 Payment Required`; the owner asked for a re-run 
 | CL0022 盡本分 → same question as CL0023 | owner: both Claims |
 
 It raised nothing on CL0003 or on the audience question written as a Position, although its own `question` for CL0022 quotes that audience question. None of the six goes on the review page: each is already settled by a ruling or the key.
+
+## Owner rulings and correction (2026-11-17)
+The owner ruled both open items: 林前9:20 is Evidence for CL0001 (「agreed」); the audience's question is a Question (「this is surely a question」). Both rules went into the prompts with an eval case each; the eval set then passed both (`eval/20261117-two-rulings`).
+
+Lecture 2's own two errors are corrected by `argument_corrections.py` from `corrections-v7.json`, no model call: CL0003 dropped (the translation step keeps supporting CL0001 and CL0002); position P07-ST01 becomes Question P07-ST01, asked by the audience, answered by CL0023. Result `creation/candidate-owner-corrected.json` (candidate c92dc5323567 → corrected 7b9aec956342, receipt beside it): 22 Claims, 9 Positions, 5 Questions.
+
+**Lecture 2 after correction: 33/33 against the key and the owner's rulings.** Done.

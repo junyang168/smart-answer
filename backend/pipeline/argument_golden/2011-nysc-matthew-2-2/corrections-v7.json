@@ -1,0 +1,9 @@
+{
+ "run": "gpt-20261117-lecture2-v7",
+ "corrections": [
+  {"op": "drop_claim", "short": "CL0003",
+   "ruling": "Owner 2026-11-17 (「agreed」): 林前9:20 「翻錯了，應該是『我乃在基督律法之下』」 is his reason, 「所以啊，基督徒乃在基督的律法底下」 his point. One Claim (CL0001); the translation step stays as its Evidence."},
+  {"op": "position_to_question", "short": "P07-ST01", "answer_claim_id": "CL0023",
+   "ruling": "Owner 2026-11-17: 「this is surely a question, although his answer made it feel like he thinks she just use her own idea」. The audience's question, answered by CL0023."}
+ ]
+}
