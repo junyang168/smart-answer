@@ -5,7 +5,7 @@
 > **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15、太 6–7；2026-11-09 加太 21；2026-11-10 加 skill `chapter-slides`，同日试验本堂 Claims 与证据步骤提示）
 > **同步幻灯规则核对范围**：2026-11-18（#637／PR #796）：§4.6 的合并后定时、短注范围及生成／修订回归入口与当前工作分支核对；其余段落保持原核对范围。
 > **本堂主张提示试验代码对齐**：2026-11-10（#637）：`chapter_slide_claims.py`、`chapter_slides.py`，真实试跑结果另记；其余保持原核对范围。
-> **与代码对齐**：2026-11-05（核对到 #637 太 6–7 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`、`backend/api/original_audio.py`、`backend/api/public_repository.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
+> **与代码对齐**：2026-11-05（核对到 #637 太 6–7 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`、`backend/api/original_audio.py`、`backend/api/public_repository.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`；2026-11-18 核对讲道投影片 CLI 使用一次独立 `--eval`，旧自动修订入口已退役。
 > **权威范围**：马太福音按章释经页由哪几部分组成；一章的材料从哪几篇讲道取、哪些段落算释经；神学、个人经历、生活应用与问答怎样取舍；同步幻灯上放什么。只管 NYSC 马太福音系列讲座这一个来源；母本与文章都不在本文范围。
 
 **目标：让听的人专心在释经上。读者打开马太福音某一章，按经节次序从头到尾听教授在 NYSC 系列讲座里对这一章的释经，同时看幻灯上他此刻在讲什么、读到哪些经文。**
@@ -133,7 +133,7 @@ flowchart LR
 
 1. 按逐字稿里念到的马太福音章号，连同前后一堂，把这一章写进文件；
 2. 跑 `chapter_exposition`，没有片段保留的那一堂从文件里拿掉；
-3. 跑 `chapter_slides`、`chapter_slides --review`、`chapter_title`。
+3. 跑 `chapter_slides`、`chapter_slides --eval`、`chapter_title`。
 
 页面下一个请求就有这一章，不用改代码，不用部署。
 
@@ -241,7 +241,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_listening_eval
 
 负责人 2026-11-10 同意先试登山宝训第一讲：**逐字稿仍决定分张、措辞与出现时间，本堂 Claims 和证据步骤作为重点提示**，帮助作者和审稿人检查结论、理由及限定有无遗漏。不是恢复由「主导 Claim」拼幻灯。提示只取本堂、能在实际逐字稿唯一定位且与保留句子重叠的证据；候选状态照实显示，原文不支持的提示不得采用，未保留或别堂的内容不得补进幻灯。暂为显式选择的单堂试验，不改变默认生成方式。
 
-程序 `chapter_slide_claims` 只读知识库，冻结主张与证据版本、逐字摘录、保留句子编号及排除清单，绑定原选材和实际逐字稿 SHA。`chapter_slides --claims-context <包> --data-dir <隔离资料目录>` 将同一包交给生成、审阅与修正；审阅对每条提示返回已呈现、遗漏或不受保留原文支持及理由。遗漏须同时成为完整方面的阻断意见。请求和原始回答存档，调用未知或失败不自动重试。旧稿和旧审核保留，不重跑选材，仍最多两轮修正。
+程序 `chapter_slide_claims` 只读知识库，冻结主张与证据版本、逐字摘录、保留句子编号及排除清单，绑定原选材和实际逐字稿 SHA。`chapter_slides --claims-context <包> --data-dir <隔离资料目录>` 将同一包交给生成、审阅与修正；审阅对每条提示返回已呈现、遗漏或不受保留原文支持及理由。遗漏须同时成为完整方面的阻断意见。请求和原始回答存档，调用未知或失败不自动重试。旧稿和旧审核保留。新版讲道流程在生成前校准规则，生成后评一次当前稿，保留原选材与审阅记录。
 
 这项逐条回查是本次内容检查，不是已验证的生成效果 eval。固定样本的新旧盲评、重点及论证保全的人工基准尚未建立；不能用幻灯数量、Claim 覆盖自报或审稿等级直接宣称改进。试验记录见 §6。
 
@@ -271,7 +271,7 @@ PPT 的 source 是相关论证记录标签，不等于知识层 SourceFragment �
 
 GPT 章流程的单次等待上限为600秒（负责人允许10分钟），由 `chapter_exposition.chapter_client` 统一配置，生成回归入口也沿用此值。等待上限不改变授权次数；超时与原始请求照常保留，不把未知调用当作未使用。
 
-**审阅与修正**（负责人 2026-11-03）。幻灯写好后由独立审稿人（另一次模型调用）对照逐字稿完整审一遍，看四件事：忠实（没加他没讲的，「很好的证据」不写成「证明」）、完整（他的问题、理由、结论都在，问题和答案同一张）、跟得上（一条一个意思、不重复、要点出现的句子对、不会长时间只有标题）、经文（读到的都显示，没读的不显示）。冻结的 Evidence 经文清单只作候选，程序仍按本堂实际原文重核所读节数，不能用旧清单强迫加入未读经文。作者模型按意见修正一次，交回完整的一份；修正稿过同一套程序核对才替换存档，原稿留作备份；修正稿再完整审一遍，审阅同时给出下一轮的意见。审阅绑定幻灯存档的 SHA，不能拿旧审阅去修新稿。最多两轮修正，审不完的交给负责人。程序缺陷修好后，可用 `revise(..., recheck_only=True)` 重核已保存的被拒修订答复，不调用模型，不覆盖旧拒收记录；通过后计入原修订轮次，并为该实际稿重新审阅。
+**正式 Eval。** 生成前用固定正例和反例检验规则。幻灯写好后运行 `chapter_slides --eval`，另一次模型调用对照逐字稿查忠实、完整、出现时间和经文呈现。冻结的 Evidence 经文清单只作候选，仍须核对教授实际朗读的范围。Eval 绑定所看到的稿件，发现阻断项时先用保存稿与反例定位原因。旧审阅和修订记录按原样保留。
 
 幻灯按讲道存档，绑定留不留的决定的 SHA；决定重跑过，幻灯就作废重写。没有幻灯存档的那一堂，页面退回由主张拼的幻灯。
 

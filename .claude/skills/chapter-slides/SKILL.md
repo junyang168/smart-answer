@@ -1,6 +1,6 @@
 ---
 name: chapter-slides
-description: 做一章马太福音的逐節聆聽页面（NYSC 系列讲座）：选堂、写进 chapters.json、找出这一章的释经段落、写同步幻灯、审阅修正、起章标题，把结果和留给负责人的意见报告出来，并在方案文档记一节。负责人说「做太 21」「/chapter-slides 太 21」时用。Claude Code 与 Codex 共用这一份。
+description: 做一章马太福音的逐節聆聽页面（NYSC 系列讲座）：选堂、写进 chapters.json、找出这一章的释经段落、写同步幻灯、独立 Eval、起章标题，把结果和留给负责人的意见报告出来，并在方案文档记一节。负责人说「做太 21」「/chapter-slides 太 21」时用。Claude Code 与 Codex 共用这一份。
 ---
 
 # 按章逐節聆聽页面
@@ -17,7 +17,7 @@ export D=$(grep -o '^DATA_BASE_DIR=.*' .env | cut -d= -f2)
 
 - 只做 NYSC 马太福音系列讲座这一个来源。母本、文章、CVP 都不在这里。
 - 章的资料在 `$D` 里，页面下一个请求就有，**不部署**。
-- 审阅最多两轮修正，**不加轮次**；用完轮数的意见原文交给负责人，不自己改幻灯文字。
+- 正式讲道投影片采用 Eval-first。生成前用固定反例检验规则，生成后用 `--eval` 对该稿作一次独立评估。
 - `chapter_exposition` 已经跑过的章，**不重跑**，除非负责人要求。
 - 代码改动（修书名表之类）在这一章所属的卡和 worktree 里做，见仓库 `AGENTS.md`。
 
@@ -106,7 +106,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 方案 §4.6 的单堂试验：仍由逐字稿分张、定时，Claims 和证据步骤只提示重点。先用 `backend.pipeline.chapter_slide_claims <passage> --lecture '<全名>' --output <提示包.json>` 只读编译，程序核实际逐字稿与已存选材一致、摘录唯一定位及保留句子；不重跑选材。包内披露候选状态及排除清单。 编译时从 SourceFragment 对应的保留句预计算每条 Claim 的连续证据范围，按证据作用区分，遇省略片段或证据空缺就断开。生成、修订及审阅收到范围与原文，再逐条选教授引入该要点的句子。
 
-复制这一堂原选材到隔离 `<data>/chapter_exposition/<passage>/`，保存旧幻灯和全部旧审阅供比较。生成时给 `chapter_slides` 加 `--claims-context <提示包.json> --data-dir <data>`；审阅用同一个 `--data-dir`，程序从幻灯存档读取冻结包，不重新取库。最多两轮修正；每条 Claim 都须有审阅处置，原文不支持的不能补进来。隔离调用保存精确请求与原始回答，未知调用不自动重试。
+复制这一堂原选材到隔离 `<data>/chapter_exposition/<passage>/`，保存旧幻灯和全部旧审阅供比较。生成时给 `chapter_slides` 加 `--claims-context <提示包.json> --data-dir <data>`；审阅用同一个 `--data-dir`，程序从幻灯存档读取冻结包，不重新取库。每条 Claim 都须有 Eval 处置，原文不支持的不能补进来。隔离调用保存精确请求与原始回答，未知调用不自动重试。
 
 报告披露旧稿／试稿、重点回查、剩余意见和是否替换线上稿；逐条回查不冒充已建立正式 eval，也不以幻灯数量增加断言效果改善。单堂试验不重写整章标题。
 
@@ -125,10 +125,10 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 **改提示词先跑生成回归集。** 用 `backend.pipeline.chapter_slide_regression --generate --output <新目录>` 实际生成、修订并评估固定案例与错误反例，再运行 `backend/tests/test_chapter_slide_regression.py`。旧答复或仅更新哈希不算新提示词验证；golden 不为迁就输出而改。比较提示词时固定原文、模型与同一套 Eval，看初稿实质缺陷、实际修订轮次、总时间和 tokens，不以少审几次冒充质量改善。该集不替代正式稿的完整审阅与程序核对。
 
-## 4. 审阅、修正、章标题与总览主题
+## 4. 独立 Eval、章标题与总览主题
 
 ```bash
-PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-1-46 --review
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-1-46 --eval
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_title mat-21-1-46
 ```
 
@@ -138,7 +138,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_title mat-21-1
 
 GPT正式入口的单次等待上限为600秒；回归入口同样沿用。超时不自动重发，也不重置消耗；按已有授权和原帐接续。
 
-审阅自己循环：审 → 修 → 再审，直到没有意见或两轮用完（`rounds_used_up`）。每轮的审阅和修正稿存在 `$D/chapter_slides/<passage>/` 的 `*.review-N.json`、`*.revision-N.json`。
+正式 Eval 只评当前已保存的稿件。发现阻断项时，先区分生成规则、输入和程序缺陷，用保存稿和反例验证原因。历史审阅与修订文件供查核，不作为正式讲道的执行入口。
 
 ## 5. 报告
 
