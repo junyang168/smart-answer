@@ -784,6 +784,25 @@ grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟
 
 用繁體中文。"""
 
+REVIEW_COMPLETENESS_RULES = """承重內容與誤報界線：
+先從原文辨認各段實際回答的問題、結論、支撐它的理由／經文及必要限制，再反向核對投影片是否保留。不能只逐條看現有要點而漏查未呈現的內容；未回答的問題不得自行補答案。
+完整是保留論證作用，不是抄全原文。故事已表達訓練與未訓練的差別及其應用時，不強求照片種類、病變細節等非承重細節；若刪除後因果、否定或適用條件改變，才是缺漏。每項完整異議須指出原話、缺失的實質意思，以及為何現有要點／經文／短註未保存它。只會讓文字更具體的建議不能判為缺陷或阻擋。
+同一實質意思在合適的要點或短註已保存，就不要要求重複。一般詞義／常見譯詞比較可以放在要點；不可為求完整，把一般譯詞冒充某節實際希臘字詞塞回經文短註。
+若材料附有已採納的修正決定，核對它是否正確落實；不能僅因偏好另一種呈現就要求反向修改。只有新的原文證據能指出該決定造成實質缺陷時，才明列新證據與衝突，不冒充普通漏項。已採納決定不是免查忠實的通行證。
+"""
+
+
+def review_system_prompt(lecture: str | None = None) -> str:
+    """One review policy for production and evaluator calibration."""
+    prompt = (REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+              .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+              .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES))
+    if lecture is not None:
+        prompt = for_lecture(prompt, lecture)
+    return (prompt + "\n\n" + INLINE_NOTE_RULES + "\n" + REVIEW_COMPLETENESS_RULES
+            + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。")
+
+
 REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -900,6 +919,25 @@ def review_path(data_base_dir: Path, passage: str, lecture: str, revision: int) 
     return record_path(data_base_dir, passage, lecture).with_suffix(f".review-{revision}.json")
 
 
+def accepted_review_context(record: dict[str, Any], *, decisions_sha256: str,
+                            review_directory: Path) -> str:
+    """Carry explicit adopted decisions, never infer acceptance from old findings.
+
+    These are runner/owner metadata, outside the model's slides response schema.
+    Source drift or missing original review fails before a new model call.
+    """
+    resolutions = record.get("accepted_review_resolutions", [])
+    if not resolutions:
+        return ""
+    reviews = {chapter_exposition.file_sha256(p) for p in review_directory.glob("*.review-*.json")}
+    for item in resolutions:
+        if (item.get("decisions_sha256") != decisions_sha256
+                or item.get("source_review_sha256") not in reviews
+                or not isinstance(item.get("decision"), str) or not item["decision"].strip()):
+            raise ValueError("Adopted review decision has stale source or missing original review")
+    return "\n\n已明確採納的修正決定（原審閱保留；新證據造成衝突須明列，不默默反向改動）：\n" + json.dumps(resolutions, ensure_ascii=False)
+
+
 def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) -> dict[str, Any]:
     """审阅当前存档的投影片，审阅绑定投影片存档的 SHA。"""
 
@@ -921,19 +959,18 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     from backend.pipeline.chapter_slide_claims import saved_context, review_contract, check_review
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     extra, schema = review_contract(context, record["slides"]) if context is not None else ("", REVIEW_SCHEMA)
-    prompt = user_prompt(lecture, decisions_record, context) + "\n\n投影片：\n" + show_slides(record["slides"])
-    review_system = (
-        REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
-        .replace("〈標題規則〉", SLIDE_TITLE_RULES)
-        .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
-    )
-    answer = client.generate_json(for_lecture(review_system, lecture) + "\n\n" + INLINE_NOTE_RULES
-                                  + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。" + extra, prompt, schema)
+    prompt = (user_prompt(lecture, decisions_record, context)
+              + accepted_review_context(record, decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture),
+                                        review_directory=target.parent)
+              + "\n\n投影片：\n" + show_slides(record["slides"]))
+    system = review_system_prompt(lecture) + extra
+    answer = client.generate_json(system, prompt, schema)
     if context is not None:
         check_review(answer, context, record["slides"])
     measure_timing(answer["findings"], sentences(kept_pieces(decisions_record)))
     out = {
         "slides_sha256": slides_sha,
+        "review_contract_sha256": hashlib.sha256(json.dumps({"system": system, "user": prompt, "schema": schema}, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
         "revision": revision,
         "model": getattr(client, "model", ""),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -974,6 +1011,8 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
                          for f in actionable(verdict))
     prompt = (
         user_prompt(lecture, decisions_record, context)
+        + accepted_review_context(record, decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture),
+                                  review_directory=review_file.parent)
         + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
         + "\n\n審稿人的意見：\n" + findings
     )

@@ -1,6 +1,7 @@
 """按章页面的投影片：模型在句子上分张，读到的经文要在上面。"""
 
 import json
+import pytest
 
 from backend.pipeline import chapter_exposition, chapter_slides
 from backend.pipeline.chapter_material import Chapter
@@ -304,6 +305,16 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
 
     author, reviewer, reviser = Capture([wrong]), Capture([finding]), Capture([corrected])
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=author)
+    saved_path = chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L')
+    previous_review = saved_path.with_suffix('.review-adopted.json')
+    previous_review.write_text(json.dumps(finding, ensure_ascii=False))
+    saved = json.loads(saved_path.read_text())
+    adopted = '已採納：標題須涵蓋整段，不能只涵蓋其中一個例子。'
+    saved['accepted_review_resolutions'] = [{
+        'decision': adopted,
+        'source_review_sha256': chapter_exposition.file_sha256(previous_review),
+        'decisions_sha256': chapter_slides.decisions_sha(tmp_path, CHAPTER.passage, 'L')}]
+    saved_path.write_text(json.dumps(saved, ensure_ascii=False))
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=reviewer)
     chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
     # All three real pipeline calls receive the same range rule, including revisions.
@@ -312,7 +323,10 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
         assert chapter_slides.POINT_TIMING_RULES in client.systems[0]
         assert "〈要點時間規則〉" not in client.systems[0]
         assert '〈標題規則〉' not in client.systems[0]
+    assert reviewer.systems[0] == chapter_slides.review_system_prompt('L')
+    assert chapter_slides.REVIEW_COMPLETENESS_RULES in reviewer.systems[0]
     assert '原文中標題沒有涵蓋的部分' in reviewer.systems[0]
+    assert adopted in reviewer.prompts[0] and adopted in reviser.prompts[0]
     assert fixture['reason'] in reviser.prompts[0]
     assert fixture['reference_title'] in reviser.prompts[0]
     record = chapter_slides.load_record(tmp_path, CHAPTER.passage, 'L')
@@ -529,3 +543,22 @@ def test_chapter_gpt_entry_uses_owner_ten_minute_timeout(monkeypatch):
     monkeypatch.setattr(codex,'CodexSubscriptionClient',capture)
     chapter_exposition.chapter_client('gpt-6.1-sol')
     assert seen['timeout_seconds']==600
+
+
+def test_adopted_review_decisions_require_saved_review_and_same_source(tmp_path):
+    old = tmp_path / 'L.review-3.json'
+    old.write_text('{"findings": ["original verdict stays immutable"]}')
+    before = old.read_bytes()
+    decision = {'decisions_sha256': 'source-sha',
+                'source_review_sha256': chapter_exposition.file_sha256(old),
+                'decision': '通常譯詞比較留在要點，不作本節希臘原文短註。'}
+    record = {'accepted_review_resolutions': [decision]}
+    prompt = chapter_slides.accepted_review_context(record, decisions_sha256='source-sha', review_directory=tmp_path)
+    assert decision['decision'] in prompt
+    assert old.read_bytes() == before
+    with pytest.raises(ValueError, match='stale source'):
+        chapter_slides.accepted_review_context(record, decisions_sha256='changed-source', review_directory=tmp_path)
+    old.unlink()
+    with pytest.raises(ValueError, match='missing original review'):
+        chapter_slides.accepted_review_context(record, decisions_sha256='source-sha', review_directory=tmp_path)
+    assert chapter_slides.accepted_review_context({}, decisions_sha256='x', review_directory=tmp_path) == ''

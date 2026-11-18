@@ -225,7 +225,11 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_listening_eval
 
 **PPT 生成回归集。** `backend/tests/fixtures/chapter_slides/generation_eval_set.json` 冻结真实原文、检查标准和已知错稿，覆盖口吻与说话者、反方立场、论证完整、标题范围、引用经文、原文字义及要点时序；十诫的直接回答及「溫柔／teachable」定义不提前显示，都是负责人 golden case。题目与答案、故事与结论均须保留，不靠逐字匹配限定模型措辞。程序仍对每个新答案执行现有格式、分张、经文和句子定位核对；语义评估须逐例逐项作答，并识别已知反例。生成模型不能看到标准答案或反例。通过的实际模型答复与评估存为 `generation_eval_baseline.json`，自动测试核对当前提示词与基准一致；提示词或测试集变动会明确失败，须重新实测，不能只更新哈希。
 
-修改生成或审阅规则后，先运行 `PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slide_regression --generate --output <新目录>`，实际用新提示词生成并评估；不加 `--generate` 只重放保存的结果，不调用模型。报告绑定测试集、生成／审阅提示词及答复；缺项、重复裁定、反例未被识别或任何失败都不能算通过。不能为了新输出调整 golden。此测试集覆盖生成契约，不替代整组经文选材 golden、完整正式稿的既有 Slide Eval，或正常入口和手机布局验收。
+**Eval 范围与误报校准。** 正式审阅与回归 Eval 共用 `chapter_slides.review_system_prompt`，包含经文短注、承重内容与误报界线，不维护两份检查规则。每个生成稿和已知错稿都检查忠实、反向承重覆盖、经文／原文归属、呈现及时间，再核对案例专属条件。完整不是抄全：故事的论证作用已保存时，不因省略非承重细节阻挡；一般译词比较在要点已保存，不要求冒充本节实际原文再塞进短注。校准集同时包含应通过与应拒绝的候选，报告分别列生成质量与判定校准，不以抓错数量证明准确。
+
+已采纳修正以 `accepted_review_resolutions` 元数据保存具体决定、原审阅 SHA 和选材 SHA，正式审阅带入同一材料；选材变化或原审阅缺失先报错。不得从历史 findings 猜测负责人已同意，也不改旧 verdict。新原文证据确实推翻决定时须明列冲突，不能靠“已采纳”豁免忠实检查。校准测试不是新的正式发布审阅。
+
+修改生成规则后，先运行 `PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slide_regression --generate --output <新目录>`，实际用新提示词生成并评估；不加 `--generate` 只重放保存的结果，不调用模型。报告绑定测试集、生成／审阅提示词及答复；缺项、重复裁定、反例未被识别或任何失败都不能算通过。不能为了新输出调整 golden。只修改 Eval 时可复用原生成答复，但须逐字核对生成 system／user 输入不变，并实际用新版 Eval 重新判断；旧判定保留，不只更新哈希。此测试集覆盖生成契约，不替代整组经文选材 golden、完整正式稿的既有 Slide Eval，或正常入口和手机布局验收。
 
 
 负责人 2026-11-03：原来的幻灯由程序从主张拼——标题是此刻占主导的主张，要点是它的证据步骤。主张是论证结构，不是讲课的呈现：（二）1 开头三分半他讲登山宝训的结构，九条主张各只有十几秒，半分钟取一个主导、不满 90 秒并入邻居之后，幻灯上只剩一条。

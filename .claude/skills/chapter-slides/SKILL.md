@@ -129,6 +129,8 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_title mat-21-1
 
 章标题命令也会为各段生成一至三条精简聆听主题，合并重复论证，每条链接到实际可播放的原声位置。总览直接使用生成结果；幻灯更新或改分段后重跑章标题命令，刷新主题和录音定位。
 
+**Eval 不另立规则。** 正式审阅和固定案例共用 `review_system_prompt`；回归同时检查已知错误和不应报错的正确案例。完整检查保留问题、理由、经文、结论及必要限制，不强求故事所有细节，不重复已在合适位置呈现的比较。已明确采纳的修正须记录 `accepted_review_resolutions`（具体决定、选材 SHA、原审阅 SHA），送入下一次正式审阅；不得自动推定接受、改写旧 verdict 或以校准代替发布审阅。只改 Eval 时，证明生成输入不变后复用原生成稿，用新 Eval 实测；保留旧判定。
+
 GPT正式入口的单次等待上限为600秒；回归入口同样沿用。超时不自动重发，也不重置消耗；按已有授权和原帐接续。
 
 审阅自己循环：审 → 修 → 再审，直到没有意见或两轮用完（`rounds_used_up`）。每轮的审阅和修正稿存在 `$D/chapter_slides/<passage>/` 的 `*.review-N.json`、`*.revision-N.json`。

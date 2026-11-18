@@ -1,0 +1,783 @@
+{
+  "binding": {
+    "test_set_sha256": "145a1c2225fc0efe4d417fe503066940f607eae8b507cd1559cad380b674e18e",
+    "generation_prompt_sha256": "60d90b7fff2fb5c147246397f89364e32344f5713b83836edeb56427ad335963",
+    "review_prompt_sha256": "afe8baf8ae93f6aa0331756dd15aa3629736d4362a0474764a6f2a09d1826ad3",
+    "judge_rules_sha256": "4a9e067d22d2d1dfb081287f33998d4e5e38d2a9040e8bdb615f5c841153ae45"
+  },
+  "answer": {
+    "cases": [
+      {
+        "id": "gold-decalogue-direct-voice",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "今天已不在舊約律法底下"
+              },
+              {
+                "sentence": "S0005",
+                "text": "有人主張不守禮儀律法，仍須守十誡"
+              },
+              {
+                "sentence": "S0007",
+                "text": "仍須遵守十誡的主張錯了"
+              }
+            ],
+            "scriptures": [],
+            "title": "十誡仍須遵守嗎",
+            "verses": "5:17-20"
+          },
+          {
+            "first": "S0018",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0019",
+                "text": "承認須守十誡，就被要求守安息日"
+              },
+              {
+                "sentence": "S0021",
+                "text": "十誡也不必遵守"
+              },
+              {
+                "sentence": "S0023",
+                "text": "現在已不在舊約，乃在新約底下"
+              },
+              {
+                "sentence": "S0025",
+                "text": "已不在摩西律法下，乃在基督律法下"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "出埃及記 20:8",
+                "sentence": "S0019"
+              }
+            ],
+            "title": "從舊約轉到新約",
+            "verses": "5:17-20"
+          }
+        ]
+      },
+      {
+        "id": "whole-topic-title",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0004",
+                "text": "拉比坐著教導，是當時的教導次序"
+              },
+              {
+                "sentence": "S0008",
+                "text": "5:3-12藉祝福顯明彌賽亞身份"
+              },
+              {
+                "sentence": "S0015",
+                "text": "5:13至7:29談認識彌賽亞後的使命"
+              },
+              {
+                "sentence": "S0020",
+                "text": "門徒使命先概述，再闡明細節"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:1",
+                "sentence": "S0002"
+              }
+            ],
+            "title": "登山寶訓背景與分段",
+            "verses": "5:1-48"
+          }
+        ]
+      },
+      {
+        "id": "quoted-scripture",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [
+              {
+                "explanation": "源自anaw",
+                "original": "anawim",
+                "reading": "",
+                "scripture": "isa-61-1",
+                "sentence": "S0008",
+                "span": "謙卑的人",
+                "verse": 1
+              },
+              {
+                "explanation": "通常希譯為praus",
+                "original": "anaw",
+                "reading": "",
+                "scripture": "isa-61-1",
+                "sentence": "S0009",
+                "span": "謙卑的人",
+                "verse": 1
+              },
+              {
+                "explanation": "此處希譯為ptochos",
+                "original": "πτωχός",
+                "reading": "",
+                "scripture": "isa-61-1",
+                "sentence": "S0010",
+                "span": "謙卑的人",
+                "verse": 1
+              },
+              {
+                "explanation": "貧窮",
+                "original": "πτωχός",
+                "reading": "",
+                "scripture": "mat-5-3-5",
+                "sentence": "S0012",
+                "span": "虛心的人",
+                "verse": 3
+              }
+            ],
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "這幾項祝福來自以賽亞書六十一章"
+              },
+              {
+                "sentence": "S0010",
+                "text": "以賽亞此處採用不尋常的希臘譯詞"
+              },
+              {
+                "sentence": "S0016",
+                "text": "相同罕見用詞是耶穌想到以賽亞的好證據"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:3-5",
+                "sentence": "S0001"
+              },
+              {
+                "ref": "以賽亞書 61:1",
+                "sentence": "S0008"
+              }
+            ],
+            "title": "八福與以賽亞的用詞",
+            "verses": "5:3-5"
+          }
+        ]
+      },
+      {
+        "id": "greek-tense",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [
+              {
+                "explanation": "現在時態",
+                "original": "ἐστιν",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0004",
+                "span": "是",
+                "verse": 3
+              },
+              {
+                "explanation": "未來式",
+                "original": "παρακληθήσονται",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0008",
+                "span": "必得安慰",
+                "verse": 4
+              },
+              {
+                "explanation": "將來式",
+                "original": "κληρονομήσουσιν",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0010",
+                "span": "必承受",
+                "verse": 5
+              },
+              {
+                "explanation": "將來式",
+                "original": "χορτασθήσονται",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0012",
+                "span": "必得飽足",
+                "verse": 6
+              },
+              {
+                "explanation": "將來式",
+                "original": "ἐλεηθήσονται",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0014",
+                "span": "必蒙憐恤",
+                "verse": 7
+              },
+              {
+                "explanation": "將來式",
+                "original": "ὄψονται",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0016",
+                "span": "必得見",
+                "verse": 8
+              },
+              {
+                "explanation": "將來式",
+                "original": "κληθήσονται",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0018",
+                "span": "必稱為",
+                "verse": 9
+              },
+              {
+                "explanation": "現在式",
+                "original": "ἐστιν",
+                "reading": "",
+                "scripture": "mat-5-3-10",
+                "sentence": "S0021",
+                "span": "是",
+                "verse": 10
+              }
+            ],
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "中文不易顯出原文的時態"
+              },
+              {
+                "sentence": "S0005",
+                "text": "虛心者現在就能體會天國的祝福"
+              },
+              {
+                "sentence": "S0008",
+                "text": "中間各項祝福用未來式"
+              },
+              {
+                "sentence": "S0021",
+                "text": "末項也用現在式，首尾祝福現在就有"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:3-10",
+                "sentence": "S0003"
+              }
+            ],
+            "title": "八福的現在與將來",
+            "verses": "5:3-10"
+          }
+        ]
+      },
+      {
+        "id": "story-argument",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0030",
+                "text": "沒學過醫學，看不懂心臟病尚有情可原"
+              },
+              {
+                "sentence": "S0031",
+                "text": "受過訓練，就應看出其中的問題"
+              },
+              {
+                "sentence": "S0034",
+                "text": "有人稱耶穌未說自己是神；經文有許多證據"
+              },
+              {
+                "sentence": "S0039",
+                "text": "猶太人不必視彌賽亞為神；耶穌卻如此明講"
+              }
+            ],
+            "scriptures": [],
+            "title": "受訓練才能看出證據",
+            "verses": "5:3-12"
+          }
+        ]
+      },
+      {
+        "id": "law-question-early-anchor",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [
+              {
+                "explanation": "天國有力地進展",
+                "original": "",
+                "reading": "",
+                "scripture": "mat-11-12-13",
+                "sentence": "S0008",
+                "span": "天國是努力進入的",
+                "verse": 12
+              },
+              {
+                "explanation": "暴徒向天國施行暴力",
+                "original": "",
+                "reading": "",
+                "scripture": "mat-11-12-13",
+                "sentence": "S0008",
+                "span": "努力的人就得著了",
+                "verse": 12
+              }
+            ],
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "有人強調律法一點一畫都不能廢去"
+              },
+              {
+                "sentence": "S0002",
+                "text": "這種讀法忽略了「直到成全」"
+              },
+              {
+                "sentence": "S0008",
+                "text": "應譯：天國有力進展，暴徒向它施暴"
+              },
+              {
+                "sentence": "S0012",
+                "text": "到施洗約翰時，舊約的效用就沒有了嗎？"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:18",
+                "sentence": "S0001"
+              },
+              {
+                "ref": "馬太福音 11:12-13",
+                "sentence": "S0006"
+              },
+              {
+                "ref": "路加福音 16:16-17",
+                "sentence": "S0015"
+              }
+            ],
+            "title": "律法不能廢去的疑問",
+            "verses": "5:17-18"
+          }
+        ]
+      },
+      {
+        "id": "peter-conclusion-not-early",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0004",
+                "text": "不必再遵行摩西律法的食物規定"
+              },
+              {
+                "sentence": "S0015",
+                "text": "彼得承認祂是主，卻不照主的話做"
+              },
+              {
+                "sentence": "S0020",
+                "text": "彼得的異象也表明不再區分食物潔淨"
+              },
+              {
+                "sentence": "S0026",
+                "text": "不能擱置這些問題，必須面對並解釋"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬可福音 7:18-19",
+                "sentence": "S0001"
+              },
+              {
+                "ref": "使徒行傳 10:13-14",
+                "sentence": "S0009"
+              },
+              {
+                "ref": "使徒行傳 10:15",
+                "sentence": "S0019"
+              }
+            ],
+            "title": "食物規定與彼得的異象",
+            "verses": "5:17-20"
+          }
+        ]
+      },
+      {
+        "id": "question-and-answer",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "十誡屬摩西律法，今天也不必遵守"
+              },
+              {
+                "sentence": "S0006",
+                "text": "有人反問：因此可以姦淫、殺人、拜偶像嗎？"
+              },
+              {
+                "sentence": "S0007",
+                "text": "錯了；基督律法與摩西律法有重疊"
+              },
+              {
+                "sentence": "S0021",
+                "text": "同一位神為人的好處，提出相同要求"
+              }
+            ],
+            "scriptures": [],
+            "title": "不守摩西律法就能犯罪嗎",
+            "verses": "5:17-20"
+          }
+        ]
+      },
+      {
+        "id": "speaker-in-testimony",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "工程師以為一見女秘書便犯了姦淫"
+              },
+              {
+                "sentence": "S0014",
+                "text": "耶穌的話並非工程師所想的意思"
+              },
+              {
+                "sentence": "S0016",
+                "text": "明白經義使工程師得釋放"
+              },
+              {
+                "sentence": "S0025",
+                "text": "牧師決心學好聖經、講清經義來幫助人"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:28",
+                "sentence": "S0007"
+              }
+            ],
+            "title": "講清經義使人得釋放",
+            "verses": "5:28"
+          }
+        ]
+      },
+      {
+        "id": "gold-teachable-question-before-answer",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "這裡的「溫柔」是什麼意思？"
+              },
+              {
+                "sentence": "S0005",
+                "text": "查經須弄清關鍵字，不讀入自己的觀念"
+              },
+              {
+                "sentence": "S0007",
+                "text": "從前後文找出關鍵字的意思"
+              },
+              {
+                "sentence": "S0010",
+                "text": "溫柔包括teachable：虛心、願意領教"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "雅各書 1:21",
+                "sentence": "S0002"
+              }
+            ],
+            "title": "從上下文理解溫柔",
+            "verses": "5:5"
+          }
+        ]
+      }
+    ]
+  },
+  "judgement": {
+    "results": [
+      {
+        "checks": [
+          {
+            "criterion_id": "voice",
+            "passed": true,
+            "reason": "「仍須遵守十誡的主張錯了」「十誡也不必遵守」直接呈現判斷與回答，沒有教授轉述框架。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "以「有人主張」標明仍須守十誡的反方立場，並另列否定回答，歸屬清楚。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "保留須守十誡便被要求守安息日的論證、十誡也不必遵守的回答，以及轉到新約與基督律法的理由。"
+          }
+        ],
+        "id": "gold-decalogue-direct-voice/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "voice",
+            "passed": false,
+            "reason": "「他說錯了」「他回答：十誡也不必遵守」仍使用轉述框架；應改為「仍須守十誡的主張錯了」「十誡也不必遵守」，保留「有人說」標明反方。"
+          }
+        ],
+        "id": "gold-decalogue-direct-voice/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "title",
+            "passed": true,
+            "reason": "「登山寶訓背景與分段」涵蓋拉比教導背景、彌賽亞身份與門徒使命兩大段，以及使命的概述與細節。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "先列藉祝福顯明彌賽亞身份，再列「認識彌賽亞後的使命」，保留認識先於回應的關係。"
+          }
+        ],
+        "id": "whole-topic-title/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "title",
+            "passed": false,
+            "reason": "兩張都稱「登山寶訓第一段」：首張實講背景，次張實講兩大段及門徒使命的細分。應分別改為「登山寶訓的背景」「登山寶訓的整體結構」。"
+          }
+        ],
+        "id": "whole-topic-title/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scripture",
+            "passed": true,
+            "reason": "scriptures 已列實際讀出的太5:3–5及賽61:1，沒有因口報範圍而加入未讀的太5:6或賽61:2–7。"
+          },
+          {
+            "criterion_id": "fidelity",
+            "passed": true,
+            "reason": "要點依原文連結八福與賽61章，並保留罕見共同用詞是「好證據」的程度，沒有增添神學裁決或改稱證明。"
+          }
+        ],
+        "id": "quoted-scripture/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scripture",
+            "passed": false,
+            "reason": "scriptures 為空，漏了實際讀出的經文；應在 S0001 加太5:3–5，在 S0008 加賽61:1，不加入未讀的賽61:2–7。"
+          }
+        ],
+        "id": "quoted-scripture/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "grammar",
+            "passed": true,
+            "reason": "保留虛心者現在體會天國、中間祝福用未來式，以及末項與首項同為現在祝福的對照與意義。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "中文時態問題在 S0002 出現，現在祝福在 S0005、未來式在首次明說的 S0008、末項現在式在 S0021 出現，沒有提前顯示整張結論。"
+          }
+        ],
+        "id": "greek-tense/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "grammar",
+            "passed": false,
+            "reason": "四條都只說「八福用詞有些不同」，漏了現在式與將來式的對照，以及首尾祝福現在已有、中間祝福將來才有的意義；須以具體時態與祝福內容取代重複要點。"
+          }
+        ],
+        "id": "greek-tense/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "要點由未受醫學訓練看不懂，推到受訓者應看出問題，再連到經文中耶穌自知並明講是神的證據，保留故事的論證方向。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "沒有把兒子的問話或醫學考試說明冒充解經結論，並以「有人稱」區分反方與直接反駁。"
+          }
+        ],
+        "id": "story-argument/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "complete",
+            "passed": false,
+            "reason": "四條只重複兒子帶回心臟照片，漏了受訓眼睛應看出證據，以及聖經中耶穌自知是神的結論；應將重複要點改為這兩層論證。"
+          }
+        ],
+        "id": "story-argument/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "S0012 首次具體提出「舊約的效用就沒有了？」時顯示疑問，沒有等到後文重述；即以 S0011「什麼意思？」作引入，也僅晚約2秒，未超過60秒。"
+          },
+          {
+            "criterion_id": "direction",
+            "passed": true,
+            "reason": "「到施洗約翰時，舊約的效用就沒有了嗎？」保留疑問形式，沒有把待解張力寫成舊約完全無效的定論。"
+          }
+        ],
+        "id": "law-question-early-anchor/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "direction",
+            "passed": false,
+            "reason": "四條都斷言「舊約律法已經完全無效」，把 S0011–S0012 的待解疑問改成定論；應改為律法不能廢去與到約翰為止之間的疑問。"
+          }
+        ],
+        "id": "law-question-early-anchor/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "彼得稱主卻不照做綁 S0015，不再區分食物的解釋綁首次明說的 S0020；「神所潔淨」經文在 S0019 出現，沒有提前放入異象鋪陳。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "徒10:15 顯示「神所潔淨不可視為不潔」的話，S0020 要點另保留不再按摩西律法區分食物的解釋。"
+          }
+        ],
+        "id": "peter-conclusion-not-early/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "sync",
+            "passed": false,
+            "reason": "全部要點綁 S0001，彼得稱主卻不肯吃應到 S0015；「神所潔淨」及不再區分的解釋應分別到 S0019、S0020，目前提前約122及132秒。不能置之不理應到 S0026，目前提前約157秒。"
+          }
+        ],
+        "id": "peter-conclusion-not-early/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "qa",
+            "passed": true,
+            "reason": "「有人反問」保留犯罪是否因此獲准的疑問，接著以「錯了」否定，並保留兩律法重疊與同一位神為人好處提出要求的理由。"
+          },
+          {
+            "criterion_id": "voice",
+            "passed": true,
+            "reason": "教授的否定與理由直接呈現，反方則明標「有人反問」，沒有混淆主張歸屬。"
+          }
+        ],
+        "id": "question-and-answer/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "qa",
+            "passed": false,
+            "reason": "將反方疑問改成「因此可以姦淫殺人」的肯定句，並漏了否定回答及基督律法重疊的理由；須恢復反方問題、否定與理由。"
+          }
+        ],
+        "id": "question-and-answer/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "以「工程師以為」標明誤解，沒有把它當作教授判斷；末點明標牧師的學習決心，也沒有把牧師感言冒充教授自評。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "首點在 S0006 才顯示工程師的誤解，沒有在 S0001 介紹學生教會時提前顯示 S0008 的閉眼走路細節；其餘要點亦隨相應敘述出現。"
+          }
+        ],
+        "id": "speaker-in-testimony/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "attribution",
+            "passed": false,
+            "reason": "「我的教導已經解決所有人的問題」冒充教授直接自評，也把牧師對這件事的感言擴大為所有人的問題均已解決；應改寫教授解釋、牧師轉告及牧師回來的感言，明標人物。"
+          }
+        ],
+        "id": "speaker-in-testimony/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "S0003 只呈現問題，含 teachable、虛心與願意領教的實質定義綁首次說出的 S0010，因此 S0011 時已有定義，符合精確條件。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "保留查關鍵字、不讀入己見、從前後文求義的方法，以及溫柔包括虛心、願意領教的實質定義。"
+          }
+        ],
+        "id": "gold-teachable-question-before-answer/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "sync",
+            "passed": false,
+            "reason": "首點在 S0002 讀經時就顯示「虛心、願意領教」，但定義到 S0010 才首次說出，提前約77秒；應將定義移至 S0010，S0003 可另列「溫柔是什麼意思？」。"
+          }
+        ],
+        "id": "gold-teachable-question-before-answer/counterexample"
+      }
+    ]
+  },
+  "provenance": {
+    "model": "gpt-6.1-sol",
+    "provider": "ChatGPT subscription",
+    "run": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261118/timing-v4",
+    "source_and_both_actual_request_texts_verified": true
+  }
+}

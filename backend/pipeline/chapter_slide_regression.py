@@ -23,14 +23,12 @@ def digest(value):
 
 
 def review_system():
-    return (slides.REVIEW_PROMPT.replace('〈要點時間規則〉', slides.POINT_TIMING_RULES)
-            .replace('〈標題規則〉', slides.SLIDE_TITLE_RULES)
-            .replace('〈原聲投影片口吻〉', slides.SLIDE_VOICE_RULES))
+    return slides.review_system_prompt()
 
 
 def binding(dataset):
     return dict(test_set_sha256=digest(dataset), generation_prompt_sha256=digest(slides.system_prompt(CHAPTERS[dataset['passage']])),
-                review_prompt_sha256=digest(review_system()), judge_rules_sha256=digest(JUDGE_RULES))
+                review_prompt_sha256=digest(review_system()), judge_rules_sha256=digest(JUDGE_RULES), common_criteria_sha256=digest(COMMON_CRITERIA))
 
 
 def object_schema(properties):
@@ -58,6 +56,20 @@ def generation_input(dataset):
     return '以下是互相獨立的測試片段，各自從 S0001 起。逐個按同一生成規則製作投影片，回傳各 id 及 slides。不得混用案例原文。\n'+json.dumps(cases,ensure_ascii=False)
 
 
+COMMON_CRITERIA = [
+    {'id':'scope-faithfulness', 'requirement':'原文立場、說話者、否定、限制與因果忠實；不添加未講的答案。'},
+    {'id':'scope-coverage', 'requirement':'從原文反向核對承重問題、理由、結論、經文；非承重細節可省，已適當呈現的意思不要求重複。'},
+    {'id':'scope-scripture', 'requirement':'實際引用經文、原文字義與短註歸屬正確；一般譯詞不冒充本節實際字詞。'},
+    {'id':'scope-presentation', 'requirement':'原聲口吻、完整標題範圍、要點可理解，不混淆他人立場。'},
+    {'id':'scope-timing', 'requirement':'問題與答案、故事與結論同步；答案不提前；一般時間差遵照正式閾值及 golden。'},
+]
+
+
+def criteria(case, *, counterexample=False):
+    specific = [x for x in case['criteria'] if not counterexample or x['id']==case['must_fail']]
+    return COMMON_CRITERIA + specific
+
+
 def judge_input(dataset, answer):
     actual={row['id']:row['slides'] for row in answer['cases']}
     if set(actual)!={c['id'] for c in dataset['cases']} or len(actual)!=len(answer['cases']):
@@ -65,10 +77,12 @@ def judge_input(dataset, answer):
     packets=[]
     for c in dataset['cases']:
         lines=slides.sentences(c['pieces'])
-        packets.append({'id':c['id']+'/generated','source':lines,'criteria':c['criteria'],'slides':actual[c['id']]})
+        packets.append({'id':c['id']+'/generated','source':lines,'criteria':criteria(c),'slides':actual[c['id']]})
         # Do not reveal the expected rejection to the evaluator.
         packets.append({'id':c['id']+'/counterexample','source':lines,
-                        'criteria':[x for x in c['criteria'] if x['id']==c['must_fail']], 'slides':c['known_bad']})
+                        'criteria':criteria(c,counterexample=True), 'slides':c['known_bad']})
+    for c in dataset.get('calibration', []):
+        packets.append({k:v for k,v in c.items() if k not in ('expected',)})
     return JUDGE_RULES + json.dumps(packets,ensure_ascii=False)
 
 
@@ -77,7 +91,7 @@ def evaluate(dataset, answer, judgement):
     judge_input(dataset,answer)  # Also validates generation identities.
     actual={row['id']:row['slides'] for row in answer['cases']}
     judged={row['id']:row['checks'] for row in judgement['results']}
-    ids={c['id']+suffix for c in dataset['cases'] for suffix in ('/generated','/counterexample')}
+    ids={c['id']+suffix for c in dataset['cases'] for suffix in ('/generated','/counterexample')} | {c['id'] for c in dataset.get('calibration',[])}
     if set(judged)!=ids or len(judged)!=len(judgement['results']):
         raise ValueError('Evaluator omitted or duplicated case IDs')
     results=[]
@@ -85,16 +99,31 @@ def evaluate(dataset, answer, judgement):
         mechanical,_,_=slides.check(actual[c['id']],c['pieces'],CHAPTERS[dataset['passage']])
         checks=judged[c['id']+'/generated']
         by_id={v['criterion_id']:v for v in checks}
-        if set(by_id)!={x['id'] for x in c['criteria']} or len(by_id)!=len(checks):
+        if set(by_id)!={x['id'] for x in criteria(c)} or len(by_id)!=len(checks):
             raise ValueError('Evaluator omitted or duplicated criteria')
         bad=judged[c['id']+'/counterexample']
-        counter_rejected=len(bad)==1 and bad[0]['criterion_id']==c['must_fail'] and bad[0]['passed'] is False
+        bad_by_id={v['criterion_id']:v for v in bad}
+        if set(bad_by_id)!={x['id'] for x in criteria(c,counterexample=True)} or len(bad_by_id)!=len(bad):
+            raise ValueError('Evaluator omitted or duplicated counterexample criteria')
+        counter_rejected=bad_by_id[c['must_fail']]['passed'] is False
         passed=not mechanical and all(v['passed'] is True for v in checks) and counter_rejected
         if not passed:problems.append(c['id'])
         results.append(dict(id=c['id'],passed=passed,mechanical=mechanical,checks=checks,counterexample_rejected=counter_rejected,counterexample=bad))
-    return dict(schema_version='chapter-slide-generation-eval.v1',binding=binding(dataset),
+    generation_problems=list(problems)
+    for c in dataset.get('calibration', []):
+        checks=judged[c['id']]
+        by_id={v['criterion_id']:v for v in checks}
+        if set(by_id)!=set(c['expected']) or len(by_id)!=len(checks):
+            raise ValueError('Evaluator omitted or duplicated calibration criteria')
+        passed=all(by_id[k]['passed'] is v for k,v in c['expected'].items())
+        if not passed:problems.append(c['id'])
+        results.append(dict(id=c['id'],passed=passed,checks=checks))
+    return dict(schema_version='chapter-slide-generation-eval.v2',binding=binding(dataset),
                 answer_sha256=digest(answer),judgement_sha256=digest(judgement),
-                status='passed' if not problems else 'failed',problems=problems,results=results)
+                status='passed' if not problems else 'failed',
+                generation_status='passed' if not generation_problems else 'failed',
+                calibration_status='failed' if any(c['id'] in problems for c in dataset.get('calibration',[])) else 'passed',
+                problems=problems,results=results)
 
 
 def main():
