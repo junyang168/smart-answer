@@ -643,8 +643,9 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     from backend.pipeline.argument_diagram_check import diagrams_for
     diagrams = diagrams_for(change_set_id, Path(data_base_dir))
     groups, claims, excluded = [], [], []
+    included = set()
     for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
-        shorts = [s for s in shorts if s in claims_by_short]  # a Claim the owner ruled out is gone from the instance
+        shorts = [s for s in shorts if s in claims_by_short and s not in included]  # a Claim the owner ruled out is gone from the instance
         if not shorts:
             continue
         gid = f"G{len(groups) + 1:02d}"
@@ -686,6 +687,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
                 excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
                 continue
+            included.add(short)
             entry = {"claim_id": cid, "group_id": gid, "statement": claim["statement"],
                      "parent": None if cid == cover else cover,
                      "stated": stated or "本堂未保留", "evidence_steps": evidence}
