@@ -7,6 +7,7 @@ const source = "紐約靈命進深會";
 const passage = "mat-5-1-48";
 const section = "mat-5-1-12";
 const point = "先講彌賽亞的身份，再講門徒的使命";
+const elaboration = "新舊約都是宗主國與附庸國之約：宗主國先施恩，再提出要求";
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="850" height="500"><rect width="850" height="500" fill="white"/></svg>';
 const image_src = "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 const diagram = (key, kind, title, origin, at) => ({
@@ -20,7 +21,7 @@ const recording = {
   media_url: "/test-listening-diagrams.wav", media_duration: 65, seconds: 45,
   stretches: [{ start: 10, end: 30 }, { start: 35, end: 60 }],
   slides: [
-    { at: 10, seconds: 25, title: "登山寶訓的結構", points: [{ at: 20, text: point }],
+    { at: 10, seconds: 25, title: "登山寶訓的結構", points: [{ at: 20, text: point }, { at: 23, text: elaboration }],
       scriptures: [], verses: [], diagram: professor },
     { at: 35, seconds: 25, title: "整理登山寶訓的結構", points: [{ at: 50, text: point }],
       scriptures: [], verses: [], diagram: editorial },
@@ -68,6 +69,13 @@ async function evaluate(browser, viewport) {
     await dialog.getByRole("button", { name: "關閉" }).click();
     await dialog.waitFor({ state: "hidden" });
     assert(await slides.getByText(point, { exact: true }).isVisible());
+
+    await open(24);
+    const activePoint = await slides.getByText(elaboration, { exact: true }).boundingBox();
+    const activeImage = await figure.getByRole("button", { name: "放大" + professor.title }).getByRole("img").boundingBox();
+    const frame = await slides.boundingBox();
+    const fits = (box) => box.y >= frame.y - 1 && box.y + box.height <= frame.y + frame.height + 1;
+    assert(fits(activePoint) && fits(activeImage), "A longer active point and the image must fit together");
 
     await open(38);
     assert.equal(await figure.count(), 0, "An image from the previous clip must disappear");

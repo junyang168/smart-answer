@@ -276,13 +276,25 @@ export default function ChapterSlide({
   // 他在讲解、没在念经文时，新出一条要点就把它转进视野。
   const newestPoint = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
-    if (activePoint) bringIntoView(newestPoint.current, { yieldToReading: true });
-  }, [activePoint, slide.at]);
+    if (!activePoint || !newestPoint.current) return;
+    const point = newestPoint.current;
+    if (!currentDiagram) {
+      bringIntoView(point, { yieldToReading: true });
+      return;
+    }
+    const column = point.closest<HTMLElement>("[data-diagram-points]");
+    if (column && column.scrollHeight > column.clientHeight) {
+      const top = point.getBoundingClientRect().top - column.getBoundingClientRect().top + column.scrollTop;
+      column.scrollTop = top;
+    }
+  }, [activePoint, currentDiagram, slide.at]);
   return (
     <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
       <div className={currentDiagram ? "grid grid-cols-2 items-start gap-3 sm:gap-5 lg:gap-8" : undefined}>
-        <header>
-          <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
+        <header data-diagram-points={currentDiagram ? "" : undefined}
+          className={currentDiagram ? "min-w-0 overflow-auto [@media(max-width:389px)_and_(max-height:599px)]:max-h-[25dvh]" : undefined}>
+          <h2 className={`font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl ${currentDiagram
+            ? "[@media(max-width:389px)_and_(max-height:599px)]:text-base" : ""}`}>{slide.title}</h2>
           {points.length > 0 && (
             <ol className={currentDiagram
               ? "mt-3 space-y-2 text-sm leading-relaxed sm:text-[1.05rem] lg:text-2xl"
