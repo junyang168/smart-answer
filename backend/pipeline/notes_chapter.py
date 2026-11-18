@@ -862,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
             elif step == "review":
                 report = chapter_slides.review(chapter, lecture, data_base_dir=data, client=client)
             elif step == "revise":
-                report = chapter_slides.revise(chapter, lecture, data_base_dir=data, client=client)
+                report = chapter_slides.revise_notes(chapter, lecture, data_base_dir=data, client=client)
             else:
                 continue
             print(json.dumps({"step": step, **report}, ensure_ascii=False), flush=True)

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from backend.pipeline import chapter_exposition, chapter_slide_claims as hints, chapter_slides
-from backend.tests.test_chapter_slides import CHAPTER, FakeClient, KEPT, _decided, slide
+from backend.tests.test_chapter_slides import CHAPTER, NOTES_CHAPTER, FakeClient, KEPT, _decided, slide
 
 
 def context_for(root):
@@ -27,7 +27,7 @@ def test_same_frozen_hints_reach_author_reviewer_and_revision(tmp_path):
     reviewer = FakeClient([review])
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=reviewer)
     reviser = FakeClient([{'slides': [slide('S0001')]}])
-    chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
+    chapter_slides.revise_notes(NOTES_CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
     for client in [author, reviewer, reviser]:
         assert 'C1' in client.prompts[0]
         assert '不把未保留片段或別堂的內容補入' in client.prompts[0]
@@ -102,10 +102,10 @@ def test_rejected_claim_trial_revision_is_preserved_and_not_called_again(tmp_pat
                'claim_checks': [{'claim_id': 'C1', 'status': 'covered', 'slides': ['S0001'], 'reason': '完整'}]}
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=FakeClient([verdict]))
     client = FakeClient([{'slides': [slide('S0001', points=('一', '二', '三', '四', '五', '六'))]}])
-    assert chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=client)['status'] == 'rejected'
+    assert chapter_slides.revise_notes(NOTES_CHAPTER, 'L', data_base_dir=tmp_path, client=client)['status'] == 'rejected'
     before = chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').read_bytes()
     unused = FakeClient([])
-    assert chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=unused)['status'] == 'revision_attempt_used'
+    assert chapter_slides.revise_notes(NOTES_CHAPTER, 'L', data_base_dir=tmp_path, client=unused)['status'] == 'revision_attempt_used'
     assert not unused.prompts
     assert chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').read_bytes() == before
 

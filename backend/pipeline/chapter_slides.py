@@ -1023,9 +1023,13 @@ def revision_user_prompt(lecture, decisions_record, previous_slides, findings, c
             + "\n\n審稿人的意見：\n" + notes)
 
 
-def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
+def revise_notes(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
+    from backend.pipeline.notes_chapter import NOTES_SOURCE
+
+    if chapter.source != NOTES_SOURCE:
+        raise ValueError("Sermon slides use the Eval-first flow")
     path = record_path(data_base_dir, chapter.passage, lecture)
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
@@ -1090,9 +1094,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--data-dir", type=Path, help="隔離試跑資料目錄")
     parser.add_argument("--claims-context", type=Path, help="本堂凍結的主張提示包；只可選一堂")
-    parser.add_argument("--review", action="store_true", help="审阅、修正，直到没有意见或轮数用完")
-    parser.add_argument("--owner-extra-round", action="store_true",
-                        help="轮数用完后，负责人批准的一轮：按最后一次审阅修正一次，再审一次，不再继续")
+    parser.add_argument("--eval", dest="evaluate", action="store_true",
+                        help="独立 Eval 一次并保存结果")
     parser.add_argument(
         "--recheck", action="store_true",
         help="被程序拒收的那一份回答，用现在的核对再过一遍；不调用模型",
@@ -1110,7 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("没有符合的讲道")
     data_root = args.data_dir or Path(DATA_BASE_PATH)
     context = json.loads(args.claims_context.read_text(encoding="utf-8")) if args.claims_context else None
-    if context is not None and (args.review or args.recheck):
+    if context is not None and (args.evaluate or args.recheck):
         parser.error("审阅与重核自动读取存档里的提示包，不接受新的 --claims-context")
     if context is not None and len(lectures) != 1:
         parser.error("主張提示包只可用於一堂")
@@ -1127,23 +1130,10 @@ def main(argv: list[str] | None = None) -> int:
         client = RecordedClient(client, data_root.parent / "calls")
     failed = False
     for lecture in lectures:
-        if args.owner_extra_round:
-            report = revise(chapter, lecture, data_base_dir=data_root, client=client, most_rounds=MOST_ROUNDS + 1)
+        if args.evaluate:
+            report = review(chapter, lecture, data_base_dir=data_root, client=client)
             print(json.dumps(report, ensure_ascii=False))
-            if report["status"] == "revised":
-                print(json.dumps(review(chapter, lecture, data_base_dir=data_root, client=client), ensure_ascii=False))
-            continue
-        if args.review:
-            data = data_root
-            while True:
-                report = review(chapter, lecture, data_base_dir=data, client=client)
-                print(json.dumps(report, ensure_ascii=False))
-                if report["status"] != "reviewed" or not report["actionable"]:
-                    break
-                report = revise(chapter, lecture, data_base_dir=data, client=client)
-                print(json.dumps(report, ensure_ascii=False))
-                if report["status"] != "revised":
-                    break
+            failed = failed or report["status"] not in {"reviewed", "unchanged"} or report.get("blocking") is not False
             continue
         report = decide(chapter, lecture, data_base_dir=data_root, client=client, force=args.force, claim_context=context)
         print(json.dumps(report, ensure_ascii=False))

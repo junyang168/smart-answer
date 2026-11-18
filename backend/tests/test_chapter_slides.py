@@ -1,5 +1,6 @@
 """按章页面的投影片：模型在句子上分张，读到的经文要在上面。"""
 
+from dataclasses import replace
 import json
 import pytest
 
@@ -12,6 +13,8 @@ CHAPTER = Chapter(
     lectures=("L",),
     sections=("mat-5-1-12", "mat-5-13-16", "mat-5-17-20"),
 )
+
+NOTES_CHAPTER = replace(CHAPTER, source="教授釋經筆記")
 
 # 两个片段、四句话：S0001 S0002 在 U001，S0003 S0004 在 U002。
 KEPT = [
@@ -154,17 +157,17 @@ def test_a_revision_replaces_the_slides_only_after_review_and_the_same_checks(tm
     bad = {"slides": [slide("S0002")]}  # 不從第一句開始：程序核對不過，原稿不動
     client = FakeClient([finding, bad])
     assert chapter_slides.review(CHAPTER, "L", data_base_dir=tmp_path, client=client)["findings"] == 1
-    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "rejected"
+    assert chapter_slides.revise_notes(NOTES_CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "rejected"
     assert "兩條說同一件事" in client.prompts[-1] and "重複的另一說法" in client.prompts[-1]
     assert chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")["slides"][0]["points"][1]["text"] == "重複的另一說法"
 
     good = {"slides": [slide("S0001", "5:1-48", points=("一", "他的結論"))]}
     client = FakeClient([good])
-    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "revised"
+    assert chapter_slides.revise_notes(NOTES_CHAPTER, "L", data_base_dir=tmp_path, client=client)["status"] == "revised"
     record = chapter_slides.load_record(tmp_path, "mat-5-1-48", "L")
     assert record["revision"] == 1 and record["slides"][0]["points"][1]["text"] == "他的結論"
     # 修正后的稿子还没审过，不能再按旧审阅修。
-    assert chapter_slides.revise(CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([]))["status"] == "not_reviewed"
+    assert chapter_slides.revise_notes(NOTES_CHAPTER, "L", data_base_dir=tmp_path, client=FakeClient([]))["status"] == "not_reviewed"
 
 
 def test_a_slide_shows_in_every_section_its_time_reaches():
@@ -316,7 +319,7 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
         'decisions_sha256': chapter_slides.decisions_sha(tmp_path, CHAPTER.passage, 'L')}]
     saved_path.write_text(json.dumps(saved, ensure_ascii=False))
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=reviewer)
-    chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
+    chapter_slides.revise_notes(NOTES_CHAPTER, 'L', data_base_dir=tmp_path, client=reviser)
     # All three real pipeline calls receive the same range rule, including revisions.
     for client in (author, reviewer, reviser):
         assert chapter_slides.SLIDE_TITLE_RULES in client.systems[0]
@@ -465,12 +468,12 @@ def test_rejected_revision_can_be_rechecked_after_code_fix_without_model_or_budg
     good={'slides':[slide('S0001','5:1-48',points=('理由','結論'))]}
     original_check=chapter_slides.checked
     monkeypatch.setattr(chapter_slides,'checked',lambda *a:(['proven input/check defect'],[],[]))
-    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([good]))['status']=='rejected'
+    assert chapter_slides.revise_notes(NOTES_CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([good]))['status']=='rejected'
     path=chapter_slides.record_path(tmp_path,'mat-5-1-48','L')
     rejection=path.with_suffix('.revision-1.rejected.json')
     rejected_bytes=rejection.read_bytes()
     monkeypatch.setattr(chapter_slides,'checked',original_check)
-    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='revised'
+    assert chapter_slides.revise_notes(NOTES_CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='revised'
     record=json.loads(path.read_text())
     assert record['revision']==1
     assert record['raw_slides']==good['slides']
@@ -483,10 +486,10 @@ def test_rechecking_a_still_invalid_revision_preserves_original_rejection_and_sa
     _decided(tmp_path)
     finding={'grade':'B','blocking':True,'findings':[{'slide':'S0001','kind':'完整','problem':'缺結論','fix':'補結論'}]}
     chapter_slides.review(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([finding]))
-    chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([{'slides':[slide('S0002')]}]))
+    chapter_slides.revise_notes(NOTES_CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([{'slides':[slide('S0002')]}]))
     path=chapter_slides.record_path(tmp_path,'mat-5-1-48','L');rejected=path.with_suffix('.revision-1.rejected.json')
     before=(path.read_bytes(),rejected.read_bytes())
-    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='rejected'
+    assert chapter_slides.revise_notes(NOTES_CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='rejected'
     assert before==(path.read_bytes(),rejected.read_bytes())
 
 
@@ -576,3 +579,26 @@ def test_prayer_unit_allows_its_matthew_six_and_seven_verses():
     assert parse_slide_verses('7:7–12', scoped) is None
     assert parse_slide_verses('7:1–6', chapter) is None
     assert '6:8–34、7:1–11' in system_prompt(scoped)
+
+
+def test_sermon_eval_entry_never_starts_a_revision_loop(monkeypatch, tmp_path):
+    monkeypatch.setattr(chapter_slides.chapter_material, 'CHAPTERS', {CHAPTER.passage: CHAPTER})
+    monkeypatch.setattr(chapter_exposition, 'chapter_client', lambda *_: FakeClient([]))
+    calls = []
+
+    def evaluate(chapter, lecture, **kwargs):
+        calls.append(lecture)
+        return {'status': 'reviewed', 'blocking': True, 'actionable': 1}
+
+    monkeypatch.setattr(chapter_slides, 'review', evaluate)
+    with pytest.raises(ValueError, match='Eval-first'):
+        chapter_slides.revise_notes(CHAPTER, 'L', data_base_dir=tmp_path, client=FakeClient([]))
+    monkeypatch.setattr(chapter_slides, 'revise_notes', lambda *a, **k: pytest.fail('obsolete revision path'))
+    args = [CHAPTER.passage, '--data-dir', str(tmp_path)]
+    assert chapter_slides.main([*args, '--eval']) == 1
+    assert calls == ['L']
+    for retired_flag in ('--review', '--owner-extra-round'):
+        with pytest.raises(SystemExit) as error:
+            chapter_slides.main([*args, retired_flag])
+        assert error.value.code == 2
+    assert calls == ['L']
