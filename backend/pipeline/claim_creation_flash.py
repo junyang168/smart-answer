@@ -561,6 +561,9 @@ def step_fragments(sentence_ids, by_id, paragraphs):
     return anchors
 
 
+UNNAMED_HOLDER='有人'
+
+
 def build_step_records(steps, records, sentences, paragraphs):
     """Compile steps + typed records to the grouped package format the flow already accepts."""
     f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
@@ -588,8 +591,13 @@ def build_step_records(steps, records, sentences, paragraphs):
                 'question_type':'open_question','answer_state':'answered' if step['supports'] else 'unanswered',
                 'answer_claim_ids':[],'anchors':anchors})
         else:
-            if not r['attribution'].strip():raise ValueError(f'{sid}: position needs attribution')
-            out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':r['attribution'],'anchors':anchors})
+            # A 反方 step is someone else's view by its line; when his words do not name the
+            # holder the reply may leave it blank (lecture 6 G004, twice). 「有人」 says only that.
+            holder=r['attribution'].strip()
+            if not holder:
+                if not step['line'].startswith('反方'):raise ValueError(f'{sid}: position needs attribution')
+                holder=UNNAMED_HOLDER;out.setdefault('repairs',[]).append({'record_id':sid,'attribution':holder,'why':'holder not named in his words'})
+            out['positions'].append({'position_id':sid,'title':r['statement'],'attribution':holder,'anchors':anchors})
         out['coverage_by_record'].append({'record_id':sid,'sentence_ids':step['sentence_ids']})
     positions={r['position_id'] for r in out['positions']}
     questions={r['question_id'] for r in out['questions']}
@@ -802,6 +810,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     check_citations_held(listing,result,set(owned))
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
+                    if result.get('repairs'):e.save(root/gid/'steps'/'attribution-repairs.json',{'repairs':result.pop('repairs'),'model_calls':0})
                     digressions.extend({**d,'group_id':gid} for d in result.pop('digressions'))
                 elif single_pass:
                     result=deepcopy(single_outputs[gid]);result.pop('candidates')
