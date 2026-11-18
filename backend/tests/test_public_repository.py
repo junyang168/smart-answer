@@ -144,11 +144,12 @@ def test_matthew_navigation_distinguishes_series_from_recording_sources(monkeypa
     assert "navigation" not in repo.book_chapters(materials, "rom", [])
 
 
-def test_matthew_chapter_artifact_can_be_linked_without_a_catalog_record(monkeypatch):
+def test_matthew_chapter_browsing_excludes_editorial_articles(monkeypatch):
     monkeypatch.setattr(repo, "chapter_pages", lambda: {})
     monkeypatch.setattr(repo, "notes_pages", lambda: {})
-    article = {"title": "編輯綜合", "href": "/article", "chapters": {("mat", 7)}}
-    result = repo.book_chapters(repo.items({}, COVERAGE), "mat", [article])
-    row = next(row for row in result["chapters"] if row["chapter"] == 7)
-    assert row["articles"] == [article]
-    assert row["sources"] == []
+    article = {"title": "編輯綜合", "href": "/article", "chapters": {("mat", 5), ("mat", 7), ("isa", 61)}}
+    materials = repo.items(CATALOG, COVERAGE)
+    result = repo.book_chapters(materials, "mat", [article])
+    assert [row["chapter"] for row in result["chapters"]] == [5, 24]
+    assert all(not row["articles"] for row in result["chapters"])
+    assert repo.book_chapters(materials, "isa", [article])["chapters"][0]["articles"] == [article]

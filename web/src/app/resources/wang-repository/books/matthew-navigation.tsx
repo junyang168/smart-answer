@@ -184,11 +184,6 @@ export function MatthewBook({
                       </div>
                     );
                   })}
-                  {chapter.articles.map((article) => (
-                    <Link key={article.href} href={article.href} className="col-span-full block py-2 text-sm text-amber-900 hover:underline">
-                      <span className="font-semibold">綜合文章（編輯整理）</span> · {article.title}
-                    </Link>
-                  ))}
                 </li>
               ))}
             </ol>

@@ -233,7 +233,6 @@ def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dic
     numbers = set(by_chapter)
     if slug == "mat":
         numbers.update(number for book, number in notes if book == slug)
-        numbers.update(number for article in articles for book, number in article["chapters"] if book == slug)
     rows = []
     for number in sorted(numbers):
         key = slug, number
@@ -248,7 +247,7 @@ def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dic
                 {k: v for k, v in page.items() if k != "passages"}
                 for page in (pages.get(key), notes.get(key)) if page
             ],
-            "articles": [article for article in articles if key in article["chapters"]],
+            "articles": [] if slug == "mat" else [article for article in articles if key in article["chapters"]],
         })
     sources = _count(list({(i["kind"], i["id"]): i for rows in by_chapter.values() for i in rows}.values()))
     if slug == "mat" and any(book == slug for book, _ in notes) and not any(s["name"] == NOTES for s in sources):
@@ -336,7 +335,7 @@ def get_books() -> dict[str, Any]:
 @router.get("/books/{slug}")
 def get_book(slug: str) -> dict[str, Any]:
     slug = _book(slug)
-    result = book_chapters(_materials(), slug, _articles())
+    result = book_chapters(_materials(), slug, [] if slug == "mat" else _articles())
     if not result["chapters"]:
         raise HTTPException(status_code=404, detail="這卷書還沒有講道。")
     for row in result["chapters"]:
