@@ -322,7 +322,7 @@ def test_owner_title_scope_case_reaches_generation_review_and_revision(tmp_path)
     assert previous['slides'][0]['title'] == fixture['rejected_title']
 
 
-def test_a_named_term_is_anchored_to_its_introduction_before_the_definition():
+def test_term_question_can_start_at_naming_but_substantive_definition_waits():
     kept = [
         {"id": "U004", "start": 324.722, "end": 344.95, "text": (
             "這裡啊，大概各位可以看到，聖經的這些結構裡面啊，常常有一種結構，"
@@ -334,6 +334,9 @@ def test_a_named_term_is_anchored_to_its_introduction_before_the_definition():
     ]
     point = {"sentence": "S0003", "text": "inclusio：一段經文開頭和結尾字或觀念相同"}
     answer = [slide("S0001", points=("八福的結構", point))]
+    assert chapter_slides.check(answer, kept, CHAPTER)[0] == []
+    # Only an introductory label/question is incorrectly late at the definition.
+    point["text"] = "inclusio：是什麼？"
     problems, _, _ = chapter_slides.check(answer, kept, CHAPTER)
     assert len(problems) == 1
     assert "S0001 已明確引入術語" in problems[0]
@@ -493,3 +496,36 @@ def test_inline_note_tracks_its_verse_when_displayed_range_is_split(tmp_path):
     for wrong in ('mat-61-1-2','isa-60-1-2','isa-61-1'):
         draft['inline_notes']=[{**note,'scripture':wrong}]
         assert chapter_slides.check([draft],KEPT,CHAPTER,cuv_root=tmp_path)[0]
+
+
+def test_runtime_model_packet_contains_resolved_owner_golden_with_source(monkeypatch):
+    from backend.pipeline import chapter_slide_cases as cases
+    owner={'kind':'not_before','at':'S9999','pattern':'答案','source_text':chapter_slides.sentences(KEPT)[1]['text'],'why':'答案不能跟問題一起提前出現'}
+    monkeypatch.setattr(cases,'cases_for',lambda lecture:[owner])
+    decisions={'pieces':KEPT,'decisions':[{'id':p['id'],'keep':True} for p in KEPT]}
+    context={'schema_version':'chapter-slide-outline-context.v1','groups':[],'claims':[]}
+    packet=chapter_slides.user_prompt('L',decisions,context)
+    assert '本講已確認的 golden 約束' in packet
+    assert '答案不能跟問題一起提前出現' in packet
+    assert '"at": "S0002"' in packet and '"at": "S9999"' not in packet
+    assert owner['source_text'] in packet
+    assert '優先於一般的提早引入規則' in packet
+    assert '不得把已合規的答案時間判為過晚' in packet
+
+
+def test_owner_packet_does_not_silently_reuse_missing_source_anchor(monkeypatch):
+    from backend.pipeline import chapter_slide_cases as cases
+    import pytest
+    monkeypatch.setattr(cases,'cases_for',lambda lecture:[{'kind':'point','at':'S0001','source_text':'本講沒有這句','pattern':'答案','why':'old case'}])
+    decisions={'pieces':KEPT,'decisions':[{'id':p['id'],'keep':True} for p in KEPT]}
+    with pytest.raises(ValueError,match='missing or ambiguous'):
+        chapter_slides.user_prompt('L',decisions,{'schema_version':'chapter-slide-outline-context.v1','groups':[],'claims':[]})
+
+
+def test_chapter_gpt_entry_uses_owner_ten_minute_timeout(monkeypatch):
+    from backend.pipeline import codex_subscription_client as codex
+    seen={}
+    def capture(**kwargs):seen.update(kwargs);return object()
+    monkeypatch.setattr(codex,'CodexSubscriptionClient',capture)
+    chapter_exposition.chapter_client('gpt-6.1-sol')
+    assert seen['timeout_seconds']==600

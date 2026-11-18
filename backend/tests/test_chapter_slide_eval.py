@@ -34,3 +34,14 @@ def test_original_language_he_explains_must_be_on_the_slide(tmp_path):
     assert problems == ["八福（S0003）: 他在講原文或文法，這一張沒有原文註解或相應要點"]
     noted = one_slide([{"sentence": "S0001", "slug": "mat-5-3"}], points=("一", "「是」是現在式"))
     assert ev.evaluate(noted, KEPT, candidates=["mat-5-1-200"], bible=bible(tmp_path))["problems"] == []
+
+
+def test_reading_exemption_requires_the_verse_to_be_displayed_already(tmp_path):
+    from backend.pipeline.chapter_slide_eval import Bible,displayed_reading_sentences
+    book=tmp_path/'MAT';book.mkdir()
+    text='虛心的人有福了因為天國是他們的'
+    (book/'5.json').write_text(json.dumps({'3':text}))
+    lines=[{'id':'S0001','text':text},{'id':'S0002','text':text},
+           {'id':'S0003','text':'這一節的解釋需要特別留意上下文和神學觀念，不能讀進自己的意思。'}]
+    slides=[{'first':'S0001','scriptures':[{'sentence':'S0002','slug':'mat-5-3'}]}]
+    assert displayed_reading_sentences(slides,lines,bible=Bible(tmp_path))=={'S0002'}

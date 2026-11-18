@@ -45,12 +45,15 @@ MIN_PIECE_CHARS = 5
 KINDS = ("釋經", "神學", "應用")
 
 DEFAULT_MODEL = "claude-opus-5-5"
+# Owner 2026-11-18: whole-PPT generation/revision may wait up to ten minutes.
+CHAPTER_GPT_TIMEOUT_SECONDS = 600
 
 
 def chapter_client(model: str):
     if model.startswith("gpt-"):
         from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-        return CodexSubscriptionClient(model=model, reasoning_effort="high")
+        return CodexSubscriptionClient(model=model, reasoning_effort="high",
+                                       timeout_seconds=CHAPTER_GPT_TIMEOUT_SECONDS)
     from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
     return ClaudeSubscriptionClient(model=model)
 

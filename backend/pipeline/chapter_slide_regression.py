@@ -10,10 +10,12 @@ import hashlib
 import json
 from pathlib import Path
 from backend.pipeline import chapter_slides as slides
+from backend.pipeline.chapter_exposition import CHAPTER_GPT_TIMEOUT_SECONDS
 from backend.pipeline.chapter_material import CHAPTERS
 from backend.pipeline.chapter_slide_claims import RecordedClient
 
 FIXTURE = Path(__file__).resolve().parents[1] / 'tests/fixtures/chapter_slides/generation_eval_set.json'
+JUDGE_RULES = '依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。passed=false 表示這項確有須修改的缺陷。非 golden 精確時序依正式規則：提前超過30秒或延後超過60秒才不合格；閾值內差距只記理由，passed=true。golden 已明確規定不得提前或指定句子的條件仍須精確遵守，不適用上述小差距豁免。\n'
 
 
 def digest(value):
@@ -28,7 +30,7 @@ def review_system():
 
 def binding(dataset):
     return dict(test_set_sha256=digest(dataset), generation_prompt_sha256=digest(slides.system_prompt(CHAPTERS[dataset['passage']])),
-                review_prompt_sha256=digest(review_system()))
+                review_prompt_sha256=digest(review_system()), judge_rules_sha256=digest(JUDGE_RULES))
 
 
 def object_schema(properties):
@@ -67,8 +69,7 @@ def judge_input(dataset, answer):
         # Do not reveal the expected rejection to the evaluator.
         packets.append({'id':c['id']+'/counterexample','source':lines,
                         'criteria':[x for x in c['criteria'] if x['id']==c['must_fail']], 'slides':c['known_bad']})
-    return ('依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。'
-            '每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。\n'+json.dumps(packets,ensure_ascii=False))
+    return JUDGE_RULES + json.dumps(packets,ensure_ascii=False)
 
 
 def evaluate(dataset, answer, judgement):
@@ -111,7 +112,7 @@ def main():
     frozen.write_text(json.dumps(current,indent=2))
     if args.generate:
         from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-        client=RecordedClient(CodexSubscriptionClient(model=args.model,reasoning_effort='medium',timeout_seconds=180,max_output_tokens=16000),args.output/'calls')
+        client=RecordedClient(CodexSubscriptionClient(model=args.model,reasoning_effort='medium',timeout_seconds=CHAPTER_GPT_TIMEOUT_SECONDS,max_output_tokens=16000),args.output/'calls')
         answer_file=args.output/'generation.json'
         if not answer_file.exists():
             answer=client.generate_json(slides.system_prompt(CHAPTERS[dataset['passage']]),generation_input(dataset),generation_schema())

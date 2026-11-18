@@ -11,13 +11,13 @@ def dataset():return json.loads(ev.FIXTURE.read_text())
 
 def test_gold_and_diverse_actual_source_cases_remain_in_test_set():
     data=dataset()
-    assert len(data['cases'])>=9
+    assert len(data['cases'])>=10
     assert len({c['id'] for c in data['cases']})==len(data['cases'])
     gold=next(c for c in data['cases'] if c['id']=='gold-decalogue-direct-voice')
     assert any('他回答：十誡也不必遵守'==p['text'] for s in gold['known_bad'] for p in s['points'])
     assert gold['must_fail']=='voice'
     assert all(c['pieces'] and c['origin']['selection_sha256'] for c in data['cases'])
-    assert {'quoted-scripture','peter-conclusion-not-early','greek-tense','story-argument'}<={c['id'] for c in data['cases']}
+    assert {'quoted-scripture','peter-conclusion-not-early','greek-tense','story-argument','gold-teachable-question-before-answer'}<={c['id'] for c in data['cases']}
 
 
 def test_generation_does_not_receive_expected_answers_or_negative_examples():

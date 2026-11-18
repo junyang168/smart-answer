@@ -48,8 +48,8 @@ SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之�
 
 
 POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這一點的句子，按這一張完整原文由前往後找。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
-- 介紹一段或提出一個問題時，從開始介紹、開始提問的那一句出現，不等到後面再把問題說完整。
-- 術語定義的要點從教授明確說出術語名稱的句子開始。若接著問「是什麼」再給定義，這幾句是同一段引入，sentence 標在命名句。
+- 介紹或提問的要點，從開始介紹、開始提問的那一句出現；這不代表答案也可提前。若要點寫的是定義、推論答案或結論，必須等教授首次說出該實質內容，不得借用前面的提問、讀經或背景句作答案錨點。
+- 只介紹術語名稱或提出「是什麼」時，可顯示術語或問題；包含實質定義的要點，綁首次說出該定義的句子。需要時把提問與答案分成不同要點，不把尚未講出的答案塞在介紹要點中。
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
 - 不要把 sentence 綁到這一點講完後的歸納句。以開始引入這一點的位置為準。一條要點含幾個相隔較遠的新意思時，重新組織要點，使每條各有自己的開始位置。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
@@ -70,7 +70,7 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 
 分張：
 - 每張投影片從某一句開始（first），到下一張的第一句之前為止。第一張從第一句開始。
-- 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。
+- 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。若頁末只剩問句、下一頁才有回答，應把問句一起移到回答頁，不讓聽眾翻頁才找答案。反駁須明示否定或修正結論，不能僅列正面理由、讓聽眾自行猜出否定回答。
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
 
 呈現口吻：
@@ -80,6 +80,7 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 每條寫 sentence，按他講的次序排，sentence 遞增。
 〈要點時間規則〉
 - 每條一個意思；同一張裡兩條不可說同一件事（例如「全與天國有關」和「都與天國有關係」只留一條）。
+- 完整與同步必須同時成立：不得為了把答案延後顯示而刪掉反方問題、推論理由、答案或故事要說明的道理。放不下時調整分張，不能以省略承重內容換取二到四條要點。輸出前按原文逐項回查問題、理由、答案與限定是否仍在。
 - 寫教授的推論：他提出的問題、他的理由、他的結論、他的勸告。理由和結論比場景、鋪陳重要，不可只留鋪陳而漏掉結論。
 - 不要把會眾或他讀的經文內容摘要成要點——經文全文程序會另外顯示；要點寫他從經文看出什麼。
 - 不重複前面投影片已經有的要點。
@@ -268,6 +269,21 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         lines.extend(f"[{s['id']}] {s['text']}" for s in by_piece.get(piece["id"], []))
         previous = piece
     if claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+        from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+        source_lines = sentences(kept)
+        owner_cases = resolve_cases(cases_for(lecture), source_lines)
+        source_by_id = {line['id']: line['text'] for line in source_lines}
+        if owner_cases:
+            scoped = [{**case, 'anchor_quotes': {key: source_by_id[case[key]] for key in ('at', 'from', 'to')
+                       if case.get(key) in source_by_id}} for case in owner_cases]
+            lines += ['# 本講已確認的 golden 約束',
+                      '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。',
+                      json.dumps(scoped, ensure_ascii=False)]
+        from backend.pipeline.chapter_slide_claims import source_context_index
+        bounds = {rid: [entry['first'], entry['last']] for rid, entry in source_context_index(claim_context, source_lines).items()}
+        lines += ['# 本講要點 source 的保留原文上下文範圍',
+                  '這是程序按實際保留原文編譯的可用範圍，不是新增支持證明。source 要相關、要點忠於原文，sentence 必須在該 source 的此範圍內。原始 anchors 的逐字引用可以較短，不要把旁邊同一片段的實際結論誤判為沒有位置。',
+                  json.dumps(bounds, ensure_ascii=False)]
         lines += ["", "# 本堂講課提綱（論證層 Claims）",
                   "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
@@ -277,8 +293,8 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
                   "sentence 綁他講出這條要點內容的那一句；但他一開始講新的一步（含為這一步念經文），畫面最新的要點就要換成屬於這一步的，"
-                  "所以每一步的第一條要點綁這一步 anchors 的第一句，同一步後面的要點再綁他講出它們的那一句。同一張不可兩條綁同一句。"
-                  "這一句必須落在 source 那一步的 anchors 句子範圍內（Claim 則在它各步、stated 句與 own_passages 的範圍內）。"
+                  "每一步開始時先顯示本步已講出的引入、問題或理由；不要把本步後面的實質答案、定義或結論提前到 anchors 的第一句。答案仍綁首次說出答案的那一句，並遵守本講 golden。同一張不可兩條綁同一句。"
+                  "這一句必須落在前列程序編譯的 source 上下文範圍內。"
                   "own_passages 是他直接講這條 Claim 本身的地方（例如自問「什麼是謙卑？」再自己回答）；他講到那裡時，"
                   "畫面最新的要點要是 source 為這條 Claim 的要點，寫出他在那裡講的內容。",
                   "- 他講任何一步論證（某個 Claim 的 stated 句、own_passages 或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
@@ -334,6 +350,10 @@ def _earlier_term_introduction(
 ) -> str | None:
     term_point = _TERM_POINT.match(point["text"])
     if not term_point or not index or not _TERM_DEFINITION.match(lines[index]["text"]):
+        return None
+    # A substantive definition must wait for the answer, even if the name came earlier.
+    tail = point["text"][term_point.end():].strip()
+    if tail not in ("", "是什麼？", "是什麼?", "什麼意思？", "什麼意思?"):
         return None
     term = term_point.group(1) or term_point.group(2)
     first = index - 1
@@ -521,8 +541,12 @@ def checked(
             source_lines=[line["text"] for line in sentences(kept)], passage=chapter.passage)
         if outline:
             from backend.pipeline.chapter_slide_claims import point_spans, stale_points
-            problems += (point_spans(claim_context, slides) + argument_alignment(claim_context, slides)
-                         + stale_points(claim_context, slides, sentences(kept)))
+            # Explicit Scripture reading is carried by the displayed verse, not an early answer point.
+            from backend.pipeline import chapter_slide_eval
+            source_lines = sentences(kept)
+            readings = chapter_slide_eval.displayed_reading_sentences(slides, source_lines)
+            problems += (point_spans(claim_context, slides, source_lines=source_lines) + argument_alignment(claim_context, slides)
+                         + stale_points(claim_context, slides, source_lines, displayed_readings=readings))
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(

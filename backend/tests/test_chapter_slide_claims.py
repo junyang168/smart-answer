@@ -340,3 +340,47 @@ def test_frozen_scripture_candidates_cannot_force_unread_verses(monkeypatch):
     assert hints.evidence_scripture_gaps(context,shown,source_lines=['第六節跳過，讀第七節'],passage='mat-5-1-48')==[]
     assert seen==[('isa-61-6-7',['第六節跳過，讀第七節'],'mat-5-1-48')]
     assert hints.evidence_scripture_gaps(context,[],source_lines=['第六節跳過，讀第七節'],passage='mat-5-1-48')==['C1 的 Evidence 引用 isa-61-7，投影片沒有顯示']
+
+
+def test_ppt_source_point_may_use_retained_context_but_never_the_next_piece():
+    context={'claims':[{'claim_id':'C1','statement':'claim','stated':'S0001','evidence_steps':[
+        {'evidence_step_id':'E1','statement':'quote','anchors':[{'sentences':['S0001']}]}]}]}
+    lines=[{'id':'S0001','piece':'U1'},{'id':'S0002','piece':'U1'},{'id':'S0003','piece':'U2'}]
+    def slide(source,at):return [{'title':'test','points':[{'source':source,'sentence':at,'text':'conclusion'}]}]
+    assert hints.point_spans(context,slide('C1','S0002'),source_lines=lines)==[]
+    assert hints.point_spans(context,slide('C1','S0003'),source_lines=lines)
+    assert hints.point_spans(context,slide('E1','S0002'),source_lines=lines)==[]
+    assert hints.point_spans(context,slide('E1','S0003'),source_lines=lines)
+
+
+def test_shared_evidence_does_not_move_a_claim_conclusion_before_its_stated_sentence():
+    shared={'evidence_step_id':'E1','statement':'shared reading','anchors':[{'sentences':['S0001','S0002']} ]}
+    context={'claims':[{'claim_id':'C1','statement':'first conclusion','stated':'S0002','evidence_steps':[shared]},
+                       {'claim_id':'C2','statement':'later conclusion','stated':'S0004','evidence_steps':[shared]}]}
+    slides=[{'first':'S0001','last':'S0003','title':'reading','points':[{'source':'C1','text':'first'}]},
+            {'first':'S0004','last':'S0005','title':'later','points':[{'source':'C2','text':'second'}]}]
+    assert hints.argument_alignment(context,slides)==[]
+    slides[1]['points'][0]['source']='C1'
+    assert any('S0004' in problem and 'C2' in problem for problem in hints.argument_alignment(context,slides))
+
+
+def test_visible_scripture_carries_reading_but_cannot_excuse_stale_explanation():
+    context={'claims':[{'claim_id':'C1','statement':'old','evidence_steps':[{'evidence_step_id':'E1','statement':'old','anchors':[{'sentences':['S0001']}]}]},
+                       {'claim_id':'C2','statement':'new','evidence_steps':[{'evidence_step_id':'E2','statement':'new','anchors':[{'sentences':[f'S{i:04}' for i in range(2,8)]}]}]}]}
+    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,8)]
+    slides=[{'first':'S0001','last':'S0007','title':'test','points':[{'sentence':'S0001','source':'E1','text':'old'}]}]
+    reading={'S0002','S0003','S0004'}
+    assert hints.stale_points(context,slides,lines[:4],displayed_readings=reading)==[]
+    assert hints.stale_points(context,slides,lines[:4])
+    assert any('S0005' in problem for problem in hints.stale_points(context,slides,lines,displayed_readings=reading))
+
+
+def test_other_evidence_of_same_claim_can_carry_context_but_unrelated_claim_cannot():
+    context={'claims':[{'claim_id':'C1','statement':'one argument','evidence_steps':[
+        {'evidence_step_id':'E1','statement':'premise','anchors':[{'sentences':['S0001']}]},
+        {'evidence_step_id':'E2','statement':'comparison','anchors':[{'sentences':['S0002','S0003','S0004']}]}]}]}
+    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,5)]
+    slides=[{'first':'S0001','last':'S0004','title':'one argument','points':[{'sentence':'S0001','source':'E1','text':'related premise'}]}]
+    assert hints.stale_points(context,slides,lines)==[]
+    context['claims'].append({'claim_id':'C2','statement':'unrelated','evidence_steps':[context['claims'][0]['evidence_steps'].pop()]})
+    assert hints.stale_points(context,slides,lines)

@@ -107,6 +107,24 @@ def evaluate(
     return {"problems": problems, "checked_sentences": len(lines)}
 
 
+def displayed_reading_sentences(slides, lines, *, bible=None):
+    """A currently displayed verse carries the listener during actual Scripture reading.
+
+    This does not excuse stale points while explaining a verse or stating a conclusion.
+    Reuses the same conservative word-overlap detector as the Scripture Eval.
+    """
+    bible = bible or Bible()
+    reading = set()
+    for line in lines:
+        slide = next((s for s in reversed(slides) if s['first'] <= line['id']), None)
+        shown = [v for item in (slide or {}).get('scriptures', []) if item['sentence'] <= line['id']
+                 for v in bible.verses(item['slug'])]
+        pairs = _bigrams(line['text'])
+        if max((_share(pairs, verse) for _, verse in shown), default=0) >= READING_SHARE:
+            reading.add(line['id'])
+    return reading
+
+
 def candidate_chapters(slides: list[dict[str, Any]], context: dict[str, Any] | None) -> list[str]:
     """他可能在念的經文：投影片和 Evidence 用到的每一章，整章都算（念到別節也認得出來）。"""
     from backend.api.scripture import parse_reference
