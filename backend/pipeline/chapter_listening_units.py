@@ -206,9 +206,10 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
             'slides': chapter_slides.placed(selection, slides)[1]}
 
 
-def build(data_root: Path, passage: str) -> dict:
+def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     path = data_root / 'chapter_exposition' / passage / 'listening-units.json'
-    plan = json.loads(path.read_text())
+    if plan is None:
+        plan = json.loads(path.read_text())
     recordings = {}
     timing_corrections = []
     sermons = audio.Sermons(data_root)
