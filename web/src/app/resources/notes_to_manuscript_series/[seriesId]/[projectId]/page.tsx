@@ -66,7 +66,7 @@ export default async function NotesToManuscriptReaderPage({ params }: PageProps)
 
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
-    { name: "AI 輔助查經", href: "/resources" },
+    { name: "聖經學習資源", href: "/resources" },
     { name: "講義轉逐字稿系列", href: "/resources/notes_to_manuscript_series" },
     {
       name: series.title,

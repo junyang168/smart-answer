@@ -243,7 +243,7 @@ export const SermonDetailView = () => {
 
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: 'AI 輔助查經', href: '/resources' },
+    { name: '聖經學習資源', href: '/resources' },
     { name: '講道中心', href: '/resources/sermons' },
     ...(seriesHref ? [{ name: sermon.series_title || '講道系列', href: seriesHref }] : []),
     { name: sermon.title }, // 當前講道標題，沒有 href

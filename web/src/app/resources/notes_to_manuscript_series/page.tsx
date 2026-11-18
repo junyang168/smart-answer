@@ -6,7 +6,7 @@ import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 import { fetchNotesToManuscriptSeries } from "./data";
 
 export const metadata: Metadata = {
-  title: "講義轉逐字稿系列 | AI 輔助查經",
+  title: "講義轉逐字稿系列 | 聖經學習資源",
   description: "按系列查看講義轉逐字稿的教學講稿，並閱讀完整逐字稿內容。",
 };
 
@@ -15,7 +15,7 @@ export const revalidate = 300;
 export default async function NotesToManuscriptSeriesPage() {
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
-    { name: "AI 輔助查經", href: "/resources" },
+    { name: "聖經學習資源", href: "/resources" },
     { name: "講義轉逐字稿系列" },
   ];
   const seriesList = await fetchNotesToManuscriptSeries();

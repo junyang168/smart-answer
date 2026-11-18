@@ -38,7 +38,7 @@ function getPublishedAtTimestamp(sermon: MicroSermonData): number | null {
 export default async function MicroSermonPage() {
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
-    { name: "AI 輔助查經", href: "/resources" },
+    { name: "聖經學習資源", href: "/resources" },
     { name: "微讲道" },
   ];
 

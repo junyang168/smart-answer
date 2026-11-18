@@ -101,7 +101,7 @@ export const ResourceCenter = () => {
     <div className="bg-gray-50">
       <section className="bg-gray-50 py-5 sm:py-8">
         <div className={`container mx-auto px-6 ${isStaff ? "" : "max-w-4xl"}`}>
-          <h1 className="sr-only">AI 輔助查經</h1>
+          <h1 className="sr-only">聖經學習資源</h1>
           <div className={`grid grid-cols-1 gap-6 text-left md:grid-cols-2 ${isStaff ? "lg:grid-cols-3" : ""}`}>
             {resourceCardsData.filter((card) => !card.staffOnly || isStaff).map((card) => (
               <ResourceCard

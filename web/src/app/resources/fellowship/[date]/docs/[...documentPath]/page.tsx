@@ -19,7 +19,7 @@ export default async function FellowshipMarkdownDocumentPage(
   const documentPath = params.documentPath.map(safeDecodeURIComponent).join("/");
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
-    { name: "AI 輔助查經", href: "/resources" },
+    { name: "聖經學習資源", href: "/resources" },
     { name: "團契查經回顧", href: "/resources/fellowship" },
     { name: date, href: `/resources/fellowship/${encodeURIComponent(date)}` },
     { name: documentPath },
