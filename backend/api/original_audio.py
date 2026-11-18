@@ -41,12 +41,18 @@ def index(passage: str, source: str | None = None, units: bool = False, legacy: 
 
     from backend.pipeline import chapter_topics, notes_chapter
 
+    data_root = Path(DATA_BASE_PATH)
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    has_unit_plan = passage in CHAPTERS and (data_root / 'chapter_exposition' / passage / 'listening-units.json').is_file()
+    unit_source = source in (None, '紐約靈命進深會')
+
     if units:
         from backend.pipeline import chapter_listening_units
-        if passage != 'mat-5-1-48' or source not in (None, '紐約靈命進深會'):
+        if not unit_source or not has_unit_plan:
             raise HTTPException(status_code=404, detail='這一章尚無單元預覽。')
         try:
-            return chapter_listening_units.build(Path(DATA_BASE_PATH), passage)
+            return chapter_listening_units.build(data_root, passage)
         except (ValueError, FileNotFoundError) as error:
             raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
 
@@ -59,10 +65,8 @@ def index(passage: str, source: str | None = None, units: bool = False, legacy: 
     if passage not in {slug for slug, _ in original_audio_index.passages()}:
         raise HTTPException(status_code=404, detail="這段經文還沒有原聲頁面。")
     store = PostgresKnowledgeStore()
-    data_root = Path(DATA_BASE_PATH)
     found = chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
-    if (not legacy and passage == 'mat-5-1-48' and source in (None, '紐約靈命進深會')
-            and (data_root / 'chapter_exposition' / passage / 'listening-units.json').is_file()):
+    if not legacy and unit_source and has_unit_plan:
         from backend.pipeline.chapter_listening_catalog import compose
         from backend.pipeline.chapter_listening_units import build
         try:

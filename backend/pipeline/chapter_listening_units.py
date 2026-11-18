@@ -269,6 +269,9 @@ def build(data_root: Path, passage: str) -> dict:
             unit_recordings[unit_passage, source] = reviewed_unit_recording(
                 directory, unit, entries[source], recordings[source])
     result = project(plan, recordings, unit_recordings)
+    from backend.api.scripture import format_chinese_reference
+    result['passage'] = passage
+    result['label'] = format_chinese_reference(passage)
     result['program_timing_corrections'] = timing_corrections
     result['resume_version'] = hashlib.sha256(json.dumps({
         'sources': [(entry['source_id'], entry['source_sha256']) for entry in plan['inputs']],
