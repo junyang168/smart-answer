@@ -118,7 +118,9 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slides mat-21-
 
 经文内短注跟着教授开始解释的句子出现。生成、修订与审阅从 Claim 证据步骤及 SourceFragment 找字义、译法、语法和结构，结合相邻逐字稿核实内容。跨经文比较分别绑定对应经节和和合本词句。没有核实的词形留空。节下文字只占一行：原文 · 十五字以内的短语，不另列「读法」，不重复经文或要点已有的话。节下文字只解释希腊原文（含与希伯来文对照）或原文文法。首尾呼应等结构只同时高亮对应词句。审阅时检查原文解释的遗漏和多余的节下文字。
 
-**改提示词先跑生成回归集。** 用 `backend.pipeline.chapter_slide_regression --generate --output <新目录>` 实际生成并评估固定案例与错误反例，再运行 `backend/tests/test_chapter_slide_regression.py`。旧答复或仅更新哈希不算新提示词验证；golden 不为迁就输出而改。比较提示词时固定原文、模型与同一套 Eval，看初稿实质缺陷、实际修订轮次、总时间和 tokens，不以少审几次冒充质量改善。该集不替代正式稿的完整审阅与程序核对。
+合并、补充或缩写要点后，重新按完整文字找锚点；不取来源要点的最早时间，也不为故事开场填画面而提前揭示后面的情节或结论。审稿要求提前也须对照原文，错误处方不照改。完整答案直到归纳句才首次出现时，应绑定该句，不套用“避免归纳句”而提前。
+
+**改提示词先跑生成回归集。** 用 `backend.pipeline.chapter_slide_regression --generate --output <新目录>` 实际生成、修订并评估固定案例与错误反例，再运行 `backend/tests/test_chapter_slide_regression.py`。旧答复或仅更新哈希不算新提示词验证；golden 不为迁就输出而改。比较提示词时固定原文、模型与同一套 Eval，看初稿实质缺陷、实际修订轮次、总时间和 tokens，不以少审几次冒充质量改善。该集不替代正式稿的完整审阅与程序核对。
 
 ## 4. 审阅、修正、章标题与总览主题
 

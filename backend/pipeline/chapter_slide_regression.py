@@ -1,6 +1,6 @@
 """Frozen source examples for the whole slide-generation contract.
 
-Generate with the production prompt, check its output mechanically, and evaluate
+Generate and revise with production prompts, check outputs mechanically, and evaluate
 semantic expectations plus known bad counterexamples. Saved reports bind the
 prompt, test set and answers; replay makes zero model calls.
 """
@@ -28,7 +28,8 @@ def review_system():
 
 def binding(dataset):
     return dict(test_set_sha256=digest(dataset), generation_prompt_sha256=digest(slides.system_prompt(CHAPTERS[dataset['passage']])),
-                review_prompt_sha256=digest(review_system()), judge_rules_sha256=digest(JUDGE_RULES), common_criteria_sha256=digest(COMMON_CRITERIA))
+                review_prompt_sha256=digest(review_system()), judge_rules_sha256=digest(JUDGE_RULES), common_criteria_sha256=digest(COMMON_CRITERIA),
+                revision_prompt_sha256=digest(slides.system_prompt(CHAPTERS[dataset['passage']])+slides._REVISE_TAIL))
 
 
 def object_schema(properties):
@@ -48,12 +49,17 @@ JUDGEMENT = object_schema({'results':array_schema(object_schema({'id':{'type':'s
     'checks':array_schema(object_schema({'criterion_id':{'type':'string'},'passed':{'type':'boolean'},'reason':{'type':'string'}}))}))})
 
 
-def generation_input(dataset):
+def generation_input(dataset, *, revisions=False):
     cases=[]
     for case in dataset['cases']:
+        if bool(case.get('revision')) != revisions:
+            continue
         decisions={'pieces':case['pieces'],'decisions':[{'id':p['id'],'keep':True} for p in case['pieces']]}
-        cases.append({'id':case['id'],'input':slides.user_prompt(case['lecture'],decisions)})
-    return '以下是互相獨立的測試片段，各自從 S0001 起。逐個按同一生成規則製作投影片，回傳各 id 及 slides。不得混用案例原文。\n'+json.dumps(cases,ensure_ascii=False)
+        prompt=(slides.revision_user_prompt(case['lecture'],decisions,case['revision']['previous_slides'],case['revision']['findings'])
+                if revisions else slides.user_prompt(case['lecture'],decisions))
+        cases.append({'id':case['id'],'input':prompt})
+    action='修訂' if revisions else '製作'
+    return f'以下是互相獨立的測試片段，各自從 S0001 起。逐個按同一規則{action}投影片，回傳各 id 及 slides。不得混用案例原文。\n'+json.dumps(cases,ensure_ascii=False)
 
 
 COMMON_CRITERIA = [
@@ -145,8 +151,20 @@ def main():
         client=RecordedClient(CodexSubscriptionClient(model=args.model,reasoning_effort='medium',timeout_seconds=CHAPTER_GPT_TIMEOUT_SECONDS,max_output_tokens=16000),args.output/'calls')
         answer_file=args.output/'generation.json'
         if not answer_file.exists():
-            answer=client.generate_json(slides.system_prompt(CHAPTERS[dataset['passage']]),generation_input(dataset),generation_schema())
-            answer_file.write_text(json.dumps(answer,ensure_ascii=False,indent=2))
+            combined=[]
+            for revisions,name in ((False,'creation.json'),(True,'revision.json')):
+                if not any(bool(c.get('revision'))==revisions for c in dataset['cases']):continue
+                saved=args.output/name
+                if not saved.exists():
+                    system=slides.system_prompt(CHAPTERS[dataset['passage']])+(slides._REVISE_TAIL if revisions else '')
+                    result=client.generate_json(system,generation_input(dataset,revisions=revisions),generation_schema())
+                    saved.write_text(json.dumps(result,ensure_ascii=False,indent=2))
+                result=json.loads(saved.read_text())
+                expected={c['id'] for c in dataset['cases'] if bool(c.get('revision'))==revisions}
+                if {c['id'] for c in result['cases']}!=expected or len(result['cases'])!=len(expected):
+                    raise ValueError('Generation/revision omitted or duplicated case IDs')
+                combined.extend(result['cases'])
+            answer_file.write_text(json.dumps({'cases':combined},ensure_ascii=False,indent=2))
         answer=json.loads(answer_file.read_text())
         judge_file=args.output/'judgement.json'
         if not judge_file.exists():

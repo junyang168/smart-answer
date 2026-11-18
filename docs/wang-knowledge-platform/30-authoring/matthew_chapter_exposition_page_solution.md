@@ -3,6 +3,7 @@
 > **读者**：Solution architect、神学编辑
 > **类型**：规范
 > **状态**：当前（负责人 2026-11-03 定试点为太 5，确认系列与章的对照；同日改为由模型按定义找出释经段落，幻灯改为由模型读逐字稿写要点；2026-11-04 加聆听模式；2026-11-05 加太 8–15、太 6–7；2026-11-09 加太 21；2026-11-10 加 skill `chapter-slides`，同日试验本堂 Claims 与证据步骤提示）
+> **同步幻灯规则核对范围**：2026-11-18（#637／PR #796）：§4.6 的合并后定时、短注范围及生成／修订回归入口与当前工作分支核对；其余段落保持原核对范围。
 > **本堂主张提示试验代码对齐**：2026-11-10（#637）：`chapter_slide_claims.py`、`chapter_slides.py`，真实试跑结果另记；其余保持原核对范围。
 > **与代码对齐**：2026-11-05（核对到 #637 太 6–7 分支，加 `backend/pipeline/chapter_title.py`、`backend/api/scripture.py`、`backend/api/original_audio.py`、`backend/api/public_repository.py`）：`web/src/app/resources/wang-repository/audio/ChapterListener.tsx`、`web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx`、`backend/pipeline/chapter_exposition.py`、`backend/pipeline/chapter_slides.py`、`backend/pipeline/chapter_material.py`、`backend/pipeline/original_audio_index.py`、`web/src/app/resources/wang-repository/audio/[passage]/page.tsx`、`web/src/app/resources/wang-repository/audio/ChapterSlide.tsx`
 > **权威范围**：马太福音按章释经页由哪几部分组成；一章的材料从哪几篇讲道取、哪些段落算释经；神学、个人经历、生活应用与问答怎样取舍；同步幻灯上放什么。只管 NYSC 马太福音系列讲座这一个来源；母本与文章都不在本文范围。
@@ -223,13 +224,17 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_listening_eval
 
 同步投影片直接呈现教授自己的问题、理由和结论，省略「他回答」「教授认为」等转述框架，不改成「我认为」。反方、听众、保罗、耶稣及故事人物仍保留必要身分，不能因此混淆归属、删除否定和条件，或加强原话。生成、修订、审阅共用 `SLIDE_VOICE_RULES`；审阅不能把这项归属和呈现视角检查当作可忽略的措辞问题。
 
-**PPT 生成回归集。** `backend/tests/fixtures/chapter_slides/generation_eval_set.json` 冻结真实原文、检查标准和已知错稿，覆盖口吻与说话者、反方立场、论证完整、标题范围、引用经文、原文字义及要点时序；十诫的直接回答及「溫柔／teachable」定义不提前显示，都是负责人 golden case。题目与答案、故事与结论均须保留，不靠逐字匹配限定模型措辞。程序仍对每个新答案执行现有格式、分张、经文和句子定位核对；语义评估须逐例逐项作答，并识别已知反例。生成模型不能看到标准答案或反例。通过的实际模型答复与评估存为 `generation_eval_baseline.json`，自动测试核对当前提示词与基准一致；提示词或测试集变动会明确失败，须重新实测，不能只更新哈希。
+經文短註的 `original` 只填該節實際使用的原文字詞或轉寫，不能將通常／他處的譯詞當成本節用字。普通中文字義、英文釋義或一般上下文解釋放在要點；沒有原文字詞／文法依據時，不以 `original` 留空的方式繞過短註範圍。教授確有講原文或希伯來文對照的內容仍須保存。
+
+**合并后的同步。** 每条要点的时间对应完整文字首次实际讲出的内容，不对应其所属段落／Evidence 的开始。合并、补充、缩写或合页后，重新核对各个实质意思；保留完整合并文字时，不能早于其中最后一个新意思首次出现的位置。必要的前提因而延迟时拆开要点或调分张，仍保留完整论证。审稿的提前处方也须回查，不能把「开始提问／介绍」作为答案的锚点；到归纳句才首次说出的结论就绑归纳句。生成、修订、审阅共用此规则，不新增语义推断的机械猜测器。
+
+**PPT 生成回归集。** `backend/tests/fixtures/chapter_slides/generation_eval_set.json` 冻结真实原文、检查标准和已知错稿，并包含真实旧稿及审稿意见的修订案例（错误提前处方、合并后误沿用早锚点），覆盖口吻与说话者、反方立场、论证完整、标题范围、引用经文、原文字义及要点时序；十诫的直接回答及「溫柔／teachable」定义不提前显示，都是负责人 golden case。题目与答案、故事与结论均须保留，不靠逐字匹配限定模型措辞。程序仍对每个新答案执行现有格式、分张、经文和句子定位核对；语义评估须逐例逐项作答，并识别已知反例。生成模型不能看到标准答案或反例。通过的实际模型答复与评估存为 `generation_eval_baseline.json`，自动测试核对当前提示词与基准一致；提示词或测试集变动会明确失败，须重新实测，不能只更新哈希。
 
 **Eval 范围与误报校准。** 正式审阅与回归 Eval 共用 `chapter_slides.review_system_prompt`，包含经文短注、承重内容与误报界线，不维护两份检查规则。每个生成稿和已知错稿都检查忠实、反向承重覆盖、经文／原文归属、呈现及时间，再核对案例专属条件。完整不是抄全：故事先查相关 Claim／Evidence 的论证角色，再与原文和已有要点核对；没有独立故事 Claim 不等于故事无关。论证作用已保存时，不因省略非承重细节、没有故事开场点或长时间只有标题阻挡；确实漏了必要对比、理由或应用才列缺漏，并指出相应论证及原文。没有论证层时明示仅据原文判断，不假称已核对。一般译词比较在要点已保存，不要求冒充本节实际原文再塞进短注。校准集同时包含应通过与应拒绝的候选，报告分别列生成质量与判定校准，不以抓错数量证明准确。
 
 已采纳修正以 `accepted_review_resolutions` 元数据保存具体决定、原审阅 SHA 和选材 SHA，正式审阅带入同一材料；选材变化或原审阅缺失先报错。不得从历史 findings 猜测负责人已同意，也不改旧 verdict。新原文证据确实推翻决定时须明列冲突，不能靠“已采纳”豁免忠实检查。校准测试不是新的正式发布审阅。
 
-修改生成规则后，先运行 `PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slide_regression --generate --output <新目录>`，实际用新提示词生成并评估；不加 `--generate` 只重放保存的结果，不调用模型。报告绑定测试集、生成／审阅提示词及答复；缺项、重复裁定、反例未被识别或任何失败都不能算通过。不能为了新输出调整 golden。只修改 Eval 时可复用原生成答复，但须逐字核对生成 system／user 输入不变，并实际用新版 Eval 重新判断；旧判定保留，不只更新哈希。此测试集覆盖生成契约，不替代整组经文选材 golden、完整正式稿的既有 Slide Eval，或正常入口和手机布局验收。
+修改生成规则后，先运行 `PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.chapter_slide_regression --generate --output <新目录>`，实际用新提示词生成、修订并评估；各阶段的原始回答分别保存为 `creation.json`、`revision.json`，合并评估输入保存为 `generation.json`。修订测试复用正式 `revision_user_prompt` 和修订 system，不让生成模型看到评估条件或错稿；不加 `--generate` 只重放保存的结果，不调用模型。报告绑定测试集、生成／审阅提示词及答复；缺项、重复裁定、反例未被识别或任何失败都不能算通过。不能为了新输出调整 golden。只修改 Eval 时可复用原生成答复，但须逐字核对生成 system／user 输入不变，并实际用新版 Eval 重新判断；旧判定保留，不只更新哈希。此测试集覆盖生成契约，不替代整组经文选材 golden、完整正式稿的既有 Slide Eval，或正常入口和手机布局验收。
 
 
 负责人 2026-11-03：原来的幻灯由程序从主张拼——标题是此刻占主导的主张，要点是它的证据步骤。主张是论证结构，不是讲课的呈现：（二）1 开头三分半他讲登山宝训的结构，九条主张各只有十几秒，半分钟取一个主导、不满 90 秒并入邻居之后，幻灯上只剩一条。

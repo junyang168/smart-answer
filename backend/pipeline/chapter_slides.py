@@ -47,11 +47,13 @@ SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之�
 - 標題的範圍不可比實際內容更窄，也不可擴大成這一張沒有講的整章／整卷。不要為配合標題刪掉原文、重要要點或改動分張。"""
 
 
-POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這一點的句子，按這一張完整原文由前往後找。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
+POINT_TIMING_RULES = """要點的 sentence 標記教授首次實際說出這條文字所表達內容的句子，按這一張完整原文由前往後找；不是它所屬段落或 Evidence 步驟的開始句。畫面會在這個實際講述錨點前留短暫預讀時間，讓聽眾先讀到要點，再聽解釋。
 - 介紹或提問的要點，從開始介紹、開始提問的那一句出現；這不代表答案也可提前。若要點寫的是定義、推論答案或結論，必須等教授首次說出該實質內容，不得借用前面的提問、讀經或背景句作答案錨點。
 - 只介紹術語名稱或提出「是什麼」時，可顯示術語或問題；包含實質定義的要點，綁首次說出該定義的句子。需要時把提問與答案分成不同要點，不把尚未講出的答案塞在介紹要點中。
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
-- 不要把 sentence 綁到這一點講完後的歸納句。以開始引入這一點的位置為準。一條要點含幾個相隔較遠的新意思時，重新組織要點，使每條各有自己的開始位置。
+- 完整內容早已講出時，不必等後面的重述；若到歸納句才首次講出結論，就應綁該歸納句。不能以「不要綁歸納句」為由把尚未說出的結論提前。
+- 合併、縮寫、補充要點或合併投影片後，舊 sentence 不再自動適用。逐一回查新要點各個實質意思首次出現的位置；保留合併文字時，最早只能綁到這些意思均已講出的句子，不取來源要點的最早錨點，也不取故事／問題的開頭。若這會讓前面的必要理由出現太晚，拆開要點或調整分張，仍保留完整論證並遵守二到四條限制。
+- 審稿意見要求提前時也套用同一規則；若該句尚未講出答案，保留正確錨點，不照錯誤意見前移。故事可先聽原聲，不為填滿畫面提前顯示後面的情節、對比或結論。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
 
 
@@ -124,11 +126,11 @@ def for_lecture(prompt: str, lecture: str) -> str:
 
 
 INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語法與經文結構，寫入 inline_notes。
-經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
+經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。必須有可回查的原文字詞或文法解說依據；普通中文詞義、英文釋義或一般上下文解經，不因涉及某節經文就自動成為原文短註。這些意思留在要點；original 留空不能作為加入一般釋經短註的理由。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
 先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
 每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading 一律留空、explanation（一句短語，十五字以內，只說原文的意思或文法）。節下文字只佔一行，不重複經文或要點已有的話。無法核實的原文字形留空。
 教授糾正和合本譯法時，span 仍須選和合本實際存在的原字詞；更正的譯詞放 explanation 或要點，不可拿更正後的文字定位和合本。不要為一般譯法比較建立空內容的結構高亮。
-跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
+跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。original 欄只填本節實際使用的原文字詞或其轉寫；通常／其他地方的譯詞即使教授確實提到，也不能獨立掛在本節的 original 欄。一般譯法比較放要點；不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
 
 
 def system_prompt(chapter: Chapter, lecture: str = "") -> str:
@@ -832,7 +834,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
 
 _REVISE_TAIL = """
 
-這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。交回完整的一份投影片（不是只交改動的）。"""
+這一次你要修正自己先前的投影片。使用者另外給你先前的投影片和審稿人的意見。逐條處理意見；審稿人錯了（逐字稿不支持）就不照改。沒有被指出問題的投影片保持原樣。合併或改寫過的要點須按共用時間規則重新核對完整文字的錨點，不沿用最早來源句；不為了湊要點上限把後段答案搬到前段。交回完整的一份投影片（不是只交改動的）。"""
 
 
 def show_slides(slides: list[dict[str, Any]]) -> str:
@@ -983,6 +985,14 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
             "actionable": len(actionable(answer)), "file": str(target)}
 
 
+def revision_user_prompt(lecture, decisions_record, previous_slides, findings, context=None, *, accepted_context=""):
+    """Same revision material for the normal runner and isolated regression cases."""
+    notes = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}" for f in findings)
+    return (user_prompt(lecture, decisions_record, context) + accepted_context
+            + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": previous_slides}, ensure_ascii=False)
+            + "\n\n審稿人的意見：\n" + notes)
+
+
 def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
@@ -1008,15 +1018,9 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     kept = kept_pieces(decisions_record)
     # A timing finding measured as too small to matter is not sent back: moving it is how rounds went back and forth.
-    findings = "\n".join(f"- 〔{f['kind']}〕{f['slide']}：{f['problem']}　改法：{f['fix']}"
-                         for f in actionable(verdict))
-    prompt = (
-        user_prompt(lecture, decisions_record, context)
-        + accepted_review_context(record, decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture),
-                                  review_directory=review_file.parent)
-        + "\n\n先前的投影片（JSON）：\n" + json.dumps({"slides": _as_answer(record["slides"])}, ensure_ascii=False)
-        + "\n\n審稿人的意見：\n" + findings
-    )
+    prompt = revision_user_prompt(lecture, decisions_record, _as_answer(record["slides"]), actionable(verdict), context,
+        accepted_context=accepted_review_context(record,
+            decisions_sha256=decisions_sha(data_base_dir, chapter.passage, lecture), review_directory=review_file.parent))
     rejected_attempt = path.with_suffix(f".revision-{revision + 1}.rejected.json")
     if recheck_only:
         if not rejected_attempt.exists():

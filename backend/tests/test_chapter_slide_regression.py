@@ -73,11 +73,12 @@ def test_actual_model_baseline_is_bound_reproducible_and_evaluator_is_calibrated
     report=ev.evaluate(dataset(),baseline['answer'],baseline['judgement'])
     assert report == baseline['report']
     assert report['calibration_status']=='passed'
-    # Generation quality remains a separate, failing gate; replay must not hide it.
-    assert report['generation_status']=='failed'
-    assert set(report['problems'])=={'whole-topic-title'}
-    assert next(row for row in report['results'] if row['id']=='story-argument')['passed'] is True
-    assert report['status']=='failed'
+    assert report['generation_status']=='passed'
+    assert report['problems']==[]
+    assert report['status']=='passed'
+    assert all(row['passed'] for row in report['results'])
+    assert baseline['provenance']['all_three_actual_system_and_user_requests_verified']
+    assert baseline['provenance']['existing_cases_and_calibration_unchanged']
 
 
 def test_review_uses_identical_policy_in_production_and_regression():
@@ -97,7 +98,7 @@ def test_judge_checks_all_dimensions_without_revealing_calibration_answers():
     assert 'accepted_resolutions' in prompt
 
 
-@pytest.mark.parametrize('case_id', ['calibration-comparison-in-point', 'calibration-wrong-original-restored', 'calibration-story-essential-not-every-detail'])
+@pytest.mark.parametrize('case_id', ['calibration-comparison-in-point', 'calibration-wrong-original-restored', 'calibration-story-essential-not-every-detail', 'calibration-english-gloss-in-point', 'calibration-english-gloss-as-original-note'])
 def test_false_positive_and_reversal_calibration_cannot_be_omitted_or_misjudged(case_id, monkeypatch):
     data,answer,judgement=example_answers()
     monkeypatch.setattr(slides,'check',lambda *a:([],[],[]))
@@ -121,3 +122,41 @@ def test_story_review_gets_actual_argument_context_for_both_candidates():
     assert '不能只憑秒數判缺漏' in ev.review_system()
     # The earlier-answer counterexample must remain a separate, failing calibration.
     assert next(c for c in data['calibration'] if c['id']=='calibration-introduction-is-not-conclusion')['expected']=={'conclusion-timing':False}
+
+
+def test_revision_regressions_use_real_revision_prompt_without_answer_criteria():
+    data=dataset()
+    prompt=ev.generation_input(data,revisions=True)
+    assert 'known_bad' not in prompt and 'must_fail' not in prompt and 'criterion' not in prompt
+    packets=json.loads(prompt.split('\n',1)[1])
+    expected={c['id']:c for c in data['cases'] if c.get('revision')}
+    assert set(expected)=={'revision-reject-early-covenant-answer','revision-merge-confession-story'}
+    assert {p['id'] for p in packets}==set(expected)
+    for packet in packets:
+        case=expected[packet['id']]
+        decisions={'pieces':case['pieces'],'decisions':[{'id':p['id'],'keep':True} for p in case['pieces']]}
+        assert packet['input']==slides.revision_user_prompt(case['lecture'],decisions,
+            case['revision']['previous_slides'],case['revision']['findings'])
+    creation=json.loads(ev.generation_input(data).split('\n',1)[1])
+    assert not set(expected)&{p['id'] for p in creation}
+    assert len(creation)==10
+
+
+def test_merge_rule_is_shared_and_revision_tail_is_bound(monkeypatch):
+    assert '舊 sentence 不再自動適用' in slides.POINT_TIMING_RULES
+    assert '不取來源要點的最早錨點' in slides.POINT_TIMING_RULES
+    assert slides.POINT_TIMING_RULES in slides.system_prompt(CHAPTERS['mat-5-1-48'])
+    assert slides.POINT_TIMING_RULES in ev.review_system()
+    before=ev.binding(dataset())
+    monkeypatch.setattr(slides,'_REVISE_TAIL',slides._REVISE_TAIL+' changed revision instruction')
+    assert ev.binding(dataset())!=before
+
+
+def test_inline_note_scope_is_explicit_without_disabling_real_original_language():
+    policy=slides.INLINE_NOTE_RULES
+    assert '普通中文詞義、英文釋義' in policy
+    assert 'original 留空不能' in policy
+    assert 'original 欄只填本節實際使用' in policy
+    assert '希伯來文對照' in policy
+    assert policy in ev.review_system()
+    assert policy in slides.system_prompt(CHAPTERS['mat-5-1-48'])
