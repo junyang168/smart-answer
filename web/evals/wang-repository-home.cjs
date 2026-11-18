@@ -76,6 +76,16 @@ async function evaluate(browser, viewport) {
     await matthew.waitFor();
     assert.equal(new URL(await matthew.getAttribute("href"), url).searchParams.get("source"), notes);
     assert.equal(await preparation.getByRole("link").count(), 0);
+
+    await matthew.click();
+    const overviews = main.getByRole("region", { name: "結構與總覽" });
+    const summary = "總結：登山寶訓的文學結構";
+    const summaryLink = overviews.getByRole("link", { name: summary, exact: true });
+    await summaryLink.waitFor();
+    assert.equal(await overviews.getByRole("link", { name: "引言：登山寶訓的結構", exact: true }).count(), 1);
+    assert.equal(await overviews.getByRole("link", { name: "福音書的可信性與馬太福音的結構", exact: true }).count(), 1);
+    await summaryLink.click();
+    await main.getByRole("heading", { name: summary, exact: true }).waitFor();
     console.log(`${viewport.width}×${viewport.height}: repository entry passed`);
   } finally {
     await page.close();

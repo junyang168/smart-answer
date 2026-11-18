@@ -145,6 +145,24 @@ def test_matthew_navigation_distinguishes_series_from_recording_sources(monkeypa
     assert "navigation" not in repo.book_chapters(materials, "rom", [])
 
 
+def test_matthew_structural_notes_without_chapter_keep_their_course_topic(monkeypatch):
+    monkeypatch.setattr(repo, "chapter_pages", lambda: {})
+    monkeypatch.setattr(repo, "notes_pages", lambda: {})
+    structural = {
+        "source_id": "structure", "source_category": "notes_to_manuscript",
+        "title": "總結：登山寶訓的文學結構", "assigned_chapters": [],
+        "lecture_title": "登山寶訓", "source_url": "/resources/notes_to_manuscript_series/s/structure",
+    }
+    materials = repo.items(CATALOG, {"source_directory": [*COVERAGE["source_directory"], structural]})
+    result = repo.book_chapters(materials, "mat", [])
+    assert result["navigation"]["notes_overviews"] == [{
+        "title": "登山寶訓",
+        "items": [{"title": structural["title"], "href": structural["source_url"]}],
+    }]
+    assert [c["chapter"] for c in result["chapters"]] == [5, 24]
+    assert [source["count"] for source in result["chapters"][0]["sources"] if source["name"] == repo.NOTES] == [1]
+
+
 def test_matthew_chapter_browsing_excludes_editorial_articles(monkeypatch):
     monkeypatch.setattr(repo, "chapter_pages", lambda: {})
     monkeypatch.setattr(repo, "notes_pages", lambda: {})

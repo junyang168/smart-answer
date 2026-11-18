@@ -82,7 +82,10 @@ def items(catalog: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, A
             "chapters": chapters,
         })
     for entry in coverage.get("source_directory") or []:
-        if entry.get("source_category") != "notes_to_manuscript" or not entry.get("assigned_chapters"):
+        if entry.get("source_category") != "notes_to_manuscript":
+            continue
+        assigned = entry.get("assigned_chapters") or []
+        if not assigned and not (entry.get("lecture_title") and entry.get("source_url")):
             continue
         out.append({
             "source": NOTES,
@@ -91,7 +94,8 @@ def items(catalog: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, A
             "title": str(entry.get("title") or "").strip(),
             "date": None,
             "href": entry.get("source_url"),
-            "chapters": {("mat", int(chapter)) for chapter in entry["assigned_chapters"]},
+            "chapters": {("mat", int(chapter)) for chapter in assigned},
+            "lecture_title": entry.get("lecture_title"),
         })
     return out
 
@@ -220,7 +224,19 @@ def _matthew_navigation(materials: list[dict[str, Any]], chapters: list[dict[str
          and any(book == "mat" for book, _ in item["chapters"])),
         key=lambda item: (item["source"], item["title"]),
     )
-    return {"series": series, "related": related, "talks": [public_talk(item) for item in talks]}
+    # Structural notes belong to their course topic even without a single chapter assignment.
+    notes_overviews: dict[str, list[dict[str, str]]] = {}
+    for item in materials:
+        if item["kind"] == "notes" and not item["chapters"]:
+            notes_overviews.setdefault(item["lecture_title"], []).append({
+                "title": item["title"], "href": item["href"],
+            })
+    return {
+        "series": series, "related": related, "talks": [public_talk(item) for item in talks],
+        "notes_overviews": [
+            {"title": title, "items": entries} for title, entries in notes_overviews.items()
+        ],
+    }
 
 
 def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
