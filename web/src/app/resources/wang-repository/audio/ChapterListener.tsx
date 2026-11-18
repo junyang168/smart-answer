@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { readBookmark, resumeClip } from "./listeningProgress";
+import { parentPassage } from "./listeningUnits";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
@@ -99,6 +100,7 @@ export default function ChapterListener({
   unitPreview?: boolean;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
+  const [unitNavigation, setUnitNavigation] = useState(unitPreview);
   const [error, setError] = useState("");
   const [showLeftOut, setShowLeftOut] = useState(false);
   // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
@@ -125,24 +127,42 @@ export default function ChapterListener({
     let alive = true;
     fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}${unitPreview ? "&units=true" : ""}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((data) => {
+      .then(async (data) => {
         if (!alive) return;
-        const loaded: Section[] = data.sections ?? [];
-        setAiVoice(Boolean(data.ai_voice));
-        const list = playlist(loaded, false);
-        const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
-        const first = Math.max(0, list.findIndex((item) => item.section === wanted));
-        bookmarkVersion.current = data.resume_version ?? "";
-        let saved = null;
-        try { saved = unitPreview ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
-        const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
-          source: item.sermon.source_id, start: item.start, end: item.end})), saved, bookmarkVersion.current,
-          {section: initialSection, source: initialRecording, time: initialTime});
-        const index = resumed?.index ?? first;
-        setSections(loaded);
-        if (list[index]) {
-          requestSeek(list[index], index, resumed?.time ?? list[index].start, false);
+        const explicitPoint = initialTime !== undefined && Boolean(initialRecording);
+        const prepare = (payload: typeof data) => {
+          const loaded: Section[] = payload.sections ?? [];
+          const list = playlist(loaded, false);
+          const requestedSection = payload.section_aliases?.[initialSection ?? ""] ?? initialSection;
+          const requestedSource = payload.source_aliases?.[initialRecording ?? ""] ?? initialRecording;
+          const wanted = Math.max(0, loaded.findIndex(s => s.passage === requestedSection || parentPassage(s) === requestedSection));
+          const first = Math.max(0, list.findIndex(item => item.section === wanted));
+          const mode = Boolean(unitPreview || payload.unit_navigation || payload.selection_preview);
+          let saved = null;
+          try { saved = mode ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
+          const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
+            parent: parentPassage(loaded[item.section]), source: item.sermon.source_id,
+            start: item.start, end: item.end})), saved, payload.resume_version ?? "",
+            {section: requestedSection, source: requestedSource, time: initialTime});
+          return {loaded, list, first, mode, resumed};
+        };
+        let ready = prepare(data);
+        // Historic source links outside the rebuilt scope retain their exact old recording.
+        if (!unitPreview && data.unit_navigation && explicitPoint && !ready.resumed) {
+          const response = await fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}&legacy=true`, {cache:"no-store"});
+          if (!response.ok) throw new Error("無法定位這段原聲。");
+          data = await response.json();
+          ready = prepare(data);
         }
+        if (!alive) return;
+        if (explicitPoint && !ready.resumed) throw new Error("無法定位這段原聲。");
+        bookmarkVersion.current = data.resume_version ?? "";
+        setAiVoice(Boolean(data.ai_voice));
+        setUnitNavigation(ready.mode);
+        const index = ready.resumed?.index ?? ready.first;
+        setSections(ready.loaded);
+        if (ready.list[index]) requestSeek(ready.list[index], index,
+          ready.resumed?.time ?? ready.list[index].start, false);
       })
       .catch(() => alive && setError("讀不到這一章的錄音。"));
     return () => {
@@ -301,7 +321,7 @@ export default function ChapterListener({
       return;
     }
     setPosition((current) => ({ ...current, time: element.currentTime }));
-    if (unitPreview && bookmarkVersion.current && Math.floor(element.currentTime) !== lastBookmarkSecond.current) {
+    if (unitNavigation && bookmarkVersion.current && Math.floor(element.currentTime) !== lastBookmarkSecond.current) {
       lastBookmarkSecond.current = Math.floor(element.currentTime);
       try { window.localStorage.setItem(bookmarkKey, JSON.stringify({version: bookmarkVersion.current,
         section: sections?.[clip.section].passage, source: clip.sermon.source_id, time: element.currentTime})); }
@@ -492,7 +512,7 @@ export default function ChapterListener({
   const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
   const sectionSeconds = (index: number) =>
     clips.filter((item) => item.section === index).reduce((sum, item) => sum + item.end - item.start, 0);
-  const subUnitParts = sectionsWithAudio.filter(({item}) => item.sub_unit_id === sections[section]?.sub_unit_id);
+  const subUnitParts = sections[section]?.sub_unit_id ? sectionsWithAudio.filter(({item}) => item.unit_id === sections[section]?.unit_id && item.sub_unit_id === sections[section]?.sub_unit_id) : [];
 
   const button =
     "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3";
@@ -505,27 +525,27 @@ export default function ChapterListener({
         </Link>
         <h1 className="font-serif text-lg font-bold">
           {title}
-          <span className={`ml-2 font-sans text-sm font-normal text-stone-500 ${unitPreview ? "[@media(max-width:389px)_and_(max-height:599px)]:hidden" : ""}`}>{source}</span>
+          <span className={`ml-2 font-sans text-sm font-normal text-stone-500 ${unitNavigation ? "[@media(max-width:389px)_and_(max-height:599px)]:hidden" : ""}`}>{source}</span>
           {aiVoice && (
             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
               AI 朗讀
             </span>
           )}
         </h1>
-        {unitPreview && <p className="w-full text-sm font-semibold text-stone-700">
+        {unitNavigation && <p className="w-full text-sm font-semibold text-stone-700">
           {sections[section]?.unit_label}
           {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">小節 {sections[section]?.sub_unit_id}{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
         </p>}
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        {!(unitPreview && subUnitParts.length > 1) && <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
+        {!(unitNavigation && subUnitParts.length > 1) && <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
         <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
-          <span className="text-stone-600">{unitPreview ? "單元" : "段落"}</span>
+          <span className="text-stone-600">{unitNavigation ? "單元" : "段落"}</span>
           <select
             value={section}
             onChange={(event) => goSection(Number(event.target.value))}
             className="min-h-11 max-w-[75vw] rounded-lg border border-stone-300 bg-white px-3 font-semibold sm:max-w-[40rem]"
           >
-            {unitPreview ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
+            {unitNavigation ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
               <optgroup key={unit} label={sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label}>
                 {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
                   <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}</option>
