@@ -779,3 +779,4 @@ def test_prompts_say_a_top_point_names_its_parts_without_restating_them():
 def test_step_prompt_sends_a_restated_step_back_to_its_step_not_the_question():
     from backend.pipeline import claim_creation_flash as f
     assert '那是那一步的重述，归入前面那一步，不归入问题' in f.STEPS
+    assert '没有再念经文' in f.STEPS and '那一句仍属于问题' in f.STEPS  # round 3 moved a one-line side of the tension
