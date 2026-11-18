@@ -45,3 +45,12 @@ Owner key: G01, G04 correct; G03 the known artifact; G05 p5, p6 now correct, but
 contradiction he sets up, went to the food Evidence. The new rule caused it: that sentence
 also "re-says a step's 不必". G02 posct missed: 「一大堆！」 proposed as part of the 題外話
 (also in round 1; correct in v6 and round 2). Not saved.
+
+# Round 4 (`gpt-20261118-lecture1-r5`, prompt 379773ce: only a re-read verse goes back)
+
+Topic key: both pass. Owner key: G01, G02, G04 correct; G03 the known artifact; G05
+tension correct again, **p5 and p6 split again**: the first 可7:18–19 reading became an
+Observation and the re-reading Evidence; 「耶穌既然來，為我們獻了一次永遠有效的贖罪祭」 went
+to the Question. Every round since round 1 has failed exactly two owner items, a
+different pair each time. Prompt changes for G05 stop here (stopping point set before
+this round); the choice of round goes to the owner.
