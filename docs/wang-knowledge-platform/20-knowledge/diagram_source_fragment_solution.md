@@ -125,6 +125,7 @@ D 出自釋經筆記母本的講義，是他自己的講義，不是同工的整
 ### 6.2 規則
 
 1. **每一格都要有一條已批准的 Claim 說出它。** 沒有 Claim 的格是編輯自己加的，圖不能保存，要改圖或刪格。這就是今天的標準答案核對，改成保存前的閘門。按今天的結果，它會擋下 C 圖原來的「6:1」，也會擋下第六講把門徒的使命寫成到 7:27。
+   「已批准」暫按現況定：庫裡還沒有逐條批准的狀態，六講的 Claim 全是 `candidate`。在有之前，一條 Claim 只要在現時代表它那一講的版本裡、未退休未駁回，就算數。
 2. **格不能與它的 Claim 相反。** 程式提出對應，Claude 逐格判定，與今天判定標準答案相同。
 3. **連到的 Claim 改版，這張圖就標記待重核**，像觀點的釘選過期一樣；重核前照舊顯示，標明待重核。
 4. **只有母本說的格**，要連到母本的 Claim；母本還沒有 Claim，這一格就連不上，圖不能保存。C 圖今天每一格都有講道的 Claim，不受影響。
@@ -185,9 +186,9 @@ E1 的「加註經文」一類是看了投影片才發現的，第 3 節已補�
 
 第一階段：SVG（A、B、D 是他的圖，C 是整理圖）
 
-1. **讀 SVG**（E3）：`backend/pipeline/svg_diagram.py` 從 SVG 讀出文字和關係，不呼叫模型。A、B、D 已全部通過。
-2. **現行寫入程式接收視覺來源。** `claim_creation_flash.py` 今天遇到圖就拒絕（「creation visual attestation adapter required」），只有舊的 `detailed_knowledge_extraction_runner` 會處理。加一個轉接：讀證明、把已證明的 SVG 交給模型、寫出視覺片段，全部沿用 4.2 的欄位與既有核對；未證明的圖照舊拒絕。A、B、D 的證明由負責人 2026-11-18 的裁定記錄（A、B 是他的投影片，D 是他母本講義裡的圖）。
-3. 整理圖記錄與閘門（第 6 節，E5），先建 C。
+1. **讀 SVG**（E3，完成）：`backend/pipeline/svg_diagram.py` 從 SVG 讀出文字和關係，不呼叫模型。A、B、D 已全部通過。
+2. **現行寫入程式接收視覺來源**（完成）。 `claim_creation_flash.py` 今天遇到圖就拒絕（「creation visual attestation adapter required」），只有舊的 `detailed_knowledge_extraction_runner` 會處理。加一個轉接：讀證明、把已證明的 SVG 交給模型、寫出視覺片段，全部沿用 4.2 的欄位與既有核對；未證明的圖照舊拒絕。A、B、D 的證明由負責人 2026-11-18 的裁定記錄（A、B 是他的投影片，D 是他母本講義裡的圖）。
+3. **整理圖記錄與閘門**（第 6 節，E5）：`backend/pipeline/editorial_diagram.py`，C 的記錄在 `backend/pipeline/argument_golden/editorial/sermon-on-the-mount-structure.json`。每一格記下說出它的 Claim 及版本，和 Claude 的判定；判定與格的文字、Claim 版本綁在一起，改了任何一樣就失效。2026-11-18 在實際的 C 與知識庫上跑 G0–G5，六項全對。
 4. 論證層生成接收圖片段（4.4）；以 2019-3-24、2019-3-31 兩篇試行，按標準答案 A、B 評分（E4）。
 5. 投影片生成改用第 8 節的找法（E6）；`keys.json` 按第 9 節改。以太 5 重建投影片驗收。
 

@@ -28,9 +28,9 @@
   },
   {
    "id": "G4",
-   "change": "link a box to a candidate (unapproved) Claim",
+   "change": "link a box to a Claim that is not live in the version holding its lecture (missing, retired, rejected, or its lecture replaced)",
    "expect": "block",
-   "why": "only approved Claims count"
+   "why": "only approved Claims count; the store has no per-Claim approval yet, so this stands for it (solution doc §6.2)"
   },
   {
    "id": "G5",
@@ -38,5 +38,6 @@
    "expect": "flag_recheck",
    "why": "linked Claim revision changed"
   }
- ]
+ ],
+ "result_20261118": "G0–G5 all as expected on the real C and smart_answer_knowledge_v2 (editorial_diagram.gate)"
 }
