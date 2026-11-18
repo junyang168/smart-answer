@@ -565,15 +565,19 @@ INSTANCE_DEAD = ("superseded", "retired", "rejected")
 
 
 def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
-    """The live records one argument-layer ChangeSet wrote, by collection, and its metadata."""
+    """The live records one argument-layer ChangeSet wrote, by collection, and its metadata.
+
+    A record keeps belonging to the lecture that wrote it after a correction gives it a
+    later revision: this returns its current payload. A retired record is not returned."""
     row = conn.execute("SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s", (change_set_id,)).fetchone()
     if not row:
         raise ValueError(f"no ChangeSet {change_set_id} in the instance")
     records: dict = {}
     for collection, payload, status in conn.execute(
-            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.objects o
-               JOIN wang_knowledge.object_versions v USING (collection, object_id, revision)
-               WHERE v.change_set_id=%s ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
+            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.object_versions v
+               JOIN wang_knowledge.objects o USING (collection, object_id)
+               WHERE v.change_set_id=%s AND v.revision=1 AND o.retired_at IS NULL
+               ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
         if status not in INSTANCE_DEAD:
             records.setdefault(collection, []).append(payload)
     return records, row[0]
