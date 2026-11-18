@@ -773,8 +773,9 @@ def test_prompts_say_a_top_point_names_its_parts_without_restating_them():
     from backend.pipeline import claim_creation_flash as f
     prompt = ''.join(v for v in vars(f).values() if isinstance(v, str))
     assert '不寫目錄' not in prompt  # it told the top point to drop the division (lecture 1 rerun round 1)
-    assert '他分段時寫出各段的經文範圍，他列舉時寫出各項的名稱' in prompt
-    assert '上層點出名稱（分段寫經文範圍，列舉寫各項名稱）' in prompt
+    assert '只有結論本身就是分段或列舉時' in prompt  # lecture 2 r8: every cover listed its topics
+    assert '不寫「要從甲、乙、丙來明白」這種只列題目、沒有答案的句子' in prompt
+    assert '上層的結論本身是分段或列舉時，點出各段經文範圍、各項名稱' in prompt
 
 
 def test_step_prompt_sends_a_restated_step_back_to_its_step_not_the_question():
