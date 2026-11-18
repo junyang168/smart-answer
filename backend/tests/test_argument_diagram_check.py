@@ -58,7 +58,8 @@ def test_diagrams_attach_to_the_linked_claim_of_that_lecture_only(tmp_path):
 def test_saved_links_name_records_of_the_approved_lecture():
     keys = json.loads(d.KEYS.read_text(encoding='utf-8'))
     claims = [a['claim_id'][-6:] for k in keys['keys'] for a in k['arguments']]
-    assert claims == ['CL0002', 'CL0004']
+    # A, B: lecture 2; D (owner 2026-11-18, for the slides): lecture 1 and lecture 6.
+    assert claims == ['CL0002', 'CL0004', 'CL0001', 'CL0008', 'CL0003', 'CL0014', 'CL0016']
 
 
 def test_regeneration_is_compared_through_his_words_element_by_element():
