@@ -137,13 +137,24 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
+    template = _SYSTEM_TEMPLATE
+    scope = ""
+    if chapter.slide_scope:
+        scope = "、".join(f"{n}:{a}–{b}" for _, n, a, b in
+                         map(chapter_material.verse_range, chapter.slide_scope))
+        template = (template.replace("第 〈章〉 章本身", "本單元主經文")
+                    .replace("第 〈章〉 章的哪幾節，格式「〈章〉:3-10」", "本單元的哪幾節，格式如「6:8-13」")
+                    .replace("講整章結構的，寫「〈整章〉」。", "列出實際解釋的各章節；跨章時分別列出各章的範圍。")
+                    .replace("第 〈章〉 章的逐字稿", f"{scope} 的逐字稿"))
     prompt = (
-        _SYSTEM_TEMPLATE.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        template.replace("〈要點時間規則〉", POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
         .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
         .replace("〈整章〉", f"{number}:{start}-{end}")
         .replace("〈章〉", str(number))
     )
+    if scope:
+        prompt += f"\n本單元的經文範圍為 {scope}。保留第六、七章之間的原有論證；引用作論據的經文在 scriptures 照實記錄。"
     return for_lecture(prompt, lecture) + "\n\n" + INLINE_NOTE_RULES
 
 
@@ -373,6 +384,24 @@ def _earlier_term_introduction(
     return None
 
 
+def parse_slide_verses(text: str, chapter: Chapter) -> list[str] | None:
+    if not chapter.slide_scope:
+        return chapter_exposition.parse_verses(text, chapter)
+    from dataclasses import replace
+
+    # All entries must fit one of the separately declared chapter ranges.
+    parsed = []
+    for match in chapter_exposition._VERSE.finditer(text):
+        for passage in chapter.slide_scope:
+            slugs = chapter_exposition.parse_verses(match.group(), replace(chapter, passage=passage))
+            if slugs:
+                parsed.extend(slugs)
+                break
+        else:
+            return None
+    return parsed or None
+
+
 def check(
     slides: list[dict[str, Any]],
     kept: list[dict[str, Any]],
@@ -445,7 +474,8 @@ def check(
             problems.append(f"{own_ids[0]}: 沒有標題")
         if not FEWEST_POINTS <= len(points) <= MOST_POINTS:
             problems.append(f"{title}: 要點 {len(points)} 條")
-        verses = chapter_exposition.parse_verses(str(slide.get("verses") or ""), chapter)
+        verse_field = str(slide.get("verses") or "")
+        verses = parse_slide_verses(verse_field, chapter)
         if verses is None:
             problems.append(f"{title}: 經節讀不出來或不在這一章（{slide.get('verses')}）")
         scriptures = []

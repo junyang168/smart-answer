@@ -63,12 +63,17 @@ def test_missing_slides_cannot_silently_drop_a_sub_unit():
     with pytest.raises(ValueError, match='No existing slides'): project(plan, recordings)
 
 
-def test_preview_api_reports_changed_material_instead_of_silently_falling_back(monkeypatch):
+def test_preview_api_reports_changed_material_instead_of_silently_falling_back(monkeypatch, tmp_path):
     from fastapi import HTTPException
+    from backend.api import original_audio
     from backend.api.original_audio import index
     from backend.pipeline import chapter_listening_units
     def changed(*args):
         raise ValueError('source changed')
+    unit_plan = tmp_path / 'chapter_exposition' / 'mat-5-1-48' / 'listening-units.json'
+    unit_plan.parent.mkdir(parents=True)
+    unit_plan.touch()
+    monkeypatch.setattr(original_audio, 'DATA_BASE_PATH', tmp_path)
     monkeypatch.setattr(chapter_listening_units, 'build', changed)
     with pytest.raises(HTTPException) as error:
         index('mat-5-1-48', source='紐約靈命進深會', units=True)

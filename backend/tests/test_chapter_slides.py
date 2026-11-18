@@ -562,3 +562,17 @@ def test_adopted_review_decisions_require_saved_review_and_same_source(tmp_path)
     with pytest.raises(ValueError, match='missing original review'):
         chapter_slides.accepted_review_context(record, decisions_sha256='source-sha', review_directory=tmp_path)
     assert chapter_slides.accepted_review_context({}, decisions_sha256='x', review_directory=tmp_path) == ''
+
+
+def test_prayer_unit_allows_its_matthew_six_and_seven_verses():
+    from dataclasses import replace
+
+    from backend.pipeline.chapter_material import Chapter
+    from backend.pipeline.chapter_slides import parse_slide_verses, system_prompt
+
+    chapter = Chapter('mat-6-1-34', 'NYSC', ())
+    scoped = replace(chapter, slide_scope=('mat-6-8-34', 'mat-7-1-11'))
+    assert parse_slide_verses('6:12; 7:1–6', scoped) == ['mat-6-12', 'mat-7-1-6']
+    assert parse_slide_verses('7:7–12', scoped) is None
+    assert parse_slide_verses('7:1–6', chapter) is None
+    assert '6:8–34、7:1–11' in system_prompt(scoped)

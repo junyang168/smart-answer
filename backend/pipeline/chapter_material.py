@@ -35,6 +35,7 @@ class Chapter:
     #: 这些讲道属于哪个来源（讲道目录的 `source_organization`）；文库入口按它把
     #: 按章页面放在这个来源下面。
     source: str = "紐約靈命進深會"
+    slide_scope: tuple[str, ...] = ()
 
 
 #: 有逐節聆聽页面的章，存在 `DATA_BASE_DIR` 里，不在代码里（负责人 2026-11-05：
