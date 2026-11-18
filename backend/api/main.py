@@ -31,6 +31,7 @@ from .canonical_repository.router import (
     admin_router as canonical_repository_admin_router,
 )
 from .argument_layer import router as argument_layer_router
+from .lecture_argument import router as lecture_argument_router
 from .extraction_health import router as extraction_health_router
 from .library_audit import router as library_audit_router
 from .reference_commentary import router as reference_commentary_router
@@ -84,6 +85,7 @@ app.include_router(sermon_search_compat_router)
 app.include_router(canonical_repository_router)
 app.include_router(canonical_repository_admin_router)
 app.include_router(argument_layer_router)
+app.include_router(lecture_argument_router)
 app.include_router(extraction_health_router)
 app.include_router(library_audit_router)
 app.include_router(reference_commentary_router)
