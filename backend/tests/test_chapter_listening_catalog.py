@@ -7,7 +7,7 @@ from backend.pipeline.chapter_listening_catalog import compose, subtract
 
 
 def row(source, start=0, end=100, title='recording'):
-    return dict(source_id=source, transcript_id=title, seconds=end-start,
+    return dict(source_id=source, transcript_id=title, seconds=end-start, media_url='/audio.mp3',
                 stretches=[dict(start=start, end=end)], transcript=[dict(at=start,text='原話')])
 
 
@@ -74,9 +74,38 @@ def test_default_api_adopts_catalog_and_explicit_legacy_retains_old_reader(tmp_p
 def test_subsecond_boundary_remnant_has_no_separate_listening_entry():
     old, new = example()
     old['sections'][1]['sermons'] = [row('old', 20, 30.51)]
+    old['sections'][1]['sermons'][0]['slides'] = [{'at': 20, 'seconds': 10.51}]
     result = compose(old, new)
     assert not any(s['passage'] == 'mat-5-21-26' for s in result['sections'])
     assert result['section_aliases']['mat-5-21-26'] == new['sections'][1]['passage']
 
     old['sections'][1]['sermons'][0]['transcript'].append({'at': 30.1, 'text': '還有一句'})
     assert any(s['passage'] == 'mat-5-21-26' for s in compose(old, new)['sections'])
+
+
+def test_legacy_prayer_card_keeps_supported_tail_but_drops_long_blank_clip():
+    from backend.pipeline.chapter_listening_eval import playback_card_problems
+
+    old, new = example()
+    old_row = row('old', 30, 755)
+    old_row.update(seconds=825, stretches=[{'start': 30, 'end': 755}, {'start': 900, 'end': 1000}],
+                   transcript=[{'at': 900, 'text': '行為也是禱告'}],
+                   slides=[{'at': 900, 'seconds': 100}])
+    old['sections'][1]['sermons'] = [old_row]
+    assert any('30–755' in p for p in playback_card_problems(old))
+    old['sections'][1]['sermons'].append({**old_row, 'stretches': []})
+    fixed = compose(old, new)
+    assert not playback_card_problems(fixed)
+    card = next(s for s in fixed['sections'] if s['passage'] == 'mat-5-21-26')
+    assert len(card['sermons']) == 1
+    assert card['sermons'][0]['seconds'] == 100
+    assert old_row['seconds'] == 825
+
+
+def test_units_only_hides_legacy_cards_without_removing_the_historical_catalog():
+    old, new = example()
+    new['catalog_mode'] = 'units_only'
+    result = compose(old, new)
+    assert [s['passage'] for s in result['sections']] == [s['passage'] for s in new['sections']]
+    assert result['section_aliases']['mat-5-21-26'] == new['sections'][1]['passage']
+    assert any(s['passage'] == 'mat-5-27-30' for s in old['sections'])

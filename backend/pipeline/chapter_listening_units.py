@@ -187,6 +187,9 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
     selection = json.loads(selection_path.read_text())
     slides = json.loads(slides_path.read_text())
     review = json.loads((directory / f'{title}.review.json').read_text())
+    argument_version = (slides.get('claim_context') or {}).get('instance', {}).get('change_set_id')
+    if entry.get('changeset') and argument_version != entry['changeset']:
+        raise ValueError('Reviewed Unit slides use a different argument layer')
     if (selection['source_id'] != source or selection['lecture'] != title
             or selection['transcript_sha256'] != entry['source_sha256']
             or slides['decisions_sha256'] != exposition.file_sha256(selection_path)
@@ -206,9 +209,10 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
             'slides': chapter_slides.placed(selection, slides)[1]}
 
 
-def build(data_root: Path, passage: str) -> dict:
+def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     path = data_root / 'chapter_exposition' / passage / 'listening-units.json'
-    plan = json.loads(path.read_text())
+    if plan is None:
+        plan = json.loads(path.read_text())
     recordings = {}
     timing_corrections = []
     sermons = audio.Sermons(data_root)
@@ -271,9 +275,12 @@ def build(data_root: Path, passage: str) -> dict:
     result = project(plan, recordings, unit_recordings)
     from backend.api.scripture import format_chinese_reference
     result['passage'] = passage
+    if plan.get('catalog_mode') == 'units_only':
+        result['catalog_mode'] = 'units_only'
     result['label'] = format_chinese_reference(passage)
     result['program_timing_corrections'] = timing_corrections
     result['resume_version'] = hashlib.sha256(json.dumps({
+        **({'catalog_mode': 'units_only'} if plan.get('catalog_mode') == 'units_only' else {}),
         'sources': [(entry['source_id'], entry['source_sha256']) for entry in plan['inputs']],
         'playback': [(s['passage'], [(r['source_id'], r['stretches']) for r in s['sermons']])
                      for s in result['sections']],
