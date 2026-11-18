@@ -129,7 +129,8 @@
       }
      ]
     }
-   ]
+   ],
+   "source_kind": "professor"
   },
   {
    "key": "B",
@@ -202,7 +203,8 @@
       }
      ]
     }
-   ]
+   ],
+   "source_kind": "professor"
   },
   {
    "key": "C",
@@ -392,6 +394,96 @@
       [
        "結論",
        "結尾"
+      ]
+     ]
+    }
+   ],
+   "arguments": [],
+   "source_kind": "editorial"
+  },
+  {
+   "key": "D",
+   "title": "登山寶訓（論彌賽亞／門徒的使命）",
+   "authority": "Owner 2026-11-18: 「又是一个 diagram. 但是这个是教授画的」 — drawn by the professor; used in the notes manuscript section 登山寶訓的結構. Items drafted by Claude from the diagram text only.",
+   "source_kind": "professor",
+   "diagram": {
+    "path": "full_article/images/sermon-on-the-mount-overview.svg",
+    "sha256": "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291",
+    "text": [
+     "登山寶訓",
+     "論彌賽亞",
+     "太 5:3-12　應驗賽 61",
+     "門徒的使命",
+     "太 5:13-16　綜合",
+     "太 5:17-7:29　闡明，細節"
+    ]
+   },
+   "items": [
+    {
+     "id": "D1",
+     "statement": "登山寶訓分兩大段：五章三至十二節論彌賽亞，五章十三節至七章二十九節是門徒的使命。",
+     "terms": [
+      [
+       "彌賽亞"
+      ],
+      [
+       "五章三",
+       "5:3"
+      ],
+      [
+       "門徒的使命"
+      ],
+      [
+       "七章二十九",
+       "7:29"
+      ]
+     ]
+    },
+    {
+     "id": "D2",
+     "statement": "五章三至十二節應驗以賽亞書六十一章。",
+     "terms": [
+      [
+       "以賽亞書六十一",
+       "以賽亞書第六十一",
+       "賽61",
+       "賽六十一",
+       "以賽亞六十一"
+      ],
+      [
+       "彌賽亞",
+       "應驗"
+      ]
+     ]
+    },
+    {
+     "id": "D3",
+     "statement": "五章十三至十六節是門徒使命的綜合說明。",
+     "terms": [
+      [
+       "五章十三",
+       "5:13"
+      ],
+      [
+       "綜合"
+      ]
+     ]
+    },
+    {
+     "id": "D4",
+     "statement": "五章十七節至七章二十九節闡明門徒使命的細節。",
+     "terms": [
+      [
+       "五章十七",
+       "5:17"
+      ],
+      [
+       "七章二十九",
+       "7:29"
+      ],
+      [
+       "闡明",
+       "細節"
       ]
      ]
     }
