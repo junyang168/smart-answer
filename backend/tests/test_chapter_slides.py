@@ -439,3 +439,57 @@ def test_timing_findings_block_only_when_the_recording_shows_a_real_gap():
     other = {"slide": "S0001", "kind": "完整", "problem": "p", "fix": "f", "current_sentence": "", "proposed_sentence": ""}
     assert chapter_slides.review_blocks_publication({"blocking": True, "findings": small + [other]})
     assert not chapter_slides.review_blocks_publication({"blocking": False, "findings": [other]})
+
+
+def test_rejected_revision_can_be_rechecked_after_code_fix_without_model_or_budget_reset(tmp_path, monkeypatch):
+    _decided(tmp_path)
+    finding={'grade':'B','blocking':True,'findings':[{'slide':'S0001','kind':'完整','problem':'缺結論','fix':'補結論'}]}
+    chapter_slides.review(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([finding]))
+    good={'slides':[slide('S0001','5:1-48',points=('理由','結論'))]}
+    original_check=chapter_slides.checked
+    monkeypatch.setattr(chapter_slides,'checked',lambda *a:(['proven input/check defect'],[],[]))
+    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([good]))['status']=='rejected'
+    path=chapter_slides.record_path(tmp_path,'mat-5-1-48','L')
+    rejection=path.with_suffix('.revision-1.rejected.json')
+    rejected_bytes=rejection.read_bytes()
+    monkeypatch.setattr(chapter_slides,'checked',original_check)
+    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='revised'
+    record=json.loads(path.read_text())
+    assert record['revision']==1
+    assert record['raw_slides']==good['slides']
+    assert record['rechecked_revision_answer_sha256']==chapter_exposition.file_sha256(rejection)
+    assert rejection.read_bytes()==rejected_bytes
+    assert path.with_suffix('.revision-0.json').exists()
+
+
+def test_rechecking_a_still_invalid_revision_preserves_original_rejection_and_saved_slides(tmp_path):
+    _decided(tmp_path)
+    finding={'grade':'B','blocking':True,'findings':[{'slide':'S0001','kind':'完整','problem':'缺結論','fix':'補結論'}]}
+    chapter_slides.review(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([finding]))
+    chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=FakeClient([{'slides':[slide('S0002')]}]))
+    path=chapter_slides.record_path(tmp_path,'mat-5-1-48','L');rejected=path.with_suffix('.revision-1.rejected.json')
+    before=(path.read_bytes(),rejected.read_bytes())
+    assert chapter_slides.revise(CHAPTER,'L',data_base_dir=tmp_path,client=None,recheck_only=True)['status']=='rejected'
+    assert before==(path.read_bytes(),rejected.read_bytes())
+
+
+def test_review_material_preserves_existing_argument_source_ids():
+    raw=[slide('S0001','5:1-48',points=({'sentence':'S0001','text':'理由','source':'E1'}, {'sentence':'S0002','text':'結論','source':'C1'}))]
+    problems,_,normalized=chapter_slides.check(raw,KEPT,CHAPTER)
+    assert not problems
+    packet=chapter_slides.show_slides(normalized)
+    assert '(source: E1)' in packet and '(source: C1)' in packet
+
+
+def test_inline_note_tracks_its_verse_when_displayed_range_is_split(tmp_path):
+    book=tmp_path/'ISA';book.mkdir()
+    (book/'61.json').write_text(json.dumps({'1':'叫我傳好信息給謙卑的人','2':'報告耶和華的恩年'}))
+    draft=slide('S0001',scriptures=[{'sentence':'S0001','ref':'以賽亞書 61:1'},{'sentence':'S0003','ref':'以賽亞書 61:2'}])
+    note={'sentence':'S0002','scripture':'isa-61-1-2','verse':2,'span':'恩年','original':'','reading':'','explanation':'恩典的年'}
+    draft['inline_notes']=[note]
+    problems,_,result=chapter_slides.check([draft],KEPT,CHAPTER,cuv_root=tmp_path)
+    assert not problems
+    assert result[0]['inline_notes']==[{**note,'scripture':'isa-61-2','sentence':'S0003'}]
+    for wrong in ('mat-61-1-2','isa-60-1-2','isa-61-1'):
+        draft['inline_notes']=[{**note,'scripture':wrong}]
+        assert chapter_slides.check([draft],KEPT,CHAPTER,cuv_root=tmp_path)[0]

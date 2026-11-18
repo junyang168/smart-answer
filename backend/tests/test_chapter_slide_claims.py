@@ -327,3 +327,16 @@ def test_a_verse_of_the_chapter_he_reads_is_not_counted_as_another_books_verse(t
     assert hints.read_aloud("isa-61-6-7", lines, tmp_path, passage="mat-5-1-48") == ["isa-61-7"]
     # A cited verse in the expounded chapter itself is still read.
     assert hints.read_aloud("mat-5-9", lines, tmp_path, passage="mat-5-1-48") == ["mat-5-9"]
+
+
+def test_frozen_scripture_candidates_cannot_force_unread_verses(monkeypatch):
+    context={'claims':[{'claim_id':'C1','evidence_steps':[{'scriptures':['isa-61-6-7']}]}]}
+    seen=[]
+    def actual(slug,lines,**kwargs):
+        seen.append((slug,lines,kwargs['passage']))
+        return ['isa-61-7']
+    monkeypatch.setattr(hints,'read_aloud',actual)
+    shown=[{'scriptures':[{'slug':'isa-61-7'}]}]
+    assert hints.evidence_scripture_gaps(context,shown,source_lines=['第六節跳過，讀第七節'],passage='mat-5-1-48')==[]
+    assert seen==[('isa-61-6-7',['第六節跳過，讀第七節'],'mat-5-1-48')]
+    assert hints.evidence_scripture_gaps(context,[],source_lines=['第六節跳過，讀第七節'],passage='mat-5-1-48')==['C1 的 Evidence 引用 isa-61-7，投影片沒有顯示']
