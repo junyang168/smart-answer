@@ -17,7 +17,8 @@ import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useStaffAccess } from '@/app/utils/useStaffAccess';
+import { useSession } from 'next-auth/react';
+import { hasEditorAccess } from '@/app/utils/roles';
 
 // --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
 
@@ -27,7 +28,7 @@ const resourceCardsData = [
   {
     icon: BookOpen,
     title: '王守仁教授聖經講論文庫',
-    description: `按聖經經卷或講論主題閱讀正式釋經文章，也可進入信仰問答；文章支援在完整閱讀與原聲講解之間隨時切換。`,
+    description: `聆聽王守仁教授的原聲講道，字幕同步，投影片列出要點與經文，幫助你聽懂每一段。也可閱讀整理成文的釋經文章。`,
     link: '/resources/wang-repository',
     linkLabel: '進入聖經講論文庫',
   },
@@ -49,6 +50,7 @@ const resourceCardsData = [
   {
     icon: Video,
     title: '微講道',
+    staffOnly: true,
     description: `用簡短、清晰的內容，幫助你理解神的話語，並在生活中經歷祂的同在。這是一個安靜、專注的靈修空間。`,
     link: '/resources/micro-sermon',
     linkLabel: '開始觀看',
@@ -56,6 +58,7 @@ const resourceCardsData = [
   {
     icon: Radio,
     title: '信仰的深度',
+    staffOnly: true,
     description: `透過網播隨時隨地聆聽王守仁教授的聖經教導，讓信仰在日常生活中扎根、深化。`,
     link: '/resources/depth_of_faith',
     linkLabel: '開始聆聽',
@@ -70,12 +73,14 @@ export const ResourceCenter = () => {
   const [topSermons, setTopSermons] = useState<Sermon[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { isStaff } = useStaffAccess();
+  const { data: session, status } = useSession();
+  const isStaff = status === "authenticated" && hasEditorAccess(session?.user?.role);
 
 
 
   // --- Data Fetching ---
   useEffect(() => {
+    if (!isStaff) return;
     // 這個 useEffect 只在組件首次掛載到瀏覽器時運行一次
     const fetchAllSermons = async () => {
       setIsLoading(true);
@@ -95,7 +100,7 @@ export const ResourceCenter = () => {
     };
 
     fetchAllSermons();
-  }, []); // 空依賴數組確保只運行一次
+  }, [isStaff]);
 
 
   return (
@@ -144,8 +149,7 @@ export const ResourceCenter = () => {
         </div>
       </section>
 
-      <section className="py-8 md:py-12">
-
+      {isStaff && <section className="py-8 md:py-12">
         {/* 最新講道區 */}
         <div className="container mx-auto px-6 mb-16">
             <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新講道速覽</h2>
@@ -154,8 +158,7 @@ export const ResourceCenter = () => {
             </div>
         </div>
 
-      </section>
-      
+      </section>}
     </div>
   );
 };
