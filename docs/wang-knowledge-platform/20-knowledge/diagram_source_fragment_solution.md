@@ -37,6 +37,7 @@
 | 他的圖（A 宗主國與附庸國的約、B 兩律法的重疊） | 同上 `captures/*.svg`，由截圖轉成 SVG | 同上 |
 | 他的圖（D 登山寶訓：論彌賽亞／門徒的使命） | `DATA_BASE_DIR/full_article/images/sermon-on-the-mount-overview.svg`，母本「登山寶訓的結構」引用 | 是他講義裡的圖，卻只放在文章圖片夾，不屬於任何來源文檔 |
 | 整理圖（C 登山寶訓的文學結構） | `DATA_BASE_DIR/full_article/images/sermon-on-the-mount-structure.svg`，母本引用 | 沒有記錄說明它由什麼而來、每一格靠哪條 Claim |
+| 視覺片段的資料模型 | `source_projection.py`、`knowledge_package_merge.py`：`source_modality = visual` 的片段、來源文檔的 `visual_sources`、`visual_source_assets`、`visual_source_attestations`；舊的 `detailed_knowledge_extraction_runner` 會用 | 現行寫入程式 `claim_creation_flash.py` 遇到圖就拒絕 |
 | 標準答案 | `backend/pipeline/argument_golden/diagrams/keys.json` | `arguments` 段把一張圖直接連到某講某一次保存的版本（`change_set_id`）。每重存一次就得手動改指向；忘了改，圖就從投影片上悄悄消失 |
 | 投影片生成 | `backend/pipeline/chapter_slide_claims.py` 以 `diagrams_for(change_set_id)` 讀上面那段 | 依賴上一行的手動指向 |
 
@@ -64,18 +65,22 @@
 | 截圖 | 截圖 OCR 出的 Markdown | Markdown 保留條列、表格 |
 | 圖 | 轉成的 SVG | SVG 保留圖的層級、重疊、箭頭；這些本身就有意思（「7:12 在 5:17–7:12 那一框裡面」） |
 
-轉出的檔案就是這個片段的逐字原文。今天的忠實核對、引文定位都比對逐字原文，所以它們不必知道片段來自圖像：SVG 用其中的文字節點，Markdown 用其文字。結構性的判斷（某格在某框內）由程式讀 SVG 本身。
+轉出的檔案就是這個片段的逐字原文。SVG 片段沿用[投影片文字與圖表證據抽取](../10-extraction/slide_visual_evidence_v1.md)和 `backend/pipeline/source_projection.py` 已有的視覺片段：`source_modality = visual`，`verbatim_excerpt` 是原始 SVG，`visual_facts` 是程式讀出的字面事實。文字類消費者用 `visual_fragment_display_text` 取得「视觉来源（非口述）」標籤加圖上文字。結構性的判斷（某格在某框內）由 `backend/pipeline/svg_diagram.py` 讀 SVG 本身（E3）。
 
 ### 4.2 片段的定位
 
-和逐字稿片段一樣屬於那篇講道的來源文檔，另外記錄：
+不新增欄位，沿用既有的來源文檔與視覺片段欄位：
 
-- `fragment_kind`：`transcript`（今天全部）、`slide_markdown`、`diagram_svg`；
-- 原圖像的路徑和 SHA；
-- 轉出檔案的路徑和 SHA；
-- 畫面出現的錄影時間（取自 `slide_meta.json` 或截圖檔名）。
+| 需要 | 既有欄位 |
+| --- | --- |
+| 這張圖屬於哪份來源 | 來源文檔的 `visual_sources`（每張一個 locator 與 `raw_sha256`） |
+| 母本以圖片連結引用的 SVG（D） | `visual_source_assets`，綁定方式 `linked_svg_asset`，記 SVG 路徑、檔案 SHA 和 Markdown 裡的連結 |
+| 確認是他展示或畫的 | `visual_source_attestations`，值 `professor_displayed_or_drawn_visual_source`，綁 locator 與 SHA |
+| 片段對得上那張圖 | 片段的 `visual_locator`、`visual_block_sha256`、`visual_source_path`、`visual_source_file_sha256`；`knowledge_package_merge` 逐項核對 |
 
-原圖或轉出檔案的 SHA 一變，片段失效，和逐字稿改動同樣處理。
+**整理圖不做證明。** C 也以圖片連結出現在母本，但它不綁成視覺來源、沒有證明，所以不會成為片段；它走第 6 節。證明只說「這是他的圖」，不說圖畫得對；畫得對由 E3 與 4.3 的對圖核對負責。
+
+SVG 或證明的 SHA 一變，片段失效，和逐字稿改動同樣處理。
 
 ### 4.3 轉換只核對一次
 
@@ -181,7 +186,7 @@ E1 的「加註經文」一類是看了投影片才發現的，第 3 節已補�
 第一階段：SVG（A、B、D 是他的圖，C 是整理圖）
 
 1. **讀 SVG**（E3）：`backend/pipeline/svg_diagram.py` 從 SVG 讀出文字和關係，不呼叫模型。A、B、D 已全部通過。
-2. 片段加 `fragment_kind` 與圖像定位欄位；逐字稿片段全部是 `transcript`，不動既有資料。登記 2019-3-24、2019-3-31 兩篇講道和母本為來源文檔，把 A、B、D 存成片段。
+2. **現行寫入程式接收視覺來源。** `claim_creation_flash.py` 今天遇到圖就拒絕（「creation visual attestation adapter required」），只有舊的 `detailed_knowledge_extraction_runner` 會處理。加一個轉接：讀證明、把已證明的 SVG 交給模型、寫出視覺片段，全部沿用 4.2 的欄位與既有核對；未證明的圖照舊拒絕。A、B、D 的證明由負責人 2026-11-18 的裁定記錄（A、B 是他的投影片，D 是他母本講義裡的圖）。
 3. 整理圖記錄與閘門（第 6 節，E5），先建 C。
 4. 論證層生成接收圖片段（4.4）；以 2019-3-24、2019-3-31 兩篇試行，按標準答案 A、B 評分（E4）。
 5. 投影片生成改用第 8 節的找法（E6）；`keys.json` 按第 9 節改。以太 5 重建投影片驗收。
