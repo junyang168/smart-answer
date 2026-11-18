@@ -54,7 +54,7 @@ function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) 
 }
 
 type SlideDiagram = {
-  at: number;
+  appearances: number[];
   title: string;
   origin: string;
   kind: "professor" | "editorial";
@@ -246,18 +246,29 @@ function Diagram({ diagram }: { diagram: SlideDiagram }) {
 export default function ChapterSlide({
   slide,
   seconds,
+  clipStart,
   clipEnd,
   className = "min-h-[20rem]",
   sentence,
 }: {
   slide: ChapterSlideData;
   seconds: number;
+  clipStart: number;
   clipEnd: number;
   /** 聆听模式：逐字稿此刻这一句，投影片跟着他念到的经节走。 */
   sentence?: string;
   /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
   className?: string;
 }) {
+  let currentDiagram: SlideDiagram | undefined;
+  let lastAppearance = -Infinity;
+  for (const diagram of slide.diagrams ?? []) {
+    for (const time of diagram.appearances) {
+      if (time < clipStart || time >= clipEnd || time > seconds || time <= lastAppearance) continue;
+      currentDiagram = diagram;
+      lastAppearance = time;
+    }
+  }
   // The speech anchor stays exact while points get a short reading lead.
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
   const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
@@ -275,28 +286,32 @@ export default function ChapterSlide({
   }, [activePoint, slide.at]);
   return (
     <section className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
-      <header>
-        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
-        {points.length > 0 && (
-          <ol className="mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl">
-            {points.map((point, index) => (
-              <li
-                key={point.text}
-                ref={point === activePoint ? newestPoint : undefined}
-                className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
-              >
-                <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
-                  {index + 1}
-                </span>
-                <span>{point.text}</span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </header>
-      {(slide.diagrams ?? []).filter((diagram) => diagram.at <= seconds && diagram.at < clipEnd).map((diagram) => (
-        <Diagram key={diagram.sha256} diagram={diagram} />
-      ))}
+      <div className={currentDiagram ? "grid grid-cols-2 items-start gap-3 sm:gap-5 lg:gap-8" : undefined}>
+        <header>
+          <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
+          {points.length > 0 && (
+            <ol className={currentDiagram
+              ? "mt-3 space-y-2 text-sm leading-relaxed sm:text-[1.05rem] lg:text-2xl"
+              : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
+              {points.map((point, index) => (
+                <li
+                  key={point.text}
+                  ref={point === activePoint ? newestPoint : undefined}
+                  className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
+                >
+                  <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
+                    {index + 1}
+                  </span>
+                  <span>{point.text}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </header>
+        {currentDiagram && <Diagram key={JSON.stringify([
+          currentDiagram.sha256, currentDiagram.kind, currentDiagram.origin,
+        ])} diagram={currentDiagram} />}
+      </div>
       {shown.length > 0 && (
         <div className="flex flex-col gap-3">
           {shown.map((item, index) => (

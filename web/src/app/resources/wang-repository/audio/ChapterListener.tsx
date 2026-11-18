@@ -614,6 +614,7 @@ export default function ChapterListener({
             <ChapterSlide
               slide={slide}
               seconds={time}
+              clipStart={clip?.start ?? time}
               clipEnd={clipEnd}
               className="min-h-full"
               sentence={lineIndex >= 0 ? lines[lineIndex].text : undefined}

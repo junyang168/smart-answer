@@ -687,7 +687,7 @@ def instance_diagrams(conn, claim_ids: list[str]) -> dict:
                 or raw[blocks[0].char_end:].strip()
                 or hashlib.sha256(raw.encode()).hexdigest() != sha):
             raise ValueError(f"Diagram SVG failed validation: {fragment['fragment_id']}")
-        links.setdefault(claim_id, {})[sha] = {
+        links.setdefault(claim_id, {})[sha, kind, doc["origin"]] = {
             "title": doc["title"], "origin": doc["origin"], "kind": kind, "sha256": sha,
             "path": fragment["visual_source_url"], "svg": raw,
         }

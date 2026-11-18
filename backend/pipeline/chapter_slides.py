@@ -636,15 +636,26 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict
         for item in claim["diagrams"]:
             if "svg" not in item:
                 continue  # Older saved test/context records may still have the retired keys.json shape.
-            sha = item["sha256"]
-            if sha in diagrams and diagrams[sha]["at"] <= at:
-                continue
-            image = base64.b64encode(item["svg"].encode()).decode("ascii")
-            diagrams[sha] = {
-                "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
-                "sha256": sha, "image_src": "data:image/svg+xml;base64," + image,
-            }
-    return {first: sorted(items.values(), key=lambda item: item["at"]) for first, items in by_slide.items() if items}
+            key = item["sha256"], item["kind"], item["origin"]
+            if key not in diagrams:
+                image = base64.b64encode(item["svg"].encode()).decode("ascii")
+                diagrams[key] = {
+                    "appearances": [], "title": item["title"], "origin": item["origin"], "kind": item["kind"],
+                    "sha256": item["sha256"], "image_src": "data:image/svg+xml;base64," + image,
+                }
+            diagrams[key]["appearances"].append(at)
+    placed = {}
+    for first, diagrams in by_slide.items():
+        used: set[float] = set()
+        selected = []
+        for item in sorted(diagrams.values(), key=lambda d: (d["kind"] != "professor", d["title"])):
+            appearances = sorted(set(item["appearances"]) - used)
+            if appearances:
+                selected.append({**item, "appearances": appearances})
+                used.update(appearances)
+        if selected:
+            placed[first] = sorted(selected, key=lambda item: item["appearances"][0])
+    return placed
 
 
 def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[

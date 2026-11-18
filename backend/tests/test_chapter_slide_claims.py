@@ -426,18 +426,18 @@ def test_diagram_projection_preserves_timing_kind_and_unit_boundary():
         {"claim_id": "C3", "stated": "本堂未保留", "diagrams": [{**diagram, "sha256": "b" * 64}]},
     ]}
     image, = chapter_slides.timed_diagrams(draft, lines, context)["S0001"]
-    assert (image["at"], image["kind"], image["image_src"]) == (3, "editorial", "data:image/svg+xml;base64,PHN2Zy8+")
+    assert (image["appearances"], image["kind"], image["image_src"]) == ([3, 5], "editorial", "data:image/svg+xml;base64,PHN2Zy8+")
     source_slide = {"at": 1, "seconds": 5, "title": "論點", "diagrams": [image],
                     "verses": [], "points": [], "scriptures": []}
     sections = original_audio_index._chapter_slides({
         "current": {"pieces": [{"start": 1, "end": 4}]},
-        "neighbor": {"pieces": [{"start": 4, "end": 7}]},
+        "neighbor": {"pieces": [{"start": 4, "end": 5}]},
     }, [source_slide])
     assert "diagrams" not in sections["neighbor"][0]
     retimed = original_audio_index._retimed(lambda time: time + 10, {
         "slides": sections["current"], "stretches": [], "judgements": [],
     })
-    assert retimed["slides"][0]["diagrams"][0]["at"] == 13
+    assert retimed["slides"][0]["diagrams"][0]["appearances"] == [13]
 
 
 def test_corrected_instance_reads_only_its_exact_original_grouping(tmp_path):
@@ -465,3 +465,50 @@ def test_corrected_instance_reads_only_its_exact_original_grouping(tmp_path):
     candidate.write_text('{"claims": [{"claim_id": "different"}]}\n')
     with pytest.raises(ValueError, match="original generation does not match the correction input"):
         hints.instance_creation_result(meta)
+
+
+def test_diagram_eval_structure_credits_order_and_later_playback_clip():
+    from backend.pipeline import original_audio_index
+
+    c = {"title": "登山寶訓的文學結構", "origin": "釋經筆記整理", "kind": "editorial",
+         "sha256": "c" * 64, "svg": "<svg/>"}
+    d = {"title": "登山寶訓（論彌賽亞／門徒的使命）", "origin": "教授母本講義", "kind": "professor",
+         "sha256": "d" * 64, "svg": "<svg/>"}
+    lines = [{"id": f"S{i:04d}", "start": i * 10} for i in range(1, 6)]
+    slides = [{"first": "S0001", "last": "S0005", "points": []}]
+    context = {"claims": [
+        {"claim_id": "CL0001", "stated": "S0002", "diagrams": [c, d]},
+        {"claim_id": "CL0003", "stated": "S0004", "diagrams": [c, d]},
+        {"claim_id": "CL0004", "stated": "S0005", "diagrams": [c]},
+    ]}
+    timed = chapter_slides.timed_diagrams(slides, lines, context)["S0001"]
+    assert [(image["title"], image["kind"], image["origin"]) for image in timed] == [
+        (d["title"], "professor", d["origin"]), (c["title"], "editorial", c["origin"]),
+    ]
+    assert [image["appearances"] for image in timed] == [[20, 40], [50]]
+    section = original_audio_index._chapter_slides({
+        "later": {"pieces": [{"start": 35, "end": 51}]},
+    }, [{"at": 10, "seconds": 41, "title": "登山寶訓的結構", "diagrams": timed,
+         "points": [], "verses": [], "scriptures": []}])
+    assert [image["appearances"] for image in section["later"][0]["diagrams"]] == [[40], [50]]
+
+
+def test_diagram_eval_law_figures_follow_their_own_claim_not_the_supporting_point():
+    a = {"title": "宗主國與附庸國的約", "origin": "2019-3-24", "kind": "professor",
+         "sha256": "a" * 64, "svg": "<svg/>"}
+    b = {"title": "兩律法的重疊", "origin": "2019-3-31", "kind": "professor",
+         "sha256": "b" * 64, "svg": "<svg/>"}
+    context = {"claims": [
+        {"claim_id": "CL0002", "stated": "S0003", "diagrams": [a]},
+        {"claim_id": "CL0004", "stated": "本堂未保留", "diagrams": [b]},
+    ]}
+    lines = [{"id": f"S{i:04d}", "start": i * 10} for i in range(1, 7)]
+    slides = [
+        {"first": "S0001", "last": "S0004", "points": [{"source": "ST01", "sentence": "S0002"}]},
+        {"first": "S0005", "last": "S0006", "points": [{"source": "CL0004", "sentence": "S0006"}]},
+    ]
+    placed = chapter_slides.timed_diagrams(slides, lines, context)
+    assert [(d["title"], d["appearances"]) for d in placed["S0001"]] == [(a["title"], [30])]
+    assert [(d["title"], d["appearances"]) for d in placed["S0005"]] == [(b["title"], [60])]
+    slides[1]["points"][0]["source"] = "ST04"
+    assert set(chapter_slides.timed_diagrams(slides, lines, context)) == {"S0001"}
