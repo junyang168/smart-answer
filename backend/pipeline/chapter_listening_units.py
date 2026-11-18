@@ -95,6 +95,8 @@ def project(plan: dict, recordings: dict) -> dict:
     """Keep argument identity distinct from its possibly interrupted playback runs."""
     sections = []
     assigned = set()
+    used_ranges = {}
+    arranged_by_subunit = plan.get('playback_sequence') == 'subunit'
     excluded = {}
     for item in plan.get('non_argument_exclusions', []):
         lines = recordings[item['source_id']]['lines']
@@ -121,10 +123,16 @@ def project(plan: dict, recordings: dict) -> dict:
         actual = [(r['group_key'], r['paragraph_key']) for r in unit['playback_order']]
         if len(actual) != len(set(actual)) or set(actual) != wanted:
             raise ValueError('Playback has missing or duplicate source paragraphs')
-        for source in {r['source_id'] for r in unit['playback_order']}:
-            own = [r for r in unit['playback_order'] if r['source_id'] == source]
-            if any(a['end'] > b['start'] for a, b in zip(own, own[1:])):
+        last_end = {}
+        for row in unit['playback_order']:
+            source = row['source_id']
+            sub_id = sub_by_group[row['group_key']]['id'] if arranged_by_subunit else None
+            order_key = (source, sub_id)
+            if row['start'] < last_end.get(order_key, 0):
                 raise ValueError('Playback must preserve source order')
+            last_end[order_key] = row['end']
+            if arranged_by_subunit:
+                used_ranges.setdefault(source, []).append((row['start'], row['end']))
         seen = set()
         for run_index, ((sid, source), rows) in enumerate(groupby(
                 unit['playback_order'], lambda r: (sub_by_group[r['group_key']]['id'], r['source_id'])), 1):
@@ -160,10 +168,15 @@ def project(plan: dict, recordings: dict) -> dict:
                              'label': f"{sid} {sub['title']}" + ('（續）' if continued else ''),
                              'sermons': [row]})
             seen.add(sid)
+    for ranges in used_ranges.values():
+        ordered = sorted(ranges)
+        if any(left[1] > right[0] for left, right in zip(ordered, ordered[1:])):
+            raise ValueError('Playback repeats source audio')
     return {'schema_version': 'wang_original_audio_index_v4', 'passage': 'mat-5-1-48',
             'label': '馬太福音 5', 'source': '紐約靈命進深會',
             'title': 'Unit／Sub-unit 聆聽預覽', 'sermons': [], 'sections': sections,
-            'missing_lectures': [], 'selection_preview': True}
+            'missing_lectures': [], 'selection_preview': True,
+            **({'playback_sequence': 'subunit'} if arranged_by_subunit else {})}
 
 
 def build(data_root: Path, passage: str) -> dict:

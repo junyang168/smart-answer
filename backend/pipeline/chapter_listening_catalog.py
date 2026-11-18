@@ -86,7 +86,12 @@ def compose(legacy, updated):
         own.update(unit_id=str(number), unit_label=f"Unit {number} · {section['label']}")
         if changed: own.pop('topics', None)  # Old summaries were bound to the pre-trimmed material.
         sections.append(own)
-    sections.sort(key=lambda s: int(s['unit_id']))  # Stable: interrupted Sub-units retain source order.
+    if updated.get('playback_sequence') == 'subunit':
+        from backend.pipeline.chapter_unit_plan import passage_bounds
+        sections.sort(key=lambda section: passage_bounds(parent_passage(section))[1])
+    else:
+        sections.sort(key=lambda section: int(section['unit_id']))
+
     result.update(sections=sections, unit_navigation=True, source_aliases=source_aliases,
                   section_aliases=section_aliases, selection_preview=False,
                   program_timing_corrections=updated.get('program_timing_corrections', []))
