@@ -28,3 +28,20 @@ The new rule sits next to two older ones that tell the top point not to list:
 「蓋子寫結論，不寫目錄，也不把下面各條的內容再寫一遍」 and
 「已各成分論點的部分，上層只點出名稱，不重述其內容」. The model kept the older ones.
 The G02/G05 losses may be run-to-run variation; one run cannot tell.
+
+# Round 2 (`gpt-20261118-lecture1-r3`, prompt fde0ac9b)
+
+Topic key: both pass (L1-structure after the key accepted 「五3至12」; the owner was told).
+Owner key: G01 all correct (ct1 now held); G02, G04 correct; G03 the known artifact;
+G05 p5 partial, p6 split: the re-reading of 可7 and 來10 while he restates the tension
+went to the Question. Not saved: G05 split for the second time.
+
+# Round 3 (`gpt-20261118-lecture1-r4`, prompt 6ddd80a3: a restated step goes back to its step)
+
+Topic key: both pass. Point 1: 「登山寶訓分為五章三至十二節的彌賽亞身份與五章十三節至七章二十九節的門徒使命兩大段……」;
+point 17 names 「食物潔淨的分別與贖罪祭這兩項」.
+Owner key: G01, G04 correct; G03 the known artifact; G05 p5, p6 now correct, but
+**tension missed**: 「可是耶穌說，你不必再遵行舊約聖經的分辨潔淨不潔淨的食物」, one side of the
+contradiction he sets up, went to the food Evidence. The new rule caused it: that sentence
+also "re-says a step's 不必". G02 posct missed: 「一大堆！」 proposed as part of the 題外話
+(also in round 1; correct in v6 and round 2). Not saved.
