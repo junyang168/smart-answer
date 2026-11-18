@@ -24,8 +24,8 @@
    "reason": "Claude: new CL0002 holds 新約恩待→基督的律法 and 加 6:2 (now an Observation), plus 林前 9:20."
   },
   "A 神": {
-   "verdict": "moved",
-   "reason": "Claude: 「同一位神」 now supports only the overlap (new CL0003) and CL0001, not CL0002. His words make it the reason for the overlap (「既然……同一位，你就會發現……重疊」), so the new placement follows him; the approved link to CL0002 was the looser one. Not an error."
+   "verdict": "part_missing",
+   "reason": "Claude, corrected 2026-11-17: the new CL0002 drops 「要求是為蒙恩子民的好處」; that part and its reasons (同一位神, ST08/ST18) now sit only under the overlap Claim. His words support it for the covenant too: 「新約一樣，神施恩給基督徒，然後呢，向基督徒有要求，這要求也是為基督徒的好處」. My first ruling (moved, not an error) was wrong."
   },
   "A 條文／原則": {
    "verdict": "not_in_lecture",
@@ -44,5 +44,5 @@
    "reason": "not taught in lecture 2"
   }
  },
- "result": "pass: every taught element comes back under the counterpart Claim with the same 论点 and 论据; one supporting reason (同一位神) moved to where his words put it"
+ "result": "diagram A: one part missing from the covenant Claim (為子民的好處); diagram B: same 论点论据"
 }
