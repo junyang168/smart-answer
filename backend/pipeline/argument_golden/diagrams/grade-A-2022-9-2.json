@@ -1,0 +1,18 @@
+{
+ "schema": "diagram-gold-key-grade.v1", "key": "A", "lecture": "2022年 NYSC 專題 馬太福音釋經（九）第二堂",
+ "run": "r2: slide-line prompt rule; section split from r1 (GPT, new split rule); groups G002, G005 only",
+ "expectation": "blind-expectation-key-A.json, written before any model call",
+ "split": {"verdict": "pass", "finding": "his covenant argument S0015–S0040 and S0058–S0061 is one section (G002), across the break; S0062– (atonement) is its own section at a heading"},
+ "parts": {
+  "1 關係先賜下，律法是約的要求": {"held": true, "claims": ["CL0006", "CL0009"], "reasons": "G002 ST20 藉接受約建立好關係; G005 CL0009 新約的人必須先由耶穌贖罪才能建立好關係 (林後5:21). The two halves are in different sections with no link; his S0064 「照樣新約的人」 points back to S0059–S0061."},
+  "3 維持／破裂": {"held": true, "claims": ["CL0006"], "reasons": "ST16, ST20; 不遵行律法這關係就破裂"},
+  "4 舊約的要求是摩西律法": {"held": true, "claims": ["CL0001", "CL0006"], "reasons": "ST20"},
+  "5 新約的要求是基督的律法": {"held": "merged", "claims": ["CL0004"], "reasons": "ST10", "finding": "stated only as the second sentence of CL0004, whose main point is 信有兩個要素 — two answers to different questions in one Claim"},
+  "A3b 字句 vs 聖靈": {"held": true, "claims": ["CL0003"], "reasons": "ST02 用聖靈的新樣服事主; 聖靈才來幫助基督徒得新生命"},
+  "A3a 條文 vs 原則": {"held": "not_in_lecture"}
+ },
+ "also_expected": {"held": true, "finding": "the answer to the apparent contradiction: CL0001 (cover), CL0003 慶祝脫離律法, CL0006 律法是好的"},
+ "slide_line": "the editor's slide text in S0015 went to other as 投影片文字; no Claim is anchored on it",
+ "content": {"verdict": "pass", "finding": "every must-have part present with his reasons; nothing he did not say"},
+ "structure": {"verdict": "one flaw", "finding": "part 5 merged into the faith-definition Claim CL0004. The Claim prompt already says answers to different questions are separate Claims; first occurrence, recorded, no prompt change."}
+}
