@@ -84,11 +84,14 @@ def check_summary(title, material, evaluation):
 def _project(data_root, passage, plan):
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline import chapter_topics, original_audio_index
+    from backend.pipeline.chapter_listening_eval import playback_card_problems
 
     legacy = chapter_topics.attach(
         original_audio_index.build_index(PostgresKnowledgeStore(), data_root, passage), data_root)
     index = chapter_listening_catalog.compose(
         legacy, chapter_listening_units.build(data_root, passage, plan=plan))
+    if problems := playback_card_problems(index):
+        raise ValueError(f'Listening card Eval did not pass: {problems}')
     material = summary_material(index, plan)
     if {row['id'] for row in material if row['unit']} != plan['units'].keys():
         raise ValueError('Every Unit must have playable reviewed slides')

@@ -82,8 +82,31 @@ def browser_checks(evidence, expected_binding):
             'evidence': evidence, 'physical_device': 'not_verified'}
 
 
-def catalog_checks(catalog, selected, evidence):
+def playback_card_problems(catalog):
+    """Check the public catalog, including leftover legacy cards and clips."""
+    from backend.pipeline.chapter_listening_catalog import has_playback_content
+
     problems = []
+    for section in catalog['sections']:
+        key = section['passage']
+        playable = False
+        for row in section['sermons']:
+            for span in row['stretches']:
+                if span.get('left_out') or span['end'] <= span['start']:
+                    continue
+                if not row.get('media_url') or not has_playback_content(row, span):
+                    problems.append(
+                        f"Unsupported playback clip: {key}, {row['source_id']}, "
+                        f"{span['start']}–{span['end']}")
+                else:
+                    playable = True
+        if not playable:
+            problems.append(f'Listening card has no playable material: {key}')
+    return problems
+
+
+def catalog_checks(catalog, selected, evidence):
+    problems = playback_card_problems(catalog)
     if not catalog.get('unit_navigation'):
         problems.append('Normal chapter entry does not use Unit navigation')
     selected_rows = {s['passage']: s for s in selected['sections']}

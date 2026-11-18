@@ -20,6 +20,16 @@ def subtract(stretch, covered):
     return [{**stretch, 'start': a, 'end': b} for a, b in pieces]
 
 
+def has_playback_content(row, span):
+    start, end = span['start'], span['end']
+    return (
+        any(start <= line['at'] < end and line.get('text', '').strip()
+            for line in row.get('transcript', ()))
+        or any(slide['at'] < end and slide['at'] + slide['seconds'] > start
+               for slide in row.get('slides', ()))
+    )
+
+
 def compose(legacy, updated):
     """Replace approved passages, retaining uncovered older passages without duplicate audio.
 
@@ -50,9 +60,16 @@ def compose(legacy, updated):
                 part for stretch in original['stretches'] for part in subtract(stretch, covered.get(key, []))
                 # Different sentence and clip boundaries can leave a fraction
                 # of a second after moving an argument into its new Unit.
-                if (part == stretch or part.get('left_out') or part['end'] - part['start'] >= 1
-                    or any(part['start'] <= line['at'] < part['end']
-                           for line in original.get('transcript', [])))
+                if part.get('left_out') or (
+                    (part == stretch or part['end'] - part['start'] >= 1
+                     or any(part['start'] <= line['at'] < part['end']
+                            for line in original.get('transcript', ())))
+                    # A legacy recording can include text later struck out by
+                    # editors. Once rebuilt, keep only supported legacy clips.
+                    and (key not in covered or 'transcript' not in original or 'slides' not in original
+                         or any(part['start'] <= line['at'] < part['end']
+                            for line in original.get('transcript', ())))
+                )
             ]
             kept = [s for s in row['stretches'] if not s.get('left_out')]
             if kept and row['stretches'] == original['stretches']:
