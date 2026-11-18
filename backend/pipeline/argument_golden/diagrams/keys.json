@@ -210,7 +210,7 @@
    "authority": "Owner 2026-11-18: 「this can be another gold key. use this to validate argument layer」, for the diagram in the notes manuscript (釋經筆記母本) section 登山寶訓的文學結構. Items drafted by Claude from the diagram text only.",
    "diagram": {
     "path": "full_article/images/sermon-on-the-mount-structure.svg",
-    "sha256": "1aa653acb0e88de71becd04f76678b9fee6a062631d479b7834dcbe6c8e4939f",
+    "sha256": "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17",
     "text": [
      "太 5:3–12　彌賽亞的身份（八福的 inclusio）",
      "門徒的使命",
@@ -218,7 +218,7 @@
      "太 5:17 – 7:12　Inclusio：門徒與舊約（律法和先知）的關係",
      "5:17–48",
      "門徒的義（勝過法利賽人）",
-     "6:1–7:11 inclusio",
+     "6:8–7:11 inclusio",
      "門徒義的實踐（施捨，禱告等）",
      "7:12　小結：律法與先知的總結（黃金律）",
      "7:13–27　門徒使命的結論（兩條路）",
@@ -226,7 +226,7 @@
     ]
    },
    "notes": [
-    "C7: the diagram marks 6:1–7:11 as an inclusio; in lecture 5 he teaches the inclusio as 6:8–7:11 (禱告首尾呼應). The terms check the 7:11 end and the 呼應, not the start verse; the ruling records which start the record gives.",
+    "C7: owner 2026-11-18 「should be 6:8」, 「you should modify the svg」. The diagram (made by hand from the sermon and the notes) labelled the inclusio 6:1–7:11; Claude changed the label to 6:8–7:11 (backup sermon-on-the-mount-structure.before-6-8-20261118.svg beside it). The item follows lecture 5: 6:8–7:11.",
     "C10: the diagram draws 7:28–29 inside the 門徒的使命 box; in lecture 6 he calls it 整個登山寶訓的結論. The item does not take a side on the nesting.",
     "C9 terms widened 2026-11-18 to accept 總結 after lecture 6 point 18 said 「總結整個門徒的使命」; disclosed to the owner."
    ],
@@ -330,10 +330,11 @@
     },
     {
      "id": "C7",
-     "statement": "六章到七章十一節這一段自成前後呼應。",
+     "statement": "六章八節至七章十一節以禱告前後呼應（inclusio）。",
      "terms": [
       [
-       "六章"
+       "六章八",
+       "6:8"
       ],
       [
        "七章十一",
