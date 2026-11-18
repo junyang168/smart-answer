@@ -377,13 +377,28 @@ def retime(raw_slides: list[dict], context: dict) -> list[dict]:
             for slide in raw_slides]
 
 
-def point_spans(context: dict, slides: list[dict]) -> list[str]:
-    """有 source 的要點，綁的句子要落在那一步（或那個 Claim）在逐字稿的範圍裡。
+def source_context_index(context: dict, source_lines=None) -> dict:
+    index = argument_index(context)
+    # PPT source IDs point to supporting argument records, not exact quotation spans.
+    # Use retained context only; this never changes Knowledge Layer fragment boundaries.
+    pieces = {}
+    by_id = {line['id']: line for line in source_lines or []}
+    for line in source_lines or []:
+        pieces.setdefault(line['piece'], []).append(line['id'])
+    for rid, entry in index.items():
+        if entry and entry['first'] in by_id and entry['last'] in by_id:
+            entry['first'] = min(pieces[by_id[entry['first']]['piece']])
+            entry['last'] = max(pieces[by_id[entry['last']]['piece']])
+    return index
+
+
+def point_spans(context: dict, slides: list[dict], *, source_lines=None) -> list[str]:
+    """有 source 的要點須在相關記錄的保留原文上下文內；不改寫知識層逐字引用邊界。
 
     負責人 2026-11-16：他講要點 A、投影片卻亮著 B 不行。一步論證的 SourceFragment 常
     從引子開始，要點講的多是後面的結論，所以時間不能取這一步的第一句；由模型指出
     他講出這條要點的那一句，程序只核對它沒有跑出這一步。"""
-    index = argument_index(context)
+    index = source_context_index(context, source_lines)
     problems = []
     for slide in slides:
         for point in slide["points"]:
@@ -408,16 +423,19 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
         for cid in entry["claims"]:
             steps_of.setdefault(cid, set()).add(rid)
     reported = set()
+    stated = {c['claim_id']: c['stated'] for c in context.get('claims', [])
+              if isinstance(c.get('stated'), str) and c['stated'].startswith('S')}
     for rid, entry in sorted(index.items(), key=lambda kv: (kv[1]["first"], kv[0])):
-        slide = next((s for s in slides if s["first"] <= entry["first"] <= s["last"]), None)
-        if slide is None or entry["first"] in reported:
+        at = stated.get(rid) or entry['first']
+        slide = next((s for s in slides if s["first"] <= at <= s["last"]), None)
+        if slide is None or at in reported:
             continue
         related = {rid} | entry["claims"] | {r for cid in entry["claims"] for r in steps_of.get(cid, ())}
         if not any(point.get("source") in related for point in slide["points"]):
-            problem = (f"{slide['title']}（{entry['first']}）: 他在講「{entry['statement'][:40]}」（{rid}），"
+            problem = (f"{slide['title']}（{at}）: 他在講「{entry['statement'][:40]}」（{rid}），"
                        f"這一張沒有要點屬於它的 Claim（{'、'.join(sorted(entry['claims']))}）")
             problems.append(problem)
-            reported.add(entry["first"])
+            reported.add(at)
     return problems
 
 
@@ -425,11 +443,11 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
 STALE_SENTENCES = 3
 
 
-def stale_points(context: dict, slides: list[dict], lines: list[dict]) -> list[str]:
+def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displayed_readings=()) -> list[str]:
     """他講進一步新的論證，目前那條要點卻還是別處的（負責人 2026-11-16：他講 A，畫面亮著 B）。
 
-    逐句看：這一句落在哪些步驟的 SourceFragment 裡；畫面此刻最新的要點，source 要是其中
-    一步或它們的 Claim。沒有 source 的要點（故事、插話）和不屬任何一步的句子不查。
+    逐句看：這一句落在哪些步驟的 SourceFragment 裡；畫面此刻最新的要點須關聯同一 Claim，
+    允許其直接連接的證據步驟互相照應。正在讀已顯示的經文時不強迫答案提早。沒有 source 的要點（故事、插話）和不屬任何一步的句子不查。
     另查同一張兩條要點綁同一句：那等於兩條一起亮。"""
     cover: dict[str, set] = {}
     for claim in context.get("claims", []):
@@ -442,6 +460,12 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict]) -> list[s
             for anchor in step.get("anchors", []):
                 for sentence in anchor.get("sentences", []):
                     cover.setdefault(sentence, set()).update({step["evidence_step_id"], claim["claim_id"]})
+    source_claims = {}
+    for claim in context.get('claims', []):
+        source_claims.setdefault(claim['claim_id'], set()).add(claim['claim_id'])
+        for step in claim.get('evidence_steps', []):
+            if step.get('evidence_step_id'):
+                source_claims.setdefault(step['evidence_step_id'], set()).add(claim['claim_id'])
     problems, run = [], None
 
     def close():
@@ -454,7 +478,8 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict]) -> list[s
         slide = next((s for s in reversed(slides) if s["first"] <= sid), None)
         shown = [p for p in (slide or {}).get("points", []) if p["sentence"] <= sid]
         source = shown[-1].get("source") if shown else ""
-        if not source or sid not in cover or source in cover[sid]:
+        same_claim = bool(source_claims.get(source, set()) & cover.get(sid, set()))
+        if not source or sid not in cover or source in cover[sid] or same_claim or sid in displayed_readings:
             close(); run = None
             continue
         if run and run["text"] == shown[-1]["text"]:
@@ -696,6 +721,7 @@ missing：保留原文支持但漏了重要內容，必須同時列一條「完�
 not_supported：這條提示不受保留原文支持，不得補進幻燈；reason 說明原文依據。
 contradicts：投影片的論證與這條 Claim 的 evidence_steps 相違——例如把 opposed_position（他反駁的看法）寫成他的主張、把理由和結論倒過來、或寫出與某步證據相反的推論；必須同時列一條「忠實」finding 並標 blocking，reason 指出是哪一步。
 判 covered 之前先確認沒有這種相違。
+故事或例子先查相關 Claim／Evidence 的論證角色，再對照原文與現有要點；只因沒有故事開場點、長時間只有標題，不能判 missing。若真正漏了必要對比、理由或應用，說明相關 Claim／步驟及缺失的論證作用；圖中沒有記錄也不能代替原文核對。
 每條恰好一次，不因 Claim 已經審核就信它。不要為逐條覆蓋重複要點、硬加標題或改講課次序。
 """
     return instruction, schema

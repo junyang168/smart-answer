@@ -1,8 +1,11 @@
 {
   "binding": {
-    "test_set_sha256": "62fde544219ca55cd79f50b3682d7d6a5065328e626dcbd477bee6ca3f85b043",
-    "generation_prompt_sha256": "405f971e87718bee5cd15c1de392e924a08fed5f90213170f6c807ea5cf805ca",
-    "review_prompt_sha256": "3f308240929a748d0a1dabcf1e83fcce656c0bb07bbe3ea09ec3f33980eee7dd"
+    "test_set_sha256": "ac918bccc7f8832ef6f8e0a4fb6cfeeebe9a0e651c8d52d8249d6dd39ec69727",
+    "generation_prompt_sha256": "2c13ab4d7c1b0de6c6252568b59c99d9449fb2eec350a8111ba71b8e17f97f62",
+    "review_prompt_sha256": "6e8ddd6c616ff1f317df2ca02fef45de5210c5af7ce5f7dfb99a08f97841d73a",
+    "judge_rules_sha256": "972eff5561b0faddfb63c3891c3fa916a1ca9bcd43cbcb7939e3cb724d6dff41",
+    "common_criteria_sha256": "4ed4e8500ae461955f1cafb33bc1a04d15e5c215c95e5e859db5ae363d3a1c48",
+    "revision_prompt_sha256": "2618c79c0c6610d45a9ee1bfdec4d3dd9be5475af57f6da049943c8a94cdb9f7"
   },
   "answer": {
     "cases": [
@@ -14,24 +17,29 @@
             "inline_notes": [],
             "points": [
               {
-                "sentence": "S0001",
-                "text": "今天已不在舊約律法底下"
+                "sentence": "S0002",
+                "text": "今天已不在舊約底下，舊約律法與我們無關"
               },
               {
-                "sentence": "S0004",
-                "text": "有人主張免守禮儀律法，仍須守十誡"
+                "sentence": "S0007",
+                "text": "有人主張仍須守十誡；這個說法錯了"
               },
               {
-                "sentence": "S0015",
-                "text": "十誡也不必遵守，免陷守安息日的圈套"
+                "sentence": "S0019",
+                "text": "先要求守十誡，再追問為何不守安息日"
               },
               {
-                "sentence": "S0023",
-                "text": "如今在新約底下，遵行基督的律法"
+                "sentence": "S0025",
+                "text": "十誡也不必遵守；如今在基督律法底下"
               }
             ],
-            "scriptures": [],
-            "title": "從摩西律法到基督律法",
+            "scriptures": [
+              {
+                "ref": "出埃及記 20:8",
+                "sentence": "S0019"
+              }
+            ],
+            "title": "十誡與新約下的律法",
             "verses": "5:17-20"
           }
         ]
@@ -44,20 +52,20 @@
             "inline_notes": [],
             "points": [
               {
-                "sentence": "S0003",
-                "text": "耶穌坐著教導，符合猶太拉比的慣例"
+                "sentence": "S0004",
+                "text": "猶太拉比坐著教導，構成登山寶訓的背景"
               },
               {
-                "sentence": "S0008",
-                "text": "第一大段藉祝福顯明彌賽亞的身份"
+                "sentence": "S0014",
+                "text": "5:3-12藉彌賽亞帶來的祝福顯明其身分"
               },
               {
-                "sentence": "S0015",
-                "text": "第二大段談門徒認識彌賽亞後的使命"
+                "sentence": "S0017",
+                "text": "5:13起談門徒使命：認識神便須有生命回應"
               },
               {
-                "sentence": "S0020",
-                "text": "門徒使命先作概述，再闡明細節"
+                "sentence": "S0021",
+                "text": "使命先由5:13-16概述，5:17起詳述"
               }
             ],
             "scriptures": [
@@ -66,7 +74,7 @@
                 "sentence": "S0002"
               }
             ],
-            "title": "登山寶訓的背景與分段",
+            "title": "登山寶訓背景與分段",
             "verses": "5:1-48"
           }
         ]
@@ -87,11 +95,11 @@
                 "verse": 1
               },
               {
-                "explanation": "此處希臘文譯作貧窮",
+                "explanation": "此處希臘譯詞意為貧窮",
                 "original": "ptochos",
                 "reading": "",
                 "scripture": "isa-61-1",
-                "sentence": "S0010",
+                "sentence": "S0012",
                 "span": "謙卑的人",
                 "verse": 1
               },
@@ -101,22 +109,22 @@
                 "reading": "",
                 "scripture": "mat-5-3-5",
                 "sentence": "S0015",
-                "span": "虛心",
+                "span": "虛心的人",
                 "verse": 3
               }
             ],
             "points": [
               {
-                "sentence": "S0004",
-                "text": "這幾項祝福出自以賽亞書六十一章"
+                "sentence": "S0005",
+                "text": "虛心、哀慟、溫柔的祝福來自以賽亞書61章"
               },
               {
-                "sentence": "S0008",
-                "text": "anawim 通常譯作 praus，此處卻用 ptochos"
+                "sentence": "S0010",
+                "text": "anaw通常譯praus，此處卻譯ptochos"
               },
               {
-                "sentence": "S0015",
-                "text": "罕見用詞是耶穌心繫以賽亞的很好證據"
+                "sentence": "S0016",
+                "text": "相同罕見用字是耶穌想著以賽亞書的很好證據"
               }
             ],
             "scriptures": [
@@ -129,7 +137,7 @@
                 "sentence": "S0008"
               }
             ],
-            "title": "八福與以賽亞的用詞",
+            "title": "八福與以賽亞的用字",
             "verses": "5:3-5"
           }
         ]
@@ -142,7 +150,7 @@
             "inline_notes": [
               {
                 "explanation": "現在時態",
-                "original": "",
+                "original": "ἐστιν",
                 "reading": "",
                 "scripture": "mat-5-3",
                 "sentence": "S0004",
@@ -151,7 +159,7 @@
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "παρακληθήσονται",
                 "reading": "",
                 "scripture": "mat-5-4",
                 "sentence": "S0008",
@@ -160,16 +168,16 @@
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "κληρονομήσουσιν",
                 "reading": "",
                 "scripture": "mat-5-5",
                 "sentence": "S0010",
-                "span": "必承受地土",
+                "span": "必承受",
                 "verse": 5
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "χορτασθήσονται",
                 "reading": "",
                 "scripture": "mat-5-6",
                 "sentence": "S0012",
@@ -178,7 +186,7 @@
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "ἐλεηθήσονται",
                 "reading": "",
                 "scripture": "mat-5-7",
                 "sentence": "S0014",
@@ -187,25 +195,25 @@
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "ὄψονται",
                 "reading": "",
                 "scripture": "mat-5-8",
                 "sentence": "S0016",
-                "span": "必得見神",
+                "span": "必得見",
                 "verse": 8
               },
               {
                 "explanation": "未來時態",
-                "original": "",
+                "original": "κληθήσονται",
                 "reading": "",
                 "scripture": "mat-5-9",
                 "sentence": "S0018",
-                "span": "必稱為神的兒子",
+                "span": "必稱為",
                 "verse": 9
               },
               {
                 "explanation": "現在時態",
-                "original": "",
+                "original": "ἐστιν",
                 "reading": "",
                 "scripture": "mat-5-10",
                 "sentence": "S0021",
@@ -215,20 +223,16 @@
             ],
             "points": [
               {
-                "sentence": "S0001",
-                "text": "中文譯文不容易看出原文的時態"
+                "sentence": "S0002",
+                "text": "中文譯文不容易顯出原文的時態"
               },
               {
-                "sentence": "S0003",
-                "text": "第一福的天國，今天就能體會"
+                "sentence": "S0005",
+                "text": "虛心者現在就能體會天國，並非將來才有"
               },
               {
-                "sentence": "S0006",
-                "text": "中間各福的應許都是將來才有"
-              },
-              {
-                "sentence": "S0021",
-                "text": "最後一福也用現在式，與第一福呼應"
+                "sentence": "S0022",
+                "text": "首尾祝福現在就有，中間各項則在將來"
               }
             ],
             "scriptures": [
@@ -278,24 +282,24 @@
             "inline_notes": [],
             "points": [
               {
-                "sentence": "S0030",
-                "text": "沒學過醫學，看不懂心臟病影像有情可原"
-              },
-              {
                 "sentence": "S0031",
-                "text": "受過訓練，就應看出別人看不出的東西"
+                "text": "學過醫學卻看不懂病徵，便該受責備"
               },
               {
-                "sentence": "S0034",
-                "text": "有人說耶穌未自稱是神，其實證據很多"
+                "sentence": "S0033",
+                "text": "受過訓練的眼睛，應能辨認別人看不出的東西"
               },
               {
-                "sentence": "S0039",
-                "text": "猶太人不必視彌賽亞為神，耶穌卻如此自稱"
+                "sentence": "S0037",
+                "text": "有人說耶穌未自稱神；這裡的分析顯出祂明講了"
+              },
+              {
+                "sentence": "S0040",
+                "text": "猶太人未必視彌賽亞為神；耶穌的彌賽亞是神"
               }
             ],
             "scriptures": [],
-            "title": "受訓辨認耶穌的身份",
+            "title": "受訓練才能看出證據",
             "verses": "5:3-12"
           }
         ]
@@ -305,38 +309,19 @@
         "slides": [
           {
             "first": "S0001",
-            "inline_notes": [
-              {
-                "explanation": "天國有力地進展著",
-                "original": "",
-                "reading": "",
-                "scripture": "mat-11-12-13",
-                "sentence": "S0007",
-                "span": "是努力進入的",
-                "verse": 12
-              },
-              {
-                "explanation": "暴徒向天國施行暴力",
-                "original": "",
-                "reading": "",
-                "scripture": "mat-11-12-13",
-                "sentence": "S0007",
-                "span": "努力的人就得著了",
-                "verse": 12
-              }
-            ],
+            "inline_notes": [],
             "points": [
               {
-                "sentence": "S0001",
-                "text": "有人強調律法的一點一畫都不能廢去"
+                "sentence": "S0003",
+                "text": "有人只強調律法不能廢去，卻忽略直到成全"
               },
               {
-                "sentence": "S0002",
-                "text": "不可漏讀直到成全這個條件"
+                "sentence": "S0008",
+                "text": "應譯為天國有力進展，暴徒向它施暴"
               },
               {
-                "sentence": "S0010",
-                "text": "到約翰為止，是否指舊約效用終止？"
+                "sentence": "S0012",
+                "text": "到施洗約翰為止，是否表示舊約效用已終止？"
               }
             ],
             "scriptures": [
@@ -345,8 +330,12 @@
                 "sentence": "S0001"
               },
               {
-                "ref": "馬太福音 11:12-13",
+                "ref": "馬太福音 11:12",
                 "sentence": "S0006"
+              },
+              {
+                "ref": "馬太福音 11:13",
+                "sentence": "S0009"
               },
               {
                 "ref": "路加福音 16:16-17",
@@ -367,19 +356,19 @@
             "points": [
               {
                 "sentence": "S0004",
-                "text": "耶穌的話表明不必再守摩西的飲食律例"
+                "text": "耶穌潔淨食物，不必再遵摩西律法的飲食限制"
               },
               {
-                "sentence": "S0010",
-                "text": "彼得稱祂為主，卻不肯照主的吩咐做"
+                "sentence": "S0015",
+                "text": "彼得承認祂是主，卻不肯做主吩咐的事"
               },
               {
                 "sentence": "S0020",
-                "text": "異象要求彼得不再分潔淨與不潔淨"
+                "text": "異象表示今後不再按摩西律法區分潔淨與否"
               },
               {
-                "sentence": "S0023",
-                "text": "必須面對並解釋這些經文問題"
+                "sentence": "S0027",
+                "text": "必須正面處理這些經文帶來的解釋問題"
               }
             ],
             "scriptures": [
@@ -388,16 +377,20 @@
                 "sentence": "S0001"
               },
               {
-                "ref": "使徒行傳 10:13-14",
+                "ref": "使徒行傳 10:13",
                 "sentence": "S0009"
+              },
+              {
+                "ref": "使徒行傳 10:14",
+                "sentence": "S0012"
               },
               {
                 "ref": "使徒行傳 10:15",
                 "sentence": "S0019"
               }
             ],
-            "title": "飲食律例與彼得的異象",
-            "verses": "5:17-20"
+            "title": "飲食律法與彼得異象",
+            "verses": "5:17-18"
           }
         ]
       },
@@ -409,24 +402,24 @@
             "inline_notes": [],
             "points": [
               {
-                "sentence": "S0001",
-                "text": "十誡屬摩西律法，今天已不在其下"
+                "sentence": "S0003",
+                "text": "十誡屬摩西律法，今天也不必遵守"
               },
               {
-                "sentence": "S0004",
-                "text": "有人反問：這樣就可以姦淫、殺人、拜偶像嗎？"
+                "sentence": "S0006",
+                "text": "有人追問：所以今天可以姦淫、殺人、拜偶像？"
               },
               {
-                "sentence": "S0009",
-                "text": "仍須守基督律法，其中與摩西律法有重疊"
+                "sentence": "S0017",
+                "text": "不可以；兩律法重疊，仍禁拜偶像、偷竊等"
               },
               {
                 "sentence": "S0021",
-                "text": "同一位神為人的益處，提出相同要求"
+                "text": "今遵基督律法；同一位神為人的益處提出要求"
               }
             ],
             "scriptures": [],
-            "title": "兩種律法重疊的原因",
+            "title": "不守摩西律法仍有規範",
             "verses": "5:17-20"
           }
         ]
@@ -439,20 +432,20 @@
             "inline_notes": [],
             "points": [
               {
-                "sentence": "S0005",
-                "text": "工程師誤以為看見漂亮秘書就是犯姦淫"
+                "sentence": "S0009",
+                "text": "工程師以為不看女秘書，就不會與她犯姦淫"
               },
               {
-                "sentence": "S0013",
-                "text": "釐清經文、給出證據，使工程師得釋放"
+                "sentence": "S0016",
+                "text": "釐清經文並提出證據，使工程師得到釋放"
               },
               {
-                "sentence": "S0019",
-                "text": "工程師的喜樂引出見證，兩位同事信主"
+                "sentence": "S0022",
+                "text": "工程師喜樂的轉變，帶領兩位同事信主"
               },
               {
-                "sentence": "S0024",
-                "text": "牧師體會講清聖經能助人，決心認真學習"
+                "sentence": "S0025",
+                "text": "牧師立志好好學習聖經，講清楚以幫助別人"
               }
             ],
             "scriptures": [
@@ -461,7 +454,112 @@
                 "sentence": "S0007"
               }
             ],
-            "title": "講清聖經使人得釋放",
+            "title": "釐清經文帶來釋放",
+            "verses": "5:28"
+          }
+        ]
+      },
+      {
+        "id": "gold-teachable-question-before-answer",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "這裡所說的溫柔是什麼意思？"
+              },
+              {
+                "sentence": "S0006",
+                "text": "查考關鍵字，不可把自己的觀念讀進去"
+              },
+              {
+                "sentence": "S0007",
+                "text": "必須從前後文找出關鍵字的意思"
+              },
+              {
+                "sentence": "S0010",
+                "text": "溫柔包含受教：虛心、願意領教"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "雅各書 1:21",
+                "sentence": "S0002"
+              }
+            ],
+            "title": "從上下文理解溫柔",
+            "verses": "5:5"
+          }
+        ]
+      },
+      {
+        "id": "revision-reject-early-covenant-answer",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "舊約：神先恩待以色列，領出埃及"
+              },
+              {
+                "sentence": "S0007",
+                "text": "約的兩個要素：先施恩，後要求"
+              },
+              {
+                "sentence": "S0016",
+                "text": "舊約神向以色列要求的就是摩西律法"
+              },
+              {
+                "sentence": "S0021",
+                "text": "新約神向基督徒要求的是「基督的律法」"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "出埃及記 20:1-4",
+                "sentence": "S0010"
+              }
+            ],
+            "title": "舊約與新約：施恩與要求",
+            "verses": "5:19-20"
+          }
+        ]
+      },
+      {
+        "id": "revision-merge-confession-story",
+        "slides": [
+          {
+            "first": "S0001",
+            "inline_notes": [],
+            "points": [
+              {
+                "sentence": "S0041",
+                "text": "弟兄把覺得漂亮當姦淫，反覆認罪痛苦，疑神不愛他"
+              },
+              {
+                "sentence": "S0055",
+                "text": "宣教士叫他更懇切；怕他崩潰拒譯，當時無法幫助"
+              },
+              {
+                "sentence": "S0059",
+                "text": "求看女子如木石、不漂亮，神不會聽"
+              },
+              {
+                "sentence": "S0061",
+                "text": "神造男造女；覺得女子漂亮不等於心裡犯姦淫"
+              }
+            ],
+            "scriptures": [
+              {
+                "ref": "馬太福音 5:28",
+                "sentence": "S0030"
+              }
+            ],
+            "title": "誤解動淫念的痛苦與解答",
             "verses": "5:28"
           }
         ]
@@ -473,19 +571,44 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "依原文核對，保留不在舊約底下、反對仍守十誡及轉入基督律法的立場，未混淆反方。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；已保存十誡引向安息日的論證、否定回答及基督律法的結論。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "S0019引用守安息日的誡命，已列出埃及記20:8；沒有須補的原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四條要點直接呈現內容，反方有明確標示，標題涵蓋十誡與新約律法。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "合併的末點須等S0025「乃在基督的律法底下」才完整成立，現有錨點正確。"
+          },
+          {
             "criterion_id": "voice",
             "passed": true,
-            "reason": "直接寫「十誡也不必遵守」及如今在基督律法底下，沒有教授的第三人稱轉述框架。"
+            "reason": "「這個說法錯了」「十誡也不必遵守」直接呈現判斷，沒有教授轉述框架。"
           },
           {
             "criterion_id": "attribution",
             "passed": true,
-            "reason": "以「有人主張」標明仍須守十誡的反方立場，並與十誡也不必遵守的回答區分。"
+            "reason": "「有人主張仍須守十誡」與「十誡也不必遵守」清楚區分。"
           },
           {
             "criterion_id": "complete",
             "passed": true,
-            "reason": "保留仍守十誡會引出守安息日要求的論證、否定回答，以及轉到新約與基督律法的結論。"
+            "reason": "已保留仍守十誡會引來安息日追問，以及十誡也不必遵守的回答。"
           }
         ],
         "id": "gold-decalogue-direct-voice/generated"
@@ -493,9 +616,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各項實質主張有原文支持，仍守十誡也明列為他人的立場；轉述口吻另列呈現缺陷。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉S0023–S0025從舊約轉入新約、基督律法的承重結論。可將末點改為「十誡也不必遵守；如今在基督律法底下」，綁S0025，維持四點。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "S0019引用「你要守安息日」，scriptures卻為空；應在S0019加入出埃及記20:8。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "S0001張的「他說錯了」「他回答」不符合原聲口吻。改為「有人主張禮儀律不守但仍守十誡；這個說法錯了」及直接呈現回答。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：第三點目前S0012，應移S0019；S0012只說「都是這麼講」，S0019才說「你要守安息日，你為什麼不守安息日」，提前約48秒。其餘小差距未超閾值。"
+          },
+          {
             "criterion_id": "voice",
             "passed": false,
-            "reason": "要點使用「他說錯了」「他回答：」，違反直接呈現原聲內容的口吻；應直接寫「仍須守十誡的說法錯了」及「十誡也不必遵守」。"
+            "reason": "「他說錯了」「他回答：十誡也不必遵守」須改成直接判斷與回答，同時保留反方身分。"
           }
         ],
         "id": "gold-decalogue-direct-voice/counterexample"
@@ -503,14 +651,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "背景、藉祝福顯明身分及門徒生命回應均有原文支持。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "已核對論證層的literary_context、reasoning及literary_form；四點保存背景、兩大段關係及使命的概述與詳述。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "實讀的馬太福音5:1已列；其餘段落只是介紹範圍，無須額外顯示或建立原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題「登山寶訓背景與分段」涵蓋整張背景與整體結構，四點清楚。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "身分推論綁S0014，使命及回應合併點綁S0017，概述與詳述合併點綁S0021，均待實質內容完整講出。"
+          },
+          {
             "criterion_id": "title",
             "passed": true,
-            "reason": "「登山寶訓的背景與分段」涵蓋坐著教導的背景、彌賽亞身份與門徒使命兩大段，以及使命的概述與細節。"
+            "reason": "標題涵蓋背景、彌賽亞身分與門徒使命的分段，未縮為第一段。"
           },
           {
             "criterion_id": "complete",
             "passed": true,
-            "reason": "第一大段顯明彌賽亞身份，第二大段寫明是門徒認識彌賽亞後的使命，保留先認識再回應的關係。"
+            "reason": "第二、三點依序呈現先認識彌賽亞、再有門徒生命回應的關係。"
           }
         ],
         "id": "whole-topic-title/generated"
@@ -518,9 +691,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "要點的背景、兩段內容及使命回應有原文支持，沒有新增神學答案。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "核對論證層後，兩張合計已保存背景、身分先於使命及概述轉詳述的結構，無承重漏項。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "馬太福音5:1已在S0002列出；其餘僅介紹段落，無須全文顯示。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "兩張都叫「登山寶訓第一段」不符各自範圍。S0001張講背景，改「登山寶訓的教導背景」；S0007張涵蓋兩大段及使命細分，改「登山寶訓的整體結構」。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：S0007張首點目前S0007，應移S0014；S0007僅說「可以分為兩大段」，S0014才說「藉著彌賽亞要帶給我們的祝福，讓我們知道彌賽亞的身份」，提前約50秒。另S0015→S0017、S0020→S0021及首張S0003→S0004均在一般閾值內。"
+          },
+          {
             "criterion_id": "title",
             "passed": false,
-            "reason": "S0001 張實講背景，S0007 張涵蓋兩大段及門徒使命的細分，均不能只稱「第一段」；可分別改為「登山寶訓的背景」與「登山寶訓的整體結構」。"
+            "reason": "S0007張不只講第一段，也講S0015的門徒使命及S0020–S0021的概述與細節，應改「登山寶訓的整體結構」；首張另改背景標題。"
           }
         ],
         "id": "whole-topic-title/counterexample"
@@ -528,14 +726,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留通常譯praus、此處譯ptochos的區別，結論仍是「很好證據」，未加強成證明。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；祝福來源、罕見譯詞、貧窮字義及由此提出的證據均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "列出的太5:3–5與賽61:1符合實讀內容；短註使用anawim及實際譯詞ptochos，未把praus掛為本節原文。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "三點清楚呈現用字比較與證據，標題涵蓋全段，沒有第三人稱報告口吻。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "來源在S0005、譯詞比較在S0010、證據結論在S0016出現；短註隨字源、字義及跨經文比較講解出現。"
+          },
+          {
             "criterion_id": "scripture",
             "passed": true,
-            "reason": "scriptures 列出實讀的太5:3–5與賽61:1，未因口頭報出範圍而加入未讀的太5:6、賽61:2或3–7。"
+            "reason": "只列實讀太5:3–5與賽61:1，未因報讀範圍而加入太5:6、賽61:2或3–7。"
           },
           {
             "criterion_id": "fidelity",
             "passed": true,
-            "reason": "保留祝福出自賽61章、希臘譯詞的比較，以及罕見用詞是耶穌想到以賽亞的「很好證據」，沒有加強成證明或加入額外神學判斷。"
+            "reason": "八福與以賽亞的連結及耶穌想到該段的判斷均取自原文，沒有額外神學推論。"
           }
         ],
         "id": "quoted-scripture/generated"
@@ -543,9 +766,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "要點保留一般譯詞與本節譯詞的差別，也保留「很好的證據」的程度。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；來源、譯詞比較、貧窮字義與結論都有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "scriptures為空，漏掉實讀太5:3–5及賽61:1；應分別在S0001、S0008加入。也應將有原文依據的字源與ptochos字義建立合規短註，不能把praus當賽61:1實際用字。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點可理解，標題涵蓋八福與以賽亞的連結，沒有說話者混淆。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點目前S0001，應移S0005；S0001只讀八福，S0005才說「這是從以賽亞書六十一章一節底下的聖經來的」，提前約31秒。其他比較、字義與結論的提前均未超30秒，只記錄。"
+          },
+          {
             "criterion_id": "scripture",
             "passed": false,
-            "reason": "scriptures 為空，漏了S0001–S0003實讀的太5:3–5及S0008實讀的賽61:1；應分別在S0001與S0008加入。"
+            "reason": "應加入太5:3–5（S0001）及賽61:1（S0008），不加入未讀的賽61:2–7。"
           }
         ],
         "id": "quoted-scripture/counterexample"
@@ -553,14 +801,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "現在就能體會天國及首尾現在、中間將來的判斷忠於原文。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；中文不顯時態、各節文法對照及祝福意義均由要點和短註共同保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:3–10逐節隨朗讀列出，短註的現在式與未來式對應正確，沒有一般釋經冒充原文文法。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "三點分別呈現翻譯限制、現在體會及整體對照，標題涵蓋全段。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "各短註綁實際解說時態的句子，整張首尾對照結論保留在S0022。"
+          },
+          {
             "criterion_id": "grammar",
             "passed": true,
-            "reason": "要點與經文註解共同呈現第一福、最後一福的現在式及中間各福的將來式，並保留天國今天能體會、其他應許將來才有的意義。"
+            "reason": "既保存現在式與將來式，也保存首尾祝福現在就有、中間在將來的意義。"
           },
           {
             "criterion_id": "sync",
             "passed": true,
-            "reason": "依序在S0001引入中文時態問題、S0003引入第一福、S0006引入中間各福、S0021引入最後一福，沒有把整段結論提前到開頭。"
+            "reason": "S0002引入時態問題，S0004起逐節顯示文法觀察，未提前揭示S0022的總結。"
           }
         ],
         "id": "greek-tense/generated"
@@ -568,9 +841,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "「用詞有些不同」雖過於籠統，但沒有直接顛倒原文；具體缺漏另列完整性問題。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；四點皆未保存S0004–S0019的時態對照及S0022「第一個跟最後一個的祝福是現在就有，其他的都是將來才有」。應以三點呈現中文限制、現在體會天國及首尾與中間的祝福對照。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "漏掉承重的原文文法短註；應隨S0004、S0008、S0010、S0012、S0014、S0016、S0018、S0021標出相應現在式或未來式，並讓各節經文隨實讀出現。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四條完全重複「八福用詞有些不同」，聽眾無法看出現在與將來的對照；應替換為各有實質內容的二至四點。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：太5:3–10全部綁S0003，令5:10早於S0021約97秒出現；應逐節綁S0003、S0006、S0009、S0011、S0013、S0015、S0017、S0021。"
+          },
+          {
             "criterion_id": "grammar",
             "passed": false,
-            "reason": "四條都只寫「八福用詞有些不同」，沒有呈現現在式與將來式的對照，也漏了首尾祝福現在已有、中間應許將來才有的結論。"
+            "reason": "只寫用詞不同，沒有現在式、將來式及祝福現在或將來享有的意義，須補回實質對照。"
           }
         ],
         "id": "greek-tense/counterexample"
@@ -578,14 +876,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "受訓者的責任、辨識證據及耶穌明講神性均有原文支持，反方另以「有人說」標示。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "已核對論證層中S0034的opposed_position，再依原文確認故事的類比作用；訓練差別與解經應用均保存，不須補照片細節或故事開場。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本範圍沒有實際讀經或原文字詞解說，scriptures與inline_notes留空適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋故事類比與辨識經文證據的共同主題；故事鋪陳可由原聲承擔。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "四點皆待相應內容講出；受訓眼睛的概括在S0033清楚表達，未為填畫面提前揭示故事結論。"
+          },
+          {
             "criterion_id": "complete",
             "passed": true,
-            "reason": "保留未受醫學訓練看不懂、受訓應能辨認的道理，並導向聖經有許多耶穌自知且自稱是神的證據。"
+            "reason": "故事導向受訓眼睛應能辨識證據，再應用於耶穌自知並宣告神性的判斷。"
           },
           {
             "criterion_id": "attribution",
             "passed": true,
-            "reason": "醫學故事被概括為受訓與未受訓的差別，沒有把兒子的問話當解經結論；另以「有人說」標出反方，直接呈現反駁。"
+            "reason": "醫學訓練的類比、他人的反對主張及解經結論清楚區分，未挪用兒子的話作神學結論。"
           }
         ],
         "id": "story-argument/generated"
@@ -593,9 +916,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "兒子帶回心臟照片確有原文支持；問題在於重複、時序及未呈現故事論旨。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "核對論證層的反方立場及原文後，四點全漏S0030–S0033訓練對比、S0034–S0038神性證據應用及S0039–S0040彌賽亞與神的區別。應將四點整體換成這些承重內容。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本範圍未讀出經文或講解原文，空陣列適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四次重複「兒子帶回心臟照片」無法配合標題說明受訓眼睛的作用；應改成訓練對比及經文證據的應用。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：照片內容最早到S0011「我看到一個心臟」才揭示；目前S0001提前約76秒，S0032、S0034、S0039則較S0011延後約145、172、214秒。應刪除重複點，改用各結論的實際錨點。"
+          },
+          {
             "criterion_id": "complete",
             "passed": false,
-            "reason": "四條僅重複兒子帶回心臟照片，漏了受訓的眼睛應能辨認證據，以及耶穌自知是神的解經結論。"
+            "reason": "只剩生活故事標籤，未保存受訓才能看出證據及耶穌自知是神的應用；須以二至四條實質要點替換。"
           }
         ],
         "id": "story-argument/counterexample"
@@ -603,14 +951,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留忽略「直到成全」的批評、譯法修正及舊約效用是否終止的疑問，未擅自裁決。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；誤讀、譯法與待解張力由三點及對照經文保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:18、太11:12–13及路16:16–17均有顯示；一般譯法修正放在要點，未冒充原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題呈現疑問方向，三點可理解，反方主張有明確歸屬。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "首點目前S0003，S0002「他們不太注意……直到成全」已完整表達，延後約16秒，僅記錄；疑問在S0012首次具體提出時顯示，沒有拖到S0013。"
+          },
+          {
             "criterion_id": "sync",
             "passed": true,
-            "reason": "S0010開始針對「眾先知和律法說預言，到約翰為止」展開解釋，疑問在此出現，沒有等到S0012才顯示完整問題。"
+            "reason": "S0012「舊約的效用就沒有了？」首次明確提出該疑問，現有錨點符合問題內容，未等後續重述。"
           },
           {
             "criterion_id": "direction",
             "passed": true,
-            "reason": "以「是否指舊約效用終止？」保留待解疑問，並呈現「直到成全」的條件，沒有裁定舊約完全無效。"
+            "reason": "以「是否表示」保留待解問題，未寫成舊約已完全無效的結論。"
           }
         ],
         "id": "law-question-early-anchor/generated"
@@ -618,9 +991,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "原文S0012問「舊約的效用就沒有了？」尚未回答，四點卻斷言「舊約律法已經完全無效」。應改成待解疑問，並恢復忽略「直到成全」及譯法修正。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉S0002–S0003的限制語、S0008修正譯法及S0012疑問。可整體換為三點，分別綁S0002、S0008、S0012。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "漏掉S0001–S0002實際引用的太5:18，應在S0001加入；現有太11:12–13及路16:16–17保留。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四點重複未成立的結論，既無法跟上經文對照，也掩蓋原文的疑問方向；須替換為誤讀、修正譯法及問題。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "四點的結論在本範圍從未講出，沒有可用的答案錨點；不能藉移動句號修正，須改寫內容並按S0002、S0008、S0012定時。"
+          },
+          {
             "criterion_id": "direction",
             "passed": false,
-            "reason": "把S0012「舊約的效用就沒有了？」的疑問改成反覆斷言「舊約律法已經完全無效」，將待解張力誤寫為既定結論。"
+            "reason": "把尚待解釋的經文張力改成「完全無效」的裁定，應恢復「到約翰為止，是否表示舊約效用終止？」。"
           }
         ],
         "id": "law-question-early-anchor/counterexample"
@@ -628,14 +1026,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "飲食限制、彼得稱主卻不做及不再區分潔淨的解釋均忠於原文。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；神所潔淨不可視為不潔由徒10:15保存，摩西飲食律解釋及正面處理問題的勸告也都有。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "可7:18–19及徒10:13–15均列出，彼得、聲音及耶穌的話沒有混淆；沒有適用原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點各有作用，標題涵蓋飲食律法與彼得異象。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "彼得稱主卻不做綁S0015，不再按律法區分綁S0020。末點目前S0027，S0026「不要說這些問題在哪裡我就不管」已表達同義，延後約5秒，僅記錄。"
+          },
+          {
             "criterion_id": "sync",
             "passed": true,
-            "reason": "S0010呈現彼得稱主卻拒絕的問題，S0019才顯示「神所潔淨」經文，S0020再呈現不再區分食物的解釋，沒有在異象鋪陳時提前顯示結論。"
+            "reason": "異象中的反應與最後解釋分開定時，徒10:15在S0019出現，結論在S0020出現。"
           },
           {
             "criterion_id": "complete",
             "passed": true,
-            "reason": "使徒行傳10:15的經文保留神所潔淨不可視為不潔，S0020要點保留不再按摩西律法區分潔淨與不潔淨食物的解釋。"
+            "reason": "徒10:15保留神所潔淨不可視為不潔，第三點保存不再按摩西律法區分食物，無須重複增點。"
           }
         ],
         "id": "peter-conclusion-not-early/generated"
@@ -643,9 +1066,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各點的實質意思均在後續原文出現，沒有新增結論；缺陷主要是提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；飲食限制、彼得反應、神所潔淨及必須處理問題均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "可7:18–19與徒10:13–15均列出，沒有錯誤原文短註；徒10各節的提前另列出現時間問題。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點內容可理解，人物歸屬清楚，標題涵蓋主要主題。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：四點全綁S0001；第二點應S0015「承認祂是主，可是主叫他做的事他不做」（提前約103秒），第三點應S0020「不要再遵守摩西律法……分潔淨跟不潔淨」（約132秒），第四點應S0026「不要說這些問題在哪裡我就不管」（約157秒）。第一點應S0004，約29秒，僅記錄。徒10:14、15也應分別綁S0012、S0019，不能全在S0009顯示。"
+          },
+          {
             "criterion_id": "sync",
             "passed": false,
-            "reason": "所有要點都綁S0001，彼得異象及結論嚴重提前；稱主卻不肯做應在S0010引入，「神所潔淨」應在S0019出現，不再區分食物的解釋應在S0020，面對問題的勸告應在S0023。"
+            "reason": "最後解釋在尚未開始彼得異象時就顯示；第三點須由S0001移至S0020，與S0019的「神所潔淨」引文分開同步。"
           }
         ],
         "id": "peter-conclusion-not-early/counterexample"
@@ -653,14 +1101,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "明列反方疑問並否定，保存兩律法重疊及同一位神為人益處提出要求的理由。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；十誡歸屬、反方問題、禁止惡行及基督律法的結論與原因均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本段沒有實讀經文或原文解說；禁令例舉不必另補整段經文。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點直接呈現問答，反方有標示，標題涵蓋不守摩西律法仍有規範的論旨。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "第三點合併否定、重疊與具體禁令，須等S0017才完整成立；第四點加入同一位神的理由，綁S0021適當。"
+          },
+          {
             "criterion_id": "qa",
             "passed": true,
-            "reason": "以「有人反問」保留姦淫、殺人、拜偶像的反方疑問；接著以「仍須守基督律法」及兩律法重疊回答，意思上否定可以任意犯罪，並保留同一位神為人益處的理由。"
+            "reason": "同張保留「可以姦淫、殺人、拜偶像？」及「不可以」，並以兩律法重疊回答。"
           },
           {
             "criterion_id": "voice",
             "passed": true,
-            "reason": "自己的判斷直接寫成不在摩西律法底下、仍須守基督律法；反方則明確標為「有人反問」。"
+            "reason": "判斷直接寫出，反方則用「有人追問」區分，無教授轉述框架。"
           }
         ],
         "id": "question-and-answer/generated"
@@ -668,9 +1141,34 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "四點把S0006的反方疑問寫成允許，直接違反S0007「你錯了」及S0017的禁令；須改為反方問題與否定回答。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉十誡屬摩西律法、兩律法重疊、仍禁惡行及同一位神的理由。應整體替換為四條完整問答與理由。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本段沒有須顯示的實讀經文或原文解說，空陣列適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四條完全重複，且刪掉反方歸屬與問號，使觀眾誤認為教授允許惡行。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "「因此可以姦淫殺人」不是本段任何時間成立的教授結論，無可用答案錨點；應在S0006顯示反方問題，再於實際回答及理由處顯示否定。"
+          },
+          {
             "criterion_id": "qa",
             "passed": false,
-            "reason": "把反方提問改成「因此可以姦淫殺人」的允許，與S0007的否定回答相反，並漏了基督律法與摩西律法重疊的理由。"
+            "reason": "把疑問當允許且漏了否定回答，須恢復「有人追問：所以可以姦淫、殺人？」與「不可以；基督律法與摩西律法有重疊」。"
           }
         ],
         "id": "question-and-answer/counterexample"
@@ -678,14 +1176,39 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "工程師的誤解、釐清後釋放、同事信主及牧師立志都有原文支持，沒有捏造本段未交代的具體釋經答案。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；故事的誤解、證據帶來釋放、喜樂影響同事及牧師學習的應用均保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "S0007近乎逐字引用太5:28，已同步列出；本段沒有原文文法短註依據。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點保留故事人物與牧師的立志，標題涵蓋釐清經文帶來的結果。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "誤解綁S0009、釋放綁S0016、同事信主綁S0022及牧師立志綁S0025，皆待內容完整講出。"
+          },
+          {
             "criterion_id": "attribution",
             "passed": true,
-            "reason": "釐清經文使工程師得釋放的摘要沒有另指錯誤說話者；末條明寫「牧師體會」並決心學習，保留S0024–S0025感言的歸屬，沒有改成教授自評。"
+            "reason": "未把牧師感言變成教授自評；「牧師立志」明確標示S0025的說話者，釐清經文的摘要也未聲稱教授直接去向工程師解釋。"
           },
           {
             "criterion_id": "sync",
             "passed": true,
-            "reason": "沒有在S0001介紹學生教會時顯示閉眼走路的細節；工程師誤解從S0005引入秘書事件時出現，後續釐清、見證與牧師感言也依講述順序呈現。"
+            "reason": "沒有在學生教會的介紹句提前顯示閉眼走路等後續情節，首點等到S0009的動機解釋。"
           }
         ],
         "id": "speaker-in-testimony/generated"
@@ -693,25 +1216,1325 @@
       {
         "checks": [
           {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "「我的教導已經解決所有人的問題」原文未說，擴大為所有人並冒充教授自評；須改為工程師釋放及牧師回來的具體感言。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉工程師誤解、教授向牧師解釋、牧師轉告、喜樂帶同事信主及牧師立志。可用四點保存誤解、釋放、同事信主與牧師應用。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0007引用時列出，沒有錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四次重複無原文依據的自評，既混淆歸屬也無法跟上故事進展，須整體替換。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "「解決所有人的問題」從未在本範圍成立，四個錨點均無依據；應改寫後分別依S0009、S0016、S0022、S0025定時。"
+          },
+          {
             "criterion_id": "attribution",
             "passed": false,
-            "reason": "「我的教導已經解決所有人的問題」冒充教授直接自評，原文只是牧師回來表示講清聖經能幫助人；也把個案成效擴大為解決所有人的問題。"
+            "reason": "S0024是牧師對教授的感言，S0025是牧師的立志，不能寫為教授「我的教導」的普遍自評。"
           }
         ],
         "id": "speaker-in-testimony/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "方法與溫柔包含受教的定義均有原文支持，保留「包含」而未強化為排他定義。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；問題、不可讀入己見、從上下文查字義及實質定義均保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "雅1:21在首次讀出時顯示，同張不重複列出；teachable是英文釋義，inline_notes留空正確。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點把問題、方法與答案分清楚，標題涵蓋上下文與溫柔的理解。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "問題在S0003出現，定義準確綁S0010，沒有借用讀經或提問句作答案錨點。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "含虛心、願意領教的定義綁S0010，符合不得提前且S0011時須已有定義的精確條件。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "已保存從前後文查關鍵字、不要讀入己見及溫柔的實質定義。"
+          }
+        ],
+        "id": "gold-teachable-question-before-answer/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "兩點的實質意思均有原文支持，問題在於把後面的定義提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；上下文方法、不可讀入己見及溫柔定義都已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "雅1:21已列且未重複，沒有把一般英文釋義建立為原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "兩條要點符合數量限制，內容清楚且標題涵蓋主題；同步缺陷另列。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點目前S0002，應移S0010；S0002只讀經，S0010才說「就是teachable，就是虛心、願意領教」，提前約77秒。第二點應待S0007內容完整，但約19秒的小差距僅記錄。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": false,
+            "reason": "含虛心、願意領教的答案在S0002出現，違反不得早於S0010的精確條件；首點須綁S0010，或拆成S0003的問題與S0010的答案。"
+          }
+        ],
+        "id": "gold-teachable-question-before-answer/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "先施恩後要求及摩西律法、基督律法的對比均有原文支持。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；施恩結構、出埃及例證及新舊約要求的對比均由四點和經文保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "出20:1–4涵蓋頒布引言及實讀的領出埃及、不可有別神與不可雕刻偶像，沒有加入未讀的後續誡命。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋新舊約的施恩與要求，四點簡明，沒有刪除答案來迴避時序。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "領出埃及綁S0003、兩要素綁S0007、摩西律法綁S0016、基督律法綁S0021，均待合併內容完整講出。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": true,
+            "reason": "完整辨認舊約要求為摩西律法的要點保留在S0016「就是摩西的律法」，未錯移至S0004。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "先施恩後要求、舊約摩西律法及新約基督律法的對比皆在。"
+          }
+        ],
+        "id": "revision-reject-early-covenant-answer/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各項內容後續都有原文支持，未顛倒新舊約對比；缺陷是完整答案提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；施恩、要求、摩西律法與基督律法均有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "出20:1–4涵蓋本段讀出的內容，沒有錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題範圍及四點內容清楚，沒有說話者混淆。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：第二點目前S0004，應移S0016；S0004僅說「提出要求」，S0016才辨認「就是摩西的律法」，提前約109秒。其餘S0001→S0003、S0005→S0007及S0017→S0021均未超一般30秒閾值。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": false,
+            "reason": "把「西乃山的要求，就是摩西律法」綁S0004，違反指定辨認句S0016。應保留完整要點並移S0016，不刪除答案。"
+          }
+        ],
+        "id": "revision-reject-early-covenant-answer/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留弟兄的誤解與痛苦、宣教士和翻譯的不同處置及神造男女的反駁，未把弟兄自認犯罪當成教授認定。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；誤認漂亮為姦淫、認罪循環、當時無助、拒譯及求視女子如木石的解答均保存，無須補人物背景。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0030由故事人物引用時顯示，沒有把一般釋經加入原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點保留不同人物的處置與結論，標題涵蓋痛苦及解答；故事鋪陳由原聲承擔。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "首點加入疑神不愛的內容，綁S0041適當；第二點加入當時無助，綁S0055；木石內容及神造男女分別綁S0059、S0061，未沿用故事開頭。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": true,
+            "reason": "沒有將認罪循環摘要綁S0001；合併點等到S0041的最後實質意思出現才顯示。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "四點已保存誤解、反覆認罪的痛苦、宣教士建議與拒譯、當時無助及神造男女的反駁，未為數量上限刪掉承重內容。"
+          }
+        ],
+        "id": "revision-merge-confession-story/generated"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "四點的意思可由本段原文支持，人物主張與反駁方向沒有顛倒；問題在於合併後提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；認罪痛苦、誤解、宣教士建議、拒譯與當時無助及神造男女的解答都有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0030引用時顯示，無錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋故事問題與解答，四點可理解，沒有把弟兄或宣教士的立場當成教授認可的判斷。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點S0001應移S0018「我犯姦淫、認罪……不久又來犯姦淫」，提前約132秒；第二點S0028應移S0034「我已經跟她犯姦淫了」，配合S0033覺得漂亮，提前約39秒；第三點S0043應移S0055「我也不知道怎麼幫助你」，提前約68秒。末點S0057→S0061約23秒，僅記錄。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": false,
+            "reason": "首點把反覆認罪仍痛苦綁在S0001宣布故事，當時尚未揭示認罪循環。完整摘要最早綁S0018，不可沿用合併頁的開頭錨點。"
+          }
+        ],
+        "id": "revision-merge-confession-story/counterexample"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "comparison-placement",
+            "passed": true,
+            "reason": "已採納決定正確落實：S0009–S0010的一般praus與本節ptochos比較保留在要點，短註只掛本節實際譯詞ptochos；沒有praus短註不構成缺漏。"
+          }
+        ],
+        "id": "calibration-comparison-in-point"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "actual-original",
+            "passed": false,
+            "reason": "S0001張新增短註把praus掛在賽61:1「謙卑的人」的original欄，違反S0010「在以賽亞六十一章……翻成ptochos」及已採納決定。應刪除這條praus短註，保留要點中的一般比較與實際ptochos短註。"
+          }
+        ],
+        "id": "calibration-wrong-original-restored"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "essential-story",
+            "passed": true,
+            "reason": "已核對論證層中S0034的反方角色，再依原文確認故事的類比作用。現有要點保留未受訓尚有情可原、受訓應能辨識及耶穌神性證據的應用；照片種類、病名與春假考試均非必要新增內容。"
+          }
+        ],
+        "id": "calibration-story-essential-not-every-detail"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "conclusion-timing",
+            "passed": false,
+            "reason": "出現時間：S0001張第二點目前S0008，應移S0014。S0008只介紹範圍並問「那個地方啊講的是什麼呢？」；論證層及S0014「藉著彌賽亞要帶給我們的祝福，讓我們知道彌賽亞的身份」才完成該推論，提前約42秒，超過30秒閾值。"
+          }
+        ],
+        "id": "calibration-introduction-is-not-conclusion"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "inline-note-scope",
+            "passed": true,
+            "reason": "S0010的teachable、虛心與願意領教是中文／英文釋義，已由要點保存；本段未講解希臘字詞或文法，inline_notes留空正確。"
+          }
+        ],
+        "id": "calibration-english-gloss-in-point"
+      },
+      {
+        "checks": [
+          {
+            "criterion_id": "inline-note-scope",
+            "passed": false,
+            "reason": "S0001張的雅1:21短註「虛心、願意領教」僅重複一般中文／英文釋義，沒有希臘原文或文法依據；original留空不能使其合規。應刪除此短註，保留S0010要點，inline_notes改為空陣列。"
+          }
+        ],
+        "id": "calibration-english-gloss-as-original-note"
+      }
+    ]
+  },
+  "report": {
+    "schema_version": "chapter-slide-generation-eval.v2",
+    "binding": {
+      "test_set_sha256": "ac918bccc7f8832ef6f8e0a4fb6cfeeebe9a0e651c8d52d8249d6dd39ec69727",
+      "generation_prompt_sha256": "2c13ab4d7c1b0de6c6252568b59c99d9449fb2eec350a8111ba71b8e17f97f62",
+      "review_prompt_sha256": "6e8ddd6c616ff1f317df2ca02fef45de5210c5af7ce5f7dfb99a08f97841d73a",
+      "judge_rules_sha256": "972eff5561b0faddfb63c3891c3fa916a1ca9bcd43cbcb7939e3cb724d6dff41",
+      "common_criteria_sha256": "4ed4e8500ae461955f1cafb33bc1a04d15e5c215c95e5e859db5ae363d3a1c48",
+      "revision_prompt_sha256": "2618c79c0c6610d45a9ee1bfdec4d3dd9be5475af57f6da049943c8a94cdb9f7"
+    },
+    "answer_sha256": "ac562733d472bde6e13cebb3bec4fed1c27c84460170b36303de1f0f65218a25",
+    "judgement_sha256": "62999f2c7f777159d87a7c96588f6d6c775e7f87b97868b42fe25d8476218052",
+    "status": "passed",
+    "generation_status": "passed",
+    "calibration_status": "passed",
+    "problems": [],
+    "results": [
+      {
+        "id": "gold-decalogue-direct-voice",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "依原文核對，保留不在舊約底下、反對仍守十誡及轉入基督律法的立場，未混淆反方。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；已保存十誡引向安息日的論證、否定回答及基督律法的結論。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "S0019引用守安息日的誡命，已列出埃及記20:8；沒有須補的原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四條要點直接呈現內容，反方有明確標示，標題涵蓋十誡與新約律法。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "合併的末點須等S0025「乃在基督的律法底下」才完整成立，現有錨點正確。"
+          },
+          {
+            "criterion_id": "voice",
+            "passed": true,
+            "reason": "「這個說法錯了」「十誡也不必遵守」直接呈現判斷，沒有教授轉述框架。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "「有人主張仍須守十誡」與「十誡也不必遵守」清楚區分。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "已保留仍守十誡會引來安息日追問，以及十誡也不必遵守的回答。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各項實質主張有原文支持，仍守十誡也明列為他人的立場；轉述口吻另列呈現缺陷。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉S0023–S0025從舊約轉入新約、基督律法的承重結論。可將末點改為「十誡也不必遵守；如今在基督律法底下」，綁S0025，維持四點。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "S0019引用「你要守安息日」，scriptures卻為空；應在S0019加入出埃及記20:8。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "S0001張的「他說錯了」「他回答」不符合原聲口吻。改為「有人主張禮儀律不守但仍守十誡；這個說法錯了」及直接呈現回答。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：第三點目前S0012，應移S0019；S0012只說「都是這麼講」，S0019才說「你要守安息日，你為什麼不守安息日」，提前約48秒。其餘小差距未超閾值。"
+          },
+          {
+            "criterion_id": "voice",
+            "passed": false,
+            "reason": "「他說錯了」「他回答：十誡也不必遵守」須改成直接判斷與回答，同時保留反方身分。"
+          }
+        ]
+      },
+      {
+        "id": "whole-topic-title",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "背景、藉祝福顯明身分及門徒生命回應均有原文支持。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "已核對論證層的literary_context、reasoning及literary_form；四點保存背景、兩大段關係及使命的概述與詳述。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "實讀的馬太福音5:1已列；其餘段落只是介紹範圍，無須額外顯示或建立原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題「登山寶訓背景與分段」涵蓋整張背景與整體結構，四點清楚。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "身分推論綁S0014，使命及回應合併點綁S0017，概述與詳述合併點綁S0021，均待實質內容完整講出。"
+          },
+          {
+            "criterion_id": "title",
+            "passed": true,
+            "reason": "標題涵蓋背景、彌賽亞身分與門徒使命的分段，未縮為第一段。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "第二、三點依序呈現先認識彌賽亞、再有門徒生命回應的關係。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "要點的背景、兩段內容及使命回應有原文支持，沒有新增神學答案。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "核對論證層後，兩張合計已保存背景、身分先於使命及概述轉詳述的結構，無承重漏項。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "馬太福音5:1已在S0002列出；其餘僅介紹段落，無須全文顯示。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "兩張都叫「登山寶訓第一段」不符各自範圍。S0001張講背景，改「登山寶訓的教導背景」；S0007張涵蓋兩大段及使命細分，改「登山寶訓的整體結構」。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：S0007張首點目前S0007，應移S0014；S0007僅說「可以分為兩大段」，S0014才說「藉著彌賽亞要帶給我們的祝福，讓我們知道彌賽亞的身份」，提前約50秒。另S0015→S0017、S0020→S0021及首張S0003→S0004均在一般閾值內。"
+          },
+          {
+            "criterion_id": "title",
+            "passed": false,
+            "reason": "S0007張不只講第一段，也講S0015的門徒使命及S0020–S0021的概述與細節，應改「登山寶訓的整體結構」；首張另改背景標題。"
+          }
+        ]
+      },
+      {
+        "id": "quoted-scripture",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留通常譯praus、此處譯ptochos的區別，結論仍是「很好證據」，未加強成證明。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；祝福來源、罕見譯詞、貧窮字義及由此提出的證據均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "列出的太5:3–5與賽61:1符合實讀內容；短註使用anawim及實際譯詞ptochos，未把praus掛為本節原文。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "三點清楚呈現用字比較與證據，標題涵蓋全段，沒有第三人稱報告口吻。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "來源在S0005、譯詞比較在S0010、證據結論在S0016出現；短註隨字源、字義及跨經文比較講解出現。"
+          },
+          {
+            "criterion_id": "scripture",
+            "passed": true,
+            "reason": "只列實讀太5:3–5與賽61:1，未因報讀範圍而加入太5:6、賽61:2或3–7。"
+          },
+          {
+            "criterion_id": "fidelity",
+            "passed": true,
+            "reason": "八福與以賽亞的連結及耶穌想到該段的判斷均取自原文，沒有額外神學推論。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "要點保留一般譯詞與本節譯詞的差別，也保留「很好的證據」的程度。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；來源、譯詞比較、貧窮字義與結論都有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "scriptures為空，漏掉實讀太5:3–5及賽61:1；應分別在S0001、S0008加入。也應將有原文依據的字源與ptochos字義建立合規短註，不能把praus當賽61:1實際用字。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點可理解，標題涵蓋八福與以賽亞的連結，沒有說話者混淆。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點目前S0001，應移S0005；S0001只讀八福，S0005才說「這是從以賽亞書六十一章一節底下的聖經來的」，提前約31秒。其他比較、字義與結論的提前均未超30秒，只記錄。"
+          },
+          {
+            "criterion_id": "scripture",
+            "passed": false,
+            "reason": "應加入太5:3–5（S0001）及賽61:1（S0008），不加入未讀的賽61:2–7。"
+          }
+        ]
+      },
+      {
+        "id": "greek-tense",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "現在就能體會天國及首尾現在、中間將來的判斷忠於原文。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；中文不顯時態、各節文法對照及祝福意義均由要點和短註共同保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:3–10逐節隨朗讀列出，短註的現在式與未來式對應正確，沒有一般釋經冒充原文文法。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "三點分別呈現翻譯限制、現在體會及整體對照，標題涵蓋全段。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "各短註綁實際解說時態的句子，整張首尾對照結論保留在S0022。"
+          },
+          {
+            "criterion_id": "grammar",
+            "passed": true,
+            "reason": "既保存現在式與將來式，也保存首尾祝福現在就有、中間在將來的意義。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "S0002引入時態問題，S0004起逐節顯示文法觀察，未提前揭示S0022的總結。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "「用詞有些不同」雖過於籠統，但沒有直接顛倒原文；具體缺漏另列完整性問題。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；四點皆未保存S0004–S0019的時態對照及S0022「第一個跟最後一個的祝福是現在就有，其他的都是將來才有」。應以三點呈現中文限制、現在體會天國及首尾與中間的祝福對照。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "漏掉承重的原文文法短註；應隨S0004、S0008、S0010、S0012、S0014、S0016、S0018、S0021標出相應現在式或未來式，並讓各節經文隨實讀出現。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四條完全重複「八福用詞有些不同」，聽眾無法看出現在與將來的對照；應替換為各有實質內容的二至四點。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：太5:3–10全部綁S0003，令5:10早於S0021約97秒出現；應逐節綁S0003、S0006、S0009、S0011、S0013、S0015、S0017、S0021。"
+          },
+          {
+            "criterion_id": "grammar",
+            "passed": false,
+            "reason": "只寫用詞不同，沒有現在式、將來式及祝福現在或將來享有的意義，須補回實質對照。"
+          }
+        ]
+      },
+      {
+        "id": "story-argument",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "受訓者的責任、辨識證據及耶穌明講神性均有原文支持，反方另以「有人說」標示。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "已核對論證層中S0034的opposed_position，再依原文確認故事的類比作用；訓練差別與解經應用均保存，不須補照片細節或故事開場。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本範圍沒有實際讀經或原文字詞解說，scriptures與inline_notes留空適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋故事類比與辨識經文證據的共同主題；故事鋪陳可由原聲承擔。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "四點皆待相應內容講出；受訓眼睛的概括在S0033清楚表達，未為填畫面提前揭示故事結論。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "故事導向受訓眼睛應能辨識證據，再應用於耶穌自知並宣告神性的判斷。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "醫學訓練的類比、他人的反對主張及解經結論清楚區分，未挪用兒子的話作神學結論。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "兒子帶回心臟照片確有原文支持；問題在於重複、時序及未呈現故事論旨。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "核對論證層的反方立場及原文後，四點全漏S0030–S0033訓練對比、S0034–S0038神性證據應用及S0039–S0040彌賽亞與神的區別。應將四點整體換成這些承重內容。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本範圍未讀出經文或講解原文，空陣列適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四次重複「兒子帶回心臟照片」無法配合標題說明受訓眼睛的作用；應改成訓練對比及經文證據的應用。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：照片內容最早到S0011「我看到一個心臟」才揭示；目前S0001提前約76秒，S0032、S0034、S0039則較S0011延後約145、172、214秒。應刪除重複點，改用各結論的實際錨點。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": false,
+            "reason": "只剩生活故事標籤，未保存受訓才能看出證據及耶穌自知是神的應用；須以二至四條實質要點替換。"
+          }
+        ]
+      },
+      {
+        "id": "law-question-early-anchor",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留忽略「直到成全」的批評、譯法修正及舊約效用是否終止的疑問，未擅自裁決。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；誤讀、譯法與待解張力由三點及對照經文保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:18、太11:12–13及路16:16–17均有顯示；一般譯法修正放在要點，未冒充原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題呈現疑問方向，三點可理解，反方主張有明確歸屬。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "首點目前S0003，S0002「他們不太注意……直到成全」已完整表達，延後約16秒，僅記錄；疑問在S0012首次具體提出時顯示，沒有拖到S0013。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "S0012「舊約的效用就沒有了？」首次明確提出該疑問，現有錨點符合問題內容，未等後續重述。"
+          },
+          {
+            "criterion_id": "direction",
+            "passed": true,
+            "reason": "以「是否表示」保留待解問題，未寫成舊約已完全無效的結論。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "原文S0012問「舊約的效用就沒有了？」尚未回答，四點卻斷言「舊約律法已經完全無效」。應改成待解疑問，並恢復忽略「直到成全」及譯法修正。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉S0002–S0003的限制語、S0008修正譯法及S0012疑問。可整體換為三點，分別綁S0002、S0008、S0012。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": false,
+            "reason": "漏掉S0001–S0002實際引用的太5:18，應在S0001加入；現有太11:12–13及路16:16–17保留。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四點重複未成立的結論，既無法跟上經文對照，也掩蓋原文的疑問方向；須替換為誤讀、修正譯法及問題。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "四點的結論在本範圍從未講出，沒有可用的答案錨點；不能藉移動句號修正，須改寫內容並按S0002、S0008、S0012定時。"
+          },
+          {
+            "criterion_id": "direction",
+            "passed": false,
+            "reason": "把尚待解釋的經文張力改成「完全無效」的裁定，應恢復「到約翰為止，是否表示舊約效用終止？」。"
+          }
+        ]
+      },
+      {
+        "id": "peter-conclusion-not-early",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "飲食限制、彼得稱主卻不做及不再區分潔淨的解釋均忠於原文。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；神所潔淨不可視為不潔由徒10:15保存，摩西飲食律解釋及正面處理問題的勸告也都有。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "可7:18–19及徒10:13–15均列出，彼得、聲音及耶穌的話沒有混淆；沒有適用原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點各有作用，標題涵蓋飲食律法與彼得異象。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "彼得稱主卻不做綁S0015，不再按律法區分綁S0020。末點目前S0027，S0026「不要說這些問題在哪裡我就不管」已表達同義，延後約5秒，僅記錄。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "異象中的反應與最後解釋分開定時，徒10:15在S0019出現，結論在S0020出現。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "徒10:15保留神所潔淨不可視為不潔，第三點保存不再按摩西律法區分食物，無須重複增點。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各點的實質意思均在後續原文出現，沒有新增結論；缺陷主要是提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；飲食限制、彼得反應、神所潔淨及必須處理問題均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "可7:18–19與徒10:13–15均列出，沒有錯誤原文短註；徒10各節的提前另列出現時間問題。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點內容可理解，人物歸屬清楚，標題涵蓋主要主題。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：四點全綁S0001；第二點應S0015「承認祂是主，可是主叫他做的事他不做」（提前約103秒），第三點應S0020「不要再遵守摩西律法……分潔淨跟不潔淨」（約132秒），第四點應S0026「不要說這些問題在哪裡我就不管」（約157秒）。第一點應S0004，約29秒，僅記錄。徒10:14、15也應分別綁S0012、S0019，不能全在S0009顯示。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": false,
+            "reason": "最後解釋在尚未開始彼得異象時就顯示；第三點須由S0001移至S0020，與S0019的「神所潔淨」引文分開同步。"
+          }
+        ]
+      },
+      {
+        "id": "question-and-answer",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "明列反方疑問並否定，保存兩律法重疊及同一位神為人益處提出要求的理由。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；十誡歸屬、反方問題、禁止惡行及基督律法的結論與原因均已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本段沒有實讀經文或原文解說；禁令例舉不必另補整段經文。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點直接呈現問答，反方有標示，標題涵蓋不守摩西律法仍有規範的論旨。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "第三點合併否定、重疊與具體禁令，須等S0017才完整成立；第四點加入同一位神的理由，綁S0021適當。"
+          },
+          {
+            "criterion_id": "qa",
+            "passed": true,
+            "reason": "同張保留「可以姦淫、殺人、拜偶像？」及「不可以」，並以兩律法重疊回答。"
+          },
+          {
+            "criterion_id": "voice",
+            "passed": true,
+            "reason": "判斷直接寫出，反方則用「有人追問」區分，無教授轉述框架。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "四點把S0006的反方疑問寫成允許，直接違反S0007「你錯了」及S0017的禁令；須改為反方問題與否定回答。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉十誡屬摩西律法、兩律法重疊、仍禁惡行及同一位神的理由。應整體替換為四條完整問答與理由。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "本段沒有須顯示的實讀經文或原文解說，空陣列適當。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四條完全重複，且刪掉反方歸屬與問號，使觀眾誤認為教授允許惡行。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "「因此可以姦淫殺人」不是本段任何時間成立的教授結論，無可用答案錨點；應在S0006顯示反方問題，再於實際回答及理由處顯示否定。"
+          },
+          {
+            "criterion_id": "qa",
+            "passed": false,
+            "reason": "把疑問當允許且漏了否定回答，須恢復「有人追問：所以可以姦淫、殺人？」與「不可以；基督律法與摩西律法有重疊」。"
+          }
+        ]
+      },
+      {
+        "id": "speaker-in-testimony",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "工程師的誤解、釐清後釋放、同事信主及牧師立志都有原文支持，沒有捏造本段未交代的具體釋經答案。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；故事的誤解、證據帶來釋放、喜樂影響同事及牧師學習的應用均保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "S0007近乎逐字引用太5:28，已同步列出；本段沒有原文文法短註依據。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點保留故事人物與牧師的立志，標題涵蓋釐清經文帶來的結果。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "誤解綁S0009、釋放綁S0016、同事信主綁S0022及牧師立志綁S0025，皆待內容完整講出。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": true,
+            "reason": "未把牧師感言變成教授自評；「牧師立志」明確標示S0025的說話者，釐清經文的摘要也未聲稱教授直接去向工程師解釋。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "沒有在學生教會的介紹句提前顯示閉眼走路等後續情節，首點等到S0009的動機解釋。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": false,
+            "reason": "「我的教導已經解決所有人的問題」原文未說，擴大為所有人並冒充教授自評；須改為工程師釋放及牧師回來的具體感言。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": false,
+            "reason": "未附論證層，依原文判斷；漏掉工程師誤解、教授向牧師解釋、牧師轉告、喜樂帶同事信主及牧師立志。可用四點保存誤解、釋放、同事信主與牧師應用。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0007引用時列出，沒有錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": false,
+            "reason": "四次重複無原文依據的自評，既混淆歸屬也無法跟上故事進展，須整體替換。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "「解決所有人的問題」從未在本範圍成立，四個錨點均無依據；應改寫後分別依S0009、S0016、S0022、S0025定時。"
+          },
+          {
+            "criterion_id": "attribution",
+            "passed": false,
+            "reason": "S0024是牧師對教授的感言，S0025是牧師的立志，不能寫為教授「我的教導」的普遍自評。"
+          }
+        ]
+      },
+      {
+        "id": "gold-teachable-question-before-answer",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "方法與溫柔包含受教的定義均有原文支持，保留「包含」而未強化為排他定義。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；問題、不可讀入己見、從上下文查字義及實質定義均保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "雅1:21在首次讀出時顯示，同張不重複列出；teachable是英文釋義，inline_notes留空正確。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點把問題、方法與答案分清楚，標題涵蓋上下文與溫柔的理解。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "問題在S0003出現，定義準確綁S0010，沒有借用讀經或提問句作答案錨點。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": true,
+            "reason": "含虛心、願意領教的定義綁S0010，符合不得提前且S0011時須已有定義的精確條件。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "已保存從前後文查關鍵字、不要讀入己見及溫柔的實質定義。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "兩點的實質意思均有原文支持，問題在於把後面的定義提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；上下文方法、不可讀入己見及溫柔定義都已保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "雅1:21已列且未重複，沒有把一般英文釋義建立為原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "兩條要點符合數量限制，內容清楚且標題涵蓋主題；同步缺陷另列。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點目前S0002，應移S0010；S0002只讀經，S0010才說「就是teachable，就是虛心、願意領教」，提前約77秒。第二點應待S0007內容完整，但約19秒的小差距僅記錄。"
+          },
+          {
+            "criterion_id": "sync",
+            "passed": false,
+            "reason": "含虛心、願意領教的答案在S0002出現，違反不得早於S0010的精確條件；首點須綁S0010，或拆成S0003的問題與S0010的答案。"
+          }
+        ]
+      },
+      {
+        "id": "revision-reject-early-covenant-answer",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "先施恩後要求及摩西律法、基督律法的對比均有原文支持。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；施恩結構、出埃及例證及新舊約要求的對比均由四點和經文保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "出20:1–4涵蓋頒布引言及實讀的領出埃及、不可有別神與不可雕刻偶像，沒有加入未讀的後續誡命。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋新舊約的施恩與要求，四點簡明，沒有刪除答案來迴避時序。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "領出埃及綁S0003、兩要素綁S0007、摩西律法綁S0016、基督律法綁S0021，均待合併內容完整講出。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": true,
+            "reason": "完整辨認舊約要求為摩西律法的要點保留在S0016「就是摩西的律法」，未錯移至S0004。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "先施恩後要求、舊約摩西律法及新約基督律法的對比皆在。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "各項內容後續都有原文支持，未顛倒新舊約對比；缺陷是完整答案提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；施恩、要求、摩西律法與基督律法均有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "出20:1–4涵蓋本段讀出的內容，沒有錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題範圍及四點內容清楚，沒有說話者混淆。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：第二點目前S0004，應移S0016；S0004僅說「提出要求」，S0016才辨認「就是摩西的律法」，提前約109秒。其餘S0001→S0003、S0005→S0007及S0017→S0021均未超一般30秒閾值。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": false,
+            "reason": "把「西乃山的要求，就是摩西律法」綁S0004，違反指定辨認句S0016。應保留完整要點並移S0016，不刪除答案。"
+          }
+        ]
+      },
+      {
+        "id": "revision-merge-confession-story",
+        "passed": true,
+        "mechanical": [],
+        "checks": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "保留弟兄的誤解與痛苦、宣教士和翻譯的不同處置及神造男女的反駁，未把弟兄自認犯罪當成教授認定。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；誤認漂亮為姦淫、認罪循環、當時無助、拒譯及求視女子如木石的解答均保存，無須補人物背景。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0030由故事人物引用時顯示，沒有把一般釋經加入原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "四點保留不同人物的處置與結論，標題涵蓋痛苦及解答；故事鋪陳由原聲承擔。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": true,
+            "reason": "首點加入疑神不愛的內容，綁S0041適當；第二點加入當時無助，綁S0055；木石內容及神造男女分別綁S0059、S0061，未沿用故事開頭。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": true,
+            "reason": "沒有將認罪循環摘要綁S0001；合併點等到S0041的最後實質意思出現才顯示。"
+          },
+          {
+            "criterion_id": "complete",
+            "passed": true,
+            "reason": "四點已保存誤解、反覆認罪的痛苦、宣教士建議與拒譯、當時無助及神造男女的反駁，未為數量上限刪掉承重內容。"
+          }
+        ],
+        "counterexample_rejected": true,
+        "counterexample": [
+          {
+            "criterion_id": "scope-faithfulness",
+            "passed": true,
+            "reason": "四點的意思可由本段原文支持，人物主張與反駁方向沒有顛倒；問題在於合併後提前。"
+          },
+          {
+            "criterion_id": "scope-coverage",
+            "passed": true,
+            "reason": "未附論證層，依原文判斷；認罪痛苦、誤解、宣教士建議、拒譯與當時無助及神造男女的解答都有保存。"
+          },
+          {
+            "criterion_id": "scope-scripture",
+            "passed": true,
+            "reason": "太5:28在S0030引用時顯示，無錯誤原文短註。"
+          },
+          {
+            "criterion_id": "scope-presentation",
+            "passed": true,
+            "reason": "標題涵蓋故事問題與解答，四點可理解，沒有把弟兄或宣教士的立場當成教授認可的判斷。"
+          },
+          {
+            "criterion_id": "scope-timing",
+            "passed": false,
+            "reason": "出現時間：首點S0001應移S0018「我犯姦淫、認罪……不久又來犯姦淫」，提前約132秒；第二點S0028應移S0034「我已經跟她犯姦淫了」，配合S0033覺得漂亮，提前約39秒；第三點S0043應移S0055「我也不知道怎麼幫助你」，提前約68秒。末點S0057→S0061約23秒，僅記錄。"
+          },
+          {
+            "criterion_id": "merged-timing",
+            "passed": false,
+            "reason": "首點把反覆認罪仍痛苦綁在S0001宣布故事，當時尚未揭示認罪循環。完整摘要最早綁S0018，不可沿用合併頁的開頭錨點。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-comparison-in-point",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "comparison-placement",
+            "passed": true,
+            "reason": "已採納決定正確落實：S0009–S0010的一般praus與本節ptochos比較保留在要點，短註只掛本節實際譯詞ptochos；沒有praus短註不構成缺漏。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-wrong-original-restored",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "actual-original",
+            "passed": false,
+            "reason": "S0001張新增短註把praus掛在賽61:1「謙卑的人」的original欄，違反S0010「在以賽亞六十一章……翻成ptochos」及已採納決定。應刪除這條praus短註，保留要點中的一般比較與實際ptochos短註。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-story-essential-not-every-detail",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "essential-story",
+            "passed": true,
+            "reason": "已核對論證層中S0034的反方角色，再依原文確認故事的類比作用。現有要點保留未受訓尚有情可原、受訓應能辨識及耶穌神性證據的應用；照片種類、病名與春假考試均非必要新增內容。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-introduction-is-not-conclusion",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "conclusion-timing",
+            "passed": false,
+            "reason": "出現時間：S0001張第二點目前S0008，應移S0014。S0008只介紹範圍並問「那個地方啊講的是什麼呢？」；論證層及S0014「藉著彌賽亞要帶給我們的祝福，讓我們知道彌賽亞的身份」才完成該推論，提前約42秒，超過30秒閾值。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-english-gloss-in-point",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "inline-note-scope",
+            "passed": true,
+            "reason": "S0010的teachable、虛心與願意領教是中文／英文釋義，已由要點保存；本段未講解希臘字詞或文法，inline_notes留空正確。"
+          }
+        ]
+      },
+      {
+        "id": "calibration-english-gloss-as-original-note",
+        "passed": true,
+        "checks": [
+          {
+            "criterion_id": "inline-note-scope",
+            "passed": false,
+            "reason": "S0001張的雅1:21短註「虛心、願意領教」僅重複一般中文／英文釋義，沒有希臘原文或文法依據；original留空不能使其合規。應刪除此短註，保留S0010要點，inline_notes改為空陣列。"
+          }
+        ]
       }
     ]
   },
   "provenance": {
     "model": "gpt-6.1-sol",
     "provider": "ChatGPT subscription",
-    "run": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261117/v4",
-    "generation_reused_from": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261117/v3",
-    "reuse_proof": {
-      "source": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261117/v3",
-      "reason": "Corrected non-golden test expectation: reported range is not quoted range; actual source only reads Isa61:1. Generation system and user input are byte-identical.",
-      "generation_user_sha256": "91f2a97e94072e39131a234fe47365889bf354a7b9328dd7865bf4bbbbd09603",
-      "generation_answer_sha256": "0b21bcaedd8cfa0c451f2fb436f5814401fb48207026b4ac25e25dec7530267c"
-    }
+    "reasoning_effort": "medium",
+    "run_directory": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261118/merge-timing-v6",
+    "all_three_actual_system_and_user_requests_verified": true,
+    "existing_cases_and_calibration_unchanged": true,
+    "previous_baseline": "generation_eval_baseline.pre-merge-timing.json",
+    "earlier_attempt": "/opt/homebrew/var/www/church/web/argument-layer-runs/slide-generation-regression-20261118/merge-timing-v5",
+    "earlier_attempt_result": "Merge timing passed; two generated inline-note regressions failed. Original verdict retained; generation policy clarified and fresh generation/revision/Eval run.",
+    "scope": "10 generation cases, 2 isolated revision cases, 12 known-bad candidates and 6 calibration candidates. Not a production revision or publication decision."
   }
 }
