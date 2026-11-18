@@ -187,6 +187,9 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
     selection = json.loads(selection_path.read_text())
     slides = json.loads(slides_path.read_text())
     review = json.loads((directory / f'{title}.review.json').read_text())
+    argument_version = (slides.get('claim_context') or {}).get('instance', {}).get('change_set_id')
+    if entry.get('changeset') and argument_version != entry['changeset']:
+        raise ValueError('Reviewed Unit slides use a different argument layer')
     if (selection['source_id'] != source or selection['lecture'] != title
             or selection['transcript_sha256'] != entry['source_sha256']
             or slides['decisions_sha256'] != exposition.file_sha256(selection_path)

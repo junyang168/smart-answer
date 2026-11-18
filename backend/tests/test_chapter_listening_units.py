@@ -186,3 +186,14 @@ def test_reviewed_slides_are_scoped_to_the_selected_unit():
     assert [section['sermons'][0]['stretches'] for section in original] == [
         section['sermons'][0]['stretches'] for section in projected]
     assert project(plan, recordings)['sections'] == original
+
+
+def test_reviewed_bundle_cannot_reuse_slides_from_another_argument_layer(tmp_path):
+    from backend.pipeline.chapter_listening_units import reviewed_unit_recording
+
+    for name, value in [('selection', {}), ('slides', {
+            'claim_context': {'instance': {'change_set_id': 'old'}}}), ('review', {})]:
+        (tmp_path / f'lecture.{name}.json').write_text(json.dumps(value))
+    with pytest.raises(ValueError, match='different argument layer'):
+        reviewed_unit_recording(tmp_path, {}, {
+            'lecture': 'lecture', 'source_id': 'source', 'changeset': 'new'}, {})
