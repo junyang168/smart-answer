@@ -1,6 +1,6 @@
 {
  "schema": "diagram-structure-key.v1",
- "authority": "Drafted by Claude 2026-11-18 from the current SVGs (A, B, D are his; C is editorial). A conversion passes only when every text matches exactly and every relation holds.",
+ "authority": "Drafted by Claude 2026-11-18 from the current SVGs (A, B, D are his; C is editorial). A conversion passes only when every text matches exactly and every relation holds. Texts are the SVG text elements as written (whitespace normalised); 2026-11-18 D and B were re-keyed to element strings after reading the markup.",
  "diagrams": [
   {
    "key": "A",
@@ -11,6 +11,8 @@
     "舊約",
     "新約",
     "1. 施恩",
+    "1. 施恩",
+    "2. 要求",
     "2. 要求",
     "（摩西律法）",
     "（基督的律法）",
@@ -61,7 +63,8 @@
    "texts": [
     "摩西的律法",
     "基督的律法",
-    "重疊"
+    "重",
+    "疊"
    ],
    "relations": [
     [
@@ -71,7 +74,15 @@
     ],
     [
      "inside_both",
-     "重疊",
+     "重",
+     [
+      "摩西的律法",
+      "基督的律法"
+     ]
+    ],
+    [
+     "inside_both",
+     "疊",
      [
       "摩西的律法",
       "基督的律法"
@@ -86,19 +97,21 @@
    "texts": [
     "登山寶訓",
     "論彌賽亞",
-    "太 5:3-12",
-    "應驗賽 61",
+    "太 5:3-12 應驗賽 61",
     "門徒的使命",
-    "太 5:13-16",
-    "綜合",
-    "太 5:17-7:29",
-    "闡明，細節"
+    "太 5:13-16 綜合",
+    "太 5:17-7:29 闡明，細節"
    ],
    "relations": [
     [
      "inside",
      "論彌賽亞",
      "登山寶訓"
+    ],
+    [
+     "inside",
+     "太 5:3-12 應驗賽 61",
+     "論彌賽亞"
     ],
     [
      "inside",
@@ -112,18 +125,18 @@
     ],
     [
      "inside",
-     "太 5:13-16",
+     "太 5:13-16 綜合",
      "門徒的使命"
     ],
     [
      "inside",
-     "太 5:17-7:29",
+     "太 5:17-7:29 闡明，細節",
      "門徒的使命"
     ],
     [
      "above",
-     "太 5:13-16",
-     "太 5:17-7:29"
+     "太 5:13-16 綜合",
+     "太 5:17-7:29 闡明，細節"
     ]
    ]
   }
