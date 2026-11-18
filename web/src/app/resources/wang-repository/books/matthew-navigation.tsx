@@ -18,7 +18,7 @@ export type BookChapter = {
 };
 
 type Talk = { title: string; href: string; source: string; scripture: string | null };
-type Series = { id: string; source: string; chapters?: number[]; items?: Talk[] };
+type Series = { id: string; source: string; chapters?: number[]; items?: Talk[]; available?: boolean };
 
 export type MatthewNavigation = {
   series: Series[];
@@ -38,7 +38,7 @@ const seriesDetails: Record<string, { title: string; format: string; description
     description: "按章講解經文，細看篇章結構、原文字義和經文之間的關聯。",
   },
   "matthew-2007": {
-    title: "2007 年《馬太福音 24–28 釋經》",
+    title: "《馬太福音 24–28 釋經》",
     format: "教授原聲",
     description: "從警醒等候主再來，到耶穌受難、空墳墓與復活。",
   },
@@ -88,7 +88,9 @@ export function MatthewBook({
   chapters: BookChapter[];
 }) {
   const selected = navigation.series.find((item) => (
-    item.id === "matthew-2007" ? view === item.id : Boolean(source) && item.source === source
+    item.available !== false && (
+      item.id === "matthew-2007" ? view === item.id : Boolean(source) && item.source === source
+    )
   ));
   const details = selected && seriesDetails[selected.id];
   const isHome = !source && !selected && view !== "chapters";
@@ -110,21 +112,22 @@ export function MatthewBook({
           <section aria-label="釋經系列" className="grid gap-4 sm:grid-cols-2">
             {navigation.series.map((series) => {
               const info = seriesDetails[series.id];
+              const available = series.available !== false;
               return (
-                <article key={series.id} className="flex flex-col items-start gap-3 rounded-2xl border border-stone-200 bg-white p-5">
-                  <h2 className="font-serif text-xl font-bold text-stone-950">{info.title}</h2>
-                  <p className="text-sm font-medium text-amber-900">{info.format}</p>
+                <article key={series.id} className={`flex flex-col items-start gap-3 rounded-2xl border border-stone-200 p-5 ${available ? "bg-white text-stone-950" : "bg-stone-100 text-stone-600"}`}>
+                  <h2 className="font-serif text-xl font-bold">{info.title}</h2>
+                  <p className={`text-sm font-medium ${available ? "text-amber-900" : "text-stone-600"}`}>{info.format}</p>
                   <p className="text-stone-700">{info.description}</p>
                   <p className="text-sm text-stone-600">
                     {series.chapters ? `目前可查第 ${chapterRanges(series.chapters)} 章` : `共 ${series.items?.length} 講`}
                   </p>
-                  <Link
+                  {available ? <Link
                     href={series.chapters ? `${path}?source=${encodeURIComponent(series.source)}` : `${path}?view=${series.id}`}
                     aria-label={`${info.title}，${series.chapters ? "查看章節" : "查看講次"}`}
                     className={`${action} mt-auto`}
                   >
                     {series.chapters ? "查看章節" : "查看講次"}
-                  </Link>
+                  </Link> : <p className="mt-auto text-sm font-semibold">整理校對中</p>}
                 </article>
               );
             })}

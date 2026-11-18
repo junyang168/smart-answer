@@ -31,7 +31,17 @@ async function evaluate(browser, viewport) {
     }
 
     await matthew.click();
-    await page.getByRole("region", { name: "釋經系列" }).waitFor();
+    const series = page.getByRole("region", { name: "釋經系列" });
+    const retreat = series.getByRole("article").filter({
+      has: page.getByRole("heading", { name: "《馬太福音 24–28 釋經》", exact: true }),
+    });
+    await retreat.getByText("整理校對中", { exact: true }).waitFor();
+    assert.equal(await retreat.getByRole("link").count(), 0);
+    const oldSeries = new URL(page.url());
+    oldSeries.searchParams.set("view", "matthew-2007");
+    await page.goto(oldSeries.href);
+    await retreat.getByText("整理校對中", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "查看講次", exact: true }).count(), 0);
     const filtered = new URL(url);
     filtered.searchParams.set("source", notes);
     await page.goto(filtered.href);

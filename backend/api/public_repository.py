@@ -210,7 +210,10 @@ def _matthew_navigation(materials: list[dict[str, Any]], chapters: list[dict[str
         ]
         if members:
             members.sort(key=lambda item: (item["series_order"] or float("inf"), item["date"] or "", item["id"]))
-            output.append({"id": key, "source": source, "items": [public_talk(item) for item in members]})
+            group = {"id": key, "source": source, "items": [public_talk(item) for item in members]}
+            if key == "matthew-2007":
+                group["available"] = False  # No reviewed PPT release for this series yet.
+            output.append(group)
             grouped.update(item["id"] for item in members)
     talks = sorted(
         (item for item in materials if item["kind"] == "sermon" and item["id"] not in grouped

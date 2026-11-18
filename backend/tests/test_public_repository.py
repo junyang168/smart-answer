@@ -127,6 +127,7 @@ def test_matthew_navigation_distinguishes_series_from_recording_sources(monkeypa
     ny_series, notes_series, retreat = navigation["series"]
     assert ny_series["chapters"] == [5, 26]
     assert notes_series["chapters"] == [5, 17]
+    assert retreat["available"] is False
     assert [lecture["title"] for lecture in retreat["items"]] == [
         "retreat-1", "retreat-2", "retreat-3", "retreat-4",
     ]
