@@ -54,7 +54,7 @@ function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) 
 }
 
 type SlideDiagram = {
-  appearances: number[];
+  at: number;
   title: string;
   origin: string;
   kind: "professor" | "editorial";
@@ -72,7 +72,7 @@ export type ChapterSlideData = {
   overview?: boolean;
   verses: string[];
   inline_notes?: InlineNote[];
-  diagrams?: SlideDiagram[];
+  diagram?: SlideDiagram;
   scriptures: { at: number; scripture: string; label: string }[];
 };
 
@@ -260,15 +260,9 @@ export default function ChapterSlide({
   /** 聆聽模式裡投影片佔滿左邊，不要最小高度。 */
   className?: string;
 }) {
-  let currentDiagram: SlideDiagram | undefined;
-  let lastAppearance = -Infinity;
-  for (const diagram of slide.diagrams ?? []) {
-    for (const time of diagram.appearances) {
-      if (time < clipStart || time >= clipEnd || time > seconds || time <= lastAppearance) continue;
-      currentDiagram = diagram;
-      lastAppearance = time;
-    }
-  }
+  const diagram = slide.diagram;
+  const currentDiagram = diagram && clipStart <= diagram.at && diagram.at < clipEnd && diagram.at <= seconds
+    ? diagram : undefined;
   // The speech anchor stays exact while points get a short reading lead.
   const points = slide.points.filter((item) => shouldShowSlideItem(item.at, seconds, clipEnd));
   const activePoint = slide.overview ? undefined : points.filter((item) => item.at <= seconds).at(-1);
@@ -308,9 +302,7 @@ export default function ChapterSlide({
             </ol>
           )}
         </header>
-        {currentDiagram && <Diagram key={JSON.stringify([
-          currentDiagram.sha256, currentDiagram.kind, currentDiagram.origin,
-        ])} diagram={currentDiagram} />}
+        {currentDiagram && <Diagram key={currentDiagram.sha256} diagram={currentDiagram} />}
       </div>
       {shown.length > 0 && (
         <div className="flex flex-col gap-3">

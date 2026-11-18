@@ -9,18 +9,22 @@ const section = "mat-5-1-12";
 const point = "先講彌賽亞的身份，再講門徒的使命";
 const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="850" height="500"><rect width="850" height="500" fill="white"/></svg>';
 const image_src = "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
-const diagram = (key, kind, title, origin, appearances) => ({
-  kind, title, origin, appearances, image_src, sha256: key.repeat(64),
+const diagram = (key, kind, title, origin, at) => ({
+  kind, title, origin, at, image_src, sha256: key.repeat(64),
 });
-const professor = diagram("d", "professor", "登山寶訓（論彌賽亞／門徒的使命）", "教授母本講義", [20, 40]);
-const editorial = diagram("c", "editorial", "登山寶訓的文學結構", "釋經筆記整理", [50]);
+const professor = diagram("d", "professor", "登山寶訓（論彌賽亞／門徒的使命）", "教授母本講義", 20);
+const editorial = diagram("c", "editorial", "登山寶訓的文學結構", "釋經筆記整理", 50);
 
 const recording = {
   source_id: "lecture-1", transcript_id: "lecture-1", title: "第一講", media_kind: "audio",
   media_url: "/test-listening-diagrams.wav", media_duration: 65, seconds: 45,
   stretches: [{ start: 10, end: 30 }, { start: 35, end: 60 }],
-  slides: [{ at: 10, seconds: 50, title: "登山寶訓的結構", points: [{ at: 20, text: point }],
-    scriptures: [], verses: [], diagrams: [professor, editorial] }],
+  slides: [
+    { at: 10, seconds: 25, title: "登山寶訓的結構", points: [{ at: 20, text: point }],
+      scriptures: [], verses: [], diagram: professor },
+    { at: 35, seconds: 25, title: "整理登山寶訓的結構", points: [{ at: 50, text: point }],
+      scriptures: [], verses: [], diagram: editorial },
+  ],
   transcript: [{ at: 10, end: 30, text: "第一個片段。" }, { at: 35, end: 60, text: "第二個片段。" }],
   judgements: [], spoken: [], readings: [], original_language_events: [],
 };
@@ -67,8 +71,6 @@ async function evaluate(browser, viewport) {
 
     await open(38);
     assert.equal(await figure.count(), 0, "An image from the previous clip must disappear");
-    await open(41);
-    await figure.getByText("教授的圖", { exact: true }).waitFor();
     await open(51);
     await figure.getByText("整理", { exact: true }).waitFor();
     assert.equal(await figure.count(), 1, "The editorial image replaces the previous image");
