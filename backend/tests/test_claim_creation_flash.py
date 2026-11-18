@@ -740,3 +740,8 @@ def test_only_a_named_short_answer_to_a_question_may_lack_evidence():
     d.validate_response(r,_transcript(),answer_only_claims=['CL001'])
     with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):
         d.validate_response(r,_transcript())  # not named by the step check: still refused
+
+
+def test_prompts_say_a_quoted_slide_line_is_not_his_words():
+    from backend.pipeline import claim_creation_flash as c
+    assert '不能作conclusion_anchor' in c.CLAIMS and '投影片文字' in c.STEPS

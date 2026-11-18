@@ -133,7 +133,8 @@ CLAIMS = RULES + (
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
     '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用，但只追加範圍，不掛到本組蓋子下面；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
-    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。')
+    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。'
+    '以「>」開頭的行是投影片或引用的文字：是和合本經文時，是他念出的經文；不是經文時，不是他說的話，只用來理解上下文，不能作conclusion_anchor的逐字引文，要引他自己說出這一點的話。')
 MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
