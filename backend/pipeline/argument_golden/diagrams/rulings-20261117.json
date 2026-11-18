@@ -1,0 +1,56 @@
+{
+ "lecture1": {
+  "A1": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "A2": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "A3": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "B1": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  }
+ },
+ "lecture3": {
+  "A1": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "A2": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "A3": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  },
+  "B1": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: not in this lecture. No paragraph of his transcript holds the item's terms, and the lecture is not among the 19 sermons that use 宗主/附庸 or 重疊 with 基督的律法."
+  }
+ },
+ "lecture2": {
+  "A1": {
+   "verdict": "claim",
+   "reason": "Claude 2026-11-17: CL0002「舊約與新約都是神先施恩，再向蒙恩的子民提出為他們好處的要求」— same order, same subject."
+  },
+  "A2": {
+   "verdict": "claim",
+   "reason": "Claude 2026-11-17: CL0002「舊約向以色列提出的是摩西律法，新約向基督徒提出的是基督的律法」."
+  },
+  "A3": {
+   "verdict": "not_in_lecture",
+   "reason": "Claude 2026-11-17: his lecture 2 transcript has no 條文、字句、γράμμα or 一般原則; the contrast is from the 2019 Romans 3 sermon the diagram comes from."
+  },
+  "B1": {
+   "verdict": "claim",
+   "reason": "Claude 2026-11-17: CL0004「……使摩西律法與基督律法有重疊，包括不可拜偶像、偷竊、姦淫、殺人」; no record says the two laws do not overlap."
+  }
+ }
+}

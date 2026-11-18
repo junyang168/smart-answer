@@ -1,0 +1,29 @@
+{
+ "schema": "diagram-gold-keys.v1",
+ "authority": "Owner 2026-11-17: 「yes. 你可以用这些 diagrams validate and calibrate argument layer, 那这些也是 gold key. 用来证明你真的懂了」. Items drafted by Claude from the diagrams' own text only; owner confirmed A1–A3 and B1 as written.",
+ "verdicts": {
+  "claim": "a Claim states it, the same way",
+  "evidence_only": "he said it in this lecture, but only as a step: no Claim of its own",
+  "not_in_lecture": "his transcript does not say it here: not an error",
+  "missed": "he said it here and no record holds it: error",
+  "contradicted": "a record says the opposite: error"
+ },
+ "keys": [
+  {"key": "A", "title": "宗主國與附庸國的約",
+   "diagram": {"path": "slides/2019-3-24 罗马书3章21至31节/captures/covenant_comparison_new.svg",
+               "sha256": "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321",
+               "text": ["神", "舊約", "1. 施恩", "2. 要求", "（摩西律法）", "細節條文", "字句 γράμμα", "新約", "1. 施恩", "2. 要求", "（基督的律法）", "一般原則", "聖靈 πνεῦμα"]},
+   "items": [
+    {"id": "A1", "statement": "舊約與新約都是約：神先施恩，然後提出要求。", "terms": [["施恩", "恩待"], ["要求"]]},
+    {"id": "A2", "statement": "舊約的要求是摩西律法；新約的要求是基督的律法。", "terms": [["摩西"], ["基督的律法", "基督律法"], ["要求"]]},
+    {"id": "A3", "statement": "摩西律法是細節條文、字句（γράμμα）；基督的律法是一般原則、聖靈（πνεῦμα）。", "terms": [["條文", "字句", "γράμμα", "一般原則", "一般的原則"]]}
+   ]},
+  {"key": "B", "title": "兩律法的重疊",
+   "diagram": {"path": "slides/2019-3-31 宗主国与附庸国的约/captures/law_relationship_new.svg",
+               "sha256": "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c",
+               "text": ["重", "疊", "摩西的律法", "基督的律法"]},
+   "items": [
+    {"id": "B1", "statement": "摩西的律法與基督的律法有重疊的部分。", "terms": [["重疊", "重叠"], ["摩西"], ["基督"]]}
+   ]}
+ ]
+}
