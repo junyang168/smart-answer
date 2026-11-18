@@ -565,15 +565,19 @@ INSTANCE_DEAD = ("superseded", "retired", "rejected")
 
 
 def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
-    """The live records one argument-layer ChangeSet wrote, by collection, and its metadata."""
+    """The live records one argument-layer ChangeSet wrote, by collection, and its metadata.
+
+    A record keeps belonging to the lecture that wrote it after a correction gives it a
+    later revision: this returns its current payload. A retired record is not returned."""
     row = conn.execute("SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s", (change_set_id,)).fetchone()
     if not row:
         raise ValueError(f"no ChangeSet {change_set_id} in the instance")
     records: dict = {}
     for collection, payload, status in conn.execute(
-            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.objects o
-               JOIN wang_knowledge.object_versions v USING (collection, object_id, revision)
-               WHERE v.change_set_id=%s ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
+            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.object_versions v
+               JOIN wang_knowledge.objects o USING (collection, object_id)
+               WHERE v.change_set_id=%s AND v.revision=1 AND o.retired_at IS NULL
+               ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
         if status not in INSTANCE_DEAD:
             records.setdefault(collection, []).append(payload)
     return records, row[0]
@@ -611,6 +615,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     for rel in records.get("knowledge_relations", []):
         if rel["relation_type"] == "supports":
             support.setdefault(rel["to_id"], []).append(rel["from_id"])
+    from backend.pipeline.argument_diagram_check import diagrams_for
+    diagrams = diagrams_for(change_set_id, Path(data_base_dir))
     groups, claims, excluded = [], [], []
     for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
         shorts = [s for s in shorts if s in claims_by_short]  # a Claim the owner ruled out is gone from the instance
@@ -655,9 +661,13 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
                 excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
                 continue
-            claims.append({"claim_id": cid, "group_id": gid, "statement": claim["statement"],
-                           "parent": None if cid == cover else cover,
-                           "stated": stated or "本堂未保留", "evidence_steps": evidence})
+            entry = {"claim_id": cid, "group_id": gid, "statement": claim["statement"],
+                     "parent": None if cid == cover else cover,
+                     "stated": stated or "本堂未保留", "evidence_steps": evidence}
+            if claim["claim_id"] in diagrams:
+                # His own diagram of this argument, from another sermon (owner 2026-11-17).
+                entry["diagrams"] = diagrams[claim["claim_id"]]
+            claims.append(entry)
     used = {c["group_id"] for c in claims}
     groups = [g for g in groups if g["group_id"] in used]
     context = {"schema_version": OUTLINE_SCHEMA, "passage": passage, "lecture": lecture,
