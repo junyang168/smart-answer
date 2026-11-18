@@ -9,21 +9,201 @@
   "contradicted": "a record says the opposite: error"
  },
  "keys": [
-  {"key": "A", "title": "宗主國與附庸國的約",
-   "diagram": {"path": "slides/2019-3-24 罗马书3章21至31节/captures/covenant_comparison_new.svg",
-               "sha256": "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321",
-               "text": ["神", "舊約", "1. 施恩", "2. 要求", "（摩西律法）", "細節條文", "字句 γράμμα", "新約", "1. 施恩", "2. 要求", "（基督的律法）", "一般原則", "聖靈 πνεῦμα"]},
+  {
+   "key": "A",
+   "title": "宗主國與附庸國的約",
+   "diagram": {
+    "path": "slides/2019-3-24 罗马书3章21至31节/captures/covenant_comparison_new.svg",
+    "sha256": "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321",
+    "text": [
+     "神",
+     "舊約",
+     "1. 施恩",
+     "2. 要求",
+     "（摩西律法）",
+     "細節條文",
+     "字句 γράμμα",
+     "新約",
+     "1. 施恩",
+     "2. 要求",
+     "（基督的律法）",
+     "一般原則",
+     "聖靈 πνεῦμα"
+    ]
+   },
    "items": [
-    {"id": "A1", "statement": "舊約與新約都是約：神先施恩，然後提出要求。", "terms": [["施恩", "恩待"], ["要求"]]},
-    {"id": "A2", "statement": "舊約的要求是摩西律法；新約的要求是基督的律法。", "terms": [["摩西"], ["基督的律法", "基督律法"], ["要求"]]},
-    {"id": "A3", "statement": "摩西律法是細節條文、字句（γράμμα）；基督的律法是一般原則、聖靈（πνεῦμα）。", "terms": [["條文", "字句", "γράμμα", "一般原則", "一般的原則"]]}
-   ]},
-  {"key": "B", "title": "兩律法的重疊",
-   "diagram": {"path": "slides/2019-3-31 宗主国与附庸国的约/captures/law_relationship_new.svg",
-               "sha256": "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c",
-               "text": ["重", "疊", "摩西的律法", "基督的律法"]},
+    {
+     "id": "A1",
+     "statement": "舊約與新約都是約：神先施恩，然後提出要求。",
+     "terms": [
+      [
+       "施恩",
+       "恩待"
+      ],
+      [
+       "要求"
+      ]
+     ]
+    },
+    {
+     "id": "A2",
+     "statement": "舊約的要求是摩西律法；新約的要求是基督的律法。",
+     "terms": [
+      [
+       "摩西"
+      ],
+      [
+       "基督的律法",
+       "基督律法"
+      ],
+      [
+       "要求"
+      ]
+     ]
+    },
+    {
+     "id": "A3",
+     "statement": "摩西律法是細節條文、字句（γράμμα）；基督的律法是一般原則、聖靈（πνεῦμα）。",
+     "terms": [
+      [
+       "條文",
+       "字句",
+       "γράμμα",
+       "一般原則",
+       "一般的原則"
+      ]
+     ]
+    }
+   ],
+   "arguments": [
+    {
+     "change_set_id": "argument-layer-SRC-nysc_2011_2_2-debf2ccdd72f-7b9aec956342",
+     "claim_id": "DK-184168a2dcb90158220f-CL0002",
+     "elements": [
+      {
+       "diagram_text": [
+        "神"
+       ],
+       "item": "A1",
+       "records": [
+        "DK-184168a2dcb90158220f-P01-ST08",
+        "DK-184168a2dcb90158220f-P01-ST18"
+       ]
+      },
+      {
+       "diagram_text": [
+        "舊約",
+        "1. 施恩",
+        "2. 要求",
+        "（摩西律法）"
+       ],
+       "item": "A1",
+       "records": [
+        "DK-184168a2dcb90158220f-P01-ST03",
+        "DK-184168a2dcb90158220f-P01-ST04",
+        "FR-a4d79a84bc3dd6284631ab6db2a1c557"
+       ]
+      },
+      {
+       "diagram_text": [
+        "新約",
+        "1. 施恩",
+        "2. 要求",
+        "（基督的律法）"
+       ],
+       "item": "A2",
+       "records": [
+        "DK-184168a2dcb90158220f-P01-ST05",
+        "DK-184168a2dcb90158220f-P01-ST07"
+       ]
+      },
+      {
+       "diagram_text": [
+        "細節條文",
+        "字句 γράμμα",
+        "一般原則",
+        "聖靈 πνεῦμα"
+       ],
+       "item": "A3",
+       "records": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "B",
+   "title": "兩律法的重疊",
+   "diagram": {
+    "path": "slides/2019-3-31 宗主国与附庸国的约/captures/law_relationship_new.svg",
+    "sha256": "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c",
+    "text": [
+     "重",
+     "疊",
+     "摩西的律法",
+     "基督的律法"
+    ]
+   },
    "items": [
-    {"id": "B1", "statement": "摩西的律法與基督的律法有重疊的部分。", "terms": [["重疊", "重叠"], ["摩西"], ["基督"]]}
-   ]}
- ]
+    {
+     "id": "B1",
+     "statement": "摩西的律法與基督的律法有重疊的部分。",
+     "terms": [
+      [
+       "重疊",
+       "重叠"
+      ],
+      [
+       "摩西"
+      ],
+      [
+       "基督"
+      ]
+     ]
+    }
+   ],
+   "arguments": [
+    {
+     "change_set_id": "argument-layer-SRC-nysc_2011_2_2-debf2ccdd72f-7b9aec956342",
+     "claim_id": "DK-184168a2dcb90158220f-CL0004",
+     "elements": [
+      {
+       "diagram_text": [
+        "重",
+        "疊"
+       ],
+       "item": "B1",
+       "records": [
+        "DK-184168a2dcb90158220f-P01-ST08",
+        "DK-184168a2dcb90158220f-P01-ST09",
+        "DK-184168a2dcb90158220f-P01-ST11",
+        "DK-184168a2dcb90158220f-P01-ST12",
+        "DK-184168a2dcb90158220f-P01-ST17",
+        "FR-77e94ba74735a6563febb0a530505baf"
+       ]
+      },
+      {
+       "diagram_text": [
+        "摩西的律法"
+       ],
+       "item": "B1",
+       "note": "the part outside the overlap: 獻祭、潔淨食物",
+       "records": [
+        "FR-bffe4c6bba14238226a0b982a55c99bc"
+       ]
+      },
+      {
+       "diagram_text": [
+        "基督的律法"
+       ],
+       "item": "B1",
+       "note": "the part outside the overlap",
+       "records": []
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "arguments_note": "Owner 2026-11-17: 「把 diagram 和整个我 approved 论证连接起来，生成 PPT 时正好用」. Each argument links one diagram to an approved Claim in the knowledge instance; each element names the diagram text and the records that carry it there (Evidence steps, or his own words as the Claim's SourceFragments). An element with no records is not taught in that lecture."
 }
