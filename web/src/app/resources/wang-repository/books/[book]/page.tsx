@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { SourceChips, type SourceCount } from "../navigation";
+import { MatthewBook, type BookChapter as Chapter, type MatthewNavigation } from "../matthew-navigation";
 
 /**
  * 一卷书的各章。只列有讲道的章（负责人 2026-11-04）；每章写这一章讲什么（有按章
@@ -11,16 +12,13 @@ import { SourceChips, type SourceCount } from "../navigation";
  * 不写各来源几篇——听的人不在乎（负责人 2026-11-05）。
  */
 
-type Chapter = {
-  chapter: number;
+type BookData = {
+  slug: string;
+  name: string;
   sources: SourceCount[];
-  page: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video" } | null;
-  /** 每個有按章頁面的來源一頁（教授釋經筆記另有 AI 朗讀的一頁）。 */
-  pages?: { kind: "chapter" | "passages"; source: string; title?: string; media?: "audio" | "video"; ai_voice?: boolean }[];
-  articles: { title: string; href: string }[];
+  chapters: Chapter[];
+  navigation?: MatthewNavigation;
 };
-
-type BookData = { slug: string; name: string; sources: SourceCount[]; chapters: Chapter[] };
 
 export default function BookPage() {
   return (
@@ -99,7 +97,10 @@ function BookChapters() {
           </p>
         )}
 
-        {data && (
+        {data?.navigation ? (
+          <MatthewBook path={pathname} source={source} view={params.get("view") ?? ""}
+            navigation={data.navigation} chapters={data.chapters} />
+        ) : data && (
           <>
             <header className="flex flex-col gap-2">
               <h1 className="font-serif text-4xl font-bold leading-tight text-stone-950">{data.name}</h1>

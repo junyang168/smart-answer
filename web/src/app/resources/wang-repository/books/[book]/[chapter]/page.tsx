@@ -54,6 +54,7 @@ function Chapter() {
     data?.sources.find((item) => item.page?.kind === "chapter") ??
     data?.sources[0];
 
+  const readingNotes = params.get("view") === "notes" && current?.items.some((item) => item.kind === "notes");
   const fixed = Boolean(wanted) && data?.sources.some((item) => item.name === wanted);
   const choose = (name: string) => router.replace(`${pathname}?source=${encodeURIComponent(name)}`, { scroll: false });
 
@@ -66,7 +67,7 @@ function Chapter() {
           </Link>
           <span aria-hidden="true">/</span>
           <Link
-            href={`/resources/wang-repository/books/${slug}${wanted ? `?source=${encodeURIComponent(wanted)}` : ""}`}
+            href={`/resources/wang-repository/books/${slug}${wanted ? `?source=${encodeURIComponent(wanted)}` : slug === "mat" ? "?view=chapters" : ""}`}
             className="text-amber-800 hover:text-amber-900"
           >
             {data?.name ?? ""}
@@ -107,9 +108,9 @@ function Chapter() {
                     }`}
                   >
                     {source.name}
-                    <span className="font-mono text-[13px] text-stone-500">
-                      {source.count} {source.unit}
-                    </span>
+                    {source.count > 0 && (
+                      <span className="font-mono text-[13px] text-stone-500">{source.count} {source.unit}</span>
+                    )}
                   </button>
                 );
               })}
@@ -125,7 +126,7 @@ function Chapter() {
               </Link>
             )}
 
-            {current.page?.kind === "chapter" ? (
+            {current.page?.kind === "chapter" && !readingNotes ? (
               <OriginalAudio
                 key={`${current.name}-${current.page.passage}`}
                 passage={current.page.passage}
@@ -153,7 +154,8 @@ function Chapter() {
                 )}
                 <section className="flex flex-col gap-2">
                   <h2 className="text-sm font-bold text-stone-600">
-                    {current.items[0]?.kind === "notes" ? "釋經筆記" : "講道"}（這一章還沒有逐節聆聽）
+                    {current.items[0]?.kind === "notes" ? "釋經筆記" : "講道"}
+                    {!readingNotes && "（這一章還沒有逐節聆聽）"}
                   </h2>
                   <ul className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
                     {current.items.map((item) => (

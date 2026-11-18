@@ -75,6 +75,9 @@ def items(catalog: dict[str, Any], coverage: dict[str, Any]) -> list[dict[str, A
             "id": transcript_id,
             "title": str(record.get("title") or transcript_id),
             "date": record.get("deliver_date"),
+            "series_id": record.get("series_id"),
+            "series_order": record.get("series_order"),
+            "scripture": (record.get("catalog_primary_passage") or {}).get("display"),
             "href": f"/resources/sermons/{quote(transcript_id, safe='')}",
             "chapters": chapters,
         })
@@ -182,6 +185,41 @@ def notes_pages() -> dict[tuple[str, int], dict[str, Any]]:
     return pages
 
 
+def _matthew_navigation(materials: list[dict[str, Any]], chapters: list[dict[str, Any]]) -> dict[str, Any]:
+    series = []
+    related = []
+    grouped = set()
+    for key, source in (("nysc", "紐約靈命進深會"), ("notes", NOTES)):
+        available = [row["chapter"] for row in chapters if any(s["name"] == source for s in row["sources"])]
+        if available:
+            series.append({"id": key, "source": source, "chapters": available})
+            grouped.update(item["id"] for item in materials if item["source"] == source)
+
+    def public_talk(item: dict[str, Any]) -> dict[str, Any]:
+        return {key: item[key] for key in ("title", "href", "source", "scripture")}
+
+    for key, series_id, source, output in (
+        ("matthew-2007", "马太福音 24-28 释经", "其他教會（名稱未記錄）", series),
+        ("dallas-matthew-24", "馬太福音24 章 釋經", "達拉斯聖道教會", related),
+    ):
+        members = [
+            item for item in materials if item["kind"] == "sermon" and (
+                item["series_id"] == series_id  # A recorded series remains intact across catalog chapters.
+                or (key == "dallas-matthew-24" and item["id"] == "S 200531")
+            ) and item["source"] == source
+        ]
+        if members:
+            members.sort(key=lambda item: (item["series_order"] or float("inf"), item["date"] or "", item["id"]))
+            output.append({"id": key, "source": source, "items": [public_talk(item) for item in members]})
+            grouped.update(item["id"] for item in members)
+    talks = sorted(
+        (item for item in materials if item["kind"] == "sermon" and item["id"] not in grouped
+         and any(book == "mat" for book, _ in item["chapters"])),
+        key=lambda item: (item["source"], item["title"]),
+    )
+    return {"series": series, "related": related, "talks": [public_talk(item) for item in talks]}
+
+
 def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dict[str, Any]]) -> dict[str, Any]:
     """第二层：这卷书有讲道的章，各来源各几篇，有什么页面，有没有综合文章。"""
 
@@ -192,28 +230,33 @@ def book_chapters(materials: list[dict[str, Any]], slug: str, articles: list[dic
         for book, chapter in item["chapters"]:
             if book == slug:
                 by_chapter.setdefault(chapter, []).append(item)
-    return {
-        "slug": slug,
-        "name": _NAME[slug],
-        # 一篇讲几章只算一次。
-        "sources": _count(list({(i["kind"], i["id"]): i for rows in by_chapter.values() for i in rows}.values())),
-        "chapters": [
-            {
-                "chapter": chapter,
-                "sources": _count(by_chapter[chapter]),
-                "page": {k: v for k, v in pages[(slug, chapter)].items() if k != "passages"}
-                if (slug, chapter) in pages else None,
-                # 别的来源也有按章页面时（教授釋經筆記的 AI 朗读），书卷页按选的来源找。
-                "pages": [
-                    {k: v for k, v in page.items() if k != "passages"}
-                    for page in (pages.get((slug, chapter)), notes.get((slug, chapter)))
-                    if page
-                ],
-                "articles": [a for a in articles if (slug, chapter) in a["chapters"]],
-            }
-            for chapter in sorted(by_chapter)
-        ],
-    }
+    numbers = set(by_chapter)
+    if slug == "mat":
+        numbers.update(number for book, number in notes if book == slug)
+        numbers.update(number for article in articles for book, number in article["chapters"] if book == slug)
+    rows = []
+    for number in sorted(numbers):
+        key = slug, number
+        sources = _count(by_chapter.get(number, []))
+        if key in notes and not any(source["name"] == NOTES for source in sources):
+            sources.append({"name": NOTES, "count": 0, "unit": "講"})
+        rows.append({
+            "chapter": number,
+            "sources": sources,
+            "page": {k: v for k, v in pages[key].items() if k != "passages"} if key in pages else None,
+            "pages": [
+                {k: v for k, v in page.items() if k != "passages"}
+                for page in (pages.get(key), notes.get(key)) if page
+            ],
+            "articles": [article for article in articles if key in article["chapters"]],
+        })
+    sources = _count(list({(i["kind"], i["id"]): i for rows in by_chapter.values() for i in rows}.values()))
+    if slug == "mat" and any(book == slug for book, _ in notes) and not any(s["name"] == NOTES for s in sources):
+        sources.append({"name": NOTES, "count": 0, "unit": "講"})
+    result = {"slug": slug, "name": _NAME[slug], "sources": sources, "chapters": rows}
+    if slug == "mat":
+        result["navigation"] = _matthew_navigation(materials, rows)
+    return result
 
 
 def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: list[dict[str, Any]]) -> dict[str, Any]:
@@ -237,6 +280,8 @@ def chapter(materials: list[dict[str, Any]], slug: str, number: int, articles: l
         elif entry["name"] == NOTES and (slug, number) in notes:
             source["page"] = notes[(slug, number)]
         sources.append(source)
+    if slug == "mat" and (slug, number) in notes and not any(source["name"] == NOTES for source in sources):
+        sources.append({"name": NOTES, "count": 0, "unit": "講", "items": [], "page": notes[(slug, number)]})
     if not sources:
         raise HTTPException(status_code=404, detail="這一章還沒有講道。")
     return {

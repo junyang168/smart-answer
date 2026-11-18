@@ -30,7 +30,8 @@ def test_sources_and_books_come_from_the_data_not_a_fixed_list():
     assert "1co" not in {b["slug"] for b in result["books"]}
 
 
-def test_a_book_lists_only_chapters_that_have_material():
+def test_a_book_lists_only_chapters_that_have_material(monkeypatch):
+    monkeypatch.setattr(repo, "notes_pages", lambda: {})
     materials = repo.items(CATALOG, COVERAGE)
     result = repo.book_chapters(materials, "mat", [])
     assert [c["chapter"] for c in result["chapters"]] == [5, 24]
@@ -65,7 +66,8 @@ def test_gtl_org_is_its_own_source():
     assert source["source_url"] == "http://www.gtl.org"
 
 
-def test_a_chapter_with_its_own_page_carries_that_pages_one_line_title():
+def test_a_chapter_with_its_own_page_carries_that_pages_one_line_title(monkeypatch):
+    monkeypatch.setattr(repo, "notes_pages", lambda: {})
     result = repo.book_chapters(repo.items(CATALOG, COVERAGE), "mat", [])
     five, twenty_four = result["chapters"]
     from backend.api.config import DATA_BASE_PATH
@@ -87,3 +89,66 @@ def test_a_chapter_page_is_labelled_by_its_recordings(tmp_path, monkeypatch):
     assert original_audio_index.media_file(data, "A") == (video / "A.mp4", "video")
     assert original_audio_index.media_file(data, "B") == (video / "B.mp3", "audio")
     assert original_audio_index.media_file(data, "C") is None
+
+
+def test_matthew_navigation_distinguishes_series_from_recording_sources(monkeypatch):
+    ny = "紐約靈命進深會"
+    dallas = "達拉斯聖道教會"
+    unknown = "其他教會（名稱未記錄）"
+    gtl = "主愛中華錄音事奉"
+
+    def sermon(key, source, scripture, *, series=None, order=None):
+        return {"transcript_id": key, "title": key, "source_organization": source,
+                "canonical_scriptures": [scripture], "series_id": series, "series_order": order,
+                "catalog_primary_passage": {"osis": scripture, "display": scripture}}
+
+    council = "马太福音 24-28 释经"
+    records = [
+        sermon("nysc-26", ny, "Matt.26.1"),
+        sermon("nysc-5", ny, "Matt.5.1"),
+        sermon("retreat-4", unknown, "Matt.28.20", series=council, order=4),
+        sermon("retreat-2", unknown, "Matt.27.45", series=council, order=2),
+        sermon("retreat-3", unknown, "Matt.28.11", series=council, order=3),
+        sermon("retreat-1", unknown, "Matt.24", series=council, order=1),
+        sermon("different-visit", unknown, "Matt.25"),
+        sermon("S 200503", dallas, "Matt.24", series="馬太福音24 章 釋經", order=2),
+        sermon("S 200531", dallas, "Matt.24.29"),
+        sermon("S 200426", dallas, "Matt.24", series="馬太福音24 章 釋經", order=1),
+        sermon("dallas-marriage", dallas, "Matt.19.3"),
+        sermon("canon", gtl, "Matt.22.14"),
+    ]
+    lecture = {"kind": "chapter", "source": repo.NOTES, "passage": "mat-17-1-27", "ai_voice": True}
+    monkeypatch.setattr(repo, "chapter_pages", lambda: {})
+    monkeypatch.setattr(repo, "notes_pages", lambda: {("mat", 17): lecture})
+    materials = repo.items({"records": records}, COVERAGE)
+    result = repo.book_chapters(materials, "mat", [])
+    navigation = result["navigation"]
+    assert [series["id"] for series in navigation["series"]] == ["nysc", "notes", "matthew-2007"]
+    ny_series, notes_series, retreat = navigation["series"]
+    assert ny_series["chapters"] == [5, 26]
+    assert notes_series["chapters"] == [5, 17]
+    assert [lecture["title"] for lecture in retreat["items"]] == [
+        "retreat-1", "retreat-2", "retreat-3", "retreat-4",
+    ]
+    assert retreat["items"][0]["scripture"] == "Matt.24"
+    assert retreat["items"][0]["href"] == "/resources/sermons/retreat-1"
+    assert [group["id"] for group in navigation["related"]] == ["dallas-matthew-24"]
+    assert [item["title"] for item in navigation["related"][0]["items"]] == [
+        "S 200426", "S 200503", "S 200531",
+    ]
+    assert {item["title"] for item in navigation["talks"]} == {"canon", "dallas-marriage", "different-visit"}
+    seventeen = next(row for row in result["chapters"] if row["chapter"] == 17)
+    assert seventeen["sources"][0]["name"] == repo.NOTES
+    assert seventeen["pages"] == [lecture]
+    assert repo.chapter(materials, "mat", 17, [])["sources"][0]["page"] == lecture
+    assert "navigation" not in repo.book_chapters(materials, "rom", [])
+
+
+def test_matthew_chapter_artifact_can_be_linked_without_a_catalog_record(monkeypatch):
+    monkeypatch.setattr(repo, "chapter_pages", lambda: {})
+    monkeypatch.setattr(repo, "notes_pages", lambda: {})
+    article = {"title": "編輯綜合", "href": "/article", "chapters": {("mat", 7)}}
+    result = repo.book_chapters(repo.items({}, COVERAGE), "mat", [article])
+    row = next(row for row in result["chapters"] if row["chapter"] == 7)
+    assert row["articles"] == [article]
+    assert row["sources"] == []
