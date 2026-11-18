@@ -698,3 +698,63 @@ def test_a_group_of_only_a_digression_needs_no_claim():
     result = {'steps': [], 'claim_text': [], 'other': [{'sentence_ids': ['S1#2'], 'why': '過場'}],
               'digressions': [{'kind': 'unsupported_comment', 'sentence_ids': ['S1#1'], 'why': '批評記者，沒有理由'}], 'not_claims': []}
     assert flash.check_steps(result, ['S1#1', 'S1#2'], []) == {}
+
+
+def test_a_test_run_picks_only_the_groups_that_own_the_named_paragraphs():
+    from backend.pipeline.claim_creation_flash import selected_groups
+    keys = ['S0001', 'S0002', 'S0003', 'S0004']
+    groups = [{'paragraph_ranges': [{'first': 'S0001', 'last': 'S0002'}]},
+              {'paragraph_ranges': [{'first': 'S0003', 'last': 'S0003'}]},
+              {'paragraph_ranges': [{'first': 'S0004', 'last': 'S0004'}]}]
+    assert selected_groups(groups, keys, ['S0002', 'S0003']) == {1, 2}
+    import pytest
+    with pytest.raises(ValueError, match='unknown paragraphs'):
+        selected_groups(groups, keys, ['S0009'])
+
+
+def test_grouping_prompt_keeps_a_heading_section_whole():
+    import inspect
+    from backend.pipeline import claim_creation_flash as c
+    text = inspect.getsource(c.run)
+    assert '不在一個小標題之內切開' in text and '小標題只是線索' not in text
+
+
+def test_a_short_answer_to_a_question_stands_on_his_own_words_without_a_step():
+    # 2017 （六）3 Q&A: 「挪亞之約是不是沒有條件？」 answered in one sentence, no reasons.
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '问题：挪亞之約是否沒有條件？', 'sentence_ids': ['S0020#001'], 'supports': ['CL0009']}],
+             'claim_text': [{'claim_id': 'CL0009', 'sentence_ids': ['S0020#002']}], 'other': [], 'digressions': []}
+    assert c.check_steps(steps, ['S0020#001', 'S0020#002'], ['CL0009'])
+    # Without his own words it is still refused: nothing would hold the answer.
+    steps['claim_text'] = []; steps['steps'][0]['sentence_ids'] = ['S0020#001', 'S0020#002']
+    with pytest.raises(ValueError, match='every Claim needs a step'):
+        c.check_steps(steps, ['S0020#001', 'S0020#002'], ['CL0009'])
+
+
+def test_only_a_named_short_answer_to_a_question_may_lack_evidence():
+    r=_response();r['claims'][0]['evidence_step_ids']=[];r['evidence_steps'][0]['produced_claim_ids']=[]
+    for q in r['questions']:q['answer_claim_ids']=[]
+    with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):
+        d.validate_response(r,_transcript(),answer_only_claims=['CL001'])  # no Question records it as the answer
+    r['questions'][0]['answer_claim_ids']=['CL001']
+    d.validate_response(r,_transcript(),answer_only_claims=['CL001'])
+    with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):
+        d.validate_response(r,_transcript())  # not named by the step check: still refused
+
+
+def test_prompts_say_a_quoted_slide_line_is_not_his_words():
+    from backend.pipeline import claim_creation_flash as c
+    assert '不能作conclusion_anchor' in c.CLAIMS and '投影片文字' in c.STEPS
+
+
+def test_a_sentence_id_with_the_wrong_paragraph_is_repaired_only_when_its_number_is_unambiguous():
+    from backend.pipeline import claim_creation_flash as c
+    ids = ['S0015#321', 'S0015#322', 'S0016#323']
+    reply = {'steps': [], 'other': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0015#321', 'S0016#322', 'S0016#323']}]}
+    assert c.repair_sentence_ids(reply, ids) == [{'written': 'S0016#322', 'sentence_id': 'S0015#322'}]
+    assert reply['claim_text'][0]['sentence_ids'] == ids
+    # already placed elsewhere, or a number that names no sentence: left for check_steps to refuse
+    twice = {'steps': [], 'other': [{'sentence_ids': ['S0015#322']}], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#322']}]}
+    assert c.repair_sentence_ids(twice, ids) == []
+    unknown = {'steps': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#999']}]}
+    assert c.repair_sentence_ids(unknown, ids) == []

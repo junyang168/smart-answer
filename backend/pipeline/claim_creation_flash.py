@@ -133,7 +133,8 @@ CLAIMS = RULES + (
     'support_hint指出不同於重述結論的實際支持位置。related_ranges完整包含結論、論據、'
     '限定、反方及必要問答，可不連續；只選提供的原文位置。'
     '相同判斷已在existing_claims中，填existing_claim_id並保留相同statement，追加本組範圍；只提到名字、不再講述的不沿用，離題後落回該點的那句結論要沿用，但只追加範圍，不掛到本組蓋子下面；本組另講出的新判斷另立Claim，掛在沿用的那條下面，但本組自己的主要結論仍是頂層，沿用的那條作它的前提；'
-    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。')
+    '新判斷existing_claim_id=null，ID由程式分配；沒有獨立判斷可輸出空candidates。'
+    '以「>」開頭的行是投影片或引用的文字：是和合本經文時，是他念出的經文；不是經文時，不是他說的話，只用來理解上下文，不能作conclusion_anchor的逐字引文，要引他自己說出這一點的話。')
 MATERIALS = RULES + (
     '唯一任務：用既有抽取欄位生成本組全部重要Evidence/Observation、Question、Position及逐句處理記錄。'
     'Claim候選範圍只是線索，不能忽略本組其餘原文；沒有Claim也須保存重要材料。'
@@ -471,6 +472,27 @@ def check_not_claims(result, claim_ids, own_ids):
     return set(gone)
 
 
+def repair_sentence_ids(result, sentence_ids):
+    """A sentence ID is its paragraph and a number unique in the lecture (S0015#322).
+    Lecture 6 G004: GPT wrote S0016#322 for S0015#322, the right number under the
+    next paragraph. An unknown ID whose number names exactly one sentence of this
+    group, not placed elsewhere in the reply, is that sentence; anything else is
+    left for check_steps to refuse. Returns the repairs, to be recorded."""
+    known=set(sentence_ids);by_number={}
+    for s in sentence_ids:by_number.setdefault(s.rsplit('#',1)[-1],[]).append(s)
+    rows=[r for part in ('steps','claim_text','other','digressions') for r in result.get(part,[])]
+    placed={s for r in rows for s in r['sentence_ids']}
+    repairs=[]
+    for r in rows:
+        for i,s in enumerate(r['sentence_ids']):
+            if s in known:continue
+            match=by_number.get(s.rsplit('#',1)[-1],[])
+            if len(match)==1 and match[0] not in placed:
+                r['sentence_ids'][i]=match[0];placed.add(match[0])
+                repairs.append({'written':s,'sentence_id':match[0]})
+    return repairs
+
+
 def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
     """Each sentence in exactly one place; supports name real Claims or steps;
     a sentence carrying scripture he cites belongs to an argument step."""
@@ -490,7 +512,15 @@ def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
     # The package rule: every Claim needs Evidence that supports it directly.
     # An open question names the Claims that answer it; that is not support for them.
     unsupported=set(claim_ids)-{c for r in result['steps'] if not is_question(r) for c in r['supports']}
+    # Owner 2026-11-17: in Q&A he often answers in a sentence and gives no argument.
+    # The Claim prompt already says to record such an answer as he gave it, without
+    # reasons; it needs his own words and a question it answers, not a made-up step.
+    answers={c for r in result['steps'] if is_question(r) for c in r['supports']}
+    stated={r['claim_id'] for r in result['claim_text'] if r['sentence_ids']}
+    short=(unsupported&answers&stated)
+    unsupported-=short
     if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
+    result['answer_only']=sorted(short)
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
         raise ValueError('a 題外話 needs sentences, a kind and a reason')
@@ -588,7 +618,15 @@ def build_step_records(steps, records, sentences, paragraphs):
     return out
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False):
+def selected_groups(groups, keys, only_paragraphs):
+    """Group numbers (1-based) that own any of the given paragraphs: a test runs only these."""
+    wanted = set(only_paragraphs)
+    unknown = wanted - set(keys)
+    if unknown: raise ValueError(f'unknown paragraphs: {sorted(unknown)}')
+    return {n for n, g in enumerate(groups, 1) if wanted & set(ranges(g['paragraph_ranges'], keys))}
+
+
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -629,7 +667,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             initial = sections.plan_sections(list(paragraphs.values()), headings=projection.headings)
             contract = {'name': VERSION+'_groups', 'strict': True, 'schema': SemanticGroups.model_json_schema()}
             request = {'identity': ports.identity['gpt'], 'system': RULES+
-                '唯一任務：依論證將全部原文分組，小標題只是線索。一組是一個主要結論及他為建立它所講的全部內容：'
+                '唯一任務：依論證將全部原文分組。小標題是編者按內容所分，是重要線索：不在一個小標題之內切開，除非他在那裡明顯轉向另一個問題；在小標題處分開、或跨小標題合併都可以。'
+                '分組界線只放在他轉向新問題的地方：開頭回指前文（如「你說這裡……」）、或接著講同一個對照或論證的段落，與前一段同組。一組是一個主要結論及他為建立它所講的全部內容：'
                 '一個論證跨幾個小標題就合為一組；只提出問題或預告要講什麼的段落，與回答它的段落同組；'
                 '插在別的論證中間、證明另一個結論的段落，歸它所證明的那組；兩處在證明同一結論就合為一組；'
                 '回答另一個問題、只用到別組已建立的結論的，另成一組；彼此不支持的主題分開。''與主題無關的生活經歷、閒談，歸它所在的那組，不另成組。'
@@ -648,11 +687,15 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if single_pass and len(groups)!=1:
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        # A test of one argument (e.g. against a diagram gold key) runs only the groups that own
+        # its paragraphs. Later groups then see no Claims of the skipped groups. No candidate is built.
+        chosen = selected_groups(groups, keys, only_paragraphs) if only_paragraphs else None
         listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
         response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
-        new_claims = {}; not_claims = []; claim_seq = 0
+        new_claims = {}; not_claims = []; claim_seq = 0; answer_only = set()
         for n, group in enumerate(groups, 1):
+            if chosen is not None and n not in chosen: continue
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
@@ -702,6 +745,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         # Bounded material tasks keep output manageable without another full review.
         material_ordinal=0;connections=[]
         for n, group in enumerate(groups,1):
+            if chosen is not None and n not in chosen: continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
             group_materials[gid]=[]
             batches=[owned] if grouped_package else [];batch=[];count=0
@@ -734,7 +778,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                         'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
                     # Only a Claim this group made and no other group reuses may be returned.
                     own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
+                    repairs=repair_sentence_ids(steps,[v.sentence_id for v in sentences])
+                    if repairs:
+                        e.save(root/gid/'steps'/'sentence-id-repairs.json',{'repairs':repairs,'model_calls':0,
+                            'rule':'unknown ID whose number names exactly one unplaced sentence of this group'})
                     check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own)
+                    answer_only.update(steps.pop('answer_only',[]))
                     gone={r['claim_id'] for r in steps.get('not_claims',[])}
                     for r in steps.get('not_claims',[]):
                         not_claims.append({**r,'group_id':gid,'statement':candidates.pop(r['claim_id'])['statement']})
@@ -804,6 +853,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 group_materials[gid].extend(r[IDS[col]] for col in COLLECTIONS[:4] for r in named[col])
                 for col in COLLECTIONS[:4]:response[col].extend(named[col])
                 response['sentence_audit'].extend(audits)
+        if chosen is not None:
+            partial={'version':VERSION,'status':'partial_test','groups':groups,'chosen_groups':sorted(chosen),
+                'only_paragraphs':sorted(only_paragraphs),'claim_candidates':candidates,'group_claim_ids':group_claims,
+                'not_claims':not_claims,'response':response,'claim_statements':claim_statements,'production_writes':0}
+            e.save(root/'partial-test-result.json',partial)
+            return partial
         for n, group in enumerate(groups,1):
             if grouped_package:continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
@@ -834,7 +889,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 if not ({edge['from_id'],edge['to_id']}&local):raise ValueError('connection is unrelated to its source group')
             connections.extend(result['connections'])
         additional=attach(response,connections)
-        d.validate_response(response,source,additional_relations=additional)
+        d.validate_response(response,source,additional_relations=additional,answer_only_claims=sorted(answer_only))
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,
@@ -880,12 +935,14 @@ def main():
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
+    parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
     client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first,
+               only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)

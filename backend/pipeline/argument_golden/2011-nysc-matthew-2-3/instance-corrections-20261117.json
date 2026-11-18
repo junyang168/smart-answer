@@ -1,0 +1,248 @@
+{
+ "schema": "argument-instance-corrections.v1",
+ "lecture_change_set_id": "argument-layer-SRC-nysc_2011_2_3-3dbfbb15c8a7-cf7f92d492bf",
+ "authority": "Owner 2026-11-17 「fix it then」: merge the 太13:17／路10:24 epithymeō–thelō comparison, cut in two by the section split (S0008|S0009), into one Observation. P01-ST05 keeps its own statement (it already states the whole comparison) and takes P02-ST07's passage; no new wording.",
+ "operations": [
+  {
+   "op": "update",
+   "collection": "observations",
+   "object_id": "DK-fafce4fae2a21a3cb3e5-P01-ST05",
+   "before_sha256": "1bd98e83a958b6bfd8f398c5aef4b70601be5d3673a408a3a4feea81c1b70acd",
+   "set": {
+    "source_fragment_ids": [
+     "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P02-ST07-01",
+     "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST05-01",
+     "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST05-02"
+    ],
+    "scripture_refs": [
+     "太13:17",
+     "路10:24"
+    ]
+   }
+  },
+  {
+   "op": "update",
+   "collection": "claims",
+   "object_id": "DK-fafce4fae2a21a3cb3e5-CL0001",
+   "before_sha256": "9cbd8afc413edd646e0eb30a10da25d859bbd552e21585ee0a9e198ff151df5d",
+   "set": {
+    "occurrences": [
+     {
+      "anchors": [
+       {
+        "stance": null,
+        "speaker": null,
+        "assertive": null,
+        "media_time": 3049.0,
+        "evidence_id": "DK-fafce4fae2a21a3cb3e5-P01-ST08",
+        "paragraph_key": "S0032",
+        "media_end_time": 3140,
+        "proposed_highlight": {
+         "text": "你看到一個女孩子，女孩子很漂亮，漂亮是漂亮，她的事，跟我沒有關係，她又不是我的太太，沒有犯罪。可是你決定說：「這個女孩子很漂亮，我今天晚上決定要跟她採取行動。」今天現在只有三點鐘，晚上都還沒有到，你決定要做，那一點，你已經犯罪了。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST08-01"
+       },
+       {
+        "stance": null,
+        "speaker": null,
+        "assertive": null,
+        "media_time": 3049.0,
+        "evidence_id": "DK-fafce4fae2a21a3cb3e5-P01-ST08",
+        "paragraph_key": "S0032",
+        "media_end_time": 3140,
+        "proposed_highlight": {
+         "text": "犯罪的很重要的意思是什麼？意志決定要做。不只是說你看到一個女人，或者這姐妹們看到一個男孩子說：「這個人很英俊。」英俊是英俊，他又不是你的丈夫，你還沒有犯罪。你決定：「這個弟兄很英俊，我今天晚上要跟他採取什麼行動」，就在那個時候就犯罪，犯罪就在那個時候。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST08-02"
+       },
+       {
+        "stance": null,
+        "speaker": null,
+        "assertive": null,
+        "media_time": 3140.0,
+        "evidence_id": "DK-fafce4fae2a21a3cb3e5-P01-ST09",
+        "paragraph_key": "S0033",
+        "media_end_time": 3212,
+        "proposed_highlight": {
+         "text": "你看雅各書一章十二節到十五節。「但各人被試探，乃是被自己的私慾[epithymia]」，什麼？那個私慾是epithymia那個字，「牽引誘惑的。牽引引誘，私慾既懷了胎，就生出罪來；罪既長成，就生出死來。」所以我問各位，只有私慾，有沒有犯罪？沒有啊。私慾會引導我們去犯罪，可是只有私慾還沒有犯罪，因為「私慾既懷了胎，就生出罪來；罪既長成，就生出死來。」",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST09-01"
+       },
+       {
+        "stance": null,
+        "speaker": null,
+        "assertive": null,
+        "media_time": 3212.0,
+        "evidence_id": "DK-fafce4fae2a21a3cb3e5-P01-ST10",
+        "paragraph_key": "S0034",
+        "media_end_time": 3271,
+        "proposed_highlight": {
+         "text": "所以比如說，不是真的，我說隨便講，比如說，我們在美國，沒有車子很難生活，對不對？那我有一部車子很差，用了很多年，開起來問題大，總是有問題。我看到一個人他開了一個什麼？Lexus的很好的車子，很好。我說：「哎呀，我巴不得我有這麼一輛車子，Lexus很好的車子。」我有這麼一個願望，有沒有犯罪？沒有啊。我說我巴不得有一部，那部不是我的，是別人的，我就不要偷，我沒有犯罪。可是我決定說：「為什麼他開一輛Lexus那麼好？我的車子那麼壞？我決定今天晚上偷！」晚上還沒有到，我決定要偷，你就犯了罪。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST10-01"
+       },
+       {
+        "media_time": 77.0,
+        "paragraph_key": "S0002",
+        "media_end_time": 132,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST01",
+        "proposed_highlight": {
+         "text": "我們現在來看這一段，馬太五章二十七、二十八節聖經。 耶穌說：「你們聽見有話說：『不可姦淫。』只是我告訴你們，凡看見婦女就動淫念的，這人心裡已經與她犯姦淫了。」",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST01-01"
+       },
+       {
+        "media_time": 170.0,
+        "paragraph_key": "S0004",
+        "media_end_time": 344,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST01",
+        "proposed_highlight": {
+         "text": "就是耶穌所講的，「凡看見婦女就動淫念」，那個字,πρὸς τὸ ἐπιθυμῆσαι，這句話到底什麼意思？你去看這個馬太福音書裡面，所用的這種表達法，就是一個\"πρὸς τὸ\", infinitive，就是不定詞，都是什麼？就代表是做目的，而不是只做後果。聽清楚了，是做目的，而不是只做後果。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST01-02"
+       },
+       {
+        "media_time": 718.0,
+        "paragraph_key": "S0009",
+        "media_end_time": 815,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST05",
+        "proposed_highlight": {
+         "text": "所以啊，你看了，同樣一句話，耶穌所講這句話，馬太用epithymeō那個字來表達，「他們『要』看你們所看見的，他們『要』聽你們所聽見的」，可是路加用thelō那個字。那什麼意思？epithymeō就是說啊，就是說，很想、很想。epithymeō，就是耶穌所說的，「你看見婦女很想要跟她發生什麼、什麼事情」，就是那個字，epithymeō那個字。也就是說你看見婦女，為了「要」，那個「要」啊，epithymeō那個字的意思跟thelō的意思完全一樣。那thelō是什麼？thelō是will，意志。我意志要看。就「從前有許多先知和君王意志上決定，不是只是喜歡而已，是意志決定要看你們所看的，卻沒有看見；要聽你們所聽的，卻沒有聽見。」",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST05-01"
+       },
+       {
+        "media_time": 2871.0,
+        "paragraph_key": "S0031",
+        "media_end_time": 3049,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST05",
+        "proposed_highlight": {
+         "text": "所以這裡啊，從耶穌所講的這句話裡面啊，還有兩個，馬太福音十三章十七節跟路加第十章二十四節所講的也是同一句話，那很重要的那個動詞，兩個不同的動詞，epithymeō，就是 **很想看**，跟什麼？thelō，**意志決定要看**，意思一樣。epithymeō就是那個字。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST05-02"
+       },
+       {
+        "media_time": 2871.0,
+        "paragraph_key": "S0031",
+        "media_end_time": 3049,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST06",
+        "proposed_highlight": {
+         "text": "再給你看啊，彼得前書四章二節到三節：「你們存這樣的心，從今以後就可以不從人的情慾」，「情慾」是什麼？epithymia的意思，那個字，人的慾望，人的情慾，「只從神的旨意」，神的旨意是thelēma，「在世度餘下的光陰。因為往日隨從外邦人的心意」，那個「心意」啊，就是指外邦人的意志，\n所以這裡聖經給我們看到什麼？epithymia，慾望，跟thelēma是什麼？意志；boulēma也是意志。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST06-01"
+       },
+       {
+        "media_time": 2871.0,
+        "paragraph_key": "S0031",
+        "media_end_time": 3049,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST07",
+        "proposed_highlight": {
+         "text": "再給你看以弗所書二章三節：「我們從前也都在他們中間，放縱肉體的私慾」，epithymia，「隨著肉體和心中所喜好的」，所喜好那個東西是什麼？就是肉體的意志跟心中的意志去行，「本為可怒之子，和別人一樣。」所以這裡可以看到什麼？",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P01-ST07-01"
+       },
+       {
+        "media_time": 412.0,
+        "paragraph_key": "S0006",
+        "media_end_time": 509,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P02-ST01",
+        "proposed_highlight": {
+         "text": "一樣，πρὸς τὸ + infinitive，希臘文pros to + infinitive 在希臘文的表達法，都是表達目的，不是表達後果。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P02-ST01-01"
+       },
+       {
+        "media_time": 412.0,
+        "paragraph_key": "S0006",
+        "media_end_time": 509,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P02-ST01",
+        "proposed_highlight": {
+         "text": "是目的，不是後果。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P02-ST01-02"
+       },
+       {
+        "media_time": 607.0,
+        "paragraph_key": "S0008",
+        "media_end_time": 718,
+        "observation_id": "DK-fafce4fae2a21a3cb3e5-P01-ST05",
+        "proposed_highlight": {
+         "text": "從前有許多先知和義人，要……」 epithymeō那個字，epithymēsai 是 epithymeō的什麼，的那一個啊……過去式。「從前有許多先知和義人要看你們所看見的」，就看那耶穌的，「沒有看見；要聽你們所聽的，卻沒有聽見。」這裡啊，是epithymeō那個字。可是什麼？同樣耶穌一句話，馬太福音十三章十七節說：「Amen，我告訴你們，從前有許多先知和義人，epithymeō，要看你們所看的。」就是那個字，epithymeō。可是路加怎麼說？路加啊，第十章二十四節，也是來引用耶穌所講的話：「我告訴你們，從前有許多先知和君王要看你們所看的，卻沒有看見；要聽你們所聽的，卻沒有聽見。」那裡啊，是 ἠθέλησαν（ēthelēsan）。ēthelēsan那句話是什麼意思呢？是thelō 的那一個過去式。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-nysc_2011_2_3-3dbfbb15c8a7-DK-fafce4fae2a21a3cb3e5-P02-ST07-01"
+       },
+       {
+        "media_time": 3049.0,
+        "paragraph_key": "S0032",
+        "media_end_time": 3140,
+        "proposed_highlight": {
+         "text": "耶穌乃是說你為了「要」，意志上決定要跟這個女人發生關係，你已經決定要做，雖然時間還沒有到，你還沒有做，你現在決定、意志決定我要做，你已經犯罪了。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-0e94f5a6193f35fc2cf681238f832ace"
+       },
+       {
+        "media_time": 718.0,
+        "paragraph_key": "S0009",
+        "media_end_time": 815,
+        "proposed_highlight": {
+         "text": "所以耶穌所說的不是「凡看見婦女就動起淫念」，不是。就是說你看婦女，為了、意志決定要跟她採取行動，在那個時候你已經犯罪。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-e45869b4669b7bda48a4e2e522d3ba66"
+       },
+       {
+        "media_time": 3049.0,
+        "paragraph_key": "S0032",
+        "media_end_time": 3140,
+        "proposed_highlight": {
+         "text": "所以耶穌的意思是什麼？你不是說你看見一個婦女就覺得她很漂亮，就已經跟她犯姦淫了，不是。耶穌乃是說你為了「要」，意志上決定要跟這個女人發生關係，你已經決定要做，雖然時間還沒有到，你還沒有做，你現在決定、意志決定我要做，你已經犯罪了。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-284866d8cdedb5061779332557878f36"
+       },
+       {
+        "media_time": 3446.0,
+        "paragraph_key": "S0036",
+        "media_end_time": 3551,
+        "proposed_highlight": {
+         "text": "馬太五章二十八節，耶穌說：「只是我告訴你們，凡看見婦女就動淫念」，不是。其實你看見婦女，為了「要」、意志上決定要跟她採取行動，決定要跟她行淫，在那個時候，「這人心裡已經與她犯姦淫了」。",
+         "status": "proposed"
+        },
+        "source_fragment_id": "FR-ab8c71ec2248d0f477c175e8e88e8f2f"
+       }
+      ],
+      "source_id": "SRC-nysc_2011_2_3-3dbfbb15c8a7"
+     }
+    ]
+   },
+   "note": "the anchor on the S0008 passage now names P01-ST05 instead of P02-ST07"
+  },
+  {
+   "op": "retire",
+   "collection": "knowledge_relations",
+   "object_id": "DK-fafce4fae2a21a3cb3e5-XR0016",
+   "before_sha256": "b58184abff79cc8a82cb0252718cfc012280108afa84eee9a3cc675dbac433f8",
+   "note": "P02-ST07 supports CL0001; P01-ST05 already supports CL0001"
+  },
+  {
+   "op": "retire",
+   "collection": "observations",
+   "object_id": "DK-fafce4fae2a21a3cb3e5-P02-ST07",
+   "before_sha256": "2c398fa2b89d791c05d9b36fc9f5a0775e0ee996e545bd53cfa484b7df6a6bc5"
+  }
+ ]
+}
