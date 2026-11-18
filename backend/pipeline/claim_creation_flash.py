@@ -472,6 +472,27 @@ def check_not_claims(result, claim_ids, own_ids):
     return set(gone)
 
 
+def repair_sentence_ids(result, sentence_ids):
+    """A sentence ID is its paragraph and a number unique in the lecture (S0015#322).
+    Lecture 6 G004: GPT wrote S0016#322 for S0015#322, the right number under the
+    next paragraph. An unknown ID whose number names exactly one sentence of this
+    group, not placed elsewhere in the reply, is that sentence; anything else is
+    left for check_steps to refuse. Returns the repairs, to be recorded."""
+    known=set(sentence_ids);by_number={}
+    for s in sentence_ids:by_number.setdefault(s.rsplit('#',1)[-1],[]).append(s)
+    rows=[r for part in ('steps','claim_text','other','digressions') for r in result.get(part,[])]
+    placed={s for r in rows for s in r['sentence_ids']}
+    repairs=[]
+    for r in rows:
+        for i,s in enumerate(r['sentence_ids']):
+            if s in known:continue
+            match=by_number.get(s.rsplit('#',1)[-1],[])
+            if len(match)==1 and match[0] not in placed:
+                r['sentence_ids'][i]=match[0];placed.add(match[0])
+                repairs.append({'written':s,'sentence_id':match[0]})
+    return repairs
+
+
 def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
     """Each sentence in exactly one place; supports name real Claims or steps;
     a sentence carrying scripture he cites belongs to an argument step."""
@@ -757,6 +778,10 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                         'scripture_sentences':scripture},contracts['steps'],STEPS,source_check)
                     # Only a Claim this group made and no other group reuses may be returned.
                     own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
+                    repairs=repair_sentence_ids(steps,[v.sentence_id for v in sentences])
+                    if repairs:
+                        e.save(root/gid/'steps'/'sentence-id-repairs.json',{'repairs':repairs,'model_calls':0,
+                            'rule':'unknown ID whose number names exactly one unplaced sentence of this group'})
                     check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own)
                     answer_only.update(steps.pop('answer_only',[]))
                     gone={r['claim_id'] for r in steps.get('not_claims',[])}
