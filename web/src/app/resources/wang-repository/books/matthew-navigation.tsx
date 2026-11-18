@@ -44,8 +44,11 @@ const seriesDetails: Record<string, { title: string; format: string; description
   },
 };
 
+const nyscSource = "紐約靈命進深會";
+const chapterInPreparation = (source: string, chapter: number) =>
+  source === nyscSource && chapter >= 8;
 const sourceNames: Record<string, string> = {
-  紐約靈命進深會: seriesDetails.nysc.title,
+  [nyscSource]: seriesDetails.nysc.title,
   教授釋經筆記: seriesDetails.notes.title,
 };
 const action = "inline-flex min-h-11 w-fit items-center rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-900 hover:border-amber-800 hover:text-amber-900";
@@ -119,7 +122,9 @@ export function MatthewBook({
                   <p className={`text-sm font-medium ${available ? "text-amber-900" : "text-stone-600"}`}>{info.format}</p>
                   <p className="text-stone-700">{info.description}</p>
                   <p className="text-sm text-stone-600">
-                    {series.chapters ? `目前可查第 ${chapterRanges(series.chapters)} 章` : `共 ${series.items?.length} 講`}
+                    {series.chapters ? `目前可查第 ${chapterRanges(
+                      series.chapters.filter((chapter) => !chapterInPreparation(series.source, chapter)),
+                    )} 章` : `共 ${series.items?.length} 講`}
                   </p>
                   {available ? <Link
                     href={series.chapters ? `${path}?source=${encodeURIComponent(series.source)}` : `${path}?view=${series.id}`}
@@ -170,9 +175,17 @@ export function MatthewBook({
               {displayed.map((chapter) => (
                 <li key={chapter.chapter} className={`px-4 py-3 sm:px-5 ${source
                   ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1"
-                  : "space-y-3"}`}>
+                  : "space-y-3"} ${chapterInPreparation(source, chapter.chapter) ? "bg-stone-100 text-stone-600" : ""}`}>
                   <h3 className="font-serif text-lg font-bold">第 {chapter.chapter} 章</h3>
                   {chapter.sources.filter((item) => !source || item.name === source).map((item) => {
+                    if (chapterInPreparation(item.name, chapter.chapter)) {
+                      return (
+                        <div key={item.name} className={source ? "contents" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-lg bg-stone-100 px-3 py-2 text-stone-600"}>
+                          {!source && <p className="font-medium">{sourceNames[item.name]}</p>}
+                          <p className="col-start-2 row-start-1 text-sm font-semibold">整理校對中</p>
+                        </div>
+                      );
+                    }
                     const page = chapter.pages?.find((candidate) => candidate.source === item.name);
                     const href = `${path}/${chapter.chapter}?source=${encodeURIComponent(item.name)}`;
                     const notes = item.name === "教授釋經筆記";

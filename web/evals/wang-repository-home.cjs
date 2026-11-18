@@ -42,6 +42,34 @@ async function evaluate(browser, viewport) {
     await page.goto(oldSeries.href);
     await retreat.getByText("整理校對中", { exact: true }).waitFor();
     assert.equal(await page.getByRole("link", { name: "查看講次", exact: true }).count(), 0);
+    const book = new URL(oldSeries);
+    book.search = "";
+    const nyscName = "紐約靈命進深會";
+    const nysc = new URL(book);
+    nysc.searchParams.set("source", nyscName);
+    const chapterRow = (chapter) => main.getByRole("listitem").filter({
+      has: page.getByRole("heading", { name: `第 ${chapter} 章`, exact: true }),
+    });
+    await page.goto(nysc.href);
+    await chapterRow(7).getByRole("link", { name: "聆聽原聲", exact: true }).waitFor();
+    const laterChapters = main.getByRole("listitem").filter({
+      has: page.getByRole("heading", { name: /^第 (?:[89]|[1-2][0-9]) 章$/ }),
+    });
+    const pending = laterChapters.filter({ hasText: "整理校對中" });
+    assert((await laterChapters.count()) > 0);
+    assert.equal(await pending.count(), await laterChapters.count());
+    assert.equal(await chapterRow(8).evaluate((row) => row.classList.contains("bg-stone-100")), true);
+    assert.equal(await chapterRow(7).getByText("整理校對中", { exact: true }).count(), 0);
+    assert.equal(await pending.getByRole("link").count(), 0);
+    assert.equal(await pending.getByRole("button").count(), 0);
+
+    book.searchParams.set("view", "chapters");
+    await page.goto(book.href);
+    await chapterRow(8).getByText("整理校對中", { exact: true }).waitFor();
+    const chapterLinks = await chapterRow(8).getByRole("link").evaluateAll((links) => links.map((link) => link.href));
+    assert(chapterLinks.some((href) => new URL(href).searchParams.get("source") === notes));
+    assert(!chapterLinks.some((href) => new URL(href).searchParams.get("source") === nyscName));
+
     const filtered = new URL(url);
     filtered.searchParams.set("source", notes);
     await page.goto(filtered.href);
