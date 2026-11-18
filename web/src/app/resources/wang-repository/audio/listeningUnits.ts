@@ -18,3 +18,8 @@ export function groupUnits(sections: Section[]) {
   }
   return groups;
 }
+
+/** Presentation only: retain stable Unit IDs in links and playback data. */
+export function listeningTitle(label = '') {
+  return label.replace(/^(?:Unit\s+\d+\s*[·•]\s*|\d+\.\d+\s+)/, '');
+}
