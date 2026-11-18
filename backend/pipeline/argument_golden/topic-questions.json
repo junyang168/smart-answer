@@ -1,6 +1,6 @@
 {
  "schema": "argument-topic-questions.v1",
- "rule": "Owner 2026-11-18: hearing a point's topic, a listener asks its questions (結構 → 分哪幾段、每段講什麼、怎樣連接). Each item passes when ONE point's own sentence carries every group of the answer; reasons under it do not count. Fixed before round 2 of the lecture 1 rerun, from the 2026-11-18 sweep (error-watch.json point-leaves-its-topic-unanswered). Each group is a list of regex alternatives.",
+ "rule": "Owner 2026-11-18: hearing a point's topic, a listener asks its questions (結構 → 分哪幾段、每段講什麼、怎樣連接). Each item passes when ONE point's own sentence carries every group of the answer; reasons under it do not count. Fixed before round 2 of the lecture 1 rerun, from the 2026-11-18 sweep (error-watch.json point-leaves-its-topic-unanswered). Each group is a list of regex alternatives. 2026-11-18 after round 2: the range patterns also accept 「五3至12」「五13至七29」 and 「五章三至十二」 (a key gap found after seeing output; the owner was told).",
  "items": [
   {
    "id": "L1-structure",
@@ -8,12 +8,14 @@
    "question": "登山寶訓分哪幾段？每段講什麼？",
    "groups": [
     [
-     "五章三(節)?(至|到)(第)?十二節",
-     "5:3[–-]12"
+     "五章?三(節)?(至|到)(第)?十二節?",
+     "5:3[–-]12",
+     "五\\s*3\\s*(至|到|[–-])\\s*12"
     ],
     [
-     "五章十三節?(至|到)(第)?七章二十九節",
-     "5:13[–-]7:29"
+     "五章?十三節?(至|到)(第)?七章?二十九節?",
+     "5:13[–-]7:29",
+     "五\\s*13\\s*(至|到|[–-])\\s*七\\s*29"
     ],
     [
      "彌賽亞"
@@ -105,12 +107,14 @@
    "question": "登山寶訓分哪幾段？每段講什麼？",
    "groups": [
     [
-     "五章三(節)?(至|到)(第)?十二節",
-     "5:3[–-]12"
+     "五章?三(節)?(至|到)(第)?十二節?",
+     "5:3[–-]12",
+     "五\\s*3\\s*(至|到|[–-])\\s*12"
     ],
     [
-     "五章十三節?(至|到)(第)?七章二十九節",
-     "5:13[–-]7:29"
+     "五章?十三節?(至|到)(第)?七章?二十九節?",
+     "5:13[–-]7:29",
+     "五\\s*13\\s*(至|到|[–-])\\s*七\\s*29"
     ],
     [
      "彌賽亞"
