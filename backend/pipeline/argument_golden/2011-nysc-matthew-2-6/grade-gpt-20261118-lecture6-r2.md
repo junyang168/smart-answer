@@ -19,4 +19,10 @@ Better: CL0004 names the parallel 免我們的債 ↔ 7:1–8; CL0011 gathers th
 New CL0001 「……不能把放棄計劃和理性思考當作信心；要分清憂慮與計劃……」 drops 倚靠神 and 神一定會
 供給. The cover was written in group 1 (S0001–S0008); his summary sits in group 2 (S0009).
 
-Not saved.
+Not saved as generated; see below.
+
+## Saved (owner 2026-11-18 「ok」)
+CL0001 restated to follow his summary (`corrections-r2.json`, op `restate_claim`, his sentence
+added as a place he says it). Jev flagged 33 of 65 records; Claude read each against his words,
+nothing changed. Loaded as `…-4186a5c07ee9`, replacing `…-06cf3cec0173` (read-back matches).
+Core-point candidates re-picked on the new IDs (`../core-points.json`).

@@ -1,0 +1,5 @@
+{"lecture": "2011 NYSC 專題：馬太福音釋經（二）6", "run": "gpt-20261118-lecture6-r2",
+ "corrections": [{"op": "restate_claim", "short": "CL0001",
+   "statement": "求神賜給我們日用的飲食，就要倚靠神，不要焦慮、憂慮，神一定會供給；同時要盡本分，為將來計劃。",
+   "basis_fragment_id": "FR-7d54ad98d8ebdbf69e133305c6f6a14c",
+   "ruling": "Owner 2026-11-18 「ok」 to Claude's proposed text: the cover follows his own summary 「所以這段聖經才告訴我們說，你好好的倚靠神……神一定會供給你。可是你要盡你的本分」 (S0009), which the rerun's cover missed."}]}
