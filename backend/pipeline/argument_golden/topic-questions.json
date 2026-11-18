@@ -112,9 +112,9 @@
      "五\\s*3\\s*(至|到|[–-])\\s*12"
     ],
     [
-     "五章?十三節?(至|到)(第)?七章?二十九節?",
-     "5:13[–-]7:29",
-     "五\\s*13\\s*(至|到|[–-])\\s*七\\s*29"
+     "五章?十三節?(至|到)(第)?七章?二十(七|九)節?",
+     "5:13[–-]7:2[79]",
+     "五\\s*13\\s*(至|到|[–-])\\s*七\\s*2[79]"
     ],
     [
      "彌賽亞"
@@ -122,7 +122,8 @@
     [
      "門徒"
     ]
-   ]
+   ],
+   "note": "Lecture 6 divides 5:3–12 / 5:13–7:27 with 7:28–29 as the conclusion of the whole sermon (「七章二十八節、二十九節……是整個登山寶訓的結論」); the key first assumed lecture 1's 5:13–7:29. Fixed 2026-11-18 after the rerun, from his transcript; the owner was told."
   }
  ]
 }
