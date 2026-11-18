@@ -100,3 +100,12 @@ def test_legacy_prayer_card_keeps_supported_tail_but_drops_long_blank_clip():
     assert len(card['sermons']) == 1
     assert card['sermons'][0]['seconds'] == 100
     assert old_row['seconds'] == 825
+
+
+def test_units_only_hides_legacy_cards_without_removing_the_historical_catalog():
+    old, new = example()
+    new['catalog_mode'] = 'units_only'
+    result = compose(old, new)
+    assert [s['passage'] for s in result['sections']] == [s['passage'] for s in new['sections']]
+    assert result['section_aliases']['mat-5-21-26'] == new['sections'][1]['passage']
+    assert any(s['passage'] == 'mat-5-27-30' for s in old['sections'])

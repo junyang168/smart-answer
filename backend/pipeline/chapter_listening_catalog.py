@@ -30,6 +30,15 @@ def has_playback_content(row, span):
     )
 
 
+def overlapping_sections(original, recording, candidates):
+    return [candidate['passage'] for candidate in candidates
+            if any(recording_key(row) == recording
+                   and any(a['start'] < b['end'] and b['start'] < a['end']
+                           for a in original['stretches'] if not a.get('left_out')
+                           for b in row['stretches'] if not b.get('left_out'))
+                   for row in candidate['sermons'])]
+
+
 def compose(legacy, updated):
     """Replace approved passages, retaining uncovered older passages without duplicate audio.
 
@@ -39,6 +48,7 @@ def compose(legacy, updated):
     result = deepcopy(legacy)
     sections = deepcopy(updated['sections'])
     replaced = {parent_passage(section) for section in sections}
+    units_only = updated.get('catalog_mode') == 'units_only'
     covered, new_sources = {}, {}
     for section in sections:
         section['unit_passage'] = parent_passage(section)
@@ -55,6 +65,9 @@ def compose(legacy, updated):
             key = recording_key(original)
             if key in new_sources: source_aliases[original['source_id']] = new_sources[key]
             if section['passage'] in replaced: continue
+            if units_only:
+                overlaps.extend(overlapping_sections(original, key, sections))
+                continue
             row = deepcopy(original)
             row['stretches'] = [
                 part for stretch in original['stretches'] for part in subtract(stretch, covered.get(key, []))
@@ -77,11 +90,7 @@ def compose(legacy, updated):
                 continue
             changed = True
             if not kept:
-                overlaps += [new['passage'] for new in updated['sections']
-                             if any(recording_key(r) == key and any(
-                                 a['start'] < b['end'] and b['start'] < a['end']
-                                 for a in original['stretches'] if not a.get('left_out')
-                                 for b in r['stretches'] if not b.get('left_out')) for r in new['sermons'])]
+                overlaps.extend(overlapping_sections(original, key, sections))
                 continue
             inside = lambda at: any(s['start'] <= at < s['end'] for s in row['stretches'])
             for field in ('transcript', 'judgements', 'spoken', 'readings', 'original_language_events'):

@@ -272,9 +272,12 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     result = project(plan, recordings, unit_recordings)
     from backend.api.scripture import format_chinese_reference
     result['passage'] = passage
+    if plan.get('catalog_mode') == 'units_only':
+        result['catalog_mode'] = 'units_only'
     result['label'] = format_chinese_reference(passage)
     result['program_timing_corrections'] = timing_corrections
     result['resume_version'] = hashlib.sha256(json.dumps({
+        **({'catalog_mode': 'units_only'} if plan.get('catalog_mode') == 'units_only' else {}),
         'sources': [(entry['source_id'], entry['source_sha256']) for entry in plan['inputs']],
         'playback': [(s['passage'], [(r['source_id'], r['stretches']) for r in s['sermons']])
                      for s in result['sections']],
