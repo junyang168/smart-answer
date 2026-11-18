@@ -698,3 +698,22 @@ def test_a_group_of_only_a_digression_needs_no_claim():
     result = {'steps': [], 'claim_text': [], 'other': [{'sentence_ids': ['S1#2'], 'why': '過場'}],
               'digressions': [{'kind': 'unsupported_comment', 'sentence_ids': ['S1#1'], 'why': '批評記者，沒有理由'}], 'not_claims': []}
     assert flash.check_steps(result, ['S1#1', 'S1#2'], []) == {}
+
+
+def test_a_test_run_picks_only_the_groups_that_own_the_named_paragraphs():
+    from backend.pipeline.claim_creation_flash import selected_groups
+    keys = ['S0001', 'S0002', 'S0003', 'S0004']
+    groups = [{'paragraph_ranges': [{'first': 'S0001', 'last': 'S0002'}]},
+              {'paragraph_ranges': [{'first': 'S0003', 'last': 'S0003'}]},
+              {'paragraph_ranges': [{'first': 'S0004', 'last': 'S0004'}]}]
+    assert selected_groups(groups, keys, ['S0002', 'S0003']) == {1, 2}
+    import pytest
+    with pytest.raises(ValueError, match='unknown paragraphs'):
+        selected_groups(groups, keys, ['S0009'])
+
+
+def test_grouping_prompt_keeps_a_heading_section_whole():
+    import inspect
+    from backend.pipeline import claim_creation_flash as c
+    text = inspect.getsource(c.run)
+    assert '不在一個小標題之內切開' in text and '小標題只是線索' not in text

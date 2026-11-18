@@ -588,7 +588,15 @@ def build_step_records(steps, records, sentences, paragraphs):
     return out
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False):
+def selected_groups(groups, keys, only_paragraphs):
+    """Group numbers (1-based) that own any of the given paragraphs: a test runs only these."""
+    wanted = set(only_paragraphs)
+    unknown = wanted - set(keys)
+    if unknown: raise ValueError(f'unknown paragraphs: {sorted(unknown)}')
+    return {n for n, g in enumerate(groups, 1) if wanted & set(ranges(g['paragraph_ranges'], keys))}
+
+
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -629,7 +637,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             initial = sections.plan_sections(list(paragraphs.values()), headings=projection.headings)
             contract = {'name': VERSION+'_groups', 'strict': True, 'schema': SemanticGroups.model_json_schema()}
             request = {'identity': ports.identity['gpt'], 'system': RULES+
-                '唯一任務：依論證將全部原文分組，小標題只是線索。一組是一個主要結論及他為建立它所講的全部內容：'
+                '唯一任務：依論證將全部原文分組。小標題是編者按內容所分，是重要線索：不在一個小標題之內切開，除非他在那裡明顯轉向另一個問題；在小標題處分開、或跨小標題合併都可以。'
+                '分組界線只放在他轉向新問題的地方：開頭回指前文（如「你說這裡……」）、或接著講同一個對照或論證的段落，與前一段同組。一組是一個主要結論及他為建立它所講的全部內容：'
                 '一個論證跨幾個小標題就合為一組；只提出問題或預告要講什麼的段落，與回答它的段落同組；'
                 '插在別的論證中間、證明另一個結論的段落，歸它所證明的那組；兩處在證明同一結論就合為一組；'
                 '回答另一個問題、只用到別組已建立的結論的，另成一組；彼此不支持的主題分開。''與主題無關的生活經歷、閒談，歸它所在的那組，不另成組。'
@@ -648,11 +657,15 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         if single_pass and len(groups)!=1:
             raise ValueError('single-pass experiment requires exactly one source group')
         e.save(root/'groups.json', groups)
+        # A test of one argument (e.g. against a diagram gold key) runs only the groups that own
+        # its paragraphs. Later groups then see no Claims of the skipped groups. No candidate is built.
+        chosen = selected_groups(groups, keys, only_paragraphs) if only_paragraphs else None
         listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
         response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
         new_claims = {}; not_claims = []; claim_seq = 0
         for n, group in enumerate(groups, 1):
+            if chosen is not None and n not in chosen: continue
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
             context = sorted({keys[j] for pk in owned for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(owned),key=keys.index)
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
@@ -702,6 +715,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         # Bounded material tasks keep output manageable without another full review.
         material_ordinal=0;connections=[]
         for n, group in enumerate(groups,1):
+            if chosen is not None and n not in chosen: continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
             group_materials[gid]=[]
             batches=[owned] if grouped_package else [];batch=[];count=0
@@ -804,6 +818,12 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 group_materials[gid].extend(r[IDS[col]] for col in COLLECTIONS[:4] for r in named[col])
                 for col in COLLECTIONS[:4]:response[col].extend(named[col])
                 response['sentence_audit'].extend(audits)
+        if chosen is not None:
+            partial={'version':VERSION,'status':'partial_test','groups':groups,'chosen_groups':sorted(chosen),
+                'only_paragraphs':sorted(only_paragraphs),'claim_candidates':candidates,'group_claim_ids':group_claims,
+                'not_claims':not_claims,'response':response,'claim_statements':claim_statements,'production_writes':0}
+            e.save(root/'partial-test-result.json',partial)
+            return partial
         for n, group in enumerate(groups,1):
             if grouped_package:continue
             gid=f'G{n:03d}'; owned=ranges(group['paragraph_ranges'],keys)
@@ -880,12 +900,14 @@ def main():
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
+    parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
     client.capture_usage_events=True  # codex --json reports token usage; saved in provider.json per call
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
-               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first)
+               groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first,
+               only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)
