@@ -24,6 +24,7 @@ export type MatthewNavigation = {
   series: Series[];
   related: Series[];
   talks: Talk[];
+  notes_overviews?: { title: string; items: { title: string; href: string }[] }[];
 };
 
 const seriesDetails: Record<string, { title: string; format: string; description: string }> = {
@@ -165,6 +166,25 @@ export function MatthewBook({
         <section aria-labelledby="matthew-selection" className="space-y-4">
           <h2 id="matthew-selection" className="font-serif text-2xl font-bold">{details?.title ?? (source || "按章查找")}</h2>
           {details && <p className="text-stone-700">{details.format} · {details.description}</p>}
+          {selected?.id === "notes" && Boolean(navigation.notes_overviews?.length) && (
+            <section aria-labelledby="notes-overviews" className="space-y-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 sm:px-5">
+              <h3 id="notes-overviews" className="font-serif text-lg font-bold">結構與總覽</h3>
+              {navigation.notes_overviews?.map((topic) => (
+                <div key={topic.title}>
+                  <h4 className="text-sm font-medium text-stone-600">{topic.title}</h4>
+                  <ul>
+                    {topic.items.map((item) => (
+                      <li key={item.href}>
+                        <Link href={item.href} prefetch={false} className="flex min-h-11 items-center py-2 text-sm font-medium text-amber-900 underline underline-offset-4">
+                          {item.title}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          )}
           {selected?.items ? (
             <>
               <p className="text-sm text-stone-600">教會名稱未記錄</p>
