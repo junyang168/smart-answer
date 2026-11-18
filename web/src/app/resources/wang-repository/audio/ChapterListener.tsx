@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { readBookmark, resumeClip } from "./listeningProgress";
-import { parentPassage } from "./listeningUnits";
+import { parentPassage, listeningTitle } from "./listeningUnits";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
@@ -60,7 +60,7 @@ function playlist(sections: Section[], showLeftOut: boolean): Clip[] {
 
 /** 「馬太福音 5:13-16」→「5:13-16」：按鈕上書名是多餘的。 */
 const shortLabel = (label: string) => /^\d+\.\d+ /.test(label)
-  ? `${label.split(" ")[0]}${label.endsWith("（續）") ? "（續）" : ""}`
+  ? listeningTitle(label)
   : label.split(" ").pop() || label;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -533,11 +533,11 @@ export default function ChapterListener({
           )}
         </h1>
         {unitNavigation && <p className="w-full text-sm font-semibold text-stone-700">
-          {sections[section]?.unit_label}
-          {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">小節 {sections[section]?.sub_unit_id}{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
+          {listeningTitle(sections[section]?.unit_label)}
+          {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">本小節{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
         </p>}
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        {!(unitNavigation && subUnitParts.length > 1) && <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
+        {!(unitNavigation && subUnitParts.length > 1) && <span className="hidden max-w-full truncate text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:block">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
         <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
           <span className="text-stone-600">{unitNavigation ? "單元" : "段落"}</span>
           <select
@@ -546,14 +546,14 @@ export default function ChapterListener({
             className="min-h-11 max-w-[75vw] rounded-lg border border-stone-300 bg-white px-3 font-semibold sm:max-w-[40rem]"
           >
             {unitNavigation ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
-              <optgroup key={unit} label={sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label}>
+              <optgroup key={unit} label={listeningTitle(sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label)}>
                 {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
-                  <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}</option>
+                  <option key={item.passage} value={index}>{unitNavigation ? listeningTitle(item.label) : item.label} · {minutes(sectionSeconds(index))}</option>
                 ))}
               </optgroup>
             )) : sectionsWithAudio.map(({ item, index }) => (
               <option key={item.passage} value={index}>
-                {item.label} · {minutes(sectionSeconds(index))}
+                {unitNavigation ? listeningTitle(item.label) : item.label} · {minutes(sectionSeconds(index))}
               </option>
             ))}
           </select>
@@ -731,7 +731,7 @@ export default function ChapterListener({
             title="上一段（[）"
             className={`${button} text-sm`}
           >
-            ‹ <span className="ml-1 hidden sm:inline">{previousSection ? shortLabel(previousSection.item.label) : "上一段"}</span>
+            ‹ <span className="ml-1 hidden sm:inline">{previousSection && !unitNavigation ? shortLabel(previousSection.item.label) : "上一段"}</span>
           </button>
           <button
             type="button"
@@ -776,7 +776,7 @@ export default function ChapterListener({
             title="下一段（]）"
             className={`${button} text-sm`}
           >
-            <span className="mr-1 hidden sm:inline">{nextSection ? shortLabel(nextSection.item.label) : "下一段"}</span> ›
+            <span className="mr-1 hidden sm:inline">{nextSection && !unitNavigation ? shortLabel(nextSection.item.label) : "下一段"}</span> ›
           </button>
         </div>
       </footer>

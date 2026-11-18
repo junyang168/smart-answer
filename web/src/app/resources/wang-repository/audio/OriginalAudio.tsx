@@ -1,6 +1,6 @@
 "use client";
 
-import { groupUnits } from "./listeningUnits";
+import { groupUnits, listeningTitle } from "./listeningUnits";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -461,16 +461,16 @@ export default function OriginalAudio({
         {unitNavigation ? <ol className="flex flex-col gap-4">
           {groupUnits(sections).map((unit) => <li key={unit.id} className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3 bg-stone-50 px-4 py-4 sm:px-5">
-              <div className="min-w-0 flex-1"><h2 className="font-serif text-lg font-bold text-stone-900">{unit.label}</h2>
+              <div className="min-w-0 flex-1"><h2 className="font-serif text-lg font-bold text-stone-900">{listeningTitle(unit.label)}</h2>
                 <p className="mt-1 text-sm text-stone-500">合計 {minutes(unit.seconds)}</p>
               </div>
-              <Link href={listenHref(unit.parts[0].passage)} aria-label={`聆聽 ${unit.label}`}
+              <Link href={listenHref(unit.parts[0].passage)} aria-label={`聆聽 ${listeningTitle(unit.label)}`}
                 className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-stone-300 hover:bg-white">▶ 聆聽</Link>
             </div>
             {unit.parts.some(part => part.sub_unit_id) ? <ol className="divide-y divide-stone-100">
               {unit.parts.map(part => <li key={part.passage}>
                 <Link href={listenHref(part.passage)} className="flex min-h-14 items-center justify-between gap-3 px-4 py-3 text-stone-800 hover:bg-amber-50 sm:px-5">
-                  <span className="min-w-0 flex-1 text-sm leading-6">{part.label}</span>
+                  <span className="min-w-0 flex-1 text-sm leading-6">{listeningTitle(part.label)}</span>
                   <span className="shrink-0 text-xs text-stone-500">{minutes(part.sermons.reduce((sum, row) => sum + row.seconds, 0))} <span aria-hidden="true" className="ml-2 text-amber-800">▶</span></span>
                 </Link>
               </li>)}
