@@ -1,0 +1,131 @@
+{
+ "schema": "diagram-structure-key.v1",
+ "authority": "Drafted by Claude 2026-11-18 from the current SVGs (A, B, D are his; C is editorial). A conversion passes only when every text matches exactly and every relation holds.",
+ "diagrams": [
+  {
+   "key": "A",
+   "svg": "slides/2019-3-24 罗马书3章21至31节/captures/covenant_comparison_new.svg",
+   "source_image": "to locate: the 2019-3-24 video frame he showed it on",
+   "texts": [
+    "神",
+    "舊約",
+    "新約",
+    "1. 施恩",
+    "2. 要求",
+    "（摩西律法）",
+    "（基督的律法）",
+    "細節條文",
+    "一般原則",
+    "字句 γράμμα",
+    "聖靈 πνεῦμα"
+   ],
+   "relations": [
+    [
+     "arrow",
+     "神",
+     "舊約"
+    ],
+    [
+     "arrow",
+     "神",
+     "新約"
+    ],
+    [
+     "column",
+     "舊約",
+     [
+      "1. 施恩",
+      "2. 要求",
+      "（摩西律法）",
+      "細節條文",
+      "字句 γράμμα"
+     ]
+    ],
+    [
+     "column",
+     "新約",
+     [
+      "1. 施恩",
+      "2. 要求",
+      "（基督的律法）",
+      "一般原則",
+      "聖靈 πνεῦμα"
+     ]
+    ]
+   ]
+  },
+  {
+   "key": "B",
+   "svg": "slides/2019-3-31 宗主国与附庸国的约/captures/law_relationship_new.svg",
+   "source_image": "to locate: the 2019-3-31 video frame",
+   "texts": [
+    "摩西的律法",
+    "基督的律法",
+    "重疊"
+   ],
+   "relations": [
+    [
+     "overlap",
+     "摩西的律法",
+     "基督的律法"
+    ],
+    [
+     "inside_both",
+     "重疊",
+     [
+      "摩西的律法",
+      "基督的律法"
+     ]
+    ]
+   ]
+  },
+  {
+   "key": "D",
+   "svg": "full_article/images/sermon-on-the-mount-overview.svg",
+   "source_image": "the 母本 handout page (owner: 釋經筆記母本的講義)",
+   "texts": [
+    "登山寶訓",
+    "論彌賽亞",
+    "太 5:3-12",
+    "應驗賽 61",
+    "門徒的使命",
+    "太 5:13-16",
+    "綜合",
+    "太 5:17-7:29",
+    "闡明，細節"
+   ],
+   "relations": [
+    [
+     "inside",
+     "論彌賽亞",
+     "登山寶訓"
+    ],
+    [
+     "inside",
+     "門徒的使命",
+     "登山寶訓"
+    ],
+    [
+     "above",
+     "論彌賽亞",
+     "門徒的使命"
+    ],
+    [
+     "inside",
+     "太 5:13-16",
+     "門徒的使命"
+    ],
+    [
+     "inside",
+     "太 5:17-7:29",
+     "門徒的使命"
+    ],
+    [
+     "above",
+     "太 5:13-16",
+     "太 5:17-7:29"
+    ]
+   ]
+  }
+ ]
+}

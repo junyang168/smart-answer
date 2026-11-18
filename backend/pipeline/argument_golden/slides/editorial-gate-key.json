@@ -1,0 +1,42 @@
+{
+ "schema": "editorial-gate-key.v1",
+ "authority": "Faults found in the real diagram C on 2026-11-18, plus one kind not yet seen. The gate must block every faulty version and pass the correct one.",
+ "base": "C as corrected 2026-11-18 (sha 2e27e4ec…), boxes linked to: L1 CL0001/CL0003, L5 CL0014 (point 12), L6 CL0014/CL0016/CL0017 (as saved …-960210a614b9)",
+ "cases": [
+  {
+   "id": "G0",
+   "change": "none",
+   "expect": "pass"
+  },
+  {
+   "id": "G1",
+   "change": "inclusio label back to 6:1–7:11",
+   "expect": "block",
+   "why": "contradicts L5 point 12 (6:8–7:11)"
+  },
+  {
+   "id": "G2",
+   "change": "link 門徒的使命 box to L6 point 16 as saved before the fix (5:13–7:27)",
+   "expect": "block",
+   "why": "box nests 7:28–29 inside 門徒的使命; the Claim puts it outside"
+  },
+  {
+   "id": "G3",
+   "change": "add a box 「7:6 珍珠不可丟給豬」 with no Claim",
+   "expect": "block",
+   "why": "no approved Claim holds it"
+  },
+  {
+   "id": "G4",
+   "change": "link a box to a candidate (unapproved) Claim",
+   "expect": "block",
+   "why": "only approved Claims count"
+  },
+  {
+   "id": "G5",
+   "change": "revise L6 CL0016 after linking",
+   "expect": "flag_recheck",
+   "why": "linked Claim revision changed"
+  }
+ ]
+}
