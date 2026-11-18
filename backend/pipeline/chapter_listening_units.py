@@ -91,10 +91,12 @@ def owner_timing(slides: dict, selection: dict) -> tuple[dict, list]:
                      for correction, prescription in zip(corrections, prescriptions, strict=True)]
 
 
-def project(plan: dict, recordings: dict) -> dict:
+def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -> dict:
     """Keep argument identity distinct from its possibly interrupted playback runs."""
     sections = []
     assigned = set()
+    used_ranges = {}
+    arranged_by_subunit = plan.get('playback_sequence') == 'subunit'
     excluded = {}
     for item in plan.get('non_argument_exclusions', []):
         lines = recordings[item['source_id']]['lines']
@@ -121,16 +123,22 @@ def project(plan: dict, recordings: dict) -> dict:
         actual = [(r['group_key'], r['paragraph_key']) for r in unit['playback_order']]
         if len(actual) != len(set(actual)) or set(actual) != wanted:
             raise ValueError('Playback has missing or duplicate source paragraphs')
-        for source in {r['source_id'] for r in unit['playback_order']}:
-            own = [r for r in unit['playback_order'] if r['source_id'] == source]
-            if any(a['end'] > b['start'] for a, b in zip(own, own[1:])):
+        last_end = {}
+        for row in unit['playback_order']:
+            source = row['source_id']
+            sub_id = sub_by_group[row['group_key']]['id'] if arranged_by_subunit else None
+            order_key = (source, sub_id)
+            if row['start'] < last_end.get(order_key, 0):
                 raise ValueError('Playback must preserve source order')
+            last_end[order_key] = row['end']
+            if arranged_by_subunit:
+                used_ranges.setdefault(source, []).append((row['start'], row['end']))
         seen = set()
         for run_index, ((sid, source), rows) in enumerate(groupby(
                 unit['playback_order'], lambda r: (sub_by_group[r['group_key']]['id'], r['source_id'])), 1):
             ranges = list(rows)
             sub = sub_by_group[ranges[0]['group_key']]
-            recording = recordings[source]
+            recording = (unit_recordings or {}).get((passage, source), recordings[source])
             lines = [line for line in recording['lines'] if line['start'] not in excluded.get(source, set()) and any(
                 r['start'] <= line['start'] < r['end'] for r in ranges)]
             if not lines:
@@ -160,10 +168,42 @@ def project(plan: dict, recordings: dict) -> dict:
                              'label': f"{sid} {sub['title']}" + ('（續）' if continued else ''),
                              'sermons': [row]})
             seen.add(sid)
+    for ranges in used_ranges.values():
+        ordered = sorted(ranges)
+        if any(left[1] > right[0] for left, right in zip(ordered, ordered[1:])):
+            raise ValueError('Playback repeats source audio')
     return {'schema_version': 'wang_original_audio_index_v4', 'passage': 'mat-5-1-48',
             'label': '馬太福音 5', 'source': '紐約靈命進深會',
             'title': 'Unit／Sub-unit 聆聽預覽', 'sermons': [], 'sections': sections,
-            'missing_lectures': [], 'selection_preview': True}
+            'missing_lectures': [], 'selection_preview': True,
+            **({'playback_sequence': 'subunit'} if arranged_by_subunit else {})}
+
+
+def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording: dict) -> dict:
+    """Use a Unit's reviewed slides only for the matching original recording."""
+    title, source = entry['lecture'], entry['source_id']
+    selection_path = directory / f'{title}.selection.json'
+    slides_path = directory / f'{title}.slides.json'
+    selection = json.loads(selection_path.read_text())
+    slides = json.loads(slides_path.read_text())
+    review = json.loads((directory / f'{title}.review.json').read_text())
+    if (selection['source_id'] != source or selection['lecture'] != title
+            or selection['transcript_sha256'] != entry['source_sha256']
+            or slides['decisions_sha256'] != exposition.file_sha256(selection_path)
+            or review['slides_sha256'] != exposition.file_sha256(slides_path)
+            or chapter_slides.review_blocks_publication(review)):
+        raise ValueError('Unit slides do not match the source, selection and passing review')
+    pieces = chapter_slides.kept_pieces(selection)
+    fields = ('source_paragraph_key', 'start', 'end', 'text')
+    actual = [(p.get(fields[0]), *(p[k] for k in fields[1:])) for p in pieces]
+    expected = sorted(
+        (r['paragraph_key'], r['start'], r['end'], r['text'])
+        for group in unit['groups'] if group['source_id'] == source
+        for r in group['source_ranges'])
+    if sorted(actual) != expected:
+        raise ValueError('Unit reviewed selection differs from its planned source paragraphs')
+    return {**recording, 'lines': chapter_slides.sentences(pieces),
+            'slides': chapter_slides.placed(selection, slides)[1]}
 
 
 def build(data_root: Path, passage: str) -> dict:
@@ -172,15 +212,14 @@ def build(data_root: Path, passage: str) -> dict:
     recordings = {}
     timing_corrections = []
     sermons = audio.Sermons(data_root)
+    using_legacy = {g['source_id'] for unit in plan['units'].values()
+                    if 'reviewed_slide_bundle' not in unit for g in unit['groups']}
+    using_legacy.update(item['source_id'] for item in plan.get('non_argument_exclusions', []))
     for entry in plan['inputs']:
         title, source = entry['lecture'], entry['source_id']
         transcript = data_root / 'script_published' / f'{title}.json'
         if exposition.file_sha256(transcript) != entry['source_sha256']:
             raise ValueError('Unit source changed; selection must be checked again')
-        selection = exposition.load_record(data_root, passage, title, entry['source_sha256'])
-        slides = chapter_slides.load_record(data_root, passage, title)
-        if selection is None or slides is None:
-            raise ValueError('Unit requires matching existing selection and slides')
         document = {'transcript_id': title, 'title': title, 'source_path': str(transcript)}
         # This new projection consumes paragraph keys, never legacy fragment indices.
         projection = project_script(json.loads(transcript.read_text())['script'])
@@ -188,31 +227,48 @@ def build(data_root: Path, passage: str) -> dict:
         sermon = sermons.load(source, document)
         if not sermon or not sermon.get('media_url'):
             raise ValueError('Unit recording is unavailable')
-        slides, owner_corrections = owner_timing(slides, selection)
-        timing_corrections.extend({'source_id': source, **c} for c in owner_corrections)
-        _, timed = chapter_slides.placed(selection, slides)
-        supplement_root = data_root / 'chapter_exposition' / passage / 'unit-supplements'
-        extra_selection_path = supplement_root / f'{title}.selection.json'
-        if extra_selection_path.exists():
-            extra = json.loads(extra_selection_path.read_text())
-            extra_slides_path = supplement_root / f'{title}.slides.json'
-            extra_slides = json.loads(extra_slides_path.read_text())
-            review = json.loads((supplement_root / f'{title}.review.json').read_text())
-            if (extra['transcript_sha256'] != entry['source_sha256']
-                    or extra_slides['decisions_sha256'] != exposition.file_sha256(extra_selection_path)
-                    or review['slides_sha256'] != exposition.file_sha256(extra_slides_path)):
-                raise ValueError('Supplement does not have matching source and review bindings')
-            extra_slides, corrections = reviewed_timing(extra_slides, review, extra)
-            timing_corrections.extend({'source_id': source, **c} for c in corrections)
-            _, additional = chapter_slides.placed(extra, extra_slides)
-            timed = sorted(timed + additional, key=lambda slide: slide['at'])
-        recordings[source] = {
-            'media': {k: sermon[k] for k in ['source_id', 'transcript_id', 'title', 'media_kind', 'media_url', 'media_duration']},
-            # New whole-argument selections supersede old AI omission decisions,
-            # while the old kept sentence IDs still position the reused slides.
-            'lines': chapter_slides.sentences(selection['pieces']),
-            'slides': timed, 'retime': audio.retimer(sermon, data_root)}
-    result = project(plan, recordings)
+        recording = {'media': {k: sermon[k] for k in
+                               ['source_id', 'transcript_id', 'title', 'media_kind', 'media_url', 'media_duration']},
+                     'retime': audio.retimer(sermon, data_root)}
+        if source in using_legacy:
+            selection = exposition.load_record(data_root, passage, title, entry['source_sha256'])
+            slides = chapter_slides.load_record(data_root, passage, title)
+            if selection is None or slides is None:
+                raise ValueError('Unit requires matching existing selection and slides')
+            slides, owner_corrections = owner_timing(slides, selection)
+            timing_corrections.extend({'source_id': source, **c} for c in owner_corrections)
+            _, timed = chapter_slides.placed(selection, slides)
+            supplement_root = data_root / 'chapter_exposition' / passage / 'unit-supplements'
+            extra_selection_path = supplement_root / f'{title}.selection.json'
+            if extra_selection_path.exists():
+                extra = json.loads(extra_selection_path.read_text())
+                extra_slides_path = supplement_root / f'{title}.slides.json'
+                extra_slides = json.loads(extra_slides_path.read_text())
+                review = json.loads((supplement_root / f'{title}.review.json').read_text())
+                if (extra['transcript_sha256'] != entry['source_sha256']
+                        or extra_slides['decisions_sha256'] != exposition.file_sha256(extra_selection_path)
+                        or review['slides_sha256'] != exposition.file_sha256(extra_slides_path)):
+                    raise ValueError('Supplement does not have matching source and review bindings')
+                extra_slides, corrections = reviewed_timing(extra_slides, review, extra)
+                timing_corrections.extend({'source_id': source, **c} for c in corrections)
+                _, additional = chapter_slides.placed(extra, extra_slides)
+                timed = sorted(timed + additional, key=lambda slide: slide['at'])
+            # Keep the old sentence IDs used to position the existing slides.
+            recording.update(lines=chapter_slides.sentences(selection['pieces']), slides=timed)
+        recordings[source] = recording
+    unit_recordings = {}
+    entries = {entry['source_id']: entry for entry in plan['inputs']}
+    for unit_passage, unit in plan['units'].items():
+        bundle = unit.get('reviewed_slide_bundle')
+        if bundle is None:
+            continue
+        if not isinstance(bundle, str) or len(bundle) != 64 or any(c not in '0123456789abcdef' for c in bundle):
+            raise ValueError('Invalid reviewed Unit slide bundle')
+        directory = path.parent / 'unit-supplements' / bundle
+        for source in {group['source_id'] for group in unit['groups']}:
+            unit_recordings[unit_passage, source] = reviewed_unit_recording(
+                directory, unit, entries[source], recordings[source])
+    result = project(plan, recordings, unit_recordings)
     result['program_timing_corrections'] = timing_corrections
     result['resume_version'] = hashlib.sha256(json.dumps({
         'sources': [(entry['source_id'], entry['source_sha256']) for entry in plan['inputs']],

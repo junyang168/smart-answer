@@ -166,3 +166,18 @@ def test_owner_timing_corrects_unique_quote_and_keeps_all_other_owner_cases_enfo
     assert owner_timing(derived, selection)[1] == []
     cases.append({'kind': 'no_title', 'pattern': '測試', 'why': 'Unresolved non-timing requirement'})
     with pytest.raises(ValueError): owner_timing(derived, selection)
+
+
+def test_reviewed_slides_are_scoped_to_the_selected_unit():
+    plan, recordings, _ = example()
+    source = next(iter(recordings))
+    original = project(plan, recordings)['sections']
+    replacement = {**recordings[source], 'slides': [
+        {**slide, 'title': 'Reviewed for this Unit'} for slide in recordings[source]['slides']
+    ]}
+    projected = project(plan, recordings, {('mat-5-1-12', source): replacement})['sections']
+    assert all(slide['title'] == 'Reviewed for this Unit'
+               for section in projected for slide in section['sermons'][0]['slides'])
+    assert [section['sermons'][0]['stretches'] for section in original] == [
+        section['sermons'][0]['stretches'] for section in projected]
+    assert project(plan, recordings)['sections'] == original
