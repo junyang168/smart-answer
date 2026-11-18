@@ -197,3 +197,16 @@ def test_reviewed_bundle_cannot_reuse_slides_from_another_argument_layer(tmp_pat
     with pytest.raises(ValueError, match='different argument layer'):
         reviewed_unit_recording(tmp_path, {}, {
             'lecture': 'lecture', 'source_id': 'source', 'changeset': 'new'}, {})
+
+
+def test_subunit_bundle_replaces_only_its_own_slides():
+    plan, recordings, _ = example()
+    source = next(iter(recordings))
+    before = project(plan, recordings)['sections']
+    replacement = {**recordings[source], 'slides': [
+        {**slide, 'title': 'Reviewed replacement'} for slide in recordings[source]['slides']
+    ]}
+    after = project(plan, recordings, {('mat-5-1-12', source, '1.3'): replacement})['sections']
+    assert [s for s in after if s['sub_unit_id'] != '1.3'] == [s for s in before if s['sub_unit_id'] != '1.3']
+    assert all(slide['title'] == 'Reviewed replacement' for s in after if s['sub_unit_id'] == '1.3'
+               for recording in s['sermons'] for slide in recording['slides'])

@@ -138,7 +138,8 @@ def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -
                 unit['playback_order'], lambda r: (sub_by_group[r['group_key']]['id'], r['source_id'])), 1):
             ranges = list(rows)
             sub = sub_by_group[ranges[0]['group_key']]
-            recording = (unit_recordings or {}).get((passage, source), recordings[source])
+            approved = unit_recordings or {}
+            recording = approved.get((passage, source, sid)) or approved.get((passage, source), recordings[source])
             lines = [line for line in recording['lines'] if line['start'] not in excluded.get(source, set()) and any(
                 r['start'] <= line['start'] < r['end'] for r in ranges)]
             if not lines:
@@ -244,7 +245,9 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
             _, timed = chapter_slides.placed(selection, slides)
             supplement_root = data_root / 'chapter_exposition' / passage / 'unit-supplements'
             extra_selection_path = supplement_root / f'{title}.selection.json'
-            if extra_selection_path.exists():
+            # Units-only plans use reviewed bundles for any replacement
+            # Subunit. Do not silently add old transcript-only supplements.
+            if extra_selection_path.exists() and plan.get('catalog_mode') != 'units_only':
                 extra = json.loads(extra_selection_path.read_text())
                 extra_slides_path = supplement_root / f'{title}.slides.json'
                 extra_slides = json.loads(extra_slides_path.read_text())
@@ -263,15 +266,21 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     unit_recordings = {}
     entries = {entry['source_id']: entry for entry in plan['inputs']}
     for unit_passage, unit in plan['units'].items():
-        bundle = unit.get('reviewed_slide_bundle')
-        if bundle is None:
-            continue
-        if not isinstance(bundle, str) or len(bundle) != 64 or any(c not in '0123456789abcdef' for c in bundle):
-            raise ValueError('Invalid reviewed Unit slide bundle')
-        directory = path.parent / 'unit-supplements' / bundle
-        for source in {group['source_id'] for group in unit['groups']}:
-            unit_recordings[unit_passage, source] = reviewed_unit_recording(
-                directory, unit, entries[source], recordings[source])
+        scopes = [(None, unit, unit['groups'])] + [
+            (sub['id'], sub, [g for g in unit['groups'] if g['key'] in sub['group_keys']])
+            for sub in unit['sub_units'] if sub.get('reviewed_slide_bundle')
+        ]
+        for sub_id, scope, groups in scopes:
+            bundle = scope.get('reviewed_slide_bundle')
+            if bundle is None:
+                continue
+            if not isinstance(bundle, str) or len(bundle) != 64 or any(c not in '0123456789abcdef' for c in bundle):
+                raise ValueError('Invalid reviewed Unit slide bundle')
+            directory = path.parent / 'unit-supplements' / bundle
+            for source in {g['source_id'] for g in groups}:
+                key = (unit_passage, source, sub_id) if sub_id else (unit_passage, source)
+                unit_recordings[key] = reviewed_unit_recording(
+                    directory, {'groups': groups}, entries[source], recordings[source])
     result = project(plan, recordings, unit_recordings)
     from backend.api.scripture import format_chinese_reference
     result['passage'] = passage
