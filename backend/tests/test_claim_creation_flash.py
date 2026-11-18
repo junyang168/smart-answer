@@ -758,3 +758,10 @@ def test_a_sentence_id_with_the_wrong_paragraph_is_repaired_only_when_its_number
     assert c.repair_sentence_ids(twice, ids) == []
     unknown = {'steps': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#999']}]}
     assert c.repair_sentence_ids(unknown, ids) == []
+
+
+def test_prompts_say_a_summary_sentence_carries_the_content_it_points_back_to():
+    from backend.pipeline import claim_creation_flash as f
+    prompt = ''.join(v for v in vars(f).values() if isinstance(v, str))
+    assert '回指的具體內容寫進去' in prompt
+    assert '只講一次、沒有重複強調，照樣是這一點的內容' in prompt
