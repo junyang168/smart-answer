@@ -820,7 +820,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 reference=set(context)
                 for cid in group_claims[gid]:reference.update(ranges(candidates[cid]['related_ranges'],keys))
                 reference.update(a['segment_index'] for col in COLLECTIONS[:4] for row in response[col]
-                    for a in row.get('anchors',[]) if a['segment_index'] in owned)
+                    for a in row.get('anchors',[]) if a['segment_index'].split('/')[0] in owned)
                 reference-=set(batch)
                 payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch if paragraphs[pk].strip() or not grouped_package},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in keys if pk in reference},
@@ -886,7 +886,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
-                if any(not any(a['segment_index'] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
+                if any(not any(a['segment_index'].split('/')[0] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
                     raise ValueError('new material requires an owned primary source; reference context is not a second extraction root')
                 d.validate_response(partial,source,visible_locators=set(batch)|reference,require_load_bearing_relations=False)
                 named=sections.namespace_response(partial,sections.Section(material_ordinal,0,0,group['title']))

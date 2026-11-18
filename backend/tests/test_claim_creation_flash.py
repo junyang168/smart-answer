@@ -899,3 +899,25 @@ def test_a_source_with_his_diagram_runs_steps_first(tmp_path):
     with pytest.raises(ValueError, match='steps-first'):
         creation.run('T', path, tmp_path / 'run', Ports(source), groups=groups(),
                      visual_source_attestations={block.locator: block.raw_sha256})
+
+
+def test_a_step_holding_only_his_diagram_belongs_to_the_diagrams_paragraph(tmp_path):
+    # Notes D run 2026-11-18: a step citing only S0004/V01 was refused as outside the group.
+    def mutate(out):
+        out = _with_diagram(out)
+        out['steps'][2]['sentence_ids'].remove('S0002/V01#001')
+        out['steps'].append({'step_id': 'T4', 'line': '他的圖', 'sentence_ids': ['S0002/V01#001'], 'supports': ['CL0001']})
+        return out
+    def records(out):
+        out['records'].append({'step_id': 'T4', 'kind': 'observation', 'statement': '他的圖', 'observation_type': 'literary_context',
+                               'step_type': None, 'attribution': '', 'scripture_refs': []})
+        return out
+    source, block = _diagram_source()
+    path = tmp_path / 'source.json'; path.write_text(json.dumps(source, ensure_ascii=False)); root = tmp_path / 'run'
+    ports = DiagramPorts(source, steps_mutation=mutate, records_mutation=records)
+    creation.run('T', path, root, ports, groups=groups(), grouped_package=True, steps_first=True,
+                 visual_source_attestations={block.locator: block.raw_sha256})
+    package = json.loads((root / 'candidate.json').read_text())
+    observation = next(o for o in package['observations'] if o['statement'] == '他的圖')
+    [fid] = observation['source_fragment_ids']
+    assert next(f for f in package['source_fragments'] if f['fragment_id'] == fid)['source_modality'] == 'visual'
