@@ -26,7 +26,7 @@ export const Footer = () => {
               <li><Link href="/about" className="hover:text-[#D4AF37]">關於我們</Link></li>
               <li><Link href="/about/our-faith" className="hover:text-[#D4AF37]">信仰宣告</Link></li>
               <li><Link href="/ministries" className="hover:text-[#D4AF37]">事工介紹</Link></li>
-              <li><Link href="/resources" className="hover:text-[#D4AF37]">AI 輔助查經</Link></li>
+              <li><Link href="/resources" className="hover:text-[#D4AF37]">聖經學習資源</Link></li>
               <li><Link href="/giving" className="hover:text-[#D4AF37]">奉獻支持</Link></li>
             </ul>
           </div>

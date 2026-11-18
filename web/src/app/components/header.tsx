@@ -37,7 +37,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
         <nav className="hidden lg:flex items-center gap-6 font-medium">
           <NavLink href="/">首頁</NavLink>
           <NavLink href="/about">關於我們</NavLink>
-          <NavLink href="/resources">AI 輔助查經</NavLink>
+          <NavLink href="/resources">聖經學習資源</NavLink>
           <NavLink href="/ministries">事工介紹</NavLink>
           <NavLink href="/contact">聯絡我們</NavLink>
           {canAccessAdmin && <NavLink href="/admin">後臺管理</NavLink>}
