@@ -766,3 +766,11 @@ def test_prompts_say_a_point_answers_what_its_topic_makes_a_listener_ask():
     assert '心裡自然會問的問題，statement都要用他的話回答' in prompt
     assert '分哪幾段（每段的經文範圍）、每段講什麼、段與段怎樣連接' in prompt
     assert '即使只講一次、沒有強調' in prompt
+
+
+def test_prompts_say_a_top_point_names_its_parts_without_restating_them():
+    from backend.pipeline import claim_creation_flash as f
+    prompt = ''.join(v for v in vars(f).values() if isinstance(v, str))
+    assert '不寫目錄' not in prompt  # it told the top point to drop the division (lecture 1 rerun round 1)
+    assert '他分段時寫出各段的經文範圍，他列舉時寫出各項的名稱' in prompt
+    assert '上層點出名稱（分段寫經文範圍，列舉寫各項名稱）' in prompt
