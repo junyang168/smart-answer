@@ -64,6 +64,7 @@ function Listen() {
       initialSection={params.get("section") ?? undefined}
       initialRecording={params.get("recording") ?? undefined}
       initialTime={params.has("at") ? Number(params.get("at")) : undefined}
+      unitPreview={params.get("units") === "1"}
     />
   );
 }

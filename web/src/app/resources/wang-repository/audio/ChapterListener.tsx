@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { readBookmark, resumeClip } from "./listeningProgress";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
@@ -57,7 +58,9 @@ function playlist(sections: Section[], showLeftOut: boolean): Clip[] {
 }
 
 /** 「馬太福音 5:13-16」→「5:13-16」：按鈕上書名是多餘的。 */
-const shortLabel = (label: string) => label.split(" ").pop() || label;
+const shortLabel = (label: string) => /^\d+\.\d+ /.test(label)
+  ? `${label.split(" ")[0]}${label.endsWith("（續）") ? "（續）" : ""}`
+  : label.split(" ").pop() || label;
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 /** ⏮ 在一段開頭幾秒內再按，就回到整章開頭。 */
@@ -84,6 +87,7 @@ export default function ChapterListener({
   initialSection,
   initialRecording,
   initialTime,
+  unitPreview = false,
 }: {
   passage: string;
   title: string;
@@ -92,6 +96,7 @@ export default function ChapterListener({
   initialSection?: string;
   initialRecording?: string;
   initialTime?: number;
+  unitPreview?: boolean;
 }) {
   const [sections, setSections] = useState<Section[] | null>(null);
   const [error, setError] = useState("");
@@ -105,6 +110,9 @@ export default function ChapterListener({
   const [seekError, setSeekError] = useState("");
   const pending = useRef<SeekRequest | null>(null);
   const seekTimer = useRef<number | undefined>(undefined);
+  const bookmarkVersion = useRef("");
+  const lastBookmarkSecond = useRef(-1);
+  const bookmarkKey = `wang-listening:${passage}:${source}:${unitPreview ? "units" : "chapter"}`;
 
   useEffect(() => () => window.clearTimeout(seekTimer.current), []);
 
@@ -115,7 +123,7 @@ export default function ChapterListener({
     // 晚到的回應不算：開發模式下這個 effect 會跑兩次，第二次的回應若在錄音載入
     // 之後才到，會再設一次 pending，而 loadedmetadata 不會再來。
     let alive = true;
-    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}`, { cache: "no-store" })
+    fetch(`/api/public/original-audio/${passage}?source=${encodeURIComponent(source)}${unitPreview ? "&units=true" : ""}`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
       .then((data) => {
         if (!alive) return;
@@ -124,14 +132,16 @@ export default function ChapterListener({
         const list = playlist(loaded, false);
         const wanted = Math.max(0, loaded.findIndex((section) => section.passage === initialSection));
         const first = Math.max(0, list.findIndex((item) => item.section === wanted));
-        const cue = initialTime === undefined ? -1 : list.findIndex((item) =>
-          item.section === wanted && item.sermon.source_id === initialRecording &&
-          item.start <= initialTime && initialTime < item.end,
-        );
-        const index = cue >= 0 ? cue : first;
+        bookmarkVersion.current = data.resume_version ?? "";
+        let saved = null;
+        try { saved = unitPreview ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
+        const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
+          source: item.sermon.source_id, start: item.start, end: item.end})), saved, bookmarkVersion.current,
+          {section: initialSection, source: initialRecording, time: initialTime});
+        const index = resumed?.index ?? first;
         setSections(loaded);
         if (list[index]) {
-          requestSeek(list[index], index, cue >= 0 ? (initialTime ?? list[index].start) : list[index].start, false);
+          requestSeek(list[index], index, resumed?.time ?? list[index].start, false);
         }
       })
       .catch(() => alive && setError("讀不到這一章的錄音。"));
@@ -140,7 +150,7 @@ export default function ChapterListener({
     };
     // 只在進來時讀一次；換段由頁面自己處理，不重新讀。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [passage]);
+  }, [passage, unitPreview]);
 
   // ---- 跳轉 ----------------------------------------------------------------
 
@@ -291,6 +301,12 @@ export default function ChapterListener({
       return;
     }
     setPosition((current) => ({ ...current, time: element.currentTime }));
+    if (unitPreview && bookmarkVersion.current && Math.floor(element.currentTime) !== lastBookmarkSecond.current) {
+      lastBookmarkSecond.current = Math.floor(element.currentTime);
+      try { window.localStorage.setItem(bookmarkKey, JSON.stringify({version: bookmarkVersion.current,
+        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time: element.currentTime})); }
+      catch { /* Playback remains usable when storage is unavailable. */ }
+    }
   }
 
   function toggle() {
@@ -476,9 +492,10 @@ export default function ChapterListener({
   const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
   const sectionSeconds = (index: number) =>
     clips.filter((item) => item.section === index).reduce((sum, item) => sum + item.end - item.start, 0);
+  const subUnitParts = sectionsWithAudio.filter(({item}) => item.sub_unit_id === sections[section]?.sub_unit_id);
 
   const button =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-3 text-stone-700 hover:bg-stone-100 disabled:opacity-30";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3";
 
   return (
     <div className={frame}>
@@ -488,23 +505,33 @@ export default function ChapterListener({
         </Link>
         <h1 className="font-serif text-lg font-bold">
           {title}
-          <span className="ml-2 font-sans text-sm font-normal text-stone-500">{source}</span>
+          <span className={`ml-2 font-sans text-sm font-normal text-stone-500 ${unitPreview ? "[@media(max-width:389px)_and_(max-height:599px)]:hidden" : ""}`}>{source}</span>
           {aiVoice && (
             <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 font-sans text-xs font-semibold text-amber-900">
               AI 朗讀
             </span>
           )}
         </h1>
+        {unitPreview && <p className="w-full text-sm font-semibold text-stone-700">
+          {sections[section]?.unit_label}
+          {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">小節 {sections[section]?.sub_unit_id}{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
+        </p>}
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
-        <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>
+        {!(unitPreview && subUnitParts.length > 1) && <span className="hidden text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:inline">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
         <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
-          <span className="text-stone-600">段落</span>
+          <span className="text-stone-600">{unitPreview ? "單元" : "段落"}</span>
           <select
             value={section}
             onChange={(event) => goSection(Number(event.target.value))}
-            className="min-h-11 rounded-lg border border-stone-300 bg-white px-3 font-semibold"
+            className="min-h-11 max-w-[75vw] rounded-lg border border-stone-300 bg-white px-3 font-semibold sm:max-w-[40rem]"
           >
-            {sectionsWithAudio.map(({ item, index }) => (
+            {unitPreview ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => (
+              <optgroup key={unit} label={sectionsWithAudio.find(({ item }) => item.unit_id === unit)?.item.unit_label}>
+                {sectionsWithAudio.filter(({ item }) => item.unit_id === unit).map(({ item, index }) => (
+                  <option key={item.passage} value={index}>{item.label} · {minutes(sectionSeconds(index))}</option>
+                ))}
+              </optgroup>
+            )) : sectionsWithAudio.map(({ item, index }) => (
               <option key={item.passage} value={index}>
                 {item.label} · {minutes(sectionSeconds(index))}
               </option>
@@ -691,7 +718,7 @@ export default function ChapterListener({
             onClick={restart}
             title="回到這一段開頭；開頭再按一次，回到整章開頭"
             aria-label="從頭"
-            className={`${button} [@media(max-width:389px)_and_(max-height:599px)]:hidden`}
+            className={`${button} hidden sm:inline-flex`}
           >
             ⏮
           </button>
@@ -703,7 +730,7 @@ export default function ChapterListener({
             onClick={toggle}
             title="播放／暫停（空白鍵）"
             aria-label={playing ? "暫停" : "播放"}
-            className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-stone-900 text-xl text-white hover:bg-stone-700"
+            className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xl text-white hover:bg-stone-700"
           >
             {playing ? "❚❚" : "▶"}
           </button>

@@ -235,7 +235,7 @@ export function citedAt(sermon: Sermon, seconds: number, passage: string) {
 }
 
 /** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
-export type Section = { passage: string; label: string; sermons: Sermon[]; topics?: { text: string; source_id: string; at: number }[] };
+export type Section = { passage: string; label: string; sermons: Sermon[]; unit_id?: string; unit_label?: string; sub_unit_id?: string; continued?: boolean; topics?: { text: string; source_id: string; at: number }[] };
 
 /** 这一行此刻要播的几段：收起时只播保留的，展开时连灰色的一起按原来的次序播。 */
 export const visible = (sermon: Sermon, showLeftOut: boolean) =>

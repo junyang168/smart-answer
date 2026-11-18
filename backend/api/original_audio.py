@@ -31,7 +31,7 @@ def passages() -> dict[str, Any]:
 
 
 @router.get("/{passage}")
-def index(passage: str, source: str | None = None) -> dict[str, Any]:
+def index(passage: str, source: str | None = None, units: bool = False) -> dict[str, Any]:
     """一段经文底下，教授讲过的每一段。
 
     只认 `passages()` 列出的段落。任由 URL 指定经文范围的话，`mat-16-14-15` 这
@@ -40,6 +40,15 @@ def index(passage: str, source: str | None = None) -> dict[str, Any]:
     """
 
     from backend.pipeline import chapter_topics, notes_chapter
+
+    if units:
+        from backend.pipeline import chapter_listening_units
+        if passage != 'mat-5-1-48' or source not in (None, '紐約靈命進深會'):
+            raise HTTPException(status_code=404, detail='這一章尚無單元預覽。')
+        try:
+            return chapter_listening_units.build(Path(DATA_BASE_PATH), passage)
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
 
     if source == notes_chapter.NOTES_SOURCE:
         # 教授釋經筆記：AI 朗读母本，另一份章的清单（`notes_chapters.json`）。
