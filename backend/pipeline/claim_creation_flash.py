@@ -490,7 +490,15 @@ def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
     # The package rule: every Claim needs Evidence that supports it directly.
     # An open question names the Claims that answer it; that is not support for them.
     unsupported=set(claim_ids)-{c for r in result['steps'] if not is_question(r) for c in r['supports']}
+    # Owner 2026-11-17: in Q&A he often answers in a sentence and gives no argument.
+    # The Claim prompt already says to record such an answer as he gave it, without
+    # reasons; it needs his own words and a question it answers, not a made-up step.
+    answers={c for r in result['steps'] if is_question(r) for c in r['supports']}
+    stated={r['claim_id'] for r in result['claim_text'] if r['sentence_ids']}
+    short=(unsupported&answers&stated)
+    unsupported-=short
     if unsupported:raise ValueError(f'no argument step supports {sorted(unsupported)}; every Claim needs a step')
+    result['answer_only']=sorted(short)
     if any(not r['why'].strip() or not r['sentence_ids'] for r in result['other']):raise ValueError('other needs sentences and a reason')
     if any(not r['why'].strip() or not r['sentence_ids'] or r['kind'] not in DIGRESSION_KINDS for r in result.get('digressions',[])):
         raise ValueError('a 題外話 needs sentences, a kind and a reason')
@@ -663,7 +671,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         listing=citation_listing(source_id,paragraphs,root,ports) if steps_first else None
         single_outputs={};claim_aliases={}
         response = empty(); candidates = {}; group_claims = {}; group_materials = {}; claim_statements = {}; digressions = []
-        new_claims = {}; not_claims = []; claim_seq = 0
+        new_claims = {}; not_claims = []; claim_seq = 0; answer_only = set()
         for n, group in enumerate(groups, 1):
             if chosen is not None and n not in chosen: continue
             gid = f'G{n:03d}'; owned = ranges(group['paragraph_ranges'], keys)
@@ -749,6 +757,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     # Only a Claim this group made and no other group reuses may be returned.
                     own=[c for c in new_claims[gid] if not any(c in v for g,v in group_claims.items() if g!=gid)]
                     check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own)
+                    answer_only.update(steps.pop('answer_only',[]))
                     gone={r['claim_id'] for r in steps.get('not_claims',[])}
                     for r in steps.get('not_claims',[]):
                         not_claims.append({**r,'group_id':gid,'statement':candidates.pop(r['claim_id'])['statement']})
@@ -854,7 +863,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 if not ({edge['from_id'],edge['to_id']}&local):raise ValueError('connection is unrelated to its source group')
             connections.extend(result['connections'])
         additional=attach(response,connections)
-        d.validate_response(response,source,additional_relations=additional)
+        d.validate_response(response,source,additional_relations=additional,answer_only_claims=sorted(answer_only))
         d.validate_sentence_audit(response,source,x.section_sentences(source,sections.Section(1,0,len(keys),'complete')))
         identity=d.extraction_identity(source_sha256=projection.body_sha256, source_file_sha256=hashlib.sha256(raw).hexdigest(),
             source_text_sha256=projection.spoken_text_sha256, editorial_structure_sha256=projection.editorial_structure_sha256,

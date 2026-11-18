@@ -717,3 +717,26 @@ def test_grouping_prompt_keeps_a_heading_section_whole():
     from backend.pipeline import claim_creation_flash as c
     text = inspect.getsource(c.run)
     assert '不在一個小標題之內切開' in text and '小標題只是線索' not in text
+
+
+def test_a_short_answer_to_a_question_stands_on_his_own_words_without_a_step():
+    # 2017 （六）3 Q&A: 「挪亞之約是不是沒有條件？」 answered in one sentence, no reasons.
+    from backend.pipeline import claim_creation_flash as c
+    steps = {'steps': [{'step_id': 'T1', 'line': '问题：挪亞之約是否沒有條件？', 'sentence_ids': ['S0020#001'], 'supports': ['CL0009']}],
+             'claim_text': [{'claim_id': 'CL0009', 'sentence_ids': ['S0020#002']}], 'other': [], 'digressions': []}
+    assert c.check_steps(steps, ['S0020#001', 'S0020#002'], ['CL0009'])
+    # Without his own words it is still refused: nothing would hold the answer.
+    steps['claim_text'] = []; steps['steps'][0]['sentence_ids'] = ['S0020#001', 'S0020#002']
+    with pytest.raises(ValueError, match='every Claim needs a step'):
+        c.check_steps(steps, ['S0020#001', 'S0020#002'], ['CL0009'])
+
+
+def test_only_a_named_short_answer_to_a_question_may_lack_evidence():
+    r=_response();r['claims'][0]['evidence_step_ids']=[];r['evidence_steps'][0]['produced_claim_ids']=[]
+    for q in r['questions']:q['answer_claim_ids']=[]
+    with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):
+        d.validate_response(r,_transcript(),answer_only_claims=['CL001'])  # no Question records it as the answer
+    r['questions'][0]['answer_claim_ids']=['CL001']
+    d.validate_response(r,_transcript(),answer_only_claims=['CL001'])
+    with pytest.raises(d.DetailedExtractionValidationError,match='no evidence'):
+        d.validate_response(r,_transcript())  # not named by the step check: still refused
