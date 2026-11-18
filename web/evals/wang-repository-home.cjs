@@ -12,43 +12,32 @@ async function evaluate(browser, viewport) {
   try {
     await page.goto(url.href);
     const main = page.getByRole("main");
-    const matthew = main.getByRole("link", { name: /^馬太福音/ });
-    const mark = main.getByRole("link", { name: /^馬可福音/ });
+    const open = main.getByRole("region", { name: "已開放" });
+    const matthew = open.getByRole("link", { name: "馬太福音", exact: true });
     await matthew.waitFor();
     const first = await matthew.boundingBox();
-    const next = await mark.boundingBox();
-    assert(first.y + first.height <= viewport.height, "The first book must fit on the initial screen");
-    assert.equal((await matthew.innerText()).trim(), "馬太福音", "Book entry should show the name only");
-    if (viewport.width < 400) {
-      assert.equal(first.y, next.y, "First two books should share a row on mobile");
-    }
+    assert(first.y + first.height <= viewport.height, "Matthew must fit on the initial screen");
+    assert.equal(await open.getByRole("link").count(), 1, "Only Matthew has a verified current PPT release");
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Page must not scroll horizontally");
 
-    const filters = main.getByText("篩選講道與筆記來源", { exact: true });
-    const topic = main.getByRole("link", { name: "按講論主題" });
-    const articles = main.getByRole("link", { name: "綜合文章" });
-    for (const link of [filters, topic, articles]) {
-      assert((await link.boundingBox()).y >= first.y + first.height, "Secondary entries belong after the books");
+    const preparation = main.getByRole("region", { name: "整理校對中" });
+    assert.deepEqual(await preparation.getByRole("listitem").allTextContents(), [
+      "羅馬書", "哥林多前書", "哥林多後書", "提摩太前書", "提摩太後書", "提多書",
+    ]);
+    assert.equal(await preparation.getByRole("link").count(), 0);
+    assert.equal(await preparation.getByRole("button").count(), 0);
+    for (const title of ["按講論主題", "綜合文章"]) {
+      assert((await main.getByRole("link", { name: title }).boundingBox()).y >= first.y + first.height);
     }
-    assert.match(await topic.getAttribute("href"), /\/library\?view=topic$/);
-    assert.match(await articles.getAttribute("href"), /\/library\?kind=article$/);
 
-    const group = main.getByRole("group", { name: "來源" });
-    assert.equal(await group.isVisible(), false, "New readers should see books before a list of source choices");
-    await filters.click();
-    await group.getByRole("button", { name: notes }).click();
-    await page.waitForURL((current) => current.searchParams.get("source") === notes);
-    await main.getByText("目前來源", { exact: false }).waitFor();
-    assert.equal(await mark.count(), 0);
-    assert.equal(new URL(await matthew.getAttribute("href"), url).searchParams.get("source"), notes);
-
-    await page.reload();
-    await main.getByText("目前來源", { exact: false }).waitFor();
-    await main.getByRole("button", { name: "清除篩選" }).click();
-    await mark.waitFor();
-    assert.equal(new URL(page.url()).searchParams.has("source"), false);
     await matthew.click();
     await page.getByRole("region", { name: "釋經系列" }).waitFor();
+    const filtered = new URL(url);
+    filtered.searchParams.set("source", notes);
+    await page.goto(filtered.href);
+    await matthew.waitFor();
+    assert.equal(new URL(await matthew.getAttribute("href"), url).searchParams.get("source"), notes);
+    assert.equal(await preparation.getByRole("link").count(), 0);
     console.log(`${viewport.width}×${viewport.height}: repository entry passed`);
   } finally {
     await page.close();

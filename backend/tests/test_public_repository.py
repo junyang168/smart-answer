@@ -153,3 +153,39 @@ def test_matthew_chapter_browsing_excludes_editorial_articles(monkeypatch):
     assert [row["chapter"] for row in result["chapters"]] == [5, 24]
     assert all(not row["articles"] for row in result["chapters"])
     assert repo.book_chapters(materials, "isa", [article])["chapters"][0]["articles"] == [article]
+
+
+def test_reader_card_requires_playable_slides_from_a_published_reviewed_unit(tmp_path, monkeypatch):
+    import json
+
+    from backend.pipeline import chapter_listening_units, chapter_unit_publish
+
+    passage = "mat-5-1-48"
+    other = "mat-5-17-20"
+    unit = "mat-5-1-12"
+    path = chapter_unit_publish.path_for(tmp_path, passage)
+    path.parent.mkdir(parents=True)
+    plan = {"status": "published", "catalog_mode": "units_only",
+            "inputs": [{"changeset": "argument-layer-current"}],
+            "units": {unit: {"sub_units": [{"id": "1.1", "reviewed_slide_bundle": "b" * 64}]}}}
+    monkeypatch.setattr(chapter_unit_publish, "load_summary", lambda *_: "通過的摘要")
+    index = {"sections": [{"passage": unit + "-sub-1.1", "sub_unit_id": "1.1",
+                           "sermons": [{"media_url": "/recording.mp3", "seconds": 120, "slides": ["slide"]}]}]}
+    monkeypatch.setattr(chapter_listening_units, "build", lambda *args, **kwargs: index)
+
+    def visible():
+        path.write_text(json.dumps(plan))
+        return repo.has_current_reader_slides(tmp_path, passage)
+
+    assert visible()
+    index["sections"][0]["passage"] = other + "-sub-1.1"
+    assert not visible()  # A playable legacy section elsewhere cannot qualify the reviewed unit.
+    index["sections"][0]["passage"] = unit + "-sub-1.1"
+    plan["status"] = "draft"
+    assert not visible()
+    plan["status"] = "published"
+    plan["inputs"][0].clear()
+    assert not visible()
+    plan["inputs"][0]["changeset"] = "argument-layer-current"
+    monkeypatch.setattr(chapter_unit_publish, "load_summary", lambda *_: None)
+    assert not visible()

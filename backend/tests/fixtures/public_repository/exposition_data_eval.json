@@ -1,0 +1,240 @@
+{
+  "series": {
+    "2011 NYSC 專題：馬太福音釋經（二）": {
+      "published": 6,
+      "missing": []
+    },
+    "2012 NYSC 專題：馬太福音釋經（三）": {
+      "published": 6,
+      "missing": []
+    },
+    "2016 NYSC 專題：馬太福音釋經（四）": {
+      "published": 4,
+      "missing": []
+    },
+    "2016 NYSC 專題：馬太福音釋經（五）": {
+      "published": 4,
+      "missing": []
+    },
+    "2017 NYSC 專題：馬太福音釋經（六）​": {
+      "published": 4,
+      "missing": []
+    },
+    "2018 NYSC 專題：馬太福音釋經（七）​": {
+      "published": 4,
+      "missing": []
+    },
+    "2021 NYSC 專題：馬太福音釋經（八)": {
+      "published": 4,
+      "missing": []
+    },
+    "2021年 NYSC 專題：馬太福音釋經（九）": {
+      "published": 4,
+      "missing": []
+    },
+    "马太福音 24-28 释经": {
+      "published": 4,
+      "missing": []
+    },
+    "馬太福音24 章 釋經": {
+      "published": 5,
+      "missing": []
+    },
+    "羅馬書釋經": {
+      "published": 17,
+      "missing": [
+        "2019-12-29 羅馬書11章7揀選得救恩III"
+      ]
+    },
+    "達拉斯聖道教會：羅馬書釋經（二）": {
+      "published": 12,
+      "missing": []
+    },
+    "哥林多前書 釋經​": {
+      "published": 11,
+      "missing": []
+    },
+    "達拉斯聖道教會：提摩太前書釋經": {
+      "published": 4,
+      "missing": []
+    },
+    "達拉斯聖道教會：提摩太後書釋經": {
+      "published": 3,
+      "missing": []
+    },
+    "達拉斯聖道教會：提多書釋經": {
+      "published": 2,
+      "missing": []
+    },
+    "達拉斯聖道教會：哥林多後書釋經": {
+      "published": 5,
+      "missing": []
+    },
+    "Ruxin 約翰福音釋經": {
+      "published": 0,
+      "missing": []
+    }
+  },
+  "cases": [
+    {
+      "source": "S 200426",
+      "series": "馬太福音24 章 釋經",
+      "passage": "馬太福音 24:4–14",
+      "role": "exposition",
+      "reason": "以四至十四節分段，解釋橄欖山談論到再臨前所發生的事。",
+      "snapshot_sha256": "c2f27b63df07c2216f3fe9a9e4dfcb3bf01e6fa7c6dbed5880a739dfb2ebb45d",
+      "paragraph": 1,
+      "paragraph_sha256": "9ae48b03f9a2f092d59c950889438123629eedc3dd5d16be06cb203c4db0b376"
+    },
+    {
+      "source": "2012 NYSC 專題：馬太福音釋經（三）5",
+      "series": "2012 NYSC 專題：馬太福音釋經（三）",
+      "passage": "馬太福音 13:10–17",
+      "role": "exposition",
+      "reason": "把馬可的平行段落用來解釋馬太的比喻目的。講道目錄的前五條經文沒有馬太。",
+      "snapshot_sha256": "b6a0dd4a91c9e8899255a9adb23ccfd5960048a40c76d9d24245dd4b0119125c",
+      "paragraph": 30,
+      "paragraph_sha256": "fe56e9768d8fca7733fb0a18eac7ea036b11eed44f3cfd2e5c6b9cebf9d04038"
+    },
+    {
+      "source": "S 200329 羅11 1-10 神的義8 揀選",
+      "series": "達拉斯聖道教會：羅馬書釋經（二）",
+      "passage": "馬太福音 22:1–14",
+      "role": "support",
+      "reason": "在羅馬書揀選的講解中，用婚筵比喻說明被召與回應。",
+      "snapshot_sha256": "1e5562aa0bf6b08c9037eb202ea141bef39abe0e2f731f04e8a48782fff69cda",
+      "paragraph": 137,
+      "paragraph_sha256": "c142bc34246e20fdc0d7311343859c1d87a93cc54a50a2d8415cb22830da64ba"
+    },
+    {
+      "source": "2019-12-22 羅馬書11章7揀選得救恩 II",
+      "series": "羅馬書釋經",
+      "passage": "羅馬書 11:7",
+      "role": "recap",
+      "reason": "明說上週已分析這一節，本講延伸其他經文的證據。",
+      "snapshot_sha256": "4c31c7fe66fddddc2e468319c4ce94533c7c3c04cdd731260ca5ca7eddb9c830",
+      "paragraph": 27,
+      "paragraph_sha256": "f59e05570d15e48c2a21e346ddf056f651ec08809efb88cbe955372e08dd83b4"
+    },
+    {
+      "source": "2019-06-02 罗五章二节",
+      "series": "羅馬書釋經",
+      "passage": "羅馬書 5:12–21",
+      "role": "exposition",
+      "reason": "實際改從第十二節解釋亞當與基督；題名寫第五章二節。",
+      "snapshot_sha256": "5b4739d4fb194c9fb99d5acad6c950580770b017741b06ab50b874b662e1afa8",
+      "paragraph": 1,
+      "paragraph_sha256": "f48fe40f1eae1ebda9e2c0aa79702dcf2729f1b1e82325c047ccbeaf8046dbd2"
+    },
+    {
+      "source": "S 200712",
+      "series": "達拉斯聖道教會：羅馬書釋經（二）",
+      "passage": "羅馬書 12:9–21",
+      "role": "exposition",
+      "reason": "從第九節逐段解釋真愛的具體表現。",
+      "snapshot_sha256": "de817f01457f02bab4264c317b8bbe1a2437fb5ce74c588e09d6a514b27d6aee",
+      "paragraph": 3,
+      "paragraph_sha256": "90de94551ed7f8a7666afab66c4499aaa1292950a49349a0c94053b8766470b1"
+    },
+    {
+      "source": "S 200726",
+      "series": "達拉斯聖道教會：羅馬書釋經（二）",
+      "passage": "羅馬書 13:12–13",
+      "role": "exposition",
+      "reason": "原稿寫羅14:12–13，但所念並解釋的是黑夜已深、白晝將近。",
+      "snapshot_sha256": "ffa57c83a00e264dd2ec6f17930e94fd4ed369cef8a1abc0bd748878074e3ca6",
+      "paragraph": 68,
+      "paragraph_sha256": "5fd077d3fb9a8858fc801b55cdfb2912a3c9f73233e7187a9fc6fce5e2a781f2"
+    },
+    {
+      "source": "S 201129",
+      "series": "哥林多前書 釋經​",
+      "passage": "哥林多前書 7:10–24",
+      "role": "exposition",
+      "reason": "從婚姻進入蒙召時維持身分的論證。",
+      "snapshot_sha256": "7e3dc138d3328e6522776c04e551a4b210bd586c373bc6560e2719820e11ed42",
+      "paragraph": 76,
+      "paragraph_sha256": "c66446723db1f1f3557ea477b108ae9d92c9bafda7a3bf69ad56c00b4db65130"
+    },
+    {
+      "source": "S 210425",
+      "series": "哥林多前書 釋經​",
+      "passage": "哥林多前書 15:20",
+      "role": "exposition",
+      "reason": "解釋初熟果子的意思，並展開與其餘信徒復活的關聯。",
+      "snapshot_sha256": "6e3667e06207a114ecd43932425b147659e4c0ae8d2016bffabe13284dc8585c",
+      "paragraph": 1,
+      "paragraph_sha256": "85018eb64b91a7268c425b001fc8a8288a15e3a1824a620ca7670acf3be1771d"
+    },
+    {
+      "source": "S 230326",
+      "series": "達拉斯聖道教會：哥林多後書釋經",
+      "passage": "哥林多後書 8:9",
+      "role": "exposition",
+      "reason": "實質解釋由富成貧的含義，再延伸到基督的身分。",
+      "snapshot_sha256": "68308713c14f5302e084b69434bd41df2a7bde1358fd6e3cb5bff7772d485b67",
+      "paragraph": 1,
+      "paragraph_sha256": "2fc63f15466c452e5eff31ed0cd5f5ae1cd83b3fbbe03b45d4ff98747bc48c33"
+    },
+    {
+      "source": "S 230402",
+      "series": "達拉斯聖道教會：哥林多後書釋經",
+      "passage": "哥林多後書 8:8–10",
+      "role": "exposition",
+      "reason": "對照第八、十節的形式，第九節是中間的論點。",
+      "snapshot_sha256": "37e70823106733e3ae8790475374be1bab1f868d827b2fc2e0812595065ed597",
+      "paragraph": 25,
+      "paragraph_sha256": "174843cd61cf7bbe4b9317f612f1534e9b705b6927b6014d7abe7182431d5c79"
+    },
+    {
+      "source": "S 210620 提前2 8-15教會生活",
+      "series": "達拉斯聖道教會：提摩太前書釋經",
+      "passage": "提摩太前書 2:8–11",
+      "role": "exposition",
+      "reason": "從男人禱告到女人的裝飾與學習；不能從題名推到第十五節。",
+      "snapshot_sha256": "192941f6b80a391959d540859806e102fb4214212d6448fec18fd82e25c962cc",
+      "paragraph": 1,
+      "paragraph_sha256": "e5726b851d0163f1ed280015e7a8ec87ea44010b8c5c84932a2064bc1bbd689b"
+    },
+    {
+      "source": "S 210725 (2)",
+      "series": "達拉斯聖道教會：提摩太前書釋經",
+      "passage": "提摩太前書 4:11–5:2",
+      "role": "exposition",
+      "reason": "用跨章一段解說提摩太的責任及與人相處。",
+      "snapshot_sha256": "5b08db473b2fb17373820ac34741dd326047a8694e7e6b17945e7b5fc86cdab7",
+      "paragraph": 2,
+      "paragraph_sha256": "b490ce11c342a3580fcf3da9e4e661074a774c8a989cb109a24cee9cf1544dd3"
+    },
+    {
+      "source": "S 210912 (3)",
+      "series": "達拉斯聖道教會：提摩太後書釋經",
+      "passage": "提摩太後書 1:9–10",
+      "role": "exposition",
+      "reason": "回到本講要解的段落，解釋萬古之先的原文。",
+      "snapshot_sha256": "fd99223e090abc26e923eafe72a66a710aa59e6a64212a8ee7cf374d8e108c2f",
+      "paragraph": 45,
+      "paragraph_sha256": "b7ceb1189c56fc8ae1f958a3c20df104b4241c509c1bbb25d74f925d7fe5ea51"
+    },
+    {
+      "source": "S 211107  多1 1-16",
+      "series": "達拉斯聖道教會：提多書釋經",
+      "passage": "提多書 1:1–2",
+      "role": "exposition",
+      "reason": "釋經集中在保羅問安和所應許的永生。題名範圍更大。",
+      "snapshot_sha256": "78bba87776b026586a07c150a63e4336e68782e2d26f579af8ea315ddeca1283",
+      "paragraph": 34,
+      "paragraph_sha256": "09bd4ba40275e29412fcab49f88f80c7e617e715b5f557d06155ff8c925f4185"
+    },
+    {
+      "source": "S 211205 多2-3靠恩典活",
+      "series": "達拉斯聖道教會：提多書釋經",
+      "passage": "提多書 2:11–13",
+      "role": "exposition",
+      "reason": "逐節說明過去、現在、將來。提到三章十一節是交代大綱。",
+      "snapshot_sha256": "3468755698aa3ce80476efc36d981bdafeacbac586fef12c55a324d507ffe18e",
+      "paragraph": 56,
+      "paragraph_sha256": "6dd3525f697a7b38e3b2eedd52881006b5c87d81bcf33af1921cc688ebdab828"
+    }
+  ]
+}

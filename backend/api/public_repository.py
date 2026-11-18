@@ -327,9 +327,62 @@ def _book(slug: str) -> str:
     return slug
 
 
+# Books with known exposition series in the current reader catalog.
+_READER_EXPOSITION_BOOKS = ("mat", "rom", "1co", "2co", "1ti", "2ti", "tit")
+
+
+def has_current_reader_slides(data_root: Path, passage: str) -> bool:
+    """Check the same released plan and source-bound slides used by the listener."""
+    from backend.pipeline import chapter_listening_catalog, chapter_listening_units, chapter_unit_publish
+
+    path = chapter_unit_publish.path_for(data_root, passage)
+    try:
+        plan = _read(path)
+        if plan.get("status") != "published" or plan.get("catalog_mode") != "units_only":
+            return False
+        if not all(entry.get("changeset") for entry in plan["inputs"]):
+            return False
+        reviewed_units = {key for key, unit in plan["units"].items() if unit.get("reviewed_slide_bundle")}
+        reviewed_subunits = {
+            (key, sub["id"])
+            for key, unit in plan["units"].items()
+            for sub in unit["sub_units"]
+            if sub.get("reviewed_slide_bundle")
+        }
+        if not (reviewed_units or reviewed_subunits) or not chapter_unit_publish.load_summary(data_root, passage):
+            return False
+        index = chapter_listening_units.build(data_root, passage, plan=plan)
+        for section in index["sections"]:
+            parent = chapter_listening_catalog.parent_passage(section)
+            if parent not in reviewed_units and (parent, section.get("sub_unit_id")) not in reviewed_subunits:
+                continue
+            if any(recording.get("media_url") and recording.get("seconds", 0) > 0 and recording.get("slides")
+                   for recording in section["sermons"]):
+                return True
+        return False
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def reader_exposition_books(data_root: Path) -> list[dict[str, Any]]:
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    ready: set[str] = set()
+    for passage in reversed(tuple(CHAPTERS)):
+        slug = passage.split("-", 1)[0]
+        if slug in _READER_EXPOSITION_BOOKS and slug not in ready and has_current_reader_slides(data_root, passage):
+            ready.add(slug)
+    return [
+        {"slug": slug, "name": _NAME[slug], "available": slug in ready}
+        for slug in _READER_EXPOSITION_BOOKS
+    ]
+
+
 @router.get("/books")
 def get_books() -> dict[str, Any]:
-    return books(_materials())
+    from backend.api.config import DATA_BASE_PATH
+
+    return {**books(_materials()), "exposition_books": reader_exposition_books(Path(DATA_BASE_PATH))}
 
 
 @router.get("/books/{slug}")
