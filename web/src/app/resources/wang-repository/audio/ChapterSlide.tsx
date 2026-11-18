@@ -53,6 +53,15 @@ function AnnotatedVerse({ text, notes }: { text: string; notes: InlineNote[] }) 
   );
 }
 
+type SlideDiagram = {
+  at: number;
+  title: string;
+  origin: string;
+  kind: "professor" | "editorial";
+  sha256: string;
+  image_src: string;
+};
+
 export type ChapterSlideData = {
   at: number;
   seconds: number;
@@ -63,6 +72,7 @@ export type ChapterSlideData = {
   overview?: boolean;
   verses: string[];
   inline_notes?: InlineNote[];
+  diagrams?: SlideDiagram[];
   scriptures: { at: number; scripture: string; label: string }[];
 };
 
@@ -204,6 +214,35 @@ function Verse({
   );
 }
 
+function Diagram({ diagram }: { diagram: SlideDiagram }) {
+  const zoom = useRef<HTMLDialogElement | null>(null);
+  const credit = diagram.kind === "editorial" ? "整理" : "教授的圖";
+  if (!diagram.image_src.startsWith("data:image/svg+xml;base64,")) return null;
+  return (
+    <figure className="space-y-2">
+      <button type="button" onClick={() => zoom.current?.showModal()} aria-label={`放大${diagram.title}`}
+        className="block w-full overflow-hidden rounded-lg bg-white p-2">
+        {/* eslint-disable-next-line @next/next/no-img-element -- Exact, verified SVG shown in image mode. */}
+        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block h-auto max-h-[45dvh] max-w-full object-contain" />
+      </button>
+      <figcaption className="text-sm leading-relaxed text-slate-300">
+        <strong className="text-amber-200">{credit}</strong> · {diagram.title}
+        <span className="block">{diagram.origin}</span>
+      </figcaption>
+      <dialog ref={zoom} aria-label={diagram.title} className="m-auto w-[min(94vw,56rem)] max-w-none rounded-xl bg-white p-4 text-stone-900 backdrop:bg-black/75">
+        <form method="dialog" className="mb-3 flex justify-end">
+          <button className="min-h-11 rounded-md border border-stone-300 px-3">關閉</button>
+        </form>
+        <div className="overflow-auto">
+          {/* eslint-disable-next-line @next/next/no-img-element -- Exact, verified SVG shown in image mode. */}
+          <img src={diagram.image_src} alt={diagram.title} className="mx-auto block h-auto w-full min-w-[40rem]" />
+        </div>
+        <p className="mt-2 text-sm">{credit} · {diagram.origin}</p>
+      </dialog>
+    </figure>
+  );
+}
+
 export default function ChapterSlide({
   slide,
   seconds,
@@ -255,6 +294,9 @@ export default function ChapterSlide({
           </ol>
         )}
       </header>
+      {(slide.diagrams ?? []).filter((diagram) => diagram.at <= seconds && diagram.at < clipEnd).map((diagram) => (
+        <Diagram key={diagram.sha256} diagram={diagram} />
+      ))}
       {shown.length > 0 && (
         <div className="flex flex-col gap-3">
           {shown.map((item, index) => (

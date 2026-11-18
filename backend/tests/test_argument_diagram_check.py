@@ -43,18 +43,6 @@ def test_the_saved_keys_match_the_owner_confirmed_items():
     assert [i['id'] for k in keys['keys'] for i in k['items']] == ['A1', 'A2', 'A3', 'B1']
 
 
-def test_diagrams_attach_to_the_linked_claim_of_that_lecture_only(tmp_path):
-    import hashlib
-    (tmp_path / 'x.svg').write_text('<svg/>')
-    digest = hashlib.sha256(b'<svg/>').hexdigest()
-    keys = {'keys': [{'key': 'B', 'title': 't', 'diagram': {'path': 'x.svg', 'sha256': digest}, 'items': [],
-                      'arguments': [{'change_set_id': 'cs2', 'claim_id': 'C4',
-                                     'elements': [{'diagram_text': ['重'], 'item': 'B1', 'records': ['E1']}]}]}]}
-    linked = d.diagrams_for('cs2', tmp_path, keys)
-    assert list(linked) == ['C4'] and linked['C4'][0]['elements'][0]['records'] == ['E1']
-    assert d.diagrams_for('cs1', tmp_path, keys) == {}
-
-
 def test_saved_links_name_records_of_the_approved_lecture():
     keys = json.loads(d.KEYS.read_text(encoding='utf-8'))
     claims = [a['claim_id'][-6:] for k in keys['keys'] for a in k['arguments']]

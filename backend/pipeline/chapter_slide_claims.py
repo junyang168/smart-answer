@@ -618,6 +618,82 @@ def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
     return records, row[0]
 
 
+def instance_creation_result(meta: dict) -> dict:
+    """Read the groups from the exact generation underlying the loaded candidate."""
+    candidate = Path(meta["candidate_path"])
+    if chapter_exposition.file_sha256(candidate) != meta["candidate_sha256"]:
+        raise ValueError("the run's candidate changed since it was written to the instance")
+    result = candidate.parent / "creation-result.json"
+    if result.is_file():
+        return json.loads(result.read_text())
+    receipt = json.loads(candidate.with_suffix(".receipt.json").read_text())
+    corrections = Path(receipt["corrections"])
+    if (receipt["corrected_sha256"] != meta["candidate_sha256"]
+            or chapter_exposition.file_sha256(corrections) != receipt["corrections_sha256"]):
+        raise ValueError("correction receipt does not match the loaded candidate")
+    run = json.loads(corrections.read_text())["run"]
+    if Path(run).name != run or run in (".", ".."):
+        raise ValueError("invalid original generation run")
+    original = candidate.parent.parent.parent / run / "creation"
+    original_candidate = original / "candidate.json"
+    result = json.loads((original / "creation-result.json").read_text())
+    if chapter_exposition.file_sha256(original_candidate) != receipt["candidate_sha256"]:
+        raise ValueError("original generation does not match the correction input")
+    if result["candidate_sha256"] != digest(json.loads(original_candidate.read_text())):
+        raise ValueError("original generation result does not match its candidate")
+    return result
+
+
+def instance_diagrams(conn, claim_ids: list[str]) -> dict:
+    """Load visual Observations directly supporting these live Claims."""
+    from backend.pipeline.source_projection import visual_source_blocks
+
+    if not claim_ids:
+        return {}
+    dead_statuses = list(INSTANCE_DEAD)
+    links = {}
+    for claim_id, fragment, doc in conn.execute("""
+        SELECT DISTINCT r.payload->>'to_id', f.payload, d.payload
+        FROM wang_knowledge.objects r
+        JOIN wang_knowledge.objects ob ON ob.collection='observations'
+            AND ob.object_id=r.payload->>'from_id'
+        CROSS JOIN LATERAL jsonb_array_elements_text(ob.payload->'source_fragment_ids') AS refs(id)
+        JOIN wang_knowledge.objects f ON f.collection='source_fragments' AND f.object_id=refs.id
+        JOIN wang_knowledge.objects d ON d.collection='source_documents'
+            AND d.object_id=f.payload->>'source_id'
+        WHERE r.collection='knowledge_relations' AND r.payload->>'relation_type'='supports'
+            AND r.payload->>'to_id'=ANY(%s)
+            AND f.payload->>'source_modality'='visual'
+            AND r.retired_at IS NULL AND ob.retired_at IS NULL
+            AND f.retired_at IS NULL AND d.retired_at IS NULL
+            AND NOT (r.review_status=ANY(%s) OR ob.review_status=ANY(%s)
+                OR f.review_status=ANY(%s) OR d.review_status=ANY(%s))
+        ORDER BY 1, 2, 3
+        """, (claim_ids, dead_statuses, dead_statuses, dead_statuses, dead_statuses)).fetchall():
+        sha = fragment["visual_block_sha256"]
+        attestations = {a["attestation"] for a in doc.get("visual_source_attestations", [])
+                        if a.get("locator") == fragment.get("visual_locator") and a.get("raw_sha256") == sha}
+        if doc["source_type"] == "editorial_diagram" and attestations == {"editorial_compiled_from_claims"}:
+            kind = "editorial"
+        elif (doc["source_type"] != "editorial_diagram"
+              and attestations == {"professor_displayed_or_drawn_visual_source"}):
+            kind = "professor"
+        else:
+            continue
+        raw = fragment["verbatim_excerpt"]
+        blocks = visual_source_blocks(raw, segment_index="S0001")
+        if (len(blocks) != 1 or blocks[0].parse_error
+                or not re.fullmatch(r"\s*(?:<\?xml\s+[^?]*\?>\s*)?", raw[:blocks[0].char_start])
+                or raw[blocks[0].char_end:].strip()
+                or hashlib.sha256(raw.encode()).hexdigest() != sha):
+            raise ValueError(f"Diagram SVG failed validation: {fragment['fragment_id']}")
+        links.setdefault(claim_id, {})[sha] = {
+            "title": doc["title"], "origin": doc["origin"], "kind": kind, "sha256": sha,
+            "path": fragment["visual_source_url"], "svg": raw,
+        }
+    return {claim: list(diagrams.values()) for claim, diagrams in links.items()}
+
+
 def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path, conn, change_set_id: str) -> dict:
     """Outline context read from the new knowledge instance (rebuild design §六).
 
@@ -633,10 +709,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     [document] = records["source_documents"]
     if document.get("title") != lecture:
         raise ValueError(f"ChangeSet {change_set_id} holds {document.get('title')}, not {lecture}")
-    candidate = Path(meta["candidate_path"])
-    if hashlib.sha256(candidate.read_bytes()).hexdigest() != meta["candidate_sha256"]:
-        raise ValueError("the run's candidate changed since it was written to the instance")
-    result = json.loads((candidate.parent / "creation-result.json").read_text())
+    result = instance_creation_result(meta)
     fragments = {f["fragment_id"]: f for f in records.get("source_fragments", [])}
     by_id = {}
     for step in records.get("evidence_steps", []):
@@ -650,8 +723,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     for rel in records.get("knowledge_relations", []):
         if rel["relation_type"] == "supports":
             support.setdefault(rel["to_id"], []).append(rel["from_id"])
-    from backend.pipeline.argument_diagram_check import diagrams_for
-    diagrams = diagrams_for(change_set_id, Path(data_base_dir))
+    diagrams = instance_diagrams(conn, [claim["claim_id"] for claim in claims_by_short.values()])
     groups, claims, excluded = [], [], []
     included = set()
     for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
@@ -676,6 +748,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                 statement, kind, fids, refs = by_id[rid]
                 anchors = []
                 for fid in fids:
+                    if fragments[fid].get("source_modality") == "visual":
+                        continue
                     quote = fragments[fid]["verbatim_excerpt"]
                     ids = locate(text, spans, quote)
                     if ids is None:
@@ -691,7 +765,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                     evidence.append(entry)
             # His own words for the Claim: an occurrence anchor that is not a supporting record.
             own = [a["source_fragment_id"] for o in claim.get("occurrences", []) for a in o.get("anchors", [])
-                   if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments]
+                   if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments
+                   and fragments[a["source_fragment_id"]].get("source_modality") != "visual"]
             stated = next((ids[0] for fid in own for ids in [locate(text, spans, fragments[fid]["verbatim_excerpt"])] if ids), None)
             if not stated and not evidence:
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.

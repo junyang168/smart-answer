@@ -61,24 +61,6 @@ def check_diagrams(keys: dict, data_base_dir: Path) -> None:
             raise ValueError(f"diagram for key {key['key']} changed since the owner confirmed it: {path}")
 
 
-def diagrams_for(change_set_id: str, data_base_dir: Path, keys: dict | None = None) -> dict[str, dict]:
-    """His diagrams linked to this lecture's approved Claims, by full Claim ID, for slide generation.
-
-    Each diagram is refused if it changed since the owner confirmed it. An element keeps
-    the records that carry it in this lecture; one with none is not taught here."""
-    keys = keys or json.loads(KEYS.read_text(encoding='utf-8'))
-    linked = {}
-    for key in keys['keys']:
-        for argument in key.get('arguments', []):
-            if argument['change_set_id'] != change_set_id:
-                continue
-            check_diagrams({'keys': [key]}, data_base_dir)
-            linked.setdefault(argument['claim_id'], []).append(
-                {'key': key['key'], 'title': key['title'], 'path': key['diagram']['path'],
-                 'sha256': key['diagram']['sha256'], 'elements': argument['elements']})
-    return linked
-
-
 def grade(keys: dict, records: dict[str, list[dict]], paragraphs: list[str], rulings: dict | None = None) -> dict:
     rulings = rulings or {}
     items = []

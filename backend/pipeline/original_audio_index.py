@@ -1455,6 +1455,8 @@ def _chapter_slides(
             if not overlap:
                 continue
             at = max(slide["at"], min(piece["start"] for piece in overlap))
+            diagrams = [diagram for diagram in slide.get("diagrams", [])
+                        if any(piece["start"] <= diagram["at"] < piece["end"] for piece in overlap)]
             out.setdefault(section, []).append({
                 "at": at,
                 "seconds": until - at,
@@ -1462,6 +1464,7 @@ def _chapter_slides(
                 "points": [{"at": item["at"], "text": item["text"]} for item in slide["points"]],
                 **({"overview": True} if slide.get("overview") else {}),
                 **({"inline_notes": slide["inline_notes"]} if slide.get("inline_notes") else {}),
+                **({"diagrams": diagrams} if diagrams else {}),
                 "verses": slide["verses"],
                 "scriptures": [
                     {"at": item["at"], "scripture": item["slug"], "label": format_chinese_reference(item["slug"])}
@@ -1507,7 +1510,8 @@ def _retimed(convert: Any, row: dict[str, Any]) -> dict[str, Any]:
              "seconds": round(convert(slide["at"] + slide["seconds"]) - convert(slide["at"]), 2),
              "points": at(slide["points"], "at"),
              "scriptures": at(slide["scriptures"], "at"),
-             **({"inline_notes": at(slide["inline_notes"], "at")} if slide.get("inline_notes") else {})}
+             **({"inline_notes": at(slide["inline_notes"], "at")} if slide.get("inline_notes") else {}),
+             **({"diagrams": at(slide["diagrams"], "at")} if slide.get("diagrams") else {})}
             for slide in row["slides"]
         ]
     return out

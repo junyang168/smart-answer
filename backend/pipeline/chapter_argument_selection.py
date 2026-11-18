@@ -1,7 +1,6 @@
 """Select complete top-level argument topics before compiling their source ranges."""
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,10 +40,9 @@ SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['groups'
 
 def topic_material(records, meta):
     """Read every complete topic from the instance's bound generation run."""
-    candidate = Path(meta['candidate_path'])
-    if hashlib.sha256(candidate.read_bytes()).hexdigest() != meta['candidate_sha256']:
-        raise ValueError('instance candidate changed')
-    result = json.loads((candidate.parent / 'creation-result.json').read_text())
+    from backend.pipeline.chapter_slide_claims import instance_creation_result
+
+    result = instance_creation_result(meta)
     [document] = records['source_documents']
     source = Path(document['source_path'])
     projection = project_script(json.loads(source.read_text())['script'])

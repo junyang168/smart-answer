@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -316,7 +317,9 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
                   "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
-                  json.dumps(claim_context, ensure_ascii=False)]
+                  json.dumps({**claim_context, "claims": [
+                      {k: v for k, v in claim.items() if k != "diagrams"} for claim in claim_context["claims"]
+                  ]}, ensure_ascii=False)]
     elif claim_context is not None:
         from backend.pipeline.chapter_slide_claims import claim_source_ranges
 
@@ -612,6 +615,38 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
+def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict[str, list[dict]]:
+    """Place each bound image at the spoken Claim, using the authored Claim point as fallback."""
+    by_id = {line["id"]: line["start"] for line in lines}
+    by_slide = {}
+    for claim in context.get("claims", []):
+        if not claim.get("diagrams"):
+            continue
+        sentence = claim.get("stated")
+        if sentence not in by_id:
+            sentence = next((point["sentence"] for slide in slides for point in slide["points"]
+                             if point.get("source") == claim["claim_id"]), None)
+        if sentence not in by_id:
+            continue
+        slide = next((slide for slide in slides if slide["first"] <= sentence <= slide["last"]), None)
+        if slide is None:
+            continue
+        at = by_id[sentence]
+        diagrams = by_slide.setdefault(slide["first"], {})
+        for item in claim["diagrams"]:
+            if "svg" not in item:
+                continue  # Older saved test/context records may still have the retired keys.json shape.
+            sha = item["sha256"]
+            if sha in diagrams and diagrams[sha]["at"] <= at:
+                continue
+            image = base64.b64encode(item["svg"].encode()).decode("ascii")
+            diagrams[sha] = {
+                "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
+                "sha256": sha, "image_src": "data:image/svg+xml;base64," + image,
+            }
+    return {first: sorted(items.values(), key=lambda item: item["at"]) for first, items in by_slide.items() if items}
+
+
 def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[
     dict[str, list[str]], list[dict[str, Any]]
 ]:
@@ -625,6 +660,7 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
+    diagrams = timed_diagrams(slides_record["slides"], lines, slides_record.get("claim_context") or {})
     for slide in slides_record["slides"]:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:
@@ -643,6 +679,7 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
                 for item in slide.get("inline_notes", [])
             ],
             "scriptures": _reread(slide["scriptures"], own, lines, index),
+            **({"diagrams": diagrams[slide["first"]]} if slide["first"] in diagrams else {}),
         })
     return piece_verses, timed
 

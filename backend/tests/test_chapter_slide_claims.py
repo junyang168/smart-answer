@@ -384,3 +384,84 @@ def test_other_evidence_of_same_claim_can_carry_context_but_unrelated_claim_cann
     assert hints.stale_points(context,slides,lines)==[]
     context['claims'].append({'claim_id':'C2','statement':'unrelated','evidence_steps':[context['claims'][0]['evidence_steps'].pop()]})
     assert hints.stale_points(context,slides,lines)
+
+
+def test_database_diagram_requires_a_matching_attestation_and_safe_exact_svg():
+    import hashlib
+    from types import SimpleNamespace
+
+    def row(claim, kind, attestation, svg):
+        sha = hashlib.sha256(svg.encode()).hexdigest()
+        return (claim, {"fragment_id": "F1", "visual_block_sha256": sha, "visual_locator": "S0001/V01",
+                        "visual_source_url": "x.svg", "verbatim_excerpt": svg},
+                {"title": claim, "origin": "來源", "source_type": kind, "visual_source_attestations": [
+                    {"locator": "S0001/V01", "raw_sha256": sha, "attestation": attestation}]})
+
+    svg = '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg"><text>圖</text></svg>\n'
+    professor = row("A", "sermon_slide", "professor_displayed_or_drawn_visual_source", svg)
+    editorial = row("C", "editorial_diagram", "editorial_compiled_from_claims", svg)
+    mismatch = row("X", "editorial_diagram", "professor_displayed_or_drawn_visual_source", svg)
+    selected = [professor, editorial, mismatch]
+    conn = SimpleNamespace(execute=lambda *_: SimpleNamespace(fetchall=lambda: selected))
+    links = hints.instance_diagrams(conn, ["A", "C", "X"])
+    assert {claim: diagrams[0]["kind"] for claim, diagrams in links.items()} == {"A": "professor", "C": "editorial"}
+    assert links["C"][0]["svg"] == svg
+    selected[0] = (professor[0], {**professor[1], "verbatim_excerpt": svg + "changed"}, professor[2])
+    with pytest.raises(ValueError, match="SVG failed validation"):
+        hints.instance_diagrams(conn, ["A"])
+    selected[:] = [row("A", "sermon_slide", "professor_displayed_or_drawn_visual_source", "<svg><script/></svg>")]
+    with pytest.raises(ValueError, match="SVG failed validation"):
+        hints.instance_diagrams(conn, ["A"])
+
+
+def test_diagram_projection_preserves_timing_kind_and_unit_boundary():
+    from backend.pipeline import original_audio_index
+
+    diagram = {"title": "結構", "origin": "講義", "kind": "editorial", "sha256": "a" * 64, "svg": "<svg/>"}
+    lines = [{"id": "S0001", "start": 1}, {"id": "S0002", "start": 3}, {"id": "S0003", "start": 5}]
+    draft = [{"first": "S0001", "last": "S0003", "points": [{"source": "C2", "sentence": "S0003"}]}]
+    context = {"claims": [
+        {"claim_id": "C2", "stated": "本堂未保留", "diagrams": [diagram]},
+        {"claim_id": "C1", "stated": "S0002", "diagrams": [diagram]},
+        {"claim_id": "C3", "stated": "本堂未保留", "diagrams": [{**diagram, "sha256": "b" * 64}]},
+    ]}
+    image, = chapter_slides.timed_diagrams(draft, lines, context)["S0001"]
+    assert (image["at"], image["kind"], image["image_src"]) == (3, "editorial", "data:image/svg+xml;base64,PHN2Zy8+")
+    source_slide = {"at": 1, "seconds": 5, "title": "論點", "diagrams": [image],
+                    "verses": [], "points": [], "scriptures": []}
+    sections = original_audio_index._chapter_slides({
+        "current": {"pieces": [{"start": 1, "end": 4}]},
+        "neighbor": {"pieces": [{"start": 4, "end": 7}]},
+    }, [source_slide])
+    assert "diagrams" not in sections["neighbor"][0]
+    retimed = original_audio_index._retimed(lambda time: time + 10, {
+        "slides": sections["current"], "stretches": [], "judgements": [],
+    })
+    assert retimed["slides"][0]["diagrams"][0]["at"] == 13
+
+
+def test_corrected_instance_reads_only_its_exact_original_grouping(tmp_path):
+    original = tmp_path / "r1" / "creation"
+    corrected = tmp_path / "r1-corrected" / "creation"
+    original.mkdir(parents=True)
+    corrected.mkdir(parents=True)
+    candidate = original / "candidate.json"
+    candidate.write_text('{"claims": []}\n')
+    result = {"candidate_sha256": hints.digest(json.loads(candidate.read_text())),
+              "groups": [{"title": "結構"}]}
+    (original / "creation-result.json").write_text(json.dumps(result))
+    loaded = corrected / "candidate-owner-corrected.json"
+    loaded.write_text('{"claims": [{"claim_id": "C1"}]}\n')
+    corrections = corrected / "corrections.json"
+    corrections.write_text('{"run": "r1"}')
+    sha = chapter_exposition.file_sha256
+    loaded.with_suffix(".receipt.json").write_text(json.dumps({
+        "corrected_sha256": sha(loaded), "candidate_sha256": sha(candidate),
+        "corrections": str(corrections), "corrections_sha256": sha(corrections),
+    }))
+    meta = {"candidate_path": str(loaded), "candidate_sha256": sha(loaded)}
+    assert hints.instance_creation_result(meta) == result
+
+    candidate.write_text('{"claims": [{"claim_id": "different"}]}\n')
+    with pytest.raises(ValueError, match="original generation does not match the correction input"):
+        hints.instance_creation_result(meta)
