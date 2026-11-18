@@ -69,3 +69,14 @@ def test_default_api_adopts_catalog_and_explicit_legacy_retains_old_reader(tmp_p
     assert api.index('mat-5-1-48',legacy=True)==old
     assert api.index('mat-5-1-48',source='other')==old
     assert api.index('mat-5-1-48',units=True)==new
+
+
+def test_subsecond_boundary_remnant_has_no_separate_listening_entry():
+    old, new = example()
+    old['sections'][1]['sermons'] = [row('old', 20, 30.51)]
+    result = compose(old, new)
+    assert not any(s['passage'] == 'mat-5-21-26' for s in result['sections'])
+    assert result['section_aliases']['mat-5-21-26'] == new['sections'][1]['passage']
+
+    old['sections'][1]['sermons'][0]['transcript'].append({'at': 30.1, 'text': '還有一句'})
+    assert any(s['passage'] == 'mat-5-21-26' for s in compose(old, new)['sections'])

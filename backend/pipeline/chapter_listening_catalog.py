@@ -46,12 +46,19 @@ def compose(legacy, updated):
             if key in new_sources: source_aliases[original['source_id']] = new_sources[key]
             if section['passage'] in replaced: continue
             row = deepcopy(original)
-            row['stretches'] = [part for stretch in row['stretches'] for part in subtract(stretch, covered.get(key, []))]
-            if row['stretches'] == original['stretches']:
+            row['stretches'] = [
+                part for stretch in original['stretches'] for part in subtract(stretch, covered.get(key, []))
+                # Different sentence and clip boundaries can leave a fraction
+                # of a second after moving an argument into its new Unit.
+                if (part == stretch or part.get('left_out') or part['end'] - part['start'] >= 1
+                    or any(part['start'] <= line['at'] < part['end']
+                           for line in original.get('transcript', [])))
+            ]
+            kept = [s for s in row['stretches'] if not s.get('left_out')]
+            if kept and row['stretches'] == original['stretches']:
                 remaining.append(row)
                 continue
             changed = True
-            kept = [s for s in row['stretches'] if not s.get('left_out')]
             if not kept:
                 overlaps += [new['passage'] for new in updated['sections']
                              if any(recording_key(r) == key and any(
