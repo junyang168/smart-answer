@@ -321,7 +321,7 @@ def evidence_scriptures(refs: list[str], lines: list[str], cuv_root: Path | None
     return shown, unread
 
 
-def evidence_scripture_gaps(context: dict | None, slides: list[dict]) -> list[str]:
+def evidence_scripture_gaps(context: dict | None, slides: list[dict], *, source_lines=None, passage=None) -> list[str]:
     """負責人 2026-11-16：Evidence 用到的經文都要出現在投影片上。回沒出現的。"""
     from backend.api.scripture import parse_reference
 
@@ -331,7 +331,10 @@ def evidence_scripture_gaps(context: dict | None, slides: list[dict]) -> list[st
     gaps = []
     for claim in context.get("claims", []):
         for step in claim.get("evidence_steps", []):
-            for slug in step.get("scriptures", []):
+            candidates = step.get("scriptures", [])
+            if source_lines is not None:
+                candidates = [read for slug in candidates for read in read_aloud(slug, source_lines, passage=passage)]
+            for slug in candidates:
                 wanted = parse_reference(slug)
                 covered = any(item["slug_book"] == wanted["slug_book"] and item["chapter"] == wanted["chapter"]
                               and item["start"] <= wanted["start"] and wanted["end"] <= item["end"] for item in shown)

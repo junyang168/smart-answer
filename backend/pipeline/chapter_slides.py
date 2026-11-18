@@ -55,6 +55,15 @@ POINT_TIMING_RULES = """要點的 sentence 標記教授開始引入、展開這�
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
 
 
+SLIDE_VOICE_RULES = """這是配合教授原聲的同步投影片，不是介紹教授觀點的第三人稱報告。
+- 教授本人的問題、理由、判斷和回答直接寫內容，省略「教授認為／教授指出／他說／他回答」等轉述框架；不機械改成「我認為」。
+- 省略的只是教授這個敘述主語，不刪否定、條件、程度、理由或結論；不要把原話的保留語氣加強。
+- 必須區分其他人的立場：反方用「有人主張……」或具體身分，並直接寫反駁的內容，不寫指涉不明的「他說錯了」。保羅、耶穌、聽眾、故事中人物等有必要的主語不可刪。
+- 聽眾提問可寫「問：……」，回答直接寫答案。故事中他人說的話仍標明人物，不能變成教授自己的結論。
+- 例如教授回答十誡問題時，寫「十誡也不必遵守」，不寫「他回答：十誡也不必遵守」；此例只規定敘述口吻，實際結論、適用範圍和論證必須取自本次原文。
+- 審閱逐條檢查：能否省掉教授轉述框架，同時仍看清誰的主張、反方立場、引文與判斷方向。不得為了省主語而混淆歸屬。"""
+
+
 _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片。聽眾一邊聽錄音，一邊看投影片；投影片幫他們抓住教授此刻在講什麼、怎樣推論。
 
 使用者給你這一堂課裡解釋馬太福音第 〈章〉 章的逐字稿，每一句有編號（S0001 起），按時間排；中間略去的部分不在其中。請把它分成一張張投影片。
@@ -63,6 +72,9 @@ _SYSTEM_TEMPLATE = """你在為王教授馬太福音講座的錄音配投影片�
 - 每張投影片從某一句開始（first），到下一張的第一句之前為止。第一張從第一句開始。
 - 一張講一個話題；教授換話題，就從新話題的第一句換一張。一個問題和它的答案、一個例子和它說明的道理，放在同一張。
 - 一張大約一到五分鐘。要點放不下時多分一張，不要漏掉內容。
+
+呈現口吻：
+〈原聲投影片口吻〉
 
 要點（points，2 到 4 條，每條不超過 28 字）：
 - 每條寫 sentence，按他講的次序排，sentence 遞增。
@@ -114,6 +126,7 @@ INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語
 經文下方的文字只用於教授解釋希臘原文（含與希伯來文對照）或原文文法。經文結構如 inclusio 只高亮對應句，將相關詞句綁到同一講解開始句，original、reading、explanation 全部留空。其他背景、經文複述和一般釋經放在投影片要點或原聲，不加節下文字。
 先看 Claim 證據步驟及 SourceFragment 的句子範圍，包含 reasoning、literary_context 等，再用相鄰逐字稿補足教授的解釋與出現時間。候選主張也須逐字稿支持。
 每條給 sentence（教授開始解釋的句子）、scripture（本張已出現的經文 slug，如 mat-5-3-5）、verse（節號）、span（和合本該節唯一的連續短詞）、original（可核實的原文或教授使用的轉寫）、reading 一律留空、explanation（一句短語，十五字以內，只說原文的意思或文法）。節下文字只佔一行，不重複經文或要點已有的話。無法核實的原文字形留空。
+教授糾正和合本譯法時，span 仍須選和合本實際存在的原字詞；更正的譯詞放 explanation 或要點，不可拿更正後的文字定位和合本。不要為一般譯法比較建立空內容的結構高亮。
 跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
 
 
@@ -124,6 +137,7 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
     prompt = (
         _SYSTEM_TEMPLATE.replace("〈要點時間規則〉", POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+        .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
         .replace("〈整章〉", f"{number}:{start}-{end}")
         .replace("〈章〉", str(number))
     )
@@ -269,7 +283,7 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "畫面最新的要點要是 source 為這條 Claim 的要點，寫出他在那裡講的內容。",
                   "- 他講任何一步論證（某個 Claim 的 stated 句、own_passages 或某一步 evidence 的 anchors）時，畫面上那一張要有一條要點的 source "
                   "是那一步、它所屬的 Claim、或同一 Claim 的另一步：聽眾此刻看到的要和他此刻論證的相關。投影片的分界不要切在一步論證中間。",
-                  "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 列的經文都要放進投影片的 scriptures，"
+                  "- evidence_steps 是每個 Claim 背後他的論證步驟。其中 scriptures 是候選出處；只有本堂實際讀出或幾乎逐字引用的節數才放進投影片的 scriptures，不因舊提示包列了範圍就顯示未讀的節數，"
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
                   "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
@@ -429,13 +443,20 @@ def check(
                     unshown.append(f"{title}（{line['id']}）：逐字稿裡有 {slug}")
         inline_notes = []
         for note in slide.get("inline_notes", []):
-            scripture = next((item for item in scriptures if item["slug"] == note["scripture"]
-                              and item["sentence"] <= note["sentence"]), None)
-            later = next((item for item in scriptures if item["slug"] == note["scripture"]), None)
+            wanted = parse_reference(note["scripture"])
+            matching = [item for item in scriptures if wanted is not None
+                        and (ref := parse_reference(item["slug"])) is not None
+                        and (ref["slug_book"], ref["chapter"]) == (wanted["slug_book"], wanted["chapter"])
+                        and wanted["start"] <= note["verse"] <= wanted["end"]
+                        and ref["start"] <= note["verse"] <= ref["end"]]
+            scripture = next((item for item in matching if item["sentence"] <= note["sentence"]), None)
+            later = next(iter(matching), None)
             if scripture is None and later is not None and note["sentence"] in own_ids:
                 # 註解綁在經文讀出之前一兩句：時間移到讀出那一句，文字不變。
                 note = {**note, "sentence": later["sentence"]}
                 scripture = later
+            if scripture is not None:
+                note = {**note, "scripture": scripture["slug"]}
             ref = parse_reference(scripture["slug"]) if scripture else None
             if (note["sentence"] not in own_ids or ref is None
                     or not ref["start"] <= note["verse"] <= ref["end"]
@@ -496,7 +517,8 @@ def checked(
     problems, unshown, slides = check(raw, kept, chapter)
     if not problems and claim_context is not None:
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
-        problems = evidence_scripture_gaps(claim_context, slides)
+        problems = evidence_scripture_gaps(claim_context, slides,
+            source_lines=[line["text"] for line in sentences(kept)], passage=chapter.passage)
         if outline:
             from backend.pipeline.chapter_slide_claims import point_spans, stale_points
             problems += (point_spans(claim_context, slides) + argument_alignment(claim_context, slides)
@@ -713,6 +735,9 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 使用者給你：保留的逐字稿（每句有編號 S0001 起），以及投影片（每張的第一句、標題、要點與它出現的那一句、顯示的經文與讀到的那一句）。要點在它標的實際講述錨點之前短暫預顯，讓聽眾先讀再聽；經文在讀到的那一句出現。
 
+呈現口吻：
+〈原聲投影片口吻〉
+
 逐張對照逐字稿檢查：
 1. 忠實：要點只寫他講的，沒有加入他沒講的解釋、評論；沒有把「很好的證據」寫成「證明」；沒有把會眾的話當成他的話；沒有搞錯誰說的、在講哪一卷書。
 2. 完整：他這一段的問題、理由、結論、勸告都在；問題和它的答案在同一張；例子和它說明的道理在同一張；沒有只留鋪陳、漏了結論。
@@ -729,7 +754,7 @@ REVIEW_PROMPT = """你是獨立審稿人，審王教授馬太福音講座錄音�
 
 每張只有二到四條要點。改法也必須符合這個上限；新增會超過時，明確說明合併、刪除或分張，不能要求其餘要點不動而超限。
 
-只列真正影響聽眾的問題，不挑措辭。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
+只列真正影響聽眾的問題，不挑無關緊要的措辭；原聲投影片的敘述視角及說話者歸屬屬於必要檢查，不得略過。每個問題寫：哪一張（第一句編號）、問題、具體怎樣改（改成什麼要點、移到哪一句、加或刪哪段經文）。
 
 grade：A（可以直接給聽眾）、B（小問題）、C（有會誤導或跟不上的地方）。blocking：還有忠實問題、漏了他的結論、漏了他讀的經文、或仍有出現時間問題時為 true。
 
@@ -775,7 +800,8 @@ def show_slides(slides: list[dict[str, Any]]) -> str:
     for number, slide in enumerate(slides, 1):
         lines.append(f"第 {number} 張（{slide['first']}–{slide['last']}）{slide['title']}　經節：{','.join(slide['verses'])}")
         for point in slide["points"]:
-            lines.append(f"  · [{point['sentence']}] {point['text']}")
+            source = f" (source: {point['source']})" if point.get("source") else ""
+            lines.append(f"  · [{point['sentence']}] {point['text']}{source}")
         for item in slide["scriptures"]:
             lines.append(f"  經文 [{item['sentence']}] {format_chinese_reference(item['slug'])}")
         for note in slide.get("inline_notes", []):
@@ -875,6 +901,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     review_system = (
         REVIEW_PROMPT.replace("〈要點時間規則〉", POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
+        .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
     )
     answer = client.generate_json(for_lecture(review_system, lecture) + "\n\n" + INLINE_NOTE_RULES
                                   + "\n審閱時逐條核對經文短註的原文、歸屬、出現時間，以及是否漏掉承重的原文觀察。指出任何超出希臘原文或原文文法的節下文字，並核對結構高亮是否同步。" + extra, prompt, schema)
@@ -894,7 +921,7 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
             "actionable": len(actionable(answer)), "file": str(target)}
 
 
-def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS) -> dict[str, Any]:
+def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
     path = record_path(data_base_dir, chapter.passage, lecture)
@@ -927,16 +954,24 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
         + "\n\n審稿人的意見：\n" + findings
     )
     rejected_attempt = path.with_suffix(f".revision-{revision + 1}.rejected.json")
-    if context is not None and rejected_attempt.exists():
-        return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
-    response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
+    if recheck_only:
+        if not rejected_attempt.exists():
+            return {"lecture": lecture, "status": "nothing_rejected"}
+        response = {"slides": json.loads(rejected_attempt.read_text())["raw_slides"]}
+    else:
+        if context is not None and rejected_attempt.exists():
+            return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
+        response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
     problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
-        rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},
-                                       ensure_ascii=False, indent=1), encoding="utf-8")
+        if not recheck_only:
+            rejected.write_text(json.dumps({"problems": problems, "raw_slides": response.get("slides")},
+                                           ensure_ascii=False, indent=1), encoding="utf-8")
         return {"lecture": lecture, "status": "rejected", "problems": problems, "file": str(rejected)}
     path.with_suffix(f".revision-{revision}.json").write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    if recheck_only:
+        record["rechecked_revision_answer_sha256"] = chapter_exposition.file_sha256(rejected_attempt)
     record.update({
         "revision": revision + 1,
         "revised_from_review_sha256": chapter_exposition.file_sha256(review_file),
