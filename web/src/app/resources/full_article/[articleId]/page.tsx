@@ -126,7 +126,7 @@ export default async function FullArticleViewer(
         <div className="grid grid-cols-1 lg:grid-cols-3 lg:gap-12">
           <main className="lg:col-span-2">
             <header id={articleTopAnchorId} className="mb-8 space-y-2">
-              <p className="text-sm text-gray-500">AI 輔助查經 / 全文文章</p>
+              <p className="text-sm text-gray-500">聖經學習資源 / 全文文章</p>
               <h1 className="text-3xl lg:text-4xl font-bold text-gray-900">{article.name || article.slug}</h1>
               {article.subtitle && <p className="text-lg text-gray-600">{article.subtitle}</p>}
               <p className="text-sm text-gray-500">

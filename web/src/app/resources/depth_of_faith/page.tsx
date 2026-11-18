@@ -3,7 +3,7 @@ import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { fetchDepthOfFaithEpisodes } from './episodes';
 
 export const metadata: Metadata = {
-  title: '信仰的深度 | AI 輔助查經',
+  title: '信仰的深度 | 聖經學習資源',
   description:
     '透過「信仰的深度」網路廣播，探索真理、堅固信心，並隨時隨地聆聽王守仁教授的聖經教導。',
 };
@@ -13,7 +13,7 @@ export const revalidate = 0;
 export default async function DepthOfFaithPage() {
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: 'AI 輔助查經', href: '/resources' },
+    { name: '聖經學習資源', href: '/resources' },
     { name: '信仰的深度' },
   ];
   const episodes = await fetchDepthOfFaithEpisodes();
