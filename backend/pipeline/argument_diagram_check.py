@@ -105,13 +105,22 @@ def _pairs(text: str) -> set[str]:
 
 def _carriers(package: dict) -> list[tuple[str, str | None, set[str]]]:
     """Every (record, Claim it serves, his words) in a package: steps through the
-    Claims they produce, a Claim's own words through the Claim itself."""
+    Claims they produce, Observations through their supports relations, a Claim's
+    own words through the Claim itself."""
     words = {f['fragment_id']: _pairs(f['verbatim_excerpt']) for f in package.get('source_fragments', [])}
     out = []
     for step in package.get('evidence_steps', []):
         pairs = set().union(*(words.get(f, set()) for f in step['source_fragment_ids']))
         for claim in step.get('produced_claim_ids') or [None]:
             out.append((step['evidence_step_id'], claim, pairs))
+    claim_ids = {c['claim_id'] for c in package.get('claims', [])}
+    for row in package.get('observations', []):
+        # An Observation serves a Claim through a supports relation, not a field of its own.
+        pairs = set().union(*(words.get(f, set()) for f in row['source_fragment_ids']))
+        served = [r['to_id'] for r in package.get('knowledge_relations', [])
+                  if r['from_id'] == row['observation_id'] and r['relation_type'] == 'supports' and r['to_id'] in claim_ids]
+        for claim in served or [None]:
+            out.append((row['observation_id'], claim, pairs))
     for claim in package.get('claims', []):
         for occurrence in claim.get('occurrences', []):
             for anchor in occurrence.get('anchors', []):
@@ -129,8 +138,9 @@ def compare_regeneration(gold: dict, new_package: dict, change_set_id: str, keys
     keys = keys or json.loads(KEYS.read_text(encoding='utf-8'))
     gold_words = {f['fragment_id']: f['verbatim_excerpt'] for f in gold.get('source_fragments', [])}
     gold_steps = {s['evidence_step_id']: s for s in gold.get('evidence_steps', [])}
+    gold_steps |= {o['observation_id']: o for o in gold.get('observations', [])}
     carriers = _carriers(new_package)
-    statements = {c['claim_id']: c.get('statement', '') for c in new_package.get('claims', [])}
+    statements = {c['claim_id']: c.get('statement') or c.get('title', '') for c in new_package.get('claims', [])}
     report = []
     for key in keys['keys']:
         for argument in key.get('arguments', []):
@@ -142,12 +152,14 @@ def compare_regeneration(gold: dict, new_package: dict, change_set_id: str, keys
                     fids = gold_steps[rid]['source_fragment_ids'] if rid in gold_steps else [rid]
                     for fid in fids:
                         want = _pairs(gold_words[fid])
-                        best = max(((len(want & got) / len(want), rec, claim) for rec, claim, got in carriers if want),
-                                   default=(0.0, None, None), key=lambda x: x[0])
-                        pieces.append({'gold_record': rid, 'gold_fragment': fid, 'held': round(best[0], 2),
-                                       'new_record': best[1] if best[0] >= held else None,
-                                       'new_claim': best[2] if best[0] >= held else None})
-                claims = sorted({p['new_claim'] for p in pieces if p['new_claim']})
+                        scored = [(len(want & got) / len(want), rec, claim) for rec, claim, got in carriers if want]
+                        top = max((x[0] for x in scored), default=0.0)
+                        # A step that serves several Claims is held by each of them.
+                        hits = [x for x in scored if x[0] == top and top >= held]
+                        pieces.append({'gold_record': rid, 'gold_fragment': fid, 'held': round(top, 2),
+                                       'new_record': hits[0][1] if hits else None,
+                                       'new_claims': sorted({x[2] for x in hits if x[2]})})
+                claims = sorted({c for p in pieces for c in p['new_claims']})
                 report.append({'key': key['key'], 'gold_claim': argument['claim_id'], 'diagram_text': element['diagram_text'],
                                'item': element['item'], 'pieces': pieces,
                                'not_held': [p['gold_record'] for p in pieces if not p['new_record']],

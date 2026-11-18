@@ -1,0 +1,48 @@
+{
+ "schema": "diagram-gold-key-regeneration-ruling.v1",
+ "run": "/opt/homebrew/var/www/church/web/argument-layer-runs/gpt-20261117-lecture2-g001-rerun",
+ "candidate_sha256": "b1700274889fe26e8f056fc8b6209c5ec4a69813d9aaf6c23827bb06d1a283a1",
+ "comparison_sha256": "c8da21d6f59c57883f6bd0a9db77c9c464fc7e44e1fc834c533affa4c3fb687e",
+ "prompt_digest": "5658c58b9159c21e0dc8431db566ffc041ae470f2871ba4df596b3a7eb2702fc",
+ "blind": false,
+ "blind_note": "the Claim prompt gained an example from this group (林前 9:20) after lecture 2 was approved: a stability test, not a blind one",
+ "claim_map": {
+  "CL0001": "CL0001",
+  "CL0002": "CL0002",
+  "CL0004": "CL0003",
+  "CL0005": "CL0004",
+  "CL0006": "CL0005"
+ },
+ "owner_removed_CL0003": "not produced again: 林前 9:20 is now an Observation supporting CL0001/CL0002",
+ "elements": {
+  "A 舊約": {
+   "verdict": "same",
+   "reason": "Claude: new CL0002 holds 宗主國／附庸國 and Egypt→Sinai, the same 论点 and 论据."
+  },
+  "A 新約": {
+   "verdict": "same",
+   "reason": "Claude: new CL0002 holds 新約恩待→基督的律法 and 加 6:2 (now an Observation), plus 林前 9:20."
+  },
+  "A 神": {
+   "verdict": "moved",
+   "reason": "Claude: 「同一位神」 now supports only the overlap (new CL0003) and CL0001, not CL0002. His words make it the reason for the overlap (「既然……同一位，你就會發現……重疊」), so the new placement follows him; the approved link to CL0002 was the looser one. Not an error."
+  },
+  "A 條文／原則": {
+   "verdict": "not_in_lecture",
+   "reason": "not taught in lecture 2"
+  },
+  "B 重疊": {
+   "verdict": "same",
+   "reason": "Claude: new CL0003 states the approved CL0004 nearly word for word and holds all six of its reasons and his own words."
+  },
+  "B 摩西的律法": {
+   "verdict": "same",
+   "reason": "Claude: his 獻祭／潔淨 sentence is again CL0003's own words."
+  },
+  "B 基督的律法": {
+   "verdict": "not_in_lecture",
+   "reason": "not taught in lecture 2"
+  }
+ },
+ "result": "pass: every taught element comes back under the counterpart Claim with the same 论点 and 论据; one supporting reason (同一位神) moved to where his words put it"
+}

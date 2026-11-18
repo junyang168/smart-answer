@@ -74,3 +74,16 @@ def test_regeneration_is_compared_through_his_words_element_by_element():
     first, second = d.compare_regeneration(gold, new, 'cs', keys)
     assert first['not_held'] == [] and first['new_claims'] == {'N4': '兩律法重疊'}
     assert second['not_held'] == ['GF2']
+
+
+def test_an_observation_holds_words_for_the_claim_it_supports():
+    keys = {'keys': [{'key': 'A', 'arguments': [{'change_set_id': 'cs', 'claim_id': 'G2', 'elements': [
+        {'diagram_text': ['新約'], 'item': 'A2', 'records': ['GS7']}]}]}]}
+    gold = {'source_fragments': [{'fragment_id': 'GF7', 'verbatim_excerpt': '各人的重擔要互相擔當如此就完全了基督的律法'}],
+            'evidence_steps': [{'evidence_step_id': 'GS7', 'source_fragment_ids': ['GF7']}]}
+    new = {'source_fragments': [{'fragment_id': 'NF6', 'verbatim_excerpt': '你們各人的重擔要互相擔當，如此，就完全了基督的律法。'}],
+           'observations': [{'observation_id': 'NO6', 'source_fragment_ids': ['NF6']}],
+           'knowledge_relations': [{'from_id': 'NO6', 'to_id': 'N2', 'relation_type': 'supports'}],
+           'claims': [{'claim_id': 'N2', 'title': '先施恩再要求', 'occurrences': []}]}
+    [element] = d.compare_regeneration(gold, new, 'cs', keys)
+    assert element['not_held'] == [] and element['new_claims'] == {'N2': '先施恩再要求'}
