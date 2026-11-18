@@ -25,7 +25,7 @@
  },
  "C7": {
   "verdict": "not_in_lecture",
-  "reason": "Program proposed claim from point 15, whose 呼應 is 5:17/7:12. Lecture 6 never calls a 6:x–7:11 section an inclusio (para 28 only gives its range); lecture 5 does."
+  "reason": "Lecture 6 calls no 6:8–7:11 section an inclusio (para 28 gives 6:1–7:11 only as the range of 門徒的義); lecture 5 does."
  },
  "C8": {
   "verdict": "claim",
@@ -37,6 +37,6 @@
  },
  "C10": {
   "verdict": "claim",
-  "reason": "CL0014 (point 16): 七章二十八至二十九節作整個登山寶訓的結論 — he puts it a level above 門徒的使命 here (para 28), unlike the diagram and lecture 1."
+  "reason": "CL0014 (point 16, restated by owner ruling 2026-11-18): 其餘五章十三節至七章二十九節都講門徒的使命，其中七章二十八至二十九節是整個登山寶訓的結論 — inside 門徒的使命, as the diagram, lecture 1 and the notes put it. The model had written 5:13–7:27 (a range he never gives); found by this key."
  }
 }
