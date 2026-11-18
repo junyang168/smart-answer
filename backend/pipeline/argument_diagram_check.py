@@ -98,6 +98,63 @@ def grade(keys: dict, records: dict[str, list[dict]], paragraphs: list[str], rul
             'counted': sum(i['verdict'] not in ('not_in_lecture', 'unruled') for i in items)}
 
 
+def _pairs(text: str) -> set[str]:
+    text = ''.join(ch for ch in text if ch.strip() and ch not in '，。、；：？！「」『』（）…')
+    return {text[i:i + 2] for i in range(len(text) - 1)}
+
+
+def _carriers(package: dict) -> list[tuple[str, str | None, set[str]]]:
+    """Every (record, Claim it serves, his words) in a package: steps through the
+    Claims they produce, a Claim's own words through the Claim itself."""
+    words = {f['fragment_id']: _pairs(f['verbatim_excerpt']) for f in package.get('source_fragments', [])}
+    out = []
+    for step in package.get('evidence_steps', []):
+        pairs = set().union(*(words.get(f, set()) for f in step['source_fragment_ids']))
+        for claim in step.get('produced_claim_ids') or [None]:
+            out.append((step['evidence_step_id'], claim, pairs))
+    for claim in package.get('claims', []):
+        for occurrence in claim.get('occurrences', []):
+            for anchor in occurrence.get('anchors', []):
+                if not anchor.get('evidence_id') and not anchor.get('observation_id') and anchor.get('source_fragment_id') in words:
+                    out.append(('own:' + anchor['source_fragment_id'], claim['claim_id'], words[anchor['source_fragment_id']]))
+    return out
+
+
+def compare_regeneration(gold: dict, new_package: dict, change_set_id: str, keys: dict | None = None,
+                         held: float = 0.6) -> list[dict]:
+    """Owner 2026-11-17: the diagram with its approved argument is a complete gold key.
+    For each diagram element, his words that carry it in the approved records must be
+    held again by the regenerated records, under one Claim. ``gold`` and ``new_package``
+    are records by collection. Reports only; Claude compares the statements and rules."""
+    keys = keys or json.loads(KEYS.read_text(encoding='utf-8'))
+    gold_words = {f['fragment_id']: f['verbatim_excerpt'] for f in gold.get('source_fragments', [])}
+    gold_steps = {s['evidence_step_id']: s for s in gold.get('evidence_steps', [])}
+    carriers = _carriers(new_package)
+    statements = {c['claim_id']: c.get('statement', '') for c in new_package.get('claims', [])}
+    report = []
+    for key in keys['keys']:
+        for argument in key.get('arguments', []):
+            if argument['change_set_id'] != change_set_id:
+                continue
+            for element in argument['elements']:
+                pieces = []
+                for rid in element['records']:
+                    fids = gold_steps[rid]['source_fragment_ids'] if rid in gold_steps else [rid]
+                    for fid in fids:
+                        want = _pairs(gold_words[fid])
+                        best = max(((len(want & got) / len(want), rec, claim) for rec, claim, got in carriers if want),
+                                   default=(0.0, None, None), key=lambda x: x[0])
+                        pieces.append({'gold_record': rid, 'gold_fragment': fid, 'held': round(best[0], 2),
+                                       'new_record': best[1] if best[0] >= held else None,
+                                       'new_claim': best[2] if best[0] >= held else None})
+                claims = sorted({p['new_claim'] for p in pieces if p['new_claim']})
+                report.append({'key': key['key'], 'gold_claim': argument['claim_id'], 'diagram_text': element['diagram_text'],
+                               'item': element['item'], 'pieces': pieces,
+                               'not_held': [p['gold_record'] for p in pieces if not p['new_record']],
+                               'new_claims': {c: statements.get(c, '') for c in claims}})
+    return report
+
+
 def transcript_paragraphs(path: Path) -> list[str]:
     script = json.loads(Path(path).read_text(encoding='utf-8'))['script']
     return [p.get('text', '') for p in script if p.get('type') != 'subtitle']

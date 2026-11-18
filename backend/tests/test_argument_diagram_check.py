@@ -59,3 +59,18 @@ def test_saved_links_name_records_of_the_approved_lecture():
     keys = json.loads(d.KEYS.read_text(encoding='utf-8'))
     claims = [a['claim_id'][-6:] for k in keys['keys'] for a in k['arguments']]
     assert claims == ['CL0002', 'CL0004']
+
+
+def test_regeneration_is_compared_through_his_words_element_by_element():
+    keys = {'keys': [{'key': 'B', 'arguments': [{'change_set_id': 'cs', 'claim_id': 'G4', 'elements': [
+        {'diagram_text': ['重'], 'item': 'B1', 'records': ['GS1']},
+        {'diagram_text': ['摩西'], 'item': 'B1', 'records': ['GF2']}]}]}]}
+    gold = {'source_fragments': [{'fragment_id': 'GF1', 'verbatim_excerpt': '摩西的律法跟基督的律法有重疊的地方'},
+                                 {'fragment_id': 'GF2', 'verbatim_excerpt': '獻祭潔淨的食物基督的律法不管這一套'}],
+            'evidence_steps': [{'evidence_step_id': 'GS1', 'source_fragment_ids': ['GF1']}]}
+    new = {'source_fragments': [{'fragment_id': 'NF1', 'verbatim_excerpt': '所以摩西的律法跟基督的律法有重疊的地方。'}],
+           'evidence_steps': [{'evidence_step_id': 'NS1', 'source_fragment_ids': ['NF1'], 'produced_claim_ids': ['N4']}],
+           'claims': [{'claim_id': 'N4', 'statement': '兩律法重疊', 'occurrences': []}]}
+    first, second = d.compare_regeneration(gold, new, 'cs', keys)
+    assert first['not_held'] == [] and first['new_claims'] == {'N4': '兩律法重疊'}
+    assert second['not_held'] == ['GF2']

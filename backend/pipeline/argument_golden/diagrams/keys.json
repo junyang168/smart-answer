@@ -205,5 +205,6 @@
    ]
   }
  ],
- "arguments_note": "Owner 2026-11-17: 「把 diagram 和整个我 approved 论证连接起来，生成 PPT 时正好用」. Each argument links one diagram to an approved Claim in the knowledge instance; each element names the diagram text and the records that carry it there (Evidence steps, or his own words as the Claim's SourceFragments). An element with no records is not taught in that lecture."
+ "arguments_note": "Owner 2026-11-17: 「把 diagram 和整个我 approved 论证连接起来，生成 PPT 时正好用」. Each argument links one diagram to an approved Claim in the knowledge instance; each element names the diagram text and the records that carry it there (Evidence steps, or his own words as the Claim's SourceFragments). An element with no records is not taught in that lecture.",
+ "gold_key": "Owner 2026-11-17: 「这就是一个完整的 gold key」 — a gold key is the diagram together with the approved argument linked to it: the Claim (论点), its Evidence steps (论据) and his own words, element by element. A regeneration passes when every element's words are held again under one Claim that states the same point (compare_regeneration reports; Claude rules)."
 }
