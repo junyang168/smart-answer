@@ -17,3 +17,14 @@ Held: 5:27–28 Question open; 盡本分 and 主觀; 林前9:20 not a Claim; aud
 
 r8 broke one owner ruling, r9 four, a different set each time. How finely lecture 2 is cut
 varies from run to run; the cover rule does not touch it. No more lecture 2 runs.
+
+## Saved instead: v7 with the four prohibitions named (owner 2026-11-18 「yes」)
+Run folder `gpt-20261118-lecture2-v7c`: v7's GPT candidate, its two owner corrections, and
+`restate_claim` on CL0010 (`corrections-v7c.json`). Compared field by field with the saved v7,
+only CL0010's sentence differs. Loaded as `…-f6c2f07c7639`, replacing `…-7b9aec956342`; same
+record IDs, so every record got a new revision and none was retired. Topic key: PASS 5/5.
+Diagram key A/B now points at the new version (`diagrams/keys.json`).
+
+Still built on the replaced versions (files, unchanged, shown as before): the chapter slides
+and listening units for 太5 (lectures 1, 2) and 太6 (`chapter_exposition/mat-6-1-34`).
+Rebuilding them is a slide run with model calls and waits for the owner.
