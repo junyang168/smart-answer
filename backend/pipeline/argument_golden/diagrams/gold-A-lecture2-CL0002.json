@@ -39,7 +39,8 @@
       "那我們看啊，舊約是什麼？舊約就是宗主國神恩待附庸國以色列。神先把以色列人從埃及地帶出來。那神把他們從埃及地帶出來之後，就在西乃山啊，神向附庸國以色列提出要求。我們可以看，約的兩個重要要素是什麼？施恩，然後什麼？要求。這兩個很重要。宗主國先施恩給附庸國，然後呢，宗主國向附庸國提出要求。我們舊約可以看到，出埃及記第二十章第一節，神頒佈這些話說：「我是耶和華你的神，曾將你從埃及地為奴之家領出來。」神先把以色列人從埃及為奴之家領出來，之後呢，神向他們提出要求：「除了我以外，你不可有別的神。不可為自己雕刻偶像，也不可做什麼形像，彷彿上天、下地，和地底下、水中的百物。」等等，開始明講，十條誡，就這裡。所以其實是什麼？你看啊，舊約，神施恩給以色列人，把他們從埃及帶出來，然後神向他們要求的是什麼？就是摩西的律法。"
      ]
     }
-   ]
+   ],
+   "must_have": true
   },
   {
    "part": "要求是為蒙恩子民的好處",
@@ -62,7 +63,8 @@
       "那是同一位神，所以啊，祂為以色列人的好處要求以色列人不要做的事或者要做的事，祂也今天呢，要求對我們好，所以要求我們不要做，或者要求我們要做。就這個原因。"
      ]
     }
-   ]
+   ],
+   "must_have": false
   },
   {
    "part": "遵行只能維持好關係，不能建立；不遵行則約破裂",
@@ -82,7 +84,8 @@
    ],
    "his_own_words": [
     "所以如果附庸國來遵守這個要求，只能夠維持已經有的好關係。如果附庸國不遵守這個要求，這約就破裂了。"
-   ]
+   ],
+   "must_have": true
   },
   {
    "part": "舊約的要求是摩西律法",
@@ -106,7 +109,8 @@
       "新約是什麼啊？新約，宗主國神恩待附庸國我們基督徒。那舊約啊，神對猶太人的要求，就是摩西的律法。新約啊，神向基督徒所要求的是什麼？保羅叫做「基督的律法」。"
      ]
     }
-   ]
+   ],
+   "must_have": true
   },
   {
    "part": "新約的要求是基督的律法",
@@ -130,7 +134,8 @@
       "加拉太書六章第二節，保羅說：「你們各人的重擔要互相擔當，如此，就完全了基督的律法。」"
      ]
     }
-   ]
+   ],
+   "must_have": true
   }
  ],
  "not_in_this_lecture": [
@@ -144,5 +149,6 @@
    ]
   }
  ],
- "pass_rule": "A rebuild passes when one Claim states every part, and each part keeps its reasons (his same words)."
+ "pass_rule": "A rebuild passes when one Claim states every must-have part, each with its same reasons (his same words); a missing optional part is reported, not failed.",
+ "must_have_ruling": "Owner 2026-11-17: 「除了 2 其他都是 must have」 — every part except 「要求是為蒙恩子民的好處」 must come back; that part is reported as a difference only."
 }
