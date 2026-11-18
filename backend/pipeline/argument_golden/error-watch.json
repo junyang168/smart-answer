@@ -2,19 +2,84 @@
  "schema": "argument-error-watch.v1",
  "rule": "Owner 2026-11-17: a type of error seen once is recorded here, not fixed. Every graded lecture is checked for each type; at its second occurrence the type gets one classification, one eval case and one prompt fix.",
  "types": [
-  {"id": "two-answers-one-claim",
+  {
+   "id": "two-answers-one-claim",
    "what": "two answers to different questions are written as one Claim; the second point has no Claim of its own",
    "rule_already_in_prompt": "Claim prompt: 「回答不同問題的分開列」",
    "check": "for each Claim, does its statement answer more than one question?",
    "occurrences": [
-    {"lecture": "2022年 NYSC 專題 馬太福音釋經（九）第二堂", "date": "2026-11-18",
-     "run": "argument-layer-runs/gpt-20261117-2022-9-2-r2", "claim": "CL0004",
+    {
+     "lecture": "2022年 NYSC 專題 馬太福音釋經（九）第二堂",
+     "date": "2026-11-18",
+     "run": "argument-layer-runs/gpt-20261117-2022-9-2-r2",
+     "claim": "CL0004",
      "finding": "「信有兩個要素……」 and 「基督來了，人可以因信與神建立好關係，並因遵行基督的律法維持這好關係」 in one Claim; the second is diagram A's part 5 (新約的要求是基督的律法)",
-     "grade": "backend/pipeline/argument_golden/diagrams/grade-A-2022-9-2.json"}]}
+     "grade": "backend/pipeline/argument_golden/diagrams/grade-A-2022-9-2.json"
+    }
+   ]
+  }
  ],
  "fixed_types": [
-  {"id": "section-cut-inside-argument", "first_seen": "2017 NYSC （六）3 (S0013|S0014)", "fix": "section-split prompt: 不在一個小標題之內切開，除非他明顯轉向另一個問題", "date": "2026-11-17"},
-  {"id": "qa-short-answer-refused", "first_seen": "2017 NYSC （六）3 (S0020, twice)", "fix": "a short answer to a Question stands on his own words without Evidence", "date": "2026-11-17"},
-  {"id": "slide-line-as-his-words", "first_seen": "2022 NYSC （九）第二堂 (S0015)", "fix": "Claim and step prompts: a 「>」 line that is not scripture is slide text, not his words", "date": "2026-11-18"}
+  {
+   "id": "section-cut-inside-argument",
+   "first_seen": "2017 NYSC （六）3 (S0013|S0014)",
+   "fix": "section-split prompt: 不在一個小標題之內切開，除非他明顯轉向另一個問題",
+   "date": "2026-11-17"
+  },
+  {
+   "id": "qa-short-answer-refused",
+   "first_seen": "2017 NYSC （六）3 (S0020, twice)",
+   "fix": "a short answer to a Question stands on his own words without Evidence",
+   "date": "2026-11-17"
+  },
+  {
+   "id": "slide-line-as-his-words",
+   "first_seen": "2022 NYSC （九）第二堂 (S0015)",
+   "fix": "Claim and step prompts: a 「>」 line that is not scripture is slide text, not his words",
+   "date": "2026-11-18"
+  },
+  {
+   "id": "point-leaves-its-topic-unanswered",
+   "first_seen": "2011 NYSC （二）1 CL0001 and （二）6 CL0016 (登山寶訓的結構 without the verse ranges)",
+   "fix": "Claim prompt: 聽眾一聽到這一點的題目，心裡自然會問的問題，statement都要用他的話回答 (分段→每段經文範圍、內容、連接；對比→兩邊；幾個→哪幾個); an answer said once or recapped by 「所以……是這樣」 still goes in the statement",
+   "date": "2026-11-18",
+   "sweep_2011_lectures": [
+    {
+     "lecture": 1,
+     "claim": "CL0001",
+     "gap": "結構 without 5:3–12 / 5:13–7:29"
+    },
+    {
+     "lecture": 1,
+     "claim": "CL0015",
+     "gap": "「至少有一部分已不必遵守」 without naming 潔淨食物、贖罪祭"
+    },
+    {
+     "lecture": 2,
+     "claim": "CL0010",
+     "gap": "「四項禁戒」 not named; 「適用範圍」 not stated (安提阿、敘利亞、基利家)"
+    },
+    {
+     "lecture": 4,
+     "claim": "CL0016",
+     "gap": "「必須了解實際情況」 without saying which (weak)"
+    },
+    {
+     "lecture": 5,
+     "claim": "CL0004",
+     "gap": "個人倫理與社會倫理 without saying which side is which"
+    },
+    {
+     "lecture": 5,
+     "claim": null,
+     "gap": "6:8–7:11 禱告的 inclusio and its division (6:9–13 禱告內容, 6:19–7:6 行為) is only in Observations; no point states it"
+    },
+    {
+     "lecture": 6,
+     "claim": "CL0016",
+     "gap": "結構 without 5:3–12 / 5:13–7:29"
+    }
+   ]
+  }
  ]
 }

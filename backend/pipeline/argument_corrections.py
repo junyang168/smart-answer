@@ -14,6 +14,11 @@ Operations:
 - ``position_to_question``: what GPT wrote as a view someone held is a question
   someone asked. The Position becomes a Question with the same id, text and
   fragments, answered by ``answer_claim_id``.
+- ``restate_claim``: the owner rules a Claim's sentence missed his own summary of it.
+  The only hand-written text this module allows, and only with the owner's ruling:
+  ``statement`` replaces the Claim's sentence (the old one is kept in the receipt),
+  and the fragment where he says that summary (``basis_fragment_id``, already cut
+  from his transcript) is added as one more place he says the Claim.
 """
 from __future__ import annotations
 
@@ -78,7 +83,25 @@ def position_to_question(candidate, short, answer_claim_id, questioner='audience
             'removed_relations': [r['relation_id'] for r in relations]}
 
 
-OPERATIONS = {'drop_claim': drop_claim, 'position_to_question': position_to_question}
+def restate_claim(candidate, short, statement, basis_fragment_id):
+    cid = _full(candidate, short)
+    claim = next(c for c in candidate['claims'] if c['claim_id'] == cid)
+    fragment = next((f for f in candidate['source_fragments'] if f['fragment_id'] == basis_fragment_id), None)
+    if fragment is None:
+        raise ValueError(f'{basis_fragment_id}: not a fragment of this lecture')
+    if not statement.strip():
+        raise ValueError('restate_claim needs a statement')
+    before = claim['title']
+    claim['title'] = statement
+    anchors = claim['occurrences'][0]['anchors']
+    if all(a.get('source_fragment_id') != basis_fragment_id for a in anchors):
+        anchors.append({'source_fragment_id': basis_fragment_id, 'paragraph_key': fragment['paragraph_key'],
+                        'media_time': fragment.get('media_time'), 'media_end_time': fragment.get('media_end_time'),
+                        'proposed_highlight': {'text': fragment['verbatim_excerpt'], 'status': 'proposed'}})
+    return {'claim_id': cid, 'before': before, 'after': statement, 'basis': fragment['verbatim_excerpt']}
+
+
+OPERATIONS = {'drop_claim': drop_claim, 'position_to_question': position_to_question, 'restate_claim': restate_claim}
 
 
 def apply(candidate_path, corrections_path, out_path):
@@ -88,6 +111,8 @@ def apply(candidate_path, corrections_path, out_path):
     spec = json.loads(spec_raw)
     done = []
     for c in spec['corrections']:
+        if c['op'] == 'restate_claim' and not c.get('ruling', '').strip():
+            raise ValueError('restate_claim writes reader-visible text: it needs the owner ruling')
         args = {k: v for k, v in c.items() if k not in ('op', 'ruling')}
         done.append({**c, 'result': OPERATIONS[c['op']](candidate, **args)})
     out = json.dumps(candidate, ensure_ascii=False, indent=1).encode()

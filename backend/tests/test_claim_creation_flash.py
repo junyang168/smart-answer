@@ -517,7 +517,8 @@ def test_incomplete_records_never_become_a_candidate(tmp_path,fault):
     def records(out):
         if fault=='missing_record':out['records']=out['records'][:2]
         if fault=='untyped_observation':out['records'][2]['observation_type']=None
-        if fault=='unattributed_position':out['records'][0]['attribution']=' '
+        if fault=='unattributed_position':  # a 反方 step may say 有人; any other step still needs its holder
+            out['records'][2]['kind']='position';out['records'][2]['attribution']=' '
         if fault=='only_refuted':  # a Claim whose only step is the view it refutes has no Evidence
             for r in out['records'][1:]:r['kind']='position';r['attribution']='有人'
         return out
@@ -758,3 +759,52 @@ def test_a_sentence_id_with_the_wrong_paragraph_is_repaired_only_when_its_number
     assert c.repair_sentence_ids(twice, ids) == []
     unknown = {'steps': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#999']}]}
     assert c.repair_sentence_ids(unknown, ids) == []
+
+
+def test_prompts_say_a_point_answers_what_its_topic_makes_a_listener_ask():
+    from backend.pipeline import claim_creation_flash as f
+    prompt = ''.join(v for v in vars(f).values() if isinstance(v, str))
+    assert '心裡自然會問的問題，statement都要用他的話回答' in prompt
+    assert '分哪幾段（每段的經文範圍）、每段講什麼、段與段怎樣連接' in prompt
+    assert '即使只講一次、沒有強調' in prompt
+
+
+def test_prompts_say_a_top_point_names_its_parts_without_restating_them():
+    from backend.pipeline import claim_creation_flash as f
+    prompt = ''.join(v for v in vars(f).values() if isinstance(v, str))
+    assert '不寫目錄' not in prompt  # it told the top point to drop the division (lecture 1 rerun round 1)
+    assert '只有結論本身就是分段或列舉時' in prompt  # lecture 2 r8: every cover listed its topics
+    assert '不寫「要從甲、乙、丙來明白」這種只列題目、沒有答案的句子' in prompt
+    assert '上層的結論本身是分段或列舉時，點出各段經文範圍、各項名稱' in prompt
+
+
+def test_step_prompt_sends_a_restated_step_back_to_its_step_not_the_question():
+    from backend.pipeline import claim_creation_flash as f
+    assert '那是那一步的重述，归入前面那一步，不归入问题' in f.STEPS
+    assert '没有再念经文' in f.STEPS and '那一句仍属于问题' in f.STEPS  # round 3 moved a one-line side of the tension
+
+
+def _one_step(line, attribution):
+    from types import SimpleNamespace as S
+    from backend.pipeline import claim_creation_flash as f
+    text = '或者是從不同的角度來講，是可以有不同的結論。'
+    sentences = [S(sentence_id='S1#1', segment_index=1, char_start=0, char_end=len(text))]
+    steps = {'steps': [{'step_id': 'ST01', 'line': line, 'supports': [], 'sentence_ids': ['S1#1']}],
+             'claim_text': [], 'other': []}
+    records = [{'step_id': 'ST01', 'kind': 'position', 'statement': '從不同角度可以有不同結論', 'attribution': attribution,
+                'observation_type': None, 'step_type': None, 'scripture_refs': []}]
+    return f.build_step_records(steps, records, sentences, {1: text})
+
+
+def test_an_unnamed_holder_of_an_opposing_view_is_recorded_as_someone():
+    # lecture 6 G004: a quoted question he corrects; his words never say whose it is (twice)
+    out = _one_step('反方：从不同角度可以有不同结论', '')
+    assert out['positions'][0]['attribution'] == '有人'
+    assert out['repairs'] == [{'record_id': 'ST01', 'attribution': '有人', 'why': 'holder not named in his words'}]
+    assert _one_step('反方：……', '很多人')['positions'][0]['attribution'] == '很多人'
+
+
+def test_a_position_without_holder_outside_an_opposing_step_is_still_refused():
+    import pytest
+    with pytest.raises(ValueError, match='position needs attribution'):
+        _one_step('X，因为 Y', '')
