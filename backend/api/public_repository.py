@@ -328,7 +328,7 @@ def _book(slug: str) -> str:
 
 
 # Books with known exposition series in the current reader catalog.
-_READER_EXPOSITION_BOOKS = ("mat", "rom", "1co", "2co", "1ti", "2ti", "tit")
+_READER_EXPOSITION_BOOKS = ("mat", "jhn", "rom", "1co", "2co", "1ti", "2ti", "tit")
 
 
 def has_current_reader_slides(data_root: Path, passage: str) -> bool:

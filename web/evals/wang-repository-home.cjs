@@ -22,7 +22,7 @@ async function evaluate(browser, viewport) {
 
     const preparation = main.getByRole("region", { name: "整理校對中" });
     assert.deepEqual(await preparation.getByRole("listitem").allTextContents(), [
-      "羅馬書", "哥林多前書", "哥林多後書", "提摩太前書", "提摩太後書", "提多書",
+      "約翰福音", "羅馬書", "哥林多前書", "哥林多後書", "提摩太前書", "提摩太後書", "提多書",
     ]);
     assert.equal(await preparation.getByRole("link").count(), 0);
     assert.equal(await preparation.getByRole("button").count(), 0);
