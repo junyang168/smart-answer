@@ -1,0 +1,124 @@
+{
+ "schema": "argument-topic-questions.v1",
+ "rule": "Owner 2026-11-18: hearing a point's topic, a listener asks its questions (結構 → 分哪幾段、每段講什麼、怎樣連接). Each item passes when ONE point's own sentence carries every group of the answer; reasons under it do not count. Fixed before round 2 of the lecture 1 rerun, from the 2026-11-18 sweep (error-watch.json point-leaves-its-topic-unanswered). Each group is a list of regex alternatives.",
+ "items": [
+  {
+   "id": "L1-structure",
+   "lecture": "nysc-2011-2-1",
+   "question": "登山寶訓分哪幾段？每段講什麼？",
+   "groups": [
+    [
+     "五章三(節)?(至|到)(第)?十二節",
+     "5:3[–-]12"
+    ],
+    [
+     "五章十三節?(至|到)(第)?七章二十九節",
+     "5:13[–-]7:29"
+    ],
+    [
+     "彌賽亞"
+    ],
+    [
+     "門徒"
+    ]
+   ]
+  },
+  {
+   "id": "L1-which-parts",
+   "lecture": "nysc-2011-2-1",
+   "question": "摩西律法哪些部分不必再遵守？",
+   "groups": [
+    [
+     "摩西律法"
+    ],
+    [
+     "食物"
+    ],
+    [
+     "贖罪祭|獻祭"
+    ]
+   ]
+  },
+  {
+   "id": "L2-four-prohibitions",
+   "lecture": "nysc-2011-2-2",
+   "question": "使徒行傳十五章禁戒哪四項？寫給誰？",
+   "groups": [
+    [
+     "祭偶像"
+    ],
+    [
+     "血"
+    ],
+    [
+     "勒死"
+    ],
+    [
+     "姦淫"
+    ],
+    [
+     "安提阿|敘利亞|基利家"
+    ]
+   ]
+  },
+  {
+   "id": "L5-two-ethics",
+   "lecture": "nysc-2011-2-5",
+   "question": "個人倫理與社會倫理，哪一邊是哪一個？",
+   "groups": [
+    [
+     "個人倫理|個人"
+    ],
+    [
+     "社會倫理|司法|審判官"
+    ],
+    [
+     "以眼還眼"
+    ],
+    [
+     "愛仇敵"
+    ]
+   ]
+  },
+  {
+   "id": "L5-prayer-inclusio",
+   "lecture": "nysc-2011-2-5",
+   "question": "禱告這一段怎麼分？",
+   "groups": [
+    [
+     "六章八節|6:8"
+    ],
+    [
+     "七章(七|十一)|7:(7|11)"
+    ],
+    [
+     "禱告"
+    ],
+    [
+     "行為"
+    ]
+   ]
+  },
+  {
+   "id": "L6-structure",
+   "lecture": "nysc-2011-2-6",
+   "question": "登山寶訓分哪幾段？每段講什麼？",
+   "groups": [
+    [
+     "五章三(節)?(至|到)(第)?十二節",
+     "5:3[–-]12"
+    ],
+    [
+     "五章十三節?(至|到)(第)?七章二十九節",
+     "5:13[–-]7:29"
+    ],
+    [
+     "彌賽亞"
+    ],
+    [
+     "門徒"
+    ]
+   ]
+  }
+ ]
+}
