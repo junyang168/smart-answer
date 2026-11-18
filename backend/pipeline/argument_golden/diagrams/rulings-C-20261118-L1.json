@@ -1,0 +1,42 @@
+{
+ "C1": {
+  "verdict": "claim",
+  "reason": "CL0001: 五章三至十二節「彌賽亞的身份」."
+ },
+ "C2": {
+  "verdict": "claim",
+  "reason": "CL0001/CL0003: 先認識彌賽亞，再談門徒的使命."
+ },
+ "C3": {
+  "verdict": "claim",
+  "reason": "CL0003: 五章十三至十六節先作綜合、概括的說明; 鹽與光 not said here."
+ },
+ "C4": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C5": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C6": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C7": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C8": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C9": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ },
+ "C10": {
+  "verdict": "not_in_lecture",
+  "reason": "Lecture 1 gives only the two halves and 5:13–16 / 5:17–7:29; no 7:12, 7:13, 7:28 or inclusio in his transcript. He puts 7:28–29 inside 門徒的使命 (5:13–7:29), as the diagram nests it."
+ }
+}

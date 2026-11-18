@@ -1,0 +1,42 @@
+{
+ "C1": {
+  "verdict": "claim",
+  "reason": "CL0014 (point 16)."
+ },
+ "C2": {
+  "verdict": "claim",
+  "reason": "CL0014/CL0015 (points 16, 17): 認出彌賽亞，就連著門徒的責任."
+ },
+ "C3": {
+  "verdict": "claim",
+  "reason": "CL0016 (point 18): 五章十三至十六節作綜合說明; he says 發光, not 鹽與光."
+ },
+ "C4": {
+  "verdict": "claim",
+  "reason": "CL0017 (point 15): 7:12 以「律法和先知」呼應 5:17, 總結基督徒與舊約的關係."
+ },
+ "C5": {
+  "verdict": "claim",
+  "reason": "CL0017 (point 15): 五章十七至四十八節…勝過文士和法利賽人的義."
+ },
+ "C6": {
+  "verdict": "claim",
+  "reason": "CL0017 (point 15): 六章一節至七章十一節講門徒的義，包括施捨和禱告."
+ },
+ "C7": {
+  "verdict": "not_in_lecture",
+  "reason": "Program proposed claim from point 15, whose 呼應 is 5:17/7:12. Lecture 6 never calls a 6:x–7:11 section an inclusio (para 28 only gives its range); lecture 5 does."
+ },
+ "C8": {
+  "verdict": "claim",
+  "reason": "CL0017/CL0016: 七章十二節總結門徒與舊約的關係 (「律法和先知」)."
+ },
+ "C9": {
+  "verdict": "claim",
+  "reason": "CL0016 (point 18): 七章十三至二十七節則總結整個門徒的使命."
+ },
+ "C10": {
+  "verdict": "claim",
+  "reason": "CL0014 (point 16): 七章二十八至二十九節作整個登山寶訓的結論 — he puts it a level above 門徒的使命 here (para 28), unlike the diagram and lecture 1."
+ }
+}
