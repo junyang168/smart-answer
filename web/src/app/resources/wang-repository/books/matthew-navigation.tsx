@@ -98,7 +98,7 @@ export function MatthewBook({
     <>
       <header className="space-y-2">
         <h1 className="font-serif text-4xl font-bold leading-tight text-stone-950">馬太福音</h1>
-        {isHome ? <Link href={`${path}?view=chapters`} className={action}>按章查找</Link> : (
+        {!isHome && (
           <Link href={path} className="inline-flex min-h-11 items-center text-sm font-medium text-amber-900 hover:underline">
             ← 返回馬太福音系列
           </Link>
@@ -129,6 +129,9 @@ export function MatthewBook({
               );
             })}
           </section>
+          <Link href={`${path}?view=chapters`} className="inline-flex min-h-11 w-fit items-center text-sm font-medium text-amber-900 underline underline-offset-4 hover:text-stone-900">
+            直接找某一章
+          </Link>
           {(navigation.related.length > 0 || navigation.talks.length > 0) && (
             <section className="space-y-3" aria-labelledby="related-talks">
               <h2 id="related-talks" className="font-serif text-2xl font-bold">相關講道</h2>
