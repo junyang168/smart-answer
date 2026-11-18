@@ -711,6 +711,7 @@ missing：保留原文支持但漏了重要內容，必須同時列一條「完�
 not_supported：這條提示不受保留原文支持，不得補進幻燈；reason 說明原文依據。
 contradicts：投影片的論證與這條 Claim 的 evidence_steps 相違——例如把 opposed_position（他反駁的看法）寫成他的主張、把理由和結論倒過來、或寫出與某步證據相反的推論；必須同時列一條「忠實」finding 並標 blocking，reason 指出是哪一步。
 判 covered 之前先確認沒有這種相違。
+故事或例子先查相關 Claim／Evidence 的論證角色，再對照原文與現有要點；只因沒有故事開場點、長時間只有標題，不能判 missing。若真正漏了必要對比、理由或應用，說明相關 Claim／步驟及缺失的論證作用；圖中沒有記錄也不能代替原文核對。
 每條恰好一次，不因 Claim 已經審核就信它。不要為逐條覆蓋重複要點、硬加標題或改講課次序。
 """
     return instruction, schema

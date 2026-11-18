@@ -75,7 +75,8 @@ def test_actual_model_baseline_is_bound_reproducible_and_evaluator_is_calibrated
     assert report['calibration_status']=='passed'
     # Generation quality remains a separate, failing gate; replay must not hide it.
     assert report['generation_status']=='failed'
-    assert set(report['problems'])=={'whole-topic-title','story-argument'}
+    assert set(report['problems'])=={'whole-topic-title'}
+    assert next(row for row in report['results'] if row['id']=='story-argument')['passed'] is True
     assert report['status']=='failed'
 
 
@@ -103,3 +104,20 @@ def test_false_positive_and_reversal_calibration_cannot_be_omitted_or_misjudged(
     row=next(x for x in judgement['results'] if x['id']==case_id)
     row['checks'][0]['passed']=not row['checks'][0]['passed']
     assert case_id in ev.evaluate(data,answer,judgement)['problems']
+
+
+def test_story_review_gets_actual_argument_context_for_both_candidates():
+    data,answer,_=example_answers()
+    prompt=ev.judge_input(data,answer)
+    packets={v['id']:v for v in json.loads(prompt[len(ev.JUDGE_RULES):])}
+    for suffix in ('/generated','/counterexample'):
+        ctx=packets['story-argument'+suffix]['argument_context']
+        assert ctx['origin']['sha256']
+        assert ctx['origin']['global_first']=='S0260'
+        step=ctx['claims'][0]['evidence_steps'][0]
+        assert step['step_type']=='opposed_position'
+        assert step['anchors'][0]['sentences']==['S0034']
+    assert '不強迫新增故事開場要點' in ev.review_system()
+    assert '不能只憑秒數判缺漏' in ev.review_system()
+    # The earlier-answer counterexample must remain a separate, failing calibration.
+    assert next(c for c in data['calibration'] if c['id']=='calibration-introduction-is-not-conclusion')['expected']=={'conclusion-timing':False}

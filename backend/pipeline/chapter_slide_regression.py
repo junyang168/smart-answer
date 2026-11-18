@@ -15,7 +15,7 @@ from backend.pipeline.chapter_material import CHAPTERS
 from backend.pipeline.chapter_slide_claims import RecordedClient
 
 FIXTURE = Path(__file__).resolve().parents[1] / 'tests/fixtures/chapter_slides/generation_eval_set.json'
-JUDGE_RULES = '依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。passed=false 表示這項確有須修改的缺陷。非 golden 精確時序依正式規則：提前超過30秒或延後超過60秒才不合格；閾值內差距只記理由，passed=true。golden 已明確規定不得提前或指定句子的條件仍須精確遵守，不適用上述小差距豁免。\n'
+JUDGE_RULES = 'argument_context 若存在，是本案例範圍相關的真實論證層節錄；跨段 Claim 只核對本案例原文實際講到的部分，不要求搬入範圍外的理由。有論證層先核對其角色及現有要點，再以原文確認，不能只用沒有故事開場點或空白秒數判缺漏。依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。passed=false 表示這項確有須修改的缺陷。非 golden 精確時序依正式規則：提前超過30秒或延後超過60秒才不合格；閾值內差距只記理由，passed=true。golden 已明確規定不得提前或指定句子的條件仍須精確遵守，不適用上述小差距豁免。\n'
 
 
 def digest(value):
@@ -60,7 +60,7 @@ COMMON_CRITERIA = [
     {'id':'scope-faithfulness', 'requirement':'原文立場、說話者、否定、限制與因果忠實；不添加未講的答案。'},
     {'id':'scope-coverage', 'requirement':'從原文反向核對承重問題、理由、結論、經文；非承重細節可省，已適當呈現的意思不要求重複。'},
     {'id':'scope-scripture', 'requirement':'實際引用經文、原文字義與短註歸屬正確；一般譯詞不冒充本節實際字詞。'},
-    {'id':'scope-presentation', 'requirement':'原聲口吻、完整標題範圍、要點可理解，不混淆他人立場。'},
+    {'id':'scope-presentation', 'requirement':'原聲口吻、完整標題範圍、要點可理解，不混淆他人立場；依論證層與原文核對故事作用，不因缺開場點或只有標題的秒數判錯。'},
     {'id':'scope-timing', 'requirement':'問題與答案、故事與結論同步；答案不提前；一般時間差遵照正式閾值及 golden。'},
 ]
 
@@ -77,10 +77,11 @@ def judge_input(dataset, answer):
     packets=[]
     for c in dataset['cases']:
         lines=slides.sentences(c['pieces'])
-        packets.append({'id':c['id']+'/generated','source':lines,'criteria':criteria(c),'slides':actual[c['id']]})
+        argument = {'argument_context': c['argument_context']} if c.get('argument_context') else {}
+        packets.append({'id':c['id']+'/generated','source':lines,'criteria':criteria(c),'slides':actual[c['id']], **argument})
         # Do not reveal the expected rejection to the evaluator.
         packets.append({'id':c['id']+'/counterexample','source':lines,
-                        'criteria':criteria(c,counterexample=True), 'slides':c['known_bad']})
+                        'criteria':criteria(c,counterexample=True), 'slides':c['known_bad'], **argument})
     for c in dataset.get('calibration', []):
         packets.append({k:v for k,v in c.items() if k not in ('expected',)})
     return JUDGE_RULES + json.dumps(packets,ensure_ascii=False)
