@@ -31,7 +31,7 @@ def passages() -> dict[str, Any]:
 
 
 @router.get("/{passage}")
-def index(passage: str, source: str | None = None, units: bool = False) -> dict[str, Any]:
+def index(passage: str, source: str | None = None, units: bool = False, legacy: bool = False) -> dict[str, Any]:
     """一段经文底下，教授讲过的每一段。
 
     只认 `passages()` 列出的段落。任由 URL 指定经文范围的话，`mat-16-14-15` 这
@@ -60,4 +60,13 @@ def index(passage: str, source: str | None = None, units: bool = False) -> dict[
         raise HTTPException(status_code=404, detail="這段經文還沒有原聲頁面。")
     store = PostgresKnowledgeStore()
     data_root = Path(DATA_BASE_PATH)
-    return chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
+    found = chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
+    if (not legacy and passage == 'mat-5-1-48' and source in (None, '紐約靈命進深會')
+            and (data_root / 'chapter_exposition' / passage / 'listening-units.json').is_file()):
+        from backend.pipeline.chapter_listening_catalog import compose
+        from backend.pipeline.chapter_listening_units import build
+        try:
+            return compose(found, build(data_root, passage))
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
+    return found

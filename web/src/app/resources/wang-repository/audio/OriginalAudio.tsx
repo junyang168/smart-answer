@@ -1,5 +1,7 @@
 "use client";
 
+import { groupUnits } from "./listeningUnits";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -235,7 +237,7 @@ export function citedAt(sermon: Sermon, seconds: number, passage: string) {
 }
 
 /** 按章的页面按经节次序分段；一段经文的页面只有一段、没有段标题。 */
-export type Section = { passage: string; label: string; sermons: Sermon[]; unit_id?: string; unit_label?: string; sub_unit_id?: string; continued?: boolean; topics?: { text: string; source_id: string; at: number }[] };
+export type Section = { passage: string; label: string; sermons: Sermon[]; unit_id?: string; unit_label?: string; unit_passage?: string; sub_unit_id?: string; continued?: boolean; topics?: { text: string; source_id: string; at: number }[] };
 
 /** 这一行此刻要播的几段：收起时只播保留的，展开时连灰色的一起按原来的次序播。 */
 export const visible = (sermon: Sermon, showLeftOut: boolean) =>
@@ -266,6 +268,7 @@ export default function OriginalAudio({
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
   const [sections, setSections] = useState<Section[] | null>(null);
+  const [unitNavigation, setUnitNavigation] = useState(false);
   const [error, setError] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   // 教授釋經筆記的錄音是 AI 朗讀母本，不是他的原聲（負責人 2026-11-06），畫面上一直標明。
@@ -310,6 +313,7 @@ export default function OriginalAudio({
         setTitle(data.title ?? "");
         setMissing(data.missing_lectures ?? []);
         setAiVoice(Boolean(data.ai_voice));
+        setUnitNavigation(Boolean(data.unit_navigation || data.selection_preview));
         setSections(
           data.sections ?? [{ passage: data.passage, label: "", sermons: data.sermons ?? [] }],
         );
@@ -454,7 +458,27 @@ export default function OriginalAudio({
           <span aria-hidden="true">▶</span>
           <span className="font-semibold">從頭開始聽</span>
         </Link>
-        <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+        {unitNavigation ? <ol className="flex flex-col gap-4">
+          {groupUnits(sections).map((unit) => <li key={unit.id} className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3 bg-stone-50 px-4 py-4 sm:px-5">
+              <div className="min-w-0 flex-1"><h2 className="font-serif text-lg font-bold text-stone-900">{unit.label}</h2>
+                <p className="mt-1 text-sm text-stone-500">合計 {minutes(unit.seconds)}</p>
+              </div>
+              <Link href={listenHref(unit.parts[0].passage)} aria-label={`聆聽 ${unit.label}`}
+                className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-stone-300 hover:bg-white">▶ 聆聽</Link>
+            </div>
+            {unit.parts.some(part => part.sub_unit_id) ? <ol className="divide-y divide-stone-100">
+              {unit.parts.map(part => <li key={part.passage}>
+                <Link href={listenHref(part.passage)} className="flex min-h-14 items-center justify-between gap-3 px-4 py-3 text-stone-800 hover:bg-amber-50 sm:px-5">
+                  <span className="min-w-0 flex-1 text-sm leading-6">{part.label}</span>
+                  <span className="shrink-0 text-xs text-stone-500">{minutes(part.sermons.reduce((sum, row) => sum + row.seconds, 0))} <span aria-hidden="true" className="ml-2 text-amber-800">▶</span></span>
+                </Link>
+              </li>)}
+            </ol> : Boolean(unit.parts[0].topics?.length) && <ul className="divide-y divide-stone-100 px-4 sm:px-5">
+              {unit.parts[0].topics?.slice(0,3).map(topic => <li key={topic.text} className="py-2 text-sm text-stone-800">{topic.text}</li>)}
+            </ul>}
+          </li>)}
+        </ol> : <ol className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
           {sections.map((section) => (
             <li key={section.passage}>
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-4 py-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-5">
@@ -482,7 +506,7 @@ export default function OriginalAudio({
               </div>
             </li>
           ))}
-        </ol>
+        </ol>}
         {missing.length > 0 && (
           <p className="text-sm text-stone-500">
             尚未整理：{missing.map((lecture) => lecture.split("：").pop()).join("、")}

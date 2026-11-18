@@ -22,6 +22,9 @@ UI_FILES = (
     'web/src/app/resources/wang-repository/audio/ChapterListener.tsx',
     'web/src/app/resources/wang-repository/audio/ChapterSlide.tsx',
     'web/src/app/resources/wang-repository/audio/listeningProgress.ts',
+    'web/src/app/resources/wang-repository/audio/listeningUnits.ts',
+    'backend/api/original_audio.py',
+    'backend/pipeline/chapter_listening_catalog.py',
     'web/src/app/resources/wang-repository/audio/OriginalAudio.tsx',
     'web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx',
     'web/src/app/globals.css',
@@ -79,7 +82,33 @@ def browser_checks(evidence, expected_binding):
             'evidence': evidence, 'physical_device': 'not_verified'}
 
 
-def evaluate(data_root, passage, *, evidence=None):
+def catalog_checks(catalog, selected, evidence):
+    problems = []
+    if not catalog.get('unit_navigation'):
+        problems.append('Normal chapter entry does not use Unit navigation')
+    selected_rows = {s['passage']: s for s in selected['sections']}
+    actual = {s['passage']: s for s in catalog['sections']}
+    for key, expected in selected_rows.items():
+        if key not in actual or actual[key]['sermons'] != expected['sermons']:
+            problems.append(f'Normal catalog omitted or changed an approved playback run: {key}')
+    for section in catalog['sections']:
+        if section['passage'] in selected_rows: continue
+        for row in section['sermons']:
+            for own in row['stretches']:
+                if own.get('left_out'): continue
+                for selected_section in selected_rows.values():
+                    for other in selected_section['sermons']:
+                        if row.get('transcript_id') != other.get('transcript_id'): continue
+                        if any(not span.get('left_out') and own['start'] < span['end'] and span['start'] < own['end'] for span in other['stretches']):
+                            problems.append('Normal catalog repeats audio already assigned to an approved Unit')
+    navigation = (evidence or {}).get('normal_entry', {})
+    for required in ('overview_subunits', 'start_link', 'unit_link', 'subunit_link', 'historical_link'):
+        if navigation.get(required) is not True:
+            problems.append(f'Normal entry browser check missing: {required}')
+    return {'status': 'failed' if problems else 'passed', 'problems': problems}
+
+
+def evaluate(data_root, passage, *, evidence=None, catalog=None):
     try:
         index = units.build(data_root, passage)
     except (ValueError, OSError) as error:
@@ -89,7 +118,7 @@ def evaluate(data_root, passage, *, evidence=None):
                     'slides': {'status': 'failed', 'problems': [str(error)]},
                     'playback': {'status': 'blocked'}, 'ui': {'status': 'blocked'}},
                 'new_model_calls': 0, 'publication_decision': False}
-    current = binding(index)
+    current = binding(catalog if catalog is not None else index)
     plan = json.loads((data_root / 'chapter_exposition' / passage / 'listening-units.json').read_text())
     golden = json.loads((ROOT / 'backend/tests/fixtures/chapter_selection/unit1_sub_units_golden.json').read_text())
     unit1 = plan['units'][golden['target_section']]
@@ -194,6 +223,8 @@ def evaluate(data_root, passage, *, evidence=None):
               'playback': {'status': 'failed' if playback_problems else 'passed', 'problems': playback_problems,
                            'timing_anchor_checks': timing_anchor_checks},
               'ui': browser_checks(evidence, current)}
+    if catalog is not None:
+        checks['normal_entry'] = catalog_checks(catalog, index, evidence)
     return {'schema_version': 'chapter-listening-eval.v1', 'passage': passage,
             'evaluated_at': datetime.now(timezone.utc).isoformat(),
             'scope': 'browser_preview_using_saved_reviews_and_current_program_checks',
@@ -207,11 +238,13 @@ def main():
     parser.add_argument('passage')
     parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--browser-evidence', type=Path)
+    parser.add_argument('--catalog', type=Path, help='Exact saved normal-entry API response for end-to-end evaluation')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     from backend.api.config import DATA_BASE_PATH
     evidence = json.loads(args.browser_evidence.read_text()) if args.browser_evidence else None
-    report = evaluate(args.data_dir or Path(DATA_BASE_PATH), args.passage, evidence=evidence)
+    report = evaluate(args.data_dir or Path(DATA_BASE_PATH), args.passage, evidence=evidence,
+                      catalog=json.loads(args.catalog.read_text()) if args.catalog else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({'status': report['status'], 'checks': {k: v['status'] for k, v in report['checks'].items()},

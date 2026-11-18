@@ -111,3 +111,15 @@ def test_rendered_point_time_must_match_owner_source_not_just_pass_saved_slide_c
     assert report['checks']['ui']['status'] == 'passed'
     assert report['checks']['playback']['status'] == 'failed'
     assert report['status'] == 'needs_attention'
+
+
+def test_isolated_preview_cannot_prove_normal_entry():
+    from backend.tests.test_chapter_listening_catalog import example
+    from backend.pipeline.chapter_listening_catalog import compose
+    old,selected=example()
+    catalog=compose(old,selected)
+    assert ev.catalog_checks(catalog,selected,{})['status']=='failed'
+    evidence={'normal_entry':{k:True for k in ('overview_subunits','start_link','unit_link','subunit_link','historical_link')}}
+    assert ev.catalog_checks(catalog,selected,evidence)['status']=='passed'
+    catalog['sections'].pop(0)
+    assert ev.catalog_checks(catalog,selected,evidence)['status']=='failed'

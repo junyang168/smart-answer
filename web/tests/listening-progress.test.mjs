@@ -26,3 +26,9 @@ test('unavailable or corrupt browser storage cannot break playback',()=>{
  for(const getItem of [()=>'{',()=>'{"version":"v1","time":"x"}',()=>{throw Error('private mode');}])
   assert.equal(readBookmark({getItem},'key'),null);
 });
+test('normal parent links and historical passage assignments resolve by recording time',()=>{
+ const catalog=clips.map(c=>({...c,parent:c.section.startsWith('1.')?'mat-5-1-12':'mat-5-17-20'}));
+ assert.deepEqual(resumeClip(catalog,null,'v1',{section:'mat-5-1-12',source:'source1',time:1849.7}),{index:2,time:1849.7});
+ assert.deepEqual(resumeClip(catalog,null,'v1',{section:'old-passage',source:'source2',time:70}),{index:3,time:70});
+ assert.equal(resumeClip(catalog,null,'v1',{section:'old-passage',source:'unknown',time:70}),null);
+});
