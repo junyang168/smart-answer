@@ -9,7 +9,7 @@
 1、2 由 `chapter_slide_claims.retime` 與 `argument_alignment` 處理（要點時間按論證步驟定，
 畫面要有同一 Claim 的要點）。這裡逐句查 3 和 4，兩項都只看程序判得準的訊號：
 - 3：一句逐字稿一半以上的相鄰兩字出現在某節和合本裡（與聆聽頁跟讀同一準則），
-  而且這句與該節的吻合度在 0.7 以上，才算他在念那一節；畫面此刻要顯示含那一節的經文。
+  而且這句與該節吻合度達 0.7，並有足夠的經文字詞覆蓋，才由程式判定正在念；畫面此刻要顯示該節。
 - 4：一句裡有希臘文或希伯來文字母，或講到「原文、時態、現在式、將來式」等，
   畫面那一張要有原文註解或提到它的要點。
 """
@@ -38,6 +38,13 @@ def _bigrams(text: str) -> set[str]:
 
 def _share(pairs: set[str], verse: set[str]) -> float:
     return len(pairs & verse) / len(pairs) if len(pairs) >= 5 and verse else 0.0
+
+
+def _is_reading(pairs: set[str], verse: set[str]) -> bool:
+    # A short phrase in a story can resemble a verse without being a reading.
+    # Require half of the verse or a longer match for the automatic decision.
+    return _share(pairs, verse) >= READING_SHARE and (
+        len(pairs & verse) >= 12 or _share(verse, pairs) >= 0.5)
 
 
 class Bible:
@@ -94,8 +101,9 @@ def evaluate(
         shown = [v for item in slide.get("scriptures", []) if order.get(item["sentence"], 10 ** 9) <= i
                  for v in bible.verses(item["slug"])]
         pairs = _bigrams(line["text"])
-        best = max(pool, key=lambda v: _share(pairs, v[1]), default=None)
-        if best and _share(pairs, best[1]) >= READING_SHARE and not any(
+        best = max((v for v in pool if _is_reading(pairs, v[1])),
+                   key=lambda v: _share(pairs, v[1]), default=None)
+        if best and not any(
                 _share(pairs, verse) >= SHOWN_SHARE for _, verse in shown):
             problems.append(f"{slide['title']}（{line['id']}）: 他在念 {best[0]}，畫面沒有顯示這節經文")
         if _ORIGINAL_SCRIPT.search(line["text"]) or _GRAMMAR_WORDS.search(line["text"]):
@@ -120,7 +128,7 @@ def displayed_reading_sentences(slides, lines, *, bible=None):
         shown = [v for item in (slide or {}).get('scriptures', []) if item['sentence'] <= line['id']
                  for v in bible.verses(item['slug'])]
         pairs = _bigrams(line['text'])
-        if max((_share(pairs, verse) for _, verse in shown), default=0) >= READING_SHARE:
+        if any(_is_reading(pairs, verse) for _, verse in shown):
             reading.add(line['id'])
     return reading
 

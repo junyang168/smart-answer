@@ -45,3 +45,16 @@ def test_reading_exemption_requires_the_verse_to_be_displayed_already(tmp_path):
            {'id':'S0003','text':'這一節的解釋需要特別留意上下文和神學觀念，不能讀進自己的意思。'}]
     slides=[{'first':'S0001','scriptures':[{'sentence':'S0002','slug':'mat-5-3'}]}]
     assert displayed_reading_sentences(slides,lines,bible=Bible(tmp_path))=={'S0002'}
+
+
+def test_story_phrase_is_not_a_scripture_reading(tmp_path):
+    book = tmp_path / "JOS"
+    book.mkdir()
+    verse = "那些人就往約但河的渡口追趕他們去了。追趕他們的人一出去，城門就關了。"
+    (book / "2.json").write_text(json.dumps({"7": verse}, ensure_ascii=False))
+    bible = ev.Bible(tmp_path)
+    passage = ["jos-2-7"]
+    kept = [{"id": "U1", "start": 0, "end": 40, "text": "可是他們出去，城門就關了。"}]
+    assert ev.evaluate(one_slide([]), kept, candidates=passage, bible=bible)["problems"] == []
+    kept[0]["text"] = verse
+    assert ev.evaluate(one_slide([]), kept, candidates=passage, bible=bible)["problems"]
