@@ -256,7 +256,6 @@ export default function OriginalAudio({
   passage,
   embedded = false,
   listenHref,
-  showSummary = true,
   source,
 }: {
   passage: string;
@@ -265,7 +264,6 @@ export default function OriginalAudio({
   embedded?: boolean;
   /** 按章页面：每一段进聆听模式的地址。 */
   listenHref?: (section: string) => string;
-  showSummary?: boolean;
 }) {
   const [label, setLabel] = useState("");
   const [title, setTitle] = useState("");
@@ -428,26 +426,25 @@ export default function OriginalAudio({
     }
   }
 
-  const Wrapper = embedded ? "div" : "main";
   if (error)
     return (
-      <Wrapper className={embedded ? undefined : "min-h-screen bg-stone-50"}>
-        <p className={embedded ? "py-3 text-rose-800" : "mx-auto max-w-4xl px-5 py-16 text-rose-800"}>{error}</p>
-      </Wrapper>
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-rose-800">{error}</p>
+      </main>
     );
   if (!sections)
     return (
-      <Wrapper className={embedded ? undefined : "min-h-screen bg-stone-50"}>
-        <p className={embedded ? "py-3 text-stone-600" : "mx-auto max-w-4xl px-5 py-16 text-stone-600"} role="status">
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-stone-600" role="status">
           正在讀取…
         </p>
-      </Wrapper>
+      </main>
     );
 
   if (listenHref) {
     return (
       <div className="flex flex-col gap-6">
-        {showSummary && title && <p className="font-serif text-lg text-stone-800">{title}</p>}
+        {title && <p className="font-serif text-lg text-stone-800">{title}</p>}
         {aiVoice && (
           <p className="flex flex-wrap items-center gap-2 text-sm text-stone-600">
             <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-semibold text-amber-900">AI 朗讀</span>

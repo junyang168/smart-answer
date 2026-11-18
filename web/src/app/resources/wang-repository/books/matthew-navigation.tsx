@@ -1,13 +1,10 @@
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useState } from "react";
 import type { SourceCount } from "./navigation";
 
 export type ChapterPage = {
   kind: "chapter" | "passages";
   source: string;
   title?: string;
-  passage?: string;
   media?: "audio" | "video";
   ai_voice?: boolean;
 };
@@ -51,29 +48,6 @@ const sourceNames: Record<string, string> = {
   紐約靈命進深會: seriesDetails.nysc.title,
   教授釋經筆記: seriesDetails.notes.title,
 };
-const OriginalAudio = dynamic(() => import("../audio/OriginalAudio"), {
-  loading: () => <p className="text-sm text-stone-600" role="status">正在讀取…</p>,
-});
-
-function ChapterListeningDetails({ href, passage, source }: { href: string; passage: string; source: string }) {
-  const [loaded, setLoaded] = useState(false);
-  return (
-    <details className="pt-1" onToggle={(event) => { if (event.currentTarget.open) setLoaded(true); }}>
-      <summary className="min-h-11 w-fit cursor-pointer px-1 py-3 text-sm font-semibold text-amber-900 hover:underline">
-        查看聆聽單元
-      </summary>
-      {loaded && (
-        <OriginalAudio
-          embedded
-          showSummary={false}
-          passage={passage}
-          source={source}
-          listenHref={(section) => `${href}&section=${encodeURIComponent(section)}`}
-        />
-      )}
-    </details>
-  );
-}
 const action = "inline-flex min-h-11 w-fit items-center rounded-lg border border-stone-300 bg-white px-3 text-sm font-medium text-stone-900 hover:border-amber-800 hover:text-amber-900";
 
 function chapterRanges(chapters: number[]) {
@@ -192,9 +166,7 @@ export function MatthewBook({
                   <h3 className="font-serif text-lg font-bold">第 {chapter.chapter} 章</h3>
                   {chapter.sources.filter((item) => !source || item.name === source).map((item) => {
                     const page = chapter.pages?.find((candidate) => candidate.source === item.name);
-                    const chapterPath = `${path}/${chapter.chapter}`;
-                    const query = `?source=${encodeURIComponent(item.name)}`;
-                    const href = chapterPath + query;
+                    const href = `${path}/${chapter.chapter}?source=${encodeURIComponent(item.name)}`;
                     const notes = item.name === "教授釋經筆記";
                     return (
                       <div key={item.name} className="space-y-1">
@@ -207,13 +179,6 @@ export function MatthewBook({
                           {notes && item.count > 0 && <Link href={`${href}&view=notes`} className={action} prefetch={false}>閱讀筆記</Link>}
                           {!notes && !page && <Link href={href} className={action} prefetch={false}>查看講道</Link>}
                         </div>
-                        {page?.kind === "chapter" && page.passage && (
-                          <ChapterListeningDetails
-                            href={`${chapterPath}/listen${query}`}
-                            passage={page.passage}
-                            source={item.name}
-                          />
-                        )}
                       </div>
                     );
                   })}
