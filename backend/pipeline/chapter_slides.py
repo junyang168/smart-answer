@@ -657,6 +657,7 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict
         placed[slide["first"]] = {
             "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
             "sha256": ref, "image_src": "data:image/svg+xml;base64," + image,
+            **({"layout": item["layout"], "labels": item["labels"]} if item.get("layout") else {}),
         }
     return placed
 

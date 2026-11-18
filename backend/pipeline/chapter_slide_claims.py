@@ -644,6 +644,15 @@ def instance_creation_result(meta: dict) -> dict:
     return result
 
 
+# These four verified drawings have a responsive layout. Labels still come from the SVG.
+DIAGRAM_LAYOUTS = {
+    "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321": ("covenants", 13),
+    "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c": ("overlap", 4),
+    "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17": ("literary_structure", 11),
+    "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291": ("overview", 6),
+}
+
+
 def instance_diagrams(conn, claim_ids: list[str]) -> dict:
     """Load visual Observations directly supporting these live Claims."""
     from backend.pipeline.source_projection import visual_source_blocks
@@ -687,9 +696,17 @@ def instance_diagrams(conn, claim_ids: list[str]) -> dict:
                 or raw[blocks[0].char_end:].strip()
                 or hashlib.sha256(raw.encode()).hexdigest() != sha):
             raise ValueError(f"Diagram SVG failed validation: {fragment['fragment_id']}")
+        layout = {}
+        if sha in DIAGRAM_LAYOUTS:
+            name, expected_labels = DIAGRAM_LAYOUTS[sha]
+            labels = [fact["text"].strip() for fact in blocks[0].facts
+                      if fact["tag"] == "text" and (fact.get("text") or "").strip()]
+            if len(labels) != expected_labels:
+                raise ValueError(f"Diagram labels changed: {fragment['fragment_id']}")
+            layout = {"layout": name, "labels": labels}
         links.setdefault(claim_id, {})[sha, kind, doc["origin"]] = {
             "title": doc["title"], "origin": doc["origin"], "kind": kind, "sha256": sha,
-            "path": fragment["visual_source_url"], "svg": raw,
+            "path": fragment["visual_source_url"], "svg": raw, **layout,
         }
     return {claim: list(diagrams.values()) for claim, diagrams in links.items()}
 
