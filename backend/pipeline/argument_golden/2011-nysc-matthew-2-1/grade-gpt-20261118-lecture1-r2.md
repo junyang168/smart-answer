@@ -54,3 +54,15 @@ Observation and the re-reading Evidence; 「耶穌既然來，為我們獻了一
 to the Question. Every round since round 1 has failed exactly two owner items, a
 different pair each time. Prompt changes for G05 stop here (stopping point set before
 this round); the choice of round goes to the owner.
+
+## Saved: round 4
+
+Owner 2026-11-18: 「Save round 4 with p5/p6 accepted」. Jev flagged 13 of 56 records;
+Claude read each against his words and found nothing changed (`fidelity/fidelity-final.json`).
+No corrections. Loaded as `argument-layer-SRC-nysc_2011_2_1-e855641bcead-7715216ebbb0`,
+replacing `…-edd8d5c906bb` (retired 144 records; read-back matches).
+
+Still built on the old ChangeSet: the 太5 chapter slides for lecture 1
+(`DATA_BASE_DIR/chapter_slides/mat-5-1-48/…（二）1.json`) and
+`chapter_exposition/mat-5-1-48/listening-units.json`. They keep showing; rebuilding them
+needs model calls and the owner's go.
