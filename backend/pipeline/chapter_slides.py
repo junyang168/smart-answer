@@ -597,15 +597,14 @@ def checked(
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(
-                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context))["problems"]
+                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context),
+                context=claim_context)["problems"]
             # 負責人指出過的問題（chapter_slide_cases.json），每次都查，不再回來。
             from backend.pipeline.chapter_slide_cases import cases_for, check_cases
             problems += check_cases(slides, cases_for(claim_context.get("lecture", "")), sentences(kept))
-    if not problems and any(slide.get("diagram_ref") for slide in slides):
-        try:
-            timed_diagrams(slides, sentences(kept), claim_context or {})
-        except ValueError as exc:
-            problems.append(str(exc))
+    if not outline and not problems and any(slide.get("diagram_ref") for slide in slides):
+        from backend.pipeline.chapter_slide_eval import diagram_problems
+        problems += diagram_problems(slides, sentences(kept), claim_context or {})
     return problems, unshown, slides
 
 

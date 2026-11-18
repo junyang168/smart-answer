@@ -214,7 +214,7 @@ function Verse({
   );
 }
 
-const diagramBox = "rounded-lg border border-slate-600 bg-slate-900/60 p-2 [@media(max-width:389px)_and_(max-height:599px)]:p-1";
+const diagramBox = "rounded-lg border border-slate-600 bg-slate-900/60 p-2 [@media(max-width:389px)]:p-1";
 const diagramHeading = "font-semibold text-amber-200";
 
 function Diagram({ diagram }: { diagram: SlideDiagram }) {
@@ -254,9 +254,9 @@ function Diagram({ diagram }: { diagram: SlideDiagram }) {
           <div className={diagramBox}>{text[0]}</div>
           <div className={diagramBox}>
             <div className={diagramHeading}>{text[1]}</div>
-            <div className="mt-1 border-l border-slate-500 pl-2 [@media(max-width:389px)_and_(max-height:599px)]:pl-1">
+            <div className="mt-1 border-l border-slate-500 pl-2 [@media(max-width:389px)]:pl-1">
               <div>{text[2]}</div>
-              <div className="my-1 rounded border border-slate-600 p-2 [@media(max-width:389px)_and_(max-height:599px)]:my-0 [@media(max-width:389px)_and_(max-height:599px)]:p-0">
+              <div className="my-1 rounded border border-slate-600 p-2 [@media(max-width:389px)]:my-0 [@media(max-width:389px)]:p-0">
                 <div>{text[3]}</div>
                 <div className="mt-1 grid gap-1 sm:grid-cols-2">
                   <div>{text[4]} {text[5]}</div>
@@ -296,7 +296,7 @@ function Diagram({ diagram }: { diagram: SlideDiagram }) {
       );
   }
   return (
-    <figure aria-label={diagram.title} className="isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 [@media(max-width:389px)_and_(max-height:599px)]:space-y-1 [@media(max-width:389px)_and_(max-height:599px)]:leading-[1.1]">
+    <figure aria-label={diagram.title} className="isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 [@media(max-width:389px)]:space-y-1 [@media(max-width:389px)]:leading-[1.1]">
       {content}
     </figure>
   );
@@ -354,15 +354,15 @@ export default function ChapterSlide({
   }, [activePoint, currentDiagram, slide.at]);
   return (
     <section ref={slidePanel} className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10 ${currentDiagram
-      ? "[@media(max-width:389px)_and_(max-height:599px)]:p-2" : ""}`}>
+      ? "[@media(max-width:389px)]:p-2" : ""}`}>
       <div className={currentDiagram ? "grid items-start gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8" : undefined}>
         <header data-diagram-points={currentDiagram ? "" : undefined}
-          className={currentDiagram ? "min-w-0 overflow-auto [@media(max-width:389px)_and_(max-height:599px)]:sr-only" : undefined}>
+          className={currentDiagram ? "min-w-0 overflow-auto [@media(max-width:389px)]:sr-only" : undefined}>
           <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
           {points.length > 0 && (
             <ol className={currentDiagram
               ? `mt-3 space-y-2 text-sm leading-relaxed sm:text-[1.05rem] lg:text-2xl ${currentDiagram.layout === "literary_structure" || currentDiagram.layout === "covenants"
-                ? "hidden sm:block" : "[@media(max-width:389px)_and_(max-height:599px)]:hidden"}`
+                ? "hidden sm:block" : "[@media(max-width:389px)]:hidden"}`
               : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
               {points.map((point, index) => (
                 <li

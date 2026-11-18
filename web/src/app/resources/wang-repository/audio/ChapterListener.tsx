@@ -635,7 +635,7 @@ export default function ChapterListener({
 
         {/* 逐字稿只留三行高：他此刻那一句在中間，前後各一句（負責人 2026-11-16）。 */}
         <div className={`relative h-[8.25rem] ${diagramVisible
-          ? "[@media(max-width:389px)_and_(max-height:599px)]:h-12" : ""}`}>
+          ? "[@media(max-width:389px)]:h-12" : ""}`}>
           <div
             ref={box}
             onWheel={userScrolled}

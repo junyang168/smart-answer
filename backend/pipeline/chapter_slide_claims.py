@@ -803,6 +803,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                "decisions_sha256": chapter_exposition.file_sha256(path),
                "transcript_sha256": decisions.get("transcript_sha256"),
                "instance": {"change_set_id": change_set_id, "candidate_sha256": meta["candidate_sha256"]},
+               "diagram_contract": "claim-bound.v1",
                "groups": groups, "claims": claims, "excluded": excluded}
     context["claim_source_ranges"] = claim_source_ranges(context, decisions)
     return context

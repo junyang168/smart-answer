@@ -23,6 +23,10 @@ def cases_for(lecture: str, path: Path = CASES) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))["lectures"].get(lecture, [])
 
 
+def diagrams_for_lecture(lecture: str, path: Path = CASES) -> list[dict[str, str]]:
+    return json.loads(path.read_text(encoding="utf-8")).get("diagrams", {}).get(lecture, [])
+
+
 def _on_screen(slides: list[dict], sentence: str) -> dict | None:
     return next((s for s in reversed(slides) if s["first"] <= sentence), None)
 

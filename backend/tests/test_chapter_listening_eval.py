@@ -123,3 +123,25 @@ def test_isolated_preview_cannot_prove_normal_entry():
     assert ev.catalog_checks(catalog,selected,evidence)['status']=='passed'
     catalog['sections'].pop(0)
     assert ev.catalog_checks(catalog,selected,evidence)['status']=='failed'
+
+
+def test_new_argument_version_and_diagrams_participate_in_unified_eval(tmp_path, monkeypatch):
+    index, evidence = setup_report(tmp_path, monkeypatch, [])
+    row = index['sections'][0]['sermons'][0]
+    slide = row['slides'][0]
+    sha = 'a' * 64
+    slide['diagram'] = {'at': row['transcript'][0]['at'], 'sha256': sha}
+    evidence['input_sha256'] = ev.binding(index)['input_sha256']
+    expected_versions = {row['source_id']: 'new'}
+    report = ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence, expected_versions=expected_versions)
+    assert report['checks']['selection']['problems'] == ['Stale argument version: test']
+    assert report['checks']['ui']['status'] == 'failed'
+    assert report['checks']['playback']['status'] == 'passed'
+    for viewport in evidence['viewports']:
+        viewport['diagrams'] = [{'sha256': sha, 'fits': True, 'dark': True, 'no_zoom': True,
+                                 'hidden_before': True, 'min_font_px': 14}]
+    assert ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence)['checks']['ui']['status'] == 'passed'
+    evidence['viewports'][-1]['diagrams'][0]['min_font_px'] = 11
+    assert ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence)['checks']['ui']['status'] == 'failed'
+    slide['diagram']['at'] += 0.5
+    assert ev.evaluate(tmp_path, 'mat-5-1-48')['checks']['playback']['status'] == 'failed'

@@ -1,5 +1,6 @@
 /** Run against the local web app. Optional PLAYWRIGHT_MODULE and CHROMIUM_EXECUTABLE. */
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 
 const base = process.env.WANG_EVAL_URL || "http://localhost:3788";
@@ -72,11 +73,11 @@ async function evaluate(browser, viewport) {
     assert.notEqual(measure.background, "rgb(255, 255, 255)");
     assert.equal(await figure.getByRole("button").count(), 0);
     assert.equal(await figure.getByText("教授的圖", { exact: true }).count(), 0);
-    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.height >= 600);
+    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.width >= 390);
 
     await open(24);
     await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await slides.getByText(elaboration, { exact: true }).isVisible(), viewport.height >= 600);
+    assert.equal(await slides.getByText(elaboration, { exact: true }).isVisible(), viewport.width >= 390);
 
     await open(38);
     assert.equal(await figure.count(), 0, "An image from the previous clip must disappear");
@@ -96,10 +97,77 @@ async function evaluate(browser, viewport) {
   }
 }
 
+// Add real-diagram measurements to the same browser evidence read by chapter_listening_eval.
+async function measureIndex(browser, index, evidence) {
+  const [book, chapter] = index.passage.split("-");
+  const chapterPath = `/api/public/repository/books/${book}/${chapter}`;
+  const examples = new Map();
+  for (const section of index.sections) {
+    for (const recording of section.sermons) {
+      for (const { diagram } of recording.slides) {
+        if (!diagram || examples.has(diagram.sha256)) continue;
+        const clip = recording.stretches.find(({ start, end }) => start <= diagram.at && diagram.at < end);
+        if (clip) examples.set(diagram.sha256, { diagram, clip, section, recording });
+      }
+    }
+  }
+  for (const view of evidence.viewports) {
+    view.diagrams = [];
+    const page = await browser.newPage({ viewport: { width: view.width, height: view.height } });
+    try {
+      await page.route(`**${chapterPath}`, route => route.fulfill({ json: {
+        chapter: Number(chapter), name: "馬太福音", sources: [{ name: source, page: { kind: "chapter", passage: index.passage } }],
+      } }));
+      await page.route(`**/api/public/original-audio/${index.passage}?*`, route => route.fulfill({ json: index }));
+      await page.route("**/web/video/**", route => route.abort());
+      const pane = page.locator("[data-slide-scroll]");
+      for (const { diagram, clip, section, recording } of examples.values()) {
+        const open = async (at) => {
+          const query = new URLSearchParams({ source, section: section.passage, recording: recording.source_id, at: String(at) });
+          await page.goto(new URL(`/resources/wang-repository/books/${book}/${chapter}/listen?${query}`, base).href);
+          await pane.getByRole("heading").first().waitFor();
+        };
+        const figure = pane.getByRole("figure", { name: diagram.title, exact: true });
+        const before = Math.max(clip.start, diagram.at - 0.05);
+        let hiddenBefore = true;
+        if (before < diagram.at) {
+          await open(before);
+          hiddenBefore = await figure.count() === 0;
+        }
+        await open(diagram.at);
+        await figure.waitFor();
+        const observation = await figure.evaluate(node => {
+          const box = node.getBoundingClientRect();
+          const panel = node.closest("[data-slide-scroll]");
+          const bounds = panel.getBoundingClientRect();
+          const [r, g, b] = getComputedStyle(node.closest("section")).backgroundColor.match(/\d+/g).map(Number);
+          const labels = [...node.querySelectorAll("div,span,strong")]
+            .filter(el => el.children.length === 0 && el.textContent.trim());
+          return {
+            fits: bounds.top <= box.top && box.bottom <= bounds.bottom && bounds.left <= box.left && box.right <= bounds.right,
+            dark: Math.max(r, g, b) < 64 && node.querySelector("img") === null,
+            no_zoom: node.querySelector("button, dialog") === null,
+            min_font_px: labels.length ? Math.min(...labels.map(el => parseFloat(getComputedStyle(el).fontSize))) : 0,
+          };
+        });
+        view.diagrams.push({ sha256: diagram.sha256, hidden_before: hiddenBefore, ...observation });
+      }
+    } finally {
+      await page.close();
+    }
+  }
+  return evidence;
+}
+
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE });
   try {
-    for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 1100, height: 850 }]) {
+    if (process.argv.length === 4) {
+      const [index, evidence] = process.argv.slice(2).map(path => JSON.parse(readFileSync(path, "utf8")));
+      console.log(JSON.stringify(await measureIndex(browser, index, evidence), null, 2));
+      return;
+    }
+    for (const viewport of [{ width: 320, height: 568 }, { width: 375, height: 667 }, { width: 390, height: 844 }, { width: 1100, height: 850 }]) {
       await evaluate(browser, viewport);
     }
   } finally {

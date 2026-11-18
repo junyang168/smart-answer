@@ -85,6 +85,7 @@ def evaluate(
     *,
     candidates: list[str],
     bible: Bible | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """逐句的自評。candidates 是他可能在念的經文（slug），通常是本堂投影片與 Evidence 用到的各章。
 
@@ -93,7 +94,7 @@ def evaluate(
     lines = chapter_slides.sentences(kept)
     order = {line["id"]: i for i, line in enumerate(lines)}
     pool = [verse for slug in candidates for verse in bible.verses(slug)]
-    problems: list[str] = []
+    problems = diagram_problems(slides, lines, context or {})
     for i, line in enumerate(lines):
         slide = next((s for s in reversed(slides) if order.get(s["first"], 10 ** 9) <= i), None)
         if slide is None:
@@ -113,6 +114,33 @@ def evaluate(
             if not notes and not mentioned:
                 problems.append(f"{slide['title']}（{line['id']}）: 他在講原文或文法，這一張沒有原文註解或相應要點")
     return {"problems": problems, "checked_sentences": len(lines)}
+
+
+def diagram_problems(slides: list[dict], lines: list[dict], context: dict) -> list[str]:
+    """Check the saved diagram choices and require golden diagrams in retained scope."""
+    from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
+
+    try:
+        placed = chapter_slides.timed_diagrams(slides, lines, context)
+    except ValueError as exc:
+        return [str(exc)]
+    if context.get("diagram_contract") != "claim-bound.v1":
+        return []
+    by_sentence = {line["id"]: line["start"] for line in lines}
+    problems = []
+    for case in diagrams_for_lecture(context.get("lecture", "")):
+        for claim in context.get("claims", []):
+            if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"]:
+                continue
+            sentence = claim.get("stated")
+            if sentence not in by_sentence:
+                continue
+            current = next((s for s in slides if s["first"] <= sentence <= s["last"]), None)
+            diagram = placed.get(current["first"]) if current else None
+            wanted = {d["sha256"] for d in claim.get("diagrams", []) if d.get("layout") == case["layout"]}
+            if not diagram or diagram["sha256"] not in wanted or diagram["at"] != by_sentence[sentence]:
+                problems.append(f"論證圖缺漏或出場錯誤：{case['layout']}（{sentence}）")
+    return problems
 
 
 def displayed_reading_sentences(slides, lines, *, bible=None):
