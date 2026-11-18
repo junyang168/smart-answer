@@ -55,13 +55,15 @@ def verse(ref: str) -> dict | None:
 
 
 def lectures(conn) -> list[dict]:
-    """Every lecture written to the instance, by its source document's title."""
+    """Every lecture in the instance, by the ChangeSet that holds it now: the one that wrote
+    its source document's current revision. A ChangeSet a rerun replaced is not listed."""
     out = []
     for (cs,) in conn.execute("SELECT change_set_id FROM wang_knowledge.change_sets "
                               "WHERE change_set_id LIKE 'argument-layer-%'").fetchall():
         row = conn.execute("""SELECT o.payload->>'title' FROM wang_knowledge.object_versions v
-                              JOIN wang_knowledge.objects o USING (collection, object_id)
-                              WHERE v.change_set_id=%s AND v.collection='source_documents'""", (cs,)).fetchone()
+                              JOIN wang_knowledge.objects o USING (collection, object_id, revision)
+                              WHERE v.change_set_id=%s AND v.collection='source_documents'
+                              AND o.retired_at IS NULL""", (cs,)).fetchone()
         if row:
             out.append({'id': cs, 'title': row[0]})
     return sorted(out, key=lambda x: x['title'])

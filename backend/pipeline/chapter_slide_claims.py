@@ -597,11 +597,21 @@ def instance_records(conn, change_set_id: str) -> tuple[dict, dict]:
     row = conn.execute("SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s", (change_set_id,)).fetchone()
     if not row:
         raise ValueError(f"no ChangeSet {change_set_id} in the instance")
+    holds = conn.execute("""SELECT 1 FROM wang_knowledge.object_versions v
+        JOIN wang_knowledge.objects o USING (collection, object_id, revision)
+        WHERE v.change_set_id=%s AND v.collection='source_documents' AND o.retired_at IS NULL""", (change_set_id,)).fetchone()
+    if not holds:
+        replaced_by = conn.execute("""SELECT change_set_id FROM wang_knowledge.change_sets
+            WHERE metadata->>'replaces'=%s""", (change_set_id,)).fetchone()
+        raise ValueError(f"ChangeSet {change_set_id} no longer holds its lecture"
+                         + (f"; it was replaced by {replaced_by[0]}" if replaced_by else ''))
     records: dict = {}
-    for collection, payload, status in conn.execute(
-            """SELECT o.collection, o.payload, o.review_status FROM wang_knowledge.object_versions v
+    # The lecture's records are those its ChangeSet wrote: at revision 1, or at a later
+    # revision when it replaced an earlier run of the same lecture (the source document).
+    for collection, _, payload, status in conn.execute(
+            """SELECT DISTINCT o.collection, o.object_id, o.payload, o.review_status FROM wang_knowledge.object_versions v
                JOIN wang_knowledge.objects o USING (collection, object_id)
-               WHERE v.change_set_id=%s AND v.revision=1 AND o.retired_at IS NULL
+               WHERE v.change_set_id=%s AND o.retired_at IS NULL
                ORDER BY o.collection, o.object_id""", (change_set_id,)).fetchall():
         if status not in INSTANCE_DEAD:
             records.setdefault(collection, []).append(payload)
