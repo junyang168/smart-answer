@@ -162,28 +162,30 @@ export function MatthewBook({
           ) : (
             <ol className="divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white">
               {displayed.map((chapter) => (
-                <li key={chapter.chapter} className="space-y-3 px-4 py-4 sm:px-5">
+                <li key={chapter.chapter} className={`px-4 py-3 sm:px-5 ${source
+                  ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1"
+                  : "space-y-3"}`}>
                   <h3 className="font-serif text-lg font-bold">第 {chapter.chapter} 章</h3>
                   {chapter.sources.filter((item) => !source || item.name === source).map((item) => {
                     const page = chapter.pages?.find((candidate) => candidate.source === item.name);
                     const href = `${path}/${chapter.chapter}?source=${encodeURIComponent(item.name)}`;
                     const notes = item.name === "教授釋經筆記";
                     return (
-                      <div key={item.name} className="space-y-1">
+                      <div key={item.name} className={source ? "contents" : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1"}>
                         {!source && <p className="font-medium">{sourceNames[item.name] ?? item.name}</p>}
-                        {page?.title && <p className="text-sm text-stone-600">{page.title}</p>}
-                        <div className="flex flex-wrap gap-2">
+                        <div className="col-start-2 row-start-1 flex flex-wrap justify-end gap-2 whitespace-nowrap">
                           {page && <Link href={href} className={action} prefetch={false}>
                             {page.ai_voice ? "AI 朗讀" : page.kind === "passages" ? "按段落聽原聲" : page.media === "video" ? "逐節觀看" : "聆聽原聲"}
                           </Link>}
                           {notes && item.count > 0 && <Link href={`${href}&view=notes`} className={action} prefetch={false}>閱讀筆記</Link>}
                           {!notes && !page && <Link href={href} className={action} prefetch={false}>查看講道</Link>}
                         </div>
+                        {page?.title && <p className="col-span-full text-sm text-stone-600">{page.title}</p>}
                       </div>
                     );
                   })}
                   {chapter.articles.map((article) => (
-                    <Link key={article.href} href={article.href} className="block py-2 text-sm text-amber-900 hover:underline">
+                    <Link key={article.href} href={article.href} className="col-span-full block py-2 text-sm text-amber-900 hover:underline">
                       <span className="font-semibold">綜合文章（編輯整理）</span> · {article.title}
                     </Link>
                   ))}
