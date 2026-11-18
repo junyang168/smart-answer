@@ -44,7 +44,7 @@ RECORDS = {
 def test_reasons_follow_his_spoken_order_and_mark_the_words_they_use():
     view = L.build(RECORDS, FakeText(), {}, [], 'cs')
     [point] = view['points']
-    assert [r['kind'] for r in point['reasons']] == ['他直接說', '理由']
+    assert [r['kind'] for r in point['reasons']] == ['他的原話', '理由']
     assert point['start'] == 0.0 and point['verses'][0]['label'] == '太 6:25–34'
     pieces = view['transcript'][0]['pieces']
     assert [(p['text'], p['uses']) for p in pieces] == [('不要憂慮。', [[1, 1]]), ('不是不要籌慮。', [[1, 2]])]

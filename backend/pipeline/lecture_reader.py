@@ -141,10 +141,10 @@ def _reasons(claim: dict, records: dict) -> list[dict]:
             reasons.append({'kind': '理由', 'text': steps[rid]['statement'], 'fragments': steps[rid]['source_fragment_ids']})
         elif rid in observations:
             row = observations[rid]
-            kind = '經文' if row.get('observation_type') == 'scripture_text' else '觀察'
+            kind = '經文' if row.get('observation_type') == 'scripture_text' else '他指出'
             reasons.append({'kind': kind, 'text': row['statement'], 'fragments': row['source_fragment_ids']})
     if own:
-        reasons.append({'kind': '他直接說', 'text': '', 'fragments': list(dict.fromkeys(own))})
+        reasons.append({'kind': '他的原話', 'text': '', 'fragments': list(dict.fromkeys(own))})
     for pid in claim.get('opposed_position_ids') or []:
         if pid in positions:
             reasons.append({'kind': '他反對的看法', 'text': positions[pid]['title'],
@@ -201,6 +201,7 @@ def build(records: dict, text: _Text, core: dict, rulings: list[dict], change_se
         reasons = []
         for r in _reasons(claim, records):
             quotes = [q for q in (quote(f) for f in r['fragments']) if q]
+            quotes.sort(key=lambda q: (q['position'] is None, q['position'] or 0))
             if quotes:
                 reasons.append({**{k: r[k] for k in ('kind', 'text')}, 'quotes': quotes})
         reasons.sort(key=lambda r: min((q['position'] for q in r['quotes'] if q['position'] is not None), default=10**9))

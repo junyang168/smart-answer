@@ -31,7 +31,7 @@ type Lecture = {
   core: { candidates: Candidate[]; note: string; no_summary: Ruling | null };
 };
 
-const VERDICT_LABEL: Record<Ruling["verdict"], string> = { right: "對", wrong: "不對", no_summary: "他沒有總結" };
+const VERDICT_LABEL: Record<Ruling["verdict"], string> = { right: "抓對了", wrong: "抓錯了", no_summary: "他沒有總結全講" };
 
 function clock(seconds: number | null): string {
   if (seconds == null) return "";
@@ -79,6 +79,7 @@ function LectureView({ lecture, reload }: { lecture: Lecture; reload: () => void
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [verseInput, setVerseInput] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
+  const [leftOutOnly, setLeftOutOnly] = useState(false);
 
   const play = useCallback((seconds: number | null) => {
     const el = audio.current;
@@ -158,6 +159,8 @@ function LectureView({ lecture, reload }: { lecture: Lecture; reload: () => void
           </p>
         )}
         {verseInput && !query && <p className="mt-2 text-sm text-slate-500">請寫成「章:節」，例如 7:12。</p>}
+        <button onClick={() => { setVerseInput(""); setLeftOutOnly(true); window.setTimeout(() => goTo("transcript"), 50); }}
+          className="mt-2 text-sm text-indigo-700 underline">看他講了、但沒有整理進任何一點的話</button>
       </section>
 
       {!query && <CoreSection lecture={lecture} reload={reload} openPoint={openPoint} />}
@@ -166,6 +169,9 @@ function LectureView({ lecture, reload }: { lecture: Lecture; reload: () => void
         <h2 className="text-xl font-bold text-slate-900">他講了哪幾點</h2>
         <p className="mt-1 text-sm text-slate-500">
           大標題是他自己這一講的段落。每一點的句子是<Tag>整理</Tag>的話；點開看理由，引號裡是他的<Tag tone="quote">原話</Tag>，按 ▶ 從那一句開始聽。
+        </p>
+        <p className="mt-1 text-sm text-slate-500">
+          點開後的小標題：<b>理由</b>是他推出這一點的一步；<b>他指出</b>是他指給大家看的事實或經文的意思；<b>經文</b>是他念的經文；<b>他的原話</b>是他直接把這一點說出來的話；<b className="text-rose-700">他反對的看法</b>是別人的說法，不是他的理由。
         </p>
         {[-1, ...lecture.sections.map((_, i) => i)].map((s) => {
           const points = lecture.points.filter((p) => p.section === s && shown(p));
@@ -186,11 +192,15 @@ function LectureView({ lecture, reload }: { lecture: Lecture; reload: () => void
 
       {!query && (
         <section className="mt-10">
-          <h2 className="text-xl font-bold text-slate-900">逐字稿（他的原話）</h2>
+          <h2 id="transcript" className="text-xl font-bold text-slate-900">逐字稿（他的原話）</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            <span className="rounded bg-amber-100 px-1">有底色</span>的話整理進了某一點，旁邊寫著是第幾點的第幾條理由，點一下回到那一點。
+            <span className="rounded bg-amber-100 px-1">有底色</span>的話整理進了某一點，旁邊寫著是第幾點，點一下回到那一點。
             <span className="text-slate-400">灰色</span>的話沒有整理進任何一點。點任何一句，從那裡開始聽。
           </p>
+          <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={leftOutOnly} onChange={(e) => setLeftOutOnly(e.target.checked)} className="h-4 w-4" />
+            只看沒有整理進去的話
+          </label>
           <div className="mt-4 space-y-4 text-[17px] leading-8">
             {lecture.transcript.map((p) => (
               <div key={p.paragraph}>
@@ -200,19 +210,20 @@ function LectureView({ lecture, reload }: { lecture: Lecture; reload: () => void
                     const key = `${p.paragraph}-${i}`;
                     const live = playing?.key === key;
                     const used = piece.uses.length > 0;
+                    if (leftOutOnly && used) return i > 0 && !p.pieces[i - 1].uses.length ? <span key={key} className="text-slate-300"> … </span> : null;
+                    const nos = Array.from(new Set(piece.uses.map(([no]) => no)));
                     return (
                       <span key={key} id={`q-${key}`}>
                         <span role="button" tabIndex={0} onClick={() => play(piece.start)}
                           onKeyDown={(e) => { if (e.key === "Enter") play(piece.start); }}
-                          className={`cursor-pointer rounded ${used ? "bg-amber-100 text-slate-900" : "text-slate-400"} ${live ? "outline outline-2 outline-indigo-500" : ""} ${flash === `q-${key}` ? "bg-indigo-200" : ""}`}>
+                          className={`cursor-pointer rounded ${used ? "bg-amber-100 text-slate-900" : leftOutOnly ? "text-slate-700" : "text-slate-400"} ${live ? "outline outline-2 outline-indigo-500" : ""} ${flash === `q-${key}` ? "bg-indigo-200" : ""}`}>
                           {piece.text}
                         </span>
-                        {used && piece.uses.map(([no, r]) => (
-                          <button key={`${no}-${r}`} onClick={() => openPoint(no)}
-                            className="mx-0.5 align-super text-xs font-semibold text-indigo-700 hover:underline">
-                            第{no}點·理由{r}
+                        {used && (
+                          <button onClick={() => openPoint(nos[0])} className="mx-0.5 align-super text-xs font-semibold text-indigo-700 hover:underline">
+                            第{nos.join("、")}點
                           </button>
-                        ))}
+                        )}
                       </span>
                     );
                   })}
@@ -267,7 +278,7 @@ function PointCard({ point, open, toggle, play, goTo, active, flash }: {
           {point.reasons.map((r, i) => (
             <li key={i}>
               <div className="text-sm">
-                <span className="font-semibold text-slate-700">{r.kind === "理由" ? `理由 ${i + 1}` : `${r.kind}（理由 ${i + 1}）`}</span>
+                <span className={`font-semibold ${r.kind === "他反對的看法" ? "text-rose-700" : "text-slate-700"}`}>{r.kind === "他反對的看法" ? "他反對的看法（不是他的理由）" : r.kind}</span>
                 {r.text && <><Tag>整理</Tag><span className="text-slate-800">{r.text}</span></>}
               </div>
               <ul className="mt-1 space-y-1">
@@ -306,7 +317,8 @@ function CoreSection({ lecture, reload, openPoint }: { lecture: Lecture; reload:
   const { candidates, note, no_summary } = lecture.core;
   return (
     <section className="mt-6 rounded-xl border-2 border-indigo-200 bg-indigo-50/50 p-4">
-      <h2 className="text-xl font-bold text-slate-900">核心論點（請確認）</h2>
+      <h2 className="text-xl font-bold text-slate-900">核心論點：我們抓對了嗎？</h2>
+      <p className="mt-1 text-sm leading-6 text-slate-600">這裡問的是我們有沒有抓對他這一講最核心的一點，不是問他講得對不對。每個候選各自判斷，可以都抓對，也可以都抓錯。</p>
       {!candidates.length && <p className="mt-2 text-sm text-slate-600">這一講還沒有選出核心論點的候選。</p>}
       {note && <p className="mt-2 text-sm leading-6 text-slate-700"><Tag>整理</Tag>{note}</p>}
       <div className="mt-3 space-y-4">
@@ -321,7 +333,7 @@ function CoreSection({ lecture, reload, openPoint }: { lecture: Lecture; reload:
               <p className="mt-1 text-sm text-slate-600"><span className="font-semibold">為什麼選它：</span>{c.why}</p>
               {c.covers.length > 0 && (
                 <p className="mt-1 text-sm text-slate-600">
-                  <span className="font-semibold">涵蓋：</span>
+                  <span className="font-semibold">這一點底下還有：</span>
                   {c.covers.map((n) => (
                     <button key={n} onClick={() => openPoint(n)} className="mr-2 text-indigo-700 underline">第 {n} 點</button>
                   ))}
