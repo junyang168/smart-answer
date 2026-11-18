@@ -1,8 +1,9 @@
 # Lecture 6 rerun (2026-11-18)
 
 Prompt 379773ce plus program fix 089669fb. Run: `argument-layer-runs/gpt-20261118-lecture6-r2`.
-Group 4's material reply left the holder of a 反方 view blank twice (one contract retry,
-rejected reply kept under `rejected/`); the program now records it as 「有人」.
+Group 4's material reply left the holder of a 反方 view blank (rejected reply kept under `rejected/`). The intended retry did
+not reach the model: the Codex client's own copy in the run's `gpt/` folder returned the same reply.
+The program now records an unnamed 反方 holder as 「有人」, so no retry was needed.
 
 ## Topic-question key
 L6-structure: old FAIL 2/4, rerun PASS 4/4 (CL0014: 五章三至十二節 / 五章十三節至七章二十七節 /
