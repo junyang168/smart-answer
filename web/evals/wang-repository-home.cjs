@@ -10,8 +10,17 @@ const notes = "教授釋經筆記";
 async function evaluate(browser, viewport) {
   const page = await browser.newPage({ viewport });
   try {
-    await page.goto(url.href);
+    await page.goto(new URL("/about", url).href);
+    const header = page.locator("#global-site-header");
+    const mobileMenu = header.getByRole("button", { name: "Open Menu" });
+    if (viewport.width < 1024) await mobileMenu.click();
+    const resources = header.getByRole("link", { name: "聖經學習資源", exact: true });
+    await resources.click();
+    await page.waitForURL(new URL("/resources", url).href);
+    if (viewport.width < 1024) assert.equal(await mobileMenu.getAttribute("aria-expanded"), "false");
     const main = page.getByRole("main");
+    await main.getByRole("link", { name: "進入聖經講論文庫" }).click();
+    await page.waitForURL(url.href);
     const open = main.getByRole("region", { name: "已開放" });
     const matthew = open.getByRole("link", { name: "馬太福音", exact: true });
     await matthew.waitFor();
