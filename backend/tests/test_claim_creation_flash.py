@@ -745,3 +745,16 @@ def test_only_a_named_short_answer_to_a_question_may_lack_evidence():
 def test_prompts_say_a_quoted_slide_line_is_not_his_words():
     from backend.pipeline import claim_creation_flash as c
     assert '不能作conclusion_anchor' in c.CLAIMS and '投影片文字' in c.STEPS
+
+
+def test_a_sentence_id_with_the_wrong_paragraph_is_repaired_only_when_its_number_is_unambiguous():
+    from backend.pipeline import claim_creation_flash as c
+    ids = ['S0015#321', 'S0015#322', 'S0016#323']
+    reply = {'steps': [], 'other': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0015#321', 'S0016#322', 'S0016#323']}]}
+    assert c.repair_sentence_ids(reply, ids) == [{'written': 'S0016#322', 'sentence_id': 'S0015#322'}]
+    assert reply['claim_text'][0]['sentence_ids'] == ids
+    # already placed elsewhere, or a number that names no sentence: left for check_steps to refuse
+    twice = {'steps': [], 'other': [{'sentence_ids': ['S0015#322']}], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#322']}]}
+    assert c.repair_sentence_ids(twice, ids) == []
+    unknown = {'steps': [], 'claim_text': [{'claim_id': 'C1', 'sentence_ids': ['S0016#999']}]}
+    assert c.repair_sentence_ids(unknown, ids) == []
