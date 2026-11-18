@@ -774,3 +774,8 @@ def test_prompts_say_a_top_point_names_its_parts_without_restating_them():
     assert '不寫目錄' not in prompt  # it told the top point to drop the division (lecture 1 rerun round 1)
     assert '他分段時寫出各段的經文範圍，他列舉時寫出各項的名稱' in prompt
     assert '上層點出名稱（分段寫經文範圍，列舉寫各項名稱）' in prompt
+
+
+def test_step_prompt_sends_a_restated_step_back_to_its_step_not_the_question():
+    from backend.pipeline import claim_creation_flash as f
+    assert '那是那一步的重述，归入前面那一步，不归入问题' in f.STEPS
