@@ -264,5 +264,59 @@
       {"points": ["六章八節至七章十一節首尾都在談禱告"]},
       {"points": ["因此，中間關於行為的教導要放在禱告的脈絡裡看，行為也是禱告"]}
     ]
+  },
+  {
+    "id": "first-peter-overlapping-reading-at-same-sentence",
+    "scope": {
+      "passage": "mat-5-1-48",
+      "lecture": "2011 NYSC 專題：馬太福音釋經（二）4",
+      "subunit": "6.1"
+    },
+    "criterion": "scripture",
+    "source": [
+      {
+        "id": "S0065",
+        "text": "彼得明講啊，（彼得前書 2:13）\n>你們為主的緣故要順服人的一切制度，或是在上的君王， 或是君王所派懲惡賞善的官員。",
+        "start": 699.0389429763561,
+        "end": 713.8915159944368
+      }
+    ],
+    "support_sentence": "S0065",
+    "model_scriptures": [
+      {
+        "ref": "彼得前書 2:13-14",
+        "sentence": "S0065"
+      }
+    ],
+    "verified_scriptures": [
+      {
+        "sentence": "S0065",
+        "slug": "1pe-2-13"
+      }
+    ],
+    "known_bad": {
+      "first": "S0065",
+      "title": "彼得在衝突中的選擇",
+      "scriptures": [
+        {
+          "sentence": "S0065",
+          "slug": "1pe-2-13-14"
+        },
+        {
+          "sentence": "S0065",
+          "slug": "1pe-2-13"
+        }
+      ]
+    },
+    "known_good": {
+      "first": "S0065",
+      "title": "彼得在衝突中的選擇",
+      "scriptures": [
+        {
+          "sentence": "S0065",
+          "slug": "1pe-2-13-14"
+        }
+      ]
+    }
   }
 ]

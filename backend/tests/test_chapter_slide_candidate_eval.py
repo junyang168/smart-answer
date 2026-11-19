@@ -371,3 +371,25 @@ def test_verified_reading_requires_full_coverage_at_its_original_sentence(tmp_pa
     })))
     assert ev.semantic_eval_problems(candidate, selection, receipt) == (
         [] if passes else ["Verified scripture is missing from its recorded source sentence"])
+
+
+def test_gold_overlapping_scripture_replays_the_original_merge():
+    case = next(c for c in json.loads(GOLD.read_text())
+                if c["id"] == "first-peter-overlapping-reading-at-same-sentence")
+    source, = case["source"]
+    at = source["id"]
+    assert at == case["support_sentence"] == "S0065"
+    kept = [{"id": "U1", "start": source["start"], "end": source["end"], "text": source["text"]}]
+    # The selected sentence is numbered S0001 when replayed on its own.
+    def on_fixture(items):
+        return [{**item, "sentence": "S0001"} for item in items]
+
+    raw = {"first": "S0001", "title": case["known_bad"]["title"], "verses": "",
+           "points": on_fixture([{"text": "為主順服人的制度"}, {"text": "包括君王和他所派的官員"}]),
+           "scriptures": on_fixture(case["model_scriptures"])}
+    problems, _, slides = chapter_slides.check(
+        [raw], kept, CHAPTERS[case["scope"]["passage"]], allow_no_chapter_verses=True,
+        verified_scriptures=on_fixture(case["verified_scriptures"]))
+    assert not problems
+    assert slides[0]["scriptures"] == on_fixture(case["known_good"]["scriptures"])
+    assert slides[0]["scriptures"] != on_fixture(case["known_bad"]["scriptures"])
