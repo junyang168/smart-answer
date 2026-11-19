@@ -1,0 +1,213 @@
+{
+ "schema": "professor-diagram-record.v1",
+ "authority": "Owner 2026-11-18: create these as one-time records; do not process yet. Fields reuse the visual SourceFragment names (slide_visual_evidence_v1). Written by hand once; not in the knowledge store.",
+ "diagrams": [
+  {
+   "key": "A",
+   "title": "宗主國與附庸國的約",
+   "source_modality": "visual",
+   "visual_source_path": "slides/2019-3-24 罗马书3章21至31节/captures/covenant_comparison_new.svg",
+   "visual_source_file_sha256": "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321",
+   "source": {
+    "kind": "sermon",
+    "name": "2019-3-24 罗马书3章21至31节",
+    "transcript": "script_review/2019-3-24 罗马书3章21至31节.json",
+    "locator": null
+   },
+   "attestation": {
+    "value": "professor_displayed_or_drawn_visual_source",
+    "by": "owner",
+    "why": "Owner 2026-11-18: A is his slide shown in the 2019-3-24 sermon."
+   },
+   "reading": {
+    "reader": "svg_diagram.read",
+    "texts": [
+     "神",
+     "舊約",
+     "新約",
+     "1. 施恩",
+     "1. 施恩",
+     "2. 要求",
+     "2. 要求",
+     "（摩西律法）",
+     "（基督的律法）",
+     "細節條文",
+     "一般原則",
+     "字句 γράμμα",
+     "聖靈 πνεῦμα"
+    ],
+    "relations": [
+     [
+      "arrow",
+      "神",
+      "新約"
+     ],
+     [
+      "arrow",
+      "神",
+      "舊約"
+     ],
+     [
+      "column",
+      "新約",
+      [
+       "1. 施恩",
+       "2. 要求",
+       "（基督的律法）",
+       "一般原則",
+       "聖靈 πνεῦμα"
+      ]
+     ],
+     [
+      "column",
+      "舊約",
+      [
+       "1. 施恩",
+       "2. 要求",
+       "（摩西律法）",
+       "細節條文",
+       "字句 γράμμα"
+      ]
+     ]
+    ]
+   },
+   "claims": [],
+   "not_yet": "No argument-layer run has cited it; Claims link here when one does. Where in the sermon it was shown is not recorded (no slide capture matches); locator is blank."
+  },
+  {
+   "key": "B",
+   "title": "兩律法的重疊",
+   "source_modality": "visual",
+   "visual_source_path": "slides/2019-3-31 宗主国与附庸国的约/captures/law_relationship_new.svg",
+   "visual_source_file_sha256": "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c",
+   "source": {
+    "kind": "sermon",
+    "name": "2019-3-31 宗主国与附庸国的约",
+    "transcript": "script_review/2019-3-31 宗主国与附庸国的约.json",
+    "locator": null
+   },
+   "attestation": {
+    "value": "professor_displayed_or_drawn_visual_source",
+    "by": "owner",
+    "why": "Owner 2026-11-18: B is his slide shown in the 2019-3-31 sermon."
+   },
+   "reading": {
+    "reader": "svg_diagram.read",
+    "texts": [
+     "重",
+     "疊",
+     "摩西的律法",
+     "基督的律法"
+    ],
+    "relations": [
+     [
+      "inside_both",
+      "疊",
+      [
+       "基督的律法",
+       "摩西的律法"
+      ]
+     ],
+     [
+      "inside_both",
+      "重",
+      [
+       "基督的律法",
+       "摩西的律法"
+      ]
+     ],
+     [
+      "overlap",
+      "基督的律法",
+      "摩西的律法"
+     ]
+    ]
+   },
+   "claims": [],
+   "not_yet": "No argument-layer run has cited it; Claims link here when one does. Where in the sermon it was shown is not recorded (no slide capture matches); locator is blank."
+  },
+  {
+   "key": "D",
+   "title": "登山寶訓（論彌賽亞／門徒的使命）",
+   "source_modality": "visual",
+   "visual_source_path": "full_article/images/sermon-on-the-mount-overview.svg",
+   "visual_source_file_sha256": "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291",
+   "source": {
+    "kind": "notes_manuscript",
+    "name": "登山寶訓的結構",
+    "transcript": "notes_to_surmon/登山寶訓的結構/final.md",
+    "locator": "S0004/V01"
+   },
+   "attestation": {
+    "value": "professor_displayed_or_drawn_visual_source",
+    "by": "owner",
+    "why": "Owner 2026-11-18: 「这个是教授画的」「this is 释经笔记母本的讲义」."
+   },
+   "reading": {
+    "reader": "svg_diagram.read",
+    "texts": [
+     "登山寶訓",
+     "論彌賽亞",
+     "太 5:3-12 應驗賽 61",
+     "門徒的使命",
+     "太 5:13-16 綜合",
+     "太 5:17-7:29 闡明，細節"
+    ],
+    "relations": [
+     [
+      "above",
+      "太 5:13-16 綜合",
+      "太 5:17-7:29 闡明，細節"
+     ],
+     [
+      "above",
+      "論彌賽亞",
+      "門徒的使命"
+     ],
+     [
+      "inside",
+      "太 5:13-16 綜合",
+      "登山寶訓"
+     ],
+     [
+      "inside",
+      "太 5:13-16 綜合",
+      "門徒的使命"
+     ],
+     [
+      "inside",
+      "太 5:17-7:29 闡明，細節",
+      "登山寶訓"
+     ],
+     [
+      "inside",
+      "太 5:17-7:29 闡明，細節",
+      "門徒的使命"
+     ],
+     [
+      "inside",
+      "太 5:3-12 應驗賽 61",
+      "登山寶訓"
+     ],
+     [
+      "inside",
+      "太 5:3-12 應驗賽 61",
+      "論彌賽亞"
+     ],
+     [
+      "inside",
+      "論彌賽亞",
+      "登山寶訓"
+     ],
+     [
+      "inside",
+      "門徒的使命",
+      "登山寶訓"
+     ]
+    ]
+   },
+   "claims": [],
+   "not_yet": "No argument-layer run has cited it; Claims link here when one does. The 2026-11-18 trial run (argument-layer-runs/gpt-20261118-notes-sotm-structure-d) is not written to the store."
+  }
+ ]
+}
