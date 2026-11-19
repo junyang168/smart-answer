@@ -682,7 +682,7 @@ export default function ChapterListener({
         </div>
 
         {/* 講稿保持可捲動，筆電預留較大的跟讀區，手機維持三行高度。 */}
-        <div className={`relative h-[8.25rem] lg:h-[clamp(8.25rem,22dvh,12rem)] ${diagramVisible
+        <div className={`relative h-[8.25rem] lg:h-40 ${diagramVisible
           ? "[@media(max-width:389px)]:h-12" : ""}`}>
           <div
             ref={box}
@@ -710,7 +710,7 @@ export default function ChapterListener({
                     ref={here ? currentLine : undefined}
                     type="button"
                     onClick={() => seekTo(line.clip, line.at, true)}
-                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:text-lg lg:leading-8 ${
+                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:py-0 lg:text-lg lg:leading-8 ${
                       here
                         ? "bg-amber-100 text-stone-950"
                         : line.left_out
