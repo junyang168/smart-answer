@@ -487,9 +487,21 @@ export default function ChapterListener({
     setFollowing(false);
   }
 
+  const unitList = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const list = unitList.current;
+    const current = list?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!list?.clientHeight || !current) return;
+    const listBounds = list.getBoundingClientRect();
+    const bounds = current.getBoundingClientRect();
+    if (bounds.top < listBounds.top || bounds.bottom > listBounds.bottom) {
+      list.scrollTo({ top: list.scrollTop + bounds.top - listBounds.top - 12 });
+    }
+  }, [section, sections]);
+
   // ---- 畫面 ----------------------------------------------------------------
 
-  const frame = "fixed inset-0 z-[60] flex flex-col bg-stone-100 text-stone-900";
+  const frame = "fixed inset-0 z-[60] flex flex-col bg-stone-100 text-stone-900 lg:grid lg:grid-cols-[19rem_minmax(0,1fr)] lg:grid-rows-[auto_minmax(0,1fr)_auto]";
   if (error || !sections) {
     return (
       <div className={frame}>
@@ -517,11 +529,11 @@ export default function ChapterListener({
   const subUnitParts = sections[section]?.sub_unit_id ? sectionsWithAudio.filter(({item}) => item.unit_id === sections[section]?.unit_id && item.sub_unit_id === sections[section]?.sub_unit_id) : [];
 
   const button =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-stone-700 hover:bg-stone-100 disabled:opacity-30 sm:px-3 lg:px-1";
 
   return (
     <div className={frame}>
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-stone-200 bg-white px-4 py-2 sm:px-6">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-stone-200 bg-white px-4 py-2 sm:px-6 lg:col-span-2 lg:min-h-16">
         <Link href={backHref} className="text-sm font-semibold text-amber-800 hover:text-amber-900">
           <span aria-hidden="true">←</span> 本章總覽
         </Link>
@@ -534,13 +546,13 @@ export default function ChapterListener({
             </span>
           )}
         </h1>
-        {unitNavigation && <p className="w-full text-sm font-semibold text-stone-700">
+        {unitNavigation && <p className="w-full text-sm font-semibold text-stone-700 lg:hidden">
           {listeningTitle(sections[section]?.unit_label)}
           {subUnitParts.length > 1 && <span className="block font-normal sm:ml-2 sm:inline">本小節{sections[section]?.continued ? "（續）" : ""} 合計 {minutes(subUnitParts.reduce((sum, part) => sum + sectionSeconds(part.index), 0))}，分 {subUnitParts.length} 段播放</span>}
         </p>}
         {/* 又窄又矮的五吋級小屏（寬 <390、高 <600，如 iPhone SE）才收起段落選單和灰色開關，讓位給投影片；換段用播放列的 ‹ ›（負責人 2026-11-16）。 */}
         {!(unitNavigation && subUnitParts.length > 1) && <span className="hidden max-w-full truncate text-sm font-semibold text-stone-700 [@media(max-width:389px)_and_(max-height:599px)]:block">{sections[section] ? shortLabel(sections[section].label) : ""}</span>}
-        <label className="flex items-center gap-2 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden">
+        <label className="flex items-center gap-2 text-sm lg:hidden [@media(max-width:389px)_and_(max-height:599px)]:hidden">
           <span className="text-stone-600">{unitNavigation ? "單元" : "段落"}</span>
           <select
             value={section}
@@ -574,7 +586,43 @@ export default function ChapterListener({
         )}
       </header>
 
-      <div className="grid min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3 lg:mx-auto lg:max-w-6xl lg:gap-4 lg:p-4">
+      <nav ref={unitList} aria-label="播放單元" className="hidden min-h-0 overflow-y-auto border-r border-stone-200 bg-stone-50 px-4 py-5 lg:col-start-1 lg:row-start-2 lg:block">
+        {unitNavigation ? Array.from(new Set(sectionsWithAudio.map(({ item }) => item.unit_id))).map((unit) => {
+          const parts = sectionsWithAudio.filter(({ item }) => item.unit_id === unit);
+          const active = parts.some(({ index }) => index === section);
+          return (
+            <details key={unit} open={active} className="mb-5">
+              <summary className="cursor-pointer rounded px-2 py-2 text-base font-semibold leading-6 text-stone-800">
+                {listeningTitle(parts[0].item.unit_label)}
+              </summary>
+              <ol className="ml-2 space-y-1 border-l border-stone-200 pl-2">
+                {parts.map(({ item, index }) => (
+                  <li key={item.passage}>
+                    <button type="button" onClick={() => goSection(index)} aria-current={index === section ? "true" : undefined}
+                      className={`w-full rounded-lg px-3 py-3 text-left text-base leading-6 ${index === section ? "bg-amber-100/70 font-semibold text-amber-950" : "text-stone-600 hover:bg-stone-200/60"}`}>
+                      {listeningTitle(item.label)}
+                      <span className="mt-1 block text-xs font-normal text-stone-500">{minutes(sectionSeconds(index))}{item.continued ? " · 續" : ""}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          );
+        }) : (
+          <ol className="space-y-1">
+            {sectionsWithAudio.map(({ item, index }) => (
+              <li key={item.passage}>
+                <button type="button" onClick={() => goSection(index)} aria-current={index === section ? "true" : undefined}
+                  className={`w-full rounded-lg px-3 py-3 text-left text-base leading-6 ${index === section ? "bg-amber-100/70 font-semibold text-amber-950" : "text-stone-600 hover:bg-stone-200/60"}`}>
+                  {item.label}<span className="mt-1 block text-xs font-normal text-stone-500">{minutes(sectionSeconds(index))}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </nav>
+
+      <div data-listening-content className="grid min-h-0 min-w-0 w-full flex-1 grid-rows-[minmax(0,1fr)_auto] gap-3 p-3 lg:col-start-2 lg:row-start-2 lg:row-span-2 lg:gap-4 lg:p-5">
         <div
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
@@ -633,11 +681,14 @@ export default function ChapterListener({
           ) : null}
         </div>
 
-        {/* 逐字稿只留三行高：他此刻那一句在中間，前後各一句（負責人 2026-11-16）。 */}
-        <div className={`relative h-[8.25rem] ${diagramVisible
+        {/* 講稿保持可捲動，筆電預留較大的跟讀區，手機維持三行高度。 */}
+        <div className={`relative h-[8.25rem] lg:h-40 ${diagramVisible
           ? "[@media(max-width:389px)]:h-12" : ""}`}>
           <div
             ref={box}
+            aria-label="講稿"
+            role="region"
+            tabIndex={0}
             onWheel={userScrolled}
             onTouchMove={userScrolled}
             className="relative h-full overflow-auto rounded-xl border border-stone-200 bg-white px-4 py-3 sm:px-5"
@@ -659,7 +710,7 @@ export default function ChapterListener({
                     ref={here ? currentLine : undefined}
                     type="button"
                     onClick={() => seekTo(line.clip, line.at, true)}
-                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors ${
+                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:py-0 lg:text-lg lg:leading-8 ${
                       here
                         ? "bg-amber-100 text-stone-950"
                         : line.left_out
@@ -689,7 +740,7 @@ export default function ChapterListener({
         </div>
       </div>
 
-      <footer className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6">
+      <footer aria-label="播放器" className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6 lg:col-start-1 lg:row-start-3 lg:border-r lg:px-3 lg:py-4">
         {seekError && <p role="status" className="text-center text-xs text-rose-800">{seekError}</p>}
         <div className="flex items-center gap-3 font-mono text-xs text-stone-500">
           <span className="w-12 text-right">{clock(sectionTime)}</span>
@@ -727,15 +778,15 @@ export default function ChapterListener({
           <span className="w-12">{clock(sectionLength)}</span>
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center justify-center gap-1 sm:gap-2">
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1 sm:gap-2 lg:gap-x-0 lg:gap-y-1">
           <button
             type="button"
             onClick={() => previousSection && goSection(previousSection.index)}
             disabled={!previousSection}
             title="上一段（[）"
-            className={`${button} text-sm`}
+            className={`${button} text-sm lg:order-first lg:basis-1/2`}
           >
-            ‹ <span className="ml-1 hidden sm:inline">{previousSection && !unitNavigation ? shortLabel(previousSection.item.label) : "上一段"}</span>
+            ‹ <span className="ml-1 hidden sm:inline lg:hidden">{previousSection && !unitNavigation ? shortLabel(previousSection.item.label) : "上一段"}</span><span className="ml-1 hidden lg:inline">上一段</span>
           </button>
           <button
             type="button"
@@ -765,7 +816,7 @@ export default function ChapterListener({
             value={rate}
             onChange={(event) => changeRate(Number(event.target.value))}
             aria-label="速度"
-            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm [@media(max-width:389px)_and_(max-height:599px)]:hidden"
+            className="min-h-11 rounded-full border border-stone-300 bg-white px-3 text-sm lg:px-1 [@media(max-width:389px)_and_(max-height:599px)]:hidden"
           >
             {SPEEDS.map((speed) => (
               <option key={speed} value={speed}>
@@ -778,9 +829,9 @@ export default function ChapterListener({
             onClick={() => nextSection && goSection(nextSection.index)}
             disabled={!nextSection}
             title="下一段（]）"
-            className={`${button} text-sm`}
+            className={`${button} text-sm lg:order-first lg:basis-1/2`}
           >
-            <span className="mr-1 hidden sm:inline">{nextSection && !unitNavigation ? shortLabel(nextSection.item.label) : "下一段"}</span> ›
+            <span className="mr-1 hidden sm:inline lg:hidden">{nextSection && !unitNavigation ? shortLabel(nextSection.item.label) : "下一段"}</span><span className="mr-1 hidden lg:inline">下一段</span> ›
           </button>
         </div>
       </footer>
