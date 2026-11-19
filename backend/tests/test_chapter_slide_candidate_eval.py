@@ -161,6 +161,35 @@ def test_semantic_eval_must_be_a_recorded_run_by_another_model(tmp_path):
         assert (ev.semantic_eval_problems(candidate, selection, receipt) == []) == ok
 
 
+@pytest.mark.parametrize("changed_criterion", ["coverage", "timing"])
+def test_final_verdict_must_match_opus_and_jev_evidence(tmp_path, changed_criterion):
+    selection = tmp_path / "selection.json"
+    selection.write_text("{}")
+    candidate = tmp_path / "slides.json"
+    slide_row = {"first": "S0001", "points": [{"sentence": "S0001"}]}
+    candidate.write_text(json.dumps({"claim_context": {"scope": "subunit"}, "slides": [slide_row]}))
+    receipt = tmp_path / "semantic-eval.json"
+    checks = [{"slide": "S0001", "criterion": key, "passed": key != "coverage", "evidence": "原答"}
+              for key in ev.SEMANTIC_CRITERIA if key != "timing"]
+    timing = {"points": [{"slide": "S0001", "point": 0, "sentence": "S0001",
+                           "status": "unresolved", "evidence": "找不到要點的講述位置"}]}
+    final = [*checks, {"slide": "S0001", "criterion": "timing", "passed": False,
+                       "evidence": "找不到要點的講述位置"}]
+    raw = {"stdout": json.dumps({"structured_output": {"checks": checks}}), "stderr": ""}
+    result = ev.with_run({"schema_version": ev.SEMANTIC_SCHEMA_VERSION,
+                          "slides_sha256": ev.semantic_slide_sha256(candidate),
+                          "selection_sha256": chapter_exposition.file_sha256(selection),
+                          "point_timing": timing, "checks": final}, raw=raw)
+    receipt.write_text(json.dumps(result))
+    assert ev.semantic_eval_problems(candidate, selection, receipt) == [
+        "S0001 coverage: 原答", "S0001 timing: 找不到要點的講述位置"]
+    result["checks"] = [{**row, "passed": True} if row["criterion"] == changed_criterion else row
+                        for row in result["checks"]]
+    receipt.write_text(json.dumps(result))
+    assert ev.semantic_eval_problems(candidate, selection, receipt) == [
+        "Semantic Eval verdicts differ from the recorded review and point timing evidence"]
+
+
 def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_splits(tmp_path, monkeypatch):
     from backend.pipeline import claim_flash_common
 
@@ -229,9 +258,12 @@ def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkey
         def generate_json(self, system, prompt, schema):
             assert self.call_artifacts.name == "transport"
             assert not (self.call_artifacts / "request.json").exists()
-            self.last_raw_response = {"usage": {"input_tokens": 13, "output_tokens": 8}}
-            return {"checks": [{"slide": "S0001", "criterion": kind, "passed": True, "evidence": "test"}
-                               for kind in ev.SEMANTIC_CRITERIA]}
+            answer = {"checks": [{"slide": "S0001", "criterion": kind, "passed": True, "evidence": "test"}
+                                 for kind in ev.SEMANTIC_CRITERIA]}
+            self.last_raw_response = {"stop_reason": "end_turn",
+                                      "content": [{"type": "text", "text": json.dumps(answer)}],
+                                      "usage": {"input_tokens": 13, "output_tokens": 8}}
+            return answer
 
     def forbidden(*args, **kwargs):
         pytest.fail("An Opus API review must not open the subscription transport.")

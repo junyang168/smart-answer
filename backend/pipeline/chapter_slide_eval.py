@@ -279,6 +279,60 @@ def _checked_point_adjustments(record, source, points):
     return adjustments
 
 
+def _model_checks(raw):
+    """Recover the review decisions from the saved provider response."""
+    if "stdout" in raw:
+        envelope = json.loads(raw["stdout"])
+        if envelope.get("is_error"):
+            raise ValueError("Review transport returned an error")
+        raw = envelope["structured_output"]
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+    elif "content" in raw:
+        if raw.get("stop_reason") != "end_turn":
+            raise ValueError("Review transport returned an incomplete answer")
+        raw = json.loads("".join(block["text"] for block in raw["content"] if block["type"] == "text"))
+    checks = raw["checks"]
+    if not isinstance(checks, list) or not all(isinstance(row, dict) for row in checks):
+        raise ValueError("Review response does not contain checks")
+    return checks
+
+
+def _assemble_checks(slides, checks, timing):
+    if timing is None:
+        return checks
+    expected = {(slide["first"], i): point["sentence"]
+                for slide in slides for i, point in enumerate(slide.get("points", []))}
+    seen = set()
+    failures = {}
+    corrected = {(row["slide"], row["point"]) for row in timing.get("adjustments", [])}
+    for point in timing["points"]:
+        key = (point["slide"], point["point"])
+        if (key not in expected or key in seen or point["sentence"] != expected[key]
+                or point["status"] not in {"correct", "early", "late", "unresolved"}
+                or not isinstance(point["evidence"], str) or not point["evidence"].strip()):
+            raise ValueError("Invalid point timing evidence")
+        seen.add(key)
+        if point["status"] != "correct" and key not in corrected:
+            failures.setdefault(point["slide"], []).append(point["evidence"])
+    if seen != set(expected):
+        raise ValueError("Point timing evidence does not cover every point")
+    if any(row["criterion"] == "timing" for row in checks):
+        # Older receipts obtained a title timing verdict from Opus, then
+        # attached point findings without clearing any of those verdicts.
+        return [
+            {**row, "passed": False, "evidence": "\n".join(
+                ([] if row["passed"] else [row["evidence"]]) + failures[row["slide"]])}
+            if row["criterion"] == "timing" and row["slide"] in failures else row
+            for row in checks
+        ]
+    return checks + [
+        {"slide": slide["first"], "criterion": "timing", "passed": slide["first"] not in failures,
+         "evidence": "\n".join(failures.get(slide["first"], [])) or "逐條要點時間核對通過。"}
+        for slide in slides
+    ]
+
+
 def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path) -> list[str]:
     """Read the single per-candidate semantic Eval with no model call."""
     from backend.pipeline.chapter_exposition import file_sha256
@@ -317,11 +371,13 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             return problems
         if record.get("diagram_timing") != timings:
             return ["Diagram timing does not match the recorded explanation span"]
-    if "point_timing_adjustments" in record:
+    timing = result.get("point_timing")
+    if timing is not None and not isinstance(timing, dict):
+        return ["Missing or invalid recorded review or point timing evidence"]
+    if "point_timing_adjustments" in record or (timing is not None and "adjustments" in timing):
         try:
             source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
-            saved = record["point_timing_adjustments"]
-            timing = result["point_timing"]
+            saved = record.get("point_timing_adjustments", [])
             if saved != timing["adjustments"] or saved != _checked_point_adjustments(record, source, timing["points"]):
                 return ["Point timing adjustments do not match the recorded results"]
         except (ValueError, KeyError, TypeError):
@@ -332,6 +388,16 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
     rows = result.get("checks")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         return ["Semantic Eval checks must be a list of decisions"]
+    try:
+        raw_checks = _model_checks(run["raw_response"])
+        if context.get("scope") == "subunit" and timing is None:
+            return ["Missing point timing evidence for subunit"]
+        replayed = _assemble_checks(record["slides"], raw_checks, timing)
+        key = lambda row: (row["slide"], row["criterion"])
+        if sorted(rows, key=key) != sorted(replayed, key=key):
+            return ["Semantic Eval verdicts differ from the recorded review and point timing evidence"]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return ["Missing or invalid recorded review or point timing evidence"]
     for row in rows:
         key = (row.get("slide"), row.get("criterion"))
         if (key not in expected or key in seen or not isinstance(row.get("passed"), bool)
@@ -442,15 +508,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
             temp.write_text(json.dumps(record, ensure_ascii=False, indent=1))
             temp.replace(slide_path)
         point_timing = {"point_timing": {"model": evidence_refresh.MODEL, "points": points, "adjustments": adjustments}}
-        corrected = {(row["slide"], row["point"]) for row in adjustments}
-        failures = {}
-        for point in points:
-            if point["status"] != "correct" and (point["slide"], point["point"]) not in corrected:
-                failures.setdefault(point["slide"], []).append(point["evidence"])
-        checks = checks + [{"slide": slide["first"], "criterion": "timing",
-                            "passed": slide["first"] not in failures,
-                            "evidence": "\n".join(failures.get(slide["first"], [])) or "逐條要點時間核對通過。"}
-                           for slide in record["slides"]]
+        checks = _assemble_checks(record["slides"], checks, point_timing["point_timing"])
     receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
                         "selection_sha256": file_sha256(selection_path), "checks": checks, **point_timing}, model, raw)
     if opus_api_spend_root is not None:
