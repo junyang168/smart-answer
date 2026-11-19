@@ -128,7 +128,7 @@ def test_saved_counterexamples_and_positive_controls_follow_the_production_eval_
         assert req["conclusion_slide"] == variant["expected"]["conclusion_slide"]
         # Simulate provider responses to test receipt replay and the mandatory ruling.
         checks = [{"slide": slide["first"], "criterion": criterion,
-                   "passed": not (criterion == "faithfulness" and slide["first"] == variant["expected"].get("foreign_slide")),
+                   "passed": not (criterion == "faithfulness" and slide["first"] == variant["expected"].get("unfaithful_slide")),
                    "evidence": "Fixture evidence"}
                   for slide in record["slides"] for criterion in packet["criteria"]]
         checks.append({"slide": req["conclusion_slide"], "criterion": req["id"],
@@ -143,7 +143,8 @@ def test_saved_counterexamples_and_positive_controls_follow_the_production_eval_
                                "point_timing": timing, "checks": assembled}, raw={"checks": checks})
         receipt_path.write_text(json.dumps(receipt))
         problems = ev.semantic_eval_problems(slide_path, selection_path, receipt_path)
-        assert (not problems) == variant["expected"]["passed"], variant["id"]
+        should_pass = variant["expected"]["passed"] and "unfaithful_slide" not in variant["expected"]
+        assert (not problems) == should_pass, variant["id"]
         missing = copy.deepcopy(receipt)
         missing["checks"] = [row for row in assembled if row["criterion"] != req["id"]]
         missing = ev.with_run(missing, raw={"checks": checks[:-1]})
@@ -184,22 +185,23 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
             target = initial_packet["argument_requirements"][0]["conclusion_slide"]
             conclusion_slide = next(s for s in actual_slides if s["first"] == target)
             if conclusion_slide["points"]:
-                record[arg.BINDINGS_KEY] = [{"id": "argument-1",
-                                            "point_sentences": [p["sentence"] for s in actual_slides for p in s["points"]]}]
+                allowed = set(initial_packet["argument_requirements"][0]["source_slides"].values())
+                record[arg.BINDINGS_KEY] = [{"id": "argument-1", "point_sentences": [
+                    p["sentence"] for s in actual_slides if s["first"] in allowed for p in s["points"]]}]
             items.append({"case_id": case_id, "packet": ev.semantic_packet(record, selection)})
             expected[case_id] = variant["expected"]
     row = {"type": "object", "additionalProperties": False,
-           "required": ["case_id", "argument_passed", "foreign_content_slides", "evidence"],
+           "required": ["case_id", "argument_passed", "unfaithful_slides", "evidence"],
            "properties": {"case_id": {"type": "string", "enum": list(expected)},
                           "argument_passed": {"type": "boolean"},
-                          "foreign_content_slides": {"type": "array", "items": {"type": "string"}},
+                          "unfaithful_slides": {"type": "array", "items": {"type": "string"}},
                           "evidence": {"type": "string"}}}
     schema = {"type": "object", "additionalProperties": False, "required": ["results"],
               "properties": {"results": {"type": "array", "items": row}}}
     system = (ev.SEMANTIC_SYSTEM + "\n" + ev.ARGUMENT_REVIEW_SYSTEM
               + "\n這次是批量試題，每筆獨立判斷。回一筆 results 給每個 case_id。"
                 "argument_passed 是唯一 argument_requirements 的判定；"
-                "foreign_content_slides 只列把另一張才說的內容寫進本張的張號，沒有則空。"
+                "unfaithful_slides 列有實質意思不受本張原文支持的張號，含把別張才說的內容搬來或與本張原話相反；沒有則空。"
                 "evidence 引原文句號與具體文字，其他逐張判定省略。")
     client = RecordedClient(chapter_exposition.chapter_client(REVIEW_MODEL),
                             Path(os.environ["WANG_SLIDE_REGRESSION_ARTIFACTS"]), once=True)
@@ -208,8 +210,8 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
     mismatches = []
     for verdict in results:
         want = expected[verdict["case_id"]]
-        foreign = [want["foreign_slide"]] if "foreign_slide" in want else []
-        if (verdict["argument_passed"] != want["passed"] or verdict["foreign_content_slides"] != foreign
+        unfaithful = [want["unfaithful_slide"]] if "unfaithful_slide" in want else []
+        if (verdict["argument_passed"] != want["passed"] or verdict["unfaithful_slides"] != unfaithful
                 or not verdict["evidence"].strip()):
             mismatches.append({**verdict, "fixture": labels[verdict["case_id"]]})
     assert not mismatches, mismatches

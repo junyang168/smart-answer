@@ -124,7 +124,7 @@
         "expected": {
           "passed": false,
           "conclusion_slide": "S0011",
-          "foreign_slide": "S0001"
+          "unfaithful_slide": "S0001"
         }
       }
     ]
@@ -428,6 +428,118 @@
         "expected": {
           "passed": true,
           "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-earlier-idea-in-later-slide",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0039",
+      "S0040",
+      "S0041",
+      "S0042",
+      "S0096",
+      "S0097",
+      "S0098",
+      "S0099",
+      "S0100",
+      "S0101"
+    ],
+    "source": [
+      "就好像你來上課，你需要呼吸，我從來沒有提醒你們：「你上我的課的時候，不要忘記呼吸。」",
+      "我從來沒講，因為理所當然地認為（take for granted），你會呼吸嘛，理所當然（take for granted），你懂我怎麼說？",
+      "以為理所當然你會呼吸嘛，所以我何必講？",
+      "所以因為，因為古時候離婚之後，沒有再婚活不下去，所以保羅就沒有提說你離婚以後可以再婚，他都沒有提這件事。",
+      "觀眾問： 我認為這個地方是講理想狀態。",
+      "但是有沒有可能離婚和再婚可以分開？",
+      "就是說在離婚，不信的要離去的情況下是可以，但是再婚的話，我沒有看到聖經裡面有講……\n\n答：對啊。",
+      "再婚、離婚，聖經明講，比如說保羅明講，是可以。",
+      "可是什麼呢？",
+      "你要了解古時候的那個情況，古時候的情況離婚之後，你不再婚沒有辦法活下去。"
+    ],
+    "requirement": {
+      "reason": "古時離婚後不再婚便難以維生",
+      "inference": "教授用呼吸作類比，說明理所當然的事可以不必另提",
+      "conclusion": "保羅沒有另外提離婚後可以再婚",
+      "conclusion_sentence": "S0004",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0004"
+      ]
+    },
+    "variants": [
+      {
+        "id": "each-claim-stays-with-its-speaker-and-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0008",
+                "text": "再婚是可以的；須了解古時離婚後不再婚就無法維生"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "earlier-idea-is-imported-and-contradicts-this-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0010",
+                "text": "古時離婚後須再婚維生，不能據未明講就禁止"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0005"
         }
       }
     ]
