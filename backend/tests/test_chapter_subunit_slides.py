@@ -119,7 +119,7 @@ def test_subunit_writer_stops_at_first_program_rejection(tmp_path, monkeypatch):
 
         def generate_json(self, system, packet, schema):
             self.calls += 1
-            assert "生成前的承重論證清單" in packet
+            assert "本子單元承重推論及原文位置" in packet
             return {"slides": [{"first": "S0099", "title": "錯了"}]}
 
     writer = Writer()
@@ -171,6 +171,13 @@ def test_subunit_semantic_rejection_is_reported_once(tmp_path, monkeypatch):
     monkeypatch.setattr(sub, "_client", lambda *a: object())
     calls = []
 
+    def plan_arguments(context, source, client):
+        calls.append("plan")
+        assert context["scope"] == "subunit" and source
+        return []
+
+    monkeypatch.setattr(sub.chapter_slide_arguments, "plan", plan_arguments)
+
     def decide(chapter, lecture, *, data_base_dir, **kwargs):
         calls.append("generate")
         path = chapter_slides.record_path(data_base_dir, chapter.passage, lecture)
@@ -189,7 +196,7 @@ def test_subunit_semantic_rejection_is_reported_once(tmp_path, monkeypatch):
     for _ in range(2):
         result = sub.run(tmp_path, CHAPTER.passage, "1.1", out, conn=None)
         assert result["status"] == "unresolved" and result["problems"] == ["missing coverage"]
-    assert calls == ["generate", "eval"]
+    assert calls == ["plan", "generate", "eval"]
 
 
 def test_matthew_seven_keeps_the_structure_diagram_only_at_the_approved_introduction():

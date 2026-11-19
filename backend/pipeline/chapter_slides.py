@@ -326,18 +326,15 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                        if subunit else
                        '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。'),
                       json.dumps(scoped, ensure_ascii=False)]
+        from backend.pipeline.chapter_slide_arguments import BOUNDARY, PLAN_KEY, validate
         from backend.pipeline.chapter_slide_claims import source_context_index
         source_entries = source_context_index(claim_context, source_lines)
         if subunit:
-            checklist = [{"source": rid, "statement": entry["statement"]}
-                         for rid, entry in source_entries.items() if entry["statement"]]
-            lines += ["# 生成前的承重論證清單",
-                      "先用逐字稿核對以下 Claim 與論證步驟。挑出構成結論所必須的問題、理由、對照兩端和推論，"
-                      "用清楚的要點涵蓋它們，填入對應的 source。連貫的幾句可整理成一條完整要點。讀經卡保留照念的原文，承重的對照或推論仍須寫成要點。"
-                      "同一步包含對照兩端時，可以有兩條要點用相同 source。反覆說同一理由只寫一次，"
-                      "留位置給接到結論的那一步。生成前確認下列既定承重事項全部保留，再一次交稿。"
-                      "sentence 是本張內的初始位置，是否跟得上同一個問題另行核對。",
-                      json.dumps(checklist, ensure_ascii=False)]
+            lines += ["# 本子單元承重推論及原文位置", BOUNDARY,
+                      "先按原文位置安排各張，再逐條確認理由、結論及兩者的關係能從投影片讀出。"
+                      "每條可由一條或幾條要點表達；source 填對不代表推論已寫出。"
+                      "承重的對照與推論須用要點交代。其他確有承重作用的原文也應保留。",
+                      json.dumps(validate(claim_context.get(PLAN_KEY, []), source_lines), ensure_ascii=False)]
             required = [{"sentence": rule["at"], "content": rule["why"]}
                         for rule in owner_cases if rule["kind"] == "required_point"]
             if required:
@@ -373,7 +370,7 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
                   "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
-                  json.dumps({**claim_context, "claims": [
+                  json.dumps({**{k: v for k, v in claim_context.items() if k != PLAN_KEY}, "claims": [
                       {**{k: v for k, v in claim.items() if k != "diagrams"},
                        **({"diagrams": [{k: d[k] for k in ("title", "origin", "kind", "sha256")}
                                         for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}

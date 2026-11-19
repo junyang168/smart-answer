@@ -1,0 +1,435 @@
+[
+  {
+    "id": "rahab-example",
+    "subunit": "6.1",
+    "original_sentences": [
+      "S0104",
+      "S0105",
+      "S0106",
+      "S0107",
+      "S0108",
+      "S0109",
+      "S0110",
+      "S0111",
+      "S0112",
+      "S0113",
+      "S0114",
+      "S0115"
+    ],
+    "source": [
+      "那喇合啊，撒謊是惡，可是把這兩個以色列探子交出來被耶利哥城的政府拿去殺掉是更大的惡。",
+      "所以喇合就選擇那個小的惡去做。",
+      "因為喇合撒謊，所以聖經定喇合的罪，對不對？",
+      "有沒有？",
+      "沒有啊，找不到。",
+      "喇合因此神拯救她，因為她敬畏神。",
+      "所以當他們進耶利哥城的時候，這探子告訴她：「你們家裡的人住在一起，你從上面吊了一個紅線下來，讓我們知道你們住在哪裡，我們保護你們。」",
+      "而且更厲害的是什麼？",
+      "喇合後來成為耶穌的先祖，耶穌從喇合生下來。",
+      "喇合的那個……你看馬太福音的那個，那個家譜。",
+      "所以啊，聖經確實有這些選擇小的惡的例子在哪裡。",
+      "這聖經證據嘛，你搞清楚了。"
+    ],
+    "requirement": {
+      "reason": "喇合作了較小的惡，聖經沒有因此定她的罪",
+      "inference": "教授以喇合作為聖經的例證",
+      "conclusion": "聖經確有選較小惡的例子",
+      "conclusion_sentence": "S0011",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0005",
+        "S0006",
+        "S0009",
+        "S0011"
+      ]
+    },
+    "variants": [
+      {
+        "id": "example-without-purpose",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0012",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "adjacent-slides",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0010",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+              }
+            ]
+          },
+          {
+            "first": "S0011",
+            "last": "S0012",
+            "title": "聖經中的例證",
+            "points": [
+              {
+                "sentence": "S0011",
+                "text": "喇合的選擇說明，聖經確實有選擇較小之惡的例子"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0011"
+        }
+      },
+      {
+        "id": "conclusion-on-wrong-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0010",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+              },
+              {
+                "sentence": "S0006",
+                "text": "喇合的選擇說明，聖經確實有選擇較小之惡的例子"
+              }
+            ]
+          },
+          {
+            "first": "S0011",
+            "last": "S0012",
+            "title": "回到問題",
+            "points": []
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0011",
+          "foreign_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "government-example",
+    "subunit": "6.1",
+    "original_sentences": [
+      "S0191",
+      "S0194",
+      "S0195",
+      "S0196",
+      "S0197"
+    ],
+    "source": [
+      "那聖經給我們看到，常常我們做倫理抉擇的時候，你逃不掉這個問題。",
+      "我們在這一個人生當中，不可能避免這些事。",
+      "就比如說政府要求你做一件事情，違背神，你那個時候怎麼辦？",
+      "原則你要順服一切的制度，一方面你要聽神的話，那這兩個起衝突你怎麼辦？",
+      "所以那個時候就只有，我們寧可順從神，不聽你們的話，違背政府為的是要遵行神的命令，就這個原因。"
+    ],
+    "requirement": {
+      "reason": "政府要求違背神時，順服制度與順從神的要求起衝突",
+      "inference": "政府的例子說明生活裡有逃不掉的倫理抉擇",
+      "conclusion": "有些倫理抉擇無法避免，衝突時寧可順從神",
+      "conclusion_sentence": "S0005",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ]
+    },
+    "variants": [
+      {
+        "id": "example-replaces-main-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "衝突時寧可順從神",
+            "points": [
+              {
+                "sentence": "S0004",
+                "text": "政府若要求違背神，順服制度便與聽神衝突"
+              },
+              {
+                "sentence": "S0005",
+                "text": "因此寧可違背政府，以遵行神的命令"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "example-supports-main-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "無法避免的倫理抉擇",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "生活裡有逃不掉的倫理抉擇"
+              },
+              {
+                "sentence": "S0005",
+                "text": "例如政府要求違背神時，兩個要求無法兼顧，只得選擇順從神"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-contrast",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0102",
+      "S0104",
+      "S0106",
+      "S0107",
+      "S0108"
+    ],
+    "source": [
+      "問： 那現在呢？",
+      "就是說現在你離婚之後，你不再婚可以活下去，對不對？",
+      "可是保羅也講了一句話，有一些人沒有結婚……保羅那句話意思就是說，你在 burn, (哥林多前書第七章第九節說：「倘若自己不能節制，就當嫁娶。",
+      "與其慾火攻心，倒不如嫁娶為妙。」)",
+      "在那個情況底下，如果你這樣的話，寧可結婚好一點，就不要……不要在這裡什麼慾火攻心什麼東西。"
+    ],
+    "requirement": {
+      "reason": "今天不再婚也能生活",
+      "inference": "教授用保羅的話說明即使今天不必靠再婚維生，仍要考慮不能節制的情況",
+      "conclusion": "若不能節制，寧可結婚",
+      "conclusion_sentence": "S0005",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ]
+    },
+    "variants": [
+      {
+        "id": "facts-without-reply",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "再婚與古今處境",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "今天不再婚也能生活"
+              },
+              {
+                "sentence": "S0005",
+                "text": "不能節制時寧可結婚"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "one-complete-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "今天怎樣看再婚",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "今天雖然不必靠再婚維生，若不能節制，保羅仍說寧可結婚"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-summary",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0136",
+      "S0137",
+      "S0139"
+    ],
+    "source": [
+      "你看，古時候女人離婚以後，必須再婚才能夠生活。",
+      "因此呢，離婚後再婚被認為是理所當然。",
+      "因此你念聖經的時候，必須要了解他們的背景，你知道當時的文化情況，我們才會正確地能夠了解聖經本人的意思是什麼。"
+    ],
+    "requirement": {
+      "reason": "古時女子離婚後要再婚才能維生",
+      "inference": "再婚被視為理所當然，這個文化背景解釋了為什麼讀經要了解當時的處境",
+      "conclusion": "須了解當時的文化生活才能正確理解經文",
+      "conclusion_sentence": "S0003",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003"
+      ]
+    },
+    "variants": [
+      {
+        "id": "only-general-advice",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0003",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "reason-and-application",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0003",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "古時女子離婚後須再婚維生，再婚被視為理所當然"
+              },
+              {
+                "sentence": "S0003",
+                "text": "因此讀經要了解當時的文化處境"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "samaritan-distinction",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0139",
+      "S0143",
+      "S0144",
+      "S0146"
+    ],
+    "source": [
+      "因此你念聖經的時候，必須要了解他們的背景，你知道當時的文化情況，我們才會正確地能夠了解聖經本人的意思是什麼。",
+      "還有，耶穌承認，耶穌分別再婚的丈夫和非丈夫，就我剛才跟你講的那個撒馬利亞的婦人。",
+      "也就是說，你以前有過丈夫，因為她再婚過。",
+      "你現在跟妳在的，不是妳的丈夫，因為他們沒有再婚，只是同居而已。"
+    ],
+    "requirement": {
+      "reason": "耶穌稱先前再婚的對象為丈夫，卻不稱現在同居的人為丈夫",
+      "inference": "兩種稱呼的對照顯出耶穌承認已結婚的夫妻關係",
+      "conclusion": "再婚的丈夫與沒有結婚的同居者有別",
+      "conclusion_sentence": "S0004",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004"
+      ]
+    },
+    "variants": [
+      {
+        "id": "recap-loses-the-distinction",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "recap-keeps-the-distinction",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "時代背景與再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              },
+              {
+                "sentence": "S0004",
+                "text": "耶穌稱她再婚的對象為丈夫；現在只是同居，所以對方不是丈夫"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  }
+]

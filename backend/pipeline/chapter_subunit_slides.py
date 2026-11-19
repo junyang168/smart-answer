@@ -12,7 +12,8 @@ A sub-unit is the listening plan's own part of a unit (`listening-units.json`
    checks a reviewed bundle against;
 2. its Claim outline is compiled from the knowledge instance against that selection,
    so only Claims he argues inside the sub-unit come along;
-3. the slide model writes its slides once against the known argument requirements;
+3. a recorded plan binds indispensable inferences to the selected transcript, then
+   the slide model writes once against those requirements;
 4. Jev and the program correct supported timing, and independent Eval reports
    any remaining findings without rewriting the sub-unit.
 
@@ -27,7 +28,7 @@ import json
 import shutil
 from pathlib import Path
 
-from backend.pipeline import chapter_exposition, chapter_slide_diagram_timing, chapter_slide_eval, chapter_slides
+from backend.pipeline import chapter_exposition, chapter_slide_arguments, chapter_slide_diagram_timing, chapter_slide_eval, chapter_slides
 from backend.pipeline.chapter_material import CHAPTERS
 
 SLIDE_MODEL = "gpt-6.1-sol"
@@ -106,6 +107,10 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
             return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": issues}
         context["diagram_spans"] = spans
     if not slides_path.exists():
+        if chapter_slide_arguments.PLAN_KEY not in context:
+            lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+            planner = _client(SLIDE_MODEL, out / "argument-plan")
+            context[chapter_slide_arguments.PLAN_KEY] = chapter_slide_arguments.plan(context, lines, planner)
         temp = context_path.with_suffix(".tmp")
         temp.write_text(json.dumps(context, ensure_ascii=False, indent=1))
         temp.replace(context_path)

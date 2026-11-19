@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline import chapter_slides
+from backend.pipeline import chapter_slide_arguments, chapter_slides
 
 #: 他念經文的判斷：這句的相鄰兩字有這麼多比例出現在某一節。
 READING_SHARE = 0.7
@@ -237,12 +237,17 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                        "diagram_sentence": timings[slide["first"]]["sentence"]}
                       if timings.get(slide["first"], {}).get("sentence") else {})}
                   for slide in slides]
+    inferences = chapter_slide_arguments.review_requirements(context, source, slides)
+    criteria = dict(SEMANTIC_CRITERIA)
+    if context.get("scope") == "subunit":
+        criteria.pop("timing")
+        criteria["faithfulness"] += chapter_slide_arguments.BOUNDARY
     required_points = [{"slide_containing_sentence": case["at"], "requirement": case["why"]}
                        for case in rulings if case["kind"] == "required_point"]
     return {
         "lecture": slide_record["lecture"],
-        "criteria": ({k: v for k, v in SEMANTIC_CRITERIA.items() if k != "timing"}
-                     if context.get("scope") == "subunit" else SEMANTIC_CRITERIA),
+        "criteria": criteria,
+        **({"argument_requirements": inferences} if inferences else {}),
         "owner_rules": [*OWNER_RULES, *(
             ["required_slide_points 是整張投影片的承重要求。slide_containing_sentence 只用來找到投影片。"
              "可以用不同要點分別呈現對照兩端。按原聲依次顯示，不要求同一句或同一要點同時寫出兩端。"]
@@ -383,6 +388,13 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
         except (ValueError, KeyError, TypeError):
             return ["Missing or invalid point timing adjustment evidence"]
     expected = {(s["first"], key) for s in record["slides"] for key in SEMANTIC_CRITERIA}
+    if chapter_slide_arguments.PLAN_KEY in context:
+        try:
+            source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
+            inferences = chapter_slide_arguments.review_requirements(context, source, record["slides"])
+            expected.update((route["conclusion_slide"], route["id"]) for route in inferences)
+        except (OSError, ValueError, TypeError, KeyError):
+            return ["Missing or invalid source-bound argument requirements"]
     seen = set()
     problems = []
     rows = result.get("checks")
@@ -408,6 +420,8 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
     if seen != expected:
         problems.append("Semantic Eval must cover each criterion for every slide")
+        if any(criterion.startswith("argument-") for _, criterion in expected - seen):
+            problems.append("Semantic Eval must check each planned inference on its conclusion slide")
     if "adjustments" in result.get("point_timing", {}):
         from backend.pipeline.chapter_slide_point_timing import apply_adjustments
 
@@ -442,11 +456,20 @@ SEMANTIC_KIND = {"faithfulness": "忠實", "coverage": "漏掉重點", "timing":
 
 def review_from_semantic(receipt: dict, slides_sha256: str) -> dict:
     """The failed semantic checks, in the review form the slide revision step reads."""
-    findings = [{"slide": row["slide"], "kind": SEMANTIC_KIND[row["criterion"]], "problem": row["evidence"],
+    findings = [{"slide": row["slide"], "kind": SEMANTIC_KIND.get(row["criterion"], "漏掉重點"), "problem": row["evidence"],
                  "fix": "按上面意見改；意見與原文不符時保留原樣並說明。"}
                 for row in receipt["checks"] if not row["passed"]]
     return {"slides_sha256": slides_sha256, "blocking": bool(findings), "findings": findings,
             "source": "semantic-eval", "semantic_eval_raw_sha256": receipt["run"]["raw_sha256"]}
+
+
+ARGUMENT_REVIEW_SYSTEM = """另外逐條驗收 argument_requirements，各加一筆 checks：
+criterion 用該條 id，slide 用 conclusion_slide。evidence 指明原文句與實際顯示的要點。
+核對實際文字是否把理由、結論和兩者的關係說清楚，單有正確的 Claim ID 或各寫一句互不相干的意思不算通過。
+source_slides 顯示理由、關係和結論各句在哪一張。可合寫，也可在相鄰張承接。
+內容只在後一張的原文說出時，提前寫在前一張是前一張的忠實問題，不能用來通過此條。
+不要因清單推論缺原文支持而要求補入；把它標成不通過，說明是哪個規劃項缺乏根據。
+這些額外決定不代替每張的完整度與忠實檢查，仍要找出清單漏列的承重推論。"""
 
 
 def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str,
@@ -463,6 +486,11 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
     row = {"type": "object", "additionalProperties": False, "required": ["slide", "criterion", "passed", "evidence"],
            "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(packet["criteria"])},
                           "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
+    requirements = packet.get("argument_requirements", [])
+    row["properties"]["criterion"]["enum"].extend(route["id"] for route in requirements)
+    system = SEMANTIC_SYSTEM
+    if requirements:
+        system += "\n" + ARGUMENT_REVIEW_SYSTEM
     schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
               "properties": {"checks": {"type": "array", "items": row}}}
     subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
@@ -477,17 +505,17 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
     if opus_api_spend_root is not None:
         from backend.pipeline.chapter_slide_claims import digest
 
-        request = {"model": model, "system": SEMANTIC_SYSTEM, "user": prompt, "schema": schema}
+        request = {"model": model, "system": system, "user": prompt, "schema": schema}
         client.call_artifacts = receipt_path.with_suffix(".reviewer-api") / digest(request) / "transport"
-        answer = client.generate_json(SEMANTIC_SYSTEM, prompt, schema)
+        answer = client.generate_json(system, prompt, schema)
     elif subunit:
         # Reuse the exact recorded review when a resumed timing check needs it.
         from backend.pipeline.chapter_slide_claims import RecordedClient
 
         answer = RecordedClient(client, receipt_path.with_suffix(".reviewer"), once=True).generate_json(
-            SEMANTIC_SYSTEM, prompt, schema)
+            system, prompt, schema)
     else:
-        answer = client.generate_json(SEMANTIC_SYSTEM, prompt, schema)
+        answer = client.generate_json(system, prompt, schema)
     raw = getattr(client, "last_raw_response", None) or answer
     checks = answer["checks"]
     point_timing = {}
