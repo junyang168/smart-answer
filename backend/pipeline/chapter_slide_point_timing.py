@@ -137,7 +137,8 @@ def evaluate_points(packet, candidates, ask, *, model, max_bytes):
 
             expected = earliest(index, "whole")
             if current not in source or expected is None:
-                evidence = f"{current}「{text}」在本張找不到可確認的完整原句，須核對要點或分張。"
+                reason = "要點綁定的句子不在本張" if current not in source else "Jev 未判定本張有完整符合的句子"
+                evidence = f"{current}「{text}」：{reason}，須核對。"
                 results.append({**item, "status": "unresolved", "evidence": evidence})
                 continue
             delta = round(lines[current]["start"] - lines[expected]["start"], 2)

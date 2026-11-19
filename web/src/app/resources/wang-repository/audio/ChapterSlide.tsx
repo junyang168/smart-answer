@@ -58,6 +58,8 @@ type SlideDiagram = {
   title: string;
   sha256: string;
   image_src: string;
+  layout?: "covenants" | "overlap" | "literary_structure" | "overview";
+  labels?: string[];
 };
 
 export type ChapterSlideData = {
@@ -212,27 +214,93 @@ function Verse({
   );
 }
 
-/**
- * 他的圖原樣顯示（負責人 2026-11-18：不另畫、不反色）。SVG 是白底畫的，放在淺色卡片上；
- * 點一下放大到全螢幕，小螢幕上看細字。
- */
+const diagramBox = "rounded-lg border border-slate-600 bg-slate-900/60 p-2 [@media(max-width:389px)]:p-1";
+const diagramHeading = "font-semibold text-amber-200";
+
 function Diagram({ diagram }: { diagram: SlideDiagram }) {
-  const [open, setOpen] = useState(false);
-  if (!diagram.image_src.startsWith("data:image/svg+xml;base64,")) return null;
-  return (
-    <figure aria-label={diagram.title} className="min-w-0">
-      <button type="button" onClick={() => setOpen(true)} aria-label={`放大：${diagram.title}`}
-        className="block w-full rounded-lg bg-white p-2 sm:p-3">
-        {/* eslint-disable-next-line @next/next/no-img-element -- Verified SVG in image mode. */}
-        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block max-h-[50dvh] w-full object-contain" />
-      </button>
-      {open && (
-        <div role="dialog" aria-label={diagram.title} onClick={() => setOpen(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3">
-          {/* eslint-disable-next-line @next/next/no-img-element -- Verified SVG in image mode. */}
-          <img src={diagram.image_src} alt={diagram.title} className="max-h-full max-w-full rounded-lg bg-white p-3 object-contain" />
+  const text = diagram.labels ?? [];
+  let content;
+  switch (diagram.layout) {
+    case "covenants":
+      content = (
+        <>
+          <div className="text-center font-semibold text-amber-200">{text[0]}</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[text.slice(1, 7), text.slice(7, 13)].map(([title, grace, demand, law, terms, spirit]) => (
+              <div key={title} className={diagramBox}>
+                <div className={diagramHeading}>{title}</div>
+                <div>{grace}</div><div>{demand}{law}</div>
+                <div>{terms}</div><div>{spirit}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      );
+      break;
+    case "overlap":
+      content = (
+        <div className="relative grid min-h-24 grid-cols-[1fr_auto_1fr] items-center text-center">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-[60%] rounded-[50%] border border-emerald-400" />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-[60%] rounded-[50%] border border-sky-400" />
+          <span className="pl-2 text-emerald-200">{text[2]}</span>
+          <strong className="mx-1 text-amber-200">{text[0]}{text[1]}</strong>
+          <span className="pr-2 text-sky-200">{text[3]}</span>
         </div>
-      )}
+      );
+      break;
+    case "literary_structure":
+      content = (
+        <>
+          <div className={diagramBox}>{text[0]}</div>
+          <div className={diagramBox}>
+            <div className={diagramHeading}>{text[1]}</div>
+            <div className="mt-1 border-l border-slate-500 pl-2 [@media(max-width:389px)]:pl-1">
+              <div>{text[2]}</div>
+              <div className="my-1 rounded border border-slate-600 p-2 [@media(max-width:389px)]:my-0 [@media(max-width:389px)]:p-0">
+                <div>{text[3]}</div>
+                <div className="mt-1 grid grid-cols-2 gap-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">
+                  <div>{text[4]} {text[5]}</div>
+                  <div>{text[6]} {text[7]}</div>
+                </div>
+                <div className="mt-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">{text[8]}</div>
+              </div>
+              <div>{text[9]}</div>
+            </div>
+          </div>
+          <div className={diagramBox}>{text[10]}</div>
+        </>
+      );
+      break;
+    case "overview":
+      content = (
+        <>
+          <div className="text-center font-semibold text-amber-200">{text[0]}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className={diagramBox}>
+              <div className={diagramHeading}>{text[1]}</div>
+              <div>{text[2]}</div>
+            </div>
+            <div className={diagramBox}>
+              <div className={diagramHeading}>{text[3]}</div>
+              <div>{text[4]}</div><div>{text[5]}</div>
+            </div>
+          </div>
+        </>
+      );
+      break;
+    default:
+      if (!diagram.image_src.startsWith("data:image/svg+xml;base64,")) return null;
+      content = (
+        // eslint-disable-next-line @next/next/no-img-element -- Verified SVG in image mode.
+        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block max-h-[45dvh] w-full object-contain invert hue-rotate-180 mix-blend-screen max-sm:max-h-[min(45dvh,max(0px,calc(100cqh_-_7rem)))]" />
+      );
+  }
+  return (
+    <figure aria-label={diagram.title} className={[
+      "isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 max-sm:space-y-1 [@media(max-width:389px)]:leading-[1.1]",
+      diagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:space-y-0" : "",
+    ].join(" ")}>
+      {content}
     </figure>
   );
 }
@@ -283,27 +351,49 @@ export default function ChapterSlide({
     }
     const column = point.closest<HTMLElement>("[data-diagram-points]");
     if (column && column.scrollHeight > column.clientHeight) {
-      const top = point.getBoundingClientRect().top - column.getBoundingClientRect().top + column.scrollTop;
-      column.scrollTop = top;
+      // Move only the point list and leave preceding points in view when they fit.
+      const pointBounds = point.getBoundingClientRect();
+      const windowBounds = column.getBoundingClientRect();
+      if (pointBounds.top < windowBounds.top) {
+        column.scrollTop += pointBounds.top - windowBounds.top;
+      } else if (pointBounds.bottom > windowBounds.bottom) {
+        column.scrollTop += pointBounds.bottom - windowBounds.bottom;
+      }
     }
   }, [activePoint, currentDiagram, slide.at]);
   return (
-    <section ref={slidePanel} className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10`}>
-      <div className={currentDiagram ? "grid items-start gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8" : undefined}>
-        <header data-diagram-points={currentDiagram ? "" : undefined}
-          className={currentDiagram ? "min-w-0 overflow-auto" : undefined}>
-          <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
-          {points.length > 0 && (
-            <ol className={currentDiagram
-              ? "mt-3 space-y-2 text-[1.05rem] leading-relaxed lg:text-2xl"
-              : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
+    <section ref={slidePanel} className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10 ${currentDiagram
+      ? "max-sm:gap-3 max-sm:p-3 [@media(max-width:374px)_and_(max-height:620px)]:p-2" : ""}`}>
+      <div className={currentDiagram
+        ? "grid items-start gap-1 max-sm:sticky max-sm:top-0 max-sm:z-10 max-sm:bg-slate-950 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8"
+        : undefined}>
+        <header className={currentDiagram ? "min-w-0" : undefined}>
+          <h2 className={["font-serif font-semibold leading-snug text-white sm:text-2xl lg:text-4xl",
+            currentDiagram ? "text-base" : "text-xl",
+            currentDiagram?.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:sr-only" : "",
+          ].join(" ")}>{slide.title}</h2>
+          {(currentDiagram || points.length > 0) && (
+            <ol data-diagram-points={currentDiagram ? "" : undefined}
+              tabIndex={currentDiagram ? 0 : undefined}
+              aria-label={currentDiagram ? "講道要點" : undefined}
+              className={currentDiagram
+                ? [
+                    "mt-1 space-y-1 text-sm leading-snug max-sm:h-[min(4.5rem,21cqh)] max-sm:overflow-y-auto max-sm:overscroll-contain motion-safe:max-sm:scroll-smooth sm:mt-3 sm:space-y-2 sm:text-[1.05rem] sm:leading-relaxed lg:text-2xl",
+                    currentDiagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:h-9" : "",
+                  ].join(" ")
+                : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
               {points.map((point, index) => (
                 <li
                   key={point.text}
                   ref={point === activePoint ? newestPoint : undefined}
-                  className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
+                  aria-current={point === activePoint ? "true" : undefined}
+                  className={["flex gap-3", point === activePoint || slide.overview ? "text-white" : "text-slate-400",
+                    currentDiagram && point.at > seconds ? "max-sm:hidden" : "",
+                  ].join(" ")}
                 >
-                  <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
+                  <span className={["w-4 shrink-0 text-right font-mono text-sm text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]",
+                    currentDiagram ? "sm:leading-[1.75rem]" : "leading-[1.75rem]",
+                  ].join(" ")}>
                     {index + 1}
                   </span>
                   <span>{point.text}</span>
