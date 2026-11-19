@@ -163,6 +163,7 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
 
 #: 程序核對不通過時，把問題交回模型改的次數上限。
 REPAIRS = 2
+MOST_POINT_CHARS = 40
 
 
 def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
@@ -292,7 +293,8 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
     if claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
         from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
         source_lines = sentences(kept)
-        owner_cases = resolve_cases(cases_for(lecture), source_lines)
+        owner_cases = resolve_cases(cases_for(lecture), source_lines,
+                                    partial=claim_context.get("scope") == "subunit")
         source_by_id = {line['id']: line['text'] for line in source_lines}
         if owner_cases:
             scoped = [{**case, 'anchor_quotes': {key: source_by_id[case[key]] for key in ('at', 'from', 'to')
@@ -478,6 +480,11 @@ def check(
                 continue
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: 要點「{text}」的句子 {item.get('sentence')} 不在這一張")
+                continue
+            # A point is one short line. 510 published points are all ≤ 25 characters; a
+            # 2026-11-18 answer carried pasted junk after the point (「新加坡總統府文件…🦉…」).
+            if len(text) > MOST_POINT_CHARS or "\n" in text or re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]", text):
+                problems.append(f"{title}: 要點「{text[:30]}…」不是一行短句（最多 {MOST_POINT_CHARS} 字、不換行、無表情符號）")
                 continue
             point = {"sentence": item["sentence"], "text": text}
             if str(item.get("source") or "").strip():

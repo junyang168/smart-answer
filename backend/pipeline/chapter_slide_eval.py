@@ -202,12 +202,26 @@ SEMANTIC_CRITERIA = {
 }
 
 
+OWNER_RULES = [
+    "負責人已裁定的條件（owner_rulings）優先於一般規則；不要建議違反它們的改法。",
+    "論證圖由程序在他開始講該論證時顯示，不算提前講出答案；負責人 2026-11-18 指出圖等到歸納句才出現是太晚。不要建議把圖移後或拆到別張。",
+]
+
+
 def semantic_packet(slide_record: dict, selection: dict) -> dict:
-    """Send the displayed slides, the exact source and the argument context together."""
+    """Send the displayed slides, the exact source, the argument context and the owner's rulings together."""
+    from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+
+    source = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+    context = slide_record.get("claim_context") or {}
+    rulings = resolve_cases(cases_for(slide_record["lecture"]), source, partial=context.get("scope") == "subunit")
     return {
         "lecture": slide_record["lecture"],
         "criteria": SEMANTIC_CRITERIA,
-        "source": chapter_slides.sentences(chapter_slides.kept_pieces(selection)),
+        "owner_rules": OWNER_RULES,
+        "owner_rulings": [{k: case[k] for k in ("kind", "at", "from", "to", "pattern", "why") if k in case}
+                          for case in rulings],
+        "source": source,
         "claims": [
             {**claim, "diagrams": [{k: v for k, v in d.items() if k != "svg"} for d in claim.get("diagrams", [])]}
             for claim in (slide_record.get("claim_context") or {}).get("claims", [])
@@ -273,7 +287,8 @@ def _raw_sha256(raw) -> str:
 
 SEMANTIC_SYSTEM = """你是獨立的投影片驗收者，不是寫投影片的人。使用者給你一堂講座的逐字稿（source，每句有編號和秒數）、論證脈絡（claims）、成品投影片（slides）和驗收標準（criteria）。
 逐張、逐項按 criteria 判定，每張投影片的每一項都要給一筆：slide 填該張的 first，criterion 填標準名稱，passed 為是否通過，evidence 寫具體依據（句子編號與原文；不通過時寫應怎麼改）。
-不要沿用任何先前的判定，全部重新看原文。"""
+不要沿用任何先前的判定，全部重新看原文。
+先讀 owner_rules 與 owner_rulings：負責人已裁定的條件優先，改法不得違反它們。"""
 
 
 def with_run(receipt: dict, model: str = "evaluator-model", raw=None) -> dict:
