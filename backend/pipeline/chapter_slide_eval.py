@@ -288,7 +288,10 @@ def _raw_sha256(raw) -> str:
 SEMANTIC_SYSTEM = """你是獨立的投影片驗收者，不是寫投影片的人。使用者給你一堂講座的逐字稿（source，每句有編號和秒數）、論證脈絡（claims）、成品投影片（slides）和驗收標準（criteria）。
 逐張、逐項按 criteria 判定，每張投影片的每一項都要給一筆：slide 填該張的 first，criterion 填標準名稱，passed 為是否通過，evidence 寫具體依據（句子編號與原文；不通過時寫應怎麼改）。
 不要沿用任何先前的判定，全部重新看原文。
-先讀 owner_rules 與 owner_rulings：負責人已裁定的條件優先，改法不得違反它們。"""
+先讀 owner_rules 與 owner_rulings：負責人已裁定的條件優先，改法不得違反它們。
+輸出有 split_candidates 欄位時，先逐條找可能混合了兩個以上獨立意思的要點，然後才看時間。
+按要點本身拆解，保留其範圍和限定，不補寫本來沒顯示的意思。必要限定或同一意思的重述不拆。
+對疑似要點只填所在投影片 first、該點目前 sentence、拆成的兩至四條短句 parts。不用替它們找時間，另一步會核對。沒有填空陣列。"""
 
 
 def with_run(receipt: dict, model: str = "evaluator-model", raw=None) -> dict:
@@ -324,11 +327,36 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
                           "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
     schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
               "properties": {"checks": {"type": "array", "items": row}}}
+    subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
+    if subunit:
+        schema["required"].append("split_candidates")
+        schema["properties"]["split_candidates"] = {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["slide", "sentence", "parts"],
+            "properties": {"slide": {"type": "string"}, "sentence": {"type": "string"},
+                           "parts": {"type": "array", "items": {"type": "string"}}},
+        }}
     client = chapter_client(model)
     answer = client.generate_json(SEMANTIC_SYSTEM, json.dumps(packet, ensure_ascii=False), schema)
     raw = getattr(client, "last_raw_response", None) or answer
+    checks = answer["checks"]
+    split_findings = []
+    if subunit and answer["split_candidates"]:
+        from backend.pipeline.chapter_slide_point_timing import find_splits
+        from backend.pipeline import claim_flash_common, evidence_refresh
+
+        split_findings = find_splits(packet, answer["split_candidates"],
+            lambda state, questions: claim_flash_common.jev(
+                receipt_path.with_suffix(".point-timing"), evidence_refresh.JevPort(), state, questions),
+            model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES)
+        for finding in split_findings:
+            checks = [{**check, "passed": False, "evidence": (
+                        finding["evidence"] if check["passed"] else
+                        f'{check["evidence"]}\n{finding["evidence"]}')}
+                      if check["slide"] == finding["slide"] and check["criterion"] == "timing" else check
+                      for check in checks]
     receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
-                        "selection_sha256": file_sha256(selection_path), "checks": answer["checks"]}, model, raw)
+                        "selection_sha256": file_sha256(selection_path), "checks": checks,
+                        **({"point_timing_splits": split_findings} if subunit else {})}, model, raw)
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
     return receipt
 

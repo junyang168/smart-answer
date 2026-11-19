@@ -138,7 +138,10 @@ INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語
 跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。original 欄只填本節實際使用的原文字詞或其轉寫；通常／其他地方的譯詞即使教授確實提到，也不能獨立掛在本節的 original 欄。一般譯法比較放要點；不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
 
 
-def system_prompt(chapter: Chapter, lecture: str = "") -> str:
+_SUBUNIT_POINT_TIMING_RULE = """- 輸出前逐條檢查：先暫時去掉目前的 sentence，把要點按可獨立顯示的意思分開，再各找第一次講清楚的原句。若要等到後一句才能把另一個獨立意思講出，保留同張投影片並依次顯示。若各部分同一句已講清楚，或前後只是同一語意的必要條件、對象或口語省略，合為一條，在首次完整表達時出現。"""
+
+
+def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False) -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
     _, number, start, end = chapter_material.verse_range(chapter.passage)
@@ -152,7 +155,8 @@ def system_prompt(chapter: Chapter, lecture: str = "") -> str:
                     .replace("講整章結構的，寫「〈整章〉」。", "列出實際解釋的各章節；跨章時分別列出各章的範圍。")
                     .replace("第 〈章〉 章的逐字稿", f"{scope} 的逐字稿"))
     prompt = (
-        template.replace("〈要點時間規則〉", POINT_TIMING_RULES)
+        template.replace("〈要點時間規則〉", POINT_TIMING_RULES.replace(
+            "- 合併、縮寫", _SUBUNIT_POINT_TIMING_RULE + "\n- 合併、縮寫", 1) if subunit else POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
         .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
         .replace("〈整章〉", f"{number}:{start}-{end}")
@@ -777,7 +781,8 @@ def decide(
                          decisions_sha(data_base_dir, chapter.passage, lecture))
     prompt = user_prompt(lecture, decisions_record, claim_context)
     schema = response_schema(claim_context)
-    response = client.generate_json(system_prompt(chapter, lecture), prompt, schema)
+    system = system_prompt(chapter, lecture, subunit=(claim_context or {}).get("scope") == "subunit")
+    response = client.generate_json(system, prompt, schema)
     result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
     # 程序核對不通過：把問題和上一份交回模型改，最多 REPAIRS 次。改的是同一份，不換提示詞。
     for _ in range(REPAIRS if claim_context is not None else 0):
@@ -786,7 +791,7 @@ def decide(
         repair = (prompt + "\n\n上一份投影片（JSON）：\n" + json.dumps(response, ensure_ascii=False)
                   + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n"
                   + "\n".join(f"- {p}" for p in result["problems"]))
-        response = client.generate_json(system_prompt(chapter, lecture), repair, schema)
+        response = client.generate_json(system, repair, schema)
         result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
     return result
 
@@ -814,7 +819,8 @@ def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str,
     from backend.pipeline.chapter_slide_claims import saved_context
     context = saved_context(rejected, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     prompt = user_prompt(lecture, decisions_record, context)
-    prompt_sha = hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest()
+    system = system_prompt(chapter, lecture, subunit=(context or {}).get("scope") == "subunit")
+    prompt_sha = hashlib.sha256((system + "\n" + prompt).encode("utf-8")).hexdigest()
     if rejected.get("prompt_sha256") != prompt_sha:
         return {"lecture": lecture, "status": "prompt_changed"}
     kept = kept_pieces(decisions_record)
@@ -839,7 +845,8 @@ def save(
         "lecture": lecture,
         "decisions_sha256": decisions_sha(data_base_dir, chapter.passage, lecture),
         "model": model,
-        "prompt_sha256": hashlib.sha256((system_prompt(chapter, lecture) + "\n" + prompt).encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256((system_prompt(
+            chapter, lecture, subunit=(claim_context or {}).get("scope") == "subunit") + "\n" + prompt).encode("utf-8")).hexdigest(),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "slides": slides,
         "unshown_references": unshown,
@@ -1176,6 +1183,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
     from backend.pipeline.chapter_slide_claims import saved_context
     context = saved_context(record, decisions_record, decisions_sha(data_base_dir, chapter.passage, lecture))
     kept = kept_pieces(decisions_record)
+    system = system_prompt(chapter, lecture, subunit=(context or {}).get("scope") == "subunit") + _REVISE_TAIL
     # A timing finding measured as too small to matter is not sent back: moving it is how rounds went back and forth.
     prompt = revision_user_prompt(lecture, decisions_record, _as_answer(record["slides"]), actionable(verdict), context,
         accepted_context=accepted_review_context(record,
@@ -1188,7 +1196,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
     else:
         if context is not None and rejected_attempt.exists():
             return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
-        response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
+        response = client.generate_json(system, prompt, response_schema(context))
     flagged = {f["slide"] for f in actionable(verdict)}
     previous = record.get("raw_slides") or []
 
@@ -1203,7 +1211,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
             break
         repair = (prompt + "\n\n上一份修正稿（JSON）：\n" + json.dumps(response, ensure_ascii=False)
                   + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n" + "\n".join(f"- {p}" for p in problems))
-        response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, repair, response_schema(context))
+        response = client.generate_json(system, repair, response_schema(context))
         problems, unshown, slides = check_revision(response)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")

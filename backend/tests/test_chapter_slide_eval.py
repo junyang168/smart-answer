@@ -78,3 +78,37 @@ def test_slide_eval_checks_the_required_diagram_in_its_retained_claim_scope(tmp_
         slides, KEPT, candidates=[], bible=library, context=context)["problems"])
     slides[0].pop("diagram_ref")
     assert ev.evaluate(slides, KEPT, candidates=[], bible=library, context=context)["problems"] == []
+
+
+def test_split_finding_depends_on_first_fully_supported_sentence_of_each_part():
+    from backend.pipeline.chapter_slide_point_timing import find_splits
+
+    source = [{"id": sid, "text": text, "start": start} for sid, text, start in [
+        ("S0001", "下一段講什麼？", 0), ("S0002", "第五章十三節起是門徒的使命。", 6),
+        ("S0003", "認識神後有生命上的反應。", 19),
+        ("S0004", "這些是門徒的使命及認識神後的反應。", 25)]]
+    packet = {"slides": [{"first": "S0001", "last": "S0004", "points": [
+        {"sentence": "S0003", "text": "門徒的使命和認識神後的反應"}]}], "source": source}
+    candidates = [{"slide": "S0001", "sentence": "S0003", "parts": ["門徒的使命", "認識神後的反應"]}]
+
+    def run(first, second, split="independent"):
+        supported = {f"0:0:{first}", f"0:1:{second}", "0:0:S0004"}
+        if second is not None:
+            supported.add("0:1:S0004")  # A later restatement must not hide the first full sentence.
+        calls = []
+
+        def ask(state, questions):
+            calls.append(questions)
+            return {key: split if key.endswith(":split") else "full" if key in supported
+                    else "question" if key.endswith("S0001") else "partial"
+                    for key in questions}
+
+        result = find_splits(packet, candidates, ask, model="jev-test", max_bytes=2000)
+        assert len(calls) > 1 and sum(map(len, calls)) == 9
+        return result
+
+    finding, = run("S0002", "S0003")
+    assert "S0002「門徒的使命」" in finding["evidence"] and "S0003「認識神後的反應」" in finding["evidence"]
+    assert not run("S0002", "S0002")  # One sentence expressed both.
+    assert not run("S0002", None)  # One meaning lacks full support.
+    assert not run("S0002", "S0003", "dependent")  # A condition/referent is part of one meaning.

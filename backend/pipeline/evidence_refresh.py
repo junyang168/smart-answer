@@ -459,15 +459,8 @@ def readback(store, result):
             raise ValueError('relation retirement was not saved: ' + key)
 
 
-class Models:
-    """Thin provider calls; retry only a TLS handshake timeout before a request is sent."""
-    def __init__(self, gpt, root, *, capacity=None):
-        if gpt.backend != 'codex_subscription':
-            raise ValueError('Evidence repair requires the authorized GPT subscription')
-        self.gpt = gpt
-        self.root, self.capacity = Path(root), capacity
-        self.identity = {'jev': MODEL, 'gpt': {'backend': gpt.backend,
-                         'model': gpt.model, 'effort': gpt.reasoning_effort}}
+class JevPort:
+    """Call Jev without requiring a GPT session."""
 
     def judge(self, request):
         self.judge_preflight()
@@ -498,6 +491,17 @@ class Models:
     def judge_preflight(self):
         if not os.environ.get('TYPESAFE_API_KEY'):
             raise ValueError('TYPESAFE_API_KEY is required; no request sent')
+
+class Models(JevPort):
+    """Evidence refresh model ports."""
+
+    def __init__(self, gpt, root, *, capacity=None):
+        if gpt.backend != 'codex_subscription':
+            raise ValueError('Evidence repair requires the authorized GPT subscription')
+        self.gpt = gpt
+        self.root, self.capacity = Path(root), capacity
+        self.identity = {'jev': MODEL, 'gpt': {'backend': gpt.backend,
+                         'model': gpt.model, 'effort': gpt.reasoning_effort}}
 
     def preflight(self):
         self.gpt._verify_chatgpt_login()
