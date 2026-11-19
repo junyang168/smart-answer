@@ -413,6 +413,9 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     """他講某一步論證時，畫面上那一張要有一條要點屬於同一個 Claim（負責人 2026-11-16：
     教授論證的是 X，投影片顯示不相關的，不行）。另報不認得的 source。"""
     index = argument_index(context)
+    readings = {step["evidence_step_id"]: set(step.get("scriptures", []))
+                for claim in context.get("claims", []) for step in claim["evidence_steps"]
+                if step.get("step_type") == "scripture_text" and step.get("evidence_step_id")}
     problems = []
     for slide in slides:
         for point in slide["points"]:
@@ -431,6 +434,8 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
         if slide is None or at in reported:
             continue
         related = {rid} | entry["claims"] | {r for cid in entry["claims"] for r in steps_of.get(cid, ())}
+        if readings.get(rid) and readings[rid] <= {item["slug"] for item in slide.get("scriptures", [])}:
+            continue
         if not any(point.get("source") in related for point in slide["points"]):
             problem = (f"{slide['title']}（{at}）: 他在講「{entry['statement'][:40]}」（{rid}），"
                        f"這一張沒有要點屬於它的 Claim（{'、'.join(sorted(entry['claims']))}）")
@@ -691,9 +696,10 @@ def verified_instance_citations(conn, change_set_id, document, result, transcrip
     return citations
 
 
-def locate_verified_citations(citations, refs, object_id, anchors, fragments, decisions, text, spans):
+def locate_verified_citations(citations, refs, object_id, anchors, fragments, decisions, text, spans, *, bible=None):
     """Place a verified verse only inside its live anchor and retained paragraph."""
-    from backend.api.scripture import reference_slugs
+    from backend.api.scripture import parse_reference, reference_slugs
+    from backend.pipeline import claim_flash_citations
 
     allowed = {slug for ref in refs for slug in reference_slugs(ref)}
     if not allowed:
@@ -717,7 +723,19 @@ def locate_verified_citations(citations, refs, object_id, anchors, fragments, de
                       pieces[span[3]] in (None, item["paragraph_key"])]
             matched = locate(text, scoped, quote)
             if matched:
-                placements.add((matched[0], slug))
+                first = matched[0]
+                # A verbatim citation may have been catalogued against its
+                # longer second sentence. Show it when its opening is read.
+                if bible is not None and item.get("basis") == "verbatim":
+                    at = next(i for i, span in enumerate(spans) if span[2] == first)
+                    if at and spans[at - 1] in scoped and spans[at - 1][3] == spans[at][3]:
+                        low, high, previous, _ = spans[at - 1]
+                        opening = claim_flash_citations.norm(text[low:high])
+                        ref = parse_reference(slug)
+                        verse = bible.chapter(ref["slug_book"], ref["chapter"]).get(str(ref["start"]), "")
+                        if len(opening) >= claim_flash_citations.QUOTE_CHARS and claim_flash_citations.norm(verse).startswith(opening):
+                            first = previous
+                placements.add((first, slug))
     return [{"sentence": sid, "slug": slug} for sid, slug in sorted(placements)]
 
 
@@ -779,6 +797,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     ChangeSet names: the instance has no record for an argument group. The run's
     candidate SHA must match what the ChangeSet recorded."""
     from backend.api.scripture import reference_slugs
+    from backend.pipeline.chapter_slide_eval import Bible
 
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
     decisions = json.loads(path.read_text())
@@ -790,6 +809,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
         raise ValueError(f"ChangeSet {change_set_id} holds {document.get('title')}, not {lecture}")
     result = instance_creation_result(meta)
     citations = verified_instance_citations(conn, change_set_id, document, result, decisions.get("transcript_sha256"))
+    bible = Bible()
     fragments = {f["fragment_id"]: f for f in records.get("source_fragments", [])}
     by_id = {}
     for step in records.get("evidence_steps", []):
@@ -838,7 +858,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    placed = locate_verified_citations(citations, refs, rid, anchors, fragments, decisions, text, spans)
+                    placed = locate_verified_citations(citations, refs, rid, anchors, fragments, decisions, text, spans,
+                                                       bible=bible)
                     confirmed = {item["slug"] for item in placed}
                     verified.update((item["sentence"], item["slug"]) for item in placed)
                     scriptures, unread = evidence_scriptures(
@@ -856,7 +877,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                            for fid in own if (ids := locate(text, spans, fragments[fid]["verbatim_excerpt"]))]
             stated = own_anchors[0]["sentences"][0] if own_anchors else None
             placed = locate_verified_citations(citations, claim.get("scripture_refs") or [], claim["claim_id"],
-                                             own_anchors, fragments, decisions, text, spans)
+                                             own_anchors, fragments, decisions, text, spans, bible=bible)
             verified.update((item["sentence"], item["slug"]) for item in placed)
             if not stated and not evidence:
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.

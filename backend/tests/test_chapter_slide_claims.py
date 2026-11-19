@@ -496,6 +496,37 @@ def test_verified_paraphrases_project_to_their_exact_playback_sentences():
         line["start"] for line in chapter_slides.sentences(kept)]
 
 
+def test_a_verse_split_into_two_sentences_appears_at_its_opening(tmp_path):
+    from backend.pipeline.chapter_slide_eval import Bible
+
+    first = "只是我告訴你們，不要與惡人作對。"
+    second = "有人打你的右臉，連左臉也轉過來由他打。"
+    (tmp_path / "MAT").mkdir()
+    (tmp_path / "MAT" / "5.json").write_text(json.dumps({"39": first + second}))
+    kept = [{"id": "U1", "source_paragraph_key": "S0001", "text": first + second, "start": 0, "end": 20}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U1", "keep": True}]}
+    text, spans = hints.retained_spans(decisions)
+    anchors = [{"fragment_id": "F1", "quote": first + second, "sentences": ["S0001", "S0002"]}]
+    citations = [(None, {"paragraph_key": "S0001", "ref": "Matt 5:39", "basis": "verbatim", "quote": second})]
+    projected = hints.locate_verified_citations(citations, ["Matt 5:39"], "E1", anchors,
+        {"F1": {"paragraph_key": "S0001"}}, decisions, text, spans, bible=Bible(tmp_path))
+    assert projected == [{"sentence": "S0001", "slug": "mat-5-39"}]
+
+
+def test_scripture_reading_can_cover_a_scripture_text_step_without_a_summary_point():
+    step = {"evidence_step_id": "E1", "statement": "讀出經文", "step_type": "scripture_text",
+            "scriptures": ["mat-5-39"], "anchors": [{"sentences": ["S0001"]}]}
+    context = {"claims": [{"claim_id": "C1", "statement": "推論", "stated": "S0002", "evidence_steps": [step]}]}
+    slides = [
+        {"first": "S0001", "last": "S0001", "title": "讀經", "points": [],
+         "scriptures": [{"sentence": "S0001", "slug": "mat-5-39"}]},
+        {"first": "S0002", "last": "S0002", "title": "解釋", "points": [{"source": "C1"}]},
+    ]
+    assert hints.argument_alignment(context, slides) == []
+    step["step_type"] = "inference"
+    assert len(hints.argument_alignment(context, slides)) == 1
+
+
 def test_diagram_eval_keeps_editorial_and_professor_figures_on_their_own_slides():
     c = {"title": "登山寶訓的文學結構", "origin": "釋經筆記整理", "kind": "editorial",
          "sha256": "c" * 64, "svg": "<svg/>"}
