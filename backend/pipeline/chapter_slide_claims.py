@@ -652,6 +652,75 @@ def instance_creation_result(meta: dict) -> dict:
     return result
 
 
+def verified_instance_citations(conn, change_set_id, document, result, transcript_sha):
+    """Read the source-bound quotation decisions already made for this lecture."""
+    from backend.pipeline import claim_flash_citations, evidence_refresh
+    from backend.pipeline.detailed_knowledge_extraction_runner import segment_locator
+    from backend.pipeline.source_projection import project_script
+
+    if document.get("source_file_sha256") != transcript_sha:
+        return []
+    original = Path(result["candidate_path"]).parent / "citations" / "citations.json"
+    citations = []
+    if original.is_file():
+        source = Path(document["source_path"])
+        if chapter_exposition.file_sha256(source) != transcript_sha:
+            raise ValueError("Verified citation transcript changed")
+        paragraphs = [(segment_locator(i), row["text"]) for i, row in
+                      enumerate(project_script(json.loads(source.read_text())["script"]).body_rows)]
+        saved = json.loads(original.read_text())
+        pin = evidence_refresh.digest({"contract": claim_flash_citations.CONTRACT, "paragraphs": sorted(paragraphs)})
+        if saved["input_sha256"] == pin:
+            citations.extend((None, item) for item in saved["citations"]
+                             if item["basis"] == "verbatim" or (item["basis"] == "introduced" and item.get("check")))
+    for (meta,) in conn.execute("""SELECT metadata FROM wang_knowledge.change_sets
+            WHERE source_kind='argument_layer_correction' AND status='applied'
+              AND metadata->>'lecture_change_set_id'=%s""", (change_set_id,)).fetchall():
+        path = Path(meta["corrections_path"])
+        if not path.is_file():
+            continue
+        if chapter_exposition.file_sha256(path) != meta["corrections_sha256"]:
+            raise ValueError("Verified citation correction changed")
+        correction = json.loads(path.read_text())
+        if correction.get("source_sha256") != transcript_sha:
+            continue
+        for operation in correction["operations"]:
+            if "scripture_refs" in operation.get("set", {}):
+                citations.extend((operation["object_id"], item) for item in operation.get("evidence", ())
+                                 if item.get("ref") and item.get("quote"))
+    return citations
+
+
+def locate_verified_citations(citations, refs, object_id, anchors, fragments, decisions, text, spans):
+    """Place a verified verse only inside its live anchor and retained paragraph."""
+    from backend.api.scripture import reference_slugs
+
+    allowed = {slug for ref in refs for slug in reference_slugs(ref)}
+    if not allowed:
+        return []
+    pieces = {p["id"]: p.get("source_paragraph_key") for p in decisions["pieces"]}
+    placements = set()
+    for owner, item in citations:
+        if owner not in (None, object_id):
+            continue
+        slug, *extra = reference_slugs(item["ref"]) or [None]
+        if extra or slug not in allowed:
+            continue
+        quote = item["quote"].strip().lstrip("」』）)").strip()
+        needle = compact(quote)
+        ids = {sid for anchor in anchors
+               if fragments[anchor["fragment_id"]].get("paragraph_key") == item["paragraph_key"]
+               and needle and needle in compact(anchor["quote"])
+               for sid in anchor["sentences"]}
+        if ids:
+            scoped = [span for span in spans if span[2] in ids and
+                      pieces[span[3]] in (None, item["paragraph_key"])]
+            matched = locate(text, scoped, quote)
+            if matched:
+                placements.add((matched[0], slug))
+    return [{"sentence": sid, "slug": slug} for sid, slug in sorted(placements)]
+
+
 def instance_diagrams(conn, claim_ids: list[str]) -> dict:
     """Load visual Observations directly supporting these live Claims."""
     from backend.pipeline.source_projection import visual_source_blocks
@@ -709,6 +778,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     come from the instance. Only the group order and titles come from the run the
     ChangeSet names: the instance has no record for an argument group. The run's
     candidate SHA must match what the ChangeSet recorded."""
+    from backend.api.scripture import reference_slugs
+
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
     decisions = json.loads(path.read_text())
     text, spans = retained_spans(decisions)
@@ -718,6 +789,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     if document.get("title") != lecture:
         raise ValueError(f"ChangeSet {change_set_id} holds {document.get('title')}, not {lecture}")
     result = instance_creation_result(meta)
+    citations = verified_instance_citations(conn, change_set_id, document, result, decisions.get("transcript_sha256"))
     fragments = {f["fragment_id"]: f for f in records.get("source_fragments", [])}
     by_id = {}
     for step in records.get("evidence_steps", []):
@@ -733,7 +805,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
             support.setdefault(rel["to_id"], []).append(rel["from_id"])
     diagrams = instance_diagrams(conn, [claim["claim_id"] for claim in claims_by_short.values()])
     groups, claims, excluded = [], [], []
-    included = set()
+    included, verified = set(), set()
     for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
         shorts = [s for s in shorts if s in claims_by_short and s not in included]  # a Claim the owner ruled out is gone from the instance
         if not shorts:
@@ -766,7 +838,12 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
+                    placed = locate_verified_citations(citations, refs, rid, anchors, fragments, decisions, text, spans)
+                    confirmed = {item["slug"] for item in placed}
+                    verified.update((item["sentence"], item["slug"]) for item in placed)
+                    scriptures, unread = evidence_scriptures(
+                        [ref for ref in refs if not set(reference_slugs(ref)) & confirmed], spoken, passage=passage)
+                    scriptures = sorted(confirmed | set(scriptures))
                     if scriptures:
                         entry["scriptures"] = scriptures
                     excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"} for ref in unread]
@@ -775,7 +852,12 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
             own = [a["source_fragment_id"] for o in claim.get("occurrences", []) for a in o.get("anchors", [])
                    if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments
                    and fragments[a["source_fragment_id"]].get("source_modality") != "visual"]
-            stated = next((ids[0] for fid in own for ids in [locate(text, spans, fragments[fid]["verbatim_excerpt"])] if ids), None)
+            own_anchors = [{"fragment_id": fid, "quote": fragments[fid]["verbatim_excerpt"], "sentences": ids}
+                           for fid in own if (ids := locate(text, spans, fragments[fid]["verbatim_excerpt"]))]
+            stated = own_anchors[0]["sentences"][0] if own_anchors else None
+            placed = locate_verified_citations(citations, claim.get("scripture_refs") or [], claim["claim_id"],
+                                             own_anchors, fragments, decisions, text, spans)
+            verified.update((item["sentence"], item["slug"]) for item in placed)
             if not stated and not evidence:
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
                 excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
@@ -795,6 +877,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                "transcript_sha256": decisions.get("transcript_sha256"),
                "instance": {"change_set_id": change_set_id, "candidate_sha256": meta["candidate_sha256"]},
                "diagram_contract": "claim-bound.v1",
+               "verified_scriptures": [{"sentence": sid, "slug": slug} for sid, slug in sorted(verified)],
                "groups": groups, "claims": claims, "excluded": excluded}
     context["claim_source_ranges"] = claim_source_ranges(context, decisions)
     return context

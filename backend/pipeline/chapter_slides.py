@@ -370,6 +370,9 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                                         for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}
                       for claim in claim_context["claims"]
                   ]}, ensure_ascii=False)]
+        if claim_context.get("verified_scriptures"):
+            lines += ["verified_scriptures 是論證層已驗證的引文，程式依句子顯示。保留含這些句子的原文，"
+                      "不必重新辨認出處，也不必另外為同一處填 scriptures。"]
         if "diagram_spans" in claim_context:
             if spans := claim_context["diagram_spans"]:
                 lines += ["# 已定位的連續講圖範圍",
@@ -476,6 +479,7 @@ def check(
     one_slide: list[tuple[str, str]] = (),
     check_term_timing: bool = True,
     diagram_spans: tuple = (),
+    verified_scriptures: tuple = (),
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -565,6 +569,11 @@ def check(
                 problems.append(f"{title}: {item.get('ref')} 的句子 {item.get('sentence')} 不在這一張")
                 continue
             scriptures.extend({"sentence": item["sentence"], "slug": slug} for slug in slugs)
+        confirmed = [item for item in verified_scriptures if item["sentence"] in own_ids]
+        confirmed_slugs = {item["slug"] for item in confirmed}
+        if confirmed:
+            scriptures = sorted([item for item in scriptures if item["slug"] not in confirmed_slugs] + confirmed,
+                                key=lambda item: own_ids.index(item["sentence"]))
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:
             for _, slug in spoken_references(line["text"]):
@@ -662,6 +671,8 @@ def checked(
         except ValueError:
             spans = []  # check_cases reports the broken case below
     options = {"one_slide": spans} if spans else {}
+    if (claim_context or {}).get("verified_scriptures"):
+        options["verified_scriptures"] = claim_context["verified_scriptures"]
     if (claim_context or {}).get("scope") == "subunit":
         options["check_term_timing"] = False
         if (claim_context or {}).get("diagram_spans"):

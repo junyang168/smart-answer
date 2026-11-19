@@ -468,6 +468,34 @@ def test_corrected_instance_reads_only_its_exact_original_grouping(tmp_path):
         hints.instance_creation_result(meta)
 
 
+def test_verified_paraphrases_project_to_their_exact_playback_sentences():
+    offered = "神又告訴亞伯拉罕說：『帶以撒到摩利亞山上去，獻祭給我。』"
+    stopped = "神說：『你不要動他，你不要害他。』"
+    kept = [{"id": "U1", "source_paragraph_key": "S0008", "text": offered + stopped,
+             "start": 0, "end": 30}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U1", "keep": True}]}
+    text, spans = hints.retained_spans(decisions)
+    anchors = [{"fragment_id": "F1", "quote": offered + stopped, "sentences": ["S0001", "S0002"]}]
+    fragments = {"F1": {"paragraph_key": "S0008"}}
+    citations = [
+        ("ST5", {"paragraph_key": "S0008", "ref": "Gen 22:2", "quote": offered}),
+        (None, {"paragraph_key": "S0008", "ref": "Gen 22:12", "quote": stopped}),
+        (None, {"paragraph_key": "S0007", "ref": "Gen 22:3", "quote": offered}),
+    ]
+    projected = hints.locate_verified_citations(citations, ["創世記22:2", "Gen 22:12", "創世記22:3"],
+                                               "ST5", anchors, fragments, decisions, text, spans)
+    assert projected == [{"sentence": "S0001", "slug": "gen-22-2"}, {"sentence": "S0002", "slug": "gen-22-12"}]
+    raw = slide("S0001")
+    raw["points"] = [{"sentence": "S0001", "text": "獻以撒"}, {"sentence": "S0002", "text": "制止獻祭"}]
+    raw["scriptures"] = [{"sentence": "S0001", "ref": "創世記22:12"}]
+    problems, _, slides = chapter_slides.check([raw], kept, CHAPTER, verified_scriptures=projected)
+    assert not problems
+    assert slides[0]["scriptures"] == projected
+    _, timed = chapter_slides.placed(decisions, {"slides": slides})
+    assert [item["at"] for item in timed[0]["scriptures"]] == [
+        line["start"] for line in chapter_slides.sentences(kept)]
+
+
 def test_diagram_eval_keeps_editorial_and_professor_figures_on_their_own_slides():
     c = {"title": "登山寶訓的文學結構", "origin": "釋經筆記整理", "kind": "editorial",
          "sha256": "c" * 64, "svg": "<svg/>"}
