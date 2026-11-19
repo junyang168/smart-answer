@@ -21,10 +21,11 @@ _CRITERIA = {
 def _match_question(meaning, sid, sentence):
     if meaning.endswith(("？", "?")):
         return {"type": "choice",
-                "instructions": f"原文 {sid} 是否提出同一個問題「{meaning}」？"
-                                "只判這一句正在問什麼，忽略問題的答案和後面的講解。",
-                "criteria": {"full": "這句提出同一個問題，可以用前文消解「那裡」「這段」等指代。",
-                             "none": "這句沒有問同一個問題。只談相同主題、回答或回顧也不算。",
+                "instructions": f"原文 {sid} 是否正在提出同一個問題「{meaning}」？"
+                                "用本張相鄰原文理解分幾句提出的問句。明確開始發問後，"
+                                "若緊接的同一輪發言就是該問題，開頭可算。忽略回答和後續講解。",
+                "criteria": {"full": "這句提出或明確開始同一個問題，可用相鄰句補足指代及分段問句。",
+                             "none": "這句沒有提出同一個問題。過場、另一個問題、回答和回顧均不算。",
                              "uncertain": "不能確定。"}}
     if verse_quote := _VERSE_QUOTE.fullmatch(meaning):
         reference, quote = (verse_quote[name] for name in ("reference", "quote"))

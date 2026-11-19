@@ -489,6 +489,7 @@ def check(
     check_term_timing: bool = True,
     diagram_spans: tuple = (),
     verified_scriptures: tuple = (),
+    allow_no_chapter_verses: bool = False,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -565,7 +566,7 @@ def check(
         if not FEWEST_POINTS <= len(points) <= limit:
             problems.append(f"{title}: 要點 {len(points)} 條")
         verse_field = str(slide.get("verses") or "")
-        verses = parse_slide_verses(verse_field, chapter)
+        verses = [] if allow_no_chapter_verses and not verse_field.strip() else parse_slide_verses(verse_field, chapter)
         if verses is None:
             problems.append(f"{title}: 經節讀不出來或不在這一章（{slide.get('verses')}）")
         scriptures = []
@@ -684,6 +685,7 @@ def checked(
         options["verified_scriptures"] = claim_context["verified_scriptures"]
     if (claim_context or {}).get("scope") == "subunit":
         options["check_term_timing"] = False
+        options["allow_no_chapter_verses"] = True
         if (claim_context or {}).get("diagram_spans"):
             options["diagram_spans"] = claim_context["diagram_spans"]
     problems, unshown, slides = check(raw, kept, chapter, **options)

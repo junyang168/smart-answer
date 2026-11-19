@@ -65,6 +65,18 @@ def test_points_verses_and_scripture_references_are_checked():
     assert "經文出處讀不出來" in joined
 
 
+def test_subunit_slide_can_cover_a_passage_elsewhere_in_scripture():
+    raw = slide("S0001", verses="", scriptures=[{"sentence": "S0001", "ref": "使徒行傳15:23"}])
+    context = {"scope": "subunit"}
+    assert chapter_slides.check([raw], KEPT, CHAPTER)[0]
+    problems, _, slides = chapter_slides.checked([raw], KEPT, CHAPTER, context)
+    assert not problems
+    assert slides[0]["verses"] == []
+    assert slides[0]["scriptures"] == [{"sentence": "S0001", "slug": "act-15-23"}]
+    raw["verses"] = "6:1"
+    assert chapter_slides.checked([raw], KEPT, CHAPTER, context)[0]
+
+
 def test_points_appear_when_he_reaches_them_in_his_order():
     # 「八福都是天國的祝福」：四條一起出來，他還在讀經文，聽眾已讀到兩分鐘後的結論。
     problems, _, _ = chapter_slides.check([slide("S0001", points=(

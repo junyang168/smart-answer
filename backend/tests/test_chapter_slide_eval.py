@@ -128,7 +128,7 @@ def test_all_points_are_checked_per_slide():
         assert {key.rsplit(":", 1)[1] for key in questions} == ids
         if "S0001" in ids:
             assert "答案完整且屬於這個問題" in questions["0:whole:S0001"]["instructions"]
-            assert "忽略問題的答案" in questions["1:whole:S0001"]["instructions"]
+            assert "忽略回答和後續講解" in questions["1:whole:S0001"]["instructions"]
             full = {"0:whole:S0002", "1:whole:S0001", "1:whole:S0003"}
         else:
             full = {"0:whole:S0004"}
@@ -159,6 +159,26 @@ def test_verbatim_point_keeps_its_valid_anchor_even_with_an_earlier_paraphrase()
 
     row, = evaluate_points(packet, no_call, model="jev", max_bytes=128000)
     assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+
+
+def test_question_timing_can_use_the_start_of_a_multisentence_question():
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+
+    source = [{"id": f"S{i:04d}", "start": i * 3, "text": text} for i, text in enumerate([
+        "問：我想問一下，這個問題可能是從聖經字面上的意思。",
+        "似乎休妻再娶就是犯了淫亂。",
+        "反而多妻，只是說不可以作長老。",
+    ], 1)]
+    packet = {"source": source, "slides": [{"first": "S0001", "last": "S0003", "points": [
+        {"sentence": "S0001", "text": "問：休妻再娶犯淫亂，多妻卻只禁作長老？"}]}]}
+
+    def ask(state, questions):
+        assert "同一輪發言" in questions["0:whole:S0001"]["instructions"]
+        assert set(state["原文"]) == {"S0001", "S0002", "S0003"}
+        return {key: "full" for key in questions}
+
+    row, = evaluate_points(packet, ask, model="jev", max_bytes=128000)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0001")
 
 
 def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
