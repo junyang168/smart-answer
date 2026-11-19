@@ -102,8 +102,8 @@ def test_unit_reader_uses_the_exact_semantic_eval_without_a_second_review(tmp_pa
     assert reviewed_unit_recording(tmp_path, unit, entry, {})["slides"][0]["title"] == "論點"
 
 
-def test_fixing_the_first_question_does_not_clear_early_answer_on_next_slide(tmp_path):
-    gold = next(c for c in json.loads(GOLD.read_text()) if c['id'] == 'next-title-reveals-answer-after-question-is-fixed')
+def test_saved_eval_can_require_title_to_cover_the_judicial_conclusion(tmp_path):
+    gold = next(c for c in json.loads(GOLD.read_text()) if c['id'] == 'title-covers-judicial-conclusion')
     candidate = tmp_path / "slides.json"
     source = tmp_path / "selection.json"
     source.write_text(json.dumps({"source": gold["source"]}))
@@ -119,12 +119,12 @@ def test_fixing_the_first_question_does_not_clear_early_answer_on_next_slide(tmp
             "slides_sha256": ev.semantic_slide_sha256(candidate),
             "selection_sha256": chapter_exposition.file_sha256(source),
             "checks": [{"slide": s["first"], "criterion": k,
-                        "passed": expected or s is prior or k != "timing",
-                        "evidence": "節錄顯示 S0058 才說到司法原則。"}
+                        "passed": expected or s is prior or k != "coverage",
+                        "evidence": "標題須包含 S0058 的司法原則。"}
                        for s in (prior, slide) for k in ev.SEMANTIC_CRITERIA],
         })))
         problems = ev.semantic_eval_problems(candidate, source, receipt)
-        assert problems == ([] if expected else ["S0020 timing: 節錄顯示 S0058 才說到司法原則。"])
+        assert problems == ([] if expected else ["S0020 coverage: 標題須包含 S0058 的司法原則。"])
 
 
 def test_semantic_eval_must_be_a_recorded_run_by_another_model(tmp_path):
@@ -148,18 +148,19 @@ def test_semantic_eval_must_be_a_recorded_run_by_another_model(tmp_path):
 def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_splits(tmp_path, monkeypatch):
     from backend.pipeline import claim_flash_common
 
+    gold = next(c for c in json.loads(GOLD.read_text()) if c["id"] == "title-covers-temptation-responsibility")
     source = tmp_path / "selection.json"
     source.write_text(json.dumps({
         "pieces": [{"id": "P1", "start": 0, "end": 10,
-                    "text": "門徒為甚麼要發光？認出彌賽亞，就負有門徒的使命。門徒的使命是發光。"}],
+                    "text": "".join(line["text"] for line in gold["source"])}],
         "decisions": [{"id": "P1", "keep": True}],
     }))
     slide_path = tmp_path / "slides.json"
     slide_path.write_text(json.dumps({
         "lecture": "Lecture", "model": "writer", "decisions_sha256": chapter_exposition.file_sha256(source),
         "claim_context": {"scope": "subunit"},
-        "slides": [{"first": "S0001", "last": "S0003", "points": [
-            {"sentence": "S0001", "text": "認出彌賽亞的門徒有發光的使命"}]}],
+        "slides": [{"first": "S0001", "last": "S0003", "title": gold["known_good"]["title"], "points": [
+            {"sentence": "S0001", "text": "神允許的試探由神開出路，自己招來的試探要自己負責"}]}],
     }))
 
     class Reviewer:
@@ -167,9 +168,15 @@ def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_spli
 
         def generate_json(self, system, packet, schema):
             assert schema["required"] == ["checks"]
-            assert json.loads(packet)["criteria"]["timing"] == ev._SUBUNIT_TITLE_TIMING
+            request = json.loads(packet)
+            criteria = request["criteria"]
+            assert set(criteria) == {"faithfulness", "coverage", "scripture"}
+            assert set(schema["properties"]["checks"]["items"]["properties"]["criterion"]["enum"]) == set(criteria)
+            assert "標題涵蓋本張共同主題" in criteria["coverage"]
+            assert request["slides"][0]["title"] == "警告中的責任分別"
+            assert request["source"][0]["text"] == "那警告是什麼意思？"
             return {"checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "原審閱"}
-                               for criterion in ev.SEMANTIC_CRITERIA]}
+                               for criterion in criteria]}
 
     def jev(root, port, state, questions):
         assert set(questions) == {"0:whole:S0001", "0:whole:S0002", "0:whole:S0003"}
@@ -181,6 +188,7 @@ def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_spli
     receipt = ev.run_semantic_eval(slide_path, source, path, "reviewer")
     assert ev.semantic_eval_problems(slide_path, source, path) == []
     assert receipt["point_timing"]["points"][0]["status"] == "correct"
+    assert all(row["criterion"] != "timing" for row in receipt["run"]["raw_response"]["checks"])
 
 
 def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkeypatch):
@@ -246,7 +254,7 @@ def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_pa
         def generate_json(self, system, packet, schema):
             return {"checks": [
                 {"slide": "S0001", "criterion": criterion, "passed": criterion != "coverage", "evidence": "原審閱"}
-                for criterion in ev.SEMANTIC_CRITERIA]}
+                for criterion in json.loads(packet)["criteria"]]}
 
     def jev(root, port, state, questions):
         full = {"0:whole:S0004", "1:whole:S0002", "2:whole:S0005"}

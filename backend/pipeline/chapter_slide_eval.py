@@ -204,17 +204,11 @@ def candidate_chapters(slides: list[dict[str, Any]], context: dict[str, Any] | N
 
 SEMANTIC_SCHEMA_VERSION = "chapter-slide-semantic-eval.v1"
 SEMANTIC_CRITERIA = {
-    "faithfulness": "標題與要點保留原文的說話者、否定、限定及因果。每個實質意思必須有原文支持。這是口語講課，不是法律條文：只有改變了他的判斷才算不忠實；措辭、語氣或「很多人／有人」這類程度差異不算錯。",
-    "coverage": "從原文反查承重理由與結論。比較、對比和首尾呼應要交代兩端如何支持結論。",
-    "timing": "過早和過晚都要查。過晚：他已開始講某一點，畫面要等他講完幾句才出現這條要點（例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，要點卻綁在兩句後的 S0017），報出應移到哪一句。一條要點合併了他在不同句講的意思時，應拆成兩條，不是等到最後一個意思。過早：標題在換張時立即可見。若結論尚未講出，標題只能用問題或中性主題。要點的全部意思須在錨點已講出。檢查故事結果、限定語及複合要點。按整段論證順序查看每張，尤其是問題之後、答案之前的相鄰投影片。第一張用問題不代表後面的標題可以先說出答案。",
+    "faithfulness": "標題與要點保留原文的說話者、否定、限定及因果。每個實質意思必須有原文支持。標題是整張的摘要，可概括本張稍後才講出的答案、結論或故事結果；核對本張全部原文。這是口語講課，不是法律條文：只有改變了他的判斷才算不忠實；措辭、語氣或「很多人／有人」這類程度差異不算錯。",
+    "coverage": "標題涵蓋本張共同主題。從原文反查承重理由與結論。比較、對比和首尾呼應要交代兩端如何支持結論。",
+    "timing": "核對定時要點的過早和過晚。他已開始講某一點卻等幾句才出現，報出應移到哪一句。要點的全部意思須在錨點已講出。按原文檢查故事結果、限定語及複合要點。標題概括整張，以忠實和完整兩項檢查。",
     "scripture": "核對成品實際顯示的經文。每一節讀出或幾乎逐字引用的經文都應顯示，只有提及範圍的經節不作逐字讀出。",
 }
-
-
-_SUBUNIT_TITLE_TIMING = (
-    "只檢查標題在換張時出現是否提前揭露尚未講出的答案或故事結果。"
-    "若答案還沒講出，標題應為問題或中性主題。逐條要點時間由另一步核對。"
-)
 
 
 OWNER_RULES = [
@@ -243,7 +237,7 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                        for case in rulings if case["kind"] == "required_point"]
     return {
         "lecture": slide_record["lecture"],
-        "criteria": ({**SEMANTIC_CRITERIA, "timing": _SUBUNIT_TITLE_TIMING}
+        "criteria": ({k: v for k, v in SEMANTIC_CRITERIA.items() if k != "timing"}
                      if context.get("scope") == "subunit" else SEMANTIC_CRITERIA),
         "owner_rules": [*OWNER_RULES, *(
             ["required_slide_points 是整張投影片的承重要求。slide_containing_sentence 只用來找到投影片。"
@@ -392,7 +386,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         raise ValueError(f"Use a different model than the slides ({model})")
     packet = semantic_packet(record, json.loads(selection_path.read_text()))
     row = {"type": "object", "additionalProperties": False, "required": ["slide", "criterion", "passed", "evidence"],
-           "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(SEMANTIC_CRITERIA)},
+           "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(packet["criteria"])},
                           "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
     schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
               "properties": {"checks": {"type": "array", "items": row}}}
@@ -423,6 +417,8 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
     checks = answer["checks"]
     point_timing = {}
     if subunit:
+        if any(check["criterion"] == "timing" for check in checks):
+            raise ValueError("Subunit point timing decisions must come from the point timing check")
         from backend.pipeline.chapter_slide_point_timing import evaluate_points
         from backend.pipeline import claim_flash_common, evidence_refresh
 
@@ -442,12 +438,10 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         for point in points:
             if point["status"] != "correct" and (point["slide"], point["point"]) not in corrected:
                 failures.setdefault(point["slide"], []).append(point["evidence"])
-        checks = [
-            {**check, "passed": False, "evidence": "\n".join(
-                ([] if check["passed"] else [check["evidence"]]) + failures[check["slide"]])}
-            if check["criterion"] == "timing" and check["slide"] in failures else check
-            for check in checks
-        ]
+        checks = checks + [{"slide": slide["first"], "criterion": "timing",
+                            "passed": slide["first"] not in failures,
+                            "evidence": "\n".join(failures.get(slide["first"], [])) or "逐條要點時間核對通過。"}
+                           for slide in record["slides"]]
     receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
                         "selection_sha256": file_sha256(selection_path), "checks": checks, **point_timing}, model, raw)
     if opus_api_spend_root is not None:

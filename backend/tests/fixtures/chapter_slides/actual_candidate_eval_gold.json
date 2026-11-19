@@ -1,8 +1,8 @@
 [
   {
-    "id": "title-reveals-oath-answer",
+    "id": "title-covers-oath-answer",
     "scope": "mat-5-33-37-lecture-5",
-    "criterion": "timing",
+    "criterion": "coverage",
     "source": [
       {"id": "S0001", "text": "我們昨天呢，看到、提到關於有關姦淫的那些事，然後又提到離婚跟那個再婚的問題。", "at": 66.0},
       {"id": "S0002", "text": "所以我們今天下午來看第五章第三十三節底下那一段，關於起誓的問題。", "at": 94.35},
@@ -20,13 +20,13 @@
       {"id": "S0014", "text": "你不要用起誓來騙別人。", "at": 263.07}
     ],
     "support_sentence": "S0014",
-    "known_bad": {"first": "S0001", "title": "不要用起誓欺騙別人", "points": [{"sentence": "S0004", "text": "有人主張任何情況都不可起誓，起誓無意義", "source": "G01-CL0001"}, {"sentence": "S0008", "text": "神沒有更大者可指，就指著自己起誓", "source": "G01-CL0001"}, {"sentence": "S0011", "text": "耶穌回應大祭司要求起誓的問題", "source": "G01-CL0001"}, {"sentence": "S0014", "text": "不要起誓，主要是不要用起誓騙人", "source": "G01-CL0001"}], "scriptures": [{"sentence": "S0003", "slug": "mat-5-34"}, {"sentence": "S0008", "slug": "heb-6-13"}, {"sentence": "S0010", "slug": "mat-26-63-64"}]},
-    "known_good": {"first": "S0001", "title": "耶穌為甚麼說「不要起誓」？", "points": [{"sentence": "S0004", "text": "有人主張任何情況都不可起誓，起誓無意義", "source": "G01-CL0001"}, {"sentence": "S0008", "text": "神沒有更大者可指，就指著自己起誓", "source": "G01-CL0001"}, {"sentence": "S0011", "text": "耶穌回應大祭司要求起誓的問題", "source": "G01-CL0001"}, {"sentence": "S0014", "text": "不要起誓，主要是不要用起誓騙人", "source": "G01-CL0001"}], "scriptures": [{"sentence": "S0003", "slug": "mat-5-34"}, {"sentence": "S0008", "slug": "heb-6-13"}, {"sentence": "S0010", "slug": "mat-26-63-64"}]}
+    "known_bad": {"first": "S0001", "title": "起誓的字眼", "points": [{"sentence": "S0004", "text": "有人主張任何情況都不可起誓，起誓無意義", "source": "G01-CL0001"}, {"sentence": "S0008", "text": "神沒有更大者可指，就指著自己起誓", "source": "G01-CL0001"}, {"sentence": "S0011", "text": "耶穌回應大祭司要求起誓的問題", "source": "G01-CL0001"}, {"sentence": "S0014", "text": "不要起誓，主要是不要用起誓騙人", "source": "G01-CL0001"}], "scriptures": [{"sentence": "S0003", "slug": "mat-5-34"}, {"sentence": "S0008", "slug": "heb-6-13"}, {"sentence": "S0010", "slug": "mat-26-63-64"}]},
+    "known_good": {"first": "S0001", "title": "不要用起誓欺騙別人", "points": [{"sentence": "S0004", "text": "有人主張任何情況都不可起誓，起誓無意義", "source": "G01-CL0001"}, {"sentence": "S0008", "text": "神沒有更大者可指，就指著自己起誓", "source": "G01-CL0001"}, {"sentence": "S0011", "text": "耶穌回應大祭司要求起誓的問題", "source": "G01-CL0001"}, {"sentence": "S0014", "text": "不要起誓，主要是不要用起誓騙人", "source": "G01-CL0001"}], "scriptures": [{"sentence": "S0003", "slug": "mat-5-34"}, {"sentence": "S0008", "slug": "heb-6-13"}, {"sentence": "S0010", "slug": "mat-26-63-64"}]}
   },
   {
-    "id": "title-reveals-story-ending",
+    "id": "title-covers-story-result",
     "scope": "mat-5-38-48-lecture-5",
-    "criterion": "timing",
+    "criterion": "coverage",
     "source": [
       {"id": "S0154", "text": "我去上我的課，她也不曉得跑去幹什麼東西。", "at": 1512.93},
       {"id": "S0155", "text": "那天晚上，有一個committee meeting，一個委員會的聚會，我跟他也在同一個committee。", "at": 1517.83},
@@ -59,8 +59,8 @@
       {"id": "S0182", "text": "你知道你錯，我就饒恕你，沒問題。", "at": 1718.08}
     ],
     "support_sentence": "S0166",
-    "known_bad": {"first": "S0154", "title": "親切問候帶來公開道歉", "points": [{"sentence": "S0157", "text": "當晚見到Pat，仍主動親切問候", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0166", "text": "一個月後，Pat在教授會議公開道歉", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0177", "text": "Pat：有權整我卻仍善待我，令我受不了", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0182", "text": "知道自己錯了，就饒恕他", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}], "scriptures": []},
-    "known_good": {"first": "S0154", "title": "受責罵之後再見同事", "points": [{"sentence": "S0157", "text": "當晚見到Pat，仍主動親切問候", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0166", "text": "一個月後，Pat在教授會議公開道歉", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0177", "text": "Pat：有權整我卻仍善待我，令我受不了", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0182", "text": "知道自己錯了，就饒恕他", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}], "scriptures": []}
+    "known_bad": {"first": "S0154", "title": "再次見面", "points": [{"sentence": "S0157", "text": "當晚見到Pat，仍主動親切問候", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0166", "text": "一個月後，Pat在教授會議公開道歉", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0177", "text": "Pat：有權整我卻仍善待我，令我受不了", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0182", "text": "知道自己錯了，就饒恕他", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}], "scriptures": []},
+    "known_good": {"first": "S0154", "title": "親切問候帶來公開道歉", "points": [{"sentence": "S0157", "text": "當晚見到Pat，仍主動親切問候", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0166", "text": "一個月後，Pat在教授會議公開道歉", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0177", "text": "Pat：有權整我卻仍善待我，令我受不了", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}, {"sentence": "S0182", "text": "知道自己錯了，就饒恕他", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST11"}], "scriptures": []}
   },
   {
     "id": "compound-point-before-last-component",
@@ -161,9 +161,9 @@
     "known_good": {"first": "S0362", "title": "一次獻祭與律法解讀", "points": [{"sentence": "S0364", "text": "基督一次獻祭後，還要照律法獻贖罪祭嗎？", "source": "DK-802058282cab3b47de21-P04-ST08"}, {"sentence": "S0366", "text": "不必再獻贖罪祭", "source": "G04-CL0018"}, {"sentence": "S0370", "text": "因此不能解作今天仍須遵守全部舊約律法", "source": "DK-802058282cab3b47de21-P04-ST01"}], "scriptures": [{"sentence": "S0363", "slug": "heb-10-12"}, {"sentence": "S0363", "slug": "heb-10-14"}]}
   },
   {
-    "id": "next-title-reveals-answer-after-question-is-fixed",
+    "id": "title-covers-judicial-conclusion",
     "scope": "mat-5-38-48-lecture-5",
-    "criterion": "timing",
+    "criterion": "coverage",
     "source": [
       {"id": "S0001", "text": "下面三十八節底下那一段，論愛仇敵的問題。", "at": 382.0},
       {"id": "S0002", "text": "那裡說：「你們聽見有話說：『以眼還眼，以牙還牙。』", "at": 388.15},
@@ -228,7 +228,20 @@
     ],
     "support_sentence": "S0058",
     "preceding": {"first": "S0001", "last": "S0019", "title": "「以眼還眼」是甚麼意思？", "points": [{"sentence": "S0001", "text": "從三十八節往下看愛仇敵的問題", "source": "G02-CL0004"}, {"sentence": "S0009", "text": "有很多人念這段聖經之後，他們有一個錯誤的觀點", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST03"}, {"sentence": "S0016", "text": "有人說舊約重報復，新約愛仇敵、標準更高", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST03"}, {"sentence": "S0019", "text": "這看法不對：以眼還眼並非舊約道德標準", "source": "G02-CL0005"}], "verses": ["mat-5-38-44"], "scriptures": [{"sentence": "S0002", "slug": "mat-5-38-41"}]},
-    "known_bad": {"first": "S0020", "last": "S0060", "title": "以眼還眼的司法背景", "points": [{"sentence": "S0020", "text": "以眼還眼究竟是什麼原則？", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0023", "text": "查考舊約出現這句話的三處經文", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0056", "text": "不是叫個人在受傷害後照樣報復", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0058", "text": "三處都關乎司法，是審判官定罪的原則", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}], "verses": ["mat-5-38"], "scriptures": [{"sentence": "S0027", "slug": "exo-21-22-25"}, {"sentence": "S0032", "slug": "lev-24-13-14"}, {"sentence": "S0033", "slug": "lev-24-16-23"}, {"sentence": "S0046", "slug": "deu-19-15-21"}]},
-    "known_good": {"first": "S0020", "last": "S0060", "title": "舊約在哪裡說到「以眼還眼」？", "points": [{"sentence": "S0020", "text": "以眼還眼究竟是什麼原則？", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0023", "text": "查考舊約出現這句話的三處經文", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0056", "text": "不是叫個人在受傷害後照樣報復", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0058", "text": "三處都關乎司法，是審判官定罪的原則", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}], "verses": ["mat-5-38"], "scriptures": [{"sentence": "S0027", "slug": "exo-21-22-25"}, {"sentence": "S0032", "slug": "lev-24-13-14"}, {"sentence": "S0033", "slug": "lev-24-16-23"}, {"sentence": "S0046", "slug": "deu-19-15-21"}]}
+    "known_bad": {"first": "S0020", "last": "S0060", "title": "舊約在哪裡說到「以眼還眼」？", "points": [{"sentence": "S0020", "text": "以眼還眼究竟是什麼原則？", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0023", "text": "查考舊約出現這句話的三處經文", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0056", "text": "不是叫個人在受傷害後照樣報復", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0058", "text": "三處都關乎司法，是審判官定罪的原則", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}], "verses": ["mat-5-38"], "scriptures": [{"sentence": "S0027", "slug": "exo-21-22-25"}, {"sentence": "S0032", "slug": "lev-24-13-14"}, {"sentence": "S0033", "slug": "lev-24-16-23"}, {"sentence": "S0046", "slug": "deu-19-15-21"}]},
+    "known_good": {"first": "S0020", "last": "S0060", "title": "以眼還眼的司法背景", "points": [{"sentence": "S0020", "text": "以眼還眼究竟是什麼原則？", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0023", "text": "查考舊約出現這句話的三處經文", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0056", "text": "不是叫個人在受傷害後照樣報復", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}, {"sentence": "S0058", "text": "三處都關乎司法，是審判官定罪的原則", "source": "DK-4f0b60ff1c8b7adbd408-P02-ST04"}], "verses": ["mat-5-38"], "scriptures": [{"sentence": "S0027", "slug": "exo-21-22-25"}, {"sentence": "S0032", "slug": "lev-24-13-14"}, {"sentence": "S0033", "slug": "lev-24-16-23"}, {"sentence": "S0046", "slug": "deu-19-15-21"}]}
+  },
+  {
+    "id": "title-covers-temptation-responsibility",
+    "scope": "mat-6-listening-subunit-6.4",
+    "criterion": "coverage",
+    "source": [
+      {"id": "S0101", "text": "那警告是什麼意思？", "at": 2355},
+      {"id": "S0102", "text": "其實是這樣，保羅乃是說你要小心，如果這個試探是神允許臨到你身上的，神會負責，神會替你開一條出路。", "at": 2358},
+      {"id": "S0103", "text": "可是如果這個試探是你自己搞來的，你自己要負責！", "at": 2373}
+    ],
+    "support_sentence": "S0103",
+    "known_bad": {"first": "S0101", "last": "S0103", "title": "神會開出路"},
+    "known_good": {"first": "S0101", "last": "S0103", "title": "警告中的責任分別"}
   }
 ]
