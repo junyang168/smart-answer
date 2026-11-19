@@ -1,4 +1,8 @@
 import json
+import os
+from pathlib import Path
+
+import pytest
 
 from backend.pipeline import chapter_slide_eval as ev
 
@@ -181,33 +185,50 @@ def test_question_timing_can_use_the_start_of_a_multisentence_question():
     assert (row["status"], row["expected_sentence"]) == ("correct", "S0001")
 
 
-def test_editorial_question_starts_at_the_reading_that_introduces_it():
-    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+POINT_TIMING_CASES = json.loads(
+    (Path(__file__).parent / "fixtures/chapter_slides/subunit_point_timing_regressions.json").read_text()
+)
 
-    source = [
-        {"id": "S0057", "start": 407, "text": "下面暫且不講，我們先來看。"},
-        {"id": "S0058", "start": 411, "text": "保羅明講，在哥林多前書第九章第二十節明講："
-         "「向沒有律法的人，我就作沒有律法的人，為要得沒有律法的人。"},
-        {"id": "S0059", "start": 427, "text": "其實我在神面前，不是沒有律法；在基督面前，正在律法之下。」"},
-        {"id": "S0060", "start": 437, "text": "這句話翻得大有問題，矛盾啊！"},
-    ]
-    slide = {"first": "S0057", "last": "S0060", "points": [
-        {"sentence": "S0058", "text": "保羅如何說自己與律法的關係？"},
-        {"sentence": "S0060", "text": "和合本此處的譯法有問題"},
-    ]}
+
+def check_point_timing_case(case, ask, model):
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points, timing_adjustments
+    from backend.pipeline.claim_flash_common import JEV_BYTES
+
+    packet = case["packet"]
+    rows = evaluate_points(packet, ask, model=model, max_bytes=JEV_BYTES)
+    assert [row["expected_sentence"] for row in rows] == case["expected_anchors"]
+    assert all(row["status"] == "correct" for row in rows)
+    assert timing_adjustments(packet["slides"], packet["source"], rows) == []
+
+
+@pytest.mark.parametrize("case", POINT_TIMING_CASES, ids=lambda case: case["id"])
+def test_subunit_point_timing_golden_replays_the_recorded_jev_answer(case):
+    from backend.pipeline.evidence_refresh import MODEL, digest
+
+    saved = case["recorded_jev"]
+    assert saved["model"] == MODEL, "Run the timing golden cases with the new Jev model"
 
     def ask(state, questions):
-        opener = questions["0:whole:S0058"]
-        assert "是否已開始談這個具體問題" in opener["instructions"]
-        assert "開始讀直接相關的經文" in opener["instructions"]
-        assert "已轉到另一個具體問題" in opener["criteria"]["none"]
-        matching = {"0:whole:S0058", "0:whole:S0059", "1:whole:S0060"}
-        return {key: "full" if key in matching else "none" for key in questions}
+        request = {"model": MODEL, "state": state, "questions": questions}
+        assert digest(request) == saved["request_sha256"], "Run fresh Jev golden Eval after a timing prompt change"
+        assert set(questions) == set(saved["answers"])
+        return saved["answers"]
 
-    rows = evaluate_points({"source": source, "slides": [slide]}, ask, model="jev", max_bytes=128000)
-    assert [(row["status"], row["expected_sentence"]) for row in rows] == [
-        ("correct", "S0058"), ("correct", "S0060"),
-    ]
+    check_point_timing_case(case, ask, MODEL)
+
+
+@pytest.mark.parametrize("case", POINT_TIMING_CASES, ids=lambda case: case["id"])
+def test_subunit_point_timing_golden_with_jev(case):
+    from dotenv import load_dotenv
+
+    from backend.pipeline.claim_flash_common import jev
+    from backend.pipeline.evidence_refresh import MODEL, JevPort
+
+    artifacts = os.environ.get("WANG_SLIDE_POINT_TIMING_ARTIFACTS")
+    if not artifacts:
+        pytest.skip("Set WANG_SLIDE_POINT_TIMING_ARTIFACTS to run or replay Jev")
+    load_dotenv()
+    check_point_timing_case(case, lambda state, questions: jev(Path(artifacts), JevPort(), state, questions), MODEL)
 
 
 def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
