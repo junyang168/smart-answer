@@ -541,6 +541,41 @@
           "conclusion_slide": "S0001",
           "unfaithful_slide": "S0005"
         }
+      },
+      {
+        "id": "keeps-unambiguous-context",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0008",
+                "text": "理解再婚問題，須知道古時離婚後不再婚就無法維生"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
       }
     ]
   }

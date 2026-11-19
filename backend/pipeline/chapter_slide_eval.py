@@ -243,7 +243,10 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
     criteria = dict(SEMANTIC_CRITERIA)
     if context.get("scope") == "subunit":
         criteria.pop("timing")
-        criteria["faithfulness"] += chapter_slide_arguments.BOUNDARY
+        criteria["faithfulness"] += (chapter_slide_arguments.BOUNDARY
+            + "口語若省略主語、對象或範圍，核對成品有沒有把不明確的指涉寫成定論。"
+              "說明哪一句及哪個詞的範圍不清，不用別段代替本張原話，也不要求作者改成相反的定論。"
+              "保留本張明確說到的解釋或限制，可以通過；未覆蓋的確定內容另由完整度檢查。")
     required_points = [{"slide_containing_sentence": case["at"], "requirement": case["why"]}
                        for case in rulings if case["kind"] == "required_point"]
     return {

@@ -94,6 +94,9 @@ def test_subunit_writer_uses_the_current_answer_when_the_earlier_reason_differs(
     prompt = chapter_slides.user_prompt(record["lecture"], selection, context)
     assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE in system
     assert "不可拿前一段的理由替換這次的理由" in system
+    assert "不要替「可以」「明說」等補上一個未能確定的對象" in system
+    packet = ev.semantic_packet(record, selection)
+    assert "不要求作者改成相反的定論" in packet["criteria"]["faithfulness"]
     assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE not in chapter_slides.system_prompt(chapter)
     assert "保羅就沒有提說" in prompt and "保羅明講，是可以" in prompt
     assert "不能據未明講就禁止" not in prompt
@@ -217,9 +220,10 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
               "properties": {"results": {"type": "array", "items": row}}}
     system = (ev.SEMANTIC_SYSTEM + "\n" + ev.ARGUMENT_REVIEW_SYSTEM
               + "\n這次是批量試題，每筆獨立判斷。回一筆 results 給每個 case_id。"
-                "argument_passed 是唯一 argument_requirements 的判定；"
-                "unfaithful_slides 列有實質意思不受本張原文支持的張號，含把別張才說的內容搬來或與本張原話相反；沒有則空。"
-                "evidence 引原文句號與具體文字，其他逐張判定省略。")
+                "argument_passed 只判定唯一 argument_requirements 指明的推論，以 conclusion_slide 與來源為範圍。"
+                "unfaithful_slides 另行判定有實質意思不受本張原文支持的各張；沒有則空。"
+                "兩欄獨立：其他張的忠實問題不能改變指定推論的 verdict。"
+                "evidence 分別說明兩欄依據，並核對布林值與文字理由一致。其他逐張判定省略。")
     client = RecordedClient(chapter_exposition.chapter_client(REVIEW_MODEL),
                             Path(os.environ["WANG_SLIDE_REGRESSION_ARTIFACTS"]), once=True)
     results = client.generate_json(system, json.dumps(items, ensure_ascii=False), schema)["results"]
