@@ -1,6 +1,13 @@
 """Check every point against the first matching sentence on the same slide."""
 
 import json
+import re
+
+
+_VERSE_QUOTE = re.compile(
+    r"(?P<reference>(?:第?[一二三四五六七八九十百零兩两\d]+章[一二三四五六七八九十百零兩两\d]+[節节]|\d+[:：]\d+))"
+    r"\s*(?:末尾|開頭|結尾)?的?\s*「(?P<quote>[^「」]+)」[。.]?"
+)
 
 
 _CRITERIA = {
@@ -20,10 +27,22 @@ def _match_question(meaning, sid, sentence):
                 "criteria": {"full": "這句提出同一個問題，可以用前文消解「那裡」「這段」等指代。",
                              "none": "這句沒有問同一個問題。只談相同主題、回答或回顧也不算。",
                              "uncertain": "不能確定。"}}
+    if verse_quote := _VERSE_QUOTE.fullmatch(meaning):
+        reference, quote = (verse_quote[name] for name in ("reference", "quote"))
+        return {
+            "type": "choice",
+            "instructions": f"{sid} 是否把「{quote}」歸給{reference}，符合要點「{meaning}」？"
+                            "相同詞句出現在別節不算。",
+            "criteria": {
+                "full": "本句將這些話引作指定經節的內容。",
+                "none": "本句沒有這樣引用，或這些話歸於另一節。",
+                "uncertain": "現有語境無法確認出處。",
+            },
+        }
     return {"type": "choice", "criteria": _CRITERIA,
-            "instructions": f"指定句 {sid} 「{sentence}」是否已讓聽眾聽到「{meaning}」的每個實質意思？"
-                            "可用本張內的前文理解代詞與省略。只知道其中一部分，"
-                            "尤其只講正反對比的一端，仍不完整。提問不算回答。"}
+            "instructions": f"{sid}「{sentence}」是否說出「{meaning}」？"
+                            "前文可補主詞、指代和已說明的章節範圍。摘要可省略附帶細節。提問不算回答。"
+                            "只說有關，未表明是結論，不算完整。不可用後文補答案。"}
 
 
 def _ask_batches(state, questions, ask, model, max_bytes):
@@ -70,26 +89,38 @@ def evaluate_points(packet, candidates, ask, *, model, max_bytes):
         if not source:
             raise ValueError("A displayed slide has no timing source")
         questions = {}
+        exact = {}
+
+        def match_sentences(key, meaning):
+            target = meaning.strip().rstrip("。．.!！")
+            for sid, sentence in source.items():
+                name = f"{key}:{sid}"
+                # Compare whole sentences. A quotation or substring can occur in
+                # a denial or question. Only omit later matches once we have proof.
+                if target and sentence.strip().rstrip("。．.!！") == target:
+                    exact[name] = "full"
+                    break
+                questions[name] = _match_question(meaning, sid, sentence)
+
         for index, point in enumerate(slide["points"]):
-            for sid in source:
-                questions[f"{index}:whole:{sid}"] = _match_question(point["text"], sid, source[sid])
+            match_sentences(f"{index}:whole", point["text"])
             if parts := decompositions.get((first, point["sentence"])):
                 questions[f"{index}:split"] = {
                     "type": "choice",
                     "instructions": f'這些投影片短句 {json.dumps(parts, ensure_ascii=False)} '
-                    "各自有沒有陳述一個不同的意思或提出一個完整問題？只核對各短句本身的獨立性。",
+                                    "各自有沒有陳述一個不同的意思或提出一個完整問題？只核對各短句本身的獨立性。",
                     "criteria": {"independent": "每條都各自陳述不同的意思或提出完整問題。",
                                  "dependent": "至少一條只是名詞、所指對象、必要條件或重述另一條。",
                                  "uncertain": "不能確定。"},
                 }
                 for part_index, part in enumerate(parts):
-                    for sid in source:
-                        questions[f"{index}:{part_index}:{sid}"] = _match_question(part, sid, source[sid])
+                    match_sentences(f"{index}:{part_index}", part)
 
-        answers = _ask_batches({"原文": source}, questions, ask, model, max_bytes)
+        answers = _ask_batches({"原文": source}, questions, ask, model, max_bytes) if questions else {}
+        answers.update(exact)
 
         def earliest(index, part):
-            return next((sid for sid in source if answers[f"{index}:{part}:{sid}"] == "full"), None)
+            return next((sid for sid in source if answers.get(f"{index}:{part}:{sid}") == "full"), None)
 
         for index, point in enumerate(slide["points"]):
             current, text = point["sentence"], point["text"]

@@ -150,3 +150,85 @@ def test_all_points_are_checked_per_slide_even_without_split_candidates():
     assert [(item["status"], item.get("expected_sentence"), item.get("delta_seconds")) for item in rows] == [
         ("early", "S0002", -10), ("late", "S0001", 20), ("correct", "S0004", 0), ("unresolved", None, None),
     ]
+
+
+def test_verbatim_points_skip_jev_but_can_still_have_an_earlier_paraphrase():
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+
+    source = [
+        {"id": "S0001", "text": "你們的任務便是發光。", "start": 0},
+        {"id": "S0002", "text": "門徒的使命就是要發光。", "start": 10},
+    ]
+    packet = {"source": source, "slides": [{
+        "first": "S0001", "last": "S0002", "points": [
+            {"sentence": "S0002", "text": "門徒的使命就是要發光"},
+        ],
+    }]}
+
+    def ask(state, questions):
+        assert set(questions) == {"0:whole:S0001"}
+        return {"0:whole:S0001": "full"}
+
+    row, = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
+    assert (row["status"], row["expected_sentence"]) == ("late", "S0001")
+
+    packet["source"] = source[1:]
+    packet["slides"][0]["first"] = "S0002"
+
+    def no_call(*_):
+        raise AssertionError("a verbatim-only check should make no call")
+
+    row, = evaluate_points(packet, [], no_call, model="jev", max_bytes=128000)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+
+
+def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+
+    def check(text, original, at, answers, verify):
+        source = [{"id": f"S{i:04d}", "text": line, "start": i * 10}
+                  for i, line in enumerate(original, 1)]
+        packet = {"source": source, "slides": [{
+            "first": source[0]["id"], "last": source[-1]["id"],
+            "points": [{"sentence": f"S{at:04d}", "text": text}],
+        }]}
+
+        def ask(_, questions):
+            verify(questions)
+            return {key: answers[int(key[-4:]) - 1] for key in questions}
+
+        row, = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
+        return row
+
+    def quote(questions):
+        for q in questions.values():
+            assert "七章十二節" in q["instructions"] and "律法和先知" in q["instructions"]
+            assert "歸給" in q["instructions"]
+
+    def assertion(questions):
+        for q in questions.values():
+            assert "補主詞" in q["instructions"] and "提問不算回答" in q["instructions"]
+            assert "有關" in q["instructions"] and "結論" in q["instructions"]
+
+    row = check("七章十二節末尾的「律法和先知」", [
+        "五章十七節：『莫想我來要廢掉律法和先知。』",
+        "七章十二節：『因為這就是律法和先知的道理。』",
+    ], 2, ["none", "full"], quote)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+
+    row = check("門徒的義要勝過文士和法利賽人的義", [
+        "所以門徒的義要什麼？", "五章十七節到四十八節，要勝過文士和法利賽人的義。",
+    ], 2, ["question", "full"], assertion)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+
+    row = check("接著講禱告的問題", [
+        "六章一節到七章十一節，講到施捨。", "然後六章五節到第十一節，講到禱告的問題。",
+    ], 2, ["none", "full"], assertion)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+
+    row = check("7:13-27 是門徒使命的結論", [
+        "七章十三節到二十七節又是另一個結論。",
+        "跟這裡有關係，就是跟門徒的使命有關係。",
+        "就講到整個門徒的使命的結論。",
+    ], 2, ["partial", "partial", "full"], assertion)
+    assert (row["status"], row["expected_sentence"]) == ("early", "S0003")
