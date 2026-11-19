@@ -243,5 +243,26 @@
     "support_sentence": "S0103",
     "known_bad": {"first": "S0101", "last": "S0103", "title": "神會開出路"},
     "known_good": {"first": "S0101", "last": "S0103", "title": "警告中的責任分別"}
+  },
+  {
+    "id": "inclusio-links-prayer-to-conduct",
+    "scope": "mat-6-listening-subunit-6.1",
+    "criterion": "coverage",
+    "source": [
+      {"id": "S0027", "text": "六章九節到十三節是主教導我們的禱告文。"},
+      {"id": "S0028", "text": "六章十九節到七章六節是談到我們的行為。"},
+      {"id": "S0029", "text": "所以這件事跟我們講什麼？"},
+      {"id": "S0030", "text": "我們的行為啊，是我們禱告的一部分。"},
+      {"id": "S0049", "text": "我們不只是用我們的口禱告，我們也用我們的行動、用我們的行為來禱告。"},
+      {"id": "S0050", "text": "這個如果你沒有看到聖經經文的結構，你看不出來。"},
+      {"id": "S0051", "text": "可是你看這個經文的結構，inclusio，你就很容易看得出來。"}
+    ],
+    "support_sentence": "S0051",
+    "known_bad": {"points": ["經文首尾都談禱告", "行為也是禱告"]},
+    "known_good": {"points": ["首尾都談禱告，因此中間講的行為也要從禱告來理解，行為也是禱告"]},
+    "across_slides_good": [
+      {"points": ["六章八節至七章十一節首尾都在談禱告"]},
+      {"points": ["因此，中間關於行為的教導要放在禱告的脈絡裡看，行為也是禱告"]}
+    ]
   }
 ]

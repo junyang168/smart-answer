@@ -64,7 +64,8 @@ def generation_input(dataset, *, revisions=False):
 
 COMMON_CRITERIA = [
     {'id':'scope-faithfulness', 'requirement':'原文立場、說話者、否定、限制與因果忠實；不添加未講的答案。'},
-    {'id':'scope-coverage', 'requirement':'從原文反向核對承重問題、理由、結論、經文；非承重細節可省，已適當呈現的意思不要求重複。'},
+    {'id':'scope-coverage', 'requirement': slides.ARGUMENT_COVERAGE_RULES
+     + '從原文反向核對承重問題與經文；非承重細節可省，已適當呈現的意思不要求重複。'},
     {'id':'scope-scripture', 'requirement':'實際引用經文、原文字義與短註歸屬正確；一般譯詞不冒充本節實際字詞。'},
     {'id':'scope-presentation', 'requirement':'原聲口吻、標題涵蓋整張共同主題（可概括本張稍後說出的結論）、要點可理解，不混淆他人立場；依論證層與原文核對故事作用，不因缺開場點或只有標題的秒數判錯。'},
     {'id':'scope-timing', 'requirement':'定時要點與同張實際講述同步；一般時間差遵照正式閾值及 golden。'},

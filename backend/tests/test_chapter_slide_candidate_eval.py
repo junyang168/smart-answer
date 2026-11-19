@@ -19,6 +19,22 @@ def test_gold_candidate_set_preserves_actual_source_and_distinguishes_four_crite
         assert case["support_sentence"] in {line["id"] for line in case["source"]}
 
 
+def test_coverage_checks_the_inference_in_both_authoring_and_eval():
+    gold = next(c for c in json.loads(GOLD.read_text()) if c["id"] == "inclusio-links-prayer-to-conduct")
+    selection = {"pieces": [{"id": "P1", "start": 0, "end": 60,
+                             "text": "".join(row["text"] for row in gold["source"])}],
+                 "decisions": [{"id": "P1", "keep": True}]}
+    context = {"schema_version": "chapter-slide-outline-context.v1", "scope": "subunit", "claims": []}
+    gen = chapter_slides.user_prompt("Lecture", selection, context)
+    packet = ev.semantic_packet({"lecture": "Lecture", "claim_context": context, "slides": []}, selection)
+    coverage = packet["criteria"]["coverage"]
+    for text in (gen, coverage):
+        assert "未交代理由怎樣支持結論，仍是漏步驟" in text
+        assert "相鄰張的要點合起來要能讀出兩者的關係" in text
+    assert "通過要指出實際表達該推論的要點" in coverage
+    assert len(gold["across_slides_good"]) == 2
+
+
 def test_hebrews_regression_detects_multiple_readings_in_one_composite_sentence(tmp_path):
     case = next(c for c in json.loads(GOLD.read_text()) if c["id"] == "hebrews-disjoint-readings")
     line = next(line["text"] for line in case["source"] if line["id"] == case["support_sentence"])
