@@ -215,6 +215,15 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
     source = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
     context = slide_record.get("claim_context") or {}
     rulings = resolve_cases(cases_for(slide_record["lecture"]), source, partial=context.get("scope") == "subunit")
+    slides = slide_record["slides"]
+    if (timings := slide_record.get("diagram_timing")) is not None:
+        # The reviewer sees the same diagrams and sentence anchors as the player.
+        chapter_slides.timed_diagrams(slides, source, context, timings)
+        slides = [{**{k: v for k, v in slide.items() if k != "diagram_ref"},
+                   **({"diagram_ref": timings[slide["first"]]["sha256"],
+                       "diagram_sentence": timings[slide["first"]]["sentence"]}
+                      if timings.get(slide["first"], {}).get("sentence") else {})}
+                  for slide in slides]
     return {
         "lecture": slide_record["lecture"],
         "criteria": SEMANTIC_CRITERIA,
@@ -226,7 +235,7 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
             {**claim, "diagrams": [{k: v for k, v in d.items() if k != "svg"} for d in claim.get("diagrams", [])]}
             for claim in (slide_record.get("claim_context") or {}).get("claims", [])
         ],
-        "slides": slide_record["slides"],
+        "slides": slides,
     }
 
 

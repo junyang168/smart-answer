@@ -662,17 +662,16 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
-def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict[str, dict]:
+def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings=None) -> dict[str, dict]:
     """Resolve the one diagram selected for a slide and when it appears.
 
-    The diagram appears when he starts the argument it shows: the earliest sentence on
-    this slide that belongs to a linked Claim (its stated sentence or an Evidence anchor),
-    or a point citing that Claim or one of its Evidence steps. Owner 2026-11-18: diagram
-    D waited for the Claim's stated sentence (S0018, his recap) and arrived after he had
-    already laid out the two parts from S0008.
+    New sub-unit bundles carry an explicit sentence located from the slide's
+    transcript. Retain the linked-Claim anchor for existing bundles without one.
     """
     by_id = {line["id"]: line["start"] for line in lines}
     claims = context.get("claims", [])
+    if timings is not None and set(timings) != {slide["first"] for slide in slides if slide.get("diagram_ref")}:
+        raise ValueError("Diagram timings do not match the selected slides")
     placed = {}
     for slide in slides:
         ref = slide.get("diagram_ref")
@@ -694,6 +693,14 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict
         if not matches:
             raise ValueError(f"{slide['title']}: 所選論證圖沒有連到本張的論點")
         at, item = min(matches, key=lambda match: match[0])
+        if timings is not None:
+            timing = timings[slide["first"]]
+            sentence = timing["sentence"]
+            if timing["sha256"] != ref or (sentence is not None and not on_slide(sentence)):
+                raise ValueError(f"{slide['title']}: 圖的出場句與本張原文不符")
+            if sentence is None:
+                continue
+            at = by_id[sentence]
         image = base64.b64encode(item["svg"].encode()).decode("ascii")
         placed[slide["first"]] = {
             "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
@@ -715,7 +722,8 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
-    diagrams = timed_diagrams(slides_record["slides"], lines, slides_record.get("claim_context") or {})
+    diagrams = timed_diagrams(slides_record["slides"], lines, slides_record.get("claim_context") or {},
+                              slides_record.get("diagram_timing"))
     for slide in slides_record["slides"]:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:

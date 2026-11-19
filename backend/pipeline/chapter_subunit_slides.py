@@ -28,7 +28,7 @@ import json
 import shutil
 from pathlib import Path
 
-from backend.pipeline import chapter_exposition, chapter_slide_eval, chapter_slides
+from backend.pipeline import chapter_exposition, chapter_slide_diagram_timing, chapter_slide_eval, chapter_slides
 from backend.pipeline.chapter_material import CHAPTERS
 
 SLIDE_MODEL = "gpt-6.1-sol"
@@ -105,6 +105,9 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn) -> dict:
         if made["status"] != "saved":
             return {"sub_unit": sub_id, "status": "generation_rejected", "problems": made.get("problems")}
     for round_ in range(chapter_slides.MOST_ROUNDS + 1):
+        diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
+        if diagram_problems:
+            return {"sub_unit": sub_id, "status": "unresolved", "rounds": round_, "problems": diagram_problems}
         receipt = out / f"round{round_ + 1}.semantic-eval.json"
         if not receipt.exists() or chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt) == [
                 "Semantic Eval belongs to a different slide version or source selection"]:
