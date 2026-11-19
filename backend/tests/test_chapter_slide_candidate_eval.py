@@ -100,3 +100,28 @@ def test_unit_reader_uses_the_exact_semantic_eval_without_a_second_review(tmp_pa
                    for k in ev.SEMANTIC_CRITERIA],
     }))
     assert reviewed_unit_recording(tmp_path, unit, entry, {})["slides"][0]["title"] == "論點"
+
+
+def test_fixing_the_first_question_does_not_clear_early_answer_on_next_slide(tmp_path):
+    gold = next(c for c in json.loads(GOLD.read_text()) if c['id'] == 'next-title-reveals-answer-after-question-is-fixed')
+    candidate = tmp_path / "slides.json"
+    source = tmp_path / "selection.json"
+    source.write_text(json.dumps({"source": gold["source"]}))
+    bad, good, prior = gold['known_bad'], gold['known_good'], gold['preceding']
+    assert prior['title'] == '「以眼還眼」是甚麼意思？'
+    assert gold['support_sentence'] == 'S0058'
+    assert '審判官' in next(line['text'] for line in gold['source'] if line['id'] == 'S0058')
+    for slide, expected in ((bad, False), (good, True)):
+        candidate.write_text(json.dumps({"slides": [prior, slide]}))
+        receipt = tmp_path / "semantic-eval.json"
+        receipt.write_text(json.dumps({
+            "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
+            "slides_sha256": ev.semantic_slide_sha256(candidate),
+            "selection_sha256": chapter_exposition.file_sha256(source),
+            "checks": [{"slide": s["first"], "criterion": k,
+                        "passed": expected or s is prior or k != "timing",
+                        "evidence": "節錄顯示 S0058 才說到司法原則。"}
+                       for s in (prior, slide) for k in ev.SEMANTIC_CRITERIA],
+        }))
+        problems = ev.semantic_eval_problems(candidate, source, receipt)
+        assert problems == ([] if expected else ["S0020 timing: 節錄顯示 S0058 才說到司法原則。"])

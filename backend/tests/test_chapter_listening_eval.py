@@ -145,3 +145,23 @@ def test_new_argument_version_and_diagrams_participate_in_unified_eval(tmp_path,
     assert ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence)['checks']['ui']['status'] == 'failed'
     slide['diagram']['at'] += 0.5
     assert ev.evaluate(tmp_path, 'mat-5-1-48')['checks']['playback']['status'] == 'failed'
+
+
+def test_existing_audio_boundaries_with_new_slide_clock_use_player_coverage():
+    from pathlib import Path
+    from backend.pipeline.chapter_listening_units import align_playback_intervals
+
+    fixture = Path(__file__).parent / 'fixtures/chapter_slides/mixed_playback_clocks.json'
+    index = json.loads(fixture.read_text())
+    original = json.loads(fixture.read_text())
+    assert len(ev.playback_alignment_problems(index)) == 3
+    for section in index['sections']:
+        row = section['sermons'][0]
+        aligned = align_playback_intervals(row)
+        assert aligned['stretches'] == row['stretches']
+        assert [s['at'] for s in aligned['slides']] == [s['at'] for s in row['slides']]
+        assert aligned['transcript'][0]['text'] == row['transcript'][0]['text']
+        section['sermons'][0] = aligned
+    assert ev.playback_alignment_problems(index) == []
+    assert index['sections'][0]['sermons'][0]['transcript'][0]['at'] == 37.25
+    assert original['sections'][0]['sermons'][0]['transcript'][0]['at'] == 37.24

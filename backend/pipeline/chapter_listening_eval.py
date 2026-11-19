@@ -155,6 +155,25 @@ def diagram_index_problems(index):
     return problems
 
 
+
+def playback_alignment_problems(index):
+    """Check the displayed audio, subtitles and slide intervals on the same clock."""
+    problems = []
+    for section in index['sections']:
+        for row in section['sermons']:
+            for line in row['transcript']:
+                if not any(s['start'] <= line['at'] < s['end'] for s in row['stretches']):
+                    problems.append(f"Sentence outside playback range: {section['label']}")
+            for stretch in row['stretches']:
+                end = stretch['start']
+                for start, finish in sorted((max(stretch['start'], s['at']), min(stretch['end'], s['at'] + s['seconds']))
+                                            for s in row['slides'] if s['at'] < stretch['end'] and s['at'] + s['seconds'] > stretch['start']):
+                    if start > end + 1: problems.append(f"Slide coverage gap: {section['label']}")
+                    end = max(end, finish)
+                if end < stretch['end'] - 1: problems.append(f"Slide coverage gap: {section['label']}")
+    return problems
+
+
 def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versions=None):
     try:
         index = units.build(data_root, passage)
@@ -281,18 +300,7 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
                                      'point_at': sorted(shown), 'passed': passed})
         if not passed:
             playback_problems.append('Rendered owner timing correction differs from its spoken source')
-    for section in index['sections']:
-        for row in section['sermons']:
-            for line in row['transcript']:
-                if not any(s['start'] <= line['at'] < s['end'] for s in row['stretches']):
-                    playback_problems.append(f"Sentence outside playback range: {section['label']}")
-            for stretch in row['stretches']:
-                end = stretch['start']
-                for start, finish in sorted((max(stretch['start'], s['at']), min(stretch['end'], s['at'] + s['seconds']))
-                                            for s in row['slides'] if s['at'] < stretch['end'] and s['at'] + s['seconds'] > stretch['start']):
-                    if start > end + 1: playback_problems.append(f"Slide coverage gap: {section['label']}")
-                    end = max(end, finish)
-                if end < stretch['end'] - 1: playback_problems.append(f"Slide coverage gap: {section['label']}")
+    playback_problems += playback_alignment_problems(catalog if catalog is not None else index)
     checks = {'selection': {'status': 'failed' if selection_problems else 'passed', 'problems': selection_problems},
               'slides': {'status': 'failed' if any(r['status'] != 'passed' for r in slide_results) else 'passed', 'records': slide_results},
               'playback': {'status': 'failed' if playback_problems else 'passed', 'problems': playback_problems,

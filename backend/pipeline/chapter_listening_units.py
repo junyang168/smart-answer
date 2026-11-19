@@ -91,6 +91,29 @@ def owner_timing(slides: dict, selection: dict) -> tuple[dict, list]:
                      for correction, prescription in zip(corrections, prescriptions, strict=True)]
 
 
+
+def align_playback_intervals(row: dict) -> dict:
+    """Record how long the active slide stays visible within a retained clip."""
+    slides = [dict(slide) for slide in row['slides']]
+    clips = row['stretches']
+    for index, slide in enumerate(slides):
+        at = slide['at']
+        clip = next((clip for clip in clips if clip['start'] <= at < clip['end']
+                     and not clip.get('left_out')), None)
+        if clip is None:
+            continue
+        next_start = slides[index + 1]['at'] if index + 1 < len(slides) else clip['end']
+        visible_until = min(next_start, clip['end'])
+        slide['seconds'] = max(slide['seconds'], round(visible_until - at, 2))
+    transcript = []
+    for line in row['transcript']:
+        # Two equivalent clocks rounded to cents can straddle the clip start.
+        start = next((clip['start'] for clip in clips
+                      if 0 < round(clip['start'] - line['at'], 2) <= .01), line['at'])
+        transcript.append({**line, 'at': start})
+    return {**row, 'slides': slides, 'transcript': transcript}
+
+
 def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -> dict:
     """Keep argument identity distinct from its possibly interrupted playback runs."""
     sections = []
@@ -160,7 +183,7 @@ def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -
                    # rounding a sentence first can hide it just before clip start.
                    'transcript': [{'at': line['start'], 'end': line['end'], 'text': line['text']} for line in lines],
                    'spoken': [], 'readings': [], 'original_language_events': []}
-            row = audio._retimed(recording['retime'], row)
+            row = align_playback_intervals(audio._retimed(recording['retime'], row))
             continued = sid in seen
             sections.append({'passage': f'{passage}-sub-{sid}-run-{run_index}',
                              'unit_id': str(unit['unit_number']),
