@@ -101,7 +101,7 @@ def test_rejected_claim_trial_revision_is_preserved_and_not_called_again(tmp_pat
                'findings': [{'slide': 'S0001', 'kind': '跟得上', 'problem': '故事', 'fix': '加要點'}],
                'claim_checks': [{'claim_id': 'C1', 'status': 'covered', 'slides': ['S0001'], 'reason': '完整'}]}
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=FakeClient([verdict]))
-    client = FakeClient([{'slides': [slide('S0001', points=('一', '二', '三', '四', '五', '六'))]}])
+    client = FakeClient([{'slides': [slide('S0001', points=('一', '二', '三', '四', '五', '六'))]}] * (chapter_slides.REPAIRS + 1))
     assert chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=client)['status'] == 'rejected'
     before = chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').read_bytes()
     unused = FakeClient([])

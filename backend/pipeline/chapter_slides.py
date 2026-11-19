@@ -1135,6 +1135,14 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
             return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
         response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
     problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
+    # Same as generation: program problems go back to the model with its own answer, at most REPAIRS times.
+    for _ in range(0 if recheck_only or context is None else REPAIRS):
+        if not problems:
+            break
+        repair = (prompt + "\n\n上一份修正稿（JSON）：\n" + json.dumps(response, ensure_ascii=False)
+                  + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n" + "\n".join(f"- {p}" for p in problems))
+        response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, repair, response_schema(context))
+        problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
         if not recheck_only:
