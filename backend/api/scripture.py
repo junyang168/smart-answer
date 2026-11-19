@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+from html import escape
 from typing import Dict, Optional
 from urllib.parse import quote_plus
 
@@ -949,16 +951,28 @@ async def fetch_bible_api(
 async def get_scripture_basic(reference: str):
     info = parse_reference(reference)
     passages: Dict[str, str] = {"zh": "", "en": ""}
+    if BIBLE_API_TRANSLATION_ZH == "cuv":
+        from backend.bible_study.paths import cuv_dir
+
+        path = cuv_dir() / info["slug_book"].upper() / f"{info['chapter']}.json"
+        try:
+            chapter = json.loads(path.read_text(encoding="utf-8"))
+            verses = [chapter.get(str(verse), "").strip() for verse in range(info["start"], info["end"] + 1)]
+            if verses and all(verses):
+                passages["zh"] = "<p>" + "<br/>".join(escape(verse) for verse in verses) + "</p>"
+        except (OSError, ValueError, AttributeError):
+            pass
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            passages["zh"] = await fetch_bible_api(
-                client,
-                info["slug_book"],
-                info["chapter"],
-                info["start"],
-                info["end"],
-                BIBLE_API_TRANSLATION_ZH,
-            )
+            if not passages["zh"]:
+                passages["zh"] = await fetch_bible_api(
+                    client,
+                    info["slug_book"],
+                    info["chapter"],
+                    info["start"],
+                    info["end"],
+                    BIBLE_API_TRANSLATION_ZH,
+                )
         except httpx.HTTPError as exc:
             print(f"Failed to fetch Chinese passage: {exc}")
         try:
