@@ -95,6 +95,7 @@ def test_subunit_writer_uses_the_current_answer_when_the_earlier_reason_differs(
     assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE in system
     assert "不可拿前一段的理由替換這次的理由" in system
     assert "不要替「可以」「明說」等補上一個未能確定的對象" in system
+    assert "即使照抄原話，也不要把它列成該問題的答案" in system
     packet = ev.semantic_packet(record, selection)
     assert "不要求作者改成相反的定論" in packet["criteria"]["faithfulness"]
     assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE not in chapter_slides.system_prompt(chapter)
