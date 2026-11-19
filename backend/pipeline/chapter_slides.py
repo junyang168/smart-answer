@@ -183,8 +183,11 @@ def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
     point = schema["properties"]["slides"]["items"]["properties"]["points"]["items"]
     point["properties"]["source"] = {"type": "string"}
     point["required"].append("source")
-    if refs := sorted({d["sha256"] for claim in claim_context["claims"]
-                       for d in claim.get("diagrams", []) if "svg" in d}):
+    if "diagram_spans" in claim_context:
+        if claim_context["diagram_spans"]:
+            schema["properties"]["slides"]["items"]["properties"]["points"].pop("maxItems", None)
+    elif refs := sorted({d["sha256"] for claim in claim_context["claims"]
+                         for d in claim.get("diagrams", []) if "svg" in d}):
         slide = schema["properties"]["slides"]["items"]
         slide["properties"]["diagram_ref"] = {"type": "string", "enum": ["", *refs]}
         slide["required"].append("diagram_ref")
@@ -368,7 +371,16 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                                         for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}
                       for claim in claim_context["claims"]
                   ]}, ensure_ascii=False)]
-        if any("svg" in d for claim in claim_context["claims"] for d in claim.get("diagrams", [])):
+        if "diagram_spans" in claim_context:
+            if spans := claim_context["diagram_spans"]:
+                lines += ["# 已定位的連續講圖範圍",
+                          "每段 first–last 必須連續留在同一張投影片。切換圖內的區塊只換要點，"
+                          "不換投影片。到 last 為止都保留這張，之後有原文就另起一張。首句可包含緊接的引入。"
+                          "圍繞整張圖整理少量完整要點，沒有四點上限。選圖和出圖時間由程式處理，不填 diagram_ref。",
+                          json.dumps(spans, ensure_ascii=False)]
+            else:
+                lines += ["本段未確認有連續的整圖講解。圖由程式處理，不填 diagram_ref。"]
+        elif any("svg" in d for claim in claim_context["claims"] for d in claim.get("diagrams", [])):
             lines += ["每張投影片的 diagram_ref 只填這張要顯示的一張圖的 sha256。"
                       "圖須連到本張實際講述的 Claim；有圖也要保留講論要點。沒有圖就填空字串。"]
     elif claim_context is not None:
@@ -464,6 +476,7 @@ def check(
     cuv_root: Path | None = None,
     one_slide: list[tuple[str, str]] = (),
     check_term_timing: bool = True,
+    diagram_spans: tuple = (),
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -535,7 +548,9 @@ def check(
         if not title:
             problems.append(f"{own_ids[0]}: 沒有標題")
         held = any(own_ids[0] <= a and b in own_ids for a, b in one_slide)
-        if not FEWEST_POINTS <= len(points) <= (MOST_CASE_POINTS if held else MOST_POINTS):
+        diagram_span = any(span["first"] in own_ids for span in diagram_spans)
+        limit = len(own_ids) if diagram_span else MOST_CASE_POINTS if held else MOST_POINTS
+        if not FEWEST_POINTS <= len(points) <= limit:
             problems.append(f"{title}: 要點 {len(points)} 條")
         verse_field = str(slide.get("verses") or "")
         verses = parse_slide_verses(verse_field, chapter)
@@ -629,7 +644,16 @@ def checked(
     outline = claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1"
     if outline:
         from backend.pipeline.chapter_slide_claims import retime
-        raw = retime(place_case_diagrams(raw, claim_context, sentences(kept)), claim_context)
+        if "diagram_spans" in claim_context:
+            spans_by_start = {span["first"]: span["sha256"] for span in claim_context["diagram_spans"]}
+            raw = [{k: v for k, v in slide.items() if k != "diagram_ref"} for slide in raw]
+            for sid, ref in spans_by_start.items():
+                slide = next((row for row in reversed(raw) if row.get("first", "") <= sid), None)
+                if slide is not None:
+                    slide["diagram_ref"] = ref
+        else:
+            raw = place_case_diagrams(raw, claim_context, sentences(kept))
+        raw = retime(raw, claim_context)
     spans = []
     if claim_context is not None:
         from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
@@ -641,6 +665,8 @@ def checked(
     options = {"one_slide": spans} if spans else {}
     if (claim_context or {}).get("scope") == "subunit":
         options["check_term_timing"] = False
+        if (claim_context or {}).get("diagram_spans"):
+            options["diagram_spans"] = claim_context["diagram_spans"]
     problems, unshown, slides = check(raw, kept, chapter, **options)
     if not problems and claim_context is not None:
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps

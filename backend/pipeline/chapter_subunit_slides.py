@@ -92,13 +92,23 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
         raise ValueError(f"{out} holds a different selection for {sub_id}; use a new directory")
     selection_path.write_text(json.dumps(selection, ensure_ascii=False, indent=1))
     context_path = out / "claims-context.json"
-    if not context_path.exists():
+    slides_path = chapter_slides.record_path(data, passage, lecture)
+    if context_path.exists():
+        context = json.loads(context_path.read_text())
+    else:
         context = compile_instance_context(passage, lecture, data_base_dir=data, conn=conn,
                                            change_set_id=entry["changeset"])
         context["scope"] = "subunit"
-        context_path.write_text(json.dumps(context, ensure_ascii=False, indent=1))
-    context = json.loads(context_path.read_text())
-    slides_path = chapter_slides.record_path(data, passage, lecture)
+    if not slides_path.exists() and "diagram_spans" not in context:
+        lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+        spans, issues = chapter_slide_diagram_timing.plan_record(context, lines, out / "diagram-plan")
+        if issues:
+            return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": issues}
+        context["diagram_spans"] = spans
+    if not slides_path.exists():
+        temp = context_path.with_suffix(".tmp")
+        temp.write_text(json.dumps(context, ensure_ascii=False, indent=1))
+        temp.replace(context_path)
     client = _client(SLIDE_MODEL, out / "calls")
     if not slides_path.exists():
         made = chapter_slides.decide(chapter, lecture, data_base_dir=data, client=client, force=True, claim_context=context)

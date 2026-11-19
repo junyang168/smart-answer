@@ -132,10 +132,19 @@ def diagram_problems(slides: list[dict], lines: list[dict], context: dict) -> li
     """Check the saved diagram choices and require golden diagrams in retained scope."""
     from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
 
+    timings = None
+    if "diagram_spans" in context:
+        from backend.pipeline.chapter_slide_diagram_timing import project_plan
+
+        timings, problems = project_plan(slides, context["diagram_spans"])
+        if problems:
+            return problems
     try:
-        placed = chapter_slides.timed_diagrams(slides, lines, context)
+        placed = chapter_slides.timed_diagrams(slides, lines, context, timings)
     except ValueError as exc:
         return [str(exc)]
+    if timings is not None:
+        return []
     if context.get("diagram_contract") != "claim-bound.v1":
         return []
     by_sentence = {line["id"]: line["start"] for line in lines}
@@ -296,6 +305,15 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
         return [f"Semantic Eval must use a different model than the slides ({record.get('model')})"]
     if "baseline_eval_sha256" in result:
         return ["Semantic Eval must judge every slide in this run, not reuse an earlier verdict"]
+    context = record.get("claim_context") or {}
+    if "diagram_spans" in context:
+        from backend.pipeline.chapter_slide_diagram_timing import project_plan
+
+        timings, problems = project_plan(record["slides"], context["diagram_spans"])
+        if problems:
+            return problems
+        if record.get("diagram_timing") != timings:
+            return ["Diagram timing does not match the recorded explanation span"]
     if "point_timing_adjustments" in record:
         try:
             source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))

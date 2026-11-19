@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from backend.pipeline import chapter_exposition, chapter_slides, claim_flash_common
+from backend.pipeline import chapter_exposition, chapter_slide_eval, chapter_slides, claim_flash_common
 from backend.pipeline import chapter_slide_diagram_timing as timing
 
 
@@ -85,3 +85,57 @@ def test_diagram_timing_updates_existing_record_and_clears_stale_assignments(tmp
     dest.write_text(json.dumps(saved))
     assert timing.check_record(dest, src, tmp_path / "raw-calls") == []
     assert json.loads(dest.read_text())["diagram_timing"] == {}
+
+
+def test_diagram_span_is_planned_before_the_writer_splits_slides():
+    lines = source()
+    calls = []
+
+    def ask(state, questions):
+        ids = list(state["相關論證的依序原文"])
+        calls.append(ids)
+        return {"scope": "whole", "S0001": "outside", "S0002": "start",
+                "S0003": "inside", "S0004": "outside"}
+
+    context = candidate()["claim_context"]
+    spans, problems = timing.plan_spans(context, lines, ask)
+    assert problems == [] and calls == [[line["id"] for line in lines]]
+    assert spans == [{"sha256": "C", "first": "S0002", "last": "S0003"}]
+
+    split = [{"first": "S0001", "last": "S0002", "diagram_ref": "C"},
+             {"first": "S0003", "last": "S0003", "diagram_ref": "C"}]
+    assert timing.project_plan(split, spans)[1]
+    assert chapter_slide_eval.diagram_problems(split, lines, {**context, "diagram_spans": spans})
+    missing = [{"first": "S0001", "last": "S0003"}]
+    assert timing.project_plan(missing, spans)[1]
+    extended = [{"first": "S0001", "last": "S0004", "diagram_ref": "C"}]
+    assert timing.project_plan(extended, spans)[1]
+
+    grouped = [{"first": "S0001", "last": "S0003", "diagram_ref": "C", "points": []},
+               {"first": "S0004", "last": "S0004", "points": []}]
+    assert timing.project_plan(grouped, spans) == ({"S0001": {"sha256": "C", "sentence": "S0002"}}, [])
+    assert chapter_slide_eval.diagram_problems(grouped, lines, {**context, "diagram_spans": spans}) == []
+    grouped[1]["diagram_ref"] = "C"
+    assert timing.project_plan(grouped, spans)[1]
+
+
+def test_local_part_of_diagram_does_not_create_a_diagram_span():
+    result = timing.plan_spans(candidate()["claim_context"], source(),
+                              lambda state, questions: {"scope": "part"})
+    assert result == ([], [])
+
+
+def test_diagram_span_limits_writer_schema_without_reducing_ordinary_slide_limits():
+    from backend.tests.test_chapter_slides import CHAPTER
+
+    context = {**candidate()["claim_context"], "schema_version": "chapter-slide-outline-context.v1",
+               "diagram_spans": [{"sha256": "C", "first": "S0001", "last": "S0007"}]}
+    schema = chapter_slides.response_schema(context)
+    props = schema["properties"]["slides"]["items"]["properties"]
+    assert "diagram_ref" not in props and "maxItems" not in props["points"]
+
+    kept = [{"id": "P", "start": 0, "end": 70, "text": "".join(f"句{i}。" for i in range(1, 8))}]
+    draft = {"first": "S0001", "title": "結構", "verses": "5:1-12", "scriptures": [],
+             "points": [{"sentence": f"S{i:04d}", "text": f"要點{i}"} for i in range(1, 8)]}
+    assert any("要點 7 條" in problem for problem in chapter_slides.check([draft], kept, CHAPTER)[0])
+    assert chapter_slides.check([draft], kept, CHAPTER, diagram_spans=context["diagram_spans"])[0] == []

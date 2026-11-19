@@ -73,18 +73,121 @@ def resolve(record, lines, ask):
     return timings, problems
 
 
+def plan_spans(context, lines, ask):
+    """Find complete diagram explanations in the retained argument before dividing slides."""
+    from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
+
+    order = {line["id"]: i for i, line in enumerate(lines)}
+    candidates = {}
+    # An approved diagram choice is scoped to the spoken passage it describes.
+    excluded = set()
+    for case in diagrams_for_lecture(context.get("lecture", "")):
+        if quote := case.get("source_text"):
+            excluded.update(case["replace_refs"])
+            if any(line["text"] == quote for line in lines):
+                excluded.discard(case["sha256"])
+    for claim in context.get("claims", []):
+        ids = {claim.get("stated")}
+        ids.update(sid for passage in claim.get("own_passages", []) for sid in passage["sentences"])
+        ids.update(sid for step in claim.get("evidence_steps", []) for anchor in step.get("anchors", [])
+                   for sid in anchor["sentences"])
+        if ids.isdisjoint(order):
+            continue
+        for diagram in claim.get("diagrams", []):
+            ref = diagram["sha256"]
+            if "svg" not in diagram or ref in excluded:
+                continue
+            candidates.setdefault(ref, diagram)
+
+    spans, problems = [], []
+    source = {line["id"]: line["text"] for line in lines}
+    for ref, diagram in candidates.items():
+        # The argument selects the candidate. Read the retained subunit to find
+        # the boundaries, since a claim anchor can be inside the explanation.
+        state, base = _questions(diagram, source)
+        state["相關論證的依序原文"] = state.pop("這一張投影片的依序原文")
+        focus = _FOCUS.get(diagram["title"], "圖整體呈現的關係或結構")
+        questions = {"scope": {
+            **base["scope"],
+            "instructions": f"這段原文有沒有連續展開「{focus}」？區分整體講解、只講圖的一部分和順帶提及。",
+        }}
+        questions.update({sid: {
+            "type": "choice",
+            "instructions": f"{sid} 在「{focus}」的連續講解中是開始、延續還是範圍外？"
+                            "帶讀另一個圖內區塊、提出相關問題、解釋理由或收結圖的關係，都算同一段。"
+                            "普通引言、只報圖名和轉到別的主題在範圍外。不要把只講局部當成整圖講解。",
+            "criteria": {"start": "開始說明整體圖的內容。", "inside": "仍在這段連續講解，包括收結。",
+                         "outside": "不在這段講解中。", "uncertain": "無法確定。"},
+        } for sid in source})
+        answers = ask(state, questions)
+        scope = answers["scope"]
+        if scope in {"part", "other"}:
+            continue
+        found = []
+        first = last = None
+        for sid in source:
+            value = answers[sid]
+            if first is not None and value in {"outside", "uncertain"}:
+                found.append({"sha256": ref, "first": first, "last": last})
+                first = last = None
+            if value == "start" and first is None:
+                first = last = sid
+            elif value in {"start", "inside"} and first is not None:
+                last = sid
+        if first is not None:
+            found.append({"sha256": ref, "first": first, "last": last})
+        if scope != "whole" or not found:
+            problems.append(f"無法確認「{diagram['title']}」的連續講解範圍")
+        else:
+            spans.extend(found)
+    spans.sort(key=lambda span: order[span["first"]])
+    if any(order[left["last"]] >= order[right["first"]] for left, right in zip(spans, spans[1:])):
+        problems.append("兩張論證圖的講解範圍相交，須核對選圖")
+    return spans, problems
+
+
+def plan_record(context, lines, root):
+    from backend.pipeline import claim_flash_common, evidence_refresh
+    from backend.pipeline.chapter_slide_point_timing import _ask_batches
+
+    return plan_spans(context, lines, lambda state, questions: _ask_batches(
+        state, questions,
+        lambda shared, batch: claim_flash_common.jev(root, evidence_refresh.JevPort(), shared, batch),
+        evidence_refresh.MODEL, claim_flash_common.JEV_BYTES))
+
+
+def project_plan(slides, spans):
+    """Use the verified diagram once, and check that its continuous source stays on one slide."""
+    timings, problems = {}, []
+    for span in spans:
+        slide = next((row for row in slides if row["first"] <= span["first"] <= row["last"]), None)
+        if (slide is None or slide["last"] != span["last"] or slide.get("diagram_ref") != span["sha256"]
+                or slide["first"] in timings):
+            problems.append(f"{span['first']}–{span['last']}: 同一張圖的連續講解須完整放在一張投影片")
+            continue
+        timings[slide["first"]] = {"sha256": span["sha256"], "sentence": span["first"]}
+    if {row["first"] for row in slides if row.get("diagram_ref")} != set(timings):
+        problems.append("論證圖出現在已確認的講解範圍之外")
+    return timings, problems
+
+
 def check_record(record_path: Path, selection_path: Path, root: Path):
     from backend.pipeline import chapter_exposition, chapter_slides, claim_flash_common, evidence_refresh
 
     record = json.loads(record_path.read_text())
-    if "diagram_timing" not in record and not any(slide.get("diagram_ref") for slide in record["slides"]):
+    context = record.get("claim_context") or {}
+    if ("diagram_spans" not in context and "diagram_timing" not in record
+            and not any(slide.get("diagram_ref") for slide in record["slides"])):
         return []
     if record["decisions_sha256"] != chapter_exposition.file_sha256(selection_path):
         raise ValueError("Diagram timing requires the matching slide selection")
     selection = json.loads(selection_path.read_text())
     lines = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
-    timings, problems = resolve(record, lines, lambda state, questions: claim_flash_common.jev(
-        root, evidence_refresh.JevPort(), state, questions))
+    if "diagram_spans" in context:
+        timings, problems = project_plan(record["slides"], context["diagram_spans"])
+    else:
+        timings, problems = resolve(record, lines, lambda state, questions: claim_flash_common.jev(
+            root, evidence_refresh.JevPort(), state, questions))
     if not problems and record.get("diagram_timing") != timings:
         chapter_slides.timed_diagrams(record["slides"], lines, record.get("claim_context") or {}, timings)
         record["diagram_timing"] = timings
