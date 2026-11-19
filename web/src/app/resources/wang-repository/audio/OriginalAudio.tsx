@@ -628,7 +628,8 @@ export default function OriginalAudio({
                     (() => {
                       const clipEnd = shown[playing?.index ?? 0]?.end ?? seconds;
                       const slide = [...sermon.slides].reverse().find((item) => shouldShowSlideItem(item.at, seconds, clipEnd)) ?? sermon.slides[0];
-                      return <ChapterSlide slide={slide} seconds={seconds} clipEnd={clipEnd} />;
+                      return <ChapterSlide slide={slide} seconds={seconds}
+                        clipStart={shown[playing?.index ?? 0]?.start ?? seconds} clipEnd={clipEnd} />;
                     })()
                   ) : sermon.media_kind === "audio" && (
                     <ScriptureSlide

@@ -58,3 +58,23 @@ def test_story_phrase_is_not_a_scripture_reading(tmp_path):
     assert ev.evaluate(one_slide([]), kept, candidates=passage, bible=bible)["problems"] == []
     kept[0]["text"] = verse
     assert ev.evaluate(one_slide([]), kept, candidates=passage, bible=bible)["problems"]
+
+
+def test_slide_eval_checks_the_required_diagram_in_its_retained_claim_scope(tmp_path):
+    lecture = "2011 NYSC 專題：馬太福音釋經（二）1"
+    figure = {"sha256": "d" * 64, "title": "結構", "layout": "overview",
+              "kind": "professor", "origin": "原圖", "svg": "<svg/>", "labels": ["結構"]}
+    context = {"lecture": lecture, "diagram_contract": "claim-bound.v1", "claims": [
+        {"claim_id": "G01-CL0001", "stated": "S0002", "diagrams": [figure]},
+    ]}
+    slides = one_slide([], points=("原文是現在式", "二"))
+    library = bible(tmp_path)
+    assert any("論證圖缺漏" in p for p in ev.evaluate(
+        slides, KEPT, candidates=[], bible=library, context=context)["problems"])
+    slides[0]["diagram_ref"] = figure["sha256"]
+    assert ev.evaluate(slides, KEPT, candidates=[], bible=library, context=context)["problems"] == []
+    context["claims"][0]["stated"] = "S0100"
+    assert any("沒有連到本張" in p for p in ev.evaluate(
+        slides, KEPT, candidates=[], bible=library, context=context)["problems"])
+    slides[0].pop("diagram_ref")
+    assert ev.evaluate(slides, KEPT, candidates=[], bible=library, context=context)["problems"] == []

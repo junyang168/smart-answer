@@ -210,3 +210,31 @@ def test_subunit_bundle_replaces_only_its_own_slides():
     assert [s for s in after if s['sub_unit_id'] != '1.3'] == [s for s in before if s['sub_unit_id'] != '1.3']
     assert all(slide['title'] == 'Reviewed replacement' for s in after if s['sub_unit_id'] == '1.3'
                for recording in s['sermons'] for slide in recording['slides'])
+
+
+def test_retained_audio_range_preserves_existing_clip_and_refreshes_slide_coverage():
+    plan, recordings, _ = example()
+    passage = 'mat-5-1-12'
+    [first, *_] = project(plan, recordings)['sections']
+    row = first['sermons'][0]
+    clip = row['stretches'][0]
+    # Keep the previously approved tail after the candidate's last sentence.
+    longer = {**clip, 'end': clip['end'] + 1.5}
+    recordings[row['source_id']]['media']['media_duration'] = 100000
+    plan['units'][passage]['retained_clips'] = {f"{first['sub_unit_id']}:1": [longer]}
+    revised = project(plan, recordings)['sections'][0]['sermons'][0]
+    assert revised['stretches'] == [longer]
+    assert revised['transcript'] == row['transcript']
+    assert revised['slides'][-1]['at'] + revised['slides'][-1]['seconds'] >= longer['end']
+
+
+def test_retained_audio_range_cannot_cut_a_selected_sentence():
+    plan, recordings, _ = example()
+    [first, *_] = project(plan, recordings)['sections']
+    row = first['sermons'][0]
+    clip = row['stretches'][0]
+    recordings[row['source_id']]['media']['media_duration'] = 100000
+    plan['units']['mat-5-1-12']['retained_clips'] = {
+        f"{first['sub_unit_id']}:1": [{**clip, 'start': clip['start'] + 1}]}
+    with pytest.raises(ValueError, match='exclude the selected transcript'):
+        project(plan, recordings)

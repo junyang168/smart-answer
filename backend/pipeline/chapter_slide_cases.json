@@ -34,5 +34,17 @@
        "source_text": "所以意思是說，你從今以後，不要再遵守摩西律法所說，分潔淨跟不潔淨的東西。",
        "why": "「從此不必再分潔淨不潔淨」是他在 S0407 才下的結論，不提早顯示。"}
     ]
+  },
+  "diagrams": {
+    "2011 NYSC 專題：馬太福音釋經（二）1": [
+      {"layout": "overview", "claim": "CL0001"}
+    ],
+    "2011 NYSC 專題：馬太福音釋經（二）2": [
+      {"layout": "covenants", "claim": "CL0002"},
+      {"layout": "overlap", "claim": "CL0004"}
+    ],
+    "2011 NYSC 專題：馬太福音釋經（二）5": [
+      {"layout": "literary_structure", "claim": "CL0014"}
+    ]
   }
 }

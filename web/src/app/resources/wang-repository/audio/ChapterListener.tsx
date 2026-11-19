@@ -508,6 +508,8 @@ export default function ChapterListener({
   const slides = clip?.sermon.slides ?? [];
   const clipEnd = clip?.end ?? time;
   const slide = [...slides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? slides[0];
+  const diagramVisible = Boolean(!table && !leftOutPart && slide?.diagram &&
+    (clip?.start ?? time) <= slide.diagram.at && slide.diagram.at < clipEnd && slide.diagram.at <= time);
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
   const minutes = (seconds: number) => `${Math.round(seconds / 60)} 分`;
   const sectionSeconds = (index: number) =>
@@ -614,6 +616,7 @@ export default function ChapterListener({
             <ChapterSlide
               slide={slide}
               seconds={time}
+              clipStart={clip?.start ?? time}
               clipEnd={clipEnd}
               className="min-h-full"
               sentence={lineIndex >= 0 ? lines[lineIndex].text : undefined}
@@ -631,7 +634,8 @@ export default function ChapterListener({
         </div>
 
         {/* 逐字稿只留三行高：他此刻那一句在中間，前後各一句（負責人 2026-11-16）。 */}
-        <div className="relative h-[8.25rem]">
+        <div className={`relative h-[8.25rem] ${diagramVisible
+          ? "[@media(max-width:389px)]:h-12" : ""}`}>
           <div
             ref={box}
             onWheel={userScrolled}

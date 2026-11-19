@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -45,6 +46,15 @@ def _is_reading(pairs: set[str], verse: set[str]) -> bool:
     # Require half of the verse or a longer match for the automatic decision.
     return _share(pairs, verse) >= READING_SHARE and (
         len(pairs & verse) >= 12 or _share(verse, pairs) >= 0.5)
+
+
+def _reading_samples(text: str):
+    # An explicit quotation can contain two disjoint verses in one sentence.
+    # Keep the full sentence for paraphrase detection and split only quoted omissions.
+    yield _bigrams(text)
+    for quote in re.findall(r"[「『“]([^」』”]+)[」』”]", text):
+        if re.search(r"…+|\.{3,}", quote):
+            yield from (_bigrams(part) for part in re.split(r"…+|\.{3,}", quote))
 
 
 class Bible:
@@ -85,6 +95,7 @@ def evaluate(
     *,
     candidates: list[str],
     bible: Bible | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """逐句的自評。candidates 是他可能在念的經文（slug），通常是本堂投影片與 Evidence 用到的各章。
 
@@ -93,19 +104,21 @@ def evaluate(
     lines = chapter_slides.sentences(kept)
     order = {line["id"]: i for i, line in enumerate(lines)}
     pool = [verse for slug in candidates for verse in bible.verses(slug)]
-    problems: list[str] = []
+    problems = diagram_problems(slides, lines, context or {})
     for i, line in enumerate(lines):
         slide = next((s for s in reversed(slides) if order.get(s["first"], 10 ** 9) <= i), None)
         if slide is None:
             continue
         shown = [v for item in slide.get("scriptures", []) if order.get(item["sentence"], 10 ** 9) <= i
                  for v in bible.verses(item["slug"])]
-        pairs = _bigrams(line["text"])
-        best = max((v for v in pool if _is_reading(pairs, v[1])),
-                   key=lambda v: _share(pairs, v[1]), default=None)
-        if best and not any(
-                _share(pairs, verse) >= SHOWN_SHARE for _, verse in shown):
-            problems.append(f"{slide['title']}（{line['id']}）: 他在念 {best[0]}，畫面沒有顯示這節經文")
+        missing = set()
+        for pairs in _reading_samples(line["text"]):
+            best = max((v for v in pool if _is_reading(pairs, v[1])),
+                       key=lambda v: _share(pairs, v[1]), default=None)
+            if best and not any(_share(pairs, verse) >= SHOWN_SHARE for _, verse in shown):
+                missing.add(best[0])
+        for slug in sorted(missing):
+            problems.append(f"{slide['title']}（{line['id']}）: 他在念 {slug}，畫面沒有顯示這節經文")
         if _ORIGINAL_SCRIPT.search(line["text"]) or _GRAMMAR_WORDS.search(line["text"]):
             notes = [n for n in slide.get("inline_notes", []) if n.get("original") or n.get("explanation")]
             mentioned = any(_ORIGINAL_SCRIPT.search(p["text"]) or _GRAMMAR_WORDS.search(p["text"])
@@ -113,6 +126,33 @@ def evaluate(
             if not notes and not mentioned:
                 problems.append(f"{slide['title']}（{line['id']}）: 他在講原文或文法，這一張沒有原文註解或相應要點")
     return {"problems": problems, "checked_sentences": len(lines)}
+
+
+def diagram_problems(slides: list[dict], lines: list[dict], context: dict) -> list[str]:
+    """Check the saved diagram choices and require golden diagrams in retained scope."""
+    from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
+
+    try:
+        placed = chapter_slides.timed_diagrams(slides, lines, context)
+    except ValueError as exc:
+        return [str(exc)]
+    if context.get("diagram_contract") != "claim-bound.v1":
+        return []
+    by_sentence = {line["id"]: line["start"] for line in lines}
+    problems = []
+    for case in diagrams_for_lecture(context.get("lecture", "")):
+        for claim in context.get("claims", []):
+            if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"]:
+                continue
+            sentence = claim.get("stated")
+            if sentence not in by_sentence:
+                continue
+            current = next((s for s in slides if s["first"] <= sentence <= s["last"]), None)
+            diagram = placed.get(current["first"]) if current else None
+            wanted = {d["sha256"] for d in claim.get("diagrams", []) if d.get("layout") == case["layout"]}
+            if not diagram or diagram["sha256"] not in wanted or diagram["at"] != by_sentence[sentence]:
+                problems.append(f"論證圖缺漏或出場錯誤：{case['layout']}（{sentence}）")
+    return problems
 
 
 def displayed_reading_sentences(slides, lines, *, bible=None):
@@ -149,3 +189,95 @@ def candidate_chapters(slides: list[dict[str, Any]], context: dict[str, Any] | N
             if whole not in chapters:
                 chapters.append(whole)
     return chapters
+
+
+SEMANTIC_SCHEMA_VERSION = "chapter-slide-semantic-eval.v1"
+SEMANTIC_CRITERIA = {
+    "faithfulness": "標題與要點保留原文的說話者、否定、限定、程度及因果。每個實質意思必須有原文支持。",
+    "coverage": "從原文反查承重理由與結論。比較、對比和首尾呼應要交代兩端如何支持結論。",
+    "timing": "標題在換張時立即可見。若結論尚未講出，標題只能用問題或中性主題。要點的全部意思須在錨點已講出。檢查故事結果、限定語及複合要點。按整段論證順序查看每張，尤其是問題之後、答案之前的相鄰投影片。第一張用問題不代表後面的標題可以先說出答案。",
+    "scripture": "核對成品實際顯示的經文。每一節讀出或幾乎逐字引用的經文都應顯示，只有提及範圍的經節不作逐字讀出。",
+}
+
+
+def semantic_packet(slide_record: dict, selection: dict) -> dict:
+    """Send the displayed slides, the exact source and the argument context together."""
+    return {
+        "lecture": slide_record["lecture"],
+        "criteria": SEMANTIC_CRITERIA,
+        "source": chapter_slides.sentences(chapter_slides.kept_pieces(selection)),
+        "claims": [
+            {**claim, "diagrams": [{k: v for k, v in d.items() if k != "svg"} for d in claim.get("diagrams", [])]}
+            for claim in (slide_record.get("claim_context") or {}).get("claims", [])
+        ],
+        "slides": slide_record["slides"],
+    }
+
+
+def semantic_slide_sha256(slide_path: Path) -> str:
+    record = json.loads(slide_path.read_text())
+    # The publisher adds transaction metadata after Eval. Bind everything the
+    # evaluator read, including normalized and original slides and context.
+    record.pop("publication", None)
+    return hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path) -> list[str]:
+    """Read the single per-candidate semantic Eval with no model call."""
+    from backend.pipeline.chapter_exposition import file_sha256
+
+    try:
+        result = json.loads(receipt_path.read_text())
+    except (OSError, ValueError):
+        return ["Missing or unreadable semantic Eval for this slide version"]
+    if (not isinstance(result, dict) or result.get("schema_version") != SEMANTIC_SCHEMA_VERSION
+            or result.get("slides_sha256") != semantic_slide_sha256(slide_path)
+            or result.get("selection_sha256") != file_sha256(selection_path)):
+        return ["Semantic Eval belongs to a different slide version or source selection"]
+    record = json.loads(slide_path.read_text())
+    expected = {(s["first"], key) for s in record["slides"] for key in SEMANTIC_CRITERIA}
+    seen = set()
+    problems = []
+    rows = result.get("checks")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return ["Semantic Eval checks must be a list of decisions"]
+    for row in rows:
+        key = (row.get("slide"), row.get("criterion"))
+        if (key not in expected or key in seen or not isinstance(row.get("passed"), bool)
+                or not isinstance(row.get("evidence"), str) or not row["evidence"].strip()):
+            return ["Semantic Eval has a duplicate, unknown or incomplete check"]
+        seen.add(key)
+        if not row["passed"]:
+            problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
+    if seen != expected:
+        problems.append("Semantic Eval must cover each criterion for every slide")
+    return problems
+
+
+def main():
+    import argparse
+    from backend.pipeline.chapter_exposition import file_sha256
+
+    parser = argparse.ArgumentParser(description="Export the exact slide candidate and its semantic Eval criteria")
+    parser.add_argument("slides", type=Path)
+    parser.add_argument("selection", type=Path)
+    parser.add_argument("--verify", type=Path, help="Verify a saved semantic Eval without issuing a model call")
+    args = parser.parse_args()
+    if args.verify:
+        problems = semantic_eval_problems(args.slides, args.selection, args.verify)
+        print(json.dumps({"status": "failed" if problems else "passed", "problems": problems}, ensure_ascii=False))
+        return int(bool(problems))
+    record = json.loads(args.slides.read_text())
+    if record["decisions_sha256"] != file_sha256(args.selection):
+        parser.error("Selection does not match this slide candidate")
+    fields = {"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(args.slides),
+              "selection_sha256": file_sha256(args.selection)}
+    print(json.dumps({**semantic_packet(record, json.loads(args.selection.read_text())),
+                      "receipt_fields": fields,
+                      "receipt_check_fields": ["slide", "criterion", "passed", "evidence"]},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

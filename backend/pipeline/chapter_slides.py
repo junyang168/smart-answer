@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -171,6 +172,11 @@ def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
     point = schema["properties"]["slides"]["items"]["properties"]["points"]["items"]
     point["properties"]["source"] = {"type": "string"}
     point["required"].append("source")
+    if refs := sorted({d["sha256"] for claim in claim_context["claims"]
+                       for d in claim.get("diagrams", []) if "svg" in d}):
+        slide = schema["properties"]["slides"]["items"]
+        slide["properties"]["diagram_ref"] = {"type": "string", "enum": ["", *refs]}
+        slide["required"].append("diagram_ref")
     return schema
 
 
@@ -298,10 +304,15 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   '這是程序按實際保留原文編譯的可用範圍，不是新增支持證明。source 要相關、要點忠於原文，sentence 必須在該 source 的此範圍內。原始 anchors 的逐字引用可以較短，不要把旁邊同一片段的實際結論誤判為沒有位置。',
                   json.dumps(bounds, ensure_ascii=False)]
         lines += ["", "# 本堂講課提綱（論證層 Claims）",
+                  "標題在 first 一換張就顯示。從 first 當下已講的意思命名；若是問題、故事或論證的起點，"
+                  "只用問題或中性話題。結論及故事結果等到首次講出時才放在定時要點。"
+                  "標題必須涵蓋本張主題，但不能以後面才說出的答案命名。",
+                  "逐條保留限制、否定及適用範圍；術語不能用範圍更廣的上位詞代替。"
+                  "反查完整論證：對比或首尾呼應要交代兩端如何支持結論，並用原文核對。",
                   "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
                   "- 不另做本堂地圖或總覽：第一張照他開頭實際講的內容做，每一張都是他此刻在講的。",
-                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
+                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，按這部分當下已講的主題命名；上層 Claim 的結論只在原文首次講出時顯示。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
@@ -316,7 +327,15 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
                   "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
-                  json.dumps(claim_context, ensure_ascii=False)]
+                  json.dumps({**claim_context, "claims": [
+                      {**{k: v for k, v in claim.items() if k != "diagrams"},
+                       **({"diagrams": [{k: d[k] for k in ("title", "origin", "kind", "sha256")}
+                                        for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}
+                      for claim in claim_context["claims"]
+                  ]}, ensure_ascii=False)]
+        if any("svg" in d for claim in claim_context["claims"] for d in claim.get("diagrams", [])):
+            lines += ["每張投影片的 diagram_ref 只填這張要顯示的一張圖的 sha256。"
+                      "圖須連到本張實際講述的 Claim；有圖也要保留講論要點。沒有圖就填空字串。"]
     elif claim_context is not None:
         from backend.pipeline.chapter_slide_claims import claim_source_ranges
 
@@ -419,7 +438,7 @@ def check(
     在读经文。
     """
 
-    from backend.api.scripture import parse_reference, reference_slugs, spoken_references
+    from backend.api.scripture import parse_reference, slide_reference_slugs, spoken_references
 
     lines = sentences(kept)
     ids = [s["id"] for s in lines]
@@ -480,14 +499,14 @@ def check(
             problems.append(f"{title}: 經節讀不出來或不在這一章（{slide.get('verses')}）")
         scriptures = []
         for item in slide.get("scriptures") or []:
-            slugs = reference_slugs(str(item.get("ref") or ""))
-            if len(slugs) != 1:
+            slugs = slide_reference_slugs(str(item.get("ref") or ""))
+            if not slugs:
                 problems.append(f"{title}: 經文出處讀不出來（{item.get('ref')}）")
                 continue
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: {item.get('ref')} 的句子 {item.get('sentence')} 不在這一張")
                 continue
-            scriptures.append({"sentence": item["sentence"], "slug": slugs[0]})
+            scriptures.extend({"sentence": item["sentence"], "slug": slug} for slug in slugs)
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:
             for _, slug in spoken_references(line["text"]):
@@ -541,6 +560,7 @@ def check(
             "points": points,
             "verses": verses or [],
             "scriptures": scriptures,
+            **({"diagram_ref": slide["diagram_ref"]} if slide.get("diagram_ref") else {}),
             **({"inline_notes": inline_notes} if inline_notes else {}),
         })
     return problems, unshown, normalised
@@ -582,10 +602,14 @@ def checked(
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(
-                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context))["problems"]
+                slides, kept, candidates=chapter_slide_eval.candidate_chapters(slides, claim_context),
+                context=claim_context)["problems"]
             # 負責人指出過的問題（chapter_slide_cases.json），每次都查，不再回來。
             from backend.pipeline.chapter_slide_cases import cases_for, check_cases
             problems += check_cases(slides, cases_for(claim_context.get("lecture", "")), sentences(kept))
+    if not outline and not problems and any(slide.get("diagram_ref") for slide in slides):
+        from backend.pipeline.chapter_slide_eval import diagram_problems
+        problems += diagram_problems(slides, sentences(kept), claim_context or {})
     return problems, unshown, slides
 
 
@@ -612,6 +636,36 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
+def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict[str, dict]:
+    """Resolve the one diagram selected for a slide against its retained Claim."""
+    by_id = {line["id"]: line["start"] for line in lines}
+    claims = context.get("claims", [])
+    placed = {}
+    for slide in slides:
+        ref = slide.get("diagram_ref")
+        if not ref:
+            continue
+        matches = []
+        for claim in claims:
+            sentence = claim.get("stated")
+            if sentence not in by_id or not slide["first"] <= sentence <= slide["last"]:
+                sentence = next((p["sentence"] for p in slide["points"] if p.get("source") == claim["claim_id"]), None)
+            if sentence not in by_id:
+                continue
+            matches.extend((by_id[sentence], d) for d in claim.get("diagrams", [])
+                           if d["sha256"] == ref and "svg" in d)
+        if not matches:
+            raise ValueError(f"{slide['title']}: 所選論證圖沒有連到本張的論點")
+        at, item = min(matches, key=lambda match: match[0])
+        image = base64.b64encode(item["svg"].encode()).decode("ascii")
+        placed[slide["first"]] = {
+            "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
+            "sha256": ref, "image_src": "data:image/svg+xml;base64," + image,
+            **({"layout": item["layout"], "labels": item["labels"]} if item.get("layout") else {}),
+        }
+    return placed
+
+
 def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[
     dict[str, list[str]], list[dict[str, Any]]
 ]:
@@ -625,6 +679,7 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
+    diagrams = timed_diagrams(slides_record["slides"], lines, slides_record.get("claim_context") or {})
     for slide in slides_record["slides"]:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:
@@ -643,6 +698,7 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
                 for item in slide.get("inline_notes", [])
             ],
             "scriptures": _reread(slide["scriptures"], own, lines, index),
+            **({"diagram": diagrams[slide["first"]]} if slide["first"] in diagrams else {}),
         })
     return piece_verses, timed
 
@@ -761,6 +817,9 @@ def save(
         from backend.pipeline.chapter_slide_claims import digest
         record["claim_context"] = claim_context
         record["claim_context_sha256"] = digest(claim_context)
+        if claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+            from backend.pipeline.chapter_slide_eval import SEMANTIC_SCHEMA_VERSION
+            record["semantic_eval"] = SEMANTIC_SCHEMA_VERSION
     target = record_path(data_base_dir, chapter.passage, lecture)
     target.parent.mkdir(parents=True, exist_ok=True)
     if problems:
@@ -774,6 +833,7 @@ def save(
         "status": "saved",
         "slides": len(slides),
         "unshown_references": unshown,
+        **({"semantic_eval": "pending"} if record.get("semantic_eval") else {}),
         "file": str(target),
     }
 
@@ -875,6 +935,8 @@ def show_slides(slides: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for number, slide in enumerate(slides, 1):
         lines.append(f"第 {number} 張（{slide['first']}–{slide['last']}）{slide['title']}　經節：{','.join(slide['verses'])}")
+        if slide.get("diagram_ref"):
+            lines.append(f"  論證圖：{slide['diagram_ref']}")
         for point in slide["points"]:
             source = f" (source: {point['source']})" if point.get("source") else ""
             lines.append(f"  · [{point['sentence']}] {point['text']}{source}")

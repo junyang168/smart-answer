@@ -42,7 +42,7 @@ def binding(index):
             'index_sha256': digest(index), 'ui_files': files}
 
 
-def browser_checks(evidence, expected_binding):
+def browser_checks(evidence, expected_binding, *, diagram_shas=()):
     if not evidence:
         return {'status': 'pending', 'problems': ['No bound browser evidence supplied']}
     if evidence.get('input_sha256') != expected_binding['input_sha256']:
@@ -65,6 +65,14 @@ def browser_checks(evidence, expected_binding):
                 or max((c['y'] + c['height'] / 2 for c in controls), default=0)
                    - min((c['y'] + c['height'] / 2 for c in controls), default=0) >= 1):
             problems.append(f"Mobile controls overflow, wrap or lack usable targets: {view.get('width')}")
+        if diagram_shas:
+            diagrams = view.get('diagrams', [])
+            if {d.get('sha256') for d in diagrams} != set(diagram_shas) or len(diagrams) != len(diagram_shas):
+                problems.append(f"Diagram browser coverage is incomplete: {view.get('width')}")
+            if any(not all(d.get(key) is True for key in ('fits', 'dark', 'no_zoom', 'hidden_before'))
+                   or not isinstance(d.get('min_font_px'), (float, int))
+                   or not math.isfinite(d['min_font_px']) or d['min_font_px'] < 14 for d in diagrams):
+                problems.append(f"Diagram is clipped, unreadable or mistimed: {view.get('width')}")
         compact = view.get('width', 999) < 390 and view.get('height', 999) < 600
         if view.get('menuVisible') != (not compact) or view.get('speedVisible') != (not compact):
             problems.append('Wrong regular/compact mobile layout')
@@ -131,7 +139,42 @@ def catalog_checks(catalog, selected, evidence):
     return {'status': 'failed' if problems else 'passed', 'problems': problems}
 
 
-def evaluate(data_root, passage, *, evidence=None, catalog=None):
+def diagram_index_problems(index):
+    problems = []
+    for section in index['sections']:
+        for recording in section['sermons']:
+            for slide in recording['slides']:
+                diagram = slide.get('diagram')
+                if not diagram:
+                    continue
+                at = diagram['at']
+                if (not slide['at'] <= at < slide['at'] + slide['seconds']
+                        or not any(s['start'] <= at < s['end'] for s in recording['stretches'])
+                        or not any(abs(line['at'] - at) < .03 for line in recording['transcript'])):
+                    problems.append(f"Diagram is outside its spoken anchor: {slide['title']}")
+    return problems
+
+
+
+def playback_alignment_problems(index):
+    """Check the displayed audio, subtitles and slide intervals on the same clock."""
+    problems = []
+    for section in index['sections']:
+        for row in section['sermons']:
+            for line in row['transcript']:
+                if not any(s['start'] <= line['at'] < s['end'] for s in row['stretches']):
+                    problems.append(f"Sentence outside playback range: {section['label']}")
+            for stretch in row['stretches']:
+                end = stretch['start']
+                for start, finish in sorted((max(stretch['start'], s['at']), min(stretch['end'], s['at'] + s['seconds']))
+                                            for s in row['slides'] if s['at'] < stretch['end'] and s['at'] + s['seconds'] > stretch['start']):
+                    if start > end + 1: problems.append(f"Slide coverage gap: {section['label']}")
+                    end = max(end, finish)
+                if end < stretch['end'] - 1: problems.append(f"Slide coverage gap: {section['label']}")
+    return problems
+
+
+def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versions=None):
     try:
         index = units.build(data_root, passage)
     except (ValueError, OSError) as error:
@@ -144,8 +187,13 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
     current = binding(catalog if catalog is not None else index)
     plan = json.loads((data_root / 'chapter_exposition' / passage / 'listening-units.json').read_text())
     golden = json.loads((ROOT / 'backend/tests/fixtures/chapter_selection/unit1_sub_units_golden.json').read_text())
-    unit1 = plan['units'][golden['target_section']]
-    selection_problems = []
+    unit1 = plan['units'].get(golden['target_section'])
+    selection_problems = [
+        f"Stale argument version: {entry['lecture']}"
+        for entry in plan['inputs']
+        if entry['source_id'] in (expected_versions or {})
+        and entry.get('changeset') != expected_versions[entry['source_id']]
+    ]
     for entry in plan['inputs']:
         try:
             frozen = json.loads(Path(entry['saved_input']).read_text())
@@ -156,7 +204,8 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
                 selection_problems.append('Selection prompt/input changed or saved answer differs; fresh golden Eval required')
         except (OSError, KeyError, ValueError):
             selection_problems.append('Bound selection input/answer is unavailable')
-    if ([r['paragraph_key'] for r in unit1['playback_order']] != golden['expected_kept_paragraphs']
+    if passage == 'mat-5-1-48' and (not unit1
+            or [r['paragraph_key'] for r in unit1['playback_order']] != golden['expected_kept_paragraphs']
             or [s['sub_unit_id'] for s in index['sections'] if s['unit_id'] == '1']
             != [r['sub_unit_id'] for r in golden['expected_playback_runs']]
             or {s['id']: [g.rsplit(':', 1)[-1] for g in s['group_keys']] for s in unit1['sub_units']}
@@ -178,9 +227,18 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
     slide_results = []
     for entry in plan['inputs']:
         title = entry['lecture']
-        selection_path = chapter_exposition.record_path(data_root, passage, title)
+        if bundle := entry.get('reviewed_chapter_bundle'):
+            directory = units.bundle_directory(data_root / 'chapter_exposition' / passage, bundle)
+            selection_path = directory / f'{title}.selection.json'
+            saved_path = directory / f'{title}.slides.json'
+            saved = json.loads(saved_path.read_text())
+            receipt = directory / f'{title}.semantic-eval.json'
+        else:
+            selection_path = chapter_exposition.record_path(data_root, passage, title)
+            saved_path = chapter_slides.record_path(data_root, passage, title)
+            saved = chapter_slides.load_record(data_root, passage, title)
+            receipt = saved_path.with_suffix('.semantic-eval.json')
         selection = json.loads(selection_path.read_text())
-        saved = chapter_slides.load_record(data_root, passage, title)
         try:
             saved, owner_corrections = units.owner_timing(saved, selection)
             preparation_problems = []
@@ -196,6 +254,8 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
         if not context:
             problems += chapter_slide_eval.evaluate(saved['slides'], kept,
                 candidates=chapter_slide_eval.candidate_chapters(saved['slides'], None))['problems']
+        if saved.get('semantic_eval'):
+            problems += chapter_slide_eval.semantic_eval_problems(saved_path, selection_path, receipt)
         slide_results.append({'lecture': title, 'status': 'failed' if problems else 'passed',
                               'scope': 'full_saved_slide_record', 'problems': problems,
                               'program_timing_corrections': owner_corrections,
@@ -208,11 +268,29 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
             review = json.loads((folder / f'{title}.review.json').read_text())
             derived, corrections = units.reviewed_timing(slides, review, extra)
             result = chapter_slide_eval.evaluate(derived['slides'], chapter_slides.kept_pieces(extra),
-                candidates=chapter_slide_eval.candidate_chapters(derived['slides'], None))
+                candidates=chapter_slide_eval.candidate_chapters(derived['slides'], derived.get('claim_context')),
+                context=derived.get('claim_context'))
             slide_results.append({'lecture': title, 'scope': 'missing_slide_supplement',
                 'status': 'failed' if result['problems'] else 'passed', **result,
                 'original_review': review, 'program_timing_corrections': corrections})
-    playback_problems = []
+    folder = data_root / 'chapter_exposition' / passage / 'unit-supplements'
+    bundles = {scope['reviewed_slide_bundle'] for unit in plan['units'].values()
+               for scope in (unit, *unit['sub_units']) if scope.get('reviewed_slide_bundle')}
+    for bundle in sorted(bundles):
+        for source_path in sorted((folder / bundle).glob('*.slides.json')):
+            title = source_path.name.removesuffix('.slides.json')
+            record = json.loads(source_path.read_text())
+            selection = json.loads(source_path.with_name(f'{title}.selection.json').read_text())
+            context = record.get('claim_context')
+            result = chapter_slide_eval.evaluate(record['slides'], chapter_slides.kept_pieces(selection),
+                candidates=chapter_slide_eval.candidate_chapters(record['slides'], context), context=context)
+            if record.get('semantic_eval'):
+                result['problems'] += chapter_slide_eval.semantic_eval_problems(
+                    source_path, source_path.with_name(f'{title}.selection.json'),
+                    source_path.with_name(f'{title}.semantic-eval.json'))
+            slide_results.append({'lecture': title, 'scope': 'reviewed_unit_bundle', 'bundle': bundle,
+                'status': 'failed' if result['problems'] else 'passed', **result})
+    playback_problems = diagram_index_problems(catalog if catalog is not None else index)
     timing_anchor_checks = []
     for correction in index.get('program_timing_corrections', []):
         if not correction.get('source_text'):
@@ -229,23 +307,15 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None):
                                      'point_at': sorted(shown), 'passed': passed})
         if not passed:
             playback_problems.append('Rendered owner timing correction differs from its spoken source')
-    for section in index['sections']:
-        for row in section['sermons']:
-            for line in row['transcript']:
-                if not any(s['start'] <= line['at'] < s['end'] for s in row['stretches']):
-                    playback_problems.append(f"Sentence outside playback range: {section['label']}")
-            for stretch in row['stretches']:
-                end = stretch['start']
-                for start, finish in sorted((max(stretch['start'], s['at']), min(stretch['end'], s['at'] + s['seconds']))
-                                            for s in row['slides'] if s['at'] < stretch['end'] and s['at'] + s['seconds'] > stretch['start']):
-                    if start > end + 1: playback_problems.append(f"Slide coverage gap: {section['label']}")
-                    end = max(end, finish)
-                if end < stretch['end'] - 1: playback_problems.append(f"Slide coverage gap: {section['label']}")
+    playback_problems += playback_alignment_problems(catalog if catalog is not None else index)
     checks = {'selection': {'status': 'failed' if selection_problems else 'passed', 'problems': selection_problems},
               'slides': {'status': 'failed' if any(r['status'] != 'passed' for r in slide_results) else 'passed', 'records': slide_results},
               'playback': {'status': 'failed' if playback_problems else 'passed', 'problems': playback_problems,
                            'timing_anchor_checks': timing_anchor_checks},
-              'ui': browser_checks(evidence, current)}
+              'ui': browser_checks(evidence, current, diagram_shas={
+                  slide['diagram']['sha256'] for section in (catalog if catalog is not None else index)['sections']
+                  for row in section['sermons'] for slide in row['slides'] if slide.get('diagram')
+              })}
     if catalog is not None:
         checks['normal_entry'] = catalog_checks(catalog, index, evidence)
     return {'schema_version': 'chapter-listening-eval.v1', 'passage': passage,
@@ -262,12 +332,14 @@ def main():
     parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--browser-evidence', type=Path)
     parser.add_argument('--catalog', type=Path, help='Exact saved normal-entry API response for end-to-end evaluation')
+    parser.add_argument('--expected-versions', type=Path, help='JSON mapping of source IDs to target argument ChangeSets')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     from backend.api.config import DATA_BASE_PATH
     evidence = json.loads(args.browser_evidence.read_text()) if args.browser_evidence else None
     report = evaluate(args.data_dir or Path(DATA_BASE_PATH), args.passage, evidence=evidence,
-                      catalog=json.loads(args.catalog.read_text()) if args.catalog else None)
+                      catalog=json.loads(args.catalog.read_text()) if args.catalog else None,
+                      expected_versions=json.loads(args.expected_versions.read_text()) if args.expected_versions else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps({'status': report['status'], 'checks': {k: v['status'] for k, v in report['checks'].items()},
