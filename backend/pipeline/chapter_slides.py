@@ -427,6 +427,33 @@ def _covers(shown: list[dict[str, Any]], wanted: dict[str, Any]) -> bool:
     )
 
 
+def scripture_covers(outer: dict, inner: dict) -> bool:
+    return (outer["slug_book"] == inner["slug_book"] and outer["chapter"] == inner["chapter"]
+            and outer["start"] <= inner["start"] and inner["end"] <= outer["end"])
+
+
+def merge_scripture_ranges(scriptures: list[dict], sentence_order: list[str]) -> list[dict]:
+    """Combine overlapping readings at the same sentence, keeping distinct reading times."""
+    from backend.api.scripture import parse_reference
+
+    grouped = {}
+    for item in scriptures:
+        ref = parse_reference(item["slug"])
+        key = item["sentence"], ref["slug_book"], ref["chapter"]
+        grouped.setdefault(key, []).append((ref["start"], ref["end"], item["slug"]))
+    merged = []
+    for (sentence, book, chapter), ranges in grouped.items():
+        combined = []
+        for start, end, slug in sorted(ranges, key=lambda row: (row[0], -row[1])):
+            if not combined or start > combined[-1][1]:
+                combined.append((start, end, slug))
+            elif end > combined[-1][1]:
+                first = combined[-1][0]
+                combined[-1] = (first, end, f"{book.lower()}-{chapter}-{first}-{end}")
+        merged.extend({"sentence": sentence, "slug": slug} for _, _, slug in combined)
+    return sorted(merged, key=lambda item: sentence_order.index(item["sentence"]))
+
+
 def _title(text: str) -> str:
     text = text.strip()
     while len(text) >= 2 and text[0] in "「『\"“" and text[-1] in "」』\"”":
@@ -588,8 +615,8 @@ def check(
         confirmed = [item for item in verified_scriptures if item["sentence"] in own_ids]
         confirmed_slugs = {item["slug"] for item in confirmed}
         if confirmed:
-            scriptures = sorted([item for item in scriptures if item["slug"] not in confirmed_slugs] + confirmed,
-                                key=lambda item: own_ids.index(item["sentence"]))
+            scriptures = [item for item in scriptures if item["slug"] not in confirmed_slugs] + confirmed
+        scriptures = merge_scripture_ranges(scriptures, own_ids)
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:
             for _, slug in spoken_references(line["text"]):

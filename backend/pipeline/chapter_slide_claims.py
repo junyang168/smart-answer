@@ -412,6 +412,8 @@ def point_spans(context: dict, slides: list[dict], *, source_lines=None) -> list
 def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     """他講某一步論證時，畫面上那一張要有一條要點屬於同一個 Claim（負責人 2026-11-16：
     教授論證的是 X，投影片顯示不相關的，不行）。另報不認得的 source。"""
+    from backend.api.scripture import parse_reference
+
     index = argument_index(context)
     readings = {step["evidence_step_id"]: set(step.get("scriptures", []))
                 for claim in context.get("claims", []) for step in claim["evidence_steps"]
@@ -434,8 +436,11 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
         if slide is None or at in reported:
             continue
         related = {rid} | entry["claims"] | {r for cid in entry["claims"] for r in steps_of.get(cid, ())}
-        if readings.get(rid) and readings[rid] <= {item["slug"] for item in slide.get("scriptures", [])}:
-            continue
+        if readings.get(rid):
+            shown = [parse_reference(item["slug"]) for item in slide.get("scriptures", [])]
+            if all(any(chapter_slides.scripture_covers(ref, wanted) for ref in shown)
+                   for wanted in map(parse_reference, readings[rid])):
+                continue
         if not any(point.get("source") in related for point in slide["points"]):
             problem = (f"{slide['title']}（{at}）: 他在講「{entry['statement'][:40]}」（{rid}），"
                        f"這一張沒有要點屬於它的 Claim（{'、'.join(sorted(entry['claims']))}）")

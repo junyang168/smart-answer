@@ -588,3 +588,26 @@ def test_prayer_unit_allows_its_matthew_six_and_seven_verses():
     assert parse_slide_verses('7:7–12', scoped) is None
     assert parse_slide_verses('7:1–6', chapter) is None
     assert '6:8–34、7:1–11' in system_prompt(scoped)
+
+
+def test_merge_verified_scripture_with_the_same_spoken_range():
+    kept = [{"id": "U001", "start": 0, "end": 40,
+             "text": "你們為主的緣故要順服人的一切制度，或是在上的君王，或是君王所派懲惡賞善的官員。這是彼得的教導。"}]
+    raw = slide("S0001", scriptures=[{"sentence": "S0001", "ref": "彼得前書 2:13–14"}])
+    problems, _, slides = chapter_slides.check([raw], kept, CHAPTER,
+        verified_scriptures=[{"sentence": "S0001", "slug": "1pe-2-13"}])
+    assert problems == []
+    assert slides[0]["scriptures"] == [{"sentence": "S0001", "slug": "1pe-2-13-14"}]
+
+
+def test_overlap_merges_only_within_the_same_sentence_book_and_chapter():
+    inputs = [{"sentence": at, "slug": slug} for at, slug in (
+        ("S0001", "1pe-2-13-14"), ("S0001", "1pe-2-14-15"), ("S0001", "1pe-2-16"),
+        ("S0001", "1pe-3-13"), ("S0001", "2pe-2-13"), ("S0002", "1pe-2-14"),
+    )]
+    assert chapter_slides.merge_scripture_ranges(inputs, ["S0001", "S0002"]) == [
+        {"sentence": at, "slug": slug} for at, slug in (
+            ("S0001", "1pe-2-13-15"), ("S0001", "1pe-2-16"),
+            ("S0001", "1pe-3-13"), ("S0001", "2pe-2-13"), ("S0002", "1pe-2-14"),
+        )
+    ]

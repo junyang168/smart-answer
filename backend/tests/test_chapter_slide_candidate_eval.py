@@ -346,3 +346,28 @@ def test_automatic_timing_respects_the_owners_saved_word_sequence(monkeypatch):
         "kind": "point", "source_text": source[0]["text"], "pattern": "發光", "why": "原聲開始時顯示"}])
     finding = {"slide": "S0001", "point": 0, "sentence": "S0001", "status": "early", "expected_sentence": "S0002"}
     assert ev._checked_point_adjustments(record, source, [finding]) == []
+
+
+@pytest.mark.parametrize(("sentence", "shown", "required", "passes"), [
+    ("S0065", "1pe-2-13-14", "1pe-2-13", True),
+    ("S0064", "1pe-2-13-14", "1pe-2-13", False),
+    ("S0065", "1pe-2-13", "1pe-2-13-14", False),
+])
+def test_verified_reading_requires_full_coverage_at_its_original_sentence(tmp_path, sentence, shown, required, passes):
+    selection = tmp_path / "source.json"
+    selection.write_text("{}")
+    candidate = tmp_path / "deck.json"
+    candidate.write_text(json.dumps({
+        "claim_context": {"verified_scriptures": [{"sentence": "S0065", "slug": required}]},
+        "slides": [{"first": "S0064", "scriptures": [{"sentence": sentence, "slug": shown}]}],
+    }))
+    receipt = tmp_path / "eval.json"
+    receipt.write_text(json.dumps(ev.with_run({
+        "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
+        "slides_sha256": ev.semantic_slide_sha256(candidate),
+        "selection_sha256": chapter_exposition.file_sha256(selection),
+        "checks": [{"slide": "S0064", "criterion": key, "passed": True, "evidence": "原答"}
+                   for key in ev.SEMANTIC_CRITERIA],
+    })))
+    assert ev.semantic_eval_problems(candidate, selection, receipt) == (
+        [] if passes else ["Verified scripture is missing from its recorded source sentence"])

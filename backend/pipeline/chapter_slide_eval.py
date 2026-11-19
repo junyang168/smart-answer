@@ -365,11 +365,18 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
     if "baseline_eval_sha256" in result:
         return ["Semantic Eval must judge every slide in this run, not reuse an earlier verdict"]
     context = record.get("claim_context") or {}
-    displayed = {(item["sentence"], item["slug"]) for slide in record["slides"]
-                 for item in slide.get("scriptures", [])}
-    if any((item["sentence"], item["slug"]) not in displayed
-           for item in context.get("verified_scriptures", [])):
-        return ["Verified scripture is missing from its recorded source sentence"]
+    verified = context.get("verified_scriptures", [])
+    if verified:
+        from backend.api.scripture import parse_reference
+
+        displayed = {}
+        for slide in record["slides"]:
+            for item in slide.get("scriptures", []):
+                displayed.setdefault(item["sentence"], []).append(parse_reference(item["slug"]))
+        for item in verified:
+            wanted = parse_reference(item["slug"])
+            if not any(chapter_slides.scripture_covers(ref, wanted) for ref in displayed.get(item["sentence"], [])):
+                return ["Verified scripture is missing from its recorded source sentence"]
     if "diagram_spans" in context:
         from backend.pipeline.chapter_slide_diagram_timing import project_plan
 

@@ -519,7 +519,7 @@ def test_scripture_reading_can_cover_a_scripture_text_step_without_a_summary_poi
     context = {"claims": [{"claim_id": "C1", "statement": "推論", "stated": "S0002", "evidence_steps": [step]}]}
     slides = [
         {"first": "S0001", "last": "S0001", "title": "讀經", "points": [],
-         "scriptures": [{"sentence": "S0001", "slug": "mat-5-39"}]},
+         "scriptures": [{"sentence": "S0001", "slug": "mat-5-38-39"}]},
         {"first": "S0002", "last": "S0002", "title": "解釋", "points": [{"source": "C1"}]},
     ]
     assert hints.argument_alignment(context, slides) == []
