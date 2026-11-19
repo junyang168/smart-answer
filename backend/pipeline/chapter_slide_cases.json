@@ -6,6 +6,9 @@
        "why": "不另做本堂地圖：那是編者的綜合，不是他講的。"},
       {"owner": "2026-11-16", "kind": "one_slide", "from": "S0007", "to": "S0020",
        "why": "講兩段結構分成兩頁，觀眾聽著沒有上下文；兩大段要在同一張，逐條出現。"},
+      {"owner": "2026-11-18", "kind": "point", "at": "S0015", "pattern": "門徒|五13|5:13",
+       "source_text": "然後呢，第五章十三節到第七章二十九節啊，乃是談到門徒的使命。",
+       "why": "他講第二大段是門徒的使命時，畫面要是這一點；原稿把它和兩句後的「生命反應」合成一條，晚了 12 秒。"},
       {"owner": "2026-11-16", "kind": "note", "at": "S0053", "span": "天國是他們的", "verses": [3, 10],
        "why": "他講 inclusio 時，五3與五10的「天國是他們的」要標出來。"},
       {"owner": "2026-11-16", "kind": "point", "at": "S0082", "pattern": "現在",
@@ -37,14 +40,14 @@
   },
   "diagrams": {
     "2011 NYSC 專題：馬太福音釋經（二）1": [
-      {"layout": "overview", "claim": "CL0001"}
+      {"claim": "CL0001"}
     ],
     "2011 NYSC 專題：馬太福音釋經（二）2": [
-      {"layout": "covenants", "claim": "CL0002"},
-      {"layout": "overlap", "claim": "CL0004"}
+      {"claim": "CL0002"},
+      {"claim": "CL0004"}
     ],
     "2011 NYSC 專題：馬太福音釋經（二）5": [
-      {"layout": "literary_structure", "claim": "CL0014"}
+      {"claim": "CL0014"}
     ]
   }
 }

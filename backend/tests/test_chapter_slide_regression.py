@@ -144,7 +144,7 @@ def test_revision_regressions_use_real_revision_prompt_without_answer_criteria()
 
 def test_merge_rule_is_shared_and_revision_tail_is_bound(monkeypatch):
     assert '舊 sentence 不再自動適用' in slides.POINT_TIMING_RULES
-    assert '不取來源要點的最早錨點' in slides.POINT_TIMING_RULES
+    assert '拆成幾條' in slides.POINT_TIMING_RULES  # owner 2026-11-18: split, do not wait
     assert slides.POINT_TIMING_RULES in slides.system_prompt(CHAPTERS['mat-5-1-48'])
     assert slides.POINT_TIMING_RULES in ev.review_system()
     before=ev.binding(dataset())

@@ -55,12 +55,12 @@ def test_saved_semantic_eval_requires_exact_complete_passing_candidate(tmp_path,
     if invalid == "failed":
         rows[0]["passed"] = False
     if invalid != "missing":
-        receipt.write_text(json.dumps({
+        receipt.write_text(json.dumps(ev.with_run({
             "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
             "slides_sha256": ev.semantic_slide_sha256(candidate),
             "selection_sha256": chapter_exposition.file_sha256(selection),
             "checks": rows,
-        }))
+        })))
     if invalid == "stale":
         candidate.write_text(json.dumps({"slides": [{"first": "S0002"}]}))
     if invalid == "published":
@@ -92,13 +92,13 @@ def test_unit_reader_uses_the_exact_semantic_eval_without_a_second_review(tmp_pa
     entry = {"lecture": title, "source_id": "source", "changeset": "current", "source_sha256": "transcript"}
     with pytest.raises(ValueError, match="Missing or unreadable semantic Eval"):
         reviewed_unit_recording(tmp_path, unit, entry, {})
-    (tmp_path / f"{title}.semantic-eval.json").write_text(json.dumps({
+    (tmp_path / f"{title}.semantic-eval.json").write_text(json.dumps(ev.with_run({
         "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
         "slides_sha256": ev.semantic_slide_sha256(edition),
         "selection_sha256": chapter_exposition.file_sha256(selection),
         "checks": [{"slide": "S0001", "criterion": k, "passed": True, "evidence": text}
                    for k in ev.SEMANTIC_CRITERIA],
-    }))
+    })))
     assert reviewed_unit_recording(tmp_path, unit, entry, {})["slides"][0]["title"] == "論點"
 
 
@@ -114,7 +114,7 @@ def test_fixing_the_first_question_does_not_clear_early_answer_on_next_slide(tmp
     for slide, expected in ((bad, False), (good, True)):
         candidate.write_text(json.dumps({"slides": [prior, slide]}))
         receipt = tmp_path / "semantic-eval.json"
-        receipt.write_text(json.dumps({
+        receipt.write_text(json.dumps(ev.with_run({
             "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
             "slides_sha256": ev.semantic_slide_sha256(candidate),
             "selection_sha256": chapter_exposition.file_sha256(source),
@@ -122,6 +122,24 @@ def test_fixing_the_first_question_does_not_clear_early_answer_on_next_slide(tmp
                         "passed": expected or s is prior or k != "timing",
                         "evidence": "節錄顯示 S0058 才說到司法原則。"}
                        for s in (prior, slide) for k in ev.SEMANTIC_CRITERIA],
-        }))
+        })))
         problems = ev.semantic_eval_problems(candidate, source, receipt)
         assert problems == ([] if expected else ["S0020 timing: 節錄顯示 S0058 才說到司法原則。"])
+
+
+def test_semantic_eval_must_be_a_recorded_run_by_another_model(tmp_path):
+    """Owner 2026-11-18: lecture 1's receipt was written by the slide builder and reused
+    an older verdict (「沿用…該項未變」); it passed a point 12 s late."""
+    selection = tmp_path / "selection.json"
+    selection.write_text("{}")
+    candidate = tmp_path / "slides.json"
+    candidate.write_text(json.dumps({"model": "gpt-slides", "slides": [{"first": "S0001"}]}))
+    receipt = tmp_path / "semantic-eval.json"
+    base = {"schema_version": ev.SEMANTIC_SCHEMA_VERSION, "slides_sha256": ev.semantic_slide_sha256(candidate),
+            "selection_sha256": chapter_exposition.file_sha256(selection),
+            "checks": [{"slide": "S0001", "criterion": k, "passed": True, "evidence": "e"} for k in ev.SEMANTIC_CRITERIA]}
+    for written, ok in ((base, False), (ev.with_run(base, "gpt-slides"), False),
+                        ({**ev.with_run(base, "claude-opus-5-5"), "baseline_eval_sha256": "x"}, False),
+                        (ev.with_run(base, "claude-opus-5-5"), True)):
+        receipt.write_text(json.dumps(written))
+        assert (ev.semantic_eval_problems(candidate, selection, receipt) == []) == ok

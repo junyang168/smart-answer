@@ -281,12 +281,12 @@ def test_points_are_timed_by_the_argument_step_they_show_and_unrelated_slides_ar
 
 
 def test_a_point_left_over_from_another_step_is_reported(tmp_path):
-    """他已講到另一步，畫面最新的要點還屬於別的 Claim：三句以上就報；兩條綁同一句也報。"""
+    """他已講到另一步，畫面最新的要點還屬於別的 Claim：超過 4 秒就報；兩條綁同一句也報。"""
     context = {"claims": [
         {"claim_id": "C1", "evidence_steps": [{"evidence_step_id": "E1", "anchors": [{"sentences": ["S0001", "S0002"]}]}]},
         {"claim_id": "C2", "evidence_steps": [{"evidence_step_id": "E2", "anchors": [{"sentences": ["S0003", "S0004", "S0005", "S0006"]}]}]},
     ]}
-    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    lines = [{"id": f"S000{i}", "start": 3.0 * i, "end": 3.0 * i + 3} for i in range(1, 7)]
     late = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0001", "text": "一", "source": "E1"},
                                                          {"sentence": "S0006", "text": "二", "source": "E2"}]}]
     assert hints.stale_points(context, late, lines) == [
@@ -308,7 +308,7 @@ def test_where_he_states_a_claim_itself_the_slide_must_show_that_claim():
         {"claim_id": "C2", "statement": "推辭不是謙卑", "stated": "S0003",
          "evidence_steps": [{"evidence_step_id": "E2", "statement": "例子", "anchors": [{"sentences": ["S0002", "S0003"]}]}]},
     ]}
-    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    lines = [{"id": f"S000{i}", "start": 3.0 * i, "end": 3.0 * i + 3} for i in range(1, 7)]
     assert hints.argument_index(context)["C1"]["last"] == "S0006"
     stale = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0002", "text": "推辭", "source": "E2"}]}]
     assert hints.stale_points(context, stale, lines) == [
@@ -367,7 +367,7 @@ def test_shared_evidence_does_not_move_a_claim_conclusion_before_its_stated_sent
 def test_visible_scripture_carries_reading_but_cannot_excuse_stale_explanation():
     context={'claims':[{'claim_id':'C1','statement':'old','evidence_steps':[{'evidence_step_id':'E1','statement':'old','anchors':[{'sentences':['S0001']}]}]},
                        {'claim_id':'C2','statement':'new','evidence_steps':[{'evidence_step_id':'E2','statement':'new','anchors':[{'sentences':[f'S{i:04}' for i in range(2,8)]}]}]}]}
-    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,8)]
+    lines=[{'id':f'S{i:04}','text':'source','start':3.0*i,'end':3.0*i+3} for i in range(1,8)]
     slides=[{'first':'S0001','last':'S0007','title':'test','points':[{'sentence':'S0001','source':'E1','text':'old'}]}]
     reading={'S0002','S0003','S0004'}
     assert hints.stale_points(context,slides,lines[:4],displayed_readings=reading)==[]
@@ -379,7 +379,7 @@ def test_other_evidence_of_same_claim_can_carry_context_but_unrelated_claim_cann
     context={'claims':[{'claim_id':'C1','statement':'one argument','evidence_steps':[
         {'evidence_step_id':'E1','statement':'premise','anchors':[{'sentences':['S0001']}]},
         {'evidence_step_id':'E2','statement':'comparison','anchors':[{'sentences':['S0002','S0003','S0004']}]}]}]}
-    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,5)]
+    lines=[{'id':f'S{i:04}','text':'source','start':3.0*i,'end':3.0*i+3} for i in range(1,5)]
     slides=[{'first':'S0001','last':'S0004','title':'one argument','points':[{'sentence':'S0001','source':'E1','text':'related premise'}]}]
     assert hints.stale_points(context,slides,lines)==[]
     context['claims'].append({'claim_id':'C2','statement':'unrelated','evidence_steps':[context['claims'][0]['evidence_steps'].pop()]})
@@ -510,3 +510,35 @@ def test_diagram_eval_law_figures_follow_their_own_claim_not_the_supporting_poin
     slides[1]["points"][0]["source"] = "ST04"
     with pytest.raises(ValueError, match="所選論證圖沒有連到本張的論點"):
         chapter_slides.timed_diagrams(slides, lines, context)
+
+
+def test_a_point_two_sentences_late_is_reported_nysc_2_1_s0015():
+    """Owner 2026-11-18, 太5 lecture 1: he says 「五章十三節到七章二十九節…門徒的使命」 at S0015
+    (186.0 s); the point was merged with S0017 and appeared at 198.6 s. Two sentences
+    passed the old three-sentence tolerance; 12 s on screen is reported."""
+    context = {"claims": [
+        {"claim_id": "CL0002", "evidence_steps": [{"evidence_step_id": "ST03", "anchors": [{"sentences": ["S0014"]}]}]},
+        {"claim_id": "CL0003", "evidence_steps": [{"evidence_step_id": "ST04", "anchors": [{"sentences": ["S0015", "S0016", "S0017"]}]}]},
+    ]}
+    lines = [{"id": "S0014", "start": 177.1, "end": 186.0}, {"id": "S0015", "start": 186.0, "end": 194.6},
+             {"id": "S0016", "start": 194.6, "end": 198.6}, {"id": "S0017", "start": 198.6, "end": 210.6}]
+    merged = [{"first": "S0014", "title": "登山寶訓的背景與結構", "points": [
+        {"sentence": "S0014", "text": "五3至12藉彌賽亞的祝福顯明祂的身份", "source": "CL0002"},
+        {"sentence": "S0017", "text": "五13至七29談門徒認識祂後的生命反應", "source": "ST04"}]}]
+    assert any("S0015–S0016" in p for p in hints.stale_points(context, merged, lines))
+    split = [dict(merged[0], points=[merged[0]["points"][0],
+                                     {"sentence": "S0015", "text": "五13至七29談門徒的使命", "source": "ST04"},
+                                     {"sentence": "S0017", "text": "認識祂後有生命上的反應", "source": "ST04"}])]
+    assert hints.stale_points(context, split, lines) == []
+
+
+def test_diagram_appears_when_he_starts_the_argument_not_at_the_recap():
+    """Owner 2026-11-18: diagram D waited for CL0001's stated sentence S0018 (his recap,
+    210.6 s); he lays out the two parts from S0008 (135.4 s)."""
+    d = {"title": "登山寶訓（論彌賽亞／門徒的使命）", "origin": "母本", "kind": "professor",
+         "sha256": "d" * 64, "svg": "<svg/>"}
+    lines = [{"id": "S0001", "start": 71.0}, {"id": "S0008", "start": 135.4}, {"id": "S0018", "start": 210.6}]
+    slides = [{"first": "S0001", "last": "S0018", "title": "結構", "points": [], "diagram_ref": d["sha256"]}]
+    context = {"claims": [{"claim_id": "CL0001", "stated": "S0018", "diagrams": [d],
+                           "evidence_steps": [{"evidence_step_id": "ST03", "anchors": [{"sentences": ["S0008"]}]}]}]}
+    assert chapter_slides.timed_diagrams(slides, lines, context)["S0001"]["at"] == 135.4

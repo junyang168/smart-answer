@@ -9,19 +9,12 @@ const passage = "mat-5-1-48";
 const section = "mat-5-1-12";
 const point = "先講彌賽亞的身份，再講門徒的使命";
 const elaboration = "新舊約都是宗主國與附庸國之約：宗主國先施恩，再提出要求";
-const professor = {
-  title: "登山寶訓（論彌賽亞／門徒的使命）", at: 20, sha256: "d".repeat(64), layout: "overview",
-  labels: ["登山寶訓", "論彌賽亞", "太 5:3–12 應驗賽 61", "門徒的使命", "太 5:13–16 綜合", "太 5:17–7:29 闡明，細節"],
-};
-const editorial = {
-  title: "登山寶訓的文學結構", at: 50, sha256: "c".repeat(64), layout: "literary_structure",
-  labels: [
-    "太 5:3–12　彌賽亞的身份（八福的 inclusio）", "門徒的使命", "太 5:13–16　總綱：鹽與光",
-    "太 5:17 – 7:12　Inclusio：門徒與舊約（律法和先知）的關係", "5:17–48", "門徒的義（勝過法利賽人）",
-    "6:8–7:11 inclusio", "門徒義的實踐（施捨，禱告等）", "7:12　小結：律法與先知的總結（黃金律）",
-    "7:13–27　門徒使命的結論（兩條路）", "7:28–29　敘事結尾",
-  ],
-};
+// His drawings are shown as drawn: a white-ground SVG, never re-laid-out or colour-inverted.
+const svg = (words) => "data:image/svg+xml;base64," + Buffer.from(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"><rect width="600" height="300" fill="#fff"/>` +
+  words.map((w, i) => `<text x="20" y="${60 + i * 60}" font-size="28">${w}</text>`).join("") + "</svg>").toString("base64");
+const professor = { title: "登山寶訓（論彌賽亞／門徒的使命）", at: 20, sha256: "d".repeat(64), image_src: svg(["論彌賽亞", "門徒的使命"]) };
+const editorial = { title: "登山寶訓的文學結構", at: 50, sha256: "c".repeat(64), image_src: svg(["太 5:13–16", "太 5:17–7:12"]) };
 
 const recording = {
   source_id: "lecture-1", transcript_id: "lecture-1", title: "第一講", media_kind: "audio",
@@ -56,40 +49,27 @@ async function evaluate(browser, viewport) {
     };
 
     await open(19.5);
-    assert.equal(await figure.count(), 0, "The image must wait for the actual statement");
+    assert.equal(await figure.count(), 0, "The image waits for him to start that argument");
     await open(21);
-    await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await figure.count(), 1);
-    const label = figure.getByText("門徒的使命", { exact: true });
-    const measure = await label.evaluate(node => {
-      const styles = getComputedStyle(node);
-      let background = "rgba(0, 0, 0, 0)";
-      for (let parent = node; parent && background === "rgba(0, 0, 0, 0)"; parent = parent.parentElement) {
-        background = getComputedStyle(parent).backgroundColor;
-      }
-      return { font: parseFloat(styles.fontSize), background };
+    await figure.waitFor();
+    const look = await figure.evaluate(node => {
+      const img = node.querySelector("img");
+      return { filter: getComputedStyle(img).filter, card: getComputedStyle(img.parentElement).backgroundColor };
     });
-    assert(measure.font >= 14, "Labels must be readable without opening another view");
-    assert.notEqual(measure.background, "rgb(255, 255, 255)");
-    assert.equal(await figure.getByRole("button").count(), 0);
-    assert.equal(await figure.getByText("教授的圖", { exact: true }).count(), 0);
-    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.width >= 390);
-
+    assert.equal(look.filter, "none", "His drawing is not colour-inverted");
+    assert.equal(look.card, "rgb(255, 255, 255)", "White-ground drawings sit on a white card");
+    assert(await slides.getByText(point, { exact: true }).isVisible(), "Points stay visible with the diagram");
+    await figure.getByRole("button").click();
+    await page.getByRole("dialog", { name: professor.title }).waitFor();
+    await page.getByRole("dialog", { name: professor.title }).click();
     await open(24);
-    await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await slides.getByText(elaboration, { exact: true }).isVisible(), viewport.width >= 390);
-
+    assert(await slides.getByText(elaboration, { exact: true }).isVisible());
     await open(38);
     assert.equal(await figure.count(), 0, "An image from the previous clip must disappear");
     await open(51);
-    await figure.getByText("門徒的使命", { exact: true }).waitFor();
-    assert.equal(await figure.getByText("整理", { exact: true }).count(), 0);
+    await figure.waitFor();
     assert.equal(await figure.count(), 1, "The editorial image has its own slide");
-    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.width >= 640);
-    const diagramBox = await figure.boundingBox();
-    const paneBox = await slides.boundingBox();
-    assert(diagramBox.y >= paneBox.y && diagramBox.y + diagramBox.height <= paneBox.y + paneBox.height,
-      "The densest diagram must fit without opening or scrolling");
+    assert(await slides.getByText(point, { exact: true }).isVisible());
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     console.log(`${viewport.width}×${viewport.height}: listening diagrams passed`);
   } finally {
@@ -137,17 +117,15 @@ async function measureIndex(browser, index, evidence) {
         await open(diagram.at);
         await figure.waitFor();
         const observation = await figure.evaluate(node => {
-          const box = node.getBoundingClientRect();
-          const panel = node.closest("[data-slide-scroll]");
-          const bounds = panel.getBoundingClientRect();
-          const [r, g, b] = getComputedStyle(node.closest("section")).backgroundColor.match(/\d+/g).map(Number);
-          const labels = [...node.querySelectorAll("div,span,strong")]
-            .filter(el => el.children.length === 0 && el.textContent.trim());
+          const img = node.querySelector("img");
+          const box = img.getBoundingClientRect();
+          const bounds = node.closest("[data-slide-scroll]").getBoundingClientRect();
+          const point = node.closest("section").querySelector("ol li");
           return {
-            fits: bounds.top <= box.top && box.bottom <= bounds.bottom && bounds.left <= box.left && box.right <= bounds.right,
-            dark: Math.max(r, g, b) < 64 && node.querySelector("img") === null,
-            no_zoom: node.querySelector("button, dialog") === null,
-            min_font_px: labels.length ? Math.min(...labels.map(el => parseFloat(getComputedStyle(el).fontSize))) : 0,
+            fits: bounds.left <= box.left && box.right <= bounds.right && box.width > 0 && box.height > 0,
+            as_drawn: getComputedStyle(img).filter === "none" && getComputedStyle(img.parentElement).backgroundColor === "rgb(255, 255, 255)",
+            points_visible: !point || (point.offsetParent !== null && getComputedStyle(point).visibility !== "hidden"),
+            enlarge: node.querySelector("button") !== null,
           };
         });
         view.diagrams.push({ sha256: diagram.sha256, hidden_before: hiddenBefore, ...observation });

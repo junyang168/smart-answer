@@ -53,7 +53,9 @@ POINT_TIMING_RULES = """要點的 sentence 標記教授首次實際說出這條�
 - 只介紹術語名稱或提出「是什麼」時，可顯示術語或問題；包含實質定義的要點，綁首次說出該定義的句子。需要時把提問與答案分成不同要點，不把尚未講出的答案塞在介紹要點中。
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
 - 完整內容早已講出時，不必等後面的重述；若到歸納句才首次講出結論，就應綁該歸納句。不能以「不要綁歸納句」為由把尚未說出的結論提前。
-- 合併、縮寫、補充要點或合併投影片後，舊 sentence 不再自動適用。逐一回查新要點各個實質意思首次出現的位置；保留合併文字時，最早只能綁到這些意思均已講出的句子，不取來源要點的最早錨點，也不取故事／問題的開頭。若這會讓前面的必要理由出現太晚，拆開要點或調整分張，仍保留完整論證並遵守二到四條限制。
+- 過晚和過早一樣是錯：他開始講一點，這條要點就要在那一句出現，不能等他講完後面幾句。
+- 一條要點只寫他在一處講出的一個意思。Evidence 步驟或合併的文字若包含他在不同句講出的幾個意思，拆成幾條，各綁各自首次講出的句子，不要合成一條等到最後一個意思講出。例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，S0017 才說「認識神之後有生命上的反應」；寫成兩條，分別綁 S0015 與 S0017，不寫成一條綁 S0017。拆開後超過四條時，調整分張。
+- 合併、縮寫、補充要點或合併投影片後，舊 sentence 不再自動適用，逐條按上面規則重新核對。
 - 審稿意見要求提前時也套用同一規則；若該句尚未講出答案，保留正確錨點，不照錯誤意見前移。故事可先聽原聲，不為填滿畫面提前顯示後面的情節、對比或結論。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
 
@@ -637,7 +639,14 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
 
 
 def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict[str, dict]:
-    """Resolve the one diagram selected for a slide against its retained Claim."""
+    """Resolve the one diagram selected for a slide and when it appears.
+
+    The diagram appears when he starts the argument it shows: the earliest sentence on
+    this slide that belongs to a linked Claim (its stated sentence or an Evidence anchor),
+    or a point citing that Claim or one of its Evidence steps. Owner 2026-11-18: diagram
+    D waited for the Claim's stated sentence (S0018, his recap) and arrived after he had
+    already laid out the two parts from S0008.
+    """
     by_id = {line["id"]: line["start"] for line in lines}
     claims = context.get("claims", [])
     placed = {}
@@ -645,15 +654,19 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict
         ref = slide.get("diagram_ref")
         if not ref:
             continue
+        on_slide = lambda sentence: sentence in by_id and slide["first"] <= sentence <= slide["last"]
         matches = []
         for claim in claims:
-            sentence = claim.get("stated")
-            if sentence not in by_id or not slide["first"] <= sentence <= slide["last"]:
-                sentence = next((p["sentence"] for p in slide["points"] if p.get("source") == claim["claim_id"]), None)
-            if sentence not in by_id:
+            found = [d for d in claim.get("diagrams", []) if d["sha256"] == ref and "svg" in d]
+            if not found:
                 continue
-            matches.extend((by_id[sentence], d) for d in claim.get("diagrams", [])
-                           if d["sha256"] == ref and "svg" in d)
+            steps = {step.get("evidence_step_id") for step in claim.get("evidence_steps", [])} - {None}
+            starts = [claim.get("stated")]
+            starts += [sentence for step in claim.get("evidence_steps", [])
+                       for anchor in step.get("anchors", []) for sentence in anchor.get("sentences", [])]
+            starts += [p["sentence"] for p in slide["points"]
+                       if p.get("source") == claim["claim_id"] or p.get("source") in steps]
+            matches.extend((by_id[s], found[0]) for s in starts if on_slide(s))
         if not matches:
             raise ValueError(f"{slide['title']}: 所選論證圖沒有連到本張的論點")
         at, item = min(matches, key=lambda match: match[0])
@@ -661,7 +674,6 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict) -> dict
         placed[slide["first"]] = {
             "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
             "sha256": ref, "image_src": "data:image/svg+xml;base64," + image,
-            **({"layout": item["layout"], "labels": item["labels"]} if item.get("layout") else {}),
         }
     return placed
 

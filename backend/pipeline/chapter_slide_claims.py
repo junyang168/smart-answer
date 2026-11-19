@@ -439,8 +439,11 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     return problems
 
 
-#: 他已講進另一步論證，畫面上的要點還停在別的 Claim，這麼多句以上才報（一兩句的過門不算）。
-STALE_SENTENCES = 3
+#: 他已講進另一步論證，畫面上的要點還停在別的 Claim，超過這麼多秒就報。
+# Owner 2026-11-18: a point that lags the sentence he is saying is the basic error.
+# Three sentences let 「五13至七29」 arrive 12 s late (S0015–S0016); count seconds instead.
+# The slide shows a point 1 s before its anchor, so a lag past this is visible.
+STALE_SECONDS = 4.0
 
 
 def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displayed_readings=()) -> list[str]:
@@ -469,7 +472,7 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displa
     problems, run = [], None
 
     def close():
-        if run and run["count"] >= STALE_SENTENCES:
+        if run and run["end"] - run["start"] > STALE_SECONDS:
             problems.append(f"{run['slide']}（{run['first']}–{run['last']}）: 他已講到另一步（{'、'.join(sorted(run['steps']))}），"
                             f"畫面還停在要點「{run['text']}」；那一步的第一條要點要在 {run['first']} 或更早出現")
 
@@ -483,10 +486,11 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displa
             close(); run = None
             continue
         if run and run["text"] == shown[-1]["text"]:
-            run.update(last=sid, count=run["count"] + 1)
+            run.update(last=sid, end=line.get("end", line["start"]))
         else:
             close()
-            run = {"slide": slide["title"], "first": sid, "last": sid, "count": 1, "text": shown[-1]["text"], "steps": cover[sid]}
+            run = {"slide": slide["title"], "first": sid, "last": sid, "text": shown[-1]["text"], "steps": cover[sid],
+                   "start": line["start"], "end": line.get("end", line["start"])}
     close()
     for slide in slides:
         bound = [p["sentence"] for p in slide["points"]]
@@ -644,15 +648,6 @@ def instance_creation_result(meta: dict) -> dict:
     return result
 
 
-# These four verified drawings have a responsive layout. Labels still come from the SVG.
-DIAGRAM_LAYOUTS = {
-    "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321": ("covenants", 13),
-    "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c": ("overlap", 4),
-    "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17": ("literary_structure", 11),
-    "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291": ("overview", 6),
-}
-
-
 def instance_diagrams(conn, claim_ids: list[str]) -> dict:
     """Load visual Observations directly supporting these live Claims."""
     from backend.pipeline.source_projection import visual_source_blocks
@@ -696,17 +691,9 @@ def instance_diagrams(conn, claim_ids: list[str]) -> dict:
                 or raw[blocks[0].char_end:].strip()
                 or hashlib.sha256(raw.encode()).hexdigest() != sha):
             raise ValueError(f"Diagram SVG failed validation: {fragment['fragment_id']}")
-        layout = {}
-        if sha in DIAGRAM_LAYOUTS:
-            name, expected_labels = DIAGRAM_LAYOUTS[sha]
-            labels = [fact["text"].strip() for fact in blocks[0].facts
-                      if fact["tag"] == "text" and (fact.get("text") or "").strip()]
-            if len(labels) != expected_labels:
-                raise ValueError(f"Diagram labels changed: {fragment['fragment_id']}")
-            layout = {"layout": name, "labels": labels}
         links.setdefault(claim_id, {})[sha, kind, doc["origin"]] = {
             "title": doc["title"], "origin": doc["origin"], "kind": kind, "sha256": sha,
-            "path": fragment["visual_source_url"], "svg": raw, **layout,
+            "path": fragment["visual_source_url"], "svg": raw,
         }
     return {claim: list(diagrams.values()) for claim, diagrams in links.items()}
 

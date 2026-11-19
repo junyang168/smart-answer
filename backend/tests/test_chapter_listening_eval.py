@@ -138,10 +138,10 @@ def test_new_argument_version_and_diagrams_participate_in_unified_eval(tmp_path,
     assert report['checks']['ui']['status'] == 'failed'
     assert report['checks']['playback']['status'] == 'passed'
     for viewport in evidence['viewports']:
-        viewport['diagrams'] = [{'sha256': sha, 'fits': True, 'dark': True, 'no_zoom': True,
-                                 'hidden_before': True, 'min_font_px': 14}]
+        viewport['diagrams'] = [{'sha256': sha, 'fits': True, 'as_drawn': True, 'points_visible': True,
+                                 'enlarge': True, 'hidden_before': True}]
     assert ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence)['checks']['ui']['status'] == 'passed'
-    evidence['viewports'][-1]['diagrams'][0]['min_font_px'] = 11
+    evidence['viewports'][-1]['diagrams'][0]['as_drawn'] = False  # re-laid-out or colour-inverted
     assert ev.evaluate(tmp_path, 'mat-5-1-48', evidence=evidence)['checks']['ui']['status'] == 'failed'
     slide['diagram']['at'] += 0.5
     assert ev.evaluate(tmp_path, 'mat-5-1-48')['checks']['playback']['status'] == 'failed'

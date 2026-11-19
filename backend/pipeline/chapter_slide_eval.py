@@ -144,14 +144,16 @@ def diagram_problems(slides: list[dict], lines: list[dict], context: dict) -> li
         for claim in context.get("claims", []):
             if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"]:
                 continue
-            sentence = claim.get("stated")
-            if sentence not in by_sentence:
+            said = [claim.get("stated")] + [sentence for step in claim.get("evidence_steps", [])
+                                             for anchor in step.get("anchors", []) for sentence in anchor.get("sentences", [])]
+            said = sorted({by_sentence[x] for x in said if x in by_sentence})
+            if not said:
                 continue
-            current = next((s for s in slides if s["first"] <= sentence <= s["last"]), None)
-            diagram = placed.get(current["first"]) if current else None
-            wanted = {d["sha256"] for d in claim.get("diagrams", []) if d.get("layout") == case["layout"]}
-            if not diagram or diagram["sha256"] not in wanted or diagram["at"] != by_sentence[sentence]:
-                problems.append(f"論證圖缺漏或出場錯誤：{case['layout']}（{sentence}）")
+            wanted = {d["sha256"] for d in claim.get("diagrams", [])}
+            shown = [d for d in placed.values() if d["sha256"] in wanted]
+            # It must be on screen when he starts this argument, not when he sums it up.
+            if not shown or min(d["at"] for d in shown) > said[0]:
+                problems.append(f"論證圖缺漏或出場太晚：{case['claim']}（他從 {said[0]:.0f} 秒開始講這個論證）")
     return problems
 
 
@@ -195,7 +197,7 @@ SEMANTIC_SCHEMA_VERSION = "chapter-slide-semantic-eval.v1"
 SEMANTIC_CRITERIA = {
     "faithfulness": "標題與要點保留原文的說話者、否定、限定、程度及因果。每個實質意思必須有原文支持。",
     "coverage": "從原文反查承重理由與結論。比較、對比和首尾呼應要交代兩端如何支持結論。",
-    "timing": "標題在換張時立即可見。若結論尚未講出，標題只能用問題或中性主題。要點的全部意思須在錨點已講出。檢查故事結果、限定語及複合要點。按整段論證順序查看每張，尤其是問題之後、答案之前的相鄰投影片。第一張用問題不代表後面的標題可以先說出答案。",
+    "timing": "過早和過晚都要查。過晚：他已開始講某一點，畫面要等他講完幾句才出現這條要點（例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，要點卻綁在兩句後的 S0017），報出應移到哪一句。一條要點合併了他在不同句講的意思時，應拆成兩條，不是等到最後一個意思。過早：標題在換張時立即可見。若結論尚未講出，標題只能用問題或中性主題。要點的全部意思須在錨點已講出。檢查故事結果、限定語及複合要點。按整段論證順序查看每張，尤其是問題之後、答案之前的相鄰投影片。第一張用問題不代表後面的標題可以先說出答案。",
     "scripture": "核對成品實際顯示的經文。每一節讀出或幾乎逐字引用的經文都應顯示，只有提及範圍的經節不作逐字讀出。",
 }
 
@@ -235,6 +237,17 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             or result.get("selection_sha256") != file_sha256(selection_path)):
         return ["Semantic Eval belongs to a different slide version or source selection"]
     record = json.loads(slide_path.read_text())
+    # Owner 2026-11-18: a receipt the slide builder wrote by hand, reusing an older
+    # verdict (「沿用…該項未變」), passed a point that appeared 12 s late. Only a
+    # recorded run of a different model than the one that wrote the slides counts.
+    run = result.get("run")
+    if (not isinstance(run, dict) or not run.get("model") or "raw_response" not in run
+            or run.get("raw_sha256") != _raw_sha256(run["raw_response"])):
+        return ["Semantic Eval was not produced by a recorded model run (chapter_slide_eval --run)"]
+    if run["model"] == record.get("model"):
+        return [f"Semantic Eval must use a different model than the slides ({record.get('model')})"]
+    if "baseline_eval_sha256" in result:
+        return ["Semantic Eval must judge every slide in this run, not reuse an earlier verdict"]
     expected = {(s["first"], key) for s in record["slides"] for key in SEMANTIC_CRITERIA}
     seen = set()
     problems = []
@@ -254,6 +267,45 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
     return problems
 
 
+def _raw_sha256(raw) -> str:
+    return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+SEMANTIC_SYSTEM = """你是獨立的投影片驗收者，不是寫投影片的人。使用者給你一堂講座的逐字稿（source，每句有編號和秒數）、論證脈絡（claims）、成品投影片（slides）和驗收標準（criteria）。
+逐張、逐項按 criteria 判定，每張投影片的每一項都要給一筆：slide 填該張的 first，criterion 填標準名稱，passed 為是否通過，evidence 寫具體依據（句子編號與原文；不通過時寫應怎麼改）。
+不要沿用任何先前的判定，全部重新看原文。"""
+
+
+def with_run(receipt: dict, model: str = "evaluator-model", raw=None) -> dict:
+    """Attach the model run record; the runner passes the model's raw response."""
+    raw = raw if raw is not None else {"checks": receipt["checks"]}
+    return {**receipt, "run": {"model": model, "raw_sha256": _raw_sha256(raw), "raw_response": raw}}
+
+
+def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str) -> dict:
+    """One independent model call over the whole candidate; writes the receipt the publisher checks."""
+    from backend.pipeline.chapter_exposition import chapter_client, file_sha256
+
+    record = json.loads(slide_path.read_text())
+    if record["decisions_sha256"] != file_sha256(selection_path):
+        raise ValueError("Selection does not match this slide candidate")
+    if model == record.get("model"):
+        raise ValueError(f"Use a different model than the slides ({model})")
+    packet = semantic_packet(record, json.loads(selection_path.read_text()))
+    row = {"type": "object", "additionalProperties": False, "required": ["slide", "criterion", "passed", "evidence"],
+           "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(SEMANTIC_CRITERIA)},
+                          "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
+    schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
+              "properties": {"checks": {"type": "array", "items": row}}}
+    client = chapter_client(model)
+    answer = client.generate_json(SEMANTIC_SYSTEM, json.dumps(packet, ensure_ascii=False), schema)
+    raw = getattr(client, "last_raw_response", None) or answer
+    receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
+                        "selection_sha256": file_sha256(selection_path), "checks": answer["checks"]}, model, raw)
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
+    return receipt
+
+
 def main():
     import argparse
     from backend.pipeline.chapter_exposition import file_sha256
@@ -262,7 +314,15 @@ def main():
     parser.add_argument("slides", type=Path)
     parser.add_argument("selection", type=Path)
     parser.add_argument("--verify", type=Path, help="Verify a saved semantic Eval without issuing a model call")
+    parser.add_argument("--run", type=Path, help="Call the evaluator model and write the semantic Eval here")
+    parser.add_argument("--model", default="claude-opus-5-5", help="Evaluator; must differ from the slide model")
     args = parser.parse_args()
+    if args.run:
+        receipt = run_semantic_eval(args.slides, args.selection, args.run, args.model)
+        problems = semantic_eval_problems(args.slides, args.selection, args.run)
+        print(json.dumps({"status": "failed" if problems else "passed", "problems": problems,
+                          "checks": len(receipt["checks"])}, ensure_ascii=False))
+        return int(bool(problems))
     if args.verify:
         problems = semantic_eval_problems(args.slides, args.selection, args.verify)
         print(json.dumps({"status": "failed" if problems else "passed", "problems": problems}, ensure_ascii=False))
