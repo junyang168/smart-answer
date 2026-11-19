@@ -719,12 +719,15 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     """
 
     lines = sentences(kept_pieces(decisions_record))
+    from backend.pipeline.chapter_slide_point_timing import apply_adjustments
+
+    slides = apply_adjustments(slides_record["slides"], lines, slides_record.get("point_timing_adjustments"))
     index = {s["id"]: i for i, s in enumerate(lines)}
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
-    diagrams = timed_diagrams(slides_record["slides"], lines, slides_record.get("claim_context") or {},
+    diagrams = timed_diagrams(slides, lines, slides_record.get("claim_context") or {},
                               slides_record.get("diagram_timing"))
-    for slide in slides_record["slides"]:
+    for slide in slides:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:
             piece_verses.setdefault(line["piece"], slide["verses"])

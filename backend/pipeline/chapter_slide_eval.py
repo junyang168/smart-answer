@@ -254,6 +254,18 @@ def semantic_slide_sha256(slide_path: Path) -> str:
     return hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _checked_point_adjustments(record, source, points):
+    from backend.pipeline.chapter_slide_cases import cases_for, check_cases
+    from backend.pipeline.chapter_slide_point_timing import apply_adjustments, timing_adjustments
+
+    slides = record["slides"]
+    adjustments = timing_adjustments(slides, source, points)
+    if adjustments and check_cases(apply_adjustments(slides, source, adjustments),
+                                   cases_for(record["lecture"]), source, partial=True):
+        return []
+    return adjustments
+
+
 def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path) -> list[str]:
     """Read the single per-candidate semantic Eval with no model call."""
     from backend.pipeline.chapter_exposition import file_sha256
@@ -278,6 +290,15 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
         return [f"Semantic Eval must use a different model than the slides ({record.get('model')})"]
     if "baseline_eval_sha256" in result:
         return ["Semantic Eval must judge every slide in this run, not reuse an earlier verdict"]
+    if "point_timing_adjustments" in record:
+        try:
+            source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
+            saved = record["point_timing_adjustments"]
+            timing = result["point_timing"]
+            if saved != timing["adjustments"] or saved != _checked_point_adjustments(record, source, timing["points"]):
+                return ["Point timing adjustments do not match the recorded results"]
+        except (ValueError, KeyError, TypeError):
+            return ["Missing or invalid point timing adjustment evidence"]
     expected = {(s["first"], key) for s in record["slides"] for key in SEMANTIC_CRITERIA}
     seen = set()
     problems = []
@@ -385,10 +406,17 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
             lambda state, questions: claim_flash_common.jev(
                 receipt_path.with_suffix(".point-timing"), evidence_refresh.JevPort(), state, questions),
             model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES)
-        point_timing = {"point_timing": {"model": evidence_refresh.MODEL, "points": points}}
+        adjustments = _checked_point_adjustments(record, packet["source"], points)
+        if record.get("point_timing_adjustments", []) != adjustments:
+            record["point_timing_adjustments"] = adjustments
+            temp = slide_path.with_suffix(".point-timing.tmp")
+            temp.write_text(json.dumps(record, ensure_ascii=False, indent=1))
+            temp.replace(slide_path)
+        point_timing = {"point_timing": {"model": evidence_refresh.MODEL, "points": points, "adjustments": adjustments}}
+        corrected = {(row["slide"], row["point"]) for row in adjustments}
         failures = {}
         for point in points:
-            if point["status"] != "correct":
+            if point["status"] != "correct" and (point["slide"], point["point"]) not in corrected:
                 failures.setdefault(point["slide"], []).append(point["evidence"])
         checks = [
             {**check, "passed": False, "evidence": "\n".join(

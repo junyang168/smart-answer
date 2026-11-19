@@ -150,3 +150,65 @@ def evaluate_points(packet, candidates, ask, *, model, max_bytes):
             results.append({**item, "status": status, "expected_sentence": expected,
                             "delta_seconds": delta, "evidence": evidence})
     return results
+
+
+def timing_adjustments(slides, source, results):
+    """Keep only Jev-backed moves inside the original slide with distinct destinations."""
+    expected = {(slide["first"], i): point["sentence"]
+                for slide in slides for i, point in enumerate(slide.get("points", []))}
+    actual = {(row["slide"], row["point"]): row["sentence"] for row in results}
+    if len(actual) != len(results) or actual != expected:
+        raise ValueError("Point timing results do not cover the original points")
+    moves = {(row["slide"], row["point"]): row["expected_sentence"]
+             for row in results if row["status"] in {"early", "late"}}
+    by_id = {line["id"]: i for i, line in enumerate(source)}
+    adjustments = []
+    for slide in slides:
+        first = slide["first"]
+        points = slide.get("points", [])
+        final = [moves.get((first, i), point["sentence"]) for i, point in enumerate(points)]
+        if final == [point["sentence"] for point in points]:
+            continue
+        if len(set(final)) != len(final) or any(
+            sid not in by_id or not by_id[first] <= by_id[sid] <= by_id[slide["last"]] for sid in final
+        ):
+            continue
+        adjustments.extend(
+            {"slide": first, "point": i, "from": point["sentence"], "to": sid}
+            for i, (point, sid) in enumerate(zip(points, final, strict=True))
+            if point["sentence"] != sid
+        )
+    return adjustments
+
+
+def apply_adjustments(slides, source, adjustments):
+    """Project saved timing only, without modifying the author's text or anchors."""
+    if not adjustments:
+        return slides
+    anchors = {(row["slide"], row["point"]): row for row in adjustments}
+    if len(anchors) != len(adjustments):
+        raise ValueError("Duplicate point timing adjustment")
+    order = {line["id"]: i for i, line in enumerate(source)}
+    output = []
+    for slide in slides:
+        points = []
+        changed = False
+        for i, point in enumerate(slide.get("points", [])):
+            row = anchors.pop((slide["first"], i), None)
+            if row is not None:
+                sid = row["to"]
+                if (row["from"] != point["sentence"] or sid not in order
+                        or not order[slide["first"]] <= order[sid] <= order[slide["last"]]):
+                    raise ValueError("Point timing adjustment does not match its original slide")
+                point = {**point, "sentence": sid}
+                changed = True
+            points.append(point)
+        if changed:
+            if len({point["sentence"] for point in points}) != len(points):
+                raise ValueError("Point timing adjustment causes a sentence collision")
+            output.append({**slide, "points": sorted(points, key=lambda point: order[point["sentence"]])})
+        else:
+            output.append(slide)
+    if anchors:
+        raise ValueError("Point timing adjustment does not match an original point")
+    return output

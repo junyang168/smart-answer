@@ -228,3 +228,73 @@ def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkey
     assert receipt["run"]["backend"] == "anthropic_api"
     assert receipt["run"]["usage"] == {"input_tokens": 13, "output_tokens": 8}
     assert ev.semantic_eval_problems(slide_path, source, receipt_path) == []
+
+
+def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_path, monkeypatch):
+    from backend.pipeline import claim_flash_common, chapter_slides
+
+    source = tmp_path / "selection.json"
+    selection = {"pieces": [{"id": "P1", "start": 0, "end": 60,
+        "text": "七章十二節的結論是什麼？下面又是另一個結論。跟門徒的使命有關係。"
+                "這是門徒與舊約關係的結論。是整個門徒使命的結論。"}],
+        "decisions": [{"id": "P1", "keep": True}]}
+    source.write_text(json.dumps(selection))
+    first = {"first": "S0001", "last": "S0005", "title": "結論的範圍", "verses": [], "scriptures": [],
+             "points": [{"sentence": "S0001", "text": "太 7:12 總結門徒與舊約的關係"},
+                        {"sentence": "S0002", "text": "還有另一個結論"},
+                        {"sentence": "S0003", "text": "太 7:13–27 是門徒使命的結論"}]}
+    deck = {"lecture": "Lecture", "model": "writer", "decisions_sha256": chapter_exposition.file_sha256(source),
+            "claim_context": {"scope": "subunit"}, "slides": [first], "raw_slides": [first]}
+    slide_path = tmp_path / "slides.json"
+    slide_path.write_text(json.dumps(deck))
+
+    class Reviewer:
+        model = "reviewer"
+
+        def generate_json(self, system, packet, schema):
+            return {"split_candidates": [], "checks": [
+                {"slide": "S0001", "criterion": criterion, "passed": criterion != "coverage", "evidence": "原審閱"}
+                for criterion in ev.SEMANTIC_CRITERIA]}
+
+    def jev(root, port, state, questions):
+        full = {"0:whole:S0004", "1:whole:S0002", "2:whole:S0005"}
+        return {key: "full" if key in full else "partial" for key in questions}
+
+    monkeypatch.setattr(chapter_exposition, "chapter_client", lambda model: Reviewer())
+    monkeypatch.setattr(claim_flash_common, "jev", jev)
+    path = tmp_path / "eval.json"
+    receipt = ev.run_semantic_eval(slide_path, source, path, "reviewer")
+    written = json.loads(slide_path.read_text())
+    assert written["slides"] == written["raw_slides"] == [first]
+    assert [row["status"] for row in receipt["point_timing"]["points"]] == ["early", "correct", "early"]
+    _, placed = chapter_slides.placed(selection, written)
+    assert [(point["text"], point["sentence"]) for point in placed[0]["points"]] == [
+        (first["points"][i]["text"], sid) for i, sid in [(1, "S0002"), (0, "S0004"), (2, "S0005")]]
+    assert ev.semantic_eval_problems(slide_path, source, path) == ["S0001 coverage: 原審閱"]
+    receipt["point_timing"]["points"][0]["expected_sentence"] = "S0002"
+    path.write_text(json.dumps(receipt))
+    assert ev.semantic_eval_problems(slide_path, source, path) == [
+        "Point timing adjustments do not match the recorded results"]
+
+
+def test_point_timing_refuses_collisions_and_moves_across_slides():
+    from backend.pipeline.chapter_slide_point_timing import timing_adjustments
+
+    source = [{"id": f"S{i:04d}"} for i in range(1, 5)]
+    slides = [{"first": "S0001", "last": "S0003", "points": [{"sentence": "S0001"}, {"sentence": "S0002"}]}]
+    unchanged = {"slide": "S0001", "point": 1, "sentence": "S0002", "status": "correct"}
+    early = {"slide": "S0001", "point": 0, "sentence": "S0001", "status": "early"}
+    for target in ("S0002", "S0004", "S0099"):
+        assert timing_adjustments(slides, source, [{**early, "expected_sentence": target}, unchanged]) == []
+
+
+def test_automatic_timing_respects_the_owners_saved_word_sequence(monkeypatch):
+    from backend.pipeline import chapter_slide_cases
+
+    source = [{"id": "S0001", "text": "門徒要發光。"}, {"id": "S0002", "text": "再談一次發光。"}]
+    record = {"lecture": "Lecture", "slides": [{"first": "S0001", "last": "S0002", "title": "發光",
+        "points": [{"sentence": "S0001", "text": "門徒要發光"}]}]}
+    monkeypatch.setattr(chapter_slide_cases, "cases_for", lambda _: [{
+        "kind": "point", "source_text": source[0]["text"], "pattern": "發光", "why": "原聲開始時顯示"}])
+    finding = {"slide": "S0001", "point": 0, "sentence": "S0001", "status": "early", "expected_sentence": "S0002"}
+    assert ev._checked_point_adjustments(record, source, [finding]) == []
