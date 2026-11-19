@@ -56,3 +56,19 @@ def test_owner_one_slide_case_outranks_the_four_point_limit():
              "points": [{"sentence": f"S000{i}", "text": f"第{i}點"} for i in range(1, 7)]}
     assert any("要點 6 條" in p for p in chapter_slides.check([slide], kept, CHAPTER)[0])
     assert not any("要點 6 條" in p for p in chapter_slides.check([slide], kept, CHAPTER, one_slide=[("S0001", "S0006")])[0])
+
+
+def test_his_diagram_is_placed_by_the_program_at_the_argument_start(monkeypatch):
+    from backend.pipeline import chapter_slide_cases
+    monkeypatch.setattr(chapter_slide_cases, "diagrams_for_lecture", lambda lecture: [{"claim": "CL0001"}])
+    context = {"lecture": "L1", "claims": [{"claim_id": "G01-CL0001", "stated": "S0018", "diagrams": [{"sha256": "d" * 64}],
+                                            "evidence_steps": [{"anchors": [{"sentences": ["S0008"]}]}]}]}
+    raw = [{"first": "S0001", "diagram_ref": ""}, {"first": "S0007", "diagram_ref": ""}, {"first": "S0017"}]
+    placed = chapter_slides.place_case_diagrams(raw, context)
+    assert [x.get("diagram_ref") for x in placed] == ["", "d" * 64, None]
+    assert raw[1]["diagram_ref"] == ""             # the model's answer is not edited in place
+
+
+def test_verse_spacing_is_not_a_change():
+    a = {"first": "S0066", "title": "t", "verses": "5:21-22,5:27-28", "points": []}
+    assert chapter_slides.untouched_problems([a], [dict(a, verses="5:21-22, 5:27-28")], {"S0001"}) == []

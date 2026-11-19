@@ -598,7 +598,7 @@ def checked(
     outline = claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1"
     if outline:
         from backend.pipeline.chapter_slide_claims import retime
-        raw = retime(raw, claim_context)
+        raw = retime(place_case_diagrams(raw, claim_context), claim_context)
     spans = []
     if claim_context is not None:
         from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
@@ -1122,9 +1122,34 @@ def untouched_problems(previous: list[dict[str, Any]], revised: list[dict[str, A
     lecture 2 revision dropped diagram A from a slide nobody had flagged)."""
     if not flagged:
         return []
+    def same(slide):  # spacing in the verse field is not a change
+        return slide and {**slide, "verses": re.sub(r"\s", "", str(slide.get("verses") or ""))}
     now = {slide.get("first"): slide for slide in revised}
     return [f"{slide.get('title')}（{slide.get('first')}）沒有被指出問題，修正稿卻改了它；請原樣交回"
-            for slide in previous if slide.get("first") not in flagged and now.get(slide.get("first")) != slide]
+            for slide in previous if slide.get("first") not in flagged and same(now.get(slide.get("first"))) != same(slide)]
+
+
+def place_case_diagrams(raw: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+    """His diagram goes on the slide on screen when he starts the argument it shows.
+
+    The program knows both facts (the owner's diagram cases and the Claim's first spoken
+    sentence), so the model does not choose it. Owner 2026-11-18: revisions of sub-unit
+    1.1 dropped diagram D three times. A slide that already carries another diagram is
+    left alone and the diagram check reports it."""
+    from backend.pipeline.chapter_slide_cases import diagrams_for_lecture
+
+    raw = [dict(slide) for slide in raw]
+    for case in diagrams_for_lecture(context.get("lecture", "")):
+        for claim in context.get("claims", []):
+            if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"] or not claim.get("diagrams"):
+                continue
+            said = [claim.get("stated")] + [x for step in claim.get("evidence_steps", [])
+                                             for anchor in step.get("anchors", []) for x in anchor.get("sentences", [])]
+            said = sorted(x for x in said if isinstance(x, str) and x.startswith("S"))
+            slide = next((x for x in reversed(raw) if said and str(x.get("first")) <= said[0]), None)
+            if slide is not None and not slide.get("diagram_ref"):
+                slide["diagram_ref"] = claim["diagrams"][0]["sha256"]
+    return raw
 
 
 def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
