@@ -187,16 +187,23 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
     slides_path = directory / f'{title}.slides.json'
     selection = json.loads(selection_path.read_text())
     slides = json.loads(slides_path.read_text())
-    review = json.loads((directory / f'{title}.review.json').read_text())
+
     argument_version = (slides.get('claim_context') or {}).get('instance', {}).get('change_set_id')
     if entry.get('changeset') and argument_version != entry['changeset']:
         raise ValueError('Reviewed Unit slides use a different argument layer')
     if (selection['source_id'] != source or selection['lecture'] != title
             or selection['transcript_sha256'] != entry['source_sha256']
-            or slides['decisions_sha256'] != exposition.file_sha256(selection_path)
-            or review['slides_sha256'] != exposition.file_sha256(slides_path)
-            or chapter_slides.review_blocks_publication(review)):
-        raise ValueError('Unit slides do not match the source, selection and passing review')
+            or slides['decisions_sha256'] != exposition.file_sha256(selection_path)):
+        raise ValueError('Unit slides do not match their source and selection')
+    if slides.get('semantic_eval'):
+        from backend.pipeline.chapter_slide_eval import semantic_eval_problems
+        if problems := semantic_eval_problems(slides_path, selection_path, directory / f'{title}.semantic-eval.json'):
+            raise ValueError(f'Unit slides failed semantic Eval: {problems}')
+    else:
+        review = json.loads((directory / f'{title}.review.json').read_text())
+        if (review['slides_sha256'] != exposition.file_sha256(slides_path)
+                or chapter_slides.review_blocks_publication(review)):
+            raise ValueError('Unit slides do not match their passing review')
     pieces = chapter_slides.kept_pieces(selection)
     fields = ('source_paragraph_key', 'start', 'end', 'text')
     actual = [(p.get(fields[0]), *(p[k] for k in fields[1:])) for p in pieces]

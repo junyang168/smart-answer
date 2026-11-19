@@ -38,3 +38,11 @@
 | 320×568、390×844 及桌面 | 核對未到時間、跳到時間之後和切段。用四張實際圖確認正文大小、深色背景、完整圖落在可見範圍；字幕與播放控制留在畫面 |
 
 圖的取材與出場納入既有 Slide Eval。整體聆聽 Eval 另核對圖落在實際錄音片段的發言句，瀏覽器量測與其他介面證據共同綁定同一份聆聽目錄。更新論證時，傳入本次目標版本對照表 `--expected-versions`，舊版資料須列為尚待更新。瀏覽器已有原證據時，以 `node web/evals/listening-diagrams.cjs <catalog.json> <browser-evidence.json>` 補入測量，再把產出的 JSON 交給 `chapter_listening_eval`。完整報告仍要核對資料版本及其他聆聽檢查。
+
+## 5. 成品的語義 Eval
+
+生成稿先通過程式檢查，再把實際會顯示的投影片、同版原文與論證交給語義 Eval。逐張驗收忠實、承重內容、時間和已讀經文。標題一換張就可見，結論和故事結果須等到說出時才顯示。要點使用其全部實質意思已說出的句子。對比和首尾呼應應保留兩端的理由與結論。
+
+用 `python -m backend.pipeline.chapter_slide_eval <slides> <selection>` 匯出成品和檢查清單。將每張、每項的判定及原文依據逐條寫入同版 Eval 檔。新增或變更成品時核對受影響的判定，沿用已核對的其餘紀錄。用同一命令的 `--verify <receipt>` 查投影片與選材版本以及判定是否完整。
+
+新稿的聆聽 Eval 和發布共用這份檔案。單元資料把它存為 `<lecture>.semantic-eval.json`，與 `<lecture>.slides.json` 及 `<lecture>.selection.json` 放在一起。程式查版本雜湊與每張的驗收項目，發布時沿用已完成的驗收。既有已發布稿仍依其原有審核紀錄讀取。實際成品的正反例存於 `backend/tests/fixtures/chapter_slides/actual_candidate_eval_gold.json`。

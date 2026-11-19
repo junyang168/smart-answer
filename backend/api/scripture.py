@@ -627,6 +627,27 @@ def reference_slugs(text: str) -> list[str]:
     return found
 
 
+def slide_reference_slugs(text: str) -> list[str]:
+    """Recognize a complete structured slide reference, including same-chapter lists."""
+    match = _SINGLE_REFERENCE_PATTERN.match(text)
+    if not match:
+        return []
+    slugs = reference_slugs(match[0])
+    if not slugs:
+        return []
+    rest = text[match.end():].strip()
+    if not rest:
+        return slugs
+    if not re.fullmatch(r"(?:[、,，]\s*\d+(?:\s*[-–—~～至]\s*\d+)?\s*)+", rest):
+        return []
+    book, chapter, *_ = slugs[0].split("-")
+    for start, end in re.findall(r"[、,，]\s*(\d+)(?:\s*[-–—~～至]\s*(\d+))?", rest):
+        slug = f"{book}-{chapter}-{start}" + (f"-{end}" if end else "")
+        if slug not in slugs:
+            slugs.append(slug)
+    return slugs
+
+
 #: 教授口里的书名简称。
 #:
 #: 他讲课说「馬太十六章十八節」「約翰二十章二十三節」，不说全名。书名表收的是

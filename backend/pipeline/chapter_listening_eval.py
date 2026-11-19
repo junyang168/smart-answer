@@ -226,6 +226,10 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
         if not context:
             problems += chapter_slide_eval.evaluate(saved['slides'], kept,
                 candidates=chapter_slide_eval.candidate_chapters(saved['slides'], None))['problems']
+        if saved.get('semantic_eval'):
+            saved_path = chapter_slides.record_path(data_root, passage, title)
+            problems += chapter_slide_eval.semantic_eval_problems(
+                saved_path, selection_path, saved_path.with_suffix('.semantic-eval.json'))
         slide_results.append({'lecture': title, 'status': 'failed' if problems else 'passed',
                               'scope': 'full_saved_slide_record', 'problems': problems,
                               'program_timing_corrections': owner_corrections,
@@ -254,6 +258,10 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
             context = record.get('claim_context')
             result = chapter_slide_eval.evaluate(record['slides'], chapter_slides.kept_pieces(selection),
                 candidates=chapter_slide_eval.candidate_chapters(record['slides'], context), context=context)
+            if record.get('semantic_eval'):
+                result['problems'] += chapter_slide_eval.semantic_eval_problems(
+                    source_path, source_path.with_name(f'{title}.selection.json'),
+                    source_path.with_name(f'{title}.semantic-eval.json'))
             slide_results.append({'lecture': title, 'scope': 'reviewed_unit_bundle', 'bundle': bundle,
                 'status': 'failed' if result['problems'] else 'passed', **result})
     playback_problems = diagram_index_problems(catalog if catalog is not None else index)

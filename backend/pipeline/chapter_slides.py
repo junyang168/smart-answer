@@ -304,10 +304,15 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   '這是程序按實際保留原文編譯的可用範圍，不是新增支持證明。source 要相關、要點忠於原文，sentence 必須在該 source 的此範圍內。原始 anchors 的逐字引用可以較短，不要把旁邊同一片段的實際結論誤判為沒有位置。',
                   json.dumps(bounds, ensure_ascii=False)]
         lines += ["", "# 本堂講課提綱（論證層 Claims）",
+                  "標題在 first 一換張就顯示。從 first 當下已講的意思命名；若是問題、故事或論證的起點，"
+                  "只用問題或中性話題。結論及故事結果等到首次講出時才放在定時要點。"
+                  "標題必須涵蓋本張主題，但不能以後面才說出的答案命名。",
+                  "逐條保留限制、否定及適用範圍；術語不能用範圍更廣的上位詞代替。"
+                  "反查完整論證：對比或首尾呼應要交代兩端如何支持結論，並用原文核對。",
                   "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
                   "- 不另做本堂地圖或總覽：第一張照他開頭實際講的內容做，每一張都是他此刻在講的。",
-                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，標題是該部分的蓋子，要點是蓋子下面的主要論點（精簡，意思不改），sentence 綁本張內的句子。",
+                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，按這部分當下已講的主題命名；上層 Claim 的結論只在原文首次講出時顯示。",
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
@@ -433,7 +438,7 @@ def check(
     在读经文。
     """
 
-    from backend.api.scripture import parse_reference, reference_slugs, spoken_references
+    from backend.api.scripture import parse_reference, slide_reference_slugs, spoken_references
 
     lines = sentences(kept)
     ids = [s["id"] for s in lines]
@@ -494,14 +499,14 @@ def check(
             problems.append(f"{title}: 經節讀不出來或不在這一章（{slide.get('verses')}）")
         scriptures = []
         for item in slide.get("scriptures") or []:
-            slugs = reference_slugs(str(item.get("ref") or ""))
-            if len(slugs) != 1:
+            slugs = slide_reference_slugs(str(item.get("ref") or ""))
+            if not slugs:
                 problems.append(f"{title}: 經文出處讀不出來（{item.get('ref')}）")
                 continue
             if item.get("sentence") not in own_ids:
                 problems.append(f"{title}: {item.get('ref')} 的句子 {item.get('sentence')} 不在這一張")
                 continue
-            scriptures.append({"sentence": item["sentence"], "slug": slugs[0]})
+            scriptures.extend({"sentence": item["sentence"], "slug": slug} for slug in slugs)
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:
             for _, slug in spoken_references(line["text"]):
@@ -812,6 +817,9 @@ def save(
         from backend.pipeline.chapter_slide_claims import digest
         record["claim_context"] = claim_context
         record["claim_context_sha256"] = digest(claim_context)
+        if claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
+            from backend.pipeline.chapter_slide_eval import SEMANTIC_SCHEMA_VERSION
+            record["semantic_eval"] = SEMANTIC_SCHEMA_VERSION
     target = record_path(data_base_dir, chapter.passage, lecture)
     target.parent.mkdir(parents=True, exist_ok=True)
     if problems:
@@ -825,6 +833,7 @@ def save(
         "status": "saved",
         "slides": len(slides),
         "unshown_references": unshown,
+        **({"semantic_eval": "pending"} if record.get("semantic_eval") else {}),
         "file": str(target),
     }
 

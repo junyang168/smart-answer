@@ -57,26 +57,39 @@ def publish(trial: Path, live: Path, *, owner_corrections: Path | None = None,
     problems, _, checked = slides.check(record['raw_slides'], slides.kept_pieces(decisions), chapter_material.CHAPTERS[passage])
     if problems or checked != record['slides']:
         raise ValueError(f'Model postimage failed program checks: {problems}')
-    review_path = slides.review_path(trial / 'data', passage, lecture, int(record.get('revision', 0)))
-    review = json.loads(review_path.read_text())
-    override = json.loads(owner_override.read_text()) if owner_override else None
-    if review.get('slides_sha256') != source_sha:
-        raise ValueError('Latest saved model slides have no matching review')
-    if slides.review_blocks_publication(review):
-        # The owner may publish over a blocking review, bound to that exact review and these slides;
-        # the findings stay open and travel with the publication.
-        if override is None:
-            raise ValueError('Latest saved model slides have no matching nonblocking review')
-        if (override.get('authority') != 'owner_override_review' or not (override.get('ruling') or '').strip()
-                or override.get('review_sha256') != exposition.file_sha256(review_path)
-                or override.get('slides_sha256') != source_sha):
-            raise ValueError('Owner override is not bound to this review and these slides')
-    elif override is not None:
-        raise ValueError('Review does not block; an owner override is not needed')
-    if context is not None:
-        check_review(review, context, record['slides'])
+    semantic = bool(record.get('semantic_eval'))
+    if semantic:
+        from backend.pipeline.chapter_slide_eval import semantic_eval_problems
+        review_path = source.with_suffix('.semantic-eval.json')
+        if problems := semantic_eval_problems(source, selection, review_path):
+            raise ValueError(f'Slides failed semantic Eval: {problems}')
+        if owner_override:
+            raise ValueError('Semantic Eval must pass before publication')
+        review = {'findings': []}
+        override = None
+    else:
+        review_path = slides.review_path(trial / 'data', passage, lecture, int(record.get('revision', 0)))
+        review = json.loads(review_path.read_text())
+        override = json.loads(owner_override.read_text()) if owner_override else None
+        if review.get('slides_sha256') != source_sha:
+            raise ValueError('Latest saved model slides have no matching review')
+        if slides.review_blocks_publication(review):
+            # The owner may publish over a blocking review, bound to that exact review and these slides;
+            # the findings stay open and travel with the publication.
+            if override is None:
+                raise ValueError('Latest saved model slides have no matching nonblocking review')
+            if (override.get('authority') != 'owner_override_review' or not (override.get('ruling') or '').strip()
+                    or override.get('review_sha256') != exposition.file_sha256(review_path)
+                    or override.get('slides_sha256') != source_sha):
+                raise ValueError('Owner override is not bound to this review and these slides')
+        elif override is not None:
+            raise ValueError('Review does not block; an owner override is not needed')
+        if context is not None:
+            check_review(review, context, record['slides'])
     postimage = deepcopy(record)
     edits = None
+    if semantic and owner_corrections is not None:
+        raise ValueError('Apply title edits before running semantic Eval')
     if owner_corrections is not None:
         edits = json.loads(owner_corrections.read_text())
         if edits.get('base_slides_sha256') != source_sha:
@@ -93,7 +106,7 @@ def publish(trial: Path, live: Path, *, owner_corrections: Path | None = None,
     # the owner's later title. Publication provenance says exactly that.
     postimage['publication'] = {
         'model_slides_sha256': source_sha,
-        'model_review_sha256': exposition.file_sha256(review_path),
+        'semantic_eval_sha256' if semantic else 'model_review_sha256': exposition.file_sha256(review_path),
         'owner_title_edit_after_model_review': edits is not None,
         'owner_override_review': override,
         'published_at': datetime.now(timezone.utc).isoformat(),
@@ -122,7 +135,7 @@ def publish(trial: Path, live: Path, *, owner_corrections: Path | None = None,
                'lecture': lecture, 'source_sha256': source_sha,
                'previous_sha256': exposition.file_sha256(original),
                'published_sha256': exposition.file_sha256(target),
-               'model_review_sha256': exposition.file_sha256(review_path),
+               'semantic_eval_sha256' if semantic else 'model_review_sha256': exposition.file_sha256(review_path),
                'owner_title_edit_after_model_review': edits is not None,
                'owner_override_review': override,
                'slides': len(postimage['slides']), 'remaining_findings': review['findings'],

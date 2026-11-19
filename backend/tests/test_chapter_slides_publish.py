@@ -100,3 +100,33 @@ def test_owner_override_publishes_over_a_blocking_review_only_when_bound(tmp_pat
     assert receipt["owner_override_review"]["ruling"] == "go"
     assert receipt["remaining_findings"] == review["findings"]
     assert json.loads(target.read_text())["publication"]["owner_override_review"]["ruling"] == "go"
+
+
+def test_publish_and_readback_reuse_same_semantic_eval(tmp_path, monkeypatch):
+    from backend.pipeline import chapter_slide_eval as ev
+
+    live, trial = setup_trial(tmp_path, monkeypatch)
+    selection = ce.record_path(trial / 'data', CHAPTER.passage, 'L')
+    source = cs.record_path(trial / 'data', CHAPTER.passage, 'L')
+    record = json.loads(source.read_text())
+    record['semantic_eval'] = ev.SEMANTIC_SCHEMA_VERSION
+    source.write_text(json.dumps(record))
+    cs.review_path(trial / 'data', CHAPTER.passage, 'L', 0).unlink()
+    # The exact candidate must have semantic evidence before a switch is possible.
+    with pytest.raises(ValueError, match='Missing or unreadable semantic Eval'):
+        publish(trial, live)
+    evidence = source.with_suffix('.semantic-eval.json')
+    evidence.write_text(json.dumps({
+        'schema_version': ev.SEMANTIC_SCHEMA_VERSION,
+        'slides_sha256': ev.semantic_slide_sha256(source),
+        'selection_sha256': ce.file_sha256(selection),
+        'checks': [
+            {'slide': slide['first'], 'criterion': name, 'passed': True, 'evidence': 'The saved source supports this check.'}
+            for slide in record['slides'] for name in ev.SEMANTIC_CRITERIA
+        ],
+    }))
+    receipt = publish(trial, live)
+    actual = cs.record_path(live, CHAPTER.passage, 'L')
+    assert receipt['semantic_eval_sha256'] == ce.file_sha256(evidence)
+    assert ev.semantic_eval_problems(actual, ce.record_path(live, CHAPTER.passage, 'L'),
+                                     actual.with_suffix('.semantic-eval.json')) == []
