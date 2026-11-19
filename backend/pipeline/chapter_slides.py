@@ -357,7 +357,8 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                       "承重的對照與推論須用要點交代。其他確有承重作用的原文也應保留。",
                       json.dumps(routes, ensure_ascii=False)]
             if routes:
-                lines += ["交稿須有 argument_bindings。對每條推論填 id 和 point_sentences，列承載推論的實際要點 sentence。"
+                lines += [chapter_slide_arguments.CHAIN_RULE,
+                          "交稿須有 argument_bindings。對每條推論填 id 和 point_sentences，列承載推論的實際要點 sentence。"
                           "至少一個要點在結論原文所在的張。先讀這幾條要點，確認理由怎麼推出結論寫得清楚。"
                           "例如『兩個要求衝突，因此選 A』仍缺一步。若原文靠比較輕重選 A，就把這個判準接上。"]
             required = [{"sentence": rule["at"], "content": rule["why"]}

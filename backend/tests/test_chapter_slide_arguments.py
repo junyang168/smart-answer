@@ -80,6 +80,7 @@ def test_generation_and_eval_share_the_source_boundary_and_the_frozen_inference(
     assert requirement["source_slides"]["S0001"] == "S0001"
     assert requirement["conclusion_slide"] == "S0011"
     assert requirement["inference"] in prompt
+    assert arg.CHAIN_RULE in prompt
     assert "known_bad" not in prompt and "expected" not in prompt
 
 
@@ -134,6 +135,23 @@ def test_writer_must_map_every_inference_to_real_points_within_its_original_slid
     for legacy in (chapter_slides.review, chapter_slides.revise):
         outcome = legacy(CHAPTER, record["lecture"], data_base_dir=tmp_path, client=None)
         assert outcome["status"] == "subunit_uses_semantic_eval"
+
+
+def test_argument_binding_rejects_a_reason_separated_from_the_conclusion_by_another_slide():
+    # Actual 6.2 shape: S0103 is on S0102, then S0114 intervenes before the recap at S0136.
+    slides = [
+        {"first": "S0102", "points": [{"sentence": "S0103"}]},
+        {"first": "S0114", "points": [{"sentence": "S0114"}]},
+        {"first": "S0136", "points": [{"sentence": "S0136"}, {"sentence": "S0142"}]},
+    ]
+    route = {"id": "argument-11", "conclusion_slide": "S0136",
+             "source_slides": {"S0104": "S0102", "S0136": "S0136", "S0142": "S0136"}}
+    binding = {"id": "argument-11", "point_sentences": ["S0103", "S0136"]}
+    with pytest.raises(ValueError, match="two adjacent slides"):
+        arg.bind_points([route], slides, [binding])
+    assert arg.bind_points([route], [slides[0], slides[2]], [binding])[0]["writer_points"] == ["S0103", "S0136"]
+    local_binding = {**binding, "point_sentences": ["S0136", "S0142"]}
+    assert arg.bind_points([route], slides, [local_binding])[0]["writer_points"] == ["S0136", "S0142"]
 
 
 @pytest.mark.parametrize("id", [case["id"] for case in cases()])

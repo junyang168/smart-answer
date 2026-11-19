@@ -13,6 +13,15 @@ BOUNDARY = (
     "論證層只供核對，不授權加入本子單元原文沒有說到的內容。"
 )
 
+CHAIN_RULE = (
+    "若原文的理由經過一個中間判斷才推出結論，承重的中間判斷也要寫成要點，"
+    "不能只並列起點與結論，或用「留意背景」「所以會誤解」省掉為何如此。"
+    "原文有對照時，交代是哪兩種情況、差異如何改變結論；只需保留會改變推論的部分。"
+    "可以合寫或跨相鄰兩張。若所需原文在相隔一張以上的位置，不能把遠處的要點算作這裡已經接上。"
+    "本段原文若重述了理由或對照，就用這裡的原話重接；本段沒有重述，就不要把別段的話補到這一張。"
+)
+
+
 PLAN_SYSTEM = """你只做一件事：從這個聆聽子單元的逐字稿找出若省略就會改變教授論證的推論。
 claims 用來辨認這些關係；以 source 為準。找出教授怎樣用一個理由、例子或對照回答某問題或支持某結論。
 也留意論證層只記了例子、但教授接著說出用途的情形。重述只留一次，例子的非必要細節不用列。
@@ -107,6 +116,7 @@ def binding_schema(routes: list[dict]) -> dict:
 def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dict]) -> list[dict]:
     """Check that every inference maps to existing points in its source slides."""
     points = {point["sentence"]: slide["first"] for slide in slides for point in slide["points"]}
+    order = {slide["first"]: i for i, slide in enumerate(slides)}
     expected = {route["id"]: route for route in requirements}
     if not isinstance(bindings, list):
         raise ValueError("Missing generated argument bindings")
@@ -124,6 +134,9 @@ def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dic
                 or len(anchors) != len(set(anchors))
                 or not any(points[sid] == route["conclusion_slide"] for sid in anchors)):
             raise ValueError(f"{route_id} must cite existing points in its source slides, including its conclusion slide")
+        bound_order = [order[points[sid]] for sid in anchors]
+        if max(bound_order) - min(bound_order) > 1:
+            raise ValueError(f"{route_id} must be readable on one slide or two adjacent slides")
         found[route_id] = anchors
     if expected.keys() != found.keys():
         missing = ", ".join(sorted(expected.keys() - found.keys()))
