@@ -31,16 +31,27 @@ def _on_screen(slides: list[dict], sentence: str) -> dict | None:
     return next((s for s in reversed(slides) if s["first"] <= sentence), None)
 
 
-def resolve_cases(cases, source_sentences):
-    """Resolve text-bound owner requirements without silently trusting old IDs."""
+def resolve_cases(cases, source_sentences, *, partial=False):
+    """Resolve text-bound owner requirements without silently trusting old IDs.
+
+    A sub-unit's slides cover only part of the lecture (owner 2026-11-18: slides are
+    made per sub-unit), so its sentence numbers differ from the lecture's; every case
+    is bound to his words. With partial=True a case whose words are not in this part
+    is not this part's case; an ambiguous quote is still an error."""
     resolved = []
     for case in cases:
-        if case.get('source_text'):
-            matches = [line['id'] for line in (source_sentences or []) if line['text'] == case['source_text']]
-            if len(matches) != 1:
+        bound = {'source_text': 'at', 'from_text': 'from', 'to_text': 'to'}
+        found = {}
+        for field, key in bound.items():
+            if not case.get(field):
+                continue
+            matches = [line['id'] for line in (source_sentences or []) if line['text'] == case[field]]
+            if len(matches) > 1 or (not matches and not partial):
                 raise ValueError('Owner case source quote is missing or ambiguous')
-            case = {**case, 'at': matches[0]}
-        resolved.append(case)
+            found[key] = matches[0] if matches else None
+        if partial and (None in found.values() or (case['kind'] != 'no_title' and not found)):
+            continue
+        resolved.append({**case, **found})
     return resolved
 
 
@@ -72,9 +83,9 @@ def timing_corrections(slides, cases, source_sentences):
     return corrections
 
 
-def check_cases(slides: list[dict[str, Any]], cases: list[dict[str, Any]], source_sentences=None) -> list[str]:
+def check_cases(slides: list[dict[str, Any]], cases: list[dict[str, Any]], source_sentences=None, *, partial=False) -> list[str]:
     try:
-        cases = resolve_cases(cases, source_sentences)
+        cases = resolve_cases(cases, source_sentences, partial=partial)
     except ValueError as error:
         return [str(error)]
     problems = []

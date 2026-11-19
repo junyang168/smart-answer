@@ -608,7 +608,8 @@ def checked(
                 context=claim_context)["problems"]
             # 負責人指出過的問題（chapter_slide_cases.json），每次都查，不再回來。
             from backend.pipeline.chapter_slide_cases import cases_for, check_cases
-            problems += check_cases(slides, cases_for(claim_context.get("lecture", "")), sentences(kept))
+            problems += check_cases(slides, cases_for(claim_context.get("lecture", "")), sentences(kept),
+                                    partial=claim_context.get("scope") == "subunit")
     if not outline and not problems and any(slide.get("diagram_ref") for slide in slides):
         from backend.pipeline.chapter_slide_eval import diagram_problems
         problems += diagram_problems(slides, sentences(kept), claim_context or {})
@@ -1097,6 +1098,16 @@ def revision_user_prompt(lecture, decisions_record, previous_slides, findings, c
             + "\n\n審稿人的意見：\n" + notes)
 
 
+def untouched_problems(previous: list[dict[str, Any]], revised: list[dict[str, Any]], flagged: set[str]) -> list[str]:
+    """A slide the reviewer did not flag comes back exactly as it was (owner 2026-11-18: a
+    lecture 2 revision dropped diagram A from a slide nobody had flagged)."""
+    if not flagged:
+        return []
+    now = {slide.get("first"): slide for slide in revised}
+    return [f"{slide.get('title')}（{slide.get('first')}）沒有被指出問題，修正稿卻改了它；請原樣交回"
+            for slide in previous if slide.get("first") not in flagged and now.get(slide.get("first")) != slide]
+
+
 def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, most_rounds: int = MOST_ROUNDS, recheck_only: bool = False) -> dict[str, Any]:
     """作者按最近一次审阅修正；修正稿过了程序核对才替换存档，原稿留作备份。"""
 
@@ -1134,7 +1145,14 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
         if context is not None and rejected_attempt.exists():
             return {"lecture": lecture, "status": "revision_attempt_used", "file": str(rejected_attempt)}
         response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, prompt, response_schema(context))
-    problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
+    flagged = {f["slide"] for f in actionable(verdict)}
+    previous = record.get("raw_slides") or []
+
+    def check_revision(answer):
+        found, unshown_, slides_ = checked(answer.get("slides") or [], kept, chapter, context)
+        return found + untouched_problems(previous, answer.get("slides") or [], flagged), unshown_, slides_
+
+    problems, unshown, slides = check_revision(response)
     # Same as generation: program problems go back to the model with its own answer, at most REPAIRS times.
     for _ in range(0 if recheck_only or context is None else REPAIRS):
         if not problems:
@@ -1142,7 +1160,7 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
         repair = (prompt + "\n\n上一份修正稿（JSON）：\n" + json.dumps(response, ensure_ascii=False)
                   + "\n\n程序核對不通過，請整份交回並改正這些問題（其他照舊）：\n" + "\n".join(f"- {p}" for p in problems))
         response = client.generate_json(system_prompt(chapter, lecture) + _REVISE_TAIL, repair, response_schema(context))
-        problems, unshown, slides = checked(response.get("slides") or [], kept, chapter, context)
+        problems, unshown, slides = check_revision(response)
     if problems:
         rejected = path.with_suffix(f".revision-{revision + 1}.rejected.json")
         if not recheck_only:
