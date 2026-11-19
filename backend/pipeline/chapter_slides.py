@@ -154,6 +154,14 @@ _SUBUNIT_POINT_TIMING_RULE = """每條要點寫一個完整、可理解的論旨
 - 標題和實際朗讀的經文分別遵循各自的顯示規則。"""
 
 
+SUBUNIT_LOCAL_DISTINCTION_RULE = (
+    "同一條 Claim 若跨張出現，每張先從本張原文找教授正在區分的情況。"
+    "寫「不是／而是」「只有／才」時，先核對否定的到底是哪個行為或狀態，及教授說在甚麼條件下才成立。"
+    "可以縮短措辭，須保留這個否定對象和條件；不能縮成較前一步、範圍較寬的行為。"
+    "Claim 摘要只用來定位共同主題；前後張即使同屬一個主題，也不能用另一張的對比替換本張。"
+)
+
+
 SUBUNIT_LOCAL_ANSWER_RULE = (
     "整理問答時，先核對本張原文中教授這一次的回答，分清聽眾的問題與教授的立場。"
     "用本次回答的原句核對結論、理由和肯否，再寫成要點。"
@@ -189,7 +197,7 @@ def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False)
         .replace("〈章〉", str(number))
     )
     if subunit:
-        prompt += "\n\n" + SUBUNIT_LOCAL_ANSWER_RULE
+        prompt += "\n\n" + SUBUNIT_LOCAL_DISTINCTION_RULE + "\n\n" + SUBUNIT_LOCAL_ANSWER_RULE
     if scope:
         prompt += f"\n本單元的經文範圍為 {scope}。保留第六、七章之間的原有論證；引用作論據的經文在 scriptures 照實記錄。"
     return for_lecture(prompt, lecture) + "\n\n" + INLINE_NOTE_RULES

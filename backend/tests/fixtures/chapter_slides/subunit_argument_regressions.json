@@ -804,5 +804,106 @@
         }
       }
     ]
+  },
+  {
+    "id": "same-claim-two-different-local-distinctions",
+    "subunit": "5.2",
+    "original_sentences": [
+      "S0118",
+      "S0119",
+      "S0140",
+      "S0141"
+    ],
+    "source": [
+      "所以耶穌所說的不是「凡看見婦女就動起淫念」，不是。",
+      "就是說你看婦女，為了、意志決定要跟她採取行動，在那個時候你已經犯罪。",
+      "你不是說你看見一個婦女就覺得她很漂亮，就已經跟她犯姦淫了，不是。",
+      "耶穌乃是說你為了「要」，意志上決定要跟這個女人發生關係，你已經決定要做，雖然時間還沒有到，你還沒有做，你現在決定、意志決定我要做，你已經犯罪了。"
+    ],
+    "requirement": {
+      "reason": "教授區分動起淫念和意志決定採取行動",
+      "inference": "有慾望與決意去做是兩個狀態，這裡的重點是意志已作決定",
+      "conclusion": "判斷界線在決意行淫，並非一有淫念便犯罪",
+      "conclusion_sentence": "S0002",
+      "source_sentences": [
+        "S0001",
+        "S0002"
+      ]
+    },
+    "variants": [
+      {
+        "id": "preserves-the-distinction-on-each-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0002",
+            "title": "心裡姦淫的界線",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "動淫念和決意行淫有別；決意要做時便已犯罪"
+              }
+            ]
+          },
+          {
+            "first": "S0003",
+            "last": "S0004",
+            "title": "覺得漂亮與決意行淫",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "覺得對方漂亮不等於犯罪"
+              },
+              {
+                "sentence": "S0004",
+                "text": "決意行淫時，雖未實行已犯罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "replaces-arising-desire-with-seeing",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0002",
+            "title": "心裡姦淫的界線",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "因此不是看見便犯罪，而是為行淫而決意時犯罪"
+              }
+            ]
+          },
+          {
+            "first": "S0003",
+            "last": "S0004",
+            "title": "覺得漂亮與決意行淫",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "覺得對方漂亮不等於犯罪"
+              },
+              {
+                "sentence": "S0004",
+                "text": "決意行淫時，雖未實行已犯罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001",
+          "faithfulness_may_pass": true
+        },
+        "balance_reason": "「看見不等於犯罪」這句本身未必錯；即使忠實度判通過，仍須因漏掉慾望與決意的關鍵區別而擋下。"
+      }
+    ]
   }
 ]

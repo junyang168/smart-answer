@@ -105,6 +105,22 @@ def test_subunit_writer_uses_the_current_answer_when_the_earlier_reason_differs(
     assert "known_good" not in prompt and "known_bad" not in prompt
 
 
+def test_subunit_prompt_preserves_the_local_object_of_a_negation():
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    case = next(row for row in cases() if row["id"] == "same-claim-two-different-local-distinctions")
+    record, selection = packet_for(case, case["variants"][0])
+    context = {**record["claim_context"], "schema_version": "chapter-slide-outline-context.v1"}
+    chapter = CHAPTERS["mat-5-1-48"]
+    system = chapter_slides.system_prompt(chapter, subunit=True)
+    assert chapter_slides.SUBUNIT_LOCAL_DISTINCTION_RULE in system
+    assert "不能用另一張的對比替換本張" in system
+    assert chapter_slides.SUBUNIT_LOCAL_DISTINCTION_RULE not in chapter_slides.system_prompt(chapter)
+    prompt = chapter_slides.user_prompt(record["lecture"], selection, context)
+    assert "凡看見婦女就動起淫念" in prompt and "就覺得她很漂亮" in prompt
+    assert "因此不是看見便犯罪" not in prompt
+
+
 def test_writer_must_map_every_inference_to_real_points_within_its_original_slides(tmp_path, monkeypatch):
     from backend.pipeline import chapter_exposition
     from backend.tests.test_chapter_slides import CHAPTER
@@ -284,6 +300,11 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
         case_id, kind = checks[verdict["check_id"]]
         want = expected[case_id]
         passes = want["passed"] if kind == "argument" else "unfaithful_slide" not in want
-        if verdict["passed"] != passes or not verdict["evidence"].strip():
-            mismatches.append({**verdict, "fixture": labels[case_id], "expected": passes})
+        # Some true-but-weaker statements are also called unfaithful in a full review.
+        # Their missing distinction must still independently fail the argument check.
+        accepted = {passes}
+        if kind == "faithfulness" and not want["passed"] and want.get("faithfulness_may_pass"):
+            accepted.add(True)
+        if verdict["passed"] not in accepted or not verdict["evidence"].strip():
+            mismatches.append({**verdict, "fixture": labels[case_id], "expected": sorted(accepted)})
     assert not mismatches, mismatches
