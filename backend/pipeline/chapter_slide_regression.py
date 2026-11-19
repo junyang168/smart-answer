@@ -15,7 +15,7 @@ from backend.pipeline.chapter_material import CHAPTERS
 from backend.pipeline.chapter_slide_claims import RecordedClient
 
 FIXTURE = Path(__file__).resolve().parents[1] / 'tests/fixtures/chapter_slides/generation_eval_set.json'
-JUDGE_RULES = 'argument_context 若存在，是本案例範圍相關的真實論證層節錄；跨段 Claim 只核對本案例原文實際講到的部分，不要求搬入範圍外的理由。有論證層先核對其角色及現有要點，再以原文確認，不能只用沒有故事開場點或空白秒數判缺漏。依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。passed=false 表示這項確有須修改的缺陷。非 golden 精確時序依正式規則：提前超過30秒或延後超過60秒才不合格；閾值內差距只記理由，passed=true。golden 已明確規定不得提前或指定句子的條件仍須精確遵守，不適用上述小差距豁免。\n'
+JUDGE_RULES = 'argument_context 若存在，是本案例範圍相關的真實論證層節錄；跨段 Claim 只核對本案例原文實際講到的部分，不要求搬入範圍外的理由。有論證層先核對其角色及現有要點，再以原文確認，不能只用沒有故事開場點或空白秒數判缺漏。依同步投影片規則逐項判定。只對照這份原文與候選，不做神學裁決。每個案例每項 criterion_id 回 passed 及具體理由；意思正確不要求逐字命中。passed=false 表示這項確有須修改的缺陷。非 golden 精確時序依正式規則：提前超過30秒或延後超過5秒才不合格（負責人 2026-11-18：要點出現太晚是基本錯誤）；閾值內差距只記理由，passed=true。golden 已明確規定不得提前或指定句子的條件仍須精確遵守，不適用上述小差距豁免。\n'
 
 
 def digest(value):
