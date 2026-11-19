@@ -484,6 +484,10 @@ for slug, name in CHINESE_BOOKS:
     BOOK_NAME_TO_SLUG[slug.upper()] = slug
     alias = SLUG_ALIASES.get(slug)
     if alias:
+        osis = BOOK_TO_OSIS.get(alias)
+        if osis:
+            BOOK_NAME_TO_SLUG.setdefault(osis, slug)
+            BOOK_NAME_TO_SLUG.setdefault(osis.lower(), slug)
         english = ALIAS_TO_API_BOOK.get(alias)
         if english:
             BOOK_NAME_TO_SLUG[english] = slug
