@@ -238,6 +238,8 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                       if timings.get(slide["first"], {}).get("sentence") else {})}
                   for slide in slides]
     inferences = chapter_slide_arguments.review_requirements(context, source, slides)
+    if chapter_slide_arguments.BINDINGS_KEY in slide_record:
+        inferences = chapter_slide_arguments.bind_points(inferences, slides, slide_record[chapter_slide_arguments.BINDINGS_KEY])
     criteria = dict(SEMANTIC_CRITERIA)
     if context.get("scope") == "subunit":
         criteria.pop("timing")
@@ -392,6 +394,8 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
         try:
             source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
             inferences = chapter_slide_arguments.review_requirements(context, source, record["slides"])
+            if chapter_slide_arguments.BINDINGS_KEY in record:
+                chapter_slide_arguments.bind_points(inferences, record["slides"], record[chapter_slide_arguments.BINDINGS_KEY])
             expected.update((route["conclusion_slide"], route["id"]) for route in inferences)
         except (OSError, ValueError, TypeError, KeyError):
             return ["Missing or invalid source-bound argument requirements"]
@@ -467,6 +471,7 @@ ARGUMENT_REVIEW_SYSTEM = """另外逐條驗收 argument_requirements，各加一
 criterion 用該條 id，slide 用 conclusion_slide。evidence 指明原文句與實際顯示的要點。
 核對實際文字是否把理由、結論和兩者的關係說清楚，單有正確的 Claim ID 或各寫一句互不相干的意思不算通過。
 source_slides 顯示理由、關係和結論各句在哪一張。可合寫，也可在相鄰張承接。
+writer_points 若有列出，是作者指給你的要點。逐一核對實質意思，引用位置正確仍可能漏推論。
 內容只在後一張的原文說出時，提前寫在前一張是前一張的忠實問題，不能用來通過此條。
 不要因清單推論缺原文支持而要求補入；把它標成不通過，說明是哪個規劃項缺乏根據。
 這些額外決定不代替每張的完整度與忠實檢查，仍要找出清單漏列的承重推論。"""

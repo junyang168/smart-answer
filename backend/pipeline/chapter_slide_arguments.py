@@ -88,3 +88,44 @@ def review_requirements(context: dict, source: list[dict], slides: list[dict]) -
         rows.append({**route, "conclusion_slide": locations[route["conclusion_sentence"]],
                      "source_slides": locations})
     return rows
+
+
+BINDINGS_KEY = "argument_bindings"
+
+
+def binding_schema(routes: list[dict]) -> dict:
+    return {"type": "array", "items": {
+        "type": "object", "additionalProperties": False,
+        "required": ["id", "point_sentences"],
+        "properties": {
+            "id": {"type": "string", "enum": [route["id"] for route in routes]},
+            "point_sentences": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        },
+    }}
+
+
+def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dict]) -> list[dict]:
+    """Check that every inference maps to existing points in its source slides."""
+    points = {point["sentence"]: slide["first"] for slide in slides for point in slide["points"]}
+    expected = {route["id"]: route for route in requirements}
+    if not isinstance(bindings, list):
+        raise ValueError("Missing generated argument bindings")
+    found = {}
+    for row in bindings:
+        if not isinstance(row, dict) or set(row) != {"id", "point_sentences"}:
+            raise ValueError("Invalid generated argument binding")
+        route_id, anchors = row["id"], row["point_sentences"]
+        if not isinstance(route_id, str) or route_id not in expected or route_id in found:
+            raise ValueError("Duplicate or unknown generated argument binding")
+        route = expected[route_id]
+        allowed = set(route["source_slides"].values())
+        if (not isinstance(anchors, list) or not anchors
+                or not all(isinstance(sid, str) and points.get(sid) in allowed for sid in anchors)
+                or len(anchors) != len(set(anchors))
+                or not any(points[sid] == route["conclusion_slide"] for sid in anchors)):
+            raise ValueError(f"{route_id} must cite existing points in its source slides, including its conclusion slide")
+        found[route_id] = anchors
+    if expected.keys() != found.keys():
+        missing = ", ".join(sorted(expected.keys() - found.keys()))
+        raise ValueError(f"Missing generated argument bindings: {missing}")
+    return [{**route, "writer_points": found[route["id"]]} for route in requirements]

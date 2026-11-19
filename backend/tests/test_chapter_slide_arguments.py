@@ -83,6 +83,38 @@ def test_generation_and_eval_share_the_source_boundary_and_the_frozen_inference(
     assert "known_bad" not in prompt and "expected" not in prompt
 
 
+def test_writer_must_map_every_inference_to_real_points_within_its_original_slides(tmp_path, monkeypatch):
+    from backend.pipeline import chapter_exposition
+    from backend.tests.test_chapter_slides import CHAPTER
+
+    case = cases()[0]
+    record, selection = packet_for(case, case["variants"][1])
+    context = {**record["claim_context"], "schema_version": "chapter-slide-outline-context.v1"}
+    schema = chapter_slides.response_schema(context)
+    assert arg.BINDINGS_KEY in schema["required"]
+    selected = chapter_exposition.record_path(tmp_path, CHAPTER.passage, record["lecture"])
+    selected.parent.mkdir(parents=True)
+    selected.write_text(json.dumps(selection))
+    monkeypatch.setattr(chapter_slides, "checked", lambda *a: ([], [], record["slides"]))
+    edited = {"slides": record["slides"]}
+    prompt = chapter_slides.user_prompt(record["lecture"], selection, context)
+
+    def save(bindings):
+        return chapter_slides.save(CHAPTER, record["lecture"], tmp_path,
+                                   {**edited, arg.BINDINGS_KEY: bindings}, prompt,
+                                   selection["pieces"], "writer", context)
+
+    for anchors in ([], ["S0005"], ["S0006", "S0011"], ["S0011", "S0999"]):
+        assert save([{"id": "argument-1", "point_sentences": anchors}])["status"] == "rejected"
+    accepted = save([{"id": "argument-1", "point_sentences": ["S0005", "S0011"]}])
+    assert accepted["status"] == "saved"
+    packet = ev.semantic_packet(json.loads(Path(accepted["file"]).read_text()), selection)
+    assert packet["argument_requirements"][0]["writer_points"] == ["S0005", "S0011"]
+    for legacy in (chapter_slides.review, chapter_slides.revise):
+        outcome = legacy(CHAPTER, record["lecture"], data_base_dir=tmp_path, client=None)
+        assert outcome["status"] == "subunit_uses_semantic_eval"
+
+
 @pytest.mark.parametrize("id", [case["id"] for case in cases()])
 def test_saved_counterexamples_and_positive_controls_follow_the_production_eval_contract(tmp_path, id):
     case = next(row for row in cases() if row["id"] == id)
@@ -147,6 +179,13 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
             case_id = f"case-{len(items) + 1}"
             labels[case_id] = "/".join((case["id"], variant["id"]))
             record, selection = packet_for(case, variant)
+            actual_slides = record["slides"]
+            initial_packet = ev.semantic_packet(record, selection)
+            target = initial_packet["argument_requirements"][0]["conclusion_slide"]
+            conclusion_slide = next(s for s in actual_slides if s["first"] == target)
+            if conclusion_slide["points"]:
+                record[arg.BINDINGS_KEY] = [{"id": "argument-1",
+                                            "point_sentences": [p["sentence"] for s in actual_slides for p in s["points"]]}]
             items.append({"case_id": case_id, "packet": ev.semantic_packet(record, selection)})
             expected[case_id] = variant["expected"]
     row = {"type": "object", "additionalProperties": False,

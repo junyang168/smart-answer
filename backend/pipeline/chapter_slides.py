@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline import chapter_exposition, chapter_material
+from backend.pipeline import chapter_exposition, chapter_material, chapter_slide_arguments
 from backend.pipeline.chapter_material import Chapter
 
 SCHEMA_VERSION = "chapter_slides_v3"
@@ -201,6 +201,10 @@ def response_schema(claim_context: dict[str, Any] | None) -> dict[str, Any]:
         slide = schema["properties"]["slides"]["items"]
         slide["properties"]["diagram_ref"] = {"type": "string", "enum": ["", *refs]}
         slide["required"].append("diagram_ref")
+    if routes := claim_context.get(chapter_slide_arguments.PLAN_KEY):
+        key = chapter_slide_arguments.BINDINGS_KEY
+        schema["properties"][key] = chapter_slide_arguments.binding_schema(routes)
+        schema["required"].append(key)
     return schema
 
 
@@ -326,15 +330,20 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                        if subunit else
                        '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。'),
                       json.dumps(scoped, ensure_ascii=False)]
-        from backend.pipeline.chapter_slide_arguments import BOUNDARY, PLAN_KEY, validate
         from backend.pipeline.chapter_slide_claims import source_context_index
         source_entries = source_context_index(claim_context, source_lines)
         if subunit:
-            lines += ["# 本子單元承重推論及原文位置", BOUNDARY,
+            routes = chapter_slide_arguments.validate(
+                claim_context.get(chapter_slide_arguments.PLAN_KEY, []), source_lines)
+            lines += ["# 本子單元承重推論及原文位置", chapter_slide_arguments.BOUNDARY,
                       "先按原文位置安排各張，再逐條確認理由、結論及兩者的關係能從投影片讀出。"
                       "每條可由一條或幾條要點表達；source 填對不代表推論已寫出。"
                       "承重的對照與推論須用要點交代。其他確有承重作用的原文也應保留。",
-                      json.dumps(validate(claim_context.get(PLAN_KEY, []), source_lines), ensure_ascii=False)]
+                      json.dumps(routes, ensure_ascii=False)]
+            if routes:
+                lines += ["交稿須有 argument_bindings。對每條推論填 id 和 point_sentences，列承載推論的實際要點 sentence。"
+                          "至少一個要點在結論原文所在的張。先讀這幾條要點，確認理由怎麼推出結論寫得清楚。"
+                          "例如『兩個要求衝突，因此選 A』仍缺一步。若原文靠比較輕重選 A，就把這個判準接上。"]
             required = [{"sentence": rule["at"], "content": rule["why"]}
                         for rule in owner_cases if rule["kind"] == "required_point"]
             if required:
@@ -370,7 +379,7 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   "綁在他引用、念出的那一句（anchors 的句子）所在的投影片；同一段經文在同一張已放過就不必重複。",
                   "- 標題和要點的論證不得與 evidence_steps 相違：opposed_position 是他反駁的看法，只能寫成「有人說…」並交代他怎麼反駁，"
                   "不可寫成他的主張；理由與結論的方向照 Claim 和它的證據，不倒過來、不寫出與證據相反的推論。",
-                  json.dumps({**{k: v for k, v in claim_context.items() if k != PLAN_KEY}, "claims": [
+                  json.dumps({**{k: v for k, v in claim_context.items() if k != chapter_slide_arguments.PLAN_KEY}, "claims": [
                       {**{k: v for k, v in claim.items() if k != "diagrams"},
                        **({"diagrams": [{k: d[k] for k in ("title", "origin", "kind", "sha256")}
                                         for d in claim["diagrams"] if "svg" in d]} if claim.get("diagrams") else {})}
@@ -911,7 +920,10 @@ def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str,
     if rejected.get("prompt_sha256") != prompt_sha:
         return {"lecture": lecture, "status": "prompt_changed"}
     kept = kept_pieces(decisions_record)
-    return save(chapter, lecture, data_base_dir, {"slides": rejected.get("raw_slides") or []}, prompt, kept,
+    response = {"slides": rejected.get("raw_slides") or []}
+    if chapter_slide_arguments.BINDINGS_KEY in rejected:
+        response[chapter_slide_arguments.BINDINGS_KEY] = rejected[chapter_slide_arguments.BINDINGS_KEY]
+    return save(chapter, lecture, data_base_dir, response, prompt, kept,
                 rejected.get("model", ""), rejected.get("claim_context"))
 
 
@@ -939,6 +951,15 @@ def save(
         "unshown_references": unshown,
         "raw_slides": response.get("slides") or [],
     }
+    if (claim_context or {}).get(chapter_slide_arguments.PLAN_KEY):
+        key = chapter_slide_arguments.BINDINGS_KEY
+        record[key] = response.get(key)
+        if not problems:
+            try:
+                requirements = chapter_slide_arguments.review_requirements(claim_context, sentences(kept), slides)
+                chapter_slide_arguments.bind_points(requirements, slides, record[key])
+            except ValueError as error:
+                problems.append(str(error))
     if claim_context is not None:
         from backend.pipeline.chapter_slide_claims import digest
         record["claim_context"] = claim_context
@@ -1165,6 +1186,8 @@ def review(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any) 
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
         return {"lecture": lecture, "status": "no_slides"}
+    if chapter_slide_arguments.PLAN_KEY in (record.get("claim_context") or {}):
+        return {"lecture": lecture, "status": "subunit_uses_semantic_eval"}
     revision = int(record.get("revision", 0))
     slides_sha = chapter_exposition.file_sha256(record_path(data_base_dir, chapter.passage, lecture))
     target = review_path(data_base_dir, chapter.passage, lecture, revision)
@@ -1273,6 +1296,8 @@ def revise(chapter: Chapter, lecture: str, *, data_base_dir: Path, client: Any, 
     record = load_record(data_base_dir, chapter.passage, lecture)
     if record is None:
         return {"lecture": lecture, "status": "no_slides"}
+    if chapter_slide_arguments.PLAN_KEY in (record.get("claim_context") or {}):
+        return {"lecture": lecture, "status": "subunit_uses_semantic_eval"}
     revision = int(record.get("revision", 0))
     review_file = review_path(data_base_dir, chapter.passage, lecture, revision)
     if not review_file.exists():
