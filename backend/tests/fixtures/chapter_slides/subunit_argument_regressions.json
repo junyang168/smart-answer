@@ -54,8 +54,8 @@
             "title": "喇合的選擇",
             "points": [
               {
-                "sentence": "S0005",
-                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+                "sentence": "S0006",
+                "text": "喇合敬畏神，得到拯救"
               }
             ]
           }
@@ -125,6 +125,26 @@
           "passed": false,
           "conclusion_slide": "S0011",
           "unfaithful_slide": "S0001"
+        }
+      },
+      {
+        "id": "concise-example-follows-the-main-line",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0012",
+            "title": "聖經中選較小之惡的例子",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "喇合選較小的惡；聖經未因此定她罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
         }
       }
     ]
@@ -261,9 +281,11 @@
           }
         ],
         "expected": {
-          "passed": false,
+          "passed": true,
           "conclusion_slide": "S0001"
-        }
+        },
+        "prior_policy_passed": false,
+        "balance_reason": "相鄰要點在同一張保留今日情況和不能節制的限定，省略連接詞不改變回答。"
       },
       {
         "id": "one-complete-point",
@@ -383,9 +405,11 @@
           }
         ],
         "expected": {
-          "passed": false,
+          "passed": true,
           "conclusion_slide": "S0001"
-        }
+        },
+        "prior_policy_passed": false,
+        "balance_reason": "「這背景」接回上一條古時須再婚維生，已說明為什麼缺少背景會誤讀；另有只寫一般勸告的反例。"
       }
     ]
   },
@@ -607,6 +631,176 @@
         "expected": {
           "passed": true,
           "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "oath-distinguishes-essential-qualifier-from-parallel-examples",
+    "subunit": "7.1",
+    "original_sentences": [
+      "S0004",
+      "S0008",
+      "S0010",
+      "S0011",
+      "S0013",
+      "S0015",
+      "S0028"
+    ],
+    "source": [
+      "那很多人啊，就以為說，喔，所以啊，我們不管什麼情況底下，絕不能夠起誓，因為起誓啊，根本沒有什麼意義。",
+      "在《希伯來書》也講啊，是神啊，為了要給亞伯拉罕的應許，神沒有比祂更大的人可以指著起誓，所以神就去指著自己起誓，那裡明講。",
+      "可是呢，在這個大祭司面前，來受審判那個時候，大祭司告訴耶穌說：「我要你起誓，你講，你是不是神的兒子？」",
+      "耶穌說：「你講的對。」",
+      "所以這裡啊，其實不要起誓主要的意思是什麼？",
+      "其實如果你去看《馬太福音》二十三章那裡，耶穌來責備法利賽人，法利賽人用起誓的方法來騙很多人、來騙一些人。",
+      "其實耶穌這裡所說的「你不要起誓」，就是你不要用起誓來騙別人，像法利賽人所做的那種方法。"
+    ],
+    "requirement": {
+      "reason": "耶穌責備法利賽人藉起誓欺騙；神曾向亞伯拉罕起誓，耶穌也應大祭司要求作答",
+      "inference": "例證分別說明並非所有起誓都被禁止、禁令針對用起誓欺騙的用法",
+      "conclusion": "禁的是藉起誓騙人，並非全面禁誓",
+      "conclusion_sentence": "S0007",
+      "source_sentences": [
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0006",
+        "S0007"
+      ]
+    },
+    "variants": [
+      {
+        "id": "one-sufficient-example",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "不可藉起誓騙人",
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "耶穌責備法利賽人藉誓騙人"
+              },
+              {
+                "sentence": "S0007",
+                "text": "禁的是藉誓欺騙，並非一律不可起誓"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "drops-the-essential-qualifier",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "不可起誓",
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "法利賽人用起誓騙人"
+              },
+              {
+                "sentence": "S0007",
+                "text": "任何情況都不可起誓"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "pat-story-keeps-a-personal-request-in-context",
+    "subunit": "10.1",
+    "original_sentences": [
+      "S0184",
+      "S0186",
+      "S0187",
+      "S0188",
+      "S0189"
+    ],
+    "source": [
+      "為了這個緣故，因為我並沒有對付她，我可以有權力來對付她，可是我沒有，結果贏了這個人。",
+      "以後在十幾年來，每次在教授會議有人……我要起來講話，我要提什麼建議，我一提，她馬上附議：「我支持Joseph，因為我知道這個人是好人，我知道這個人所提的一定是好事情。」",
+      "所以每次我一提什麼，她都支持我。",
+      "後來我告訴她：「妳不要盲目地支持，妳要用頭腦想一想。」",
+      "她說：「不是，我一直知道你這個人是誰。」"
+    ],
+    "requirement": {
+      "reason": "教授有權對付同事，卻沒有報復",
+      "inference": "以後對方多年支持他的提議，說明他因此贏得了對方",
+      "conclusion": "不報復使他贏得了同事",
+      "conclusion_sentence": "S0001",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003"
+      ]
+    },
+    "variants": [
+      {
+        "id": "follows-main-line-without-personal-aside",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "贏得同事的信任",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "有權對付同事卻不報復，結果贏得對方"
+              },
+              {
+                "sentence": "S0003",
+                "text": "十幾年來，對方經常支持他的提議"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "turns-a-personal-request-into-a-rule",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "不盲目支持",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "有權對付同事卻不報復，結果贏得對方"
+              },
+              {
+                "sentence": "S0003",
+                "text": "十幾年來，對方經常支持他的提議"
+              },
+              {
+                "sentence": "S0004",
+                "text": "支持也不可盲目，要用頭腦思考"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001"
         }
       }
     ]

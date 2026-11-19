@@ -229,29 +229,28 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
                     p["sentence"] for s in actual_slides if s["first"] in allowed for p in s["points"]]}]
             items.append({"case_id": case_id, "packet": ev.semantic_packet(record, selection)})
             expected[case_id] = variant["expected"]
+    checks = {f"{item['case_id']}-{kind}": (item["case_id"], kind)
+              for item in items for kind in ("argument", "faithfulness")}
     row = {"type": "object", "additionalProperties": False,
-           "required": ["case_id", "argument_passed", "unfaithful_slides", "evidence"],
-           "properties": {"case_id": {"type": "string", "enum": list(expected)},
-                          "argument_passed": {"type": "boolean"},
-                          "unfaithful_slides": {"type": "array", "items": {"type": "string"}},
-                          "evidence": {"type": "string"}}}
+           "required": ["check_id", "passed", "evidence"],
+           "properties": {"check_id": {"type": "string", "enum": list(checks)},
+                          "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
     schema = {"type": "object", "additionalProperties": False, "required": ["results"],
               "properties": {"results": {"type": "array", "items": row}}}
     system = (ev.SEMANTIC_SYSTEM + "\n" + ev.ARGUMENT_REVIEW_SYSTEM
-              + "\n這次是批量試題，每筆獨立判斷。回一筆 results 給每個 case_id。"
-                "argument_passed 只判定唯一 argument_requirements 指明的推論，以 conclusion_slide 與來源為範圍。"
-                "unfaithful_slides 另行判定有實質意思不受本張原文支持的各張；沒有則空。"
-                "兩欄獨立：其他張的忠實問題不能改變指定推論的 verdict。"
-                "evidence 分別說明兩欄依據，並核對布林值與文字理由一致。其他逐張判定省略。")
+              + "\n這次是批量試題。回兩筆獨立判定，check_id 分別為 case_id 加 -argument 和 -faithfulness。"
+                "-argument 只判定唯一 argument_requirements 指明的推論，以 conclusion_slide 與來源為範圍。"
+                "-faithfulness 只判定所有呈現內容有沒有本張原文依據，有不忠實之處才不通過。"
+                "一筆的判定不能影響同個案例的另一筆；evidence 指出具體原話和投影片內容。")
     client = RecordedClient(chapter_exposition.chapter_client(REVIEW_MODEL),
                             Path(os.environ["WANG_SLIDE_REGRESSION_ARTIFACTS"]), once=True)
     results = client.generate_json(system, json.dumps(items, ensure_ascii=False), schema)["results"]
-    assert len(results) == len(expected) and {row["case_id"] for row in results} == set(expected)
+    assert len(results) == len(checks) and {row["check_id"] for row in results} == set(checks)
     mismatches = []
     for verdict in results:
-        want = expected[verdict["case_id"]]
-        unfaithful = [want["unfaithful_slide"]] if "unfaithful_slide" in want else []
-        if (verdict["argument_passed"] != want["passed"] or verdict["unfaithful_slides"] != unfaithful
-                or not verdict["evidence"].strip()):
-            mismatches.append({**verdict, "fixture": labels[verdict["case_id"]]})
+        case_id, kind = checks[verdict["check_id"]]
+        want = expected[case_id]
+        passes = want["passed"] if kind == "argument" else "unfaithful_slide" not in want
+        if verdict["passed"] != passes or not verdict["evidence"].strip():
+            mismatches.append({**verdict, "fixture": labels[case_id], "expected": passes})
     assert not mismatches, mismatches

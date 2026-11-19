@@ -28,10 +28,12 @@ def test_coverage_checks_the_inference_in_both_authoring_and_eval():
     gen = chapter_slides.user_prompt("Lecture", selection, context)
     packet = ev.semantic_packet({"lecture": "Lecture", "claim_context": context, "slides": []}, selection)
     coverage = packet["criteria"]["coverage"]
-    for text in (gen, coverage):
-        assert "未交代理由怎樣支持結論，仍是漏步驟" in text
-        assert "相鄰張的要點合起來要能讀出兩者的關係" in text
-    assert "通過要指出實際表達該推論的要點" in coverage
+    assert "未交代理由怎樣支持結論，仍是漏步驟" in gen
+    assert "相鄰張的要點合起來要能讀出兩者的關係" in gen
+    assert coverage == ev.SUBUNIT_COVERAGE
+    assert "讓推論難以跟上" in coverage
+    assert "已在指定推論的判定報告的同一缺口，不再重複報" in coverage
+    assert "逐一交代其餘同向例證" in coverage
     assert len(gold["across_slides_good"]) == 2
 
 
@@ -217,7 +219,7 @@ def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_spli
             criteria = request["criteria"]
             assert set(criteria) == {"faithfulness", "coverage", "scripture"}
             assert set(schema["properties"]["checks"]["items"]["properties"]["criterion"]["enum"]) == set(criteria)
-            assert "標題涵蓋本張共同主題" in criteria["coverage"]
+            assert "標題和要點要保留教授的主要回答" in criteria["coverage"]
             assert request["slides"][0]["title"] == "警告中的責任分別"
             assert request["source"][0]["text"] == "那警告是什麼意思？"
             return {"checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "原審閱"}
