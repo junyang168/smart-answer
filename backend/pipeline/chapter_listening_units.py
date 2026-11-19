@@ -183,7 +183,18 @@ def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -
                    # rounding a sentence first can hide it just before clip start.
                    'transcript': [{'at': line['start'], 'end': line['end'], 'text': line['text']} for line in lines],
                    'spoken': [], 'readings': [], 'original_language_events': []}
-            row = align_playback_intervals(audio._retimed(recording['retime'], row))
+            row = audio._retimed(recording['retime'], row)
+            clip_key = f'{sid}:{run_index}'
+            if clips := unit.get('retained_clips', {}).get(clip_key):
+                if any(not 0 <= clip['start'] < clip['end'] <= row['media_duration'] for clip in clips):
+                    raise ValueError('Invalid retained audio range')
+                if any(a['end'] > b['start'] for a, b in zip(clips, clips[1:])):
+                    raise ValueError('Retained audio ranges must be ordered')
+                if any(not any(clip['start'] - .011 <= line['at'] < clip['end'] for clip in clips)
+                       for line in row['transcript']):
+                    raise ValueError('Retained audio ranges exclude the selected transcript')
+                row.update(stretches=clips, seconds=sum(clip['end'] - clip['start'] for clip in clips))
+            row = align_playback_intervals(row)
             continued = sid in seen
             sections.append({'passage': f'{passage}-sub-{sid}-run-{run_index}',
                              'unit_id': str(unit['unit_number']),
@@ -203,7 +214,13 @@ def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -
             **({'playback_sequence': 'subunit'} if arranged_by_subunit else {})}
 
 
-def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording: dict) -> dict:
+def bundle_directory(root: Path, bundle: str) -> Path:
+    if not isinstance(bundle, str) or len(bundle) != 64 or any(c not in '0123456789abcdef' for c in bundle):
+        raise ValueError('Invalid reviewed slide bundle')
+    return root / 'unit-supplements' / bundle
+
+
+def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, recording: dict) -> dict:
     """Use a Unit's reviewed slides only for the matching original recording."""
     title, source = entry['lecture'], entry['source_id']
     selection_path = directory / f'{title}.selection.json'
@@ -214,7 +231,8 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
     argument_version = (slides.get('claim_context') or {}).get('instance', {}).get('change_set_id')
     if entry.get('changeset') and argument_version != entry['changeset']:
         raise ValueError('Reviewed Unit slides use a different argument layer')
-    if (selection['source_id'] != source or selection['lecture'] != title
+    selection_source = entry.get('chapter_selection_source_id', source) if unit is None else source
+    if (selection['source_id'] != selection_source or selection['lecture'] != title
             or selection['transcript_sha256'] != entry['source_sha256']
             or slides['decisions_sha256'] != exposition.file_sha256(selection_path)):
         raise ValueError('Unit slides do not match their source and selection')
@@ -230,12 +248,15 @@ def reviewed_unit_recording(directory: Path, unit: dict, entry: dict, recording:
     pieces = chapter_slides.kept_pieces(selection)
     fields = ('source_paragraph_key', 'start', 'end', 'text')
     actual = [(p.get(fields[0]), *(p[k] for k in fields[1:])) for p in pieces]
-    expected = sorted(
-        (r['paragraph_key'], r['start'], r['end'], r['text'])
-        for group in unit['groups'] if group['source_id'] == source
-        for r in group['source_ranges'])
-    if sorted(actual) != expected:
-        raise ValueError('Unit reviewed selection differs from its planned source paragraphs')
+    if unit is not None:
+        expected = sorted(
+            (r['paragraph_key'], r['start'], r['end'], r['text'])
+            for group in unit['groups'] if group['source_id'] == source
+            for r in group['source_ranges'])
+        if sorted(actual) != expected:
+            raise ValueError('Unit reviewed selection differs from its planned source paragraphs')
+    elif not slides.get('semantic_eval'):
+        raise ValueError('A chapter-wide slide bundle requires a semantic Eval')
     return {**recording, 'lines': chapter_slides.sentences(pieces),
             'slides': chapter_slides.placed(selection, slides)[1]}
 
@@ -265,7 +286,9 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
         recording = {'media': {k: sermon[k] for k in
                                ['source_id', 'transcript_id', 'title', 'media_kind', 'media_url', 'media_duration']},
                      'retime': audio.retimer(sermon, data_root)}
-        if source in using_legacy:
+        if bundle := entry.get('reviewed_chapter_bundle'):
+            recording = reviewed_unit_recording(bundle_directory(path.parent, bundle), None, entry, recording)
+        elif source in using_legacy:
             selection = exposition.load_record(data_root, passage, title, entry['source_sha256'])
             slides = chapter_slides.load_record(data_root, passage, title)
             if selection is None or slides is None:
@@ -304,9 +327,7 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
             bundle = scope.get('reviewed_slide_bundle')
             if bundle is None:
                 continue
-            if not isinstance(bundle, str) or len(bundle) != 64 or any(c not in '0123456789abcdef' for c in bundle):
-                raise ValueError('Invalid reviewed Unit slide bundle')
-            directory = path.parent / 'unit-supplements' / bundle
+            directory = bundle_directory(path.parent, bundle)
             for source in {g['source_id'] for g in groups}:
                 key = (unit_passage, source, sub_id) if sub_id else (unit_passage, source)
                 unit_recordings[key] = reviewed_unit_recording(

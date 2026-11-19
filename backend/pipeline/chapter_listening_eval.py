@@ -227,9 +227,18 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
     slide_results = []
     for entry in plan['inputs']:
         title = entry['lecture']
-        selection_path = chapter_exposition.record_path(data_root, passage, title)
+        if bundle := entry.get('reviewed_chapter_bundle'):
+            directory = units.bundle_directory(data_root / 'chapter_exposition' / passage, bundle)
+            selection_path = directory / f'{title}.selection.json'
+            saved_path = directory / f'{title}.slides.json'
+            saved = json.loads(saved_path.read_text())
+            receipt = directory / f'{title}.semantic-eval.json'
+        else:
+            selection_path = chapter_exposition.record_path(data_root, passage, title)
+            saved_path = chapter_slides.record_path(data_root, passage, title)
+            saved = chapter_slides.load_record(data_root, passage, title)
+            receipt = saved_path.with_suffix('.semantic-eval.json')
         selection = json.loads(selection_path.read_text())
-        saved = chapter_slides.load_record(data_root, passage, title)
         try:
             saved, owner_corrections = units.owner_timing(saved, selection)
             preparation_problems = []
@@ -246,9 +255,7 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
             problems += chapter_slide_eval.evaluate(saved['slides'], kept,
                 candidates=chapter_slide_eval.candidate_chapters(saved['slides'], None))['problems']
         if saved.get('semantic_eval'):
-            saved_path = chapter_slides.record_path(data_root, passage, title)
-            problems += chapter_slide_eval.semantic_eval_problems(
-                saved_path, selection_path, saved_path.with_suffix('.semantic-eval.json'))
+            problems += chapter_slide_eval.semantic_eval_problems(saved_path, selection_path, receipt)
         slide_results.append({'lecture': title, 'status': 'failed' if problems else 'passed',
                               'scope': 'full_saved_slide_record', 'problems': problems,
                               'program_timing_corrections': owner_corrections,
