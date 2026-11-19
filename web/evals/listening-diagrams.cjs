@@ -83,8 +83,21 @@ async function evaluate(browser, viewport) {
       assert(diagramBox.y >= paneBox.y - 1 && diagramBox.y + diagramBox.height <= paneBox.y + paneBox.height + 1,
         JSON.stringify({ message: "The whole diagram must remain visible", viewport, diagramBox, paneBox }));
     };
-    assert.equal(await visible(point).count(), 1);
+    const pointWindow = slides.locator("[data-diagram-points]");
+    const assertFollowing = async (text) => {
+      await slides.getByText(text, { exact: true }).waitFor();
+      await page.waitForFunction(() => {
+        const active = document.querySelector("[data-slide-scroll] [aria-current=true]");
+        const window = active?.closest("[data-diagram-points]");
+        if (!active || !window) return false;
+        const item = active.getBoundingClientRect(), bounds = window.getBoundingClientRect();
+        return item.top >= bounds.top - 1 && item.bottom <= bounds.bottom + 1;
+      });
+      assert.match(await pointWindow.locator("[aria-current=true]").innerText(), new RegExp(text));
+    };
+    await assertFollowing(point);
     await assertDiagramFits();
+    const initialDiagramY = (await figure.boundingBox()).y;
 
     await open(22.5);
     await figure.getByText("論彌賽亞", { exact: true }).waitFor();
@@ -94,17 +107,30 @@ async function evaluate(browser, viewport) {
 
     await open(24);
     await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await visible(elaboration).count(), 1);
-    assert.equal(await visible(point).count(), viewport.width < 640 ? 0 : 1);
+    await assertFollowing(elaboration);
+    assert.equal(await visible(point).count(), 1, "Previously spoken points stay in the list");
     await assertDiagramFits();
 
     await open(27.5);
     await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await visible(ending).count(), 1);
-    assert.equal(await visible(elaboration).count(), viewport.width < 640 ? 0 : 1);
+    await assertFollowing(ending);
     await assertDiagramFits();
     if (viewport.width < 640) {
       const diagramY = (await figure.boundingBox()).y;
+      assert.ok(Math.abs(diagramY - initialDiagramY) <= 1, "Changing the highlighted point must not move the diagram");
+      const pointPosition = await pointWindow.evaluate(node => ({top: node.scrollTop, height: node.clientHeight}));
+      assert(pointPosition.top > 0, "Earlier points have scrolled up inside their own window");
+      const previous = await visible(elaboration).boundingBox();
+      const end = await visible(ending).boundingBox();
+      assert(previous.y < end.y, "Earlier points remain in their original order");
+      await pointWindow.evaluate(node => node.scrollTo({top: 0, behavior: "instant"}));
+      const first = await visible(point).boundingBox();
+      const bounds = await pointWindow.boundingBox();
+      assert(first.y >= bounds.y - 1 && first.y < bounds.y + bounds.height,
+        "Listeners can scroll back to the first point");
+      assert.ok(Math.abs((await figure.boundingBox()).y - diagramY) <= 1,
+        "Manually scrolling the point window must not move the diagram");
+
       const scrolled = await slides.evaluate(node => {
         node.scrollTop = node.scrollHeight;
         return node.scrollTop;
@@ -112,7 +138,6 @@ async function evaluate(browser, viewport) {
       assert(scrolled > 0, "Fixture must exercise a scrollable slide");
       await assertDiagramFits();
       assert.ok(Math.abs((await figure.boundingBox()).y - diagramY) <= 14, "Scrolling Scripture cannot displace the diagram");
-      assert.equal(await visible(ending).count(), 1);
     } else {
       const pointBox = await visible(ending).boundingBox();
       assert.ok(pointBox.x + pointBox.width <= (await figure.boundingBox()).x,
