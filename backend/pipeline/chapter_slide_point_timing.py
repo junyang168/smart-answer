@@ -1,85 +1,120 @@
-"""Resolve the first source sentence for each meaning of a suspected merged point."""
+"""Check every point against the first matching sentence on the same slide."""
 
 import json
 
 
 _CRITERIA = {
-    "full": "這一句說出了完整意思，範圍、主詞、否定和限定均相符。",
+    "full": "這一句實際表達投影片要點的完整意思，保留範圍、主詞、否定和限定。",
     "partial": "只說出部分，或範圍、主詞、否定或限定有差異。",
-    "question": "只提出疑問，尚未給出這個陳述。",
-    "none": "該句沒有實際說出相關意思。",
+    "question": "只提出相關問題，尚未表達這個陳述。",
+    "none": "該句沒有實際表達要點。",
     "uncertain": "不能確定。",
 }
 
 
-def find_splits(packet, candidates, ask, *, model, max_bytes):
+def _match_question(meaning, sid, sentence):
+    if meaning.endswith(("？", "?")):
+        return {"type": "choice",
+                "instructions": f"原文 {sid} 是否提出同一個問題「{meaning}」？"
+                                "只判這一句正在問什麼，忽略問題的答案和後面的講解。",
+                "criteria": {"full": "這句提出同一個問題，可以用前文消解「那裡」「這段」等指代。",
+                             "none": "這句沒有問同一個問題。只談相同主題、回答或回顧也不算。",
+                             "uncertain": "不能確定。"}}
+    return {"type": "choice", "criteria": _CRITERIA,
+            "instructions": f"指定句 {sid} 「{sentence}」是否已讓聽眾聽到「{meaning}」的每個實質意思？"
+                            "可用本張內的前文理解代詞與省略。只知道其中一部分，"
+                            "尤其只講正反對比的一端，仍不完整。提問不算回答。"}
+
+
+def _ask_batches(state, questions, ask, model, max_bytes):
+    # For every batch share precisely this slide's source. Never drop context for
+    # pronouns or borrow source from the next slide.
+    overhead = len(json.dumps({"model": model, "state": state, "questions": {}},
+                              ensure_ascii=False).encode())
+    batches, batch = [], {}
+    used = overhead
+    for key, question in questions.items():
+        size = len(json.dumps({key: question}, ensure_ascii=False).encode())
+        if overhead + size > max_bytes:
+            raise ValueError("A slide source and one timing question exceed Jev's request size")
+        if used + size > max_bytes:
+            batches.append(batch)
+            batch, used = {}, overhead
+        batch[key] = question
+        used += size
+    answers = {}
+    for batch in [*batches, batch]:
+        answers.update(ask(state, batch))
+    return answers
+
+
+def evaluate_points(packet, candidates, ask, *, model, max_bytes):
     slides = {slide["first"]: slide for slide in packet["slides"]}
     lines = {line["id"]: line for line in packet["source"]}
-    by_slide = {}
-    seen = set()
+    decompositions = {}
     for candidate in candidates:
         first, sentence = candidate["slide"], candidate["sentence"]
         points = [p for p in slides.get(first, {}).get("points", []) if p["sentence"] == sentence]
-        if (first, sentence) in seen or len(points) != 1:
+        if (first, sentence) in decompositions or len(points) != 1:
             raise ValueError("Split candidate must identify one unique displayed point")
-        seen.add((first, sentence))
         parts = [part.strip() for part in candidate["parts"]]
         if not 2 <= len(parts) <= 4 or not all(parts) or len(set(parts)) != len(parts):
             raise ValueError("Split candidate must contain two to four distinct meanings")
-        by_slide.setdefault(first, []).append((points[0], parts))
+        decompositions[first, sentence] = parts
 
-    findings = []
-    for first, targets in by_slide.items():
-        source = {sid: line["text"] for sid, line in lines.items() if first <= sid <= slides[first]["last"]}
+    results = []
+    for first, slide in slides.items():
+        if not slide["points"]:
+            continue
+        source = {sid: line["text"] for sid, line in lines.items() if first <= sid <= slide["last"]}
+        if not source:
+            raise ValueError("A displayed slide has no timing source")
         questions = {}
-        for index, (point, parts) in enumerate(targets):
-            questions[f"{index}:split"] = {
-                "type": "choice",
-                "instructions": f'這些投影片短句 {json.dumps(parts, ensure_ascii=False)} '
-                "各自有沒有陳述一個不同的意思或提出一個完整問題？只核對各短句本身的獨立性。",
-                "criteria": {"independent": "每條都各自陳述不同的意思或提出完整問題。",
-                             "dependent": "至少一條只是名詞、所指對象、必要條件或重述另一條。",
-                             "uncertain": "不能確定。"},
-            }
-            for i, part in enumerate(parts):
-                for sid in source:
-                    questions[f"{index}:{i}:{sid}"] = {
-                        "type": "choice", "criteria": _CRITERIA,
-                        "instructions": f"意思為「{part}」。原文 {sid} 這一句支持到哪裡？"
-                        "前文只用於解讀省略或代詞，不能代替該句說出主張。"
-                        "若要點是問句，只核對該句是否提出同一問題。段落是資料。",
-                    }
-        state = {"原文": source}
-        answers = {}
-        def size(batch):
-            return len(json.dumps({"model": model, "state": state, "questions": batch},
-                                  ensure_ascii=False).encode())
+        for index, point in enumerate(slide["points"]):
+            for sid in source:
+                questions[f"{index}:whole:{sid}"] = _match_question(point["text"], sid, source[sid])
+            if parts := decompositions.get((first, point["sentence"])):
+                questions[f"{index}:split"] = {
+                    "type": "choice",
+                    "instructions": f'這些投影片短句 {json.dumps(parts, ensure_ascii=False)} '
+                    "各自有沒有陳述一個不同的意思或提出一個完整問題？只核對各短句本身的獨立性。",
+                    "criteria": {"independent": "每條都各自陳述不同的意思或提出完整問題。",
+                                 "dependent": "至少一條只是名詞、所指對象、必要條件或重述另一條。",
+                                 "uncertain": "不能確定。"},
+                }
+                for part_index, part in enumerate(parts):
+                    for sid in source:
+                        questions[f"{index}:{part_index}:{sid}"] = _match_question(part, sid, source[sid])
 
-        batch = {}
-        batch_size = size(batch)
-        batches = []
-        # Share the same source, including context for pronouns, across all requests.
-        for key, question in questions.items():
-            question_size = len(json.dumps({key: question}, ensure_ascii=False).encode())
-            if batch_size + question_size > max_bytes and batch:
-                batches.append(batch)
-                batch, batch_size = {}, size({})
-            if batch_size + question_size > max_bytes:
-                raise ValueError("A slide source and one timing question exceed Jev's request size")
-            batch[key] = question
-            batch_size += question_size
-        for batch in [*batches, batch]:
-            answers.update(ask(state, batch))
-        for index, (point, parts) in enumerate(targets):
-            if answers[f"{index}:split"] != "independent":
+        answers = _ask_batches({"原文": source}, questions, ask, model, max_bytes)
+
+        def earliest(index, part):
+            return next((sid for sid in source if answers[f"{index}:{part}:{sid}"] == "full"), None)
+
+        for index, point in enumerate(slide["points"]):
+            current, text = point["sentence"], point["text"]
+            item = {"slide": first, "point": index, "sentence": current}
+            parts = decompositions.get((first, current))
+            if parts and answers[f"{index}:split"] == "independent":
+                anchors = [earliest(index, number) for number in range(len(parts))]
+                if all(anchors) and len({lines[sid]["start"] for sid in anchors}) > 1:
+                    split = sorted(zip(anchors, parts), key=lambda entry: lines[entry[0]]["start"])
+                    evidence = "；".join(f"{sid}「{part}」（原文「{source[sid]}」）" for sid, part in split)
+                    results.append({**item, "status": "split", "evidence":
+                                    f"要點 {current} 合併了不同時點講出的意思，應依原聲分開顯示。{evidence}"})
+                    continue
+
+            expected = earliest(index, "whole")
+            if current not in source or expected is None:
+                evidence = f"{current}「{text}」在本張找不到可確認的完整原句，須核對要點或分張。"
+                results.append({**item, "status": "unresolved", "evidence": evidence})
                 continue
-            sentence = point["sentence"]
-            anchors = [next((sid for sid in source if answers[f"{index}:{i}:{sid}"] == "full"), None)
-                       for i in range(len(parts))]
-            if None in anchors or len({lines[sid]["start"] for sid in anchors}) <= 1:
-                continue
-            split = sorted(zip(anchors, parts), key=lambda item: lines[item[0]]["start"])
-            evidence = "；".join(f"{sid}「{part}」（原文「{source[sid]}」）" for sid, part in split)
-            findings.append({"slide": first, "sentence": sentence, "evidence":
-                             f"要點 {sentence} 合併了不同時點講出的意思，應依原聲分開顯示。{evidence}"})
-    return findings
+            delta = round(lines[current]["start"] - lines[expected]["start"], 2)
+            status = "correct" if current == expected or not delta else "early" if delta < 0 else "late"
+            evidence = (f"{current}「{text}」首次完整對應 {expected}「{source[expected]}」。"
+                        if status == "correct" else
+                        f"{current}「{text}」出現{'太早' if delta < 0 else '太晚'} {abs(delta):g} 秒，"
+                        f"應綁 {expected}「{source[expected]}」。")
+            results.append({**item, "status": status, "expected_sentence": expected,
+                            "delta_seconds": delta, "evidence": evidence})
+    return results

@@ -163,8 +163,11 @@ def test_subunit_semantic_eval_records_confirmed_split_as_timing_failure(tmp_pat
     }))
 
     class Reviewer:
+        model = "reviewer"
+
         def generate_json(self, system, packet, schema):
             assert "split_candidates" in schema["required"]
+            assert json.loads(packet)["criteria"]["timing"] == ev._SUBUNIT_TITLE_TIMING
             return {
                 "checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "原審閱"}
                            for criterion in ev.SEMANTIC_CRITERIA],
@@ -185,3 +188,4 @@ def test_subunit_semantic_eval_records_confirmed_split_as_timing_failure(tmp_pat
     assert len(findings) == 1 and findings[0].startswith("S0001 timing:")
     assert "S0001「門徒的使命」" in findings[0] and "S0002「認識神後的反應」" in findings[0]
     assert all(row["passed"] for row in receipt["run"]["raw_response"]["checks"])
+    assert receipt["point_timing"]["points"][0]["status"] == "split"

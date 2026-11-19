@@ -202,6 +202,12 @@ SEMANTIC_CRITERIA = {
 }
 
 
+_SUBUNIT_TITLE_TIMING = (
+    "只檢查標題在換張時出現是否提前揭露尚未講出的答案或故事結果。"
+    "若答案還沒講出，標題應為問題或中性主題。逐條要點時間由另一步核對。"
+)
+
+
 OWNER_RULES = [
     "負責人已裁定的條件（owner_rulings）優先於一般規則；不要建議違反它們的改法。",
     "論證圖由程序在他開始講該論證時顯示，不算提前講出答案；負責人 2026-11-18 指出圖等到歸納句才出現是太晚。不要建議把圖移後或拆到別張。",
@@ -226,7 +232,8 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                   for slide in slides]
     return {
         "lecture": slide_record["lecture"],
-        "criteria": SEMANTIC_CRITERIA,
+        "criteria": ({**SEMANTIC_CRITERIA, "timing": _SUBUNIT_TITLE_TIMING}
+                     if context.get("scope") == "subunit" else SEMANTIC_CRITERIA),
         "owner_rules": OWNER_RULES,
         "owner_rulings": [{k: case[k] for k in ("kind", "at", "from", "to", "pattern", "why") if k in case}
                           for case in rulings],
@@ -298,7 +305,7 @@ SEMANTIC_SYSTEM = """你是獨立的投影片驗收者，不是寫投影片的�
 逐張、逐項按 criteria 判定，每張投影片的每一項都要給一筆：slide 填該張的 first，criterion 填標準名稱，passed 為是否通過，evidence 寫具體依據（句子編號與原文；不通過時寫應怎麼改）。
 不要沿用任何先前的判定，全部重新看原文。
 先讀 owner_rules 與 owner_rulings：負責人已裁定的條件優先，改法不得違反它們。
-輸出有 split_candidates 欄位時，先逐條找可能混合了兩個以上獨立意思的要點，然後才看時間。
+輸出有 split_candidates 欄位時，逐條找可能混合了兩個以上獨立意思的要點。
 按要點本身拆解，保留其範圍和限定，不補寫本來沒顯示的意思。必要限定或同一意思的重述不拆。
 對疑似要點只填所在投影片 first、該點目前 sentence、拆成的兩至四條短句 parts。不用替它們找時間，另一步會核對。沒有填空陣列。"""
 
@@ -345,27 +352,40 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
                            "parts": {"type": "array", "items": {"type": "string"}}},
         }}
     client = chapter_client(model)
-    answer = client.generate_json(SEMANTIC_SYSTEM, json.dumps(packet, ensure_ascii=False), schema)
+    prompt = json.dumps(packet, ensure_ascii=False)
+    if subunit:
+        # Jev runs after decomposition. A resumed timing check can reuse the
+        # review's exact recorded reply instead of calling that reviewer again.
+        from backend.pipeline.chapter_slide_claims import RecordedClient
+
+        answer = RecordedClient(client, receipt_path.with_suffix(".reviewer")).generate_json(
+            SEMANTIC_SYSTEM, prompt, schema)
+    else:
+        answer = client.generate_json(SEMANTIC_SYSTEM, prompt, schema)
     raw = getattr(client, "last_raw_response", None) or answer
     checks = answer["checks"]
-    split_findings = []
-    if subunit and answer["split_candidates"]:
-        from backend.pipeline.chapter_slide_point_timing import find_splits
+    point_timing = {}
+    if subunit:
+        from backend.pipeline.chapter_slide_point_timing import evaluate_points
         from backend.pipeline import claim_flash_common, evidence_refresh
 
-        split_findings = find_splits(packet, answer["split_candidates"],
+        points = evaluate_points(packet, answer["split_candidates"],
             lambda state, questions: claim_flash_common.jev(
                 receipt_path.with_suffix(".point-timing"), evidence_refresh.JevPort(), state, questions),
             model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES)
-        for finding in split_findings:
-            checks = [{**check, "passed": False, "evidence": (
-                        finding["evidence"] if check["passed"] else
-                        f'{check["evidence"]}\n{finding["evidence"]}')}
-                      if check["slide"] == finding["slide"] and check["criterion"] == "timing" else check
-                      for check in checks]
+        point_timing = {"point_timing": {"model": evidence_refresh.MODEL, "points": points}}
+        failures = {}
+        for point in points:
+            if point["status"] != "correct":
+                failures.setdefault(point["slide"], []).append(point["evidence"])
+        checks = [
+            {**check, "passed": False, "evidence": "\n".join(
+                ([] if check["passed"] else [check["evidence"]]) + failures[check["slide"]])}
+            if check["criterion"] == "timing" and check["slide"] in failures else check
+            for check in checks
+        ]
     receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
-                        "selection_sha256": file_sha256(selection_path), "checks": checks,
-                        **({"point_timing_splits": split_findings} if subunit else {})}, model, raw)
+                        "selection_sha256": file_sha256(selection_path), "checks": checks, **point_timing}, model, raw)
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
     return receipt
 

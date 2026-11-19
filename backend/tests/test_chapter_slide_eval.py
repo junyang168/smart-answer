@@ -81,7 +81,7 @@ def test_slide_eval_checks_the_required_diagram_in_its_retained_claim_scope(tmp_
 
 
 def test_split_finding_depends_on_first_fully_supported_sentence_of_each_part():
-    from backend.pipeline.chapter_slide_point_timing import find_splits
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
 
     source = [{"id": sid, "text": text, "start": start} for sid, text, start in [
         ("S0001", "下一段講什麼？", 0), ("S0002", "第五章十三節起是門徒的使命。", 6),
@@ -92,7 +92,7 @@ def test_split_finding_depends_on_first_fully_supported_sentence_of_each_part():
     candidates = [{"slide": "S0001", "sentence": "S0003", "parts": ["門徒的使命", "認識神後的反應"]}]
 
     def run(first, second, split="independent"):
-        supported = {f"0:0:{first}", f"0:1:{second}", "0:0:S0004"}
+        supported = {f"0:0:{first}", f"0:1:{second}", "0:0:S0004", "0:whole:S0003"}
         if second is not None:
             supported.add("0:1:S0004")  # A later restatement must not hide the first full sentence.
         calls = []
@@ -103,12 +103,50 @@ def test_split_finding_depends_on_first_fully_supported_sentence_of_each_part():
                     else "question" if key.endswith("S0001") else "partial"
                     for key in questions}
 
-        result = find_splits(packet, candidates, ask, model="jev-test", max_bytes=2000)
-        assert len(calls) > 1 and sum(map(len, calls)) == 9
+        result = evaluate_points(packet, candidates, ask, model="jev-test", max_bytes=2000)
+        assert len(calls) > 1 and sum(map(len, calls)) == 13
         return result
 
     finding, = run("S0002", "S0003")
     assert "S0002「門徒的使命」" in finding["evidence"] and "S0003「認識神後的反應」" in finding["evidence"]
-    assert not run("S0002", "S0002")  # One sentence expressed both.
-    assert not run("S0002", None)  # One meaning lacks full support.
-    assert not run("S0002", "S0003", "dependent")  # A condition/referent is part of one meaning.
+    assert finding["status"] == "split"
+    assert run("S0002", "S0002")[0]["status"] == "correct"  # One sentence expressed both.
+    assert run("S0002", None)[0]["status"] == "correct"  # The suggested split has an unsupported part.
+    assert run("S0002", "S0003", "dependent")[0]["status"] == "correct"  # One meaning.
+
+
+def test_all_points_are_checked_per_slide_even_without_split_candidates():
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+
+    packet = {
+        "source": [{"id": f"S000{i}", "text": f"原文{i}。", "start": i * 10} for i in range(1, 6)],
+        "slides": [
+            {"first": "S0001", "last": "S0003", "points": [
+                {"sentence": "S0001", "text": "這句是答案。"},
+                {"sentence": "S0003", "text": "這句是問題嗎？"},
+            ]},
+            {"first": "S0004", "last": "S0005", "points": [
+                {"sentence": "S0004", "text": "當時已經講出這個意思。"},
+                {"sentence": "S0005", "text": "原文沒有提到的結論。"},
+            ]},
+        ],
+    }
+    seen = []
+
+    def ask(state, questions):
+        ids = set(state["原文"])
+        seen.append(ids)
+        assert {key.rsplit(":", 1)[1] for key in questions} == ids
+        if "S0001" in ids:
+            assert "提問不算回答" in questions["0:whole:S0001"]["instructions"]
+            assert "忽略問題的答案" in questions["1:whole:S0001"]["instructions"]
+            full = {"0:whole:S0002", "1:whole:S0001", "1:whole:S0003"}
+        else:
+            full = {"0:whole:S0004"}
+        return {key: "full" if key in full else "other" for key in questions}
+
+    rows = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
+    assert seen == [{"S0001", "S0002", "S0003"}, {"S0004", "S0005"}]
+    assert [(item["status"], item.get("expected_sentence"), item.get("delta_seconds")) for item in rows] == [
+        ("early", "S0002", -10), ("late", "S0001", 20), ("correct", "S0004", 0), ("unresolved", None, None),
+    ]
