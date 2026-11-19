@@ -12,10 +12,9 @@ A sub-unit is the listening plan's own part of a unit (`listening-units.json`
    checks a reviewed bundle against;
 2. its Claim outline is compiled from the knowledge instance against that selection,
    so only Claims he argues inside the sub-unit come along;
-3. the slide model writes its slides (program checks, up to REPAIRS repairs);
-4. a different model reviews them (`chapter_slide_eval`); failed checks go back as
-   a revision of the flagged slides' set, at most MOST_ROUNDS times, each followed
-   by one fresh review. What still fails goes to the owner.
+3. the slide model writes its slides once against the known argument requirements;
+4. Jev and the program correct supported timing, and independent Eval reports
+   any remaining findings without rewriting the sub-unit.
 
 Nothing is written to DATA_BASE_DIR: `stage` copies a passing sub-unit into a new
 bundle directory only when called, and the plan is changed separately.
@@ -74,7 +73,7 @@ def subunit_selection(plan: dict, passage: str, sub_id: str) -> tuple[str, dict]
 
 def _client(model: str, calls: Path):
     from backend.pipeline.chapter_slide_claims import RecordedClient
-    return RecordedClient(chapter_exposition.chapter_client(model), calls)
+    return RecordedClient(chapter_exposition.chapter_client(model), calls, once=True)
 
 
 def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
@@ -105,31 +104,18 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
         made = chapter_slides.decide(chapter, lecture, data_base_dir=data, client=client, force=True, claim_context=context)
         if made["status"] != "saved":
             return {"sub_unit": sub_id, "status": "generation_rejected", "problems": made.get("problems")}
-    for round_ in range(chapter_slides.MOST_ROUNDS + 1):
-        diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
-        if diagram_problems:
-            return {"sub_unit": sub_id, "status": "unresolved", "rounds": round_, "problems": diagram_problems}
-        transport = ".opus-api" if opus_api_spend_root is not None else ""
-        receipt = out / f"round{round_ + 1}{transport}.semantic-eval.json"
-        if not receipt.exists() or chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt) == [
-                "Semantic Eval belongs to a different slide version or source selection"]:
-            chapter_slide_eval.run_semantic_eval(slides_path, selection_path, receipt, REVIEW_MODEL,
-                                                 opus_api_spend_root=opus_api_spend_root)
-        problems = chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt)
-        if not problems:
-            return {"sub_unit": sub_id, "status": "passed", "rounds": round_, "receipt": str(receipt)}
-        if round_ == chapter_slides.MOST_ROUNDS:
-            return {"sub_unit": sub_id, "status": "unresolved", "rounds": round_, "problems": problems}
-        record = json.loads(slides_path.read_text())
-        review = chapter_slide_eval.review_from_semantic(json.loads(receipt.read_text()),
-                                                         chapter_exposition.file_sha256(slides_path))
-        chapter_slides.review_path(data, passage, lecture, int(record.get("revision", 0))).write_text(
-            json.dumps(review, ensure_ascii=False, indent=1))
-        revised = chapter_slides.revise(chapter, lecture, data_base_dir=data, client=client)
-        if revised["status"] != "revised":
-            return {"sub_unit": sub_id, "status": "revision_rejected", "rounds": round_ + 1,
-                    "problems": revised.get("problems")}
-    raise AssertionError("unreachable")
+    diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
+    if diagram_problems:
+        return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": diagram_problems}
+    transport = ".opus-api" if opus_api_spend_root is not None else ""
+    receipt = out / f"round1{transport}.semantic-eval.json"
+    if not receipt.exists():
+        chapter_slide_eval.run_semantic_eval(slides_path, selection_path, receipt, REVIEW_MODEL,
+                                             opus_api_spend_root=opus_api_spend_root)
+    problems = chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt)
+    if problems:
+        return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": problems}
+    return {"sub_unit": sub_id, "status": "passed", "rounds": 0, "receipt": str(receipt)}
 
 
 def stage(out: Path, data_root: Path, passage: str) -> str:

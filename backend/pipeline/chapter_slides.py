@@ -309,7 +309,22 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                       '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。',
                       json.dumps(scoped, ensure_ascii=False)]
         from backend.pipeline.chapter_slide_claims import source_context_index
-        bounds = {rid: [entry['first'], entry['last']] for rid, entry in source_context_index(claim_context, source_lines).items()}
+        source_entries = source_context_index(claim_context, source_lines)
+        if claim_context.get("scope") == "subunit":
+            checklist = [{"source": rid, "statement": entry["statement"]}
+                         for rid, entry in source_entries.items() if entry["statement"]]
+            lines += ["# 生成前的承重論證清單",
+                      "先用逐字稿核對以下 Claim 與論證步驟。挑出構成結論所必須的問題、理由、對照兩端和推論，"
+                      "各自落到一條要點，填入對應的 source。讀經卡保留照念的原文，承重的對照或推論仍須寫成要點。"
+                      "同一步包含對照兩端時，可以有兩條要點用相同 source。反覆說同一理由只寫一次，"
+                      "留位置給接到結論的那一步。生成前確認下列既定承重事項全部保留，再一次交稿。"
+                      "sentence 是本張內的初始位置，最早講出完整意思的時間另行核對。",
+                      json.dumps(checklist, ensure_ascii=False)]
+            required = [{"sentence": rule["at"], "content": rule["why"]}
+                        for rule in owner_cases if rule["kind"] == "required_point"]
+            if required:
+                lines += ["以下是必須出現在對應投影片的要點，不可省略：", json.dumps(required, ensure_ascii=False)]
+        bounds = {rid: [entry['first'], entry['last']] for rid, entry in source_entries.items()}
         lines += ['# 本講要點 source 的保留原文上下文範圍',
                   '這是程序按實際保留原文編譯的可用範圍，不是新增支持證明。source 要相關、要點忠於原文，sentence 必須在該 source 的此範圍內。原始 anchors 的逐字引用可以較短，不要把旁邊同一片段的實際結論誤判為沒有位置。',
                   json.dumps(bounds, ensure_ascii=False)]
@@ -602,7 +617,7 @@ def checked(
     outline = claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1"
     if outline:
         from backend.pipeline.chapter_slide_claims import retime
-        raw = retime(place_case_diagrams(raw, claim_context), claim_context)
+        raw = retime(place_case_diagrams(raw, claim_context, sentences(kept)), claim_context)
     spans = []
     if claim_context is not None:
         from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
@@ -621,9 +636,10 @@ def checked(
             # Explicit Scripture reading is carried by the displayed verse, not an early answer point.
             from backend.pipeline import chapter_slide_eval
             source_lines = sentences(kept)
-            readings = chapter_slide_eval.displayed_reading_sentences(slides, source_lines)
-            problems += (point_spans(claim_context, slides, source_lines=source_lines) + argument_alignment(claim_context, slides)
-                         + stale_points(claim_context, slides, source_lines, displayed_readings=readings))
+            problems += point_spans(claim_context, slides, source_lines=source_lines) + argument_alignment(claim_context, slides)
+            if claim_context.get("scope") != "subunit":
+                readings = chapter_slide_eval.displayed_reading_sentences(slides, source_lines)
+                problems += stale_points(claim_context, slides, source_lines, displayed_readings=readings)
             # 自評（負責人 2026-11-16）：逐句看他此刻念的經文、講的原文，畫面此刻有沒有。
             from backend.pipeline import chapter_slide_eval
             problems += chapter_slide_eval.evaluate(
@@ -796,7 +812,8 @@ def decide(
     response = client.generate_json(system, prompt, schema)
     result = save(chapter, lecture, data_base_dir, response, prompt, kept, getattr(client, "model", ""), claim_context)
     # 程序核對不通過：把問題和上一份交回模型改，最多 REPAIRS 次。改的是同一份，不換提示詞。
-    for _ in range(REPAIRS if claim_context is not None else 0):
+    repair_limit = REPAIRS if claim_context is not None and claim_context.get("scope") != "subunit" else 0
+    for _ in range(repair_limit):
         if result["status"] != "rejected":
             break
         repair = (prompt + "\n\n上一份投影片（JSON）：\n" + json.dumps(response, ensure_ascii=False)
@@ -1147,7 +1164,7 @@ def untouched_problems(previous: list[dict[str, Any]], revised: list[dict[str, A
             for slide in previous if slide.get("first") not in flagged and same(now.get(slide.get("first"))) != same(slide)]
 
 
-def place_case_diagrams(raw: list[dict[str, Any]], context: dict[str, Any]) -> list[dict[str, Any]]:
+def place_case_diagrams(raw: list[dict[str, Any]], context: dict[str, Any], source_lines=()) -> list[dict[str, Any]]:
     """His diagram goes on the slide on screen when he starts the argument it shows.
 
     The program knows both facts (the owner's diagram cases and the Claim's first spoken
@@ -1158,6 +1175,26 @@ def place_case_diagrams(raw: list[dict[str, Any]], context: dict[str, Any]) -> l
 
     raw = [dict(slide) for slide in raw]
     for case in diagrams_for_lecture(context.get("lecture", "")):
+        if quote := case.get("source_text"):
+            # Known diagram identity belongs to the spoken section, not to
+            # every slide citing the same Claim.
+            for slide in raw:
+                if slide.get("diagram_ref") in case["replace_refs"]:
+                    slide["diagram_ref"] = ""
+            matching = [line["id"] for line in source_lines if line["text"] == quote]
+            if len(matching) > 1:
+                raise ValueError("Approved diagram introduction is ambiguous")
+            if matching:
+                diagram = case["sha256"]
+                linked = {d["sha256"] for claim in context.get("claims", [])
+                          if claim["claim_id"].rsplit("-", 1)[-1] == case["claim"]
+                          for d in claim.get("diagrams", [])}
+                if diagram not in linked:
+                    raise ValueError("Approved diagram is missing from the bound Claim")
+                slide = next((row for row in reversed(raw) if row.get("first", "") <= matching[0]), None)
+                if slide is not None:
+                    slide["diagram_ref"] = diagram
+            continue
         for claim in context.get("claims", []):
             if claim["claim_id"].rsplit("-", 1)[-1] != case["claim"] or not claim.get("diagrams"):
                 continue

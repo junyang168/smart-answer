@@ -2,6 +2,7 @@
 
 案例在 chapter_slide_cases.json，按講次列出。每條是一個程序判得準的條件：
 - point：他講到 at 那一句時，畫面最新的要點要符合 pattern；
+- required_point：包含來源句的投影片必須有相應內容要點，時間另行核對；
 - not_before：符合 pattern 的要點不可在 at 之前出現；
 - one_slide：from 到 to 要在同一張投影片上；
 - note：講到 at 時，這一張要把 span 標在所列的各節上；
@@ -104,6 +105,11 @@ def check_cases(slides: list[dict[str, Any]], cases: list[dict[str, Any]], sourc
             if not shown or not re.search(case["pattern"], shown[-1]["text"]):
                 current = shown[-1]["text"] if shown else "（沒有要點）"
                 problems.append(f"負責人指出過：{why}（{case['at']} 時畫面是「{current}」）")
+        elif kind == "required_point":
+            slide = _on_screen(slides, case["at"])
+            points = (slide or {}).get("points", [])
+            if not any(re.search(case["pattern"], point["text"]) for point in points):
+                problems.append(f"承重論證缺漏（{case['at']}）：{why}")
         elif kind == "not_before":
             early = [(s["title"], p) for s in slides for p in s["points"]
                      if p["sentence"] < case["at"] and re.search(case["pattern"], p["text"])]

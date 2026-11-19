@@ -230,13 +230,19 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                        "diagram_sentence": timings[slide["first"]]["sentence"]}
                       if timings.get(slide["first"], {}).get("sentence") else {})}
                   for slide in slides]
+    required_points = [{"slide_containing_sentence": case["at"], "requirement": case["why"]}
+                       for case in rulings if case["kind"] == "required_point"]
     return {
         "lecture": slide_record["lecture"],
         "criteria": ({**SEMANTIC_CRITERIA, "timing": _SUBUNIT_TITLE_TIMING}
                      if context.get("scope") == "subunit" else SEMANTIC_CRITERIA),
-        "owner_rules": OWNER_RULES,
+        "owner_rules": [*OWNER_RULES, *(
+            ["required_slide_points 是整張投影片的承重要求。slide_containing_sentence 只用來找到投影片。"
+             "可以用不同要點分別呈現對照兩端。按原聲依次顯示，不要求同一句或同一要點同時寫出兩端。"]
+            if required_points else [])],
         "owner_rulings": [{k: case[k] for k in ("kind", "at", "from", "to", "pattern", "why") if k in case}
-                          for case in rulings],
+                          for case in rulings if case["kind"] != "required_point"],
+        **({"required_slide_points": required_points} if required_points else {}),
         "source": source,
         "claims": [
             {**claim, "diagrams": [{k: v for k, v in d.items() if k != "svg"} for d in claim.get("diagrams", [])]}
@@ -315,6 +321,16 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
     if seen != expected:
         problems.append("Semantic Eval must cover each criterion for every slide")
+    if "adjustments" in result.get("point_timing", {}) and (context := record.get("claim_context")):
+        from backend.pipeline.chapter_slide_claims import stale_points
+        from backend.pipeline.chapter_slide_point_timing import apply_adjustments
+
+        if context.get("schema_version") == "chapter-slide-outline-context.v1":
+            source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
+            placed = apply_adjustments(record["slides"], source, record.get("point_timing_adjustments"))
+            readings = displayed_reading_sentences(placed, source)
+            problems.extend(f"Timing after Jev: {problem}"
+                            for problem in stale_points(context, placed, source, displayed_readings=readings))
     return problems
 
 
@@ -391,7 +407,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         # Reuse the exact recorded review when a resumed timing check needs it.
         from backend.pipeline.chapter_slide_claims import RecordedClient
 
-        answer = RecordedClient(client, receipt_path.with_suffix(".reviewer")).generate_json(
+        answer = RecordedClient(client, receipt_path.with_suffix(".reviewer"), once=True).generate_json(
             SEMANTIC_SYSTEM, prompt, schema)
     else:
         answer = client.generate_json(SEMANTIC_SYSTEM, prompt, schema)

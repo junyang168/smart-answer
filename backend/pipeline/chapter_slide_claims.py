@@ -902,23 +902,34 @@ def main():
 class RecordedClient:
     """Save exact requests and raw CLI replies; replay never starts an unknown call."""
 
-    def __init__(self, client, directory: Path):
+    def __init__(self, client, directory: Path, *, once: bool = False):
         self.client, self.directory = client, directory
         self.model = client.model
+        self.once = once
 
     def generate_json(self, system, prompt, schema):
         request = {"system": system, "user": prompt, "schema": schema, "model": self.model}
         root = self.directory / digest(request)
         root.mkdir(parents=True, exist_ok=True)
         target = root / "request.json"
-        if target.exists():
+        saved = root / "answer.json"
+        if self.once and any(path != target for path in self.directory.glob("*/request.json")):
+            raise ValueError("A different one-shot request is already saved for this subunit")
+        try:
+            with target.open("x", encoding="utf-8") as stream:
+                json.dump(request, stream, ensure_ascii=False, indent=2)
+        except FileExistsError:
             if json.loads(target.read_text()) != request:
                 raise ValueError("Saved request changed")
-        else:
-            target.write_text(json.dumps(request, ensure_ascii=False, indent=2))
+            if self.once:
+                if not saved.is_file():
+                    raise ValueError("One-shot request has no recorded answer; no automatic retry")
+                return json.loads(saved.read_text())
         self.client.call_artifacts = root
         answer = self.client.generate_json(system, prompt, schema)
-        (root / "answer.json").write_text(json.dumps(answer, ensure_ascii=False, indent=2))
+        temp = saved.with_suffix(".tmp")
+        temp.write_text(json.dumps(answer, ensure_ascii=False, indent=2))
+        temp.replace(saved)
         return answer
 
 
