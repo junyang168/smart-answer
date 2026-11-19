@@ -40,6 +40,8 @@ SCHEMA_VERSION = "chapter_slides_v3"
 DEFAULT_MODEL = chapter_exposition.DEFAULT_MODEL
 
 MOST_POINTS = 4
+#: 負責人要求一段講論留在同一張（one_slide 案例）時，這一張最多幾條：他的裁定優先於四條上限。
+MOST_CASE_POINTS = 6
 FEWEST_POINTS = 2
 
 SLIDE_TITLE_RULES = """標題要根據這一張從 first 到下一張 first 之前的完整原文範圍及全部要點命名，涵蓋整張的共同主題，不只取開頭、最後一句、某一條 Claim 或其中一個子段。
@@ -54,7 +56,7 @@ POINT_TIMING_RULES = """要點的 sentence 標記教授首次實際說出這條�
 - 相同意思講過又重複時，綁定第一次明確表達的句子，不綁後面的重述、總結或確認。
 - 完整內容早已講出時，不必等後面的重述；若到歸納句才首次講出結論，就應綁該歸納句。不能以「不要綁歸納句」為由把尚未說出的結論提前。
 - 過晚和過早一樣是錯：他開始講一點，這條要點就要在那一句出現，不能等他講完後面幾句。
-- 一條要點只寫他在一處講出的一個意思。Evidence 步驟或合併的文字若包含他在不同句講出的幾個意思，拆成幾條，各綁各自首次講出的句子，不要合成一條等到最後一個意思講出。例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，S0017 才說「認識神之後有生命上的反應」；寫成兩條，分別綁 S0015 與 S0017，不寫成一條綁 S0017。拆開後超過四條時，從他換到下一點的那一句另起一張；不得為了守四條上限刪去他講出的承重內容（問題的答案、對比的另一端、故事的結果）。
+- 一條要點只寫他在一處講出的一個意思。Evidence 步驟或合併的文字若包含他在不同句講出的幾個意思，拆成幾條，各綁各自首次講出的句子，不要合成一條等到最後一個意思講出。例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，S0017 才說「認識神之後有生命上的反應」；寫成兩條，分別綁 S0015 與 S0017，不寫成一條綁 S0017。拆開後超過四條時，從他換到下一點的那一句另起一張（負責人指定同一張的段落除外：那一張最多六條）；不得為了守四條上限刪去他講出的承重內容（問題的答案、對比的另一端、故事的結果）。
 - 合併、縮寫、補充要點或合併投影片後，舊 sentence 不再自動適用，逐條按上面規則重新核對。
 - 審稿意見要求提前時也套用同一規則；若該句尚未講出答案，保留正確錨點，不照錯誤意見前移。故事可先聽原聲，不為填滿畫面提前顯示後面的情節、對比或結論。
 - 審閱時逐條從投影片第一句向後核對要點的最早適當句子，報出過晚或過早的 sentence，指出具體應移到哪一句及其原文。"""
@@ -196,7 +198,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                     "points": {
                         "type": "array",
                         "minItems": FEWEST_POINTS,
-                        "maxItems": MOST_POINTS,
+                        "maxItems": MOST_CASE_POINTS,
                         "items": {
                             "type": "object",
                             "properties": {"sentence": {"type": "string"}, "text": {"type": "string"}},
@@ -431,6 +433,7 @@ def check(
     chapter: Chapter,
     *,
     cuv_root: Path | None = None,
+    one_slide: list[tuple[str, str]] = (),
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -500,7 +503,8 @@ def check(
             problems.append(f"{title}: 要點沒有按他講的次序")
         if not title:
             problems.append(f"{own_ids[0]}: 沒有標題")
-        if not FEWEST_POINTS <= len(points) <= MOST_POINTS:
+        held = any(own_ids[0] <= a and b in own_ids for a, b in one_slide)
+        if not FEWEST_POINTS <= len(points) <= (MOST_CASE_POINTS if held else MOST_POINTS):
             problems.append(f"{title}: 要點 {len(points)} 條")
         verse_field = str(slide.get("verses") or "")
         verses = parse_slide_verses(verse_field, chapter)
@@ -595,7 +599,15 @@ def checked(
     if outline:
         from backend.pipeline.chapter_slide_claims import retime
         raw = retime(raw, claim_context)
-    problems, unshown, slides = check(raw, kept, chapter)
+    spans = []
+    if claim_context is not None:
+        from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+        try:
+            spans = [(c["from"], c["to"]) for c in resolve_cases(cases_for(claim_context.get("lecture", "")), sentences(kept),
+                     partial=claim_context.get("scope") == "subunit") if c["kind"] == "one_slide"]
+        except ValueError:
+            spans = []  # check_cases reports the broken case below
+    problems, unshown, slides = check(raw, kept, chapter, **({"one_slide": spans} if spans else {}))
     if not problems and claim_context is not None:
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
         problems = evidence_scripture_gaps(claim_context, slides,

@@ -47,3 +47,12 @@ def test_a_revision_may_not_change_slides_nobody_flagged():
     assert chapter_slides.untouched_problems([a, b], dropped, {"S0010"}) == [
         "約（S0001）沒有被指出問題，修正稿卻改了它；請原樣交回"]
     assert chapter_slides.untouched_problems([a, b], [a, dict(b, title="新")], {"S0010"}) == []
+
+
+def test_owner_one_slide_case_outranks_the_four_point_limit():
+    from backend.tests.test_chapter_slides import CHAPTER
+    kept = [{"id": "U001", "start": 0.0, "end": 60.0, "text": "一。二。三。四。五。六。"}]
+    slide = {"first": "S0001", "title": "結構", "verses": "5:3-5", "scriptures": [],
+             "points": [{"sentence": f"S000{i}", "text": f"第{i}點"} for i in range(1, 7)]}
+    assert any("要點 6 條" in p for p in chapter_slides.check([slide], kept, CHAPTER)[0])
+    assert not any("要點 6 條" in p for p in chapter_slides.check([slide], kept, CHAPTER, one_slide=[("S0001", "S0006")])[0])
