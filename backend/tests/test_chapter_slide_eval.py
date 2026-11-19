@@ -128,7 +128,7 @@ def test_all_points_are_checked_per_slide():
         assert {key.rsplit(":", 1)[1] for key in questions} == ids
         if "S0001" in ids:
             assert "答案完整且屬於這個問題" in questions["0:whole:S0001"]["instructions"]
-            assert "忽略回答和後續講解" in questions["1:whole:S0001"]["instructions"]
+            assert "是否已開始談這個具體問題" in questions["1:whole:S0001"]["instructions"]
             full = {"0:whole:S0002", "1:whole:S0001", "1:whole:S0003"}
         else:
             full = {"0:whole:S0004"}
@@ -179,6 +179,35 @@ def test_question_timing_can_use_the_start_of_a_multisentence_question():
 
     row, = evaluate_points(packet, ask, model="jev", max_bytes=128000)
     assert (row["status"], row["expected_sentence"]) == ("correct", "S0001")
+
+
+def test_editorial_question_starts_at_the_reading_that_introduces_it():
+    from backend.pipeline.chapter_slide_point_timing import evaluate_points
+
+    source = [
+        {"id": "S0057", "start": 407, "text": "下面暫且不講，我們先來看。"},
+        {"id": "S0058", "start": 411, "text": "保羅明講，在哥林多前書第九章第二十節明講："
+         "「向沒有律法的人，我就作沒有律法的人，為要得沒有律法的人。"},
+        {"id": "S0059", "start": 427, "text": "其實我在神面前，不是沒有律法；在基督面前，正在律法之下。」"},
+        {"id": "S0060", "start": 437, "text": "這句話翻得大有問題，矛盾啊！"},
+    ]
+    slide = {"first": "S0057", "last": "S0060", "points": [
+        {"sentence": "S0058", "text": "保羅如何說自己與律法的關係？"},
+        {"sentence": "S0060", "text": "和合本此處的譯法有問題"},
+    ]}
+
+    def ask(state, questions):
+        opener = questions["0:whole:S0058"]
+        assert "是否已開始談這個具體問題" in opener["instructions"]
+        assert "開始讀直接相關的經文" in opener["instructions"]
+        assert "已轉到另一個具體問題" in opener["criteria"]["none"]
+        matching = {"0:whole:S0058", "0:whole:S0059", "1:whole:S0060"}
+        return {key: "full" if key in matching else "none" for key in questions}
+
+    rows = evaluate_points({"source": source, "slides": [slide]}, ask, model="jev", max_bytes=128000)
+    assert [(row["status"], row["expected_sentence"]) for row in rows] == [
+        ("correct", "S0058"), ("correct", "S0060"),
+    ]
 
 
 def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
