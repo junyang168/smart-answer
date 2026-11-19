@@ -195,7 +195,7 @@ def candidate_chapters(slides: list[dict[str, Any]], context: dict[str, Any] | N
 
 SEMANTIC_SCHEMA_VERSION = "chapter-slide-semantic-eval.v1"
 SEMANTIC_CRITERIA = {
-    "faithfulness": "標題與要點保留原文的說話者、否定、限定、程度及因果。每個實質意思必須有原文支持。",
+    "faithfulness": "標題與要點保留原文的說話者、否定、限定及因果。每個實質意思必須有原文支持。這是口語講課，不是法律條文：只有改變了他的判斷才算不忠實；措辭、語氣或「很多人／有人」這類程度差異不算錯。",
     "coverage": "從原文反查承重理由與結論。比較、對比和首尾呼應要交代兩端如何支持結論。",
     "timing": "過早和過晚都要查。過晚：他已開始講某一點，畫面要等他講完幾句才出現這條要點（例：他在 S0015 說「五章十三節到七章二十九節談門徒的使命」，要點卻綁在兩句後的 S0017），報出應移到哪一句。一條要點合併了他在不同句講的意思時，應拆成兩條，不是等到最後一個意思。過早：標題在換張時立即可見。若結論尚未講出，標題只能用問題或中性主題。要點的全部意思須在錨點已講出。檢查故事結果、限定語及複合要點。按整段論證順序查看每張，尤其是問題之後、答案之前的相鄰投影片。第一張用問題不代表後面的標題可以先說出答案。",
     "scripture": "核對成品實際顯示的經文。每一節讀出或幾乎逐字引用的經文都應顯示，只有提及範圍的經節不作逐字讀出。",
@@ -280,6 +280,18 @@ def with_run(receipt: dict, model: str = "evaluator-model", raw=None) -> dict:
     """Attach the model run record; the runner passes the model's raw response."""
     raw = raw if raw is not None else {"checks": receipt["checks"]}
     return {**receipt, "run": {"model": model, "raw_sha256": _raw_sha256(raw), "raw_response": raw}}
+
+
+SEMANTIC_KIND = {"faithfulness": "忠實", "coverage": "漏掉重點", "timing": "出現時間", "scripture": "經文"}
+
+
+def review_from_semantic(receipt: dict, slides_sha256: str) -> dict:
+    """The failed semantic checks, in the review form the slide revision step reads."""
+    findings = [{"slide": row["slide"], "kind": SEMANTIC_KIND[row["criterion"]], "problem": row["evidence"],
+                 "fix": "按上面意見改；意見與原文不符時保留原樣並說明。"}
+                for row in receipt["checks"] if not row["passed"]]
+    return {"slides_sha256": slides_sha256, "blocking": bool(findings), "findings": findings,
+            "source": "semantic-eval", "semantic_eval_raw_sha256": receipt["run"]["raw_sha256"]}
 
 
 def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str) -> dict:

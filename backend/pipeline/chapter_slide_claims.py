@@ -480,16 +480,20 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displa
         sid = line["id"]
         slide = next((s for s in reversed(slides) if s["first"] <= sid), None)
         shown = [p for p in (slide or {}).get("points", []) if p["sentence"] <= sid]
-        source = shown[-1].get("source") if shown else ""
+        # Owner 2026-11-18: an empty slide while he argues is late too (lecture 1 showed
+        # only a title from S0008 to S0014 while he laid out 五3–12).
+        empty = slide is not None and not shown and not slide.get("overview")
+        source = shown[-1].get("source") if shown else ("（本張還沒有要點）" if empty else "")
         same_claim = bool(source_claims.get(source, set()) & cover.get(sid, set()))
         if not source or sid not in cover or source in cover[sid] or same_claim or sid in displayed_readings:
             close(); run = None
             continue
-        if run and run["text"] == shown[-1]["text"]:
+        text = shown[-1]["text"] if shown else source
+        if run and run["text"] == text:
             run.update(last=sid, end=line.get("end", line["start"]))
         else:
             close()
-            run = {"slide": slide["title"], "first": sid, "last": sid, "text": shown[-1]["text"], "steps": cover[sid],
+            run = {"slide": slide["title"], "first": sid, "last": sid, "text": text, "steps": cover[sid],
                    "start": line["start"], "end": line.get("end", line["start"])}
     close()
     for slide in slides:

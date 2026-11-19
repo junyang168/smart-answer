@@ -219,7 +219,7 @@ def test_creation_runs_become_an_outline_with_their_evidence_on_retained_sentenc
         ('E1', 'answer', ['S0003']), ('P1', 'opposed_position', ['S0002'])]
     assert [e['evidence_step_id'] for e in point['evidence_steps']] == ['E2', 'O1']
     client = FakeClient([{'slides': [slide('S0001', points=({'sentence': 'S0002', 'text': '反方', 'source': 'P1'},
-                                                            {'sentence': 'S0004', 'text': '引經', 'source': 'E2'}))]}])
+                                                            {'sentence': 'S0004', 'text': '引經', 'source': 'E2'}))]}] * (chapter_slides.REPAIRS + 1))  # empty slide while he argues: sent back
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
     assert '不另做本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
 
