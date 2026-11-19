@@ -258,11 +258,11 @@ function Diagram({ diagram }: { diagram: SlideDiagram }) {
               <div>{text[2]}</div>
               <div className="my-1 rounded border border-slate-600 p-2 [@media(max-width:389px)]:my-0 [@media(max-width:389px)]:p-0">
                 <div>{text[3]}</div>
-                <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                <div className="mt-1 grid grid-cols-2 gap-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">
                   <div>{text[4]} {text[5]}</div>
                   <div>{text[6]} {text[7]}</div>
                 </div>
-                <div className="mt-1">{text[8]}</div>
+                <div className="mt-1 [@media(max-width:374px)_and_(max-height:620px)]:mt-0">{text[8]}</div>
               </div>
               <div>{text[9]}</div>
             </div>
@@ -292,11 +292,14 @@ function Diagram({ diagram }: { diagram: SlideDiagram }) {
       if (!diagram.image_src.startsWith("data:image/svg+xml;base64,")) return null;
       content = (
         // eslint-disable-next-line @next/next/no-img-element -- Verified SVG in image mode.
-        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block max-h-[45dvh] w-full object-contain invert hue-rotate-180 mix-blend-screen" />
+        <img src={diagram.image_src} alt={diagram.title} className="mx-auto block max-h-[45dvh] w-full object-contain invert hue-rotate-180 mix-blend-screen max-sm:max-h-[min(45dvh,max(0px,calc(100cqh_-_7rem)))]" />
       );
   }
   return (
-    <figure aria-label={diagram.title} className="isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 [@media(max-width:389px)]:space-y-1 [@media(max-width:389px)]:leading-[1.1]">
+    <figure aria-label={diagram.title} className={[
+      "isolate min-w-0 space-y-2 text-sm leading-snug text-slate-100 max-sm:space-y-1 [@media(max-width:389px)]:leading-[1.1]",
+      diagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:space-y-0" : "",
+    ].join(" ")}>
       {content}
     </figure>
   );
@@ -348,29 +351,49 @@ export default function ChapterSlide({
     }
     const column = point.closest<HTMLElement>("[data-diagram-points]");
     if (column && column.scrollHeight > column.clientHeight) {
-      const top = point.getBoundingClientRect().top - column.getBoundingClientRect().top + column.scrollTop;
-      column.scrollTop = top;
+      // Move only the point list and leave preceding points in view when they fit.
+      const pointBounds = point.getBoundingClientRect();
+      const windowBounds = column.getBoundingClientRect();
+      if (pointBounds.top < windowBounds.top) {
+        column.scrollTop += pointBounds.top - windowBounds.top;
+      } else if (pointBounds.bottom > windowBounds.bottom) {
+        column.scrollTop += pointBounds.bottom - windowBounds.bottom;
+      }
     }
   }, [activePoint, currentDiagram, slide.at]);
   return (
     <section ref={slidePanel} className={`flex ${className} flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6 lg:gap-8 lg:px-12 lg:py-10 ${currentDiagram
-      ? "[@media(max-width:389px)]:p-2" : ""}`}>
-      <div className={currentDiagram ? "grid items-start gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8" : undefined}>
-        <header data-diagram-points={currentDiagram ? "" : undefined}
-          className={currentDiagram ? "min-w-0 overflow-auto [@media(max-width:389px)]:sr-only" : undefined}>
-          <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl lg:text-4xl">{slide.title}</h2>
-          {points.length > 0 && (
-            <ol className={currentDiagram
-              ? `mt-3 space-y-2 text-sm leading-relaxed sm:text-[1.05rem] lg:text-2xl ${currentDiagram.layout === "literary_structure" || currentDiagram.layout === "covenants"
-                ? "hidden sm:block" : "[@media(max-width:389px)]:hidden"}`
-              : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
+      ? "max-sm:gap-3 max-sm:p-3 [@media(max-width:374px)_and_(max-height:620px)]:p-2" : ""}`}>
+      <div className={currentDiagram
+        ? "grid items-start gap-1 max-sm:sticky max-sm:top-0 max-sm:z-10 max-sm:bg-slate-950 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-5 lg:gap-8"
+        : undefined}>
+        <header className={currentDiagram ? "min-w-0" : undefined}>
+          <h2 className={["font-serif font-semibold leading-snug text-white sm:text-2xl lg:text-4xl",
+            currentDiagram ? "text-base" : "text-xl",
+            currentDiagram?.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:sr-only" : "",
+          ].join(" ")}>{slide.title}</h2>
+          {(currentDiagram || points.length > 0) && (
+            <ol data-diagram-points={currentDiagram ? "" : undefined}
+              tabIndex={currentDiagram ? 0 : undefined}
+              aria-label={currentDiagram ? "講道要點" : undefined}
+              className={currentDiagram
+                ? [
+                    "mt-1 space-y-1 text-sm leading-snug max-sm:h-[min(4.5rem,21cqh)] max-sm:overflow-y-auto max-sm:overscroll-contain motion-safe:max-sm:scroll-smooth sm:mt-3 sm:space-y-2 sm:text-[1.05rem] sm:leading-relaxed lg:text-2xl",
+                    currentDiagram.layout === "literary_structure" ? "[@media(max-width:374px)_and_(max-height:620px)]:h-9" : "",
+                  ].join(" ")
+                : "mt-4 space-y-2.5 text-[1.05rem] leading-relaxed lg:mt-6 lg:space-y-4 lg:text-2xl"}>
               {points.map((point, index) => (
                 <li
                   key={point.text}
                   ref={point === activePoint ? newestPoint : undefined}
-                  className={`flex gap-3 ${point === activePoint || slide.overview ? "text-white" : "text-slate-400"}`}
+                  aria-current={point === activePoint ? "true" : undefined}
+                  className={["flex gap-3", point === activePoint || slide.overview ? "text-white" : "text-slate-400",
+                    currentDiagram && point.at > seconds ? "max-sm:hidden" : "",
+                  ].join(" ")}
                 >
-                  <span className="w-4 shrink-0 text-right font-mono text-sm leading-[1.75rem] text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]">
+                  <span className={["w-4 shrink-0 text-right font-mono text-sm text-amber-400/80 lg:w-6 lg:text-lg lg:leading-[2.25rem]",
+                    currentDiagram ? "sm:leading-[1.75rem]" : "leading-[1.75rem]",
+                  ].join(" ")}>
                     {index + 1}
                   </span>
                   <span>{point.text}</span>

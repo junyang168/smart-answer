@@ -579,7 +579,7 @@ export default function ChapterListener({
           data-slide-scroll
           onWheel={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
           onTouchMove={(event) => (event.currentTarget.dataset.handsOff = String(Date.now()))}
-          className="min-h-0 overflow-auto rounded-xl"
+          className={["min-h-0 overflow-auto rounded-xl", !table && slide?.diagram ? "[container-type:size]" : ""].join(" ")}
         >
           {table ? (
             <section className="min-h-full overflow-auto rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
