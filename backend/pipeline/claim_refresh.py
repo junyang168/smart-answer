@@ -214,7 +214,9 @@ def anchors(eids, records, sid, *, source_binding=None):
             if verify_current_source_binding(binding)!=source_binding:
                 raise ValueError('Claim occurrence source binding differs from exact editorial proof')
             binding=source_binding
-        source = e.source_snapshot(binding,source=doc)
+        # A source with his attested diagrams (#812) is read with them; source_snapshot
+        # still checks every attestation and descriptor against the registered document.
+        source = e.source_snapshot(binding,source=doc,visual_context=bool(doc.get('visual_sources')))
         paragraphs = {key:value['text'] for key,value in source['paragraphs'].items()}
     for eid in eids:
         evidence = records['evidence_steps/' + eid]['payload']

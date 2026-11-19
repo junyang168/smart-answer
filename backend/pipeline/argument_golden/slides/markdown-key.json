@@ -1,0 +1,34 @@
+{
+ "schema": "slide-markdown-key.v1",
+ "authority": "Claude 2026-11-18, checked against the slide images (sharp frames only). Grading: after removing whitespace and line breaks and mapping full/half-width punctuation to one form, the converted text must equal the key exactly — every Chinese character, Greek letter and accent, and English word. Markdown headings and colour emphasis are not graded.",
+ "items": [
+  {
+   "image": "S 200607/frames/slide_008.png",
+   "label": "teaching",
+   "text": "神集體地(collectively)揀選以色列人(羅9:4-5; 11:1, 28),為他們預備救恩。但大部分的以色列人對神不忠心,不因信接受福音而沒有得救。那些向神忠心,因信接受的人得到救恩而成為「ἡ ἐκλογή the elect, (蒙)揀選, ἐκλεκτοί 選上的—太22:14的翻譯」。",
+   "existing_ocr_error": "以色列列人: the OCR doubled 列 across the line break"
+  },
+  {
+   "image": "S 200607/frames/slide_011.png",
+   "label": "annotated_scripture",
+   "text": "羅11:11 我且說,他們失腳是要他們跌倒麼?斷乎不是!反倒因他們的過失(ἀλλὰ τῷ αὐτῶ παραπτώματι 當他們過失的時機),救恩便臨到外邦人,要激動他們發憤."
+  },
+  {
+   "image": "S 200607/frames/slide_018.png",
+   "label": "teaching",
+   "text": "強處:A 的困難都消失 徒13:45-46 但猶太人看見人這樣多,就滿心嫉妒,硬駁保羅所說的話,並且毀謗。保羅和巴拿巴放膽(παρρησιασάμενοι 傳完信息後)說:神的道先講給你們原是應當的;只因你們棄絕這道,斷定自己不配得永生,我們就轉向外邦人去。"
+  },
+  {
+   "image": "S 200607/frames/slide_022.png",
+   "label": "annotated_scripture",
+   "text": "羅11:15 若他們被丟棄,天下[就]得與神和好;他們被收納,豈不是死而復生(ζωὴ ἐκ νεκρῶν)麼?他們=以色列人 天下=外邦人(不是全世界,因為全世界包括以色列人)"
+  },
+  {
+   "image": "2019-3-24 罗马书3章21至31节/frames/slide_025.png",
+   "label": "annotated_scripture",
+   "text": "耶31 (LXX 38):31-33 耶和華說:日子將到,我要與以色列家和猶大家另立新約(διαθήσομαι...διαθήκη καινή),不像我拉著他們祖宗的手,領他們出埃及地的時候,與他們所立的約(διαθήκη)。我雖作他們的丈夫,他們卻背了我的約(διαθήκη)。這是耶和",
+   "note": "the slide is cut off at the bottom; the key stops where the image does"
+  }
+ ],
+ "not_in_key": "Photos of the screen (the 2019 captures) are too small to transcribe reliably from the photo; their key needs the video frame at full size, located when step 2 runs."
+}

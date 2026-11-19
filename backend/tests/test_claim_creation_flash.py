@@ -808,3 +808,116 @@ def test_a_position_without_holder_outside_an_opposing_step_is_still_refused():
     import pytest
     with pytest.raises(ValueError, match='position needs attribution'):
         _one_step('X，因为 Y', '')
+
+
+# #812: his attested diagrams enter the steps-first runner as evidence.
+DIAGRAM = ('<svg xmlns="http://www.w3.org/2000/svg"><rect x="50" y="20" width="400" height="200"/>'
+           '<text x="250" y="60">人子</text><text x="250" y="140">領受永遠權柄</text></svg>')
+
+
+def _diagram_source():
+    import hashlib
+    from backend.pipeline.source_projection import project_script
+    source = _transcript()
+    row = source['script'][1]
+    link = '![圖](u.svg)'
+    start = len(row['text']); row['text'] += link
+    row['_visual_source_assets'] = [{'char_start': start, 'char_end': start + len(link), 'raw_svg': DIAGRAM,
+        'source_path': '/data/u.svg', 'source_file_sha256': hashlib.sha256(DIAGRAM.encode()).hexdigest(), 'source_url': 'u.svg'}]
+    [block] = project_script(source['script']).visual_blocks
+    return source, block
+
+
+def _with_diagram(out):
+    out['steps'][2]['sentence_ids'].append('S0002/V01#001')
+    out['other'][0]['sentence_ids'] = ['S0003#005']
+    return out
+
+
+class DiagramPorts(StepsPorts):
+    def repair(self, request):
+        task = request['input']['task']
+        if task == 'creation_claims':
+            assert '他的圖' in json.dumps(request['input']['diagrams'], ensure_ascii=False)
+        if task == 'creation_argument_steps':
+            shown = {s['sentence_id']: s['text'] for s in request['input']['sentences']}
+            assert shown['S0002/V01#001'].startswith('他的圖（非口述，S0002/V01）')
+            assert '「領受永遠權柄」在「人子」框內' in shown['S0002/V01#001']
+        return super().repair(request)
+
+
+def run_diagram(tmp_path, steps_mutation=_with_diagram, attest=True):
+    source, block = _diagram_source()
+    path = tmp_path / 'source.json'; path.write_text(json.dumps(source, ensure_ascii=False)); root = tmp_path / 'run'
+    ports = DiagramPorts(source, steps_mutation=steps_mutation)
+    return ports, root, block, (lambda: creation.run('T', path, root, ports, groups=groups(), grouped_package=True, steps_first=True,
+                                                     visual_source_attestations={block.locator: block.raw_sha256} if attest else None))
+
+
+def test_an_unattested_diagram_stops_the_run_before_any_call(tmp_path):
+    ports, root, block, go = run_diagram(tmp_path, attest=False)
+    with pytest.raises(ValueError, match='not attested'):
+        go()
+    assert ports.calls == []
+
+
+def test_his_attested_diagram_becomes_a_visual_fragment_of_the_step_that_uses_it(tmp_path):
+    ports, root, block, go = run_diagram(tmp_path)
+    go()
+    package = json.loads((root / 'candidate.json').read_text())
+    [visual] = [f for f in package['source_fragments'] if f.get('source_modality') == 'visual']
+    assert visual['verbatim_excerpt'] == DIAGRAM and visual['visual_locator'] == 'S0002/V01'
+    assert visual['visual_block_sha256'] == block.raw_sha256 and visual['visual_source_path'] == '/data/u.svg'
+    assert {f['fact_id'] for f in visual['visual_facts']} == {f['fact_id'] for f in block.facts}
+    [observation] = package['observations']
+    assert visual['fragment_id'] in observation['source_fragment_ids']
+    [document] = package['source_documents']
+    assert document['visual_source_attestations'] == [{'locator': 'S0002/V01', 'raw_sha256': block.raw_sha256,
+                                                       'attestation': 'professor_displayed_or_drawn_visual_source'}]
+    assert json.loads((root / 'intent.json').read_text())['visual_source_attestations'] == {'S0002/V01': block.raw_sha256}
+
+
+@pytest.mark.parametrize('place', ['other', 'claim_text'])
+def test_his_diagram_cannot_be_filler_or_a_claims_own_words(tmp_path, place):
+    def mutate(out):
+        out = _with_diagram(out)
+        out['steps'][2]['sentence_ids'].remove('S0002/V01#001')
+        if place == 'other':
+            out['other'][0]['sentence_ids'].append('S0002/V01#001')
+        else:
+            out['claim_text'] = [{'claim_id': 'CL0001', 'sentence_ids': ['S0002/V01#001']}]
+        return out
+    ports, root, block, go = run_diagram(tmp_path, steps_mutation=mutate)
+    with pytest.raises(ValueError, match='his diagram must be in an argument step'):
+        go()
+    assert 'creation_step_records' not in ports.calls
+
+
+def test_a_source_with_his_diagram_runs_steps_first(tmp_path):
+    source, block = _diagram_source()
+    path = tmp_path / 'source.json'; path.write_text(json.dumps(source, ensure_ascii=False))
+    with pytest.raises(ValueError, match='steps-first'):
+        creation.run('T', path, tmp_path / 'run', Ports(source), groups=groups(),
+                     visual_source_attestations={block.locator: block.raw_sha256})
+
+
+def test_a_step_holding_only_his_diagram_belongs_to_the_diagrams_paragraph(tmp_path):
+    # Notes D run 2026-11-18: a step citing only S0004/V01 was refused as outside the group.
+    def mutate(out):
+        out = _with_diagram(out)
+        out['steps'][2]['sentence_ids'].remove('S0002/V01#001')
+        out['steps'].append({'step_id': 'T4', 'line': '他的圖', 'sentence_ids': ['S0002/V01#001'], 'supports': ['CL0001']})
+        return out
+    def records(out):
+        out['records'].append({'step_id': 'T4', 'kind': 'observation', 'statement': '他的圖', 'observation_type': 'literary_context',
+                               'step_type': None, 'attribution': '', 'scripture_refs': []})
+        return out
+    source, block = _diagram_source()
+    path = tmp_path / 'source.json'; path.write_text(json.dumps(source, ensure_ascii=False)); root = tmp_path / 'run'
+    ports = DiagramPorts(source, steps_mutation=mutate, records_mutation=records)
+    creation.run('T', path, root, ports, groups=groups(), grouped_package=True, steps_first=True,
+                 visual_source_attestations={block.locator: block.raw_sha256})
+    package = json.loads((root / 'candidate.json').read_text())
+    observation = next(o for o in package['observations'] if o['statement'] == '他的圖')
+    [fid] = observation['source_fragment_ids']
+    assert next(f for f in package['source_fragments'] if f['fragment_id'] == fid)['source_modality'] == 'visual'

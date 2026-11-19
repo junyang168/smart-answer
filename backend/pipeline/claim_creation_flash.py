@@ -5,6 +5,7 @@ this module only separates producer tasks and joins their answers.
 """
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import replace
 import fcntl
 import hashlib
 import json
@@ -16,7 +17,7 @@ from backend.pipeline import detailed_knowledge_extraction_runner as x
 from backend.pipeline import extraction_sections as sections
 from backend.pipeline import evidence_refresh as e, claim_flash_common as f
 from backend.pipeline.claim_flash_grouping import SemanticGroups, _ranges
-from backend.pipeline.source_projection import project_script
+from backend.pipeline.source_projection import project_script, validate_visual_source_attestations
 from backend.pipeline.knowledge_package_merge import validate_merged_package
 
 VERSION = 'claim_creation_flash_v4'
@@ -111,6 +112,7 @@ RULES = (
     '逐字引文只從所給S定位碼連續複製，不補標點，不拼接；時間欄位必須null。'
     + f.KNOWLEDGE_TEXT_RULES)
 CLAIMS = RULES + (
+    '輸入有diagrams時，那是他展示或畫的圖：程序從SVG讀出圖上文字與結構，不是口述，與他說的話同等；圖上的分段與層次可以是提綱的依據，Claim仍寫他的判斷，related_ranges包含圖所在的段落。'
     '唯一任務：還原教授講這一組時心中的講課提綱，提綱上每一點寫成一條Claim候選及完整相關原文範圍；'
     '不生成Evidence、Fragment或關係。'
     '提綱頂層恰好一條，列在最前，是本組的蓋子：他在這裡要聽眾明白的主要結論；他講了幾個論點時，蓋子只寫這幾點合起來得出的那一個結論，一兩句，各論點掛在它下面，不讓任何一點成為沒有上層的孤立Claim；蓋子先寫他的結論，不把下面各條的內容再寫一遍（下面已有的點，蓋子不重述其內容）；只有結論本身就是分段或列舉時（例：「登山寶訓分兩大段」），才寫出各段的經文範圍或各項的名稱；不寫「要從甲、乙、丙來明白」這種只列題目、沒有答案的句子；只是引出本組問題的前提、或解釋某一方的說明，掛在結論下面，不另成頂層；其下是他為講明它而逐一講出的要點，'
@@ -495,7 +497,7 @@ def repair_sentence_ids(result, sentence_ids):
     return repairs
 
 
-def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
+def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None, diagrams=()):
     """Each sentence in exactly one place; supports name real Claims or steps;
     a sentence carrying scripture he cites belongs to an argument step."""
     gone=check_not_claims(result, claim_ids, claim_ids if own_ids is None else own_ids)
@@ -532,16 +534,30 @@ def check_steps(result, sentence_ids, claim_ids, scripture=(), own_ids=None):
                    for s in r['sentence_ids'] if s in scripture)
     if loose:
         raise ValueError(f'scripture he cites must be in the argument, not filler or a 題外話: {loose}')
+    # #812: his diagram is evidence he gave; it is not filler, a 題外話 or a Claim's own words.
+    misplaced = sorted(s for part in ('claim_text', 'other', 'digressions') for r in result.get(part, [])
+                       for s in r['sentence_ids'] if s in diagrams)
+    if misplaced:
+        raise ValueError(f'his diagram must be in an argument step: {misplaced}')
     return {s:r['step_id'] for r in result['steps'] for s in r['sentence_ids']}
 
 
-def step_fragments(sentence_ids, by_id, paragraphs):
+def step_fragments(sentence_ids, by_id, paragraphs, visuals=None):
     """Cut each step's SourceFragments from the transcript; nothing is copied by a model.
 
     Consecutive sentences in one paragraph become one fragment. A fragment is
     stored by its text alone, so a run that also occurs earlier in the paragraph
-    is widened by the sentences before it until it names one place."""
+    is widened by the sentences before it until it names one place.
+
+    A sentence that is one of his attested diagrams (#812) becomes a visual
+    anchor citing every literal fact of that SVG; the compiler binds the raw SVG."""
     anchors=[]
+    for s in sentence_ids:
+        if getattr(by_id[s],'source_modality','spoken')=='visual':
+            block=(visuals or {})[by_id[s].segment_index]
+            anchors.append({'segment_index':block.locator,'start_time':None,'end_time':None,'verbatim_excerpt':'',
+                'source_modality':'visual','visual_fact_ids':[str(f['fact_id']) for f in block.facts]})
+    sentence_ids=[s for s in sentence_ids if getattr(by_id[s],'source_modality','spoken')!='visual']
     for pk in dict.fromkeys(by_id[s].segment_index for s in sentence_ids):
         row=[v for v in by_id.values() if v.segment_index==pk]
         picked=sorted(row.index(by_id[s]) for s in sentence_ids if by_id[s].segment_index==pk)
@@ -563,8 +579,30 @@ def step_fragments(sentence_ids, by_id, paragraphs):
 
 UNNAMED_HOLDER='有人'
 
+RELATION_WORDS = {'inside': '「{0}」在「{1}」框內', 'above': '「{0}」在「{1}」之上', 'left_of': '「{0}」在「{1}」左邊',
+                  'arrow': '箭頭從「{0}」指向「{1}」', 'overlap': '「{0}」與「{1}」兩圈重疊'}
 
-def build_step_records(steps, records, sentences, paragraphs):
+
+def diagram_text(block):
+    """What the model reads for one of his diagrams: its words and its structure (#812).
+
+    Read from the SVG by the program (svg_diagram, eval E3); the sentence ID stays the
+    one the audit expects, so the diagram is placed like any sentence."""
+    from backend.pipeline.svg_diagram import read
+    seen = read(block.raw_svg)
+    parts = []
+    for kind, *rest in seen['relations']:
+        if kind == 'column':
+            parts.append(f"「{rest[0]}」下列：" + '、'.join(f'「{v}」' for v in rest[1]))
+        elif kind == 'inside_both':
+            parts.append(f"「{rest[0]}」在" + '與'.join(f'「{v}」' for v in rest[1]) + '兩圈之內')
+        else:
+            parts.append(RELATION_WORDS[kind].format(*rest))
+    return (f"他的圖（非口述，{block.locator}）。圖上文字：" + '；'.join(seen['texts'])
+            + ('。結構：' + '；'.join(parts) if parts else '') + '。')
+
+
+def build_step_records(steps, records, sentences, paragraphs, visuals=None):
     """Compile steps + typed records to the grouped package format the flow already accepts."""
     f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
     by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
@@ -574,7 +612,7 @@ def build_step_records(steps, records, sentences, paragraphs):
     asked={s['step_id'] for s in steps['steps'] if kind[s['step_id']]['kind']=='question'}
     proves=lambda step:any(t not in asked for t in step['supports'])
     for step in steps['steps']:
-        sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs)
+        sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs,visuals)
         if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
         if r['kind']=='observation':
             if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
@@ -636,7 +674,7 @@ def selected_groups(groups, keys, only_paragraphs):
     return {n for n, g in enumerate(groups, 1) if wanted & set(ranges(g['paragraph_ranges'], keys))}
 
 
-def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None):
+def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False, grouped_package=False, single_pass=False, steps_first=False, only_paragraphs=None, visual_source_attestations=None):
     """Generate only. No SQL or Flash calls are reachable before completion."""
     started=time.monotonic()
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
@@ -644,10 +682,17 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         path = Path(source_path).resolve(); raw = path.read_bytes(); source = json.loads(raw)
         projection = project_script(source.get('script', []))
-        if projection.visual_blocks: raise ValueError('creation visual attestation adapter required; use existing visual extraction')
+        # #812: only a diagram attested as his (professor_displayed_or_drawn_visual_source)
+        # may enter; an unattested or editorial one stops the run here.
+        validate_visual_source_attestations(projection, visual_source_attestations)
+        visuals = {b.locator: b for b in projection.visual_blocks}
+        if visuals and not steps_first: raise ValueError('a source with his diagrams runs steps-first')
         keys = [x.segment_locator(i) for i in range(len(projection.body_rows))]
         paragraphs = dict(zip(keys, [r['text'] for r in projection.body_rows]))
-        all_sentences = x.section_sentences(source, sections.Section(1,0,len(keys),'complete'))
+        all_sentences = [replace(v, text=diagram_text(visuals[v.segment_index])) if v.source_modality=='visual' else v
+                         for v in x.section_sentences(source, sections.Section(1,0,len(keys),'complete'))]
+        diagram_ids = {v.sentence_id for v in all_sentences if v.source_modality=='visual'}
+        row_of = lambda v: v.segment_index.split('/')[0]
         if not keys: raise ValueError('empty creation source')
         def source_check():
             if path.read_bytes() != raw: raise ValueError('creation source changed')
@@ -664,7 +709,8 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             **({'material_audit_contract':COMPACT_AUDIT} if compact_audit else {}),
             **({'material_package_contract':GROUP_PACKAGE} if grouped_package else {}),
             **({'single_pass_contract':SINGLE_PASS} if single_pass else {}),
-            **({'argument_steps_contract':STEPS_CONTRACT} if steps_first else {})})
+            **({'argument_steps_contract':STEPS_CONTRACT} if steps_first else {}),
+            **({'visual_source_attestations':dict(sorted(visual_source_attestations.items()))} if visuals else {})})
         if (root/'creation-result.json').exists():
             saved = json.loads((root/'creation-result.json').read_text())
             package = json.loads((root/'candidate.json').read_text())
@@ -711,12 +757,14 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             payload = {'group_id':gid, 'owned_paragraphs':{pk:paragraphs[pk] for pk in owned},
                        'context':{pk:paragraphs[pk] for pk in context},
                        'existing_claims': {k:{'statement':v['statement'],'related_ranges':v['related_ranges']} for k,v in candidates.items()}}
+            shown = {loc: diagram_text(b) for loc, b in visuals.items() if b.segment_index in owned}
+            if shown: payload['diagrams'] = shown
             if single_pass:
                 payload={'group_id':gid,'batch_id':1,
                     'owned_paragraphs':{pk:paragraphs[pk] for pk in owned if paragraphs[pk].strip()},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in context},
                     'sentences':[{'sentence_id':v.sentence_id,'text':v.text,'segment_index':v.segment_index}
-                        for v in all_sentences if v.segment_index in owned], 'existing_materials':{}}
+                        for v in all_sentences if row_of(v) in owned], 'existing_materials':{}}
                 whole=call(root/gid/'single-pass',ports,'creation_single_pass',payload,contracts['materials'],material_prompt,source_check)
                 single_outputs[gid]=deepcopy(whole);model_ids=[v['claim_id'] for v in whole['candidates']]
                 material_ids={r[IDS[col]] for col in COLLECTIONS[:4] for r in whole[col]}
@@ -737,7 +785,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                 # Reuse the existing spoken-anchor validation via an Observation shell.
                 shell = empty(); shell['observations']=[{'observation_id':'anchor-check','statement':candidate['statement'],
                     'observation_type':'literary_context','argument_role':'background','scripture_refs':[], 'anchors':[anchor]}]
-                d.validate_response(shell,source,visible_locators=set(owned+context), require_load_bearing_relations=False)
+                d.validate_response(shell,source,visible_locators=set(owned+context), visible_visual_locators=set(), require_load_bearing_relations=False)
                 if anchor['segment_index'] not in related: raise ValueError('Claim conclusion missing from related range')
                 if cid is not None:
                     if cid not in candidates or candidates[cid]['statement'] != candidate['statement']:
@@ -760,19 +808,19 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             group_materials[gid]=[]
             batches=[owned] if grouped_package else [];batch=[];count=0
             for pk in ([] if grouped_package else owned):
-                total=sum(v.segment_index==pk for v in all_sentences)
+                total=sum(row_of(v)==pk for v in all_sentences)
                 if total>24:raise ValueError('one paragraph exceeds material sentence budget; use existing sentence-slice source preparation')
                 if batch and count+total>24:batches.append(batch);batch=[];count=0
                 batch.append(pk);count+=total
             if batch:batches.append(batch)
             for ordinal, batch in enumerate(batches,1):
                 material_ordinal+=1
-                sentences=[v for v in all_sentences if v.segment_index in batch]
+                sentences=[v for v in all_sentences if row_of(v) in batch]
                 context=sorted({keys[j] for pk in batch for j in range(max(0,keys.index(pk)-1),min(len(keys),keys.index(pk)+2))}-set(batch),key=keys.index)
                 reference=set(context)
                 for cid in group_claims[gid]:reference.update(ranges(candidates[cid]['related_ranges'],keys))
                 reference.update(a['segment_index'] for col in COLLECTIONS[:4] for row in response[col]
-                    for a in row.get('anchors',[]) if a['segment_index'] in owned)
+                    for a in row.get('anchors',[]) if a['segment_index'].split('/')[0] in owned)
                 reference-=set(batch)
                 payload={'group_id':gid,'batch_id':ordinal,'owned_paragraphs':{pk:paragraphs[pk] for pk in batch if paragraphs[pk].strip() or not grouped_package},
                     'reference_paragraphs':{pk:paragraphs[pk] for pk in keys if pk in reference},
@@ -792,7 +840,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     if repairs:
                         e.save(root/gid/'steps'/'sentence-id-repairs.json',{'repairs':repairs,'model_calls':0,
                             'rule':'unknown ID whose number names exactly one unplaced sentence of this group'})
-                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own)
+                    check_steps(steps,[v.sentence_id for v in sentences],group_claims[gid],scripture,own_ids=own,diagrams=diagram_ids)
                     answer_only.update(steps.pop('answer_only',[]))
                     gone={r['claim_id'] for r in steps.get('not_claims',[])}
                     for r in steps.get('not_claims',[]):
@@ -806,7 +854,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                         'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
                         contracts['step_records'],STEP_RECORDS,source_check)
-                    result=build_step_records(steps,records['records'],sentences,paragraphs)
+                    result=build_step_records(steps,records['records'],sentences,paragraphs,visuals)
                     check_citations_held(listing,result,set(owned))
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
@@ -838,7 +886,7 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                     for r in partial['observations']:r['argument_role']='background'  # placeholder until the argument task
                 for r in partial['questions']:r['answer_claim_ids']=[]
                 for r in partial['evidence_steps']:r['produced_claim_ids']=[]
-                if any(not any(a['segment_index'] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
+                if any(not any(a['segment_index'].split('/')[0] in batch for a in r['anchors']) for col in COLLECTIONS[:4] for r in partial[col]):
                     raise ValueError('new material requires an owned primary source; reference context is not a second extraction root')
                 d.validate_response(partial,source,visible_locators=set(batch)|reference,require_load_bearing_relations=False)
                 named=sections.namespace_response(partial,sections.Section(material_ordinal,0,0,group['title']))
@@ -908,9 +956,11 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
             reasoning_effort=ports.identity['gpt']['effort'],max_output_tokens=getattr(getattr(ports,'gpt',None),'max_output_tokens',6000),
             section_plan={'groups':groups},response_schema={'name':VERSION,'schema':contracts},
             model_input_contract_version=VERSION,backend=ports.identity['gpt']['backend'])
+        if visuals:identity['source_visual_sha256']=projection.visual_content_sha256
         source_check()
         package=x.compile_package(transcript_id=source_id,transcript_path=path,transcript=source,raw=raw,
-            response=response,extraction=identity,additional_relations=additional)
+            response=response,extraction=identity,additional_relations=additional,
+            visual_source_attestations=visual_source_attestations if visuals else None)
         bind_conclusions(package,candidates,projection,claim_statements)
         validate_merged_package(package,native_relations=True);source_check()
         e.save(root/'digression-proposals.json',{'contract':STEPS_CONTRACT,'proposals':digressions});
@@ -946,6 +996,7 @@ def main():
     parser.add_argument('--single-pass',action='store_true',help='Experimental one-group Claim/material/connection generation in one call')
     parser.add_argument('--through-flash',action='store_true',help='Verify the completed candidate in private PostgreSQL; never canonical ingest')
     parser.add_argument('--codex-executable')
+    parser.add_argument('--visual-attestations',help="JSON {locator: raw SVG SHA}: diagrams the owner attested as his (#812); any other diagram stops the run")
     parser.add_argument('--only-paragraphs',help='Comma-separated paragraph keys (S0013,S0014): a test runs only the groups that own them; no candidate')
     args=parser.parse_args();load_dotenv('.env');root=Path(args.root).resolve()
     client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='medium',max_output_tokens=16000 if args.grouped_package or args.single_pass else 6000,executable=args.codex_executable)
@@ -953,7 +1004,8 @@ def main():
     ports=Models(client,root,capacity=ClaimModelCapacity(json.loads(Path(args.capacity_file).read_text())))
     result=run(args.source_id,args.source_file,root/'creation',ports,
                groups=json.loads(Path(args.groups).read_text()) if args.groups else None,compact_audit=args.compact_audit,grouped_package=args.grouped_package,single_pass=args.single_pass,steps_first=args.steps_first,
-               only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None)
+               only_paragraphs=args.only_paragraphs.split(',') if args.only_paragraphs else None,
+               visual_source_attestations=json.loads(Path(args.visual_attestations).read_text()) if args.visual_attestations else None)
     if args.through_flash:
         from backend.pipeline.claim_flash_flow import run_candidate
         verified=run_candidate(result['candidate_path'],root/'verification',ports)

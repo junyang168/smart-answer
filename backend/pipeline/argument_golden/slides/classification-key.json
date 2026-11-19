@@ -1,0 +1,209 @@
+{
+ "schema": "slide-classification-key.v1",
+ "authority": "Drafted by Claude 2026-11-18 from the images (contact sheets); awaiting owner confirmation. Labels: teaching = his own words -> fragment; annotated_scripture = a passage with his inserted Greek/English or glosses -> fragment plus a scripture reference (his additions are his teaching); plain_scripture = passage text only -> reference only; unreadable -> not converted, flagged for a retake; duplicate -> dropped, the first one kept.",
+ "labels": {
+  "teaching": "fragment",
+  "annotated_scripture": "fragment + scripture reference",
+  "plain_scripture": "scripture reference only",
+  "unreadable": "no record; flag",
+  "duplicate": "drop"
+ },
+ "items": [
+  {
+   "n": 1,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/captures/capture-568000-60ef6a.jpg",
+   "label": "teaching",
+   "why": "約 word study: his own list συνθήκη/διαθήκη/ברית with his glosses 合同、遺令、宗主國附庸國的約"
+  },
+  {
+   "n": 2,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/captures/capture-2150000-5b9f59.jpg",
+   "label": "annotated_scripture",
+   "why": "耶34:13,18-19 with (διαθήκη) inserted"
+  },
+  {
+   "n": 3,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/frames/slide_014.png",
+   "label": "annotated_scripture",
+   "why": "continuation of 耶34 with (διαθήκη) inserted"
+  },
+  {
+   "n": 4,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/frames/slide_016.png",
+   "label": "plain_scripture",
+   "why": "出20:1ff. verse text only, no insertion"
+  },
+  {
+   "n": 5,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/captures/capture-2434000-c85cf3.jpg",
+   "label": "teaching",
+   "why": "猶太人的錯誤: his own statement"
+  },
+  {
+   "n": 6,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/captures/capture-2526000-55d8ec.jpg",
+   "label": "annotated_scripture",
+   "why": "羅9:31-32 with Greek and his gloss 追求義的律法 missed the law 誤會，誤用律法"
+  },
+  {
+   "n": 7,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/frames/slide_025.png",
+   "label": "annotated_scripture",
+   "why": "耶31:31-33 with Greek inserted"
+  },
+  {
+   "n": 8,
+   "sermon": "2019-3-24 罗马书3章21至31节",
+   "image": "2019-3-24 罗马书3章21至31节/captures/capture-3423138-92f601.jpg",
+   "label": "annotated_scripture",
+   "why": "continuation of 耶31 with (διαθήκη) inserted"
+  },
+  {
+   "n": 9,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-0-ab1416.jpg",
+   "label": "unreadable",
+   "why": "photo of the slide sorter; text too small to read"
+  },
+  {
+   "n": 10,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-1369000-c69e6c.jpg",
+   "label": "annotated_scripture",
+   "why": "加3:23-25 with παιδαγωγός and εἰς Χριστόν inserted"
+  },
+  {
+   "n": 11,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "/opt/homebrew/var/www/church/web/data/slides/2019-3-31 宗主国与附庸国的约/images/slide_001.png",
+   "label": "annotated_scripture",
+   "why": "加3:19 with Greek and his gloss 應許的子孫=耶穌基督"
+  },
+  {
+   "n": 12,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-2329017-7d2488.jpg",
+   "label": "annotated_scripture",
+   "why": "林前9:21 with ἔννομος Χριστοῦ inserted"
+  },
+  {
+   "n": 13,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-3222904-1692e0.jpg",
+   "label": "annotated_scripture",
+   "why": "羅8:4 with Greek, English and his line 律法的義=基督的律法"
+  },
+  {
+   "n": 14,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-3600000-9a5609.jpg",
+   "label": "teaching",
+   "why": "his statement: 附庸國以色列人的約的要求可以解決保羅好像對摩西律法有矛盾的看法的問題"
+  },
+  {
+   "n": 15,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-3617636-ad3aa1.jpg",
+   "label": "teaching",
+   "why": "his statement, fuller form of #14"
+  },
+  {
+   "n": 16,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-4070098-3d3d14.jpg",
+   "label": "annotated_scripture",
+   "why": "太5:17-18 with καταλῦσαι, πληρῶσαι inserted"
+  },
+  {
+   "n": 17,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-4149533-2758ab.jpg",
+   "label": "annotated_scripture",
+   "why": "太11:12-13 with Greek and his glosses"
+  },
+  {
+   "n": 18,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-4286299-09ee4c.jpg",
+   "label": "annotated_scripture",
+   "why": "可7:18-19 with καθαρίζων πάντα τὰ βρώματα inserted"
+  },
+  {
+   "n": 19,
+   "sermon": "2019-3-31 宗主国与附庸国的约",
+   "image": "2019-3-31 宗主国与附庸国的约/captures/capture-4296734-17fe2c.jpg",
+   "label": "annotated_scripture",
+   "why": "來10:12,14 with Greek and his gloss 新約不必再獻贖罪祭"
+  },
+  {
+   "n": 20,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_008.png",
+   "label": "teaching",
+   "why": "his statement on 集體地 (collectively) 揀選, with Greek and verse refs"
+  },
+  {
+   "n": 21,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_010.png",
+   "label": "teaching",
+   "why": "his grammatical analysis: τῷ αὐτῶν παραπτώματι two possible meanings, A. Dative of cause"
+  },
+  {
+   "n": 22,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_011.png",
+   "label": "annotated_scripture",
+   "why": "羅11:11 with Greek and his gloss 當他們過失的時機"
+  },
+  {
+   "n": 23,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_017.png",
+   "label": "teaching",
+   "why": "his analysis: B. Dative of instrument"
+  },
+  {
+   "n": 24,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_018.png",
+   "label": "teaching",
+   "why": "his 強處 analysis, quoting 徒13:45-46 with Greek inserted"
+  },
+  {
+   "n": 25,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_020.png",
+   "label": "teaching",
+   "why": "his summary 羅11:11的重點"
+  },
+  {
+   "n": 26,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_022.png",
+   "label": "annotated_scripture",
+   "why": "羅11:15 with Greek and his glosses 他們=以色列人, 天下=外邦人"
+  },
+  {
+   "n": 27,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_024.png",
+   "label": "teaching",
+   "why": "his statement on ἐκ νεκρῶν: 末日身體從死裡復活, word count in NT"
+  },
+  {
+   "n": 28,
+   "sermon": "S 200607",
+   "image": "S 200607/frames/slide_028.png",
+   "label": "duplicate",
+   "why": "same slide as #27"
+  }
+ ]
+}
