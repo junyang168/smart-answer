@@ -189,3 +189,42 @@ def test_subunit_semantic_eval_records_confirmed_split_as_timing_failure(tmp_pat
     assert "S0001「門徒的使命」" in findings[0] and "S0002「認識神後的反應」" in findings[0]
     assert all(row["passed"] for row in receipt["run"]["raw_response"]["checks"])
     assert receipt["point_timing"]["points"][0]["status"] == "split"
+
+
+def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkeypatch):
+    from backend.pipeline import claim_anthropic_api
+
+    source = tmp_path / "selection.json"
+    source.write_text(json.dumps({"pieces": [], "decisions": []}))
+    slide_path = tmp_path / "slides.json"
+    slide_path.write_text(json.dumps({
+        "lecture": "Lecture", "model": "writer", "decisions_sha256": chapter_exposition.file_sha256(source),
+        "slides": [{"first": "S0001"}],
+    }))
+    spend = tmp_path / "spend"
+
+    class FakeAPI:
+        backend = "anthropic_api"
+
+        def __init__(self, *, model, max_output_tokens, spend_root):
+            assert spend_root == spend
+            self.model = model
+
+        def generate_json(self, system, prompt, schema):
+            assert self.call_artifacts.name == "transport"
+            assert not (self.call_artifacts / "request.json").exists()
+            self.last_raw_response = {"usage": {"input_tokens": 13, "output_tokens": 8}}
+            return {"checks": [{"slide": "S0001", "criterion": kind, "passed": True, "evidence": "test"}
+                               for kind in ev.SEMANTIC_CRITERIA]}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("An Opus API review must not open the subscription transport.")
+
+    monkeypatch.setattr(claim_anthropic_api, "ClaimAnthropicAPI", FakeAPI)
+    monkeypatch.setattr(chapter_exposition, "chapter_client", forbidden)
+    receipt_path = tmp_path / "eval.json"
+    receipt = ev.run_semantic_eval(slide_path, source, receipt_path, "claude-opus-5-5",
+                                   opus_api_spend_root=spend)
+    assert receipt["run"]["backend"] == "anthropic_api"
+    assert receipt["run"]["usage"] == {"input_tokens": 13, "output_tokens": 8}
+    assert ev.semantic_eval_problems(slide_path, source, receipt_path) == []

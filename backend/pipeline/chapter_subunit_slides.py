@@ -77,7 +77,8 @@ def _client(model: str, calls: Path):
     return RecordedClient(chapter_exposition.chapter_client(model), calls)
 
 
-def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn) -> dict:
+def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
+        opus_api_spend_root: Path | None = None) -> dict:
     """Generate and review one sub-unit's slides in `out`; returns the outcome."""
     from backend.pipeline.chapter_slide_claims import compile_instance_context
 
@@ -108,10 +109,12 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn) -> dict:
         diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
         if diagram_problems:
             return {"sub_unit": sub_id, "status": "unresolved", "rounds": round_, "problems": diagram_problems}
-        receipt = out / f"round{round_ + 1}.semantic-eval.json"
+        transport = ".opus-api" if opus_api_spend_root is not None else ""
+        receipt = out / f"round{round_ + 1}{transport}.semantic-eval.json"
         if not receipt.exists() or chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt) == [
                 "Semantic Eval belongs to a different slide version or source selection"]:
-            chapter_slide_eval.run_semantic_eval(slides_path, selection_path, receipt, REVIEW_MODEL)
+            chapter_slide_eval.run_semantic_eval(slides_path, selection_path, receipt, REVIEW_MODEL,
+                                                 opus_api_spend_root=opus_api_spend_root)
         problems = chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt)
         if not problems:
             return {"sub_unit": sub_id, "status": "passed", "rounds": round_, "receipt": str(receipt)}
@@ -155,6 +158,7 @@ def main() -> int:
     parser.add_argument("sub_unit", help="listening plan sub-unit id, e.g. 1.1")
     parser.add_argument("--out", type=Path, required=True, help="run directory for this sub-unit")
     parser.add_argument("--data-dir", type=Path, help="where the listening plan lives (read only)")
+    parser.add_argument("--opus-api-spend-root", type=Path, help="Use the billed Opus API for Eval")
     args = parser.parse_args()
     from backend.api.config import DATA_BASE_PATH
     from backend.pipeline.argument_review import database_url
@@ -162,7 +166,8 @@ def main() -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     with psycopg.connect(database_url()) as conn:
-        result = run(args.data_dir or Path(DATA_BASE_PATH), args.passage, args.sub_unit, args.out, conn=conn)
+        result = run(args.data_dir or Path(DATA_BASE_PATH), args.passage, args.sub_unit, args.out, conn=conn,
+                     opus_api_spend_root=args.opus_api_spend_root)
     (args.out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["status"] == "passed" else 1

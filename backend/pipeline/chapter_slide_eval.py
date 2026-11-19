@@ -328,8 +328,9 @@ def review_from_semantic(receipt: dict, slides_sha256: str) -> dict:
             "source": "semantic-eval", "semantic_eval_raw_sha256": receipt["run"]["raw_sha256"]}
 
 
-def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str) -> dict:
-    """One independent model call over the whole candidate; writes the receipt the publisher checks."""
+def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str,
+                      *, opus_api_spend_root: Path | None = None) -> dict:
+    """One independent content review, plus Jev point timing for sub-units."""
     from backend.pipeline.chapter_exposition import chapter_client, file_sha256
 
     record = json.loads(slide_path.read_text())
@@ -351,11 +352,22 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
             "properties": {"slide": {"type": "string"}, "sentence": {"type": "string"},
                            "parts": {"type": "array", "items": {"type": "string"}}},
         }}
-    client = chapter_client(model)
+    if opus_api_spend_root is not None:
+        from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
+
+        client = ClaimAnthropicAPI(model=model, max_output_tokens=24000,
+                                   spend_root=opus_api_spend_root.resolve())
+    else:
+        client = chapter_client(model)
     prompt = json.dumps(packet, ensure_ascii=False)
-    if subunit:
-        # Jev runs after decomposition. A resumed timing check can reuse the
-        # review's exact recorded reply instead of calling that reviewer again.
+    if opus_api_spend_root is not None:
+        from backend.pipeline.chapter_slide_claims import digest
+
+        request = {"model": model, "system": SEMANTIC_SYSTEM, "user": prompt, "schema": schema}
+        client.call_artifacts = receipt_path.with_suffix(".reviewer-api") / digest(request) / "transport"
+        answer = client.generate_json(SEMANTIC_SYSTEM, prompt, schema)
+    elif subunit:
+        # Reuse the exact recorded review when a resumed timing check needs it.
         from backend.pipeline.chapter_slide_claims import RecordedClient
 
         answer = RecordedClient(client, receipt_path.with_suffix(".reviewer")).generate_json(
@@ -386,6 +398,8 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         ]
     receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
                         "selection_sha256": file_sha256(selection_path), "checks": checks, **point_timing}, model, raw)
+    if opus_api_spend_root is not None:
+        receipt["run"].update(backend=client.backend, usage=raw.get("usage"))
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
     return receipt
 
@@ -400,9 +414,17 @@ def main():
     parser.add_argument("--verify", type=Path, help="Verify a saved semantic Eval without issuing a model call")
     parser.add_argument("--run", type=Path, help="Call the evaluator model and write the semantic Eval here")
     parser.add_argument("--model", default="claude-opus-5-5", help="Evaluator; must differ from the slide model")
+    parser.add_argument("--opus-api-spend-root", type=Path, help="Use the billed Opus API and save its usage here")
     args = parser.parse_args()
+    if args.opus_api_spend_root and not args.run:
+        parser.error("--opus-api-spend-root requires --run")
+    if args.opus_api_spend_root:
+        from dotenv import load_dotenv
+
+        load_dotenv()
     if args.run:
-        receipt = run_semantic_eval(args.slides, args.selection, args.run, args.model)
+        receipt = run_semantic_eval(args.slides, args.selection, args.run, args.model,
+                                    opus_api_spend_root=args.opus_api_spend_root)
         problems = semantic_eval_problems(args.slides, args.selection, args.run)
         print(json.dumps({"status": "failed" if problems else "passed", "problems": problems,
                           "checks": len(receipt["checks"])}, ensure_ascii=False))
