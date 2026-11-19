@@ -28,7 +28,7 @@ import json
 import shutil
 from pathlib import Path
 
-from backend.pipeline import chapter_exposition, chapter_slide_arguments, chapter_slide_diagram_timing, chapter_slide_eval, chapter_slides
+from backend.pipeline import chapter_exposition, chapter_slide_arguments, chapter_slide_diagram_timing, chapter_slide_eval, chapter_slide_point_timing, chapter_slides
 from backend.pipeline.chapter_material import CHAPTERS
 
 SLIDE_MODEL = "gpt-6.1-sol"
@@ -89,9 +89,10 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
     data = out / "data"
     selection_path = chapter_exposition.record_path(data, passage, lecture)
     selection_path.parent.mkdir(parents=True, exist_ok=True)
-    if selection_path.exists() and json.loads(selection_path.read_text()) != selection:
+    if not selection_path.exists():
+        selection_path.write_text(json.dumps(selection, ensure_ascii=False, indent=1))
+    elif json.loads(selection_path.read_text()) != selection:
         raise ValueError(f"{out} holds a different selection for {sub_id}; use a new directory")
-    selection_path.write_text(json.dumps(selection, ensure_ascii=False, indent=1))
     context_path = out / "claims-context.json"
     slides_path = chapter_slides.record_path(data, passage, lecture)
     if context_path.exists():
@@ -114,17 +115,18 @@ def run(data_root: Path, passage: str, sub_id: str, out: Path, *, conn,
         temp = context_path.with_suffix(".tmp")
         temp.write_text(json.dumps(context, ensure_ascii=False, indent=1))
         temp.replace(context_path)
-    client = _client(SLIDE_MODEL, out / "calls")
     if not slides_path.exists():
+        client = _client(SLIDE_MODEL, out / "calls")
         made = chapter_slides.decide(chapter, lecture, data_base_dir=data, client=client, force=True, claim_context=context)
         if made["status"] != "saved":
             return {"sub_unit": sub_id, "status": "generation_rejected", "problems": made.get("problems")}
-    diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
-    if diagram_problems:
-        return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": diagram_problems}
     transport = ".opus-api" if opus_api_spend_root is not None else ""
     receipt = out / f"round1{transport}.semantic-eval.json"
     if not receipt.exists():
+        diagram_problems = chapter_slide_diagram_timing.check_record(slides_path, selection_path, out / "diagram-timing")
+        if diagram_problems:
+            return {"sub_unit": sub_id, "status": "unresolved", "rounds": 0, "problems": diagram_problems}
+        chapter_slide_point_timing.prepare_record(slides_path, selection_path, out / "point-timing")
         chapter_slide_eval.run_semantic_eval(slides_path, selection_path, receipt, REVIEW_MODEL,
                                              opus_api_spend_root=opus_api_spend_root)
     problems = chapter_slide_eval.semantic_eval_problems(slides_path, selection_path, receipt)

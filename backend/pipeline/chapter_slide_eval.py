@@ -19,10 +19,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline import chapter_slide_arguments, chapter_slides
+from backend.pipeline import chapter_slide_arguments, chapter_slide_point_timing, chapter_slides
 
 #: 他念經文的判斷：這句的相鄰兩字有這麼多比例出現在某一節。
 READING_SHARE = 0.7
@@ -255,6 +256,14 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
     inferences = chapter_slide_arguments.review_requirements(context, source, slides)
     if chapter_slide_arguments.BINDINGS_KEY in slide_record:
         inferences = chapter_slide_arguments.bind_points(inferences, slides, slide_record[chapter_slide_arguments.BINDINGS_KEY])
+    if chapter_slide_point_timing.PLAN_KEY in slide_record:
+        plan = chapter_slide_point_timing.verified_plan(slide_record, source)
+        moves = {row["from"]: row["to"] for row in plan["adjustments"]}
+        slides = chapter_slide_point_timing.apply_adjustments(slides, source, plan["adjustments"])
+        inferences = [
+            {**route, "writer_points": [moves.get(sid, sid) for sid in route["writer_points"]]}
+            if "writer_points" in route else route for route in inferences
+        ]
     criteria = dict(SEMANTIC_CRITERIA)
     if context.get("scope") == "subunit":
         criteria.pop("timing")
@@ -289,14 +298,18 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
 
 
 def semantic_slide_sha256(slide_path: Path) -> str:
-    record = json.loads(slide_path.read_text())
+    return _semantic_record_sha256(json.loads(slide_path.read_text()))
+
+
+def _semantic_record_sha256(record: dict) -> str:
     # The publisher adds transaction metadata after Eval. Bind everything the
     # evaluator read, including normalized and original slides and context.
-    record.pop("publication", None)
-    return hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    material = {k: v for k, v in record.items() if k != "publication"}
+    return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _checked_point_adjustments(record, source, points):
+    """Validate historical receipts produced before timing became a preparation step."""
     from backend.pipeline.chapter_slide_cases import cases_for, check_cases
     from backend.pipeline.chapter_slide_point_timing import apply_adjustments, timing_adjustments
 
@@ -334,7 +347,8 @@ def _assemble_checks(slides, checks, timing):
                 for slide in slides for i, point in enumerate(slide.get("points", []))}
     seen = set()
     failures = {}
-    corrected = {(row["slide"], row["point"]) for row in timing.get("adjustments", [])}
+    corrected = {(row["slide"], row["point"])
+                 for key in ("adjustments", "owner_locks") for row in timing.get(key, [])}
     for point in timing["points"]:
         key = (point["slide"], point["point"])
         if (key not in expected or key in seen or point["sentence"] != expected[key]
@@ -410,7 +424,16 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
     timing = result.get("point_timing")
     if timing is not None and not isinstance(timing, dict):
         return ["Missing or invalid recorded review or point timing evidence"]
-    if "point_timing_adjustments" in record or (timing is not None and "adjustments" in timing):
+    if chapter_slide_point_timing.PLAN_KEY in record:
+        try:
+            selection = json.loads(selection_path.read_text())
+            source = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
+            plan = chapter_slide_point_timing.verified_plan(record, source)
+            if timing != plan or run.get("packet_sha256") != _raw_sha256(semantic_packet(record, selection)):
+                return ["Semantic Eval does not match the frozen timing or review packet"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return ["Missing or invalid frozen point timing evidence"]
+    elif "point_timing_adjustments" in record or (timing is not None and "adjustments" in timing):
         try:
             source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
             saved = record.get("point_timing_adjustments", [])
@@ -509,15 +532,24 @@ writer_points 是作者指給你的要點，核對文字的實質意思；位置
 
 def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str,
                       *, opus_api_spend_root: Path | None = None) -> dict:
-    """One independent content review, plus Jev point timing for sub-units."""
-    from backend.pipeline.chapter_exposition import chapter_client, file_sha256
+    """Review the frozen display and write its receipt without editing the candidate."""
+    from backend.pipeline.chapter_exposition import chapter_client
 
-    record = json.loads(slide_path.read_text())
-    if record["decisions_sha256"] != file_sha256(selection_path):
+    original = slide_path.read_bytes()
+    source_bytes = selection_path.read_bytes()
+    record = json.loads(original)
+    selection = json.loads(source_bytes)
+    source_sha = hashlib.sha256(source_bytes).hexdigest()
+    if record["decisions_sha256"] != source_sha:
         raise ValueError("Selection does not match this slide candidate")
     if model == record.get("model"):
         raise ValueError(f"Use a different model than the slides ({model})")
-    packet = semantic_packet(record, json.loads(selection_path.read_text()))
+    if receipt_path.exists():
+        raise ValueError("Semantic Eval receipt already exists")
+    subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
+    if subunit and chapter_slide_point_timing.PLAN_KEY not in record:
+        raise ValueError("Prepare and freeze point timing before semantic Eval")
+    packet = semantic_packet(record, selection)
     row = {"type": "object", "additionalProperties": False, "required": ["slide", "criterion", "passed", "evidence"],
            "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(packet["criteria"])},
                           "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
@@ -528,7 +560,6 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         system += "\n" + ARGUMENT_REVIEW_SYSTEM
     schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
               "properties": {"checks": {"type": "array", "items": row}}}
-    subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
     if opus_api_spend_root is not None:
         from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
 
@@ -544,7 +575,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         client.call_artifacts = receipt_path.with_suffix(".reviewer-api") / digest(request) / "transport"
         answer = client.generate_json(system, prompt, schema)
     elif subunit:
-        # Reuse the exact recorded review when a resumed timing check needs it.
+        # Reuse the exact recorded review when receipt writing was interrupted.
         from backend.pipeline.chapter_slide_claims import RecordedClient
 
         answer = RecordedClient(client, receipt_path.with_suffix(".reviewer"), once=True).generate_json(
@@ -553,30 +584,28 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         answer = client.generate_json(system, prompt, schema)
     raw = getattr(client, "last_raw_response", None) or answer
     checks = answer["checks"]
-    point_timing = {}
+    timing = {}
     if subunit:
         if any(check["criterion"] == "timing" for check in checks):
-            raise ValueError("Subunit point timing decisions must come from the point timing check")
-        from backend.pipeline.chapter_slide_point_timing import evaluate_points
-        from backend.pipeline import claim_flash_common, evidence_refresh
-
-        points = evaluate_points(packet,
-            lambda state, questions: claim_flash_common.jev(
-                receipt_path.with_suffix(".point-timing"), evidence_refresh.JevPort(), state, questions),
-            model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES)
-        adjustments = _checked_point_adjustments(record, packet["source"], points)
-        if record.get("point_timing_adjustments", []) != adjustments:
-            record["point_timing_adjustments"] = adjustments
-            temp = slide_path.with_suffix(".point-timing.tmp")
-            temp.write_text(json.dumps(record, ensure_ascii=False, indent=1))
-            temp.replace(slide_path)
-        point_timing = {"point_timing": {"model": evidence_refresh.MODEL, "points": points, "adjustments": adjustments}}
-        checks = _assemble_checks(record["slides"], checks, point_timing["point_timing"])
-    receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": semantic_slide_sha256(slide_path),
-                        "selection_sha256": file_sha256(selection_path), "checks": checks, **point_timing}, model, raw)
+            raise ValueError("Subunit point timing decisions must come from frozen timing evidence")
+        plan = record[chapter_slide_point_timing.PLAN_KEY]
+        timing = {"point_timing": plan}
+        checks = _assemble_checks(record["slides"], checks, plan)
+    if slide_path.read_bytes() != original or selection_path.read_bytes() != source_bytes:
+        raise ValueError("Slides or source changed during semantic Eval")
+    receipt = with_run({"schema_version": SEMANTIC_SCHEMA_VERSION, "slides_sha256": _semantic_record_sha256(record),
+                        "selection_sha256": source_sha, "checks": checks, **timing}, model, raw)
+    if subunit:
+        receipt["run"]["packet_sha256"] = _raw_sha256(packet)
     if opus_api_spend_root is not None:
         receipt["run"].update(backend=client.backend, usage=raw.get("usage"))
-    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=receipt_path.parent, delete=False) as tmp:
+        temp = Path(tmp.name)
+    try:
+        temp.write_text(json.dumps(receipt, ensure_ascii=False, indent=1))
+        receipt_path.hardlink_to(temp)
+    finally:
+        temp.unlink()
     return receipt
 
 

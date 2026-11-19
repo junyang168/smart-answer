@@ -1,5 +1,6 @@
 """Check whether a displayed point follows the discussion on its slide."""
 
+import hashlib
 import json
 import re
 
@@ -67,7 +68,8 @@ def _ask_batches(state, questions, ask, model, max_bytes):
     return answers
 
 
-def evaluate_points(packet, ask, *, model, max_bytes):
+def evaluate_points(packet, ask, *, model, max_bytes, locks=None):
+    locks = locks or {}
     slides = {slide["first"]: slide for slide in packet["slides"]}
     lines = {line["id"]: line for line in packet["source"]}
     results = []
@@ -81,6 +83,8 @@ def evaluate_points(packet, ask, *, model, max_bytes):
         exact = {}
 
         for index, point in enumerate(slide["points"]):
+            if (first, index) in locks:
+                continue
             meaning = point["text"]
             target = meaning.strip().rstrip("。．.!！")
             current = point["sentence"]
@@ -100,6 +104,10 @@ def evaluate_points(packet, ask, *, model, max_bytes):
         for index, point in enumerate(slide["points"]):
             current, text = point["sentence"], point["text"]
             item = {"slide": first, "point": index, "sentence": current}
+            if lock := locks.get((first, index)):
+                results.append({**item, "status": "correct", "expected_sentence": current,
+                                "delta_seconds": 0.0, "evidence": lock["evidence"]})
+                continue
             supported = [sid for sid in source if answers.get(f"{index}:whole:{sid}") == "full"]
             expected = (min(supported, key=lambda sid: abs(lines[sid]["start"] - lines[current]["start"]))
                         if supported and current in source else None)
@@ -179,3 +187,93 @@ def apply_adjustments(slides, source, adjustments):
     if anchors:
         raise ValueError("Point timing adjustment does not match an original point")
     return output
+
+
+PLAN_KEY = "point_timing_plan"
+
+
+def owner_locks(record, source):
+    from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+
+    locks = {}
+    for case in resolve_cases(cases_for(record["lecture"]), source, partial=True):
+        if case["kind"] != "point" or not case.get("source_text"):
+            continue
+        for slide in record["slides"]:
+            for i, point in enumerate(slide["points"]):
+                matches = (point["text"] == case["point_text"] if "point_text" in case
+                           else re.search(case["pattern"], point["text"]))
+                if matches and point["sentence"] == case["at"]:
+                    key = (slide["first"], i)
+                    locks[key] = {"slide": slide["first"], "point": i, "sentence": case["at"],
+                                  "evidence": f"已確認的時間 {case['at']}：{case['why']}"}
+    return locks
+
+
+def make_plan(record, source, points, model):
+    from backend.pipeline.chapter_slide_cases import cases_for, check_cases
+
+    slides = record["slides"]
+    cases = cases_for(record["lecture"])
+    locks = owner_locks(record, source)
+    effective = [row if (row["slide"], row["point"]) not in locks else {**row, "status": "correct"}
+                 for row in points]
+    proposed = timing_adjustments(slides, source, effective)
+    approved = []
+    existing = set(check_cases(slides, cases, source, partial=True))
+    for slide in slides:
+        moves = [row for row in proposed if row["slide"] == slide["first"]]
+        if moves and not set(check_cases(apply_adjustments(slides, source, approved + moves),
+                                         cases, source, partial=True)) - existing:
+            approved.extend(moves)
+    return {"model": model, "points": points, "adjustments": approved, "owner_locks": list(locks.values())}
+
+
+def verified_plan(record, source):
+    plan = record.get(PLAN_KEY)
+    if not isinstance(plan, dict) or not plan.get("model"):
+        raise ValueError("Prepare and freeze point timing before semantic Eval")
+    if (plan != make_plan(record, source, plan["points"], plan["model"])
+            or record.get("point_timing_adjustments") != plan["adjustments"]):
+        raise ValueError("Frozen point timing does not match its recorded evidence")
+    return plan
+
+
+def prepare_record(slide_path, selection_path, artifacts):
+    """Set the playback timing once, before sending the candidate for review."""
+    from backend.pipeline import chapter_slides, claim_flash_common, evidence_refresh
+
+    original = slide_path.read_bytes()
+    record = json.loads(original)
+    selection = selection_path.read_bytes()
+    selection_sha = hashlib.sha256(selection).hexdigest()
+    if record["decisions_sha256"] != selection_sha:
+        raise ValueError("Selection does not match this slide candidate")
+    if (record.get("claim_context") or {}).get("scope") != "subunit":
+        raise ValueError("Point timing preparation requires a subunit")
+    source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection)))
+    if PLAN_KEY in record:
+        return verified_plan(record, source)
+    points = evaluate_points({"source": source, "slides": record["slides"]},
+        lambda state, questions: claim_flash_common.jev(artifacts, evidence_refresh.JevPort(), state, questions),
+        model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES, locks=owner_locks(record, source))
+    plan = make_plan(record, source, points, evidence_refresh.MODEL)
+    if slide_path.read_bytes() != original or selection_path.read_bytes() != selection:
+        raise ValueError("Slides or source changed during point timing")
+    record.update({PLAN_KEY: plan, "point_timing_adjustments": plan["adjustments"]})
+    temp = slide_path.with_suffix(".point-timing.tmp")
+    temp.write_text(json.dumps(record, ensure_ascii=False, indent=1))
+    temp.replace(slide_path)
+    return plan
+
+
+if __name__ == "__main__":
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Prepare subunit playback timing before Eval")
+    parser.add_argument("slides", type=Path)
+    parser.add_argument("selection", type=Path)
+    parser.add_argument("--artifacts", required=True, type=Path)
+    args = parser.parse_args()
+    prepare_record(args.slides, args.selection, args.artifacts)

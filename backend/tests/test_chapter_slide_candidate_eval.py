@@ -193,7 +193,7 @@ def test_final_verdict_must_match_opus_and_jev_evidence(tmp_path, changed_criter
 
 
 def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_splits(tmp_path, monkeypatch):
-    from backend.pipeline import claim_flash_common
+    from backend.pipeline import chapter_slide_point_timing, claim_flash_common
 
     gold = next(c for c in json.loads(GOLD.read_text()) if c["id"] == "title-covers-temptation-responsibility")
     source = tmp_path / "selection.json"
@@ -232,7 +232,14 @@ def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_spli
     monkeypatch.setattr(chapter_exposition, "chapter_client", lambda model: Reviewer())
     monkeypatch.setattr(claim_flash_common, "jev", jev)
     path = tmp_path / "eval.json"
+    unfinished = slide_path.read_bytes(), source.read_bytes()
+    with pytest.raises(ValueError, match="freeze point timing"):
+        ev.run_semantic_eval(slide_path, source, path, "reviewer")
+    assert (slide_path.read_bytes(), source.read_bytes()) == unfinished and not path.exists()
+    chapter_slide_point_timing.prepare_record(slide_path, source, tmp_path / "timing")
+    frozen = slide_path.read_bytes(), source.read_bytes()
     receipt = ev.run_semantic_eval(slide_path, source, path, "reviewer")
+    assert (slide_path.read_bytes(), source.read_bytes()) == frozen
     assert ev.semantic_eval_problems(slide_path, source, path) == []
     assert receipt["point_timing"]["points"][0]["status"] == "correct"
     assert all(row["criterion"] != "timing" for row in receipt["run"]["raw_response"]["checks"])
@@ -280,8 +287,8 @@ def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkey
     assert ev.semantic_eval_problems(slide_path, source, receipt_path) == []
 
 
-def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_path, monkeypatch):
-    from backend.pipeline import claim_flash_common, chapter_slides
+def test_subunit_eval_reviews_playback_timing_without_changing_candidate(tmp_path, monkeypatch):
+    from backend.pipeline import chapter_slide_point_timing, chapter_slides, claim_flash_common
 
     source = tmp_path / "selection.json"
     selection = {"pieces": [{"id": "P1", "start": 0, "end": 60,
@@ -302,6 +309,8 @@ def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_pa
         model = "reviewer"
 
         def generate_json(self, system, packet, schema):
+            request = json.loads(packet)
+            assert [p["sentence"] for p in request["slides"][0]["points"]] == ["S0002", "S0004", "S0005"]
             return {"checks": [
                 {"slide": "S0001", "criterion": criterion, "passed": criterion != "coverage", "evidence": "原審閱"}
                 for criterion in json.loads(packet)["criteria"]]}
@@ -313,7 +322,16 @@ def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_pa
     monkeypatch.setattr(chapter_exposition, "chapter_client", lambda model: Reviewer())
     monkeypatch.setattr(claim_flash_common, "jev", jev)
     path = tmp_path / "eval.json"
+    chapter_slide_point_timing.prepare_record(slide_path, source, tmp_path / "timing")
+
+    def no_second_timing_call(*args):
+        pytest.fail("Semantic Eval must not call Jev to retime a point")
+
+    monkeypatch.setattr(claim_flash_common, "jev", no_second_timing_call)
+    frozen = slide_path.read_bytes(), source.read_bytes()
+    chapter_slide_point_timing.prepare_record(slide_path, source, tmp_path / "timing")
     receipt = ev.run_semantic_eval(slide_path, source, path, "reviewer")
+    assert (slide_path.read_bytes(), source.read_bytes()) == frozen
     written = json.loads(slide_path.read_text())
     assert written["slides"] == written["raw_slides"] == [first]
     assert [row["status"] for row in receipt["point_timing"]["points"]] == ["early", "correct", "early"]
@@ -324,7 +342,7 @@ def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_pa
     receipt["point_timing"]["points"][0]["expected_sentence"] = "S0002"
     path.write_text(json.dumps(receipt))
     assert ev.semantic_eval_problems(slide_path, source, path) == [
-        "Point timing adjustments do not match the recorded results"]
+        "Semantic Eval does not match the frozen timing or review packet"]
 
 
 def test_point_timing_refuses_collisions_and_moves_across_slides():
@@ -348,6 +366,34 @@ def test_automatic_timing_respects_the_owners_saved_word_sequence(monkeypatch):
         "kind": "point", "source_text": source[0]["text"], "pattern": "發光", "why": "原聲開始時顯示"}])
     finding = {"slide": "S0001", "point": 0, "sentence": "S0001", "status": "early", "expected_sentence": "S0002"}
     assert ev._checked_point_adjustments(record, source, [finding]) == []
+
+
+def test_confirmed_timing_does_not_block_an_independent_move(monkeypatch):
+    from backend.pipeline import chapter_slide_cases, chapter_slide_point_timing
+
+    question = "律法先知到約翰為止，舊約效用就沒有了嗎？"
+    quote = "下面那句話：「因為眾先知和律法說預言，到約翰為止。」"
+    source = [{"id": f"S{i:04d}", "text": quote if i == 28 else f"原句 {i}"}
+              for i in [28, 30, 80, 82]]
+    record = {"lecture": "Lecture", "slides": [
+        {"first": "S0028", "last": "S0030", "title": "律法", "points": [
+            {"sentence": "S0028", "text": question}]},
+        {"first": "S0080", "last": "S0082", "title": "律法不落空", "points": [
+            {"sentence": "S0082", "text": "律法卻不落空，如何理解？"}]},
+    ]}
+    monkeypatch.setattr(chapter_slide_cases, "cases_for", lambda _: [{
+        "kind": "point", "source_text": quote, "pattern": "舊約效用", "point_text": question,
+        "why": "原聲開始提出問題時顯示"}])
+    results = [
+        {"slide": "S0028", "point": 0, "sentence": "S0028", "status": "early",
+         "expected_sentence": "S0030", "evidence": "Jev 另提時間"},
+        {"slide": "S0080", "point": 0, "sentence": "S0082", "status": "late",
+         "expected_sentence": "S0080", "evidence": "Jev 找到前文"},
+    ]
+    plan = chapter_slide_point_timing.make_plan(record, source, results, "Jev")
+    assert plan["owner_locks"][0]["sentence"] == "S0028"
+    assert plan["adjustments"] == [{"slide": "S0080", "point": 0, "from": "S0082", "to": "S0080"}]
+    assert all(row["passed"] for row in ev._assemble_checks(record["slides"], [], plan))
 
 
 @pytest.mark.parametrize(("sentence", "shown", "required", "passes"), [

@@ -185,18 +185,26 @@ def test_subunit_semantic_rejection_is_reported_once(tmp_path, monkeypatch):
         path.write_text("{}")
         return {"status": "saved"}
 
+    def prepare_diagram(deck, selection, artifacts):
+        calls.append("diagram")
+        return []
+
+    def prepare(deck, selection, artifacts):
+        calls.append("timing")
+
     def evaluate(deck, selection, receipt, model, **kwargs):
         calls.append("eval")
         receipt.write_text("{}")
 
     monkeypatch.setattr(chapter_slides, "decide", decide)
-    monkeypatch.setattr(sub.chapter_slide_diagram_timing, "check_record", lambda *a: [])
+    monkeypatch.setattr(sub.chapter_slide_diagram_timing, "check_record", prepare_diagram)
+    monkeypatch.setattr(sub.chapter_slide_point_timing, "prepare_record", prepare)
     monkeypatch.setattr(sub.chapter_slide_eval, "run_semantic_eval", evaluate)
     monkeypatch.setattr(sub.chapter_slide_eval, "semantic_eval_problems", lambda *a: ["missing coverage"])
     for _ in range(2):
         result = sub.run(tmp_path, CHAPTER.passage, "1.1", out, conn=None)
         assert result["status"] == "unresolved" and result["problems"] == ["missing coverage"]
-    assert calls == ["plan", "generate", "eval"]
+    assert calls == ["plan", "generate", "diagram", "timing", "eval"]
 
 
 def test_matthew_seven_keeps_the_structure_diagram_only_at_the_approved_introduction():
