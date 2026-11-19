@@ -87,6 +87,15 @@ def plan(context: dict, source: list[dict], client) -> list[dict]:
 
 def review_requirements(context: dict, source: list[dict], slides: list[dict]) -> list[dict]:
     rows = []
+    content_ids = {line["id"] for line in _content_lines(source)}
+    evidence = {}
+    for claim in context.get("claims", []):
+        for step in claim.get("evidence_steps", []):
+            if step_id := step.get("evidence_step_id"):
+                evidence.setdefault(step_id, []).extend(
+                    set(anchor["sentences"]) & content_ids
+                    for anchor in step.get("anchors", []) if anchor.get("fragment_id"))
+    indices = {slide["first"]: i for i, slide in enumerate(slides)}
     for route in validate(context.get(PLAN_KEY, []), source):
         locations = {}
         for sid in route["source_sentences"]:
@@ -94,12 +103,28 @@ def review_requirements(context: dict, source: list[dict], slides: list[dict]) -
             if len(containing) != 1:
                 raise ValueError(f"{route['id']} has no unique slide for {sid}")
             locations[sid] = containing[0]
-        rows.append({**route, "conclusion_slide": locations[route["conclusion_sentence"]],
-                     "source_slides": locations})
+        conclusion = locations[route["conclusion_sentence"]]
+        planned = set(locations)
+        repeated_points = []
+        for slide in slides:
+            at = slide["first"]
+            if abs(indices[at] - indices[conclusion]) != 1 or at in locations.values():
+                continue
+            for point in slide.get("points", []):
+                sid = point["sentence"]
+                anchors = evidence.get(point.get("source"), [])
+                if (slide["first"] <= sid <= slide["last"]
+                        and any(sid in anchor for anchor in anchors)
+                        and any(sid not in anchor and planned & anchor for anchor in anchors)):
+                    locations[sid] = at
+                    repeated_points.append(sid)
+        rows.append({**route, "conclusion_slide": conclusion, "source_slides": locations,
+                     **({"repeated_evidence_points": repeated_points} if repeated_points else {})})
     return rows
 
 
 BINDINGS_KEY = "argument_bindings"
+RAW_BINDINGS_KEY = "raw_argument_bindings"
 
 
 def binding_schema(routes: list[dict]) -> dict:
@@ -113,7 +138,7 @@ def binding_schema(routes: list[dict]) -> dict:
     }}
 
 
-def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dict]) -> list[dict]:
+def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dict], *, recover_repeats=False) -> list[dict]:
     """Check that every inference maps to existing points in its source slides."""
     points = {point["sentence"]: slide["first"] for slide in slides for point in slide["points"]}
     order = {slide["first"]: i for i, slide in enumerate(slides)}
@@ -136,7 +161,13 @@ def bind_points(requirements: list[dict], slides: list[dict], bindings: list[dic
             raise ValueError(f"{route_id} must cite existing points in its source slides, including its conclusion slide")
         bound_order = [order[points[sid]] for sid in anchors]
         if max(bound_order) - min(bound_order) > 1:
-            raise ValueError(f"{route_id} must be readable on one slide or two adjacent slides")
+            local_repeats = {points[sid] for sid in anchors if sid in route.get("repeated_evidence_points", [])}
+            if not recover_repeats or len(local_repeats) != 1:
+                raise ValueError(f"{route_id} must be readable on one slide or two adjacent slides")
+            # Keep the conclusion and its independently anchored neighboring repeat.
+            # Semantic Eval still checks whether these points express the entire inference.
+            nearby = local_repeats | {route["conclusion_slide"]}
+            anchors = [sid for sid in anchors if points[sid] in nearby]
         found[route_id] = anchors
     if expected.keys() != found.keys():
         missing = ", ".join(sorted(expected.keys() - found.keys()))

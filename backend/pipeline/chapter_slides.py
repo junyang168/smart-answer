@@ -973,7 +973,8 @@ def recheck(chapter: Chapter, lecture: str, *, data_base_dir: Path) -> dict[str,
     kept = kept_pieces(decisions_record)
     response = {"slides": rejected.get("raw_slides") or []}
     if chapter_slide_arguments.BINDINGS_KEY in rejected:
-        response[chapter_slide_arguments.BINDINGS_KEY] = rejected[chapter_slide_arguments.BINDINGS_KEY]
+        key = chapter_slide_arguments.BINDINGS_KEY
+        response[key] = rejected.get(chapter_slide_arguments.RAW_BINDINGS_KEY, rejected[key])
     return save(chapter, lecture, data_base_dir, response, prompt, kept,
                 rejected.get("model", ""), rejected.get("claim_context"))
 
@@ -1008,7 +1009,12 @@ def save(
         if not problems:
             try:
                 requirements = chapter_slide_arguments.review_requirements(claim_context, sentences(kept), slides)
-                chapter_slide_arguments.bind_points(requirements, slides, record[key])
+                bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                point_sentences = {route["id"]: route["writer_points"] for route in bound}
+                normalized = [{**row, "point_sentences": point_sentences[row["id"]]} for row in record[key]]
+                if normalized != record[key]:
+                    record[chapter_slide_arguments.RAW_BINDINGS_KEY] = record[key]
+                    record[key] = normalized
             except ValueError as error:
                 problems.append(str(error))
     if claim_context is not None:

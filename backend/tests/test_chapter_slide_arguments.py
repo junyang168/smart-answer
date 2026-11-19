@@ -154,6 +154,39 @@ def test_argument_binding_rejects_a_reason_separated_from_the_conclusion_by_anot
     assert arg.bind_points([route], slides, [local_binding])[0]["writer_points"] == ["S0136", "S0142"]
 
 
+def test_writer_can_recover_a_nearby_repeat_of_the_same_anchored_evidence():
+    slides = [
+        {"first": "S0109", "last": "S0119", "points": [{"sentence": "S0113", "source": "E1"}]},
+        {"first": "S0120", "last": "S0138", "points": [{"sentence": "S0122", "source": "E1"}]},
+        {"first": "S0139", "last": "S0141", "points": [{"sentence": "S0141", "source": "C1"}]},
+    ]
+    source = [{"id": line, "text": "逐字稿。"} for line in ("S0113", "S0122", "S0123", "S0141")]
+    step = {"evidence_step_id": "E1", "anchors": [
+        {"fragment_id": "old", "sentences": ["S0113"]},
+        {"fragment_id": "repeat", "sentences": ["S0122", "S0123"]},
+    ]}
+    context = {"claims": [{"evidence_steps": [step]}], arg.PLAN_KEY: [{
+        "reason": "相同用詞比較", "inference": "推論", "conclusion": "結論",
+        "conclusion_sentence": "S0141", "source_sentences": ["S0113", "S0141"],
+    }]}
+    original = {"id": "argument-1", "point_sentences": ["S0113", "S0122", "S0141"]}
+    requirements = arg.review_requirements(context, source, slides)
+    assert requirements[0]["repeated_evidence_points"] == ["S0122"]
+    assert requirements[0]["source_slides"]["S0122"] == "S0120"
+    with pytest.raises(ValueError, match="two adjacent slides"):
+        arg.bind_points(requirements, slides, [original])
+    resolved, = arg.bind_points(requirements, slides, [original], recover_repeats=True)
+    assert resolved["writer_points"] == ["S0122", "S0141"]
+    assert original["point_sentences"] == ["S0113", "S0122", "S0141"]
+
+    wrong = copy.deepcopy(slides)
+    wrong[1]["points"][0]["source"] = "C1"  # Same topic alone is insufficient.
+    requirements = arg.review_requirements(context, source, wrong)
+    assert "S0122" not in requirements[0]["source_slides"]
+    with pytest.raises(ValueError, match="must cite existing points"):
+        arg.bind_points(requirements, wrong, [original], recover_repeats=True)
+
+
 @pytest.mark.parametrize("id", [case["id"] for case in cases()])
 def test_saved_counterexamples_and_positive_controls_follow_the_production_eval_contract(tmp_path, id):
     case = next(row for row in cases() if row["id"] == id)
