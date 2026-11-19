@@ -83,6 +83,23 @@ def test_generation_and_eval_share_the_source_boundary_and_the_frozen_inference(
     assert "known_bad" not in prompt and "expected" not in prompt
 
 
+def test_subunit_writer_uses_the_current_answer_when_the_earlier_reason_differs():
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    case = next(row for row in cases() if row["id"] == "remarriage-earlier-idea-in-later-slide")
+    record, selection = packet_for(case, case["variants"][0])
+    context = {**record["claim_context"], "schema_version": "chapter-slide-outline-context.v1"}
+    chapter = CHAPTERS["mat-5-1-48"]
+    system = chapter_slides.system_prompt(chapter, subunit=True)
+    prompt = chapter_slides.user_prompt(record["lecture"], selection, context)
+    assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE in system
+    assert "不可拿前一段的理由替換這次的理由" in system
+    assert chapter_slides.SUBUNIT_LOCAL_ANSWER_RULE not in chapter_slides.system_prompt(chapter)
+    assert "保羅就沒有提說" in prompt and "保羅明講，是可以" in prompt
+    assert "不能據未明講就禁止" not in prompt
+    assert "known_good" not in prompt and "known_bad" not in prompt
+
+
 def test_writer_must_map_every_inference_to_real_points_within_its_original_slides(tmp_path, monkeypatch):
     from backend.pipeline import chapter_exposition
     from backend.tests.test_chapter_slides import CHAPTER

@@ -154,6 +154,16 @@ _SUBUNIT_POINT_TIMING_RULE = """每條要點寫一個完整、可理解的論旨
 - 標題和實際朗讀的經文分別遵循各自的顯示規則。"""
 
 
+SUBUNIT_LOCAL_ANSWER_RULE = (
+    "整理問答時，先核對本張原文中教授這一次的回答，分清聽眾的問題與教授的立場。"
+    "用本次回答的原句核對結論、理由和肯否，再寫成要點。"
+    "同一問題在前後段落有不同說法時，前文只用來理解這一次在問什麼。"
+    "即使最後的結論相同，也不可拿前一段的理由替換這次的理由，"
+    "不可把「明說」改成「沒明說」，也不可從沉默推成教授在這裡沒有講的規則。"
+    "如果本次回答沒有交代理由，只呈現他這次實際給的答案。"
+)
+
+
 def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False) -> str:
     """写投影片的提示词，按这一章填章号（原来写死第五章；负责人 2026-11-05 加太 8–15）。"""
 
@@ -174,6 +184,8 @@ def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False)
         .replace("〈整章〉", f"{number}:{start}-{end}")
         .replace("〈章〉", str(number))
     )
+    if subunit:
+        prompt += "\n\n" + SUBUNIT_LOCAL_ANSWER_RULE
     if scope:
         prompt += f"\n本單元的經文範圍為 {scope}。保留第六、七章之間的原有論證；引用作論據的經文在 scriptures 照實記錄。"
     return for_lecture(prompt, lecture) + "\n\n" + INLINE_NOTE_RULES
