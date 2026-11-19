@@ -1,4 +1,4 @@
-"""Check every point against the first matching sentence on the same slide."""
+"""Check whether a displayed point follows the discussion on its slide."""
 
 import json
 import re
@@ -11,10 +11,9 @@ _VERSE_QUOTE = re.compile(
 
 
 _CRITERIA = {
-    "full": "這一句實際表達投影片要點的完整意思，保留範圍、主詞、否定和限定。",
-    "partial": "只說出部分，或範圍、主詞、否定或限定有差異。",
-    "question": "只提出相關問題，尚未表達這個陳述。",
-    "none": "該句沒有實際表達要點。",
+    "full": "指定句正在提出、講解或總結這個要點。完整答案可在同張後文說出。",
+    "partial": "指定句只順帶提及相同詞語、經節或相近的主題。",
+    "none": "指定句在講另一件事。",
     "uncertain": "不能確定。",
 }
 
@@ -40,9 +39,9 @@ def _match_question(meaning, sid, sentence):
             },
         }
     return {"type": "choice", "criteria": _CRITERIA,
-            "instructions": f"{sid}「{sentence}」是否說出「{meaning}」？"
-                            "前文可補主詞、指代和已說明的章節範圍。摘要可省略附帶細節。提問不算回答。"
-                            "只說有關，未表明是結論，不算完整。不可用後文補答案。"}
+            "instructions": f"{sid}「{sentence}」是否正在談「{meaning}」所對應的同一個具體問題或意思？"
+                            "用同張完整原文確認要點有支持。答案完整且屬於這個問題，就可以在開始談它時先顯示。"
+                            "相關問題的開場、講解和總結均可。泛泛過場、同一大主題或相同經節本身不夠。"}
 
 
 def _ask_batches(state, questions, ask, model, max_bytes):
@@ -67,20 +66,9 @@ def _ask_batches(state, questions, ask, model, max_bytes):
     return answers
 
 
-def evaluate_points(packet, candidates, ask, *, model, max_bytes):
+def evaluate_points(packet, ask, *, model, max_bytes):
     slides = {slide["first"]: slide for slide in packet["slides"]}
     lines = {line["id"]: line for line in packet["source"]}
-    decompositions = {}
-    for candidate in candidates:
-        first, sentence = candidate["slide"], candidate["sentence"]
-        points = [p for p in slides.get(first, {}).get("points", []) if p["sentence"] == sentence]
-        if (first, sentence) in decompositions or len(points) != 1:
-            raise ValueError("Split candidate must identify one unique displayed point")
-        parts = [part.strip() for part in candidate["parts"]]
-        if not 2 <= len(parts) <= 4 or not all(parts) or len(set(parts)) != len(parts):
-            raise ValueError("Split candidate must contain two to four distinct meanings")
-        decompositions[first, sentence] = parts
-
     results = []
     for first, slide in slides.items():
         if not slide["points"]:
@@ -91,59 +79,37 @@ def evaluate_points(packet, candidates, ask, *, model, max_bytes):
         questions = {}
         exact = {}
 
-        def match_sentences(key, meaning):
+        for index, point in enumerate(slide["points"]):
+            meaning = point["text"]
             target = meaning.strip().rstrip("。．.!！")
+            current = point["sentence"]
+            if target and source.get(current, "").strip().rstrip("。．.!！") == target:
+                exact[f"{index}:whole:{current}"] = "full"
+                continue
             for sid, sentence in source.items():
-                name = f"{key}:{sid}"
-                # Compare whole sentences. A quotation or substring can occur in
-                # a denial or question. Only omit later matches once we have proof.
+                name = f"{index}:whole:{sid}"
                 if target and sentence.strip().rstrip("。．.!！") == target:
                     exact[name] = "full"
-                    break
-                questions[name] = _match_question(meaning, sid, sentence)
-
-        for index, point in enumerate(slide["points"]):
-            match_sentences(f"{index}:whole", point["text"])
-            if parts := decompositions.get((first, point["sentence"])):
-                questions[f"{index}:split"] = {
-                    "type": "choice",
-                    "instructions": f'這些投影片短句 {json.dumps(parts, ensure_ascii=False)} '
-                                    "各自有沒有陳述一個不同的意思或提出一個完整問題？只核對各短句本身的獨立性。",
-                    "criteria": {"independent": "每條都各自陳述不同的意思或提出完整問題。",
-                                 "dependent": "至少一條只是名詞、所指對象、必要條件或重述另一條。",
-                                 "uncertain": "不能確定。"},
-                }
-                for part_index, part in enumerate(parts):
-                    match_sentences(f"{index}:{part_index}", part)
+                else:
+                    questions[name] = _match_question(meaning, sid, sentence)
 
         answers = _ask_batches({"原文": source}, questions, ask, model, max_bytes) if questions else {}
         answers.update(exact)
 
-        def earliest(index, part):
-            return next((sid for sid in source if answers.get(f"{index}:{part}:{sid}") == "full"), None)
-
         for index, point in enumerate(slide["points"]):
             current, text = point["sentence"], point["text"]
             item = {"slide": first, "point": index, "sentence": current}
-            parts = decompositions.get((first, current))
-            if parts and answers[f"{index}:split"] == "independent":
-                anchors = [earliest(index, number) for number in range(len(parts))]
-                if all(anchors) and len({lines[sid]["start"] for sid in anchors}) > 1:
-                    split = sorted(zip(anchors, parts), key=lambda entry: lines[entry[0]]["start"])
-                    evidence = "；".join(f"{sid}「{part}」（原文「{source[sid]}」）" for sid, part in split)
-                    results.append({**item, "status": "split", "evidence":
-                                    f"要點 {current} 合併了不同時點講出的意思，應依原聲分開顯示。{evidence}"})
-                    continue
-
-            expected = earliest(index, "whole")
+            supported = [sid for sid in source if answers.get(f"{index}:whole:{sid}") == "full"]
+            expected = (min(supported, key=lambda sid: abs(lines[sid]["start"] - lines[current]["start"]))
+                        if supported and current in source else None)
             if current not in source or expected is None:
-                reason = "要點綁定的句子不在本張" if current not in source else "Jev 未判定本張有完整符合的句子"
+                reason = "要點綁定的句子不在本張" if current not in source else "Jev 未確認本張原文從哪句開始講這個要點"
                 evidence = f"{current}「{text}」：{reason}，須核對。"
                 results.append({**item, "status": "unresolved", "evidence": evidence})
                 continue
             delta = round(lines[current]["start"] - lines[expected]["start"], 2)
             status = "correct" if current == expected or not delta else "early" if delta < 0 else "late"
-            evidence = (f"{current}「{text}」首次完整對應 {expected}「{source[expected]}」。"
+            evidence = (f"{current}「{text}」{expected} 正在談這個要點「{source[expected]}」。"
                         if status == "correct" else
                         f"{current}「{text}」出現{'太早' if delta < 0 else '太晚'} {abs(delta):g} 秒，"
                         f"應綁 {expected}「{source[expected]}」。")

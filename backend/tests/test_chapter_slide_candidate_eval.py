@@ -145,50 +145,42 @@ def test_semantic_eval_must_be_a_recorded_run_by_another_model(tmp_path):
         assert (ev.semantic_eval_problems(candidate, selection, receipt) == []) == ok
 
 
-def test_subunit_semantic_eval_records_confirmed_split_as_timing_failure(tmp_path, monkeypatch):
+def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_splits(tmp_path, monkeypatch):
     from backend.pipeline import claim_flash_common
 
     source = tmp_path / "selection.json"
     source.write_text(json.dumps({
         "pieces": [{"id": "P1", "start": 0, "end": 10,
-                    "text": "第二大段講門徒的使命。認識神之後會有生命上的反應。"}],
+                    "text": "門徒為甚麼要發光？認出彌賽亞，就負有門徒的使命。門徒的使命是發光。"}],
         "decisions": [{"id": "P1", "keep": True}],
     }))
     slide_path = tmp_path / "slides.json"
     slide_path.write_text(json.dumps({
         "lecture": "Lecture", "model": "writer", "decisions_sha256": chapter_exposition.file_sha256(source),
         "claim_context": {"scope": "subunit"},
-        "slides": [{"first": "S0001", "last": "S0002", "points": [
-            {"sentence": "S0002", "text": "門徒的使命及認識神後的反應"}]}],
+        "slides": [{"first": "S0001", "last": "S0003", "points": [
+            {"sentence": "S0001", "text": "認出彌賽亞的門徒有發光的使命"}]}],
     }))
 
     class Reviewer:
         model = "reviewer"
 
         def generate_json(self, system, packet, schema):
-            assert "split_candidates" in schema["required"]
+            assert schema["required"] == ["checks"]
             assert json.loads(packet)["criteria"]["timing"] == ev._SUBUNIT_TITLE_TIMING
-            return {
-                "checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "原審閱"}
-                           for criterion in ev.SEMANTIC_CRITERIA],
-                "split_candidates": [{"slide": "S0001", "sentence": "S0002",
-                                      "parts": ["門徒的使命", "認識神後的反應"]}],
-            }
+            return {"checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "原審閱"}
+                               for criterion in ev.SEMANTIC_CRITERIA]}
 
     def jev(root, port, state, questions):
-        passing = {"0:0:S0001", "0:1:S0002"}
-        return {key: "independent" if key.endswith(":split") else "full" if key in passing else "none"
-                for key in questions}
+        assert set(questions) == {"0:whole:S0001", "0:whole:S0002", "0:whole:S0003"}
+        return {key: "full" for key in questions}
 
     monkeypatch.setattr(chapter_exposition, "chapter_client", lambda model: Reviewer())
     monkeypatch.setattr(claim_flash_common, "jev", jev)
     path = tmp_path / "eval.json"
     receipt = ev.run_semantic_eval(slide_path, source, path, "reviewer")
-    findings = ev.semantic_eval_problems(slide_path, source, path)
-    assert len(findings) == 1 and findings[0].startswith("S0001 timing:")
-    assert "S0001「門徒的使命」" in findings[0] and "S0002「認識神後的反應」" in findings[0]
-    assert all(row["passed"] for row in receipt["run"]["raw_response"]["checks"])
-    assert receipt["point_timing"]["points"][0]["status"] == "split"
+    assert ev.semantic_eval_problems(slide_path, source, path) == []
+    assert receipt["point_timing"]["points"][0]["status"] == "correct"
 
 
 def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkeypatch):
@@ -252,7 +244,7 @@ def test_subunit_eval_applies_only_confirmed_moves_without_erasing_review(tmp_pa
         model = "reviewer"
 
         def generate_json(self, system, packet, schema):
-            return {"split_candidates": [], "checks": [
+            return {"checks": [
                 {"slide": "S0001", "criterion": criterion, "passed": criterion != "coverage", "evidence": "原審閱"}
                 for criterion in ev.SEMANTIC_CRITERIA]}
 

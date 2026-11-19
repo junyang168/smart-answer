@@ -138,7 +138,10 @@ INLINE_NOTE_RULES = """逐張找教授用來解經的原文字義、譯法、語
 跨經文比較時分別綁到相關經文詞句，講清他在比較什麼。original 欄只填本節實際使用的原文字詞或其轉寫；通常／其他地方的譯詞即使教授確實提到，也不能獨立掛在本節的 original 欄。一般譯法比較放要點；不要把一般譯法當成某節的實際用字。從逐字稿沒有依據的語法、讀法或結論不得加入。無適用處傳空陣列。"""
 
 
-_SUBUNIT_POINT_TIMING_RULE = """- 輸出前逐條檢查：先暫時去掉目前的 sentence，把要點按可獨立顯示的意思分開，再各找第一次講清楚的原句。若要等到後一句才能把另一個獨立意思講出，保留同張投影片並依次顯示。若各部分同一句已講清楚，或前後只是同一語意的必要條件、對象或口語省略，合為一條，在首次完整表達時出現。"""
+_SUBUNIT_POINT_TIMING_RULE = """每條要點寫一個完整、可理解的論旨，可以概括連續幾句的原文。可在教授開始講這個問題時顯示該問題的完整答案，即使答案在本張後面才說出。要點必須忠於本張講解，保留條件與因果。
+- sentence 填他正在談這個要點的句子。開場、講解和總結均可；泛泛的過場或談別的問題時等一下。
+- 只有分開呈現能讓聽眾更容易跟上時，才拆成多條。先保留承重內容，如空間不足可分張。
+- 標題和實際朗讀的經文分別遵循各自的顯示規則。"""
 
 
 def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False) -> str:
@@ -155,8 +158,7 @@ def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False)
                     .replace("講整章結構的，寫「〈整章〉」。", "列出實際解釋的各章節；跨章時分別列出各章的範圍。")
                     .replace("第 〈章〉 章的逐字稿", f"{scope} 的逐字稿"))
     prompt = (
-        template.replace("〈要點時間規則〉", POINT_TIMING_RULES.replace(
-            "- 合併、縮寫", _SUBUNIT_POINT_TIMING_RULE + "\n- 合併、縮寫", 1) if subunit else POINT_TIMING_RULES)
+        template.replace("〈要點時間規則〉", _SUBUNIT_POINT_TIMING_RULE if subunit else POINT_TIMING_RULES)
         .replace("〈標題規則〉", SLIDE_TITLE_RULES)
         .replace("〈原聲投影片口吻〉", SLIDE_VOICE_RULES)
         .replace("〈整章〉", f"{number}:{start}-{end}")
@@ -298,27 +300,30 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
         previous = piece
     if claim_context is not None and claim_context.get("schema_version") == "chapter-slide-outline-context.v1":
         from backend.pipeline.chapter_slide_cases import cases_for, resolve_cases
+        subunit = claim_context.get("scope") == "subunit"
         source_lines = sentences(kept)
         owner_cases = resolve_cases(cases_for(lecture), source_lines,
-                                    partial=claim_context.get("scope") == "subunit")
+                                    partial=subunit)
         source_by_id = {line['id']: line['text'] for line in source_lines}
         if owner_cases:
             scoped = [{**case, 'anchor_quotes': {key: source_by_id[case[key]] for key in ('at', 'from', 'to')
                        if case.get(key) in source_by_id}} for case in owner_cases]
             lines += ['# 本講已確認的 golden 約束',
-                      '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。',
+                      ('以下是負責人已裁定的特定案例。照各案例自己的條件處理，優先於一般規則。'
+                       if subunit else
+                       '以下是負責人已裁定的條件，生成、修訂、審閱都須遵守。它們優先於一般的提早引入規則；不得用提問句提前展示答案，也不得把已合規的答案時間判為過晚。'),
                       json.dumps(scoped, ensure_ascii=False)]
         from backend.pipeline.chapter_slide_claims import source_context_index
         source_entries = source_context_index(claim_context, source_lines)
-        if claim_context.get("scope") == "subunit":
+        if subunit:
             checklist = [{"source": rid, "statement": entry["statement"]}
                          for rid, entry in source_entries.items() if entry["statement"]]
             lines += ["# 生成前的承重論證清單",
                       "先用逐字稿核對以下 Claim 與論證步驟。挑出構成結論所必須的問題、理由、對照兩端和推論，"
-                      "各自落到一條要點，填入對應的 source。讀經卡保留照念的原文，承重的對照或推論仍須寫成要點。"
+                      "用清楚的要點涵蓋它們，填入對應的 source。連貫的幾句可整理成一條完整要點。讀經卡保留照念的原文，承重的對照或推論仍須寫成要點。"
                       "同一步包含對照兩端時，可以有兩條要點用相同 source。反覆說同一理由只寫一次，"
                       "留位置給接到結論的那一步。生成前確認下列既定承重事項全部保留，再一次交稿。"
-                      "sentence 是本張內的初始位置，最早講出完整意思的時間另行核對。",
+                      "sentence 是本張內的初始位置，是否跟得上同一個問題另行核對。",
                       json.dumps(checklist, ensure_ascii=False)]
             required = [{"sentence": rule["at"], "content": rule["why"]}
                         for rule in owner_cases if rule["kind"] == "required_point"]
@@ -330,19 +335,24 @@ def user_prompt(lecture: str, decisions_record: dict[str, Any], claim_context: d
                   json.dumps(bounds, ensure_ascii=False)]
         lines += ["", "# 本堂講課提綱（論證層 Claims）",
                   "標題在 first 一換張就顯示。從 first 當下已講的意思命名；若是問題、故事或論證的起點，"
-                  "只用問題或中性話題。結論及故事結果等到首次講出時才放在定時要點。"
+                  "只用問題或中性話題。"
+                  + ("完整要點可在開始講其問題時顯示答案。" if subunit
+                     else "結論及故事結果等到首次講出時才放在定時要點。") +
                   "標題必須涵蓋本張主題，但不能以後面才說出的答案命名。",
                   "逐條保留限制、否定及適用範圍；術語不能用範圍更廣的上位詞代替。"
                   "反查完整論證：對比或首尾呼應要交代兩端如何支持結論，並用原文核對。",
                   "groups 是本堂講到的論證部分；每部分第一層 Claim（parent 為 null）是蓋子，其餘是它下面的論點。stated 是他講出這一點的句子。",
                   "逐字稿分張、措辭和出現時間照舊；提綱決定結構，使聽眾看清整體：",
                   "- 不另做本堂地圖或總覽：第一張照他開頭實際講的內容做，每一張都是他此刻在講的。",
-                  "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，按這部分當下已講的主題命名；上層 Claim 的結論只在原文首次講出時顯示。",
+                   "- 每部分開始時一張結構頁：first 是該部分在本堂第一句，按這部分當下已講的主題命名。"
+                  + ("遵守要點預覽規則。" if subunit else "上層 Claim 的結論只在原文首次講出時顯示。"),
                   "- 他離開某部分後又回來講時，回來的第一張標題前加「（續）」並寫部分名。",
                   "- 結構頁之後照逐字稿做細節頁。不要把別講才講的結論寫進本堂。",
                   "- 每條要點填 source：它呈現的那個 Claim 的 claim_id，或某一步的 evidence_step_id；故事、插話等不屬任何一步的填空字串。"
-                  "sentence 綁他講出這條要點內容的那一句；但他一開始講新的一步（含為這一步念經文），畫面最新的要點就要換成屬於這一步的，"
-                  "每一步開始時先顯示本步已講出的引入、問題或理由；不要把本步後面的實質答案、定義或結論提前到 anchors 的第一句。答案仍綁首次說出答案的那一句，並遵守本講 golden。同一張不可兩條綁同一句。"
+                  + ("sentence 綁他正在講該問題或論述的句子；本張稍後會講出的完整答案可以預先顯示。"
+                     if subunit else
+                     "sentence 綁他講出這條要點內容的那一句；答案仍綁首次說出答案的那一句。") +
+                  "遵守本講 golden，同一張不可兩條綁同一句。"
                   "這一句必須落在前列程序編譯的 source 上下文範圍內。"
                   "own_passages 是他直接講這條 Claim 本身的地方（例如自問「什麼是謙卑？」再自己回答）；他講到那裡時，"
                   "畫面最新的要點要是 source 為這條 Claim 的要點，寫出他在那裡講的內容。",
@@ -453,6 +463,7 @@ def check(
     *,
     cuv_root: Path | None = None,
     one_slide: list[tuple[str, str]] = (),
+    check_term_timing: bool = True,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """核对模型的投影片。返回（问题、逐字稿里认出却不在投影片上的经文、规范化后的投影片）。
 
@@ -511,7 +522,8 @@ def check(
             point = {"sentence": item["sentence"], "text": text}
             if str(item.get("source") or "").strip():
                 point["source"] = str(item["source"]).strip()
-            earlier = _earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+            earlier = (_earlier_term_introduction(point, own, own_ids.index(point["sentence"]))
+                       if check_term_timing else None)
             if earlier:
                 problems.append(
                     f"{title}: 要點「{text}」在 {earlier} 已明確引入術語，"
@@ -626,7 +638,10 @@ def checked(
                      partial=claim_context.get("scope") == "subunit") if c["kind"] == "one_slide"]
         except ValueError:
             spans = []  # check_cases reports the broken case below
-    problems, unshown, slides = check(raw, kept, chapter, **({"one_slide": spans} if spans else {}))
+    options = {"one_slide": spans} if spans else {}
+    if (claim_context or {}).get("scope") == "subunit":
+        options["check_term_timing"] = False
+    problems, unshown, slides = check(raw, kept, chapter, **options)
     if not problems and claim_context is not None:
         from backend.pipeline.chapter_slide_claims import argument_alignment, evidence_scripture_gaps
         problems = evidence_scripture_gaps(claim_context, slides,

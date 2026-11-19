@@ -80,42 +80,31 @@ def test_slide_eval_checks_the_required_diagram_in_its_retained_claim_scope(tmp_
     assert ev.evaluate(slides, KEPT, candidates=[], bible=library, context=context)["problems"] == []
 
 
-def test_split_finding_depends_on_first_fully_supported_sentence_of_each_part():
+def test_a_complete_summary_can_appear_when_the_matching_question_begins():
     from backend.pipeline.chapter_slide_point_timing import evaluate_points
 
     source = [{"id": sid, "text": text, "start": start} for sid, text, start in [
-        ("S0001", "下一段講什麼？", 0), ("S0002", "第五章十三節起是門徒的使命。", 6),
-        ("S0003", "認識神後有生命上的反應。", 19),
-        ("S0004", "這些是門徒的使命及認識神後的反應。", 25)]]
+        ("S0001", "現在講下一段。", 0),
+        ("S0002", "七章十二節跟前一段有沒有因果關係？", 5),
+        ("S0003", "七至十一節談向神禱告，十二節談怎樣待人。", 16),
+        ("S0004", "所以兩段沒有因果關係。", 28)]]
+    text = "兩段分別談向神禱告與怎樣待人，因此沒有因果關係"
     packet = {"slides": [{"first": "S0001", "last": "S0004", "points": [
-        {"sentence": "S0003", "text": "門徒的使命和認識神後的反應"}]}], "source": source}
-    candidates = [{"slide": "S0001", "sentence": "S0003", "parts": ["門徒的使命", "認識神後的反應"]}]
+        {"sentence": "S0002", "text": text}]}], "source": source}
 
-    def run(first, second, split="independent"):
-        supported = {f"0:0:{first}", f"0:1:{second}", "0:0:S0004", "0:whole:S0003"}
-        if second is not None:
-            supported.add("0:1:S0004")  # A later restatement must not hide the first full sentence.
-        calls = []
+    def ask(state, questions):
+        assert "答案完整且屬於這個問題" in questions["0:whole:S0002"]["instructions"]
+        assert set(questions) == {f"0:whole:{line['id']}" for line in source}
+        return {key: "none" if key.endswith("S0001") else "full" for key in questions}
 
-        def ask(state, questions):
-            calls.append(questions)
-            return {key: split if key.endswith(":split") else "full" if key in supported
-                    else "question" if key.endswith("S0001") else "partial"
-                    for key in questions}
-
-        result = evaluate_points(packet, candidates, ask, model="jev-test", max_bytes=2000)
-        assert len(calls) > 1 and sum(map(len, calls)) == 13
-        return result
-
-    finding, = run("S0002", "S0003")
-    assert "S0002「門徒的使命」" in finding["evidence"] and "S0003「認識神後的反應」" in finding["evidence"]
-    assert finding["status"] == "split"
-    assert run("S0002", "S0002")[0]["status"] == "correct"  # One sentence expressed both.
-    assert run("S0002", None)[0]["status"] == "correct"  # The suggested split has an unsupported part.
-    assert run("S0002", "S0003", "dependent")[0]["status"] == "correct"  # One meaning.
+    row, = evaluate_points(packet, ask, model="jev-test", max_bytes=128000)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+    packet["slides"][0]["points"][0]["sentence"] = "S0001"
+    row, = evaluate_points(packet, ask, model="jev-test", max_bytes=128000)
+    assert (row["status"], row["expected_sentence"]) == ("early", "S0002")
 
 
-def test_all_points_are_checked_per_slide_even_without_split_candidates():
+def test_all_points_are_checked_per_slide():
     from backend.pipeline.chapter_slide_point_timing import evaluate_points
 
     packet = {
@@ -138,21 +127,21 @@ def test_all_points_are_checked_per_slide_even_without_split_candidates():
         seen.append(ids)
         assert {key.rsplit(":", 1)[1] for key in questions} == ids
         if "S0001" in ids:
-            assert "提問不算回答" in questions["0:whole:S0001"]["instructions"]
+            assert "答案完整且屬於這個問題" in questions["0:whole:S0001"]["instructions"]
             assert "忽略問題的答案" in questions["1:whole:S0001"]["instructions"]
             full = {"0:whole:S0002", "1:whole:S0001", "1:whole:S0003"}
         else:
             full = {"0:whole:S0004"}
         return {key: "full" if key in full else "other" for key in questions}
 
-    rows = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
+    rows = evaluate_points(packet, ask, model="jev", max_bytes=128000)
     assert seen == [{"S0001", "S0002", "S0003"}, {"S0004", "S0005"}]
     assert [(item["status"], item.get("expected_sentence"), item.get("delta_seconds")) for item in rows] == [
-        ("early", "S0002", -10), ("late", "S0001", 20), ("correct", "S0004", 0), ("unresolved", None, None),
+        ("early", "S0002", -10), ("correct", "S0003", 0), ("correct", "S0004", 0), ("unresolved", None, None),
     ]
 
 
-def test_verbatim_points_skip_jev_but_can_still_have_an_earlier_paraphrase():
+def test_verbatim_point_keeps_its_valid_anchor_even_with_an_earlier_paraphrase():
     from backend.pipeline.chapter_slide_point_timing import evaluate_points
 
     source = [
@@ -165,20 +154,10 @@ def test_verbatim_points_skip_jev_but_can_still_have_an_earlier_paraphrase():
         ],
     }]}
 
-    def ask(state, questions):
-        assert set(questions) == {"0:whole:S0001"}
-        return {"0:whole:S0001": "full"}
-
-    row, = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
-    assert (row["status"], row["expected_sentence"]) == ("late", "S0001")
-
-    packet["source"] = source[1:]
-    packet["slides"][0]["first"] = "S0002"
-
     def no_call(*_):
-        raise AssertionError("a verbatim-only check should make no call")
+        raise AssertionError("a verbatim point at its anchor should make no call")
 
-    row, = evaluate_points(packet, [], no_call, model="jev", max_bytes=128000)
+    row, = evaluate_points(packet, no_call, model="jev", max_bytes=128000)
     assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
 
 
@@ -197,7 +176,7 @@ def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
             verify(questions)
             return {key: answers[int(key[-4:]) - 1] for key in questions}
 
-        row, = evaluate_points(packet, [], ask, model="jev", max_bytes=128000)
+        row, = evaluate_points(packet, ask, model="jev", max_bytes=128000)
         return row
 
     def quote(questions):
@@ -207,8 +186,8 @@ def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
 
     def assertion(questions):
         for q in questions.values():
-            assert "補主詞" in q["instructions"] and "提問不算回答" in q["instructions"]
-            assert "有關" in q["instructions"] and "結論" in q["instructions"]
+            assert "同張完整原文" in q["instructions"]
+            assert "同一個具體問題" in q["instructions"]
 
     row = check("七章十二節末尾的「律法和先知」", [
         "五章十七節：『莫想我來要廢掉律法和先知。』",
@@ -218,8 +197,8 @@ def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
 
     row = check("門徒的義要勝過文士和法利賽人的義", [
         "所以門徒的義要什麼？", "五章十七節到四十八節，要勝過文士和法利賽人的義。",
-    ], 2, ["question", "full"], assertion)
-    assert (row["status"], row["expected_sentence"]) == ("correct", "S0002")
+    ], 1, ["full", "full"], assertion)
+    assert (row["status"], row["expected_sentence"]) == ("correct", "S0001")
 
     row = check("接著講禱告的問題", [
         "六章一節到七章十一節，講到施捨。", "然後六章五節到第十一節，講到禱告的問題。",

@@ -321,16 +321,15 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
     if seen != expected:
         problems.append("Semantic Eval must cover each criterion for every slide")
-    if "adjustments" in result.get("point_timing", {}) and (context := record.get("claim_context")):
-        from backend.pipeline.chapter_slide_claims import stale_points
+    if "adjustments" in result.get("point_timing", {}):
         from backend.pipeline.chapter_slide_point_timing import apply_adjustments
 
-        if context.get("schema_version") == "chapter-slide-outline-context.v1":
-            source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
-            placed = apply_adjustments(record["slides"], source, record.get("point_timing_adjustments"))
-            readings = displayed_reading_sentences(placed, source)
-            problems.extend(f"Timing after Jev: {problem}"
-                            for problem in stale_points(context, placed, source, displayed_readings=readings))
+        source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
+        placed = apply_adjustments(record["slides"], source, record.get("point_timing_adjustments"))
+        for slide in placed:
+            anchors = [point["sentence"] for point in slide.get("points", [])]
+            if len(anchors) != len(set(anchors)):
+                problems.append(f"{slide['first']} timing: 有兩條要點綁在同一句，須核對是否該合成完整的一條。")
     return problems
 
 
@@ -342,9 +341,7 @@ SEMANTIC_SYSTEM = """你是獨立的投影片驗收者，不是寫投影片的�
 逐張、逐項按 criteria 判定，每張投影片的每一項都要給一筆：slide 填該張的 first，criterion 填標準名稱，passed 為是否通過，evidence 寫具體依據（句子編號與原文；不通過時寫應怎麼改）。
 不要沿用任何先前的判定，全部重新看原文。
 先讀 owner_rules 與 owner_rulings：負責人已裁定的條件優先，改法不得違反它們。
-輸出有 split_candidates 欄位時，逐條找可能混合了兩個以上獨立意思的要點。
-按要點本身拆解，保留其範圍和限定，不補寫本來沒顯示的意思。必要限定或同一意思的重述不拆。
-對疑似要點只填所在投影片 first、該點目前 sentence、拆成的兩至四條短句 parts。不用替它們找時間，另一步會核對。沒有填空陣列。"""
+要點可以概括幾句原文。內容檢查要看完整論旨、限定和因果。子單元的逐條要點時間由另一步判定。"""
 
 
 def with_run(receipt: dict, model: str = "evaluator-model", raw=None) -> dict:
@@ -382,13 +379,6 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
     schema = {"type": "object", "additionalProperties": False, "required": ["checks"],
               "properties": {"checks": {"type": "array", "items": row}}}
     subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
-    if subunit:
-        schema["required"].append("split_candidates")
-        schema["properties"]["split_candidates"] = {"type": "array", "items": {
-            "type": "object", "additionalProperties": False, "required": ["slide", "sentence", "parts"],
-            "properties": {"slide": {"type": "string"}, "sentence": {"type": "string"},
-                           "parts": {"type": "array", "items": {"type": "string"}}},
-        }}
     if opus_api_spend_root is not None:
         from backend.pipeline.claim_anthropic_api import ClaimAnthropicAPI
 
@@ -418,7 +408,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
         from backend.pipeline.chapter_slide_point_timing import evaluate_points
         from backend.pipeline import claim_flash_common, evidence_refresh
 
-        points = evaluate_points(packet, answer["split_candidates"],
+        points = evaluate_points(packet,
             lambda state, questions: claim_flash_common.jev(
                 receipt_path.with_suffix(".point-timing"), evidence_refresh.JevPort(), state, questions),
             model=evidence_refresh.MODEL, max_bytes=claim_flash_common.JEV_BYTES)

@@ -220,3 +220,13 @@ def test_both_sides_are_reviewed_on_the_slide_as_separate_points():
     assert len(packet["required_slide_points"]) == 2
     assert all(row["slide_containing_sentence"] == "S0002" for row in packet["required_slide_points"])
     assert any("可以用不同要點分別呈現對照兩端" in rule for rule in packet["owner_rules"])
+
+
+def test_subunit_prompt_allows_complete_answers_before_they_are_spoken():
+    from backend.tests.test_chapter_slides import CHAPTER
+
+    prompt = chapter_slides.system_prompt(CHAPTER, subunit=True)
+    assert "可以概括連續幾句" in prompt
+    assert "可在教授開始講這個問題時顯示該問題的完整答案" in prompt
+    assert "不得借用前面的提問" not in prompt
+    assert "一條要點只寫他在一處講出" not in prompt
