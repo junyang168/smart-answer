@@ -632,7 +632,14 @@ def check(
         confirmed = [item for item in verified_scriptures if item["sentence"] in own_ids]
         confirmed_slugs = {item["slug"] for item in confirmed}
         if confirmed:
-            scriptures = [item for item in scriptures if item["slug"] not in confirmed_slugs] + confirmed
+            from backend.pipeline.chapter_slide_eval import Bible, reads_scripture
+
+            bible = Bible(cuv_root)
+            text_at = {line["id"]: line["text"] for line in own}
+            # A verified occurrence supersedes an ungrounded model anchor.
+            # An independently detected reading at another sentence is a distinct occurrence.
+            scriptures = [item for item in scriptures if item["slug"] not in confirmed_slugs
+                          or reads_scripture(text_at[item["sentence"]], item["slug"], bible)] + confirmed
         scriptures = merge_scripture_ranges(scriptures, own_ids)
         shown = [parse_reference(item["slug"]) for item in scriptures]
         for line in own:

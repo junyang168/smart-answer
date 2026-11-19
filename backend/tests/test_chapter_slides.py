@@ -601,3 +601,19 @@ def test_overlap_merges_only_within_the_same_sentence_book_and_chapter():
             ("S0001", "1pe-3-13"), ("S0001", "2pe-2-13"), ("S0002", "1pe-2-14"),
         )
     ]
+
+
+def test_verified_repeat_does_not_displace_the_first_actual_reading(tmp_path):
+    text = "我實在告訴你們，從前有許多先知和義人要看你們所看的，卻沒有看見，要聽你們所聽的，卻沒有聽見。"
+    chapter_file = tmp_path / "MAT" / "13.json"
+    chapter_file.parent.mkdir()
+    chapter_file.write_text(json.dumps({"17": text}))
+    kept = [{"id": "U1", "start": 0, "end": 45,
+             "text": "我們先看一處經文。" + text + "這一節後面還要再談。"}]
+    scripture = {"ref": "馬太福音 13:17", "sentence": "S0002"}
+    raw = slide("S0001", scriptures=[{**scripture, "sentence": "S0001"}, scripture])
+    verified = [{"sentence": "S0003", "slug": "mat-13-17"}]
+    problems, _, slides = chapter_slides.check([raw], kept, CHAPTER,
+                                               cuv_root=tmp_path, verified_scriptures=verified)
+    assert not problems
+    assert slides[0]["scriptures"] == [{"sentence": "S0002", "slug": "mat-13-17"}, *verified]

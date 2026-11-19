@@ -89,6 +89,10 @@ class Bible:
                 for n in range(ref["start"], ref["end"] + 1)]
 
 
+def reads_scripture(text: str, slug: str, bible: Bible) -> bool:
+    return any(_is_reading(sample, verse) for sample in _reading_samples(text) for _, verse in bible.verses(slug))
+
+
 def evaluate(
     slides: list[dict[str, Any]],
     kept: list[dict[str, Any]],
