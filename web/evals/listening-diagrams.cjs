@@ -9,6 +9,7 @@ const passage = "mat-5-1-48";
 const section = "mat-5-1-12";
 const point = "先講彌賽亞的身份，再講門徒的使命";
 const elaboration = "新舊約都是宗主國與附庸國之約：宗主國先施恩，再提出要求";
+const ending = "門徒的義從原則走到實際生活";
 const professor = {
   title: "登山寶訓（論彌賽亞／門徒的使命）", at: 20, sha256: "d".repeat(64), layout: "overview",
   labels: ["登山寶訓", "論彌賽亞", "太 5:3–12 應驗賽 61", "門徒的使命", "太 5:13–16 綜合", "太 5:17–7:29 闡明，細節"],
@@ -28,8 +29,10 @@ const recording = {
   media_url: "/test-listening-diagrams.wav", media_duration: 65, seconds: 45,
   stretches: [{ start: 10, end: 30 }, { start: 35, end: 60 }],
   slides: [
-    { at: 10, seconds: 25, title: "登山寶訓的結構", points: [{ at: 20, text: point }, { at: 23, text: elaboration }],
-      scriptures: [], verses: [], diagram: professor },
+    { at: 10, seconds: 25, title: "登山寶訓的結構", points: [
+      { at: 20, text: point }, { at: 22, text: "兩大段各有自己的重點" }, { at: 23, text: elaboration },
+      { at: 25, text: "先認識彌賽亞的身份" }, { at: 26, text: "再理解門徒的使命" }, { at: 27, text: ending },
+    ], scriptures: [{ at: 27, label: "馬太福音 5:1–12", scripture: "mat-5-1-12" }], verses: [], diagram: professor },
     { at: 35, seconds: 25, title: "整理登山寶訓的結構", points: [{ at: 50, text: point }],
       scriptures: [], verses: [], diagram: editorial },
   ],
@@ -73,11 +76,48 @@ async function evaluate(browser, viewport) {
     assert.notEqual(measure.background, "rgb(255, 255, 255)");
     assert.equal(await figure.getByRole("button").count(), 0);
     assert.equal(await figure.getByText("教授的圖", { exact: true }).count(), 0);
-    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.width >= 390);
+    const visible = text => slides.getByText(text, { exact: true }).and(slides.locator(":visible"));
+    const assertDiagramFits = async () => {
+      const diagramBox = await figure.boundingBox();
+      const paneBox = await slides.boundingBox();
+      assert(diagramBox.y >= paneBox.y - 1 && diagramBox.y + diagramBox.height <= paneBox.y + paneBox.height + 1,
+        JSON.stringify({ message: "The whole diagram must remain visible", viewport, diagramBox, paneBox }));
+    };
+    assert.equal(await visible(point).count(), 1);
+    await assertDiagramFits();
+
+    await open(22.5);
+    await figure.getByText("論彌賽亞", { exact: true }).waitFor();
+    if (viewport.width < 640) {
+      assert.equal(await visible(elaboration).count(), 0, "A prefetched point is not the highlighted point yet");
+    }
 
     await open(24);
     await figure.getByText("論彌賽亞", { exact: true }).waitFor();
-    assert.equal(await slides.getByText(elaboration, { exact: true }).isVisible(), viewport.width >= 390);
+    assert.equal(await visible(elaboration).count(), 1);
+    assert.equal(await visible(point).count(), viewport.width < 640 ? 0 : 1);
+    await assertDiagramFits();
+
+    await open(27.5);
+    await figure.getByText("論彌賽亞", { exact: true }).waitFor();
+    assert.equal(await visible(ending).count(), 1);
+    assert.equal(await visible(elaboration).count(), viewport.width < 640 ? 0 : 1);
+    await assertDiagramFits();
+    if (viewport.width < 640) {
+      const diagramY = (await figure.boundingBox()).y;
+      const scrolled = await slides.evaluate(node => {
+        node.scrollTop = node.scrollHeight;
+        return node.scrollTop;
+      });
+      assert(scrolled > 0, "Fixture must exercise a scrollable slide");
+      await assertDiagramFits();
+      assert.ok(Math.abs((await figure.boundingBox()).y - diagramY) <= 14, "Scrolling Scripture cannot displace the diagram");
+      assert.equal(await visible(ending).count(), 1);
+    } else {
+      const pointBox = await visible(ending).boundingBox();
+      assert.ok(pointBox.x + pointBox.width <= (await figure.boundingBox()).x,
+        "Laptop points and diagram show in separate columns");
+    }
 
     await open(38);
     assert.equal(await figure.count(), 0, "An image from the previous clip must disappear");
@@ -85,11 +125,8 @@ async function evaluate(browser, viewport) {
     await figure.getByText("門徒的使命", { exact: true }).waitFor();
     assert.equal(await figure.getByText("整理", { exact: true }).count(), 0);
     assert.equal(await figure.count(), 1, "The editorial image has its own slide");
-    assert.equal(await slides.getByText(point, { exact: true }).isVisible(), viewport.width >= 640);
-    const diagramBox = await figure.boundingBox();
-    const paneBox = await slides.boundingBox();
-    assert(diagramBox.y >= paneBox.y && diagramBox.y + diagramBox.height <= paneBox.y + paneBox.height,
-      "The densest diagram must fit without opening or scrolling");
+    assert.equal(await visible(point).count(), 1);
+    await assertDiagramFits();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     console.log(`${viewport.width}×${viewport.height}: listening diagrams passed`);
   } finally {
