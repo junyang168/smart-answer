@@ -470,8 +470,14 @@ export default function ChapterListener({
     const container = box.current;
     const line = currentLine.current;
     if (!container || !line) return;
+    const target = line.offsetTop - (container.clientHeight - line.offsetHeight) / 2;
+    const lineHeight = parseFloat(getComputedStyle(line).lineHeight);
+    // Align desktop follow-scrolling with text rows so neither edge exposes an extra partial row.
+    const top = window.matchMedia("(min-width: 1024px)").matches
+      ? Math.round(target / lineHeight) * lineHeight
+      : target;
     container.scrollTo({
-      top: line.offsetTop - (container.clientHeight - line.offsetHeight) / 2,
+      top,
       behavior: smooth ? "smooth" : "auto",
     });
   }
@@ -681,8 +687,8 @@ export default function ChapterListener({
           ) : null}
         </div>
 
-        {/* 講稿保持可捲動，筆電預留較大的跟讀區，手機維持三行高度。 */}
-        <div className={`relative h-[8.25rem] lg:h-40 ${diagramVisible
+        {/* 講稿保持可捲動，筆電高度依四行文字計算，手機維持三行高度。 */}
+        <div className={`relative h-[8.25rem] lg:h-[calc(4lh+2px)] lg:text-lg lg:leading-7 ${diagramVisible
           ? "[@media(max-width:389px)]:h-12" : ""}`}>
           <div
             ref={box}
@@ -691,7 +697,7 @@ export default function ChapterListener({
             tabIndex={0}
             onWheel={userScrolled}
             onTouchMove={userScrolled}
-            className="relative h-full overflow-auto rounded-xl border border-stone-200 bg-white px-4 py-3 sm:px-5"
+            className="relative h-full overflow-auto rounded-xl border border-stone-200 bg-white px-4 py-3 sm:px-5 lg:py-0"
           >
             {lines.length === 0 && <p className="text-sm text-stone-500">這一段沒有逐字稿。</p>}
             {lines.map((line, index) => {
@@ -710,7 +716,7 @@ export default function ChapterListener({
                     ref={here ? currentLine : undefined}
                     type="button"
                     onClick={() => seekTo(line.clip, line.at, true)}
-                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:py-0 lg:text-lg lg:leading-8 ${
+                    className={`block w-full rounded-md px-2 py-1 text-left text-[0.95rem] leading-7 transition-colors lg:py-0 lg:text-lg lg:leading-7 ${
                       here
                         ? "bg-amber-100 text-stone-950"
                         : line.left_out
