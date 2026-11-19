@@ -490,6 +490,24 @@ def test_steps_first_cuts_fragments_and_links_from_the_steps(tmp_path):
     ports.calls=[];assert go()==result and ports.calls==[]
 
 
+def test_steps_first_persists_verified_quotation_in_compiled_package(tmp_path, monkeypatch):
+    def verified_citations(source_id, paragraphs, root, ports):
+        quote = paragraphs['S0002']
+        return {'citations': [{'basis': 'introduced', 'paragraph_key': 'S0002', 'key': ['Dan', 7, 14],
+                               'ref': 'Dan 7:14', 'quote': quote}], 'unresolved': []}
+
+    def omit_refs(answer):
+        answer['records'][2]['scripture_refs'] = []
+        return answer
+
+    monkeypatch.setattr(creation, 'citation_listing', verified_citations)
+    _, root, go = run_steps(tmp_path, records_mutation=omit_refs)
+    go()
+    package = json.loads((root / 'candidate.json').read_text())
+    assert package['observations'][0]['scripture_refs'] == ['Dan 7:14']
+    assert package['evidence_steps'][0]['scripture_refs'] == []
+
+
 @pytest.mark.parametrize('fault',['sentence_twice','sentence_missing','two_comparisons','unknown_support'])
 def test_bad_steps_stop_before_the_records_call(tmp_path,fault):
     def mutate(out):
@@ -626,6 +644,34 @@ def test_a_sentence_carrying_scripture_must_be_in_an_argument_step():
         c.check_steps(steps, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)
     as_claim = {**steps, 'other': [], 'claim_text': [{'claim_id': 'CL0001', 'sentence_ids': ['S0001#002']}]}
     assert c.check_steps(as_claim, ['S0001#001', 'S0001#002', 'S0001#003'], ['CL0001'], scripture)
+
+
+def test_verified_unnumbered_quotation_is_saved_on_its_own_evidence_step():
+    from types import SimpleNamespace as Sentence
+
+    offered = '神又告訴亞伯拉罕說：「帶以撒到摩利亞山上去，獻祭給我。」'
+    stopped = '神說：「你不要動他，你不要害他。」'
+    paragraphs = {'S0008': offered + stopped}
+    sentences = [
+        Sentence(sentence_id='S0008#001', segment_index='S0008', char_start=0, char_end=len(offered)),
+        Sentence(sentence_id='S0008#002', segment_index='S0008', char_start=len(offered),
+                 char_end=len(paragraphs['S0008'])),
+    ]
+    listing = {
+        'citations': [{'basis': 'introduced', 'paragraph_key': 'S0008', 'key': ['Gen', 22, 12],
+                       'ref': 'Gen 22:12', 'quote': stopped, 'check': '直接引語制止傷害以撒'}],
+        'unresolved': [{'paragraph_key': 'S0008', 'reason': 'introduced_other_verse', 'quote': offered}],
+    }
+    scripture = creation.cited_sentences(listing, sentences, paragraphs)
+    steps = {'steps': [
+        {'step_id': 'T1', 'line': '神吩咐獻以撒', 'sentence_ids': ['S0008#001'], 'supports': ['CL0001']},
+        {'step_id': 'T2', 'line': '神制止獻祭', 'sentence_ids': ['S0008#002'], 'supports': ['CL0001']},
+    ], 'claim_text': [], 'other': []}
+    records = [{'step_id': step['step_id'], 'kind': 'evidence', 'statement': step['line'],
+                'step_type': 'answer', 'scripture_refs': []} for step in steps['steps']]
+    result = creation.build_step_records(steps, records, sentences, paragraphs, scripture=scripture)
+    assert [step['scripture_refs'] for step in result['evidence_steps']] == [[], ['Gen 22:12']]
+    assert creation.merge_scripture_refs(['創世記22:12'], ['S0008#002'], scripture) == ['創世記22:12']
 
 
 NOT_CLAIM_STEPS = {'steps': [{'step_id': 'T1', 'line': '經文事實：……', 'sentence_ids': ['S0001#001', 'S0001#002'], 'supports': ['CL0001']}],

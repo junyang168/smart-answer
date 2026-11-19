@@ -172,7 +172,7 @@ STEP_RECORDS = RULES + (
     'kind：字詞、原文、經文結構等事實→observation，填observation_type；他所反駁的看法→position，statement寫那個看法，'
     'attribution寫持有者（如「很多人」）；line以「问题：」開頭的→question，statement寫他問的問題；其餘→evidence，填step_type。不適用的欄位填null，attribution不適用填空字串。'
     'statement用一兩句寫出這一步的內容，忠於他的話，不加他沒說的。'
-    'scripture_refs只列他在這一步親口說出的經文出處（如「太5:3」）；他沒說出處的不補，即使你知道出處。')
+    'scripture_refs填他在這一步親口報出的經文出處（如「太5:3」）。沒有報章節的引文由程式合併已核實的出處。')
 
 CONNECTIONS = RULES + (
     '唯一任務：依原文和已生成節點補齊本組論證連接、直接答案和反方，不改節點statement。'
@@ -602,7 +602,22 @@ def diagram_text(block):
             + ('。結構：' + '；'.join(parts) if parts else '') + '。')
 
 
-def build_step_records(steps, records, sentences, paragraphs, visuals=None):
+def merge_scripture_refs(existing, sentence_ids, scripture):
+    """Preserve stated references and add verified citations anchored to these sentences."""
+    from backend.api.scripture import reference_slugs
+
+    merged = list(existing)
+    seen = {tuple(reference_slugs(ref)) or (ref,) for ref in merged}
+    for sid in sentence_ids:
+        for ref in scripture.get(sid, ()):
+            key = tuple(reference_slugs(ref)) or (ref,)
+            if key not in seen:
+                merged.append(ref)
+                seen.add(key)
+    return merged
+
+
+def build_step_records(steps, records, sentences, paragraphs, visuals=None, *, scripture=None):
     """Compile steps + typed records to the grouped package format the flow already accepts."""
     f.exactly(records,[r['step_id'] for r in steps['steps']],'step_id')
     by_id={v.sentence_id:v for v in sentences};kind={r['step_id']:r for r in records}
@@ -614,16 +629,17 @@ def build_step_records(steps, records, sentences, paragraphs, visuals=None):
     for step in steps['steps']:
         sid=step['step_id'];r=kind[sid];anchors=step_fragments(step['sentence_ids'],by_id,paragraphs,visuals)
         if not r['statement'].strip():raise ValueError(f'{sid}: record needs a statement')
+        refs = merge_scripture_refs(r['scripture_refs'], step['sentence_ids'], scripture or {})
         if r['kind']=='observation':
             if not r['observation_type']:raise ValueError(f'{sid}: observation needs observation_type')
             out['observations'].append({'observation_id':sid,'statement':r['statement'],'observation_type':r['observation_type'],
-                'argument_role':'load_bearing' if proves(step) else 'background','scripture_refs':r['scripture_refs'],'anchors':anchors})
+                'argument_role':'load_bearing' if proves(step) else 'background','scripture_refs':refs,'anchors':anchors})
         elif r['kind']=='evidence':
             if not r['step_type']:raise ValueError(f'{sid}: evidence needs step_type')
             out['evidence_steps'].append({'evidence_step_id':sid,'statement':r['statement'],'step_type':r['step_type'],
                 'speaker':'professor','stance':'asserted','discourse_role':step['line'],
                 'support_eligibility':'eligible_candidate' if proves(step) else 'context_only',
-                'scripture_refs':r['scripture_refs'],'anchors':anchors})
+                'scripture_refs':refs,'anchors':anchors})
         elif r['kind']=='question':
             out['questions'].append({'question_id':sid,'text':r['statement'],'questioner':'professor',
                 'question_type':'open_question','answer_state':'answered' if step['supports'] else 'unanswered',
@@ -854,8 +870,13 @@ def run(source_id, source_path, root, ports, *, groups=None, compact_audit=False
                         'argument_steps':[{'step_id':r['step_id'],'line':r['line'],'supports':r['supports'],
                             'text':''.join(text[s] for s in r['sentence_ids'])} for r in steps['steps']]},
                         contracts['step_records'],STEP_RECORDS,source_check)
-                    result=build_step_records(steps,records['records'],sentences,paragraphs,visuals)
+                    result=build_step_records(steps,records['records'],sentences,paragraphs,visuals,scripture=scripture)
                     check_citations_held(listing,result,set(owned))
+                    claim_by_id = {claim['claim_id']: claim for claim in response['claims']}
+                    for row in steps['claim_text']:
+                        claim = claim_by_id[row['claim_id']]
+                        claim['scripture_refs'] = merge_scripture_refs(
+                            claim['scripture_refs'], row['sentence_ids'], scripture)
                     for cid,anchors in result['claim_statements'].items():claim_statements.setdefault(cid,[]).extend(anchors)
                     keepers=set(result.pop('claim_statements'))
                     if result.get('repairs'):e.save(root/gid/'steps'/'attribution-repairs.json',{'repairs':result.pop('repairs'),'model_calls':0})
