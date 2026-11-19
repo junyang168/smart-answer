@@ -555,6 +555,8 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
                           "passed": {"type": "boolean"}, "evidence": {"type": "string"}}}
     requirements = packet.get("argument_requirements", [])
     row["properties"]["criterion"]["enum"].extend(route["id"] for route in requirements)
+    if subunit:
+        row["properties"]["slide"]["enum"] = [slide["first"] for slide in packet["slides"]]
     system = SEMANTIC_SYSTEM
     if requirements:
         system += "\n" + ARGUMENT_REVIEW_SYSTEM

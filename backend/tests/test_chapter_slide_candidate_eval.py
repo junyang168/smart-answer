@@ -311,6 +311,7 @@ def test_subunit_eval_reviews_playback_timing_without_changing_candidate(tmp_pat
         def generate_json(self, system, packet, schema):
             request = json.loads(packet)
             assert [p["sentence"] for p in request["slides"][0]["points"]] == ["S0002", "S0004", "S0005"]
+            assert schema["properties"]["checks"]["items"]["properties"]["slide"]["enum"] == ["S0001"]
             return {"checks": [
                 {"slide": "S0001", "criterion": criterion, "passed": criterion != "coverage", "evidence": "原審閱"}
                 for criterion in json.loads(packet)["criteria"]]}
