@@ -1,5 +1,8 @@
+// components/resources/ResourceCard.tsx
 import Link from 'next/link';
-import { ChevronRight, type LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
+import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
 
 interface ResourceCardProps {
   icon: LucideIcon;
@@ -9,19 +12,26 @@ interface ResourceCardProps {
   linkLabel: string;
 }
 
-export default function ResourceCard({ icon: Icon, title, description, link, linkLabel }: ResourceCardProps) {
+const ResourceCard = ({ icon: Icon, title, description, link, linkLabel }: ResourceCardProps) => {
   return (
-    <Link
-      href={link}
-      aria-label={`${title}：${linkLabel}`}
-      className="group block rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:border-amber-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-800 md:p-6"
-    >
-      <div className="flex items-center gap-2">
-        <Icon aria-hidden="true" className="h-5 w-5 shrink-0 text-[#8B4513]" />
-        <h3 className="flex-1 text-xl font-bold font-display text-gray-800">{title}</h3>
-        <ChevronRight aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-900" />
+    <div className="bg-white border border-gray-200 rounded-lg p-4 md:p-6 shadow-sm hover:shadow-lg transition-shadow duration-300 grid grid-cols-[auto_1fr] items-start gap-x-3 md:flex md:flex-col">
+      <div className="row-span-3 bg-gray-100 p-2 rounded-full md:mb-3 md:p-3">
+        <Icon className="w-5 h-5 md:w-7 md:h-7 text-[#8B4513]" />
       </div>
-      <p className="mt-2 leading-relaxed text-gray-600">{description}</p>
-    </Link>
+      <h3 className="text-xl font-bold font-display text-gray-800 mb-2">{title}</h3>
+      <div className="col-start-2 text-gray-600 flex-grow mb-3">
+        <div className="prose prose-slate max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
+        </div>
+      </div>
+      <Link href={link} className="col-start-2 inline-flex min-h-11 items-center justify-self-start mt-auto bg-[#8B4513] text-white font-bold py-2 px-6 rounded-full hover:bg-opacity-90 transition-all md:self-start">
+        {linkLabel}
+      </Link>
+    </div>
+
+
+
   );
-}
+};
+
+export default ResourceCard;
