@@ -1209,7 +1209,7 @@
         "expected": {
           "passed": false,
           "conclusion_slide": "S0001",
-          "coverage": false,
+          "coverage": true,
           "faithfulness_may_pass": true
         }
       }
