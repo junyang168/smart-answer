@@ -1,4 +1,4 @@
-import { BookOpen, Library, Mic, Users } from 'lucide-react';
+import { BookOpen, FilePenLine, Library, MessagesSquare } from 'lucide-react';
 import { getServerSession } from 'next-auth';
 import ResourceCard from '@/app/components/resources/ResourceCard';
 import { authConfig } from '@/app/utils/auth';
@@ -21,18 +21,18 @@ const resourceCardsData = [
     linkLabel: '瀏覽系列',
   },
   {
-    icon: Users,
+    icon: MessagesSquare,
     title: '團契查經回顧',
     description: `回顧雙週團契查經的主題、學習重點與來源連結，也讓新朋友認識我們如何一起查考聖經。`,
     link: '/resources/fellowship',
     linkLabel: '查看回顧',
   },
   {
-    icon: Mic,
+    icon: FilePenLine,
     title: '講道校對與編輯',
     description: `認領逐字稿，校對講道內容，查看編輯與發布進度。`,
     link: '/resources/series',
-    linkLabel: '查看校對進度',
+    linkLabel: '校對編輯',
     visibleTo: canUseSermonEditing,
   },
 ];
@@ -40,7 +40,7 @@ const resourceCardsData = [
 export async function ResourceCenter() {
   const session = await getServerSession(authConfig);
   const cards = resourceCardsData.filter(card => !card.visibleTo || card.visibleTo(session?.user?.role));
-  const columns = cards.length === 2 ? "md:grid-cols-2 max-w-4xl" : "md:grid-cols-2 lg:grid-cols-3 max-w-6xl";
+  const columns = cards.length === 3 ? "md:grid-cols-2 lg:grid-cols-3 max-w-6xl" : "md:grid-cols-2 max-w-4xl";
   return (
     <section className="bg-gray-50 px-4 py-5 sm:px-6 sm:py-8">
       <h1 className="sr-only">聖經學習資源</h1>
