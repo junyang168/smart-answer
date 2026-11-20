@@ -1,0 +1,909 @@
+[
+  {
+    "id": "rahab-example",
+    "subunit": "6.1",
+    "original_sentences": [
+      "S0104",
+      "S0105",
+      "S0106",
+      "S0107",
+      "S0108",
+      "S0109",
+      "S0110",
+      "S0111",
+      "S0112",
+      "S0113",
+      "S0114",
+      "S0115"
+    ],
+    "source": [
+      "那喇合啊，撒謊是惡，可是把這兩個以色列探子交出來被耶利哥城的政府拿去殺掉是更大的惡。",
+      "所以喇合就選擇那個小的惡去做。",
+      "因為喇合撒謊，所以聖經定喇合的罪，對不對？",
+      "有沒有？",
+      "沒有啊，找不到。",
+      "喇合因此神拯救她，因為她敬畏神。",
+      "所以當他們進耶利哥城的時候，這探子告訴她：「你們家裡的人住在一起，你從上面吊了一個紅線下來，讓我們知道你們住在哪裡，我們保護你們。」",
+      "而且更厲害的是什麼？",
+      "喇合後來成為耶穌的先祖，耶穌從喇合生下來。",
+      "喇合的那個……你看馬太福音的那個，那個家譜。",
+      "所以啊，聖經確實有這些選擇小的惡的例子在哪裡。",
+      "這聖經證據嘛，你搞清楚了。"
+    ],
+    "requirement": {
+      "reason": "喇合作了較小的惡，聖經沒有因此定她的罪",
+      "inference": "教授以喇合作為聖經的例證",
+      "conclusion": "聖經確有選較小惡的例子",
+      "conclusion_sentence": "S0011",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0005",
+        "S0006",
+        "S0009",
+        "S0011"
+      ]
+    },
+    "variants": [
+      {
+        "id": "example-without-purpose",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0012",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "喇合敬畏神，得到拯救"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "adjacent-slides",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0010",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+              }
+            ]
+          },
+          {
+            "first": "S0011",
+            "last": "S0012",
+            "title": "聖經中的例證",
+            "points": [
+              {
+                "sentence": "S0011",
+                "text": "喇合的選擇說明，聖經確實有選擇較小之惡的例子"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0011"
+        }
+      },
+      {
+        "id": "conclusion-on-wrong-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0010",
+            "title": "喇合的選擇",
+            "points": [
+              {
+                "sentence": "S0005",
+                "text": "喇合選了較小的惡；聖經沒有因此定她罪"
+              },
+              {
+                "sentence": "S0006",
+                "text": "喇合的選擇說明，聖經確實有選擇較小之惡的例子"
+              }
+            ]
+          },
+          {
+            "first": "S0011",
+            "last": "S0012",
+            "title": "回到問題",
+            "points": []
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0011",
+          "unfaithful_slide": "S0001"
+        }
+      },
+      {
+        "id": "concise-example-follows-the-main-line",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0012",
+            "title": "聖經中選較小之惡的例子",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "喇合選較小的惡；聖經未因此定她罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "government-example",
+    "subunit": "6.1",
+    "original_sentences": [
+      "S0191",
+      "S0194",
+      "S0195",
+      "S0196",
+      "S0197"
+    ],
+    "source": [
+      "那聖經給我們看到，常常我們做倫理抉擇的時候，你逃不掉這個問題。",
+      "我們在這一個人生當中，不可能避免這些事。",
+      "就比如說政府要求你做一件事情，違背神，你那個時候怎麼辦？",
+      "原則你要順服一切的制度，一方面你要聽神的話，那這兩個起衝突你怎麼辦？",
+      "所以那個時候就只有，我們寧可順從神，不聽你們的話，違背政府為的是要遵行神的命令，就這個原因。"
+    ],
+    "requirement": {
+      "reason": "政府要求違背神時，順服制度與順從神的要求起衝突",
+      "inference": "政府的例子說明生活裡有逃不掉的倫理抉擇",
+      "conclusion": "有些倫理抉擇無法避免，衝突時寧可順從神",
+      "conclusion_sentence": "S0005",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ]
+    },
+    "variants": [
+      {
+        "id": "example-replaces-main-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "衝突時寧可順從神",
+            "points": [
+              {
+                "sentence": "S0004",
+                "text": "政府若要求違背神，順服制度便與聽神衝突"
+              },
+              {
+                "sentence": "S0005",
+                "text": "因此寧可違背政府，以遵行神的命令"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "example-supports-main-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "無法避免的倫理抉擇",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "生活裡有逃不掉的倫理抉擇"
+              },
+              {
+                "sentence": "S0005",
+                "text": "例如政府要求違背神時，兩個要求無法兼顧，只得選擇順從神"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-contrast",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0102",
+      "S0104",
+      "S0106",
+      "S0107",
+      "S0108"
+    ],
+    "source": [
+      "問： 那現在呢？",
+      "就是說現在你離婚之後，你不再婚可以活下去，對不對？",
+      "可是保羅也講了一句話，有一些人沒有結婚……保羅那句話意思就是說，你在 burn, (哥林多前書第七章第九節說：「倘若自己不能節制，就當嫁娶。",
+      "與其慾火攻心，倒不如嫁娶為妙。」)",
+      "在那個情況底下，如果你這樣的話，寧可結婚好一點，就不要……不要在這裡什麼慾火攻心什麼東西。"
+    ],
+    "requirement": {
+      "reason": "今天不再婚也能生活",
+      "inference": "教授用保羅的話說明即使今天不必靠再婚維生，仍要考慮不能節制的情況",
+      "conclusion": "若不能節制，寧可結婚",
+      "conclusion_sentence": "S0005",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0005"
+      ]
+    },
+    "variants": [
+      {
+        "id": "facts-without-reply",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "再婚與古今處境",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "今天不再婚也能生活"
+              },
+              {
+                "sentence": "S0005",
+                "text": "不能節制時寧可結婚"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        },
+        "prior_policy_passed": false,
+        "balance_reason": "相鄰要點在同一張保留今日情況和不能節制的限定，省略連接詞不改變回答。"
+      },
+      {
+        "id": "one-complete-point",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "今天怎樣看再婚",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "今天雖然不必靠再婚維生，若不能節制，保羅仍說寧可結婚"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-summary",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0136",
+      "S0137",
+      "S0139",
+      "S0142"
+    ],
+    "source": [
+      "你看，古時候女人離婚以後，必須再婚才能夠生活。",
+      "因此呢，離婚後再婚被認為是理所當然。",
+      "因此你念聖經的時候，必須要了解他們的背景，你知道當時的文化情況，我們才會正確地能夠了解聖經本人的意思是什麼。",
+      "就是我們已經習慣了我們現在的情況，而忘記了古時候的情況，所以有時候以致引起我們對聖經錯誤的觀點，所以這個要特別小心。"
+    ],
+    "requirement": {
+      "reason": "古時女子離婚後要再婚才能維生",
+      "inference": "古代再婚為維生所需，因此被視為理所當然；若習慣現在的處境、忘記古代情況，就會誤解經文。",
+      "conclusion": "須了解當時的文化生活才能正確理解經文",
+      "conclusion_sentence": "S0003",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003",
+        "S0004"
+      ]
+    },
+    "variants": [
+      {
+        "id": "only-general-advice",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "reason-and-application",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "古時女子離婚後須再婚維生，再婚被視為理所當然"
+              },
+              {
+                "sentence": "S0003",
+                "text": "因此讀經要了解當時的文化處境"
+              },
+              {
+                "sentence": "S0004",
+                "text": "習慣今天的處境而忘記古時情況，就會誤讀聖經"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "start-and-conclusion-without-the-middle",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "古時離婚後須再婚維生"
+              },
+              {
+                "sentence": "S0003",
+                "text": "忽略這背景便會誤讀聖經"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        },
+        "prior_policy_passed": false,
+        "balance_reason": "「這背景」接回上一條古時須再婚維生，已說明為什麼缺少背景會誤讀；另有只寫一般勸告的反例。"
+      }
+    ]
+  },
+  {
+    "id": "samaritan-distinction",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0139",
+      "S0142",
+      "S0143",
+      "S0144",
+      "S0146"
+    ],
+    "source": [
+      "因此你念聖經的時候，必須要了解他們的背景，你知道當時的文化情況，我們才會正確地能夠了解聖經本人的意思是什麼。",
+      "就是我們已經習慣了我們現在的情況，而忘記了古時候的情況，所以有時候以致引起我們對聖經錯誤的觀點，所以這個要特別小心。",
+      "還有，耶穌承認，耶穌分別再婚的丈夫和非丈夫，就我剛才跟你講的那個撒馬利亞的婦人。",
+      "也就是說，你以前有過丈夫，因為她再婚過。",
+      "你現在跟妳在的，不是妳的丈夫，因為他們沒有再婚，只是同居而已。"
+    ],
+    "requirement": {
+      "reason": "耶穌稱先前再婚的對象為丈夫，卻不稱現在同居的人為丈夫",
+      "inference": "兩種稱呼的對照顯出耶穌承認已結婚的夫妻關係",
+      "conclusion": "再婚的丈夫與沒有結婚的同居者有別",
+      "conclusion_sentence": "S0005",
+      "source_sentences": [
+        "S0003",
+        "S0004",
+        "S0005"
+      ]
+    },
+    "variants": [
+      {
+        "id": "recap-loses-the-distinction",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "按古代背景理解再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "recap-keeps-the-distinction",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "時代背景與再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "讀經須知古代文化，勿因今日習慣誤解"
+              },
+              {
+                "sentence": "S0005",
+                "text": "耶穌稱她再婚的對象為丈夫；現在只是同居，所以對方不是丈夫"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "remarriage-earlier-idea-in-later-slide",
+    "subunit": "6.2",
+    "original_sentences": [
+      "S0039",
+      "S0040",
+      "S0041",
+      "S0042",
+      "S0096",
+      "S0097",
+      "S0098",
+      "S0099",
+      "S0100",
+      "S0101"
+    ],
+    "source": [
+      "就好像你來上課，你需要呼吸，我從來沒有提醒你們：「你上我的課的時候，不要忘記呼吸。」",
+      "我從來沒講，因為理所當然地認為（take for granted），你會呼吸嘛，理所當然（take for granted），你懂我怎麼說？",
+      "以為理所當然你會呼吸嘛，所以我何必講？",
+      "所以因為，因為古時候離婚之後，沒有再婚活不下去，所以保羅就沒有提說你離婚以後可以再婚，他都沒有提這件事。",
+      "觀眾問： 我認為這個地方是講理想狀態。",
+      "但是有沒有可能離婚和再婚可以分開？",
+      "就是說在離婚，不信的要離去的情況下是可以，但是再婚的話，我沒有看到聖經裡面有講……\n\n答：對啊。",
+      "再婚、離婚，聖經明講，比如說保羅明講，是可以。",
+      "可是什麼呢？",
+      "你要了解古時候的那個情況，古時候的情況離婚之後，你不再婚沒有辦法活下去。"
+    ],
+    "requirement": {
+      "reason": "古時離婚後不再婚便難以維生",
+      "inference": "教授用呼吸作類比，說明理所當然的事可以不必另提",
+      "conclusion": "保羅沒有另外提離婚後可以再婚",
+      "conclusion_sentence": "S0004",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0004"
+      ]
+    },
+    "variants": [
+      {
+        "id": "each-claim-stays-with-its-speaker-and-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0008",
+                "text": "再婚是可以的；須了解古時離婚後不再婚就無法維生"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "earlier-idea-is-imported-and-contradicts-this-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0010",
+                "text": "古時離婚後須再婚維生，不能據未明講就禁止"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0005"
+        }
+      },
+      {
+        "id": "keeps-unambiguous-context",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0004",
+            "title": "保羅為何沒有另外提再婚",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "像上課不必提醒呼吸，理所當然的事不用另提"
+              },
+              {
+                "sentence": "S0004",
+                "text": "古時離婚後須再婚才能維生，這是理所當然，所以保羅沒有另提"
+              }
+            ]
+          },
+          {
+            "first": "S0005",
+            "last": "S0010",
+            "title": "離婚後可否再婚",
+            "points": [
+              {
+                "sentence": "S0008",
+                "text": "理解再婚問題，須知道古時離婚後不再婚就無法維生"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "oath-distinguishes-essential-qualifier-from-parallel-examples",
+    "subunit": "7.1",
+    "original_sentences": [
+      "S0004",
+      "S0008",
+      "S0010",
+      "S0011",
+      "S0013",
+      "S0015",
+      "S0028"
+    ],
+    "source": [
+      "那很多人啊，就以為說，喔，所以啊，我們不管什麼情況底下，絕不能夠起誓，因為起誓啊，根本沒有什麼意義。",
+      "在《希伯來書》也講啊，是神啊，為了要給亞伯拉罕的應許，神沒有比祂更大的人可以指著起誓，所以神就去指著自己起誓，那裡明講。",
+      "可是呢，在這個大祭司面前，來受審判那個時候，大祭司告訴耶穌說：「我要你起誓，你講，你是不是神的兒子？」",
+      "耶穌說：「你講的對。」",
+      "所以這裡啊，其實不要起誓主要的意思是什麼？",
+      "其實如果你去看《馬太福音》二十三章那裡，耶穌來責備法利賽人，法利賽人用起誓的方法來騙很多人、來騙一些人。",
+      "其實耶穌這裡所說的「你不要起誓」，就是你不要用起誓來騙別人，像法利賽人所做的那種方法。"
+    ],
+    "requirement": {
+      "reason": "耶穌責備法利賽人藉起誓欺騙；神曾向亞伯拉罕起誓，耶穌也應大祭司要求作答",
+      "inference": "例證分別說明並非所有起誓都被禁止、禁令針對用起誓欺騙的用法",
+      "conclusion": "禁的是藉起誓騙人，並非全面禁誓",
+      "conclusion_sentence": "S0007",
+      "source_sentences": [
+        "S0002",
+        "S0003",
+        "S0004",
+        "S0006",
+        "S0007"
+      ]
+    },
+    "variants": [
+      {
+        "id": "one-sufficient-example",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "不可藉起誓騙人",
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "耶穌責備法利賽人藉誓騙人"
+              },
+              {
+                "sentence": "S0007",
+                "text": "禁的是藉誓欺騙，並非一律不可起誓"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "drops-the-essential-qualifier",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "不可起誓",
+            "points": [
+              {
+                "sentence": "S0006",
+                "text": "法利賽人用起誓騙人"
+              },
+              {
+                "sentence": "S0007",
+                "text": "任何情況都不可起誓"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "pat-story-keeps-a-personal-request-in-context",
+    "subunit": "10.1",
+    "original_sentences": [
+      "S0184",
+      "S0186",
+      "S0187",
+      "S0188",
+      "S0189"
+    ],
+    "source": [
+      "為了這個緣故，因為我並沒有對付她，我可以有權力來對付她，可是我沒有，結果贏了這個人。",
+      "以後在十幾年來，每次在教授會議有人……我要起來講話，我要提什麼建議，我一提，她馬上附議：「我支持Joseph，因為我知道這個人是好人，我知道這個人所提的一定是好事情。」",
+      "所以每次我一提什麼，她都支持我。",
+      "後來我告訴她：「妳不要盲目地支持，妳要用頭腦想一想。」",
+      "她說：「不是，我一直知道你這個人是誰。」"
+    ],
+    "requirement": {
+      "reason": "教授有權對付同事，卻沒有報復",
+      "inference": "以後對方多年支持他的提議，說明他因此贏得了對方",
+      "conclusion": "不報復使他贏得了同事",
+      "conclusion_sentence": "S0001",
+      "source_sentences": [
+        "S0001",
+        "S0002",
+        "S0003"
+      ]
+    },
+    "variants": [
+      {
+        "id": "follows-main-line-without-personal-aside",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "贏得同事的信任",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "有權對付同事卻不報復，結果贏得對方"
+              },
+              {
+                "sentence": "S0003",
+                "text": "十幾年來，對方經常支持他的提議"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "turns-a-personal-request-into-a-rule",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0005",
+            "title": "不盲目支持",
+            "points": [
+              {
+                "sentence": "S0001",
+                "text": "有權對付同事卻不報復，結果贏得對方"
+              },
+              {
+                "sentence": "S0003",
+                "text": "十幾年來，對方經常支持他的提議"
+              },
+              {
+                "sentence": "S0004",
+                "text": "支持也不可盲目，要用頭腦思考"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001"
+        }
+      }
+    ]
+  },
+  {
+    "id": "same-claim-two-different-local-distinctions",
+    "subunit": "5.2",
+    "original_sentences": [
+      "S0118",
+      "S0119",
+      "S0140",
+      "S0141"
+    ],
+    "source": [
+      "所以耶穌所說的不是「凡看見婦女就動起淫念」，不是。",
+      "就是說你看婦女，為了、意志決定要跟她採取行動，在那個時候你已經犯罪。",
+      "你不是說你看見一個婦女就覺得她很漂亮，就已經跟她犯姦淫了，不是。",
+      "耶穌乃是說你為了「要」，意志上決定要跟這個女人發生關係，你已經決定要做，雖然時間還沒有到，你還沒有做，你現在決定、意志決定我要做，你已經犯罪了。"
+    ],
+    "requirement": {
+      "reason": "教授區分動起淫念和意志決定採取行動",
+      "inference": "有慾望與決意去做是兩個狀態，這裡的重點是意志已作決定",
+      "conclusion": "判斷界線在決意行淫，並非一有淫念便犯罪",
+      "conclusion_sentence": "S0002",
+      "source_sentences": [
+        "S0001",
+        "S0002"
+      ]
+    },
+    "variants": [
+      {
+        "id": "preserves-the-distinction-on-each-slide",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0002",
+            "title": "心裡姦淫的界線",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "動淫念和決意行淫有別；決意要做時便已犯罪"
+              }
+            ]
+          },
+          {
+            "first": "S0003",
+            "last": "S0004",
+            "title": "覺得漂亮與決意行淫",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "覺得對方漂亮不等於犯罪"
+              },
+              {
+                "sentence": "S0004",
+                "text": "決意行淫時，雖未實行已犯罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "replaces-arising-desire-with-seeing",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0002",
+            "title": "心裡姦淫的界線",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "因此不是看見便犯罪，而是為行淫而決意時犯罪"
+              }
+            ]
+          },
+          {
+            "first": "S0003",
+            "last": "S0004",
+            "title": "覺得漂亮與決意行淫",
+            "points": [
+              {
+                "sentence": "S0003",
+                "text": "覺得對方漂亮不等於犯罪"
+              },
+              {
+                "sentence": "S0004",
+                "text": "決意行淫時，雖未實行已犯罪"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001",
+          "unfaithful_slide": "S0001",
+          "faithfulness_may_pass": true
+        },
+        "balance_reason": "「看見不等於犯罪」這句本身未必錯；即使忠實度判通過，仍須因漏掉慾望與決意的關鍵區別而擋下。"
+      }
+    ]
+  }
+]

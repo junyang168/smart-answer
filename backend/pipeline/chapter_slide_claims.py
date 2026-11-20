@@ -412,7 +412,12 @@ def point_spans(context: dict, slides: list[dict], *, source_lines=None) -> list
 def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     """他講某一步論證時，畫面上那一張要有一條要點屬於同一個 Claim（負責人 2026-11-16：
     教授論證的是 X，投影片顯示不相關的，不行）。另報不認得的 source。"""
+    from backend.api.scripture import parse_reference
+
     index = argument_index(context)
+    readings = {step["evidence_step_id"]: set(step.get("scriptures", []))
+                for claim in context.get("claims", []) for step in claim["evidence_steps"]
+                if step.get("step_type") == "scripture_text" and step.get("evidence_step_id")}
     problems = []
     for slide in slides:
         for point in slide["points"]:
@@ -431,6 +436,11 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
         if slide is None or at in reported:
             continue
         related = {rid} | entry["claims"] | {r for cid in entry["claims"] for r in steps_of.get(cid, ())}
+        if readings.get(rid):
+            shown = [parse_reference(item["slug"]) for item in slide.get("scriptures", [])]
+            if all(any(chapter_slides.scripture_covers(ref, wanted) for ref in shown)
+                   for wanted in map(parse_reference, readings[rid])):
+                continue
         if not any(point.get("source") in related for point in slide["points"]):
             problem = (f"{slide['title']}（{at}）: 他在講「{entry['statement'][:40]}」（{rid}），"
                        f"這一張沒有要點屬於它的 Claim（{'、'.join(sorted(entry['claims']))}）")
@@ -439,8 +449,11 @@ def argument_alignment(context: dict, slides: list[dict]) -> list[str]:
     return problems
 
 
-#: 他已講進另一步論證，畫面上的要點還停在別的 Claim，這麼多句以上才報（一兩句的過門不算）。
-STALE_SENTENCES = 3
+#: 他已講進另一步論證，畫面上的要點還停在別的 Claim，超過這麼多秒就報。
+# Owner 2026-11-18: a point that lags the sentence he is saying is the basic error.
+# Three sentences let 「五13至七29」 arrive 12 s late (S0015–S0016); count seconds instead.
+# The slide shows a point 1 s before its anchor, so a lag past this is visible.
+STALE_SECONDS = 4.0
 
 
 def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displayed_readings=()) -> list[str]:
@@ -469,7 +482,7 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displa
     problems, run = [], None
 
     def close():
-        if run and run["count"] >= STALE_SENTENCES:
+        if run and run["end"] - run["start"] > STALE_SECONDS:
             problems.append(f"{run['slide']}（{run['first']}–{run['last']}）: 他已講到另一步（{'、'.join(sorted(run['steps']))}），"
                             f"畫面還停在要點「{run['text']}」；那一步的第一條要點要在 {run['first']} 或更早出現")
 
@@ -477,16 +490,21 @@ def stale_points(context: dict, slides: list[dict], lines: list[dict], *, displa
         sid = line["id"]
         slide = next((s for s in reversed(slides) if s["first"] <= sid), None)
         shown = [p for p in (slide or {}).get("points", []) if p["sentence"] <= sid]
-        source = shown[-1].get("source") if shown else ""
+        # Owner 2026-11-18: an empty slide while he argues is late too (lecture 1 showed
+        # only a title from S0008 to S0014 while he laid out 五3–12).
+        empty = slide is not None and not shown and not slide.get("overview")
+        source = shown[-1].get("source") if shown else ("（本張還沒有要點）" if empty else "")
         same_claim = bool(source_claims.get(source, set()) & cover.get(sid, set()))
         if not source or sid not in cover or source in cover[sid] or same_claim or sid in displayed_readings:
             close(); run = None
             continue
-        if run and run["text"] == shown[-1]["text"]:
-            run.update(last=sid, count=run["count"] + 1)
+        text = shown[-1]["text"] if shown else source
+        if run and run["text"] == text:
+            run.update(last=sid, end=line.get("end", line["start"]))
         else:
             close()
-            run = {"slide": slide["title"], "first": sid, "last": sid, "count": 1, "text": shown[-1]["text"], "steps": cover[sid]}
+            run = {"slide": slide["title"], "first": sid, "last": sid, "text": text, "steps": cover[sid],
+                   "start": line["start"], "end": line.get("end", line["start"])}
     close()
     for slide in slides:
         bound = [p["sentence"] for p in slide["points"]]
@@ -644,13 +662,86 @@ def instance_creation_result(meta: dict) -> dict:
     return result
 
 
-# These four verified drawings have a responsive layout. Labels still come from the SVG.
-DIAGRAM_LAYOUTS = {
-    "2926b0209e3aa6a06be4c27bb5c6ed2f073d99598751d05b59fd9acb8f99c321": ("covenants", 13),
-    "46a81924c21751fc5e225bb464071c68a5ef30b8dbc5bde7c6b367732031c84c": ("overlap", 4),
-    "2e27e4ec3d314fa308d9e65686628cf4d1f2438e14f3bc613da3d81f5c178f17": ("literary_structure", 11),
-    "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291": ("overview", 6),
-}
+def verified_instance_citations(conn, change_set_id, document, result, transcript_sha):
+    """Read the source-bound quotation decisions already made for this lecture."""
+    from backend.pipeline import claim_flash_citations, evidence_refresh
+    from backend.pipeline.detailed_knowledge_extraction_runner import segment_locator
+    from backend.pipeline.source_projection import project_script
+
+    if document.get("source_file_sha256") != transcript_sha:
+        return []
+    original = Path(result["candidate_path"]).parent / "citations" / "citations.json"
+    citations = []
+    if original.is_file():
+        source = Path(document["source_path"])
+        if chapter_exposition.file_sha256(source) != transcript_sha:
+            raise ValueError("Verified citation transcript changed")
+        paragraphs = [(segment_locator(i), row["text"]) for i, row in
+                      enumerate(project_script(json.loads(source.read_text())["script"]).body_rows)]
+        saved = json.loads(original.read_text())
+        pin = evidence_refresh.digest({"contract": claim_flash_citations.CONTRACT, "paragraphs": sorted(paragraphs)})
+        if saved["input_sha256"] == pin:
+            citations.extend((None, item) for item in saved["citations"]
+                             if item["basis"] == "verbatim" or (item["basis"] == "introduced" and item.get("check")))
+    for (meta,) in conn.execute("""SELECT metadata FROM wang_knowledge.change_sets
+            WHERE source_kind='argument_layer_correction' AND status='applied'
+              AND metadata->>'lecture_change_set_id'=%s""", (change_set_id,)).fetchall():
+        path = Path(meta["corrections_path"])
+        if not path.is_file():
+            continue
+        if chapter_exposition.file_sha256(path) != meta["corrections_sha256"]:
+            raise ValueError("Verified citation correction changed")
+        correction = json.loads(path.read_text())
+        if correction.get("source_sha256") != transcript_sha:
+            continue
+        for operation in correction["operations"]:
+            if "scripture_refs" in operation.get("set", {}):
+                citations.extend((operation["object_id"], item) for item in operation.get("evidence", ())
+                                 if item.get("ref") and item.get("quote"))
+    return citations
+
+
+def locate_verified_citations(citations, refs, object_id, anchors, fragments, decisions, text, spans, *, bible=None):
+    """Place a verified verse only inside its live anchor and retained paragraph."""
+    from backend.api.scripture import parse_reference, reference_slugs
+    from backend.pipeline import claim_flash_citations
+
+    allowed = {slug for ref in refs for slug in reference_slugs(ref)}
+    if not allowed:
+        return []
+    pieces = {p["id"]: p.get("source_paragraph_key") for p in decisions["pieces"]}
+    placements = set()
+    for owner, item in citations:
+        if owner not in (None, object_id):
+            continue
+        slug, *extra = reference_slugs(item["ref"]) or [None]
+        if extra or slug not in allowed:
+            continue
+        quote = item["quote"].strip().lstrip("」』）)").strip()
+        needle = compact(quote)
+        ids = {sid for anchor in anchors
+               if fragments[anchor["fragment_id"]].get("paragraph_key") == item["paragraph_key"]
+               and needle and needle in compact(anchor["quote"])
+               for sid in anchor["sentences"]}
+        if ids:
+            scoped = [span for span in spans if span[2] in ids and
+                      pieces[span[3]] in (None, item["paragraph_key"])]
+            matched = locate(text, scoped, quote)
+            if matched:
+                first = matched[0]
+                # A verbatim citation may have been catalogued against its
+                # longer second sentence. Show it when its opening is read.
+                if bible is not None and item.get("basis") == "verbatim":
+                    at = next(i for i, span in enumerate(spans) if span[2] == first)
+                    if at and spans[at - 1] in scoped and spans[at - 1][3] == spans[at][3]:
+                        low, high, previous, _ = spans[at - 1]
+                        opening = claim_flash_citations.norm(text[low:high])
+                        ref = parse_reference(slug)
+                        verse = bible.chapter(ref["slug_book"], ref["chapter"]).get(str(ref["start"]), "")
+                        if len(opening) >= claim_flash_citations.QUOTE_CHARS and claim_flash_citations.norm(verse).startswith(opening):
+                            first = previous
+                placements.add((first, slug))
+    return [{"sentence": sid, "slug": slug} for sid, slug in sorted(placements)]
 
 
 def instance_diagrams(conn, claim_ids: list[str]) -> dict:
@@ -696,17 +787,9 @@ def instance_diagrams(conn, claim_ids: list[str]) -> dict:
                 or raw[blocks[0].char_end:].strip()
                 or hashlib.sha256(raw.encode()).hexdigest() != sha):
             raise ValueError(f"Diagram SVG failed validation: {fragment['fragment_id']}")
-        layout = {}
-        if sha in DIAGRAM_LAYOUTS:
-            name, expected_labels = DIAGRAM_LAYOUTS[sha]
-            labels = [fact["text"].strip() for fact in blocks[0].facts
-                      if fact["tag"] == "text" and (fact.get("text") or "").strip()]
-            if len(labels) != expected_labels:
-                raise ValueError(f"Diagram labels changed: {fragment['fragment_id']}")
-            layout = {"layout": name, "labels": labels}
         links.setdefault(claim_id, {})[sha, kind, doc["origin"]] = {
             "title": doc["title"], "origin": doc["origin"], "kind": kind, "sha256": sha,
-            "path": fragment["visual_source_url"], "svg": raw, **layout,
+            "path": fragment["visual_source_url"], "svg": raw,
         }
     return {claim: list(diagrams.values()) for claim, diagrams in links.items()}
 
@@ -718,6 +801,9 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     come from the instance. Only the group order and titles come from the run the
     ChangeSet names: the instance has no record for an argument group. The run's
     candidate SHA must match what the ChangeSet recorded."""
+    from backend.api.scripture import reference_slugs
+    from backend.pipeline.chapter_slide_eval import Bible
+
     path = chapter_exposition.record_path(data_base_dir, passage, lecture)
     decisions = json.loads(path.read_text())
     text, spans = retained_spans(decisions)
@@ -727,6 +813,8 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
     if document.get("title") != lecture:
         raise ValueError(f"ChangeSet {change_set_id} holds {document.get('title')}, not {lecture}")
     result = instance_creation_result(meta)
+    citations = verified_instance_citations(conn, change_set_id, document, result, decisions.get("transcript_sha256"))
+    bible = Bible()
     fragments = {f["fragment_id"]: f for f in records.get("source_fragments", [])}
     by_id = {}
     for step in records.get("evidence_steps", []):
@@ -742,7 +830,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
             support.setdefault(rel["to_id"], []).append(rel["from_id"])
     diagrams = instance_diagrams(conn, [claim["claim_id"] for claim in claims_by_short.values()])
     groups, claims, excluded = [], [], []
-    included = set()
+    included, verified = set(), set()
     for number, (gid_run, shorts) in enumerate(sorted(result["group_claim_ids"].items()), 1):
         shorts = [s for s in shorts if s in claims_by_short and s not in included]  # a Claim the owner ruled out is gone from the instance
         if not shorts:
@@ -775,7 +863,13 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                         anchors.append({"fragment_id": fid, "quote": quote, "sentences": ids})
                 if anchors:
                     entry = {"evidence_step_id": rid, "statement": statement, "step_type": kind, "anchors": anchors}
-                    scriptures, unread = evidence_scriptures(refs, spoken, passage=passage)
+                    placed = locate_verified_citations(citations, refs, rid, anchors, fragments, decisions, text, spans,
+                                                       bible=bible)
+                    confirmed = {item["slug"] for item in placed}
+                    verified.update((item["sentence"], item["slug"]) for item in placed)
+                    scriptures, unread = evidence_scriptures(
+                        [ref for ref in refs if not set(reference_slugs(ref)) & confirmed], spoken, passage=passage)
+                    scriptures = sorted(confirmed | set(scriptures))
                     if scriptures:
                         entry["scriptures"] = scriptures
                     excluded += [{"claim_id": cid, "object_id": rid, "reason": f"scripture not checkable: {ref}"} for ref in unread]
@@ -784,7 +878,12 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
             own = [a["source_fragment_id"] for o in claim.get("occurrences", []) for a in o.get("anchors", [])
                    if not a.get("evidence_id") and not a.get("observation_id") and a.get("source_fragment_id") in fragments
                    and fragments[a["source_fragment_id"]].get("source_modality") != "visual"]
-            stated = next((ids[0] for fid in own for ids in [locate(text, spans, fragments[fid]["verbatim_excerpt"])] if ids), None)
+            own_anchors = [{"fragment_id": fid, "quote": fragments[fid]["verbatim_excerpt"], "sentences": ids}
+                           for fid in own if (ids := locate(text, spans, fragments[fid]["verbatim_excerpt"]))]
+            stated = own_anchors[0]["sentences"][0] if own_anchors else None
+            placed = locate_verified_citations(citations, claim.get("scripture_refs") or [], claim["claim_id"],
+                                             own_anchors, fragments, decisions, text, spans, bible=bible)
+            verified.update((item["sentence"], item["slug"]) for item in placed)
             if not stated and not evidence:
                 # Nothing of it is in this chapter's retained sentences (Acts 15, the Q&A): not this page's outline.
                 excluded.append({"claim_id": cid, "object_id": claim["claim_id"], "reason": "not in this chapter's retained sentences"})
@@ -804,6 +903,7 @@ def compile_instance_context(passage: str, lecture: str, *, data_base_dir: Path,
                "transcript_sha256": decisions.get("transcript_sha256"),
                "instance": {"change_set_id": change_set_id, "candidate_sha256": meta["candidate_sha256"]},
                "diagram_contract": "claim-bound.v1",
+               "verified_scriptures": [{"sentence": sid, "slug": slug} for sid, slug in sorted(verified)],
                "groups": groups, "claims": claims, "excluded": excluded}
     context["claim_source_ranges"] = claim_source_ranges(context, decisions)
     return context
@@ -911,23 +1011,34 @@ def main():
 class RecordedClient:
     """Save exact requests and raw CLI replies; replay never starts an unknown call."""
 
-    def __init__(self, client, directory: Path):
+    def __init__(self, client, directory: Path, *, once: bool = False):
         self.client, self.directory = client, directory
         self.model = client.model
+        self.once = once
 
     def generate_json(self, system, prompt, schema):
         request = {"system": system, "user": prompt, "schema": schema, "model": self.model}
         root = self.directory / digest(request)
         root.mkdir(parents=True, exist_ok=True)
         target = root / "request.json"
-        if target.exists():
+        saved = root / "answer.json"
+        if self.once and any(path != target for path in self.directory.glob("*/request.json")):
+            raise ValueError("A different one-shot request is already saved for this subunit")
+        try:
+            with target.open("x", encoding="utf-8") as stream:
+                json.dump(request, stream, ensure_ascii=False, indent=2)
+        except FileExistsError:
             if json.loads(target.read_text()) != request:
                 raise ValueError("Saved request changed")
-        else:
-            target.write_text(json.dumps(request, ensure_ascii=False, indent=2))
+            if self.once:
+                if not saved.is_file():
+                    raise ValueError("One-shot request has no recorded answer; no automatic retry")
+                return json.loads(saved.read_text())
         self.client.call_artifacts = root
         answer = self.client.generate_json(system, prompt, schema)
-        (root / "answer.json").write_text(json.dumps(answer, ensure_ascii=False, indent=2))
+        temp = saved.with_suffix(".tmp")
+        temp.write_text(json.dumps(answer, ensure_ascii=False, indent=2))
+        temp.replace(saved)
         return answer
 
 

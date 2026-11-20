@@ -101,7 +101,7 @@ def test_rejected_claim_trial_revision_is_preserved_and_not_called_again(tmp_pat
                'findings': [{'slide': 'S0001', 'kind': '跟得上', 'problem': '故事', 'fix': '加要點'}],
                'claim_checks': [{'claim_id': 'C1', 'status': 'covered', 'slides': ['S0001'], 'reason': '完整'}]}
     chapter_slides.review(CHAPTER, 'L', data_base_dir=tmp_path, client=FakeClient([verdict]))
-    client = FakeClient([{'slides': [slide('S0001', points=('一', '二', '三', '四', '五', '六'))]}])
+    client = FakeClient([{'slides': [slide('S0001', points=('一', '二', '三', '四', '五', '六'))]}] * (chapter_slides.REPAIRS + 1))
     assert chapter_slides.revise(CHAPTER, 'L', data_base_dir=tmp_path, client=client)['status'] == 'rejected'
     before = chapter_slides.record_path(tmp_path, CHAPTER.passage, 'L').read_bytes()
     unused = FakeClient([])
@@ -219,7 +219,7 @@ def test_creation_runs_become_an_outline_with_their_evidence_on_retained_sentenc
         ('E1', 'answer', ['S0003']), ('P1', 'opposed_position', ['S0002'])]
     assert [e['evidence_step_id'] for e in point['evidence_steps']] == ['E2', 'O1']
     client = FakeClient([{'slides': [slide('S0001', points=({'sentence': 'S0002', 'text': '反方', 'source': 'P1'},
-                                                            {'sentence': 'S0004', 'text': '引經', 'source': 'E2'}))]}])
+                                                            {'sentence': 'S0004', 'text': '引經', 'source': 'E2'}))]}] * (chapter_slides.REPAIRS + 1))  # empty slide while he argues: sent back
     chapter_slides.decide(CHAPTER, 'L', data_base_dir=tmp_path, client=client, force=True, claim_context=context)
     assert '不另做本堂地圖' in client.prompts[0] and '經文事實' in client.prompts[0]
 
@@ -281,12 +281,12 @@ def test_points_are_timed_by_the_argument_step_they_show_and_unrelated_slides_ar
 
 
 def test_a_point_left_over_from_another_step_is_reported(tmp_path):
-    """他已講到另一步，畫面最新的要點還屬於別的 Claim：三句以上就報；兩條綁同一句也報。"""
+    """他已講到另一步，畫面最新的要點還屬於別的 Claim：超過 4 秒就報；兩條綁同一句也報。"""
     context = {"claims": [
         {"claim_id": "C1", "evidence_steps": [{"evidence_step_id": "E1", "anchors": [{"sentences": ["S0001", "S0002"]}]}]},
         {"claim_id": "C2", "evidence_steps": [{"evidence_step_id": "E2", "anchors": [{"sentences": ["S0003", "S0004", "S0005", "S0006"]}]}]},
     ]}
-    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    lines = [{"id": f"S000{i}", "start": 3.0 * i, "end": 3.0 * i + 3} for i in range(1, 7)]
     late = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0001", "text": "一", "source": "E1"},
                                                          {"sentence": "S0006", "text": "二", "source": "E2"}]}]
     assert hints.stale_points(context, late, lines) == [
@@ -308,7 +308,7 @@ def test_where_he_states_a_claim_itself_the_slide_must_show_that_claim():
         {"claim_id": "C2", "statement": "推辭不是謙卑", "stated": "S0003",
          "evidence_steps": [{"evidence_step_id": "E2", "statement": "例子", "anchors": [{"sentences": ["S0002", "S0003"]}]}]},
     ]}
-    lines = [{"id": f"S000{i}"} for i in range(1, 7)]
+    lines = [{"id": f"S000{i}", "start": 3.0 * i, "end": 3.0 * i + 3} for i in range(1, 7)]
     assert hints.argument_index(context)["C1"]["last"] == "S0006"
     stale = [{"first": "S0001", "title": "甲", "points": [{"sentence": "S0002", "text": "推辭", "source": "E2"}]}]
     assert hints.stale_points(context, stale, lines) == [
@@ -367,7 +367,7 @@ def test_shared_evidence_does_not_move_a_claim_conclusion_before_its_stated_sent
 def test_visible_scripture_carries_reading_but_cannot_excuse_stale_explanation():
     context={'claims':[{'claim_id':'C1','statement':'old','evidence_steps':[{'evidence_step_id':'E1','statement':'old','anchors':[{'sentences':['S0001']}]}]},
                        {'claim_id':'C2','statement':'new','evidence_steps':[{'evidence_step_id':'E2','statement':'new','anchors':[{'sentences':[f'S{i:04}' for i in range(2,8)]}]}]}]}
-    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,8)]
+    lines=[{'id':f'S{i:04}','text':'source','start':3.0*i,'end':3.0*i+3} for i in range(1,8)]
     slides=[{'first':'S0001','last':'S0007','title':'test','points':[{'sentence':'S0001','source':'E1','text':'old'}]}]
     reading={'S0002','S0003','S0004'}
     assert hints.stale_points(context,slides,lines[:4],displayed_readings=reading)==[]
@@ -379,7 +379,7 @@ def test_other_evidence_of_same_claim_can_carry_context_but_unrelated_claim_cann
     context={'claims':[{'claim_id':'C1','statement':'one argument','evidence_steps':[
         {'evidence_step_id':'E1','statement':'premise','anchors':[{'sentences':['S0001']}]},
         {'evidence_step_id':'E2','statement':'comparison','anchors':[{'sentences':['S0002','S0003','S0004']}]}]}]}
-    lines=[{'id':f'S{i:04}','text':'source'} for i in range(1,5)]
+    lines=[{'id':f'S{i:04}','text':'source','start':3.0*i,'end':3.0*i+3} for i in range(1,5)]
     slides=[{'first':'S0001','last':'S0004','title':'one argument','points':[{'sentence':'S0001','source':'E1','text':'related premise'}]}]
     assert hints.stale_points(context,slides,lines)==[]
     context['claims'].append({'claim_id':'C2','statement':'unrelated','evidence_steps':[context['claims'][0]['evidence_steps'].pop()]})
@@ -468,6 +468,65 @@ def test_corrected_instance_reads_only_its_exact_original_grouping(tmp_path):
         hints.instance_creation_result(meta)
 
 
+def test_verified_paraphrases_project_to_their_exact_playback_sentences():
+    offered = "神又告訴亞伯拉罕說：『帶以撒到摩利亞山上去，獻祭給我。』"
+    stopped = "神說：『你不要動他，你不要害他。』"
+    kept = [{"id": "U1", "source_paragraph_key": "S0008", "text": offered + stopped,
+             "start": 0, "end": 30}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U1", "keep": True}]}
+    text, spans = hints.retained_spans(decisions)
+    anchors = [{"fragment_id": "F1", "quote": offered + stopped, "sentences": ["S0001", "S0002"]}]
+    fragments = {"F1": {"paragraph_key": "S0008"}}
+    citations = [
+        ("ST5", {"paragraph_key": "S0008", "ref": "Gen 22:2", "quote": offered}),
+        (None, {"paragraph_key": "S0008", "ref": "Gen 22:12", "quote": stopped}),
+        (None, {"paragraph_key": "S0007", "ref": "Gen 22:3", "quote": offered}),
+    ]
+    projected = hints.locate_verified_citations(citations, ["創世記22:2", "Gen 22:12", "創世記22:3"],
+                                               "ST5", anchors, fragments, decisions, text, spans)
+    assert projected == [{"sentence": "S0001", "slug": "gen-22-2"}, {"sentence": "S0002", "slug": "gen-22-12"}]
+    raw = slide("S0001")
+    raw["points"] = [{"sentence": "S0001", "text": "獻以撒"}, {"sentence": "S0002", "text": "制止獻祭"}]
+    raw["scriptures"] = [{"sentence": "S0001", "ref": "創世記22:12"}]
+    problems, _, slides = chapter_slides.check([raw], kept, CHAPTER, verified_scriptures=projected)
+    assert not problems
+    assert slides[0]["scriptures"] == projected
+    _, timed = chapter_slides.placed(decisions, {"slides": slides})
+    assert [item["at"] for item in timed[0]["scriptures"]] == [
+        line["start"] for line in chapter_slides.sentences(kept)]
+
+
+def test_a_verse_split_into_two_sentences_appears_at_its_opening(tmp_path):
+    from backend.pipeline.chapter_slide_eval import Bible
+
+    first = "只是我告訴你們，不要與惡人作對。"
+    second = "有人打你的右臉，連左臉也轉過來由他打。"
+    (tmp_path / "MAT").mkdir()
+    (tmp_path / "MAT" / "5.json").write_text(json.dumps({"39": first + second}))
+    kept = [{"id": "U1", "source_paragraph_key": "S0001", "text": first + second, "start": 0, "end": 20}]
+    decisions = {"pieces": kept, "decisions": [{"id": "U1", "keep": True}]}
+    text, spans = hints.retained_spans(decisions)
+    anchors = [{"fragment_id": "F1", "quote": first + second, "sentences": ["S0001", "S0002"]}]
+    citations = [(None, {"paragraph_key": "S0001", "ref": "Matt 5:39", "basis": "verbatim", "quote": second})]
+    projected = hints.locate_verified_citations(citations, ["Matt 5:39"], "E1", anchors,
+        {"F1": {"paragraph_key": "S0001"}}, decisions, text, spans, bible=Bible(tmp_path))
+    assert projected == [{"sentence": "S0001", "slug": "mat-5-39"}]
+
+
+def test_scripture_reading_can_cover_a_scripture_text_step_without_a_summary_point():
+    step = {"evidence_step_id": "E1", "statement": "讀出經文", "step_type": "scripture_text",
+            "scriptures": ["mat-5-39"], "anchors": [{"sentences": ["S0001"]}]}
+    context = {"claims": [{"claim_id": "C1", "statement": "推論", "stated": "S0002", "evidence_steps": [step]}]}
+    slides = [
+        {"first": "S0001", "last": "S0001", "title": "讀經", "points": [],
+         "scriptures": [{"sentence": "S0001", "slug": "mat-5-38-39"}]},
+        {"first": "S0002", "last": "S0002", "title": "解釋", "points": [{"source": "C1"}]},
+    ]
+    assert hints.argument_alignment(context, slides) == []
+    step["step_type"] = "inference"
+    assert len(hints.argument_alignment(context, slides)) == 1
+
+
 def test_diagram_eval_keeps_editorial_and_professor_figures_on_their_own_slides():
     c = {"title": "登山寶訓的文學結構", "origin": "釋經筆記整理", "kind": "editorial",
          "sha256": "c" * 64, "svg": "<svg/>"}
@@ -510,3 +569,35 @@ def test_diagram_eval_law_figures_follow_their_own_claim_not_the_supporting_poin
     slides[1]["points"][0]["source"] = "ST04"
     with pytest.raises(ValueError, match="所選論證圖沒有連到本張的論點"):
         chapter_slides.timed_diagrams(slides, lines, context)
+
+
+def test_a_point_two_sentences_late_is_reported_nysc_2_1_s0015():
+    """Owner 2026-11-18, 太5 lecture 1: he says 「五章十三節到七章二十九節…門徒的使命」 at S0015
+    (186.0 s); the point was merged with S0017 and appeared at 198.6 s. Two sentences
+    passed the old three-sentence tolerance; 12 s on screen is reported."""
+    context = {"claims": [
+        {"claim_id": "CL0002", "evidence_steps": [{"evidence_step_id": "ST03", "anchors": [{"sentences": ["S0014"]}]}]},
+        {"claim_id": "CL0003", "evidence_steps": [{"evidence_step_id": "ST04", "anchors": [{"sentences": ["S0015", "S0016", "S0017"]}]}]},
+    ]}
+    lines = [{"id": "S0014", "start": 177.1, "end": 186.0}, {"id": "S0015", "start": 186.0, "end": 194.6},
+             {"id": "S0016", "start": 194.6, "end": 198.6}, {"id": "S0017", "start": 198.6, "end": 210.6}]
+    merged = [{"first": "S0014", "title": "登山寶訓的背景與結構", "points": [
+        {"sentence": "S0014", "text": "五3至12藉彌賽亞的祝福顯明祂的身份", "source": "CL0002"},
+        {"sentence": "S0017", "text": "五13至七29談門徒認識祂後的生命反應", "source": "ST04"}]}]
+    assert any("S0015–S0016" in p for p in hints.stale_points(context, merged, lines))
+    split = [dict(merged[0], points=[merged[0]["points"][0],
+                                     {"sentence": "S0015", "text": "五13至七29談門徒的使命", "source": "ST04"},
+                                     {"sentence": "S0017", "text": "認識祂後有生命上的反應", "source": "ST04"}])]
+    assert hints.stale_points(context, split, lines) == []
+
+
+def test_diagram_appears_when_he_starts_the_argument_not_at_the_recap():
+    """Owner 2026-11-18: diagram D waited for CL0001's stated sentence S0018 (his recap,
+    210.6 s); he lays out the two parts from S0008 (135.4 s)."""
+    d = {"title": "登山寶訓（論彌賽亞／門徒的使命）", "origin": "母本", "kind": "professor",
+         "sha256": "d" * 64, "svg": "<svg/>"}
+    lines = [{"id": "S0001", "start": 71.0}, {"id": "S0008", "start": 135.4}, {"id": "S0018", "start": 210.6}]
+    slides = [{"first": "S0001", "last": "S0018", "title": "結構", "points": [], "diagram_ref": d["sha256"]}]
+    context = {"claims": [{"claim_id": "CL0001", "stated": "S0018", "diagrams": [d],
+                           "evidence_steps": [{"evidence_step_id": "ST03", "anchors": [{"sentences": ["S0008"]}]}]}]}
+    assert chapter_slides.timed_diagrams(slides, lines, context)["S0001"]["at"] == 135.4

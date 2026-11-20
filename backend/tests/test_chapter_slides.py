@@ -65,6 +65,18 @@ def test_points_verses_and_scripture_references_are_checked():
     assert "經文出處讀不出來" in joined
 
 
+def test_subunit_slide_can_cover_a_passage_elsewhere_in_scripture():
+    raw = slide("S0001", verses="", scriptures=[{"sentence": "S0001", "ref": "使徒行傳15:23"}])
+    context = {"scope": "subunit"}
+    assert chapter_slides.check([raw], KEPT, CHAPTER)[0]
+    problems, _, slides = chapter_slides.checked([raw], KEPT, CHAPTER, context)
+    assert not problems
+    assert slides[0]["verses"] == []
+    assert slides[0]["scriptures"] == [{"sentence": "S0001", "slug": "act-15-23"}]
+    raw["verses"] = "6:1"
+    assert chapter_slides.checked([raw], KEPT, CHAPTER, context)[0]
+
+
 def test_points_appear_when_he_reaches_them_in_his_order():
     # 「八福都是天國的祝福」：四條一起出來，他還在讀經文，聽眾已讀到兩分鐘後的結論。
     problems, _, _ = chapter_slides.check([slide("S0001", points=(
@@ -576,3 +588,32 @@ def test_prayer_unit_allows_its_matthew_six_and_seven_verses():
     assert parse_slide_verses('7:7–12', scoped) is None
     assert parse_slide_verses('7:1–6', chapter) is None
     assert '6:8–34、7:1–11' in system_prompt(scoped)
+
+
+def test_overlap_merges_only_within_the_same_sentence_book_and_chapter():
+    inputs = [{"sentence": at, "slug": slug} for at, slug in (
+        ("S0001", "1pe-2-13-14"), ("S0001", "1pe-2-14-15"), ("S0001", "1pe-2-16"),
+        ("S0001", "1pe-3-13"), ("S0001", "2pe-2-13"), ("S0002", "1pe-2-14"),
+    )]
+    assert chapter_slides.merge_scripture_ranges(inputs, ["S0001", "S0002"]) == [
+        {"sentence": at, "slug": slug} for at, slug in (
+            ("S0001", "1pe-2-13-15"), ("S0001", "1pe-2-16"),
+            ("S0001", "1pe-3-13"), ("S0001", "2pe-2-13"), ("S0002", "1pe-2-14"),
+        )
+    ]
+
+
+def test_verified_repeat_does_not_displace_the_first_actual_reading(tmp_path):
+    text = "我實在告訴你們，從前有許多先知和義人要看你們所看的，卻沒有看見，要聽你們所聽的，卻沒有聽見。"
+    chapter_file = tmp_path / "MAT" / "13.json"
+    chapter_file.parent.mkdir()
+    chapter_file.write_text(json.dumps({"17": text}))
+    kept = [{"id": "U1", "start": 0, "end": 45,
+             "text": "我們先看一處經文。" + text + "這一節後面還要再談。"}]
+    scripture = {"ref": "馬太福音 13:17", "sentence": "S0002"}
+    raw = slide("S0001", scriptures=[{**scripture, "sentence": "S0001"}, scripture])
+    verified = [{"sentence": "S0003", "slug": "mat-13-17"}]
+    problems, _, slides = chapter_slides.check([raw], kept, CHAPTER,
+                                               cuv_root=tmp_path, verified_scriptures=verified)
+    assert not problems
+    assert slides[0]["scriptures"] == [{"sentence": "S0002", "slug": "mat-13-17"}, *verified]

@@ -69,9 +69,10 @@ def browser_checks(evidence, expected_binding, *, diagram_shas=()):
             diagrams = view.get('diagrams', [])
             if {d.get('sha256') for d in diagrams} != set(diagram_shas) or len(diagrams) != len(diagram_shas):
                 problems.append(f"Diagram browser coverage is incomplete: {view.get('width')}")
-            if any(not all(d.get(key) is True for key in ('fits', 'dark', 'no_zoom', 'hidden_before'))
-                   or not isinstance(d.get('min_font_px'), (float, int))
-                   or not math.isfinite(d['min_font_px']) or d['min_font_px'] < 14 for d in diagrams):
+            # Owner 2026-11-18: his drawing as drawn (no re-layout, no inverted colours),
+            # beside the points, enlargeable, and not before he starts that argument.
+            if any(not all(d.get(key) is True for key in ('fits', 'as_drawn', 'points_visible', 'enlarge', 'hidden_before'))
+                   for d in diagrams):
                 problems.append(f"Diagram is clipped, unreadable or mistimed: {view.get('width')}")
         compact = view.get('width', 999) < 390 and view.get('height', 999) < 600
         if view.get('menuVisible') != (not compact) or view.get('speedVisible') != (not compact):

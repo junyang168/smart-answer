@@ -1,0 +1,143 @@
+[
+  {
+    "id": "question-starts-with-the-scripture-reading",
+    "source_reference": {
+      "lecture": "2011 NYSC 專題：馬太福音釋經（二）2",
+      "subunit": "3.2",
+      "first": "S0057",
+      "last": "S0066",
+      "transcript_sha256": "0d5d09b1411d74bba83cfaa98671012aec26afe0d4a67b2bbeb1c8cbf05c14b4"
+    },
+    "reason": "問句型要點在教授開始讀保羅的話時顯示。批評譯文是下一個要點，兩條的時間不得合併。",
+    "packet": {
+      "source": [
+        {
+          "id": "S0057",
+          "start": 407.0,
+          "text": "下面暫且不講，我們先來看。"
+        },
+        {
+          "id": "S0058",
+          "start": 411.21254355400697,
+          "text": "保羅明講，在哥林多前書第九章第二十節明講：「向沒有律法的人，我就作沒有律法的人，為要得沒有律法的人。"
+        },
+        {
+          "id": "S0059",
+          "start": 427.4146341463415,
+          "text": "其實我在神面前，不是沒有律法；在基督面前，正在律法之下。」"
+        },
+        {
+          "id": "S0060",
+          "start": 436.81184668989545,
+          "text": "這句話翻得大有問題，矛盾啊！"
+        },
+        {
+          "id": "S0061",
+          "start": 441.34843205574913,
+          "text": "「其實我在神面前，不是沒有律法；在基督面前，正在律法之下。」"
+        },
+        {
+          "id": "S0062",
+          "start": 451.0696864111498,
+          "text": "這句話翻錯了！"
+        },
+        {
+          "id": "S0063",
+          "start": 453.3379790940767,
+          "text": "其實是什麼？"
+        },
+        {
+          "id": "S0064",
+          "start": 455.2822299651568,
+          "text": "「其實我在神面前，不是沒有律法，我乃在基督律法之下。」"
+        },
+        {
+          "id": "S0065",
+          "start": 464.0313588850174,
+          "text": "是在基督的律法之下。"
+        },
+        {
+          "id": "S0066",
+          "start": 467.2717770034843,
+          "text": "保羅說：「我已經不在摩西律法底下，我乃在基督律法之下。」"
+        }
+      ],
+      "slides": [
+        {
+          "first": "S0057",
+          "last": "S0066",
+          "points": [
+            {
+              "sentence": "S0058",
+              "text": "保羅如何說自己與律法的關係？"
+            },
+            {
+              "sentence": "S0060",
+              "text": "和合本此處的譯法有問題"
+            },
+            {
+              "sentence": "S0064",
+              "text": "應譯為乃在基督律法之下"
+            },
+            {
+              "sentence": "S0066",
+              "text": "保羅已不在摩西律法之下"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_anchors": [
+      "S0058",
+      "S0060",
+      "S0064",
+      "S0066"
+    ],
+    "recorded_jev": {
+      "model": "jev-1.14.0",
+      "request_sha256": "5d2a309ae2a32ca2d426488abdb5b13854addab58b7fcf82eecbdf893cc23f42",
+      "answers": {
+        "0:whole:S0057": "none",
+        "0:whole:S0058": "full",
+        "0:whole:S0059": "full",
+        "0:whole:S0060": "full",
+        "0:whole:S0061": "full",
+        "0:whole:S0062": "full",
+        "0:whole:S0063": "full",
+        "0:whole:S0064": "full",
+        "0:whole:S0065": "full",
+        "0:whole:S0066": "full",
+        "1:whole:S0057": "none",
+        "1:whole:S0058": "partial",
+        "1:whole:S0059": "full",
+        "1:whole:S0060": "full",
+        "1:whole:S0061": "full",
+        "1:whole:S0062": "full",
+        "1:whole:S0063": "full",
+        "1:whole:S0064": "full",
+        "1:whole:S0065": "full",
+        "1:whole:S0066": "full",
+        "2:whole:S0057": "none",
+        "2:whole:S0058": "partial",
+        "2:whole:S0059": "full",
+        "2:whole:S0060": "full",
+        "2:whole:S0061": "full",
+        "2:whole:S0062": "full",
+        "2:whole:S0063": "full",
+        "2:whole:S0064": "full",
+        "2:whole:S0065": "full",
+        "2:whole:S0066": "full",
+        "3:whole:S0057": "none",
+        "3:whole:S0058": "full",
+        "3:whole:S0059": "full",
+        "3:whole:S0060": "full",
+        "3:whole:S0061": "full",
+        "3:whole:S0062": "full",
+        "3:whole:S0063": "full",
+        "3:whole:S0064": "full",
+        "3:whole:S0065": "full",
+        "3:whole:S0066": "full"
+      }
+    }
+  }
+]

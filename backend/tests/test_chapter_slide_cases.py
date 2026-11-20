@@ -48,3 +48,22 @@ def test_missing_or_duplicated_owner_source_quote_cannot_fall_back_to_old_id():
     for source in [[], [{'id': 'S0001', 'text': '原話'}, {'id': 'S0002', 'text': '原話'}]]:
         assert c.check_cases([], [case], source)
         with pytest.raises(ValueError): c.timing_corrections([], [case], source)
+
+
+def test_structure_keeps_mission_and_response_on_one_slide_at_separate_anchors():
+    lecture = "2011 NYSC 專題：馬太福音釋經（二）1"
+    cases = [case for case in c.cases_for(lecture)
+             if case.get("at") in {"S0015", "S0017"} or case["kind"] == "one_slide"]
+    source = [{"id": "S0105", "text": cases[0]["from_text"]},
+              {"id": "S0115", "text": cases[1]["source_text"]},
+              {"id": "S0117", "text": cases[2]["source_text"]},
+              {"id": "S0120", "text": cases[0]["to_text"]}]
+    structure = {"first": "S0105", "title": "登山寶訓的結構"}
+    mission = {"sentence": "S0115", "text": "太5:13–7:29 談門徒的使命"}
+    response = {"sentence": "S0117", "text": "認識神後有行為或生命上的反應"}
+    assert c.check_cases([{**structure, "points": [mission, response]}], cases, source) == []
+    for sentence in ("S0115", "S0117"):
+        combined = {"sentence": sentence, "text": mission["text"] + "；" + response["text"]}
+        assert c.check_cases([{**structure, "points": [combined]}], cases, source)
+    assert c.check_cases([{**structure, "points": [mission]},
+                          {"first": "S0117", "title": "門徒", "points": [response]}], cases, source)
