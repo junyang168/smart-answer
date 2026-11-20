@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { mediaTime, sourceTime } from "./listeningClock";
 import { readBookmark, resumeClip } from "./listeningProgress";
 import { parentPassage, listeningTitle } from "./listeningUnits";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -74,6 +75,7 @@ const SEEK_TIMEOUT_MS = 10000;
 type SeekRequest = {
   src: string;
   time: number;
+  stretch: Stretch;
   play: boolean;
   attempts: number;
   warming: boolean;
@@ -142,7 +144,7 @@ export default function ChapterListener({
           try { saved = mode ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
           const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
             parent: parentPassage(loaded[item.section]), source: item.sermon.source_id,
-            start: item.start, end: item.end})), saved, payload.resume_version ?? "",
+            start: item.start, end: item.end, excluded: item.sermon.excluded_audio, audioRevision: item.sermon.audio_revision})), saved, payload.resume_version ?? "",
             {section: requestedSection, source: requestedSource, time: initialTime});
           return {loaded, list, first, mode, resumed};
         };
@@ -181,7 +183,8 @@ export default function ChapterListener({
     window.clearTimeout(seekTimer.current);
     const wanted: SeekRequest = {
       src: new URL(mediaSrc(url), document.baseURI).href,
-      time,
+      time: mediaTime(target.stretch, time),
+      stretch: target.stretch,
       play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
       attempts: 0,
       warming: false,
@@ -213,10 +216,11 @@ export default function ChapterListener({
     const element = media.current;
     // iOS may enter a stalled seek if currentTime is assigned while only metadata is loaded.
     const ready = element && element.currentSrc === wanted.src && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= SEEK_TOLERANCE) {
+    const tolerance = wanted.stretch.media_start === undefined ? SEEK_TOLERANCE : 0.05;
+    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= tolerance) {
       pending.current = null;
       window.clearTimeout(seekTimer.current);
-      setPosition((position) => ({ ...position, time: element.currentTime }));
+      setPosition((position) => ({ ...position, time: Math.min(wanted.stretch.end, Math.max(wanted.stretch.start, sourceTime(wanted.stretch, element.currentTime))) }));
       setSeekError("");
       if (!wanted.play) element.pause();
       element.muted = false;
@@ -303,8 +307,12 @@ export default function ChapterListener({
       return;
     }
     // 同一個檔、緊接著的下一段，不必跳——設一次 currentTime 就會頓一下。
-    if (next.sermon.media_url === clip.sermon.media_url && Math.abs(next.start - element.currentTime) <= 1) {
-      setPosition({ clip: position.clip + 1, time: element.currentTime });
+    const nextStart = mediaTime(next.stretch, next.start);
+    const inNext = next.stretch.media_start === undefined
+      ? Math.abs(nextStart - element.currentTime) <= 1
+      : nextStart <= element.currentTime && element.currentTime <= nextStart + 1 && element.currentTime < mediaTime(next.stretch, next.end);
+    if (next.sermon.media_url === clip.sermon.media_url && inNext) {
+      setPosition({ clip: position.clip + 1, time: sourceTime(next.stretch, element.currentTime) });
     } else {
       seekTo(position.clip + 1, next.start, true);
     }
@@ -316,15 +324,20 @@ export default function ChapterListener({
     // Queued events from the previous position must not advance the playlist.
     if (pending.current || element.seeking) return;
     if (element.currentSrc !== element.src) return;
-    if (element.currentTime >= clip.end) {
+    const time = sourceTime(clip.stretch, element.currentTime);
+    if (time >= clip.end) {
       advance();
       return;
     }
-    setPosition((current) => ({ ...current, time: element.currentTime }));
-    if (unitNavigation && bookmarkVersion.current && Math.floor(element.currentTime) !== lastBookmarkSecond.current) {
-      lastBookmarkSecond.current = Math.floor(element.currentTime);
+    if (time < clip.start && clip.stretch.media_start !== undefined) {
+      seekTo(position.clip, clip.start);
+      return;
+    }
+    setPosition((current) => ({ ...current, time }));
+    if (unitNavigation && bookmarkVersion.current && Math.floor(time) !== lastBookmarkSecond.current) {
+      lastBookmarkSecond.current = Math.floor(time);
       try { window.localStorage.setItem(bookmarkKey, JSON.stringify({version: bookmarkVersion.current,
-        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time: element.currentTime})); }
+        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time, audioRevision: clip.sermon.audio_revision})); }
       catch { /* Playback remains usable when storage is unavailable. */ }
     }
   }
@@ -335,7 +348,7 @@ export default function ChapterListener({
     const wanted = pending.current;
     if (wanted) {
       if (wanted.deadline > 0 && Date.now() >= wanted.deadline && clip) {
-        requestSeek(clip, position.clip, wanted.time, true);
+        requestSeek(clip, position.clip, sourceTime(wanted.stretch, wanted.time), true);
       } else {
         wanted.play = !wanted.play;
         setPlaying(wanted.play);
@@ -525,7 +538,10 @@ export default function ChapterListener({
   const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
   const slides = clip?.sermon.slides ?? [];
   const clipEnd = clip?.end ?? time;
-  const slide = [...slides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? slides[0];
+  const localSlides = clip?.stretch.media_start === undefined ? slides : slides.filter(
+    (item) => clip.start <= item.at && item.at < clipEnd,
+  );
+  const slide = [...localSlides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? localSlides[0];
   const diagramVisible = Boolean(!table && !leftOutPart && slide?.diagram &&
     (clip?.start ?? time) <= slide.diagram.at && slide.diagram.at < clipEnd && slide.diagram.at <= time);
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));

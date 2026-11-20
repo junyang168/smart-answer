@@ -32,3 +32,14 @@ test('normal parent links and historical passage assignments resolve by recordin
  assert.deepEqual(resumeClip(catalog,null,'v1',{section:'old-passage',source:'source2',time:70}),{index:3,time:70});
  assert.equal(resumeClip(catalog,null,'v1',{section:'old-passage',source:'unknown',time:70}),null);
 });
+
+test('explicit times in removed audio use the next retained interval; terminal deletions stop at the end', () => {
+ const edited = [
+  {section:'edited',source:'edited',start:60,end:378.05,excluded:[[378.05,620.9],[1000,1100]],audioRevision:'media'},
+  {section:'edited',source:'edited',start:620.9,end:1000,excluded:[[378.05,620.9],[1000,1100]],audioRevision:'media'},
+ ];
+ assert.deepEqual(resumeClip(edited,null,'v2',{source:'edited',time:412}),{index:1,time:620.9});
+ assert.deepEqual(resumeClip(edited,null,'v2',{source:'edited',time:1050}),{index:1,time:1000});
+ assert.deepEqual(resumeClip(edited,{version:'v1',section:'edited',source:'edited',time:450,audioRevision:'media'},'v2',{}),{index:1,time:620.9});
+ assert.equal(resumeClip(edited,{version:'v1',section:'edited',source:'edited',time:450,audioRevision:'other'},'v2',{}),null);
+});
