@@ -28,7 +28,7 @@ def test_exact_mark_coverage_and_no_audio_do_not_remove_other_sound(tmp_path):
             'decision': 'no_audio', 'evidence_sha256': 'a' * 64}
     assert cuts._decision_intervals(transcript, {'decisions': [item]}) == ([], [])
     with pytest.raises(ValueError, match='Unreviewed'):
-        cuts._decision_intervals(transcript, {'decisions': []})
+        cuts._decision_intervals(transcript, {'review_candidates': [['1', 0]], 'decisions': []})
 
 
 def test_post_read_projection_never_crosses_seams_and_preserves_independent_sources(monkeypatch, tmp_path):
@@ -100,7 +100,7 @@ def test_activation_reuses_previous_bytes_and_rejects_source_change(tmp_path):
     video = active.parent / 'video'
     video.mkdir(parents=True)
     source = video / 'Lecture.mp3'
-    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=500:duration=3',
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=500:duration=22',
                     str(source)], check=True)
     transcript = active / 'script_published' / 'Lecture.json'
     transcript.parent.mkdir(parents=True)
@@ -113,13 +113,13 @@ def test_activation_reuses_previous_bytes_and_rejects_source_change(tmp_path):
     source_sha, transcript_sha = cuts.file_sha(source), cuts.file_sha(transcript)
     proof.write_text(json.dumps({
         'audio_sha256': source_sha, 'published_transcript_sha256': transcript_sha,
-        'source_paragraph_index': 1, 'removed_source_interval': [1, 2],
+        'source_paragraph_index': 1, 'removed_source_interval': [2, 18],
         'review': {'left': 'pass', 'right': 'pass'},
     }))
     decisions = tmp_path / 'decisions.json'
     decisions.write_text(json.dumps({
         'audio_sha256': source_sha, 'transcript_sha256': transcript_sha,
-        'decisions': [{'paragraph': 1, 'ordinal': 0, 'decision': 'skip', 'interval': [1, 2],
+        'decisions': [{'paragraph': 1, 'ordinal': 0, 'decision': 'skip', 'interval': [2, 18],
                        'text_sha256': hashlib.sha256(PASSAGE.encode()).hexdigest(),
                        'evidence_file': proof.name, 'evidence_sha256': cuts.file_sha(proof)}],
     }))
@@ -164,16 +164,25 @@ def test_unavailable_edited_source_is_removed_from_plan_before_other_sources_loa
     assert filtered['units']['both']['sub_units'] == [plan['units']['both']['sub_units'][1]]
     assert json.loads(path.read_text()) == plan
 
-def test_only_deletions_longer_than_ten_spoken_characters_need_audio_review(tmp_path):
+def test_cut_threshold_uses_duration_instead_of_character_count(tmp_path):
     transcript = tmp_path / 'source.json'
-    ten = '甲乙丙丁戊己庚辛壬癸'
-    eleven = ten + '子'
+    marks = ('少字但慢', '剛好十五秒', '字數較多而且語速快所以沒有超過門檻')
     transcript.write_text(json.dumps({'script': [
-        {'index': 1, 'text': '甲~~幾個字~~乙。'},
-        {'index': 2, 'text': f'~~{ten}，。 ！？~~'},
-        {'index': 3, 'text': f'前~~語助詞~~一句。~~{eleven}~~後一句。'},
-        {'index': 4, 'text': f'同一句~~{PASSAGE}~~中間。'},
-        {'index': 5, 'type': 'comment', 'text': f'~~{PASSAGE}~~'},
+        {'index': i, 'text': f'~~{words}~~'} for i, words in enumerate(marks, 1)
     ]}))
-    marks = cuts.deletion_marks(transcript)
-    assert marks == {('3', 1): eleven, ('4', 0): PASSAGE}
+    raw = tmp_path / 'raw.json'
+    raw.write_text(json.dumps({'entries': [
+        {'index': 1, 'text': marks[0], 'start_ms': 0, 'end_ms': 15001},
+        {'index': 2, 'text': marks[1], 'start_ms': 16000, 'end_ms': 31000},
+        {'index': 3, 'text': marks[2], 'start_ms': 32000, 'end_ms': 46999},
+    ]}))
+    candidates = cuts._candidate_decisions(transcript, raw, 50)
+    assert [candidate['paragraph'] for candidate in candidates] == [1]
+    candidate = {**candidates[0], 'evidence_sha256': 'a' * 64, 'decision': 'skip'}
+    report = {'review_candidates': [['1', 0]], 'decisions': [candidate]}
+    assert cuts._decision_intervals(transcript, report) == ([[0, 15.001]], [])
+    candidate['interval'] = [0, 15]
+    with pytest.raises(ValueError, match='more than 15 seconds'):
+        cuts._decision_intervals(transcript, report)
+    candidate['decision'] = 'keep'
+    assert cuts._decision_intervals(transcript, report) == ([], [])

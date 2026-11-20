@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal
 from difflib import SequenceMatcher
 import fcntl
 from functools import lru_cache
@@ -18,9 +19,9 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 from backend.pipeline.source_projection import SOFT_DELETION
 
-SCHEMA = 'chapter-listening-cuts.v1'
+SCHEMA = 'chapter-listening-cuts.v2'
 TOLERANCE = .08  # Encoder padding and media duration rounding, in seconds.
-SHORT_DELETION_LIMIT = 10
+SHORT_DELETION_SECONDS = 15
 
 
 def manifest(data_root: Path, title: str) -> Path:
@@ -77,9 +78,15 @@ def retained_clock(cuts, duration):
 
 
 def _playback_marks(text):
-    """Select deletions longer than ten spoken characters and keep editor ordinals."""
+    """Keep original editor ordinals when counting spoken content."""
     return [(ordinal, mark) for ordinal, mark in enumerate(SOFT_DELETION.finditer(text))
-            if sum(char.isalnum() for char in mark.group(1)) > SHORT_DELETION_LIMIT]
+            if any(char.isalnum() for char in mark.group(1))]
+
+
+def _above_threshold(interval):
+    start, end = interval
+    return (math.isfinite(start) and math.isfinite(end)
+            and Decimal(str(end)) - Decimal(str(start)) > SHORT_DELETION_SECONDS)
 
 
 def deletion_marks(transcript):
@@ -95,6 +102,11 @@ def suggest(data_root: Path, title: str) -> dict:
     source, transcript = _source(data_root, title), _transcript(data_root, title)
     duration, _ = _duration(source)
     raw = data_root / 'script' / f'{title}.json'
+    decisions = _candidate_decisions(transcript, raw, duration)
+    return {'transcript_sha256': file_sha(transcript), 'audio_sha256': file_sha(source), 'decisions': decisions}
+
+
+def _candidate_decisions(transcript, raw, duration):
     entries = json.loads(raw.read_text()).get('entries', []) if raw.is_file() else []
     cues = {entry['index']: entry for entry in entries
             if isinstance(entry.get('index'), int) and entry.get('start_ms') is not None
@@ -136,34 +148,48 @@ def suggest(data_root: Path, title: str) -> dict:
             matched = [anchors[block.b + char - block.a]
                        for block in blocks
                        for char in range(max(start, block.a), min(stop, block.a + block.size))]
-            decision = {'paragraph': row['index'], 'ordinal': i, 'decision': 'hold', 'interval': [begin, end],
-                        'text_sha256': hashlib.sha256(mark.group(1).encode()).hexdigest()}
-            if matched:
-                decision['candidate_interval'] = [max(begin, matched[0][0]), min(end, matched[-1][1])]
-            decisions.append(decision)
-    return {'transcript_sha256': file_sha(transcript), 'audio_sha256': file_sha(source), 'decisions': decisions}
+            if not matched:
+                continue
+            estimate = [max(begin, matched[0][0]), min(end, matched[-1][1])]
+            if _above_threshold(estimate):
+                decisions.append({'paragraph': row['index'], 'ordinal': i, 'decision': 'hold', 'interval': [begin, end],
+                                  'text_sha256': hashlib.sha256(mark.group(1).encode()).hexdigest(),
+                                  'candidate_interval': estimate})
+    return decisions
+
+
+def _decision_key(item):
+    return str(item['paragraph']), item['ordinal']
 
 
 def _decision_intervals(transcript, report):
     marks = deletion_marks(transcript)
+    required = {tuple(key) for key in report.get('review_candidates', [])}
     seen, cuts, pending = set(), [], []
     for decision in report['decisions']:
-        key = (str(decision['paragraph']), decision['ordinal'])
+        key = _decision_key(decision)
         if key in seen or key not in marks or decision['text_sha256'] != hashlib.sha256(marks[key].encode()).hexdigest():
             raise ValueError('Deletion decision does not match its marked paragraph')
         seen.add(key)
         result = decision['decision']
         if result == 'hold':
+            if key not in required or not _above_threshold(decision['interval']):
+                raise ValueError('Only a long candidate needs an audio hold')
             pending.append(decision['interval'])
             continue
         if not re.fullmatch(r'[a-f0-9]{64}', decision.get('evidence_sha256', '')):
             raise ValueError('A resolved deletion requires saved audio evidence')
         if result == 'skip':
+            if not _above_threshold(decision['interval']):
+                raise ValueError('A cut must remove more than 15 seconds of source audio')
             cuts.append(decision['interval'])
+        elif result == 'keep':
+            if _above_threshold(decision['interval']):
+                raise ValueError('This verified deletion is longer than 15 seconds')
         elif result != 'no_audio':
             raise ValueError('Unknown deletion decision')
-    if seen != marks.keys():
-        raise ValueError('Unreviewed soft deletion')
+    if not required <= seen:
+        raise ValueError('Unreviewed long soft deletion')
     return cuts, pending
 
 
@@ -182,16 +208,17 @@ def _verify_evidence(report, folder):
                 or proof.get('deletion_ordinal', 0) != decision['ordinal']):
             raise ValueError('Audio boundary evidence belongs to another source or deletion')
         review = proof['review']
-        if decision['decision'] == 'skip':
+        if decision['decision'] in ('skip', 'keep'):
             reference = proof['removed_source_interval']
             safe = proof.get('safe_cut_intervals', [(at, at) for at in reference])
             if (review.get('left') != 'pass' or review.get('right') != 'pass'
                     or not all(abs(at - baseline) <= 1 and low <= at <= high
                                for at, baseline, (low, high) in zip(decision['interval'], reference, safe, strict=True))):
                 raise ValueError('Both audio cuts must match the passing review')
-            seams.append({'interval': decision['interval'],
-                          'left': review.get('left_retained_ending', ''),
-                          'right': review.get('right_retained_opening', '')})
+            if decision['decision'] == 'skip':
+                seams.append({'interval': decision['interval'],
+                              'left': review.get('left_retained_ending', ''),
+                              'right': review.get('right_retained_opening', '')})
         if decision['decision'] == 'no_audio' and review.get('no_audio') != 'pass':
             raise ValueError('Missing proof that the deletion had no corresponding audio')
     return seams
@@ -239,15 +266,27 @@ def prepare(data_root: Path, title: str, decisions_path: Path, install_root: Pat
     transcript_sha, audio_sha = file_sha(transcript), file_sha(source)
     if (decisions['transcript_sha256'], decisions['audio_sha256']) != (transcript_sha, audio_sha):
         raise ValueError('Reviewed audio or transcript changed')
-    cuts, pending = _decision_intervals(transcript, decisions)
-    seams = _verify_evidence(decisions, decisions_path.parent)
     duration, streams = _duration(source)
+    raw = data_root / 'script' / f'{title}.json'
+    recognition_sha = file_sha(raw) if raw.is_file() else None
+    candidates = {_decision_key(candidate): candidate['candidate_interval']
+                  for candidate in _candidate_decisions(transcript, raw, duration)}
+    decisions['review_candidates'] = sorted(candidates)
+    cuts, pending = _decision_intervals(transcript, decisions)
+    for decision in decisions['decisions']:
+        if decision['decision'] == 'hold':
+            start, end = decision['interval']
+            left, right = candidates[_decision_key(decision)]
+            if not start <= left < right <= end:
+                raise ValueError('Held interval does not cover the full candidate')
+    seams = _verify_evidence(decisions, decisions_path.parent)
     clock = retained_clock([*cuts, *pending], duration)
     video = 'video' in streams
     video_root = install_root.parent / 'video'
     video_root.mkdir(exist_ok=True, parents=True)
     value = {'schema_version': SCHEMA, 'title': title, 'source_duration': duration,
              'transcript_sha256': transcript_sha, 'audio_sha256': audio_sha, 'media_sha256': None,
+             'recognition_sha256': recognition_sha, 'review_candidates': [list(key) for key in sorted(candidates)],
              'media': None, 'clock': clock, 'caption_seams': seams,
              'decisions': [{k: v for k, v in d.items() if k not in ('evidence_file', 'candidate_interval')}
                            for d in decisions['decisions']]}
@@ -299,6 +338,9 @@ def _load(data_root, title, path):
     transcript, source = _transcript(data_root, title), _source(data_root, title)
     if (file_sha(transcript), file_sha(source)) != (value['transcript_sha256'], value['audio_sha256']):
         raise ValueError('Edited media source changed')
+    raw = data_root / 'script' / f'{title}.json'
+    if (file_sha(raw) if raw.is_file() else None) != value['recognition_sha256']:
+        raise ValueError('Edited media recognition cues changed')
     cuts, pending = _decision_intervals(transcript, value)
     if [seam['interval'] for seam in value.get('caption_seams', [])] != cuts:
         raise ValueError('Caption seams disagree with approved cuts')
