@@ -106,8 +106,11 @@ def evaluate_points(packet, ask, *, model, max_bytes, locks=None):
             current, text = point["sentence"], point["text"]
             item = {"slide": first, "point": index, "sentence": current}
             if lock := locks.get((first, index)):
-                results.append({**item, "status": "correct", "expected_sentence": current,
-                                "delta_seconds": 0.0, "evidence": lock["evidence"]})
+                target = lock["sentence"]
+                delta = round(lines[current]["start"] - lines[target]["start"], 2)
+                status = "correct" if current == target else "early" if delta < 0 else "late"
+                results.append({**item, "status": status, "expected_sentence": target,
+                                "delta_seconds": delta, "evidence": lock["evidence"]})
                 continue
             supported = [sid for sid in source if answers.get(f"{index}:whole:{sid}") == "full"]
             expected = (min(supported, key=lambda sid: abs(lines[sid]["start"] - lines[current]["start"]))
@@ -201,13 +204,18 @@ def owner_locks(record, source):
         if case["kind"] != "point" or not case.get("source_text"):
             continue
         for slide in record["slides"]:
-            for i, point in enumerate(slide["points"]):
-                matches = (point["text"] == case["point_text"] if "point_text" in case
-                           else re.search(case["pattern"], point["text"]))
-                if matches and point["sentence"] == case["at"]:
-                    key = (slide["first"], i)
-                    locks[key] = {"slide": slide["first"], "point": i, "sentence": case["at"],
-                                  "evidence": f"已確認的時間 {case['at']}：{case['why']}"}
+            if not slide["first"] <= case["at"] <= slide["last"]:
+                continue
+            matches = [(i, point) for i, point in enumerate(slide["points"])
+                       if (point["text"] == case["point_text"] if "point_text" in case
+                           else re.search(case["pattern"], point["text"]))]
+            if record.get("point_anchor_basis") != "evidence":
+                matches = [(i, point) for i, point in matches if point["sentence"] == case["at"]]
+            if len(matches) != 1:
+                continue
+            i, _ = matches[0]
+            locks[slide["first"], i] = {"slide": slide["first"], "point": i, "sentence": case["at"],
+                                       "evidence": f"已確認的時間 {case['at']}：{case['why']}"}
     return locks
 
 
@@ -217,8 +225,14 @@ def make_plan(record, source, points, model):
     slides = record["slides"]
     cases = cases_for(record["lecture"])
     locks = owner_locks(record, source)
-    effective = [row if (row["slide"], row["point"]) not in locks else {**row, "status": "correct"}
-                 for row in points]
+    effective = []
+    for row in points:
+        if lock := locks.get((row["slide"], row["point"])):
+            target = lock["sentence"]
+            status = ("correct" if row["sentence"] == target else "early"
+                      if row["sentence"] < target else "late")
+            row = {**row, "status": status, "expected_sentence": target}
+        effective.append(row)
     proposed = timing_adjustments(slides, source, effective)
     approved = []
     existing = set(check_cases(slides, cases, source, partial=True))

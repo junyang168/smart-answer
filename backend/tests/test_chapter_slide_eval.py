@@ -281,3 +281,96 @@ def test_matthew_conclusion_timing_keeps_reference_and_statement_distinctions():
         "就講到整個門徒的使命的結論。",
     ], 2, ["partial", "partial", "full"], assertion)
     assert (row["status"], row["expected_sentence"]) == ("early", "S0003")
+
+
+def test_scripture_without_writer_time_locates_first_reading_and_keeps_verified_repeat(tmp_path):
+    from backend.pipeline.chapter_slide_scripture_timing import locate_readings
+
+    text = "從前有許多先知和義人要看你們所看的，卻沒有看見；要聽你們所聽的，卻沒有聽見。"
+    path = tmp_path / "MAT" / "13.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"17": text}))
+    source = [
+        {"id": "S0098", "text": "從前有許多先知和義人，要……"},
+        {"id": "S0099", "text": "「" + text + "」"},
+        {"id": "S0117", "text": "再來回顧這段引文。"},
+    ]
+    raw = [{"first": "S0098", "title": "讀經", "scriptures": [{"ref": "馬太福音 13:17"}]}]
+    verified = [{"sentence": "S0117", "slug": "mat-13-17"}]
+
+    def no_extra_call(*_):
+        pytest.fail("The confirmed repeat and clear original reading require no model call")
+
+    placed, problems = locate_readings(raw, source, verified, no_extra_call, bible=ev.Bible(tmp_path))
+    assert problems == []
+    assert placed == [{"sentence": "S0099", "slug": "mat-13-17"}, *verified]
+
+
+def test_partial_scripture_reading_uses_jev_and_fails_closed_without_a_position(tmp_path):
+    from backend.pipeline.chapter_slide_scripture_timing import locate_readings
+
+    path = tmp_path / "MAT" / "5.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"28": "凡看見婦女就動淫念的，這人心裏已經與她犯姦淫了。"}))
+    source = [
+        {"id": "S0118", "text": "所以耶穌所說的不是「凡看見婦女就動起淫念」，不是。"},
+        {"id": "S0119", "text": "就是說你看婦女，為了、意志決定要跟她採取行動。"},
+    ]
+    raw = [{"first": "S0118", "title": "引述與譯法", "scriptures": [{"ref": "馬太福音 5:28"}]}]
+
+    def ask(state, questions):
+        assert "凡看見婦女" in state["候選經文"]["mat-5-28"]
+        assert "直接引述一節的部分也算" in questions["mat-5-28:S0118"]["instructions"]
+        return {"mat-5-28:S0118": "start", "mat-5-28:S0119": "other"}
+
+    placed, problems = locate_readings(raw, source, [], ask, bible=ev.Bible(tmp_path))
+    assert problems == []
+    assert placed == [{"sentence": "S0118", "slug": "mat-5-28"}]
+    placed, problems = locate_readings(raw, source, [],
+        lambda _, questions: dict.fromkeys(questions, "uncertain"), bible=ev.Bible(tmp_path))
+    assert placed == []
+    assert problems == ["引述與譯法：無法定位 mat-5-28 的實際朗讀"]
+
+
+def test_parallel_scriptures_follow_their_own_spoken_reference(tmp_path):
+    from backend.pipeline.chapter_slide_scripture_timing import locate_readings
+
+    shared = "要看你們所看的，卻沒有看見；要聽你們所聽的，卻沒有聽見。"
+    for book, chapter, verse, people in (("MAT", 13, 17, "義人"), ("LUK", 10, 24, "君王")):
+        path = tmp_path / book / f"{chapter}.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({str(verse): "從前有許多先知和" + people + shared}))
+    raw = [{"first": "S0099", "title": "平行經文",
+            "scriptures": [{"ref": "馬太福音 13:17"}, {"ref": "路加福音 10:24"}]}]
+    source = [
+        {"id": "S0099", "text": "「從前有許多先知和義人" + shared + "」"},
+        {"id": "S0103", "text": "就是那個字。"},
+        {"id": "S0105", "text": "路加啊，第十章二十四節：「從前有許多先知和君王" + shared + "」"},
+    ]
+    placed, errors = locate_readings(raw, source, [],
+        lambda *_: pytest.fail("Distinct readings and explicit references are sufficient"),
+        bible=ev.Bible(tmp_path))
+    assert errors == []
+    assert placed == [{"sentence": "S0099", "slug": "mat-13-17"},
+                      {"sentence": "S0105", "slug": "luk-10-24"}]
+
+
+def test_owner_display_anchor_is_independent_of_the_writers_evidence_sentence(monkeypatch):
+    from backend.pipeline import chapter_slide_cases, chapter_slide_point_timing as timing
+
+    source = [
+        {"id": "S0063", "start": 0, "text": "溫柔就是虛心，願意領教。"},
+        {"id": "S0064", "start": 8, "text": "溫柔包括這個觀念在這裡。"},
+    ]
+    slides = [{"first": "S0063", "last": "S0064", "title": "虛心受教",
+               "points": [{"sentence": "S0063", "text": "溫柔包括虛心領教"}]}]
+    record = {"lecture": "Lecture", "slides": slides, "point_anchor_basis": "evidence"}
+    monkeypatch.setattr(chapter_slide_cases, "cases_for", lambda _: [{
+        "kind": "point", "source_text": source[1]["text"], "pattern": "虛心領教", "why": "已確認的播放位置"}])
+    locks = timing.owner_locks(record, source)
+    points = timing.evaluate_points(record | {"source": source},
+        lambda *_: pytest.fail("A confirmed owner position requires no Jev call"), model="jev", max_bytes=128000,
+        locks=locks)
+    plan = timing.make_plan(record, source, points, "jev")
+    assert slides[0]["points"][0]["sentence"] == "S0063"
+    assert timing.apply_adjustments(slides, source, plan["adjustments"])[0]["points"][0]["sentence"] == "S0064"

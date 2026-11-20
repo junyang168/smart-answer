@@ -237,11 +237,21 @@ def test_both_sides_are_reviewed_on_the_slide_as_separate_points():
     assert any("可以用不同要點分別呈現對照兩端" in rule for rule in packet["owner_rules"])
 
 
-def test_subunit_prompt_allows_complete_answers_before_they_are_spoken():
+def test_subunit_writer_only_supplies_content_evidence_and_reference():
     from backend.tests.test_chapter_slides import CHAPTER
 
     prompt = chapter_slides.system_prompt(CHAPTER, subunit=True)
     assert "可以概括連續幾句" in prompt
-    assert "可在教授開始講這個問題時顯示該問題的完整答案" in prompt
+    assert "填 evidence_sentence" in prompt
+    assert "每條只填 ref" in prompt
+    assert "sentence 寫開始讀它的那一句" not in prompt
+    schema = chapter_slides.response_schema({
+        "scope": "subunit", "schema_version": "chapter-slide-outline-context.v1", "claims": [],
+    })
+    shapes = schema["properties"]["slides"]["items"]["properties"]
+    assert shapes["scriptures"]["items"]["required"] == ["ref"]
+    for key in ("points", "inline_notes"):
+        assert "evidence_sentence" in shapes[key]["items"]["required"]
+        assert "sentence" not in shapes[key]["items"]["properties"]
     assert "不得借用前面的提問" not in prompt
     assert "一條要點只寫他在一處講出" not in prompt

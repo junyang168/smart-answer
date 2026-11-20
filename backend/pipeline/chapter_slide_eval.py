@@ -483,6 +483,10 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
 
         source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
         placed = apply_adjustments(record["slides"], source, record.get("point_timing_adjustments"))
+        if record.get("point_anchor_basis") == "evidence":
+            from backend.pipeline.chapter_slide_cases import cases_for, check_cases
+
+            problems.extend(check_cases(placed, cases_for(record["lecture"]), source, partial=True))
         for slide in placed:
             anchors = [point["sentence"] for point in slide.get("points", [])]
             if len(anchors) != len(set(anchors)):
