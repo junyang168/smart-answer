@@ -1,22 +1,8 @@
-// app/resources/page.tsx
-"use client";
-
-import { useState, useEffect } from 'react';
-import type { Sermon } from '@/app/interfaces/article';
-
-
+import { BookOpen, Library, Mic, Users } from 'lucide-react';
+import { getServerSession } from 'next-auth';
 import ResourceCard from '@/app/components/resources/ResourceCard';
-import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
-
-import { BookOpen, Library, Mic, Users, Radio, Video } from 'lucide-react';
-
-import { apiToUiSermon} from '@/app/utils/converter'
-import { useSession } from 'next-auth/react';
-import { hasEditorAccess } from '@/app/utils/roles';
-
-// --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
-
-
+import { authConfig } from '@/app/utils/auth';
+import { canUseSermonEditing, canViewStudyDemo } from '@/app/utils/roles';
 
 const resourceCardsData = [
   {
@@ -25,6 +11,7 @@ const resourceCardsData = [
     description: '查找經文的研讀資料',
     link: '/demos/scripture-study.html',
     linkLabel: '選擇經文',
+    visibleTo: canViewStudyDemo,
   },
   {
     icon: Library,
@@ -42,98 +29,24 @@ const resourceCardsData = [
   },
   {
     icon: Mic,
-    title: '講道中心',
-    description: `同工利用 AI 整理、校對教授的音頻、視頻與筆記轉成的文字。`,
+    title: '講道校對與編輯',
+    description: `認領逐字稿，校對講道內容，查看編輯與發布進度。`,
     link: '/resources/series',
-    linkLabel: '進入講道中心',
-    staffOnly: true, // 講道中心是同工的編輯入口（負責人 2026-11-06）
-  },
-  {
-    icon: Video,
-    title: '微講道',
-    staffOnly: true,
-    description: `用簡短、清晰的內容，幫助你理解神的話語，並在生活中經歷祂的同在。這是一個安靜、專注的靈修空間。`,
-    link: '/resources/micro-sermon',
-    linkLabel: '開始觀看',
-  },
-  {
-    icon: Radio,
-    title: '信仰的深度',
-    staffOnly: true,
-    description: `透過網播隨時隨地聆聽王守仁教授的聖經教導，讓信仰在日常生活中扎根、深化。`,
-    link: '/resources/depth_of_faith',
-    linkLabel: '開始聆聽',
+    linkLabel: '查看校對進度',
+    visibleTo: canUseSermonEditing,
   },
 ];
 
-
-// --- 頁面組件本身 ---
-
-export const ResourceCenter = () => {
-  // --- State Management ---
-  const [topSermons, setTopSermons] = useState<Sermon[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { data: session, status } = useSession();
-  const isStaff = status === "authenticated" && hasEditorAccess(session?.user?.role);
-
-
-
-  // --- Data Fetching ---
-  useEffect(() => {
-    if (!isStaff) return;
-    // 這個 useEffect 只在組件首次掛載到瀏覽器時運行一次
-    const fetchAllSermons = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        // ✅ fetch 在瀏覽器中運行，可以使用相對路徑或絕對路徑
-        const res = await fetch('/api/sc_api/top_sermon_articles/2');
-        const apiData = await res.json();
-        const transformedSermons = apiData.sermons.map(apiToUiSermon);
-        setTopSermons(transformedSermons);
-
-      } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchAllSermons();
-  }, [isStaff]);
-
-
+export async function ResourceCenter() {
+  const session = await getServerSession(authConfig);
+  const cards = resourceCardsData.filter(card => !card.visibleTo || card.visibleTo(session?.user?.role));
+  const columns = cards.length === 2 ? "md:grid-cols-2 max-w-4xl" : "md:grid-cols-2 lg:grid-cols-3 max-w-6xl";
   return (
-    <div className="bg-gray-50">
-      <section className="bg-gray-50 py-5 sm:py-8">
-        <div className="container mx-auto max-w-6xl px-4 sm:px-6">
-          <h1 className="sr-only">聖經學習資源</h1>
-          <div className="grid grid-cols-1 gap-3 text-left sm:gap-5 md:grid-cols-2 lg:grid-cols-3">
-            {resourceCardsData.filter((card) => !card.staffOnly || isStaff).map((card) => (
-              <ResourceCard
-                key={card.title}
-                icon={card.icon}
-                title={card.title}
-                description={card.description}
-                link={card.link}
-                linkLabel={card.linkLabel}
-              />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {isStaff && <section className="py-8 md:py-12">
-        {/* 最新講道區 */}
-        <div className="container mx-auto px-6 mb-16">
-            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新講道速覽</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {topSermons.map(sermon => <LatestSermonCard key={sermon.title} sermon={sermon} />)}
-            </div>
-        </div>
-
-      </section>}
-    </div>
+    <section className="bg-gray-50 px-4 py-5 sm:px-6 sm:py-8">
+      <h1 className="sr-only">聖經學習資源</h1>
+      <div className={`mx-auto grid grid-cols-1 gap-3 text-left sm:gap-5 ${columns}`}>
+        {cards.map(card => <ResourceCard key={card.link} {...card} />)}
+      </div>
+    </section>
   );
-};
+}

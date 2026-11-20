@@ -39,15 +39,6 @@ export const authConfig: NextAuthOptions = {
     async session({ session, token }) {
       // 这个回调在 session 被访问时触发（例如，客户端调用 useSession()）
 
-      // DEV ENVIRONMENT: Hardcode role to 'editor' when Google Auth is not working
-      if (process.env.NODE_ENV === "development") {
-        if (session.user) {
-          session.user.role = "editor";
-          session.user.internalId = "dev-user";
-        }
-        return session;
-      }
-
       // Re-read current roles; a signed-in tester can be revoked without token expiry.
       if (session.user) {
         const user = await getUserByEmail(session.user.email);

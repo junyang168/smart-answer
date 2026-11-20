@@ -26,6 +26,12 @@ export function hasEditorAccess(
 ): role is "admin" | "editor" | "beta_tester" {
   return ["admin", "editor", "beta_tester"].includes(String(role));
 }
+export function canViewStudyDemo(role: unknown) {
+  return role === BETA_TESTER_ROLE;
+}
+export function canUseSermonEditing(role: unknown) {
+  return role === "editor" || role === BETA_TESTER_ROLE;
+}
 export function hasTranscriptBetaAccess(
   email?: string | null,
   role?: unknown,

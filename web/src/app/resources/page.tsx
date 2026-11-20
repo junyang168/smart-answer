@@ -4,7 +4,7 @@ import { ResourceCenter } from "@/app/components/ResourceCenter";
 import { Suspense } from 'react';
 
 // Suspense 用於在客戶端組件及其子組件加載時顯示一個回退 UI
-const SermonsPageFallback = () => <div className="text-center py-20">正在準備講道中心...</div>;
+const SermonsPageFallback = () => <div className="text-center py-20">正在讀取...</div>;
 
 export default function ResourcesPage() {
   const breadcrumbLinks = [

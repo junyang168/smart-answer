@@ -1,15 +1,16 @@
 // app/resources/series/page.tsx
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
-import { StaffOnly } from '@/app/components/common/StaffOnly';
+import { requireSermonEditing } from '@/app/utils/requireSermonEditing';
 import { SeriesBrowser } from '@/app/components/series/SeriesBrowser';
 import { Suspense } from 'react';
 
 // 同工的編輯入口：每個系列的校對進度（負責人 2026-11-06）。普通信眾從講論文庫找講道。
-export default function AllSeriesPage() {
+export default async function AllSeriesPage() {
+  await requireSermonEditing();
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: '聖經學習資源', href: '/resources' },
-    { name: '講道中心', href: '/resources/sermons' },
+    { name: '講道校對與編輯', href: '/resources/sermons' },
     { name: '講道系列' },
   ];
 
@@ -21,11 +22,9 @@ export default function AllSeriesPage() {
           <h1 className="text-3xl font-bold text-stone-950">講道系列</h1>
           <p className="mt-2 text-stone-600">各系列的編輯進度。點一個系列，看每篇講道的認領人與發佈情況。</p>
         </header>
-        <StaffOnly>
           <Suspense fallback={null}>
             <SeriesBrowser />
           </Suspense>
-        </StaffOnly>
       </div>
     </div>
   );
