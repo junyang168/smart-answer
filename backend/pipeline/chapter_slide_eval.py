@@ -220,6 +220,14 @@ SEMANTIC_CRITERIA = {
 }
 
 
+ILLUSTRATION_COVERAGE = (
+    "生活類比或例證緊接著已講清的主論證時，看前一張與本張。"
+    "若前一張的標題或要點已交代主要理由和結論，本張用簡短要點標示類比即可。"
+    "讓原聲補充類比中逐一對應的人物、原因及例子細節。"
+    "只有類比承擔了其他要點沒有交代的必要推理，或簡寫使類比的意思改變，才判不通過。"
+)
+
+
 SUBUNIT_COVERAGE = (
     "只問一邊聽原聲、一邊看投影片的人，能否跟上本張的主線。"
     "標題和要點要保留教授的主要回答、必要條件、否定、對比，以及省略後會改變意思或讓推論難以跟上的一步。"
@@ -229,6 +237,7 @@ SUBUNIT_COVERAGE = (
     "若額外文字令主要回答難以辨認，指出哪個無關或重複的要點蓋過主線，優先建議刪減。"
     "逐張檢查還要看標題、焦點和規劃漏掉的重點。已在指定推論的判定報告的同一缺口，不再重複報。"
     + chapter_slide_arguments.EXPLICIT_PREMISE_RULE
+    + ILLUSTRATION_COVERAGE
 )
 
 
@@ -559,7 +568,7 @@ argument_requirements 是待核對的推論，不是逐項逐字展示清單。�
 source_slides 顯示理由、關係和結論各句在哪一張。可合寫，也可在相鄰張承接。
 writer_points 是作者指給你的要點，核對文字的實質意思；位置正確本身不能證明推論已保留。
 只在後一張才說出的內容不用搬到前一張；只寫在本張原文沒有支持它的其他張，不能算該結論已呈現。若缺的內容沒有原文支持，不要求作者補入。
-逐張 coverage 查標題、焦點和規劃漏列的重點，不在兩欄重複報同一缺口。忠實仍獨立檢查。"""
+逐張 coverage 查標題、焦點和規劃漏列的重點，不在兩欄重複報同一缺口。忠實仍獨立檢查。""" + "\n" + ILLUSTRATION_COVERAGE
 
 def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str,
                       *, opus_api_spend_root: Path | None = None) -> dict:
