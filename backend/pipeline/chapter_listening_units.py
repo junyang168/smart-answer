@@ -306,7 +306,7 @@ def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, rec
         legacy_shas = json.loads(legacy_manifest.read_text()) if legacy_manifest and legacy_manifest.is_file() else ()
         receipt = directory / f'{title}.semantic-eval.json'
         if problems := semantic_eval_problems(slides_path, selection_path, receipt,
-                                              published_legacy_sha256s=legacy_shas):
+                                              published_legacy_sha256s=legacy_shas, allow_published_policy=True):
             raise ValueError(f'Unit slides failed semantic Eval: {problems}')
         legacy_clock = bool(legacy_shas and exposition.file_sha256(receipt) in legacy_shas)
     else:
