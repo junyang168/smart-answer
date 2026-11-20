@@ -21,17 +21,17 @@ import { hasEditorAccess } from '@/app/utils/roles';
 const resourceCardsData = [
   {
     icon: BookOpen,
-    title: '按經文查經',
+    title: '查經資料',
     description: '查找經文的研讀資料',
     link: '/demos/scripture-study.html',
     linkLabel: '選擇經文',
   },
   {
     icon: Library,
-    title: '王守仁教授聖經講論文庫',
-    description: `聆聽王守仁教授的原聲講道，字幕同步，投影片列出要點與經文，幫助你聽懂每一段。也可閱讀整理成文的釋經文章。`,
+    title: '釋經講道系列',
+    description: `聆聽王守仁教授的原聲講道，字幕同步，投影片列出要點與經文。`,
     link: '/resources/wang-repository',
-    linkLabel: '進入聖經講論文庫',
+    linkLabel: '瀏覽系列',
   },
   {
     icon: Users,
