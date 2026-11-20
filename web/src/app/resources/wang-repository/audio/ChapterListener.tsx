@@ -4,7 +4,7 @@ import Link from "next/link";
 import { mediaTime, sourceTime } from "./listeningClock";
 import { readBookmark, resumeClip } from "./listeningProgress";
 import { parentPassage, listeningTitle } from "./listeningUnits";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
 import ScriptureSlide from "./ScriptureSlide";
@@ -112,6 +112,8 @@ export default function ChapterListener({
   const [rate, setRate] = useState(1);
   const media = useRef<HTMLAudioElement | null>(null);
   const [seekError, setSeekError] = useState("");
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const scrub = useRef<{ pointer: number; start: number; length: number } | null>(null);
   const pending = useRef<SeekRequest | null>(null);
   const seekTimer = useRef<number | undefined>(undefined);
   const bookmarkVersion = useRef("");
@@ -406,11 +408,29 @@ export default function ChapterListener({
   const sectionLength = sectionClips.reduce((sum, item) => sum + item.end - item.start, 0);
   const chapterTime = clip ? clip.offset + (position.time - clip.start) : 0;
   const sectionTime = Math.max(0, chapterTime - sectionStart);
+  const displayedTime = scrubTime ?? chapterTime;
+  const displayedSectionTime = Math.min(sectionLength, Math.max(0, displayedTime - sectionStart));
   const sectionsWithAudio = (sections ?? [])
     .map((item, index) => ({ item, index }))
     .filter(({ index }) => clips.some((c) => c.section === index));
   const previousSection = [...sectionsWithAudio].reverse().find(({ index }) => index < section);
   const nextSection = sectionsWithAudio.find(({ index }) => index > section);
+
+  function pointerTime(event: PointerEvent<HTMLDivElement>, range: { start: number; length: number }) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    return range.start + fraction * range.length;
+  }
+
+  function finishScrub(event: PointerEvent<HTMLDivElement>, seek: boolean) {
+    const range = scrub.current;
+    if (!range || range.pointer !== event.pointerId) return;
+    scrub.current = null;
+    setScrubTime(null);
+    if (seek) {
+      seekChapter(Math.min(pointerTime(event, range), range.start + Math.max(0, range.length - 0.05)));
+    }
+  }
 
   function restart() {
     if (sectionTime > RESTART_GRACE) seekChapter(sectionStart, true);
@@ -765,24 +785,48 @@ export default function ChapterListener({
       <footer aria-label="播放器" className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6 lg:col-start-1 lg:row-start-3 lg:border-r lg:px-3 lg:py-4">
         {seekError && <p role="status" className="text-center text-xs text-rose-800">{seekError}</p>}
         <div className="flex items-center gap-3 font-mono text-xs text-stone-500">
-          <span className="w-12 text-right">{clock(sectionTime)}</span>
+          <span className="w-12 text-right">{clock(displayedSectionTime)}</span>
           <div
             role="slider"
             aria-label="本段進度"
             aria-valuemin={0}
             aria-valuemax={Math.round(sectionLength)}
-            aria-valuenow={Math.round(sectionTime)}
-            tabIndex={0}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              seekChapter(sectionStart + ((event.clientX - rect.left) / rect.width) * sectionLength);
+            aria-valuenow={Math.round(displayedSectionTime)}
+            aria-valuetext={`${clock(displayedSectionTime)} / ${clock(sectionLength)}`}
+            aria-disabled={!sectionLength || undefined}
+            tabIndex={sectionLength ? 0 : -1}
+            onPointerDown={(event) => {
+              if (!event.isPrimary || event.button !== 0 || !sectionLength) return;
+              const range = { pointer: event.pointerId, start: sectionStart, length: sectionLength };
+              scrub.current = range;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setScrubTime(pointerTime(event, range));
             }}
-            className="relative flex h-6 flex-1 cursor-pointer items-center gap-[3px]"
+            onPointerMove={(event) => {
+              const range = scrub.current;
+              if (range?.pointer === event.pointerId) setScrubTime(pointerTime(event, range));
+            }}
+            onPointerUp={(event) => finishScrub(event, true)}
+            onPointerCancel={(event) => finishScrub(event, false)}
+            onLostPointerCapture={(event) => finishScrub(event, false)}
+            onKeyDown={(event) => {
+              const end = Math.max(0, sectionLength - 0.05);
+              const target = {
+                ArrowLeft: sectionTime - 15, ArrowDown: sectionTime - 15,
+                ArrowRight: sectionTime + 15, ArrowUp: sectionTime + 15,
+                Home: 0, End: end,
+              }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              seekChapter(sectionStart + Math.max(0, Math.min(end, target)));
+            }}
+            className="relative flex h-11 flex-1 touch-none cursor-pointer select-none items-center gap-[3px]"
           >
             {/* 一段錄音一截：換堂課、或中間跳過他岔開去講的地方，看得見斷口。 */}
             {sectionClips.map((item) => {
               const length = item.end - item.start;
-              const done = Math.min(1, Math.max(0, (chapterTime - item.offset) / length));
+              const done = Math.min(1, Math.max(0, (displayedTime - item.offset) / length));
               return (
                 <div
                   key={`${item.offset}`}
@@ -796,6 +840,10 @@ export default function ChapterListener({
                 </div>
               );
             })}
+            {sectionLength > 0 && (
+              <span aria-hidden="true" className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-600 ring-2 ring-white"
+                style={{ left: `${displayedSectionTime / sectionLength * 100}%` }} />
+            )}
           </div>
           <span className="w-12">{clock(sectionLength)}</span>
         </div>

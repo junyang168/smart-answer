@@ -6,6 +6,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 
 const root = process.env.WANG_CUT_EVAL_DATA;
 const base = process.env.WANG_EVAL_URL || "http://127.0.0.1:3824";
+const useLivePreview = process.env.WANG_EVAL_LIVE === "1";
 if (!root) throw new Error("Set WANG_CUT_EVAL_DATA to the isolated test run");
 const index = JSON.parse(readFileSync(join(root, "public.json")));
 const section = index.sections.find((row) => row.sub_unit_id === "6.1");
@@ -17,20 +18,23 @@ const right = sermon.stretches.find((clip) => clip.start >= 620.9);
 const url = new URL("/resources/wang-repository/books/mat/5/listen", base);
 
 async function evaluate(browser, viewport) {
-  const page = await browser.newPage({ viewport });
+  const touch = viewport.width < 450;
+  const page = await browser.newPage({ viewport, hasTouch: touch, isMobile: touch });
   try {
-    await page.route("**/api/public/original-audio/**", (route) => route.fulfill({ json: index }));
-    await page.route(`**/dev-media/${assetName}`, (route) => {
-      const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || "");
-      if (!range) return route.fulfill({ contentType: "audio/mpeg", body: asset });
-      const start = Number(range[1]);
-      const end = range[2] ? Math.min(Number(range[2]), asset.length - 1) : asset.length - 1;
-      return route.fulfill({
-        status: 206, contentType: "audio/mpeg",
-        headers: { "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${asset.length}` },
-        body: asset.subarray(start, end + 1),
+    if (!useLivePreview) {
+      await page.route("**/api/public/original-audio/**", (route) => route.fulfill({ json: index }));
+      await page.route(`**/dev-media/${assetName}`, (route) => {
+        const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || "");
+        if (!range) return route.fulfill({ contentType: "audio/mpeg", body: asset });
+        const start = Number(range[1]);
+        const end = range[2] ? Math.min(Number(range[2]), asset.length - 1) : asset.length - 1;
+        return route.fulfill({
+          status: 206, contentType: "audio/mpeg",
+          headers: { "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${asset.length}` },
+          body: asset.subarray(start, end + 1),
+        });
       });
-    });
+    }
     const open = async (time, target = section) => {
       url.search = new URLSearchParams({
         source: "紐約靈命進深會", section: target.passage, recording: sermon.source_id, at: String(time),
@@ -54,6 +58,47 @@ async function evaluate(browser, viewport) {
     await open(450);
     await waitForTime(right.media_start);
     assert(await audio.evaluate((element) => element.paused));
+    await open(370);
+    const beforeDrag = left.media_start + 370 - left.start;
+    await waitForTime(beforeDrag);
+
+    const slider = page.getByRole("slider", { name: "本段進度" });
+    const bounds = await slider.boundingBox();
+    assert(bounds.height >= 44);
+    const y = Math.round(bounds.y + bounds.height / 2);
+    const from = Math.round(bounds.x + bounds.width * 0.2);
+    const targetTime = left.end - left.start + 800 - right.start;
+    const to = Math.round(bounds.x + bounds.width * targetTime / sermon.seconds);
+    const sectionTime = (to - bounds.x) / bounds.width * sermon.seconds;
+    const afterCut = sectionTime - (left.end - left.start);
+    assert(afterCut > 0 && afterCut < right.end - right.start);
+    if (touch) {
+      const cdp = await page.context().newCDPSession(page);
+      const send = (type, x) => cdp.send("Input.dispatchTouchEvent", {
+        type, touchPoints: x === undefined ? [] : [{ x, y }],
+      });
+      await send("touchStart", from);
+      await send("touchMove", to);
+      await page.waitForFunction((expected) => Math.abs(Number(
+        document.querySelector('[aria-label="本段進度"]')?.getAttribute("aria-valuenow"),
+      ) - expected) < 4, sectionTime);
+      await waitForTime(beforeDrag);
+      await send("touchEnd");
+    } else {
+      await page.mouse.move(from, y);
+      await page.mouse.down();
+      await page.mouse.move(to, y, { steps: 6 });
+      await waitForTime(beforeDrag);
+      await page.mouse.up();
+    }
+    await waitForTime(right.media_start + afterCut);
+    assert(await audio.evaluate((element) => element.paused));
+    await page.locator("[data-slide-scroll]").getByText("喇合選小惡的聖經例證", { exact: true }).waitFor();
+    const dragCaption = await page.getByRole("button", { name: /我再講一個例子.*約書亞記/ })
+      .first().getAttribute("class");
+    assert.match(dragCaption, /bg-amber-/);
+    await open(450);
+    await waitForTime(right.media_start);
     await page.getByRole("button", { name: "播放", exact: true }).click();
     await page.waitForFunction((at) => document.querySelector("audio")?.currentTime >= at + 1, right.media_start);
     await page.getByRole("button", { name: "暫停", exact: true }).click();
@@ -80,7 +125,7 @@ async function evaluate(browser, viewport) {
     const currentCaption = await page.getByRole("button", { name: /還有古時候，我講，休書必須有這句話/ })
       .first().getAttribute("class");
     assert.match(currentCaption, /bg-amber-/);
-    console.log(`${viewport.width}×${viewport.height}: source link, natural transition, captions, slide and resume passed`);
+    console.log(`${viewport.width}×${viewport.height}: scrub, source link, natural transition, captions, slide and resume passed`);
   } finally {
     await page.close();
   }
