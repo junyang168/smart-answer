@@ -8,7 +8,7 @@ import type { Sermon } from '@/app/interfaces/article';
 import ResourceCard from '@/app/components/resources/ResourceCard';
 import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
 
-import { BookOpen, Mic, Users, Radio, Video } from 'lucide-react';
+import { BookOpen, Library, Mic, Users, Radio, Video } from 'lucide-react';
 
 import { apiToUiSermon} from '@/app/utils/converter'
 import { useSession } from 'next-auth/react';
@@ -27,7 +27,7 @@ const resourceCardsData = [
     linkLabel: '選擇經文',
   },
   {
-    icon: BookOpen,
+    icon: Library,
     title: '王守仁教授聖經講論文庫',
     description: `聆聽王守仁教授的原聲講道，字幕同步，投影片列出要點與經文，幫助你聽懂每一段。也可閱讀整理成文的釋經文章。`,
     link: '/resources/wang-repository',
@@ -107,9 +107,9 @@ export const ResourceCenter = () => {
   return (
     <div className="bg-gray-50">
       <section className="bg-gray-50 py-5 sm:py-8">
-        <div className={`container mx-auto px-6 ${isStaff ? "" : "max-w-4xl"}`}>
+        <div className="container mx-auto max-w-6xl px-4 sm:px-6">
           <h1 className="sr-only">聖經學習資源</h1>
-          <div className={`grid grid-cols-1 gap-6 text-left md:grid-cols-2 ${isStaff ? "lg:grid-cols-3" : ""}`}>
+          <div className="grid grid-cols-1 gap-3 text-left sm:gap-5 md:grid-cols-2 lg:grid-cols-3">
             {resourceCardsData.filter((card) => !card.staffOnly || isStaff).map((card) => (
               <ResourceCard
                 key={card.title}
