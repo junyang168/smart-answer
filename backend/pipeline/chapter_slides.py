@@ -1072,8 +1072,25 @@ def save(
         record[key] = response.get(key)
         if not problems:
             try:
-                requirements = chapter_slide_arguments.review_requirements(claim_context, sentences(kept), slides)
-                bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                source = sentences(kept)
+                requirements = chapter_slide_arguments.review_requirements(claim_context, source, slides)
+                try:
+                    bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                except ValueError:
+                    if claim_context.get("scope") != "subunit" or not isinstance(record[key], list):
+                        raise
+                    from backend.pipeline.claim_flash_common import jev
+                    from backend.pipeline.evidence_refresh import JevPort
+
+                    artifacts = data_base_dir.parent / "argument-repeats"
+                    repeats = chapter_slide_arguments.find_adjacent_repeats(
+                        requirements, slides, source, record[key],
+                        lambda state, questions: jev(artifacts, JevPort(), state, questions))
+                    if not repeats:
+                        raise
+                    requirements = chapter_slide_arguments.apply_adjacent_repeats(requirements, slides, repeats)
+                    bound = chapter_slide_arguments.bind_points(requirements, slides, record[key], recover_repeats=True)
+                    record[chapter_slide_arguments.CONFIRMED_REPEATS_KEY] = repeats
                 point_sentences = {route["id"]: route["writer_points"] for route in bound}
                 normalized = [{**row, "point_sentences": point_sentences[row["id"]]} for row in record[key]]
                 if normalized != record[key]:

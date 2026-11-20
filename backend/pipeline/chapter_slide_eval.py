@@ -254,6 +254,8 @@ def semantic_packet(slide_record: dict, selection: dict) -> dict:
                       if timings.get(slide["first"], {}).get("sentence") else {})}
                   for slide in slides]
     inferences = chapter_slide_arguments.review_requirements(context, source, slides)
+    inferences = chapter_slide_arguments.apply_adjacent_repeats(
+        inferences, slides, slide_record.get(chapter_slide_arguments.CONFIRMED_REPEATS_KEY))
     if chapter_slide_arguments.BINDINGS_KEY in slide_record:
         inferences = chapter_slide_arguments.bind_points(inferences, slides, slide_record[chapter_slide_arguments.BINDINGS_KEY])
     if chapter_slide_point_timing.PLAN_KEY in slide_record:
@@ -446,6 +448,8 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
         try:
             source = chapter_slides.sentences(chapter_slides.kept_pieces(json.loads(selection_path.read_text())))
             inferences = chapter_slide_arguments.review_requirements(context, source, record["slides"])
+            inferences = chapter_slide_arguments.apply_adjacent_repeats(
+                inferences, record["slides"], record.get(chapter_slide_arguments.CONFIRMED_REPEATS_KEY))
             if chapter_slide_arguments.BINDINGS_KEY in record:
                 chapter_slide_arguments.bind_points(inferences, record["slides"], record[chapter_slide_arguments.BINDINGS_KEY])
             expected.update((route["conclusion_slide"], route["id"]) for route in inferences)

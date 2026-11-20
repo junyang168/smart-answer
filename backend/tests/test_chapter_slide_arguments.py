@@ -308,3 +308,46 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
         if verdict["passed"] not in accepted or not verdict["evidence"].strip():
             mismatches.append({**verdict, "fixture": labels[case_id], "expected": sorted(accepted)})
     assert not mismatches, mismatches
+
+
+def test_jev_recovers_only_the_confirmed_adjacent_repeat():
+    source = [
+        {"id": "S0113", "text": "epithymeō那個字的意思跟thelō的意思完全一樣。"},
+        {"id": "S0115", "text": "thelō是will，意志。"},
+        {"id": "S0129", "text": "意志；boulēma也是意志。"},
+        {"id": "S0137", "text": "慾望就是意志，慾望包括意志在內。"},
+        {"id": "S0141", "text": "意志決定要跟這個女人發生關係，你已經犯罪了。"},
+    ]
+    slides = [
+        {"first": "S0113", "last": "S0115", "points": [
+            {"sentence": "S0113", "text": "渴望和意志的動詞意思相同"}]},
+        {"first": "S0129", "last": "S0137", "points": [
+            {"sentence": "S0129", "text": "彼得並論情慾與意志"},
+            {"sentence": "S0137", "text": "慾望包含意志的成分"}]},
+        {"first": "S0141", "last": "S0141", "points": [
+            {"sentence": "S0141", "text": "為要行淫而決意，未行也已犯罪"}]},
+    ]
+    requirements = [{
+        "id": "argument-1", "reason": "在這裡慾望包含意志決定",
+        "source_sentences": ["S0113", "S0115", "S0141"], "conclusion_sentence": "S0141",
+        "conclusion_slide": "S0141", "source_slides": {"S0113": "S0113", "S0115": "S0113", "S0141": "S0141"},
+    }]
+    original = [{"id": "argument-1", "point_sentences": ["S0113", "S0129", "S0137", "S0141"]}]
+    with pytest.raises(ValueError, match="source slides"):
+        arg.bind_points(requirements, slides, original, recover_repeats=True)
+
+    def ask(state, questions):
+        assert set(state["earlier_source"]) == {"S0113", "S0115"}
+        assert "不能把別句說過的意思算在本句" in next(iter(questions.values()))["instructions"]
+        action = "same_reason" if state["sentence"] == "S0137" else "other"
+        return dict.fromkeys(questions, action)
+
+    confirmed = arg.find_adjacent_repeats(requirements, slides, source, original, ask)
+    assert confirmed == {"argument-1": ["S0137"]}
+    repaired = arg.apply_adjacent_repeats(requirements, slides, confirmed)
+    [bound] = arg.bind_points(repaired, slides, original, recover_repeats=True)
+    assert bound["writer_points"] == ["S0137", "S0141"]
+    with pytest.raises(ValueError, match="unconfirmed point"):
+        arg.bind_points(repaired, slides, [{"id": "argument-1", "point_sentences": ["S0129", "S0141"]}])
+    with pytest.raises(ValueError, match="preceding slide"):
+        arg.apply_adjacent_repeats(requirements, slides, {"argument-1": ["S0113"]})
