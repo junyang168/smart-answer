@@ -905,5 +905,132 @@
         "balance_reason": "「看見不等於犯罪」這句本身未必錯；即使忠實度判通過，仍須因漏掉慾望與決意的關鍵區別而擋下。"
       }
     ]
+  },
+  {
+    "id": "ten-commandments-omitted-premise",
+    "subunit": "3.2",
+    "original_sentences": [
+      "S0149",
+      "S0150",
+      "S0151",
+      "S0152",
+      "S0153",
+      "S0154",
+      "S0155"
+    ],
+    "source": [
+      "整個舊約跟我們沒有關係。",
+      "我們現在已經不在舊約底下，我們現在呢，乃在新約底下。",
+      "我們現在在新約底下。",
+      "所以我今天已經不在摩西律法底下，我們乃在基督的律法底下。",
+      "所以十條誡是什麼？",
+      "摩西律法的一部分，摩西的律法的一部分。",
+      "所以我們今天已經不在……十條誡你也不管。"
+    ],
+    "requirement": {
+      "reason": "今天已不在摩西律法之下，而十條誡屬於摩西律法",
+      "inference": "既已不在該律法之下，就不再以其中的十條誡為必守的律法",
+      "conclusion": "今日不必以摩西律法的身分遵守十條誡",
+      "conclusion_sentence": "S0007",
+      "source_sentences": [
+        "S0004",
+        "S0006",
+        "S0007"
+      ]
+    },
+    "variants": [
+      {
+        "id": "omitted-premise",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "新約與十條誡的地位",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "我們如今乃在新約之下"
+              },
+              {
+                "sentence": "S0004",
+                "text": "如今在基督律法之下"
+              },
+              {
+                "sentence": "S0006",
+                "text": "十條誡是摩西律法的一部分"
+              },
+              {
+                "sentence": "S0007",
+                "text": "因此十條誡也不必遵守"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": false,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "one-point-repair",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "新約與十條誡的地位",
+            "points": [
+              {
+                "sentence": "S0002",
+                "text": "我們如今乃在新約之下"
+              },
+              {
+                "sentence": "S0004",
+                "text": "已不在摩西律法之下，乃在基督律法之下"
+              },
+              {
+                "sentence": "S0006",
+                "text": "十條誡是摩西律法的一部分"
+              },
+              {
+                "sentence": "S0007",
+                "text": "因此十條誡也不必遵守"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      },
+      {
+        "id": "omit-repeated-setting",
+        "slides": [
+          {
+            "first": "S0001",
+            "last": "S0007",
+            "title": "新約與十條誡的地位",
+            "points": [
+              {
+                "sentence": "S0004",
+                "text": "已不在摩西律法之下，乃在基督律法之下"
+              },
+              {
+                "sentence": "S0006",
+                "text": "十條誡是摩西律法的一部分"
+              },
+              {
+                "sentence": "S0007",
+                "text": "因此十條誡也不必遵守"
+              }
+            ]
+          }
+        ],
+        "expected": {
+          "passed": true,
+          "conclusion_slide": "S0001"
+        }
+      }
+    ]
   }
 ]

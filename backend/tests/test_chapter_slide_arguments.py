@@ -121,6 +121,22 @@ def test_subunit_prompt_preserves_the_local_object_of_a_negation():
     assert "因此不是看見便犯罪" not in prompt
 
 
+def test_subunit_writer_planner_and_eval_share_explicit_premise_rule():
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    case = next(row for row in cases() if row["id"] == "ten-commandments-omitted-premise")
+    record, selection = packet_for(case, case["variants"][0])
+    chapter = CHAPTERS["mat-5-1-48"]
+    system = chapter_slides.system_prompt(chapter, subunit=True)
+    coverage = ev.semantic_packet(record, selection)["criteria"]["coverage"]
+
+    for prompt in (arg.PLAN_SYSTEM, system, coverage):
+        assert "不可用正面描述代替原文明說的否定" in prompt
+    assert "合寫成一條要點" in system
+    assert "省略重述和不影響推論的細節" in system
+    assert "已不在摩西律法之下，乃在基督律法之下" not in system
+
+
 def test_writer_must_map_every_inference_to_real_points_within_its_original_slides(tmp_path, monkeypatch):
     from backend.pipeline import chapter_exposition
     from backend.tests.test_chapter_slides import CHAPTER
