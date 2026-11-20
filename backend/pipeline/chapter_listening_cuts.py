@@ -20,6 +20,7 @@ from backend.pipeline.source_projection import SOFT_DELETION
 
 SCHEMA = 'chapter-listening-cuts.v1'
 TOLERANCE = .08  # Encoder padding and media duration rounding, in seconds.
+SHORT_DELETION_LIMIT = 10
 
 
 def manifest(data_root: Path, title: str) -> Path:
@@ -75,12 +76,18 @@ def retained_clock(cuts, duration):
     return clock
 
 
+def _playback_marks(text):
+    """Select deletions longer than ten spoken characters and keep editor ordinals."""
+    return [(ordinal, mark) for ordinal, mark in enumerate(SOFT_DELETION.finditer(text))
+            if sum(char.isalnum() for char in mark.group(1)) > SHORT_DELETION_LIMIT]
+
+
 def deletion_marks(transcript):
     document = json.loads(transcript.read_text())
     script = document['script'] if isinstance(document, dict) else document
     return {(str(row['index']), i): match.group(1)
             for row in script if 'index' in row and row.get('type') not in ('subtitle', 'comment')
-            for i, match in enumerate(SOFT_DELETION.finditer(row.get('text') or ''))}
+            for i, match in _playback_marks(row.get('text') or '')}
 
 
 def suggest(data_root: Path, title: str) -> dict:
@@ -100,7 +107,7 @@ def suggest(data_root: Path, title: str) -> dict:
         if row.get('type') in ('subtitle', 'comment'):
             continue
         text = row.get('text') or ''
-        marks = list(SOFT_DELETION.finditer(text))
+        marks = _playback_marks(text)
         if not marks:
             continue
         first = row.get('start_index', row.get('index'))
@@ -123,7 +130,7 @@ def suggest(data_root: Path, title: str) -> dict:
             edited = normalized(SOFT_DELETION.sub(r'\1', text))
             blocks = [block for block in SequenceMatcher(None, edited, ''.join(heard),
                                                          autojunk=False).get_matching_blocks() if block.size >= 3]
-        for i, mark in enumerate(marks):
+        for i, mark in marks:
             start = len(normalized(SOFT_DELETION.sub(r'\1', text[:mark.start()])))
             stop = start + len(normalized(mark.group(1)))
             matched = [anchors[block.b + char - block.a]

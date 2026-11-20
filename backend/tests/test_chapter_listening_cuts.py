@@ -8,6 +8,9 @@ import pytest
 from backend.pipeline import chapter_listening_cuts as cuts
 
 
+PASSAGE = "這是一個完整段落，用於檢查發布資料是否包含所有需要處理的刪除標記。這些文字只供合成測試使用。保留段落在其他地方。"
+
+
 def test_overlapping_exclusions_leave_one_continuous_media_clock():
     assert cuts.retained_clock([(2, 4), (4, 6), (5, 8)], 10) == [
         {'start': 0, 'end': 2, 'media_start': 0},
@@ -20,8 +23,8 @@ def test_overlapping_exclusions_leave_one_continuous_media_clock():
 
 def test_exact_mark_coverage_and_no_audio_do_not_remove_other_sound(tmp_path):
     transcript = tmp_path / 'source.json'
-    transcript.write_text(json.dumps({'script': [{'index': 1, 'text': 'Before ~~extra~~ after'}]}))
-    item = {'paragraph': 1, 'ordinal': 0, 'text_sha256': hashlib.sha256(b'extra').hexdigest(),
+    transcript.write_text(json.dumps({'script': [{'index': 1, 'text': f'~~{PASSAGE}~~'}]}))
+    item = {'paragraph': 1, 'ordinal': 0, 'text_sha256': hashlib.sha256(PASSAGE.encode()).hexdigest(),
             'decision': 'no_audio', 'evidence_sha256': 'a' * 64}
     assert cuts._decision_intervals(transcript, {'decisions': [item]}) == ([], [])
     with pytest.raises(ValueError, match='Unreviewed'):
@@ -101,7 +104,7 @@ def test_activation_reuses_previous_bytes_and_rejects_source_change(tmp_path):
                     str(source)], check=True)
     transcript = active / 'script_published' / 'Lecture.json'
     transcript.parent.mkdir(parents=True)
-    transcript.write_text(json.dumps({'script': [{'index': 1, 'text': 'Before ~~extra~~ after'}]}))
+    transcript.write_text(json.dumps({'script': [{'index': 1, 'text': f'~~{PASSAGE}~~'}]}))
     (staged / 'script_published').mkdir(parents=True)
     (staged / 'script_published' / transcript.name).symlink_to(transcript)
     (staged.parent / 'video').mkdir()
@@ -117,7 +120,7 @@ def test_activation_reuses_previous_bytes_and_rejects_source_change(tmp_path):
     decisions.write_text(json.dumps({
         'audio_sha256': source_sha, 'transcript_sha256': transcript_sha,
         'decisions': [{'paragraph': 1, 'ordinal': 0, 'decision': 'skip', 'interval': [1, 2],
-                       'text_sha256': hashlib.sha256(b'extra').hexdigest(),
+                       'text_sha256': hashlib.sha256(PASSAGE.encode()).hexdigest(),
                        'evidence_file': proof.name, 'evidence_sha256': cuts.file_sha(proof)}],
     }))
     prepared = cuts.prepare(active, 'Lecture', decisions, staged)
@@ -160,3 +163,17 @@ def test_unavailable_edited_source_is_removed_from_plan_before_other_sources_loa
     assert filtered['inputs'] == [plan['inputs'][1]]
     assert filtered['units']['both']['sub_units'] == [plan['units']['both']['sub_units'][1]]
     assert json.loads(path.read_text()) == plan
+
+def test_only_deletions_longer_than_ten_spoken_characters_need_audio_review(tmp_path):
+    transcript = tmp_path / 'source.json'
+    ten = '甲乙丙丁戊己庚辛壬癸'
+    eleven = ten + '子'
+    transcript.write_text(json.dumps({'script': [
+        {'index': 1, 'text': '甲~~幾個字~~乙。'},
+        {'index': 2, 'text': f'~~{ten}，。 ！？~~'},
+        {'index': 3, 'text': f'前~~語助詞~~一句。~~{eleven}~~後一句。'},
+        {'index': 4, 'text': f'同一句~~{PASSAGE}~~中間。'},
+        {'index': 5, 'type': 'comment', 'text': f'~~{PASSAGE}~~'},
+    ]}))
+    marks = cuts.deletion_marks(transcript)
+    assert marks == {('3', 1): eleven, ('4', 0): PASSAGE}
