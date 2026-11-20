@@ -22,9 +22,11 @@ UI_FILES = (
     'web/src/app/resources/wang-repository/audio/ChapterListener.tsx',
     'web/src/app/resources/wang-repository/audio/ChapterSlide.tsx',
     'web/src/app/resources/wang-repository/audio/listeningProgress.ts',
+    'web/src/app/resources/wang-repository/audio/listeningClock.ts',
     'web/src/app/resources/wang-repository/audio/listeningUnits.ts',
     'backend/api/original_audio.py',
     'backend/pipeline/chapter_listening_catalog.py',
+    'backend/pipeline/chapter_listening_cuts.py',
     'web/src/app/resources/wang-repository/audio/OriginalAudio.tsx',
     'web/src/app/resources/wang-repository/books/[book]/[chapter]/listen/page.tsx',
     'web/src/app/globals.css',
@@ -185,7 +187,11 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
                     'slides': {'status': 'failed', 'problems': [str(error)]},
                     'playback': {'status': 'blocked'}, 'ui': {'status': 'blocked'}},
                 'new_model_calls': 0, 'publication_decision': False}
-    current = binding(catalog if catalog is not None else index)
+    from backend.pipeline import chapter_listening_cuts
+
+    protected = chapter_listening_cuts.protect(index, data_root)
+    displayed = catalog if catalog is not None else protected
+    current = binding(displayed)
     plan = json.loads((data_root / 'chapter_exposition' / passage / 'listening-units.json').read_text())
     golden = json.loads((ROOT / 'backend/tests/fixtures/chapter_selection/unit1_sub_units_golden.json').read_text())
     unit1 = plan['units'].get(golden['target_section'])
@@ -291,7 +297,9 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
                     source_path.with_name(f'{title}.semantic-eval.json'))
             slide_results.append({'lecture': title, 'scope': 'reviewed_unit_bundle', 'bundle': bundle,
                 'status': 'failed' if result['problems'] else 'passed', **result})
-    playback_problems = diagram_index_problems(catalog if catalog is not None else index)
+    playback_problems = diagram_index_problems(displayed) + chapter_listening_cuts.playback_problems(displayed)
+    if displayed.get('soft_deletion_holds'):
+        playback_problems.append('Soft-deleted audio still needs boundary verification')
     timing_anchor_checks = []
     for correction in index.get('program_timing_corrections', []):
         if not correction.get('source_text'):
@@ -308,17 +316,17 @@ def evaluate(data_root, passage, *, evidence=None, catalog=None, expected_versio
                                      'point_at': sorted(shown), 'passed': passed})
         if not passed:
             playback_problems.append('Rendered owner timing correction differs from its spoken source')
-    playback_problems += playback_alignment_problems(catalog if catalog is not None else index)
+    playback_problems += playback_alignment_problems(displayed)
     checks = {'selection': {'status': 'failed' if selection_problems else 'passed', 'problems': selection_problems},
               'slides': {'status': 'failed' if any(r['status'] != 'passed' for r in slide_results) else 'passed', 'records': slide_results},
               'playback': {'status': 'failed' if playback_problems else 'passed', 'problems': playback_problems,
                            'timing_anchor_checks': timing_anchor_checks},
               'ui': browser_checks(evidence, current, diagram_shas={
-                  slide['diagram']['sha256'] for section in (catalog if catalog is not None else index)['sections']
+                  slide['diagram']['sha256'] for section in displayed['sections']
                   for row in section['sermons'] for slide in row['slides'] if slide.get('diagram')
               })}
     if catalog is not None:
-        checks['normal_entry'] = catalog_checks(catalog, index, evidence)
+        checks['normal_entry'] = catalog_checks(catalog, protected, evidence)
     return {'schema_version': 'chapter-listening-eval.v1', 'passage': passage,
             'evaluated_at': datetime.now(timezone.utc).isoformat(),
             'scope': 'browser_preview_using_saved_reviews_and_current_program_checks',

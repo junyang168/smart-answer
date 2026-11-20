@@ -1,5 +1,6 @@
 "use client";
 
+import { mediaTime, sourceTime } from "./listeningClock";
 import { groupUnits, listeningTitle } from "./listeningUnits";
 
 import Link from "next/link";
@@ -35,6 +36,7 @@ import ChapterSlide, { shouldShowSlideItem, type ChapterSlideData } from "./Chap
 export type Stretch = {
   start: number;
   end: number;
+  media_start?: number;
   left_out?: boolean;
   /** 为什么不算这一章的释经。编辑整理，不是他的话。 */
   reasons?: string[];
@@ -69,6 +71,8 @@ export type Sermon = {
   media_kind: "audio" | "video" | null;
   media_url: string | null;
   media_duration: number | null;
+  excluded_audio?: [number, number][];
+  audio_revision?: string;
   stretches: Stretch[];
   judgements: Judgement[];
   spoken: Spoken[];
@@ -331,33 +335,39 @@ export default function OriginalAudio({
    * 说那句话的地方，不是跳到那一段的开头。
    */
   function playFrom(sermon: Sermon, seconds: number) {
-    const index = Math.max(
-      0,
-      visible(sermon, showLeftOut).findIndex((stretch) => seconds < stretch.end),
-    );
+    const list = visible(sermon, showLeftOut);
+    const found = list.findIndex((stretch) => seconds < stretch.end);
+    const index = found < 0 ? (sermon.excluded_audio ? list.length - 1 : 0) : found;
+    const stretch = list[index];
+    if (!stretch) return;
+    if (stretch.media_start !== undefined) seconds = Math.min(stretch.end, Math.max(stretch.start, seconds));
+    const target = mediaTime(stretch, seconds);
     setPlaying({ sermon, index });
     setPaused(false);
     setAt(seconds);
-    pendingSeek.current = seconds;
+    pendingSeek.current = target;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
-        element.currentTime = seconds;
+        element.currentTime = target;
         void element.play();
       }
     }, 0);
   }
 
   function play(sermon: Sermon, index = 0) {
-    const start = visible(sermon, showLeftOut)[index].start;
+    const stretch = visible(sermon, showLeftOut)[index];
+    if (!stretch) return;
+    const start = stretch.start;
+    const target = mediaTime(stretch, start);
     setPlaying({ sermon, index });
     setPaused(false);
     setAt(start);
-    pendingSeek.current = start;
+    pendingSeek.current = target;
     window.setTimeout(() => {
       const element = media.current;
       if (element) {
-        element.currentTime = start;
+        element.currentTime = target;
         void element.play();
       }
     }, 0);
@@ -367,13 +377,14 @@ export default function OriginalAudio({
   function switchLeftOut(show: boolean) {
     setShowLeftOut(show);
     if (!playing) return;
-    const now = media.current?.currentTime ?? at;
+    const previous = visible(playing.sermon, showLeftOut)[playing.index];
+    const now = media.current && previous ? sourceTime(previous, media.current.currentTime) : at;
     const list = visible(playing.sermon, show);
     const index = list.findIndex((stretch) => now < stretch.end);
     if (index < 0) return;
     setPlaying({ ...playing, index });
     // 收起时正落在灰色片段里，跳到下一段保留的。
-    if (now < list[index].start && media.current) media.current.currentTime = list[index].start;
+    if (now < list[index].start && media.current) media.current.currentTime = mediaTime(list[index], list[index].start);
   }
 
   /** 真的暫停，不是把播放器關掉。
@@ -402,15 +413,18 @@ export default function OriginalAudio({
       applyPendingSeek();
       return;
     }
-    setAt(element.currentTime);
     const list = visible(playing.sermon, showLeftOut);
     const stretch = list[playing.index];
-    if (!stretch || element.currentTime < stretch.end) return;
+    if (!stretch) return;
+    const now = sourceTime(stretch, element.currentTime);
+    setAt(Math.min(now, stretch.end));
+    if (now < stretch.end) return;
     const next = playing.index + 1;
     if (next < list.length) {
       // 相连的两段不必跳：设一次 currentTime 就会顿一下。
-      if (Math.abs(list[next].start - element.currentTime) > 1) {
-        element.currentTime = list[next].start;
+      const target = mediaTime(list[next], list[next].start);
+      if (Math.abs(target - element.currentTime) > 1 || (list[next].media_start !== undefined && element.currentTime < target)) {
+        element.currentTime = target;
       }
       setPlaying({ ...playing, index: next });
       return;

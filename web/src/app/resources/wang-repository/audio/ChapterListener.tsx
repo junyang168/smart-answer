@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { mediaTime, sourceTime } from "./listeningClock";
 import { readBookmark, resumeClip } from "./listeningProgress";
 import { parentPassage, listeningTitle } from "./listeningUnits";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import ChapterSlide, { shouldShowSlideItem } from "./ChapterSlide";
 import ScriptureSlide from "./ScriptureSlide";
@@ -74,6 +75,7 @@ const SEEK_TIMEOUT_MS = 10000;
 type SeekRequest = {
   src: string;
   time: number;
+  stretch: Stretch;
   play: boolean;
   attempts: number;
   warming: boolean;
@@ -110,6 +112,8 @@ export default function ChapterListener({
   const [rate, setRate] = useState(1);
   const media = useRef<HTMLAudioElement | null>(null);
   const [seekError, setSeekError] = useState("");
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const scrub = useRef<{ pointer: number; start: number; length: number } | null>(null);
   const pending = useRef<SeekRequest | null>(null);
   const seekTimer = useRef<number | undefined>(undefined);
   const bookmarkVersion = useRef("");
@@ -142,7 +146,7 @@ export default function ChapterListener({
           try { saved = mode ? readBookmark(window.localStorage, bookmarkKey) : null; } catch { /* Storage may be disabled. */ }
           const resumed = resumeClip(list.map(item => ({section: loaded[item.section].passage,
             parent: parentPassage(loaded[item.section]), source: item.sermon.source_id,
-            start: item.start, end: item.end})), saved, payload.resume_version ?? "",
+            start: item.start, end: item.end, excluded: item.sermon.excluded_audio, audioRevision: item.sermon.audio_revision})), saved, payload.resume_version ?? "",
             {section: requestedSection, source: requestedSource, time: initialTime});
           return {loaded, list, first, mode, resumed};
         };
@@ -181,7 +185,8 @@ export default function ChapterListener({
     window.clearTimeout(seekTimer.current);
     const wanted: SeekRequest = {
       src: new URL(mediaSrc(url), document.baseURI).href,
-      time,
+      time: mediaTime(target.stretch, time),
+      stretch: target.stretch,
       play: play ?? pending.current?.play ?? Boolean(element && !element.paused),
       attempts: 0,
       warming: false,
@@ -213,10 +218,11 @@ export default function ChapterListener({
     const element = media.current;
     // iOS may enter a stalled seek if currentTime is assigned while only metadata is loaded.
     const ready = element && element.currentSrc === wanted.src && element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
-    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= SEEK_TOLERANCE) {
+    const tolerance = wanted.stretch.media_start === undefined ? SEEK_TOLERANCE : 0.05;
+    if (ready && !element.seeking && Math.abs(element.currentTime - wanted.time) <= tolerance) {
       pending.current = null;
       window.clearTimeout(seekTimer.current);
-      setPosition((position) => ({ ...position, time: element.currentTime }));
+      setPosition((position) => ({ ...position, time: Math.min(wanted.stretch.end, Math.max(wanted.stretch.start, sourceTime(wanted.stretch, element.currentTime))) }));
       setSeekError("");
       if (!wanted.play) element.pause();
       element.muted = false;
@@ -303,8 +309,12 @@ export default function ChapterListener({
       return;
     }
     // 同一個檔、緊接著的下一段，不必跳——設一次 currentTime 就會頓一下。
-    if (next.sermon.media_url === clip.sermon.media_url && Math.abs(next.start - element.currentTime) <= 1) {
-      setPosition({ clip: position.clip + 1, time: element.currentTime });
+    const nextStart = mediaTime(next.stretch, next.start);
+    const inNext = next.stretch.media_start === undefined
+      ? Math.abs(nextStart - element.currentTime) <= 1
+      : nextStart <= element.currentTime && element.currentTime <= nextStart + 1 && element.currentTime < mediaTime(next.stretch, next.end);
+    if (next.sermon.media_url === clip.sermon.media_url && inNext) {
+      setPosition({ clip: position.clip + 1, time: sourceTime(next.stretch, element.currentTime) });
     } else {
       seekTo(position.clip + 1, next.start, true);
     }
@@ -316,15 +326,20 @@ export default function ChapterListener({
     // Queued events from the previous position must not advance the playlist.
     if (pending.current || element.seeking) return;
     if (element.currentSrc !== element.src) return;
-    if (element.currentTime >= clip.end) {
+    const time = sourceTime(clip.stretch, element.currentTime);
+    if (time >= clip.end) {
       advance();
       return;
     }
-    setPosition((current) => ({ ...current, time: element.currentTime }));
-    if (unitNavigation && bookmarkVersion.current && Math.floor(element.currentTime) !== lastBookmarkSecond.current) {
-      lastBookmarkSecond.current = Math.floor(element.currentTime);
+    if (time < clip.start && clip.stretch.media_start !== undefined) {
+      seekTo(position.clip, clip.start);
+      return;
+    }
+    setPosition((current) => ({ ...current, time }));
+    if (unitNavigation && bookmarkVersion.current && Math.floor(time) !== lastBookmarkSecond.current) {
+      lastBookmarkSecond.current = Math.floor(time);
       try { window.localStorage.setItem(bookmarkKey, JSON.stringify({version: bookmarkVersion.current,
-        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time: element.currentTime})); }
+        section: sections?.[clip.section].passage, source: clip.sermon.source_id, time, audioRevision: clip.sermon.audio_revision})); }
       catch { /* Playback remains usable when storage is unavailable. */ }
     }
   }
@@ -335,7 +350,7 @@ export default function ChapterListener({
     const wanted = pending.current;
     if (wanted) {
       if (wanted.deadline > 0 && Date.now() >= wanted.deadline && clip) {
-        requestSeek(clip, position.clip, wanted.time, true);
+        requestSeek(clip, position.clip, sourceTime(wanted.stretch, wanted.time), true);
       } else {
         wanted.play = !wanted.play;
         setPlaying(wanted.play);
@@ -393,11 +408,29 @@ export default function ChapterListener({
   const sectionLength = sectionClips.reduce((sum, item) => sum + item.end - item.start, 0);
   const chapterTime = clip ? clip.offset + (position.time - clip.start) : 0;
   const sectionTime = Math.max(0, chapterTime - sectionStart);
+  const displayedTime = scrubTime ?? chapterTime;
+  const displayedSectionTime = Math.min(sectionLength, Math.max(0, displayedTime - sectionStart));
   const sectionsWithAudio = (sections ?? [])
     .map((item, index) => ({ item, index }))
     .filter(({ index }) => clips.some((c) => c.section === index));
   const previousSection = [...sectionsWithAudio].reverse().find(({ index }) => index < section);
   const nextSection = sectionsWithAudio.find(({ index }) => index > section);
+
+  function pointerTime(event: PointerEvent<HTMLDivElement>, range: { start: number; length: number }) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    return range.start + fraction * range.length;
+  }
+
+  function finishScrub(event: PointerEvent<HTMLDivElement>, seek: boolean) {
+    const range = scrub.current;
+    if (!range || range.pointer !== event.pointerId) return;
+    scrub.current = null;
+    setScrubTime(null);
+    if (seek) {
+      seekChapter(Math.min(pointerTime(event, range), range.start + Math.max(0, range.length - 0.05)));
+    }
+  }
 
   function restart() {
     if (sectionTime > RESTART_GRACE) seekChapter(sectionStart, true);
@@ -525,7 +558,10 @@ export default function ChapterListener({
   const table = clip?.sermon.tables?.find((item) => item.at <= time && time < item.until);
   const slides = clip?.sermon.slides ?? [];
   const clipEnd = clip?.end ?? time;
-  const slide = [...slides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? slides[0];
+  const localSlides = clip?.stretch.media_start === undefined ? slides : slides.filter(
+    (item) => clip.start <= item.at && item.at < clipEnd,
+  );
+  const slide = [...localSlides].reverse().find((item) => shouldShowSlideItem(item.at, time, clipEnd)) ?? localSlides[0];
   const diagramVisible = Boolean(!table && !leftOutPart && slide?.diagram &&
     (clip?.start ?? time) <= slide.diagram.at && slide.diagram.at < clipEnd && slide.diagram.at <= time);
   const hasLeftOut = sections.some((item) => item.sermons.some((sermon) => sermon.stretches.some((s) => s.left_out)));
@@ -749,24 +785,48 @@ export default function ChapterListener({
       <footer aria-label="播放器" className="border-t border-stone-200 bg-white px-4 pb-3 pt-2 sm:px-6 lg:col-start-1 lg:row-start-3 lg:border-r lg:px-3 lg:py-4">
         {seekError && <p role="status" className="text-center text-xs text-rose-800">{seekError}</p>}
         <div className="flex items-center gap-3 font-mono text-xs text-stone-500">
-          <span className="w-12 text-right">{clock(sectionTime)}</span>
+          <span className="w-12 text-right">{clock(displayedSectionTime)}</span>
           <div
             role="slider"
             aria-label="本段進度"
             aria-valuemin={0}
             aria-valuemax={Math.round(sectionLength)}
-            aria-valuenow={Math.round(sectionTime)}
-            tabIndex={0}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              seekChapter(sectionStart + ((event.clientX - rect.left) / rect.width) * sectionLength);
+            aria-valuenow={Math.round(displayedSectionTime)}
+            aria-valuetext={`${clock(displayedSectionTime)} / ${clock(sectionLength)}`}
+            aria-disabled={!sectionLength || undefined}
+            tabIndex={sectionLength ? 0 : -1}
+            onPointerDown={(event) => {
+              if (!event.isPrimary || event.button !== 0 || !sectionLength) return;
+              const range = { pointer: event.pointerId, start: sectionStart, length: sectionLength };
+              scrub.current = range;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setScrubTime(pointerTime(event, range));
             }}
-            className="relative flex h-6 flex-1 cursor-pointer items-center gap-[3px]"
+            onPointerMove={(event) => {
+              const range = scrub.current;
+              if (range?.pointer === event.pointerId) setScrubTime(pointerTime(event, range));
+            }}
+            onPointerUp={(event) => finishScrub(event, true)}
+            onPointerCancel={(event) => finishScrub(event, false)}
+            onLostPointerCapture={(event) => finishScrub(event, false)}
+            onKeyDown={(event) => {
+              const end = Math.max(0, sectionLength - 0.05);
+              const target = {
+                ArrowLeft: sectionTime - 15, ArrowDown: sectionTime - 15,
+                ArrowRight: sectionTime + 15, ArrowUp: sectionTime + 15,
+                Home: 0, End: end,
+              }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              event.stopPropagation();
+              seekChapter(sectionStart + Math.max(0, Math.min(end, target)));
+            }}
+            className="relative flex h-11 flex-1 touch-none cursor-pointer select-none items-center gap-[3px]"
           >
             {/* 一段錄音一截：換堂課、或中間跳過他岔開去講的地方，看得見斷口。 */}
             {sectionClips.map((item) => {
               const length = item.end - item.start;
-              const done = Math.min(1, Math.max(0, (chapterTime - item.offset) / length));
+              const done = Math.min(1, Math.max(0, (displayedTime - item.offset) / length));
               return (
                 <div
                   key={`${item.offset}`}
@@ -780,6 +840,10 @@ export default function ChapterListener({
                 </div>
               );
             })}
+            {sectionLength > 0 && (
+              <span aria-hidden="true" className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 rounded-full bg-amber-600 ring-2 ring-white"
+                style={{ left: `${displayedSectionTime / sectionLength * 100}%` }} />
+            )}
           </div>
           <span className="w-12">{clock(sectionLength)}</span>
         </div>

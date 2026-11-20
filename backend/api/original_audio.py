@@ -39,7 +39,7 @@ def index(passage: str, source: str | None = None, units: bool = False, legacy: 
     的验收条件，不是可选项。
     """
 
-    from backend.pipeline import chapter_topics, notes_chapter
+    from backend.pipeline import chapter_listening_cuts, chapter_topics, notes_chapter
 
     data_root = Path(DATA_BASE_PATH)
     from backend.pipeline.chapter_material import CHAPTERS
@@ -47,12 +47,19 @@ def index(passage: str, source: str | None = None, units: bool = False, legacy: 
     has_unit_plan = passage in CHAPTERS and (data_root / 'chapter_exposition' / passage / 'listening-units.json').is_file()
     unit_source = source in (None, '紐約靈命進深會')
 
+    def unit_index():
+        from backend.pipeline.chapter_listening_units import build
+
+        plan, held = chapter_listening_cuts.available_plan(data_root, passage)
+        result = build(data_root, passage, plan=plan) if held else build(data_root, passage)
+        return result, held
+
     if units:
-        from backend.pipeline import chapter_listening_units
         if not unit_source or not has_unit_plan:
             raise HTTPException(status_code=404, detail='這一章尚無單元預覽。')
         try:
-            return chapter_listening_units.build(data_root, passage)
+            found, held = unit_index()
+            return chapter_listening_cuts.protect(found, data_root, held_sources=held)
         except (ValueError, FileNotFoundError) as error:
             raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
 
@@ -66,11 +73,12 @@ def index(passage: str, source: str | None = None, units: bool = False, legacy: 
         raise HTTPException(status_code=404, detail="這段經文還沒有原聲頁面。")
     store = PostgresKnowledgeStore()
     found = chapter_topics.attach(original_audio_index.build_index(store, data_root, passage), data_root)
+    held = []
     if not legacy and unit_source and has_unit_plan:
         from backend.pipeline.chapter_listening_catalog import compose
-        from backend.pipeline.chapter_listening_units import build
         try:
-            return compose(found, build(data_root, passage))
+            selected, held = unit_index()
+            found = compose(found, selected)
         except (ValueError, FileNotFoundError) as error:
             raise HTTPException(status_code=409, detail='單元材料已變更，須重新核對。') from error
-    return found
+    return chapter_listening_cuts.protect(found, data_root, held_sources=held)
