@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from itertools import groupby
 from copy import deepcopy
+from difflib import SequenceMatcher
 import json
 import hashlib
 from pathlib import Path
@@ -114,6 +115,59 @@ def align_playback_intervals(row: dict) -> dict:
     return {**row, 'slides': slides, 'transcript': transcript}
 
 
+def _reviewed_playback_clock(data_root, directory, expected_sha, selection, selection_sha,
+                             slides, slides_sha, pieces, timed, duration):
+    clock_path = directory / f'{selection["lecture"]}.playback-timing.json'
+    if exposition.file_sha256(clock_path) != expected_sha:
+        raise ValueError('Reviewed playback timing changed')
+    clock = json.loads(clock_path.read_text())
+    raw_path = data_root / 'script' / Path(selection['transcript_file']).name
+    if (clock.get('schema_version') != 'chapter-reviewed-playback-clock.v1'
+            or clock['selection_sha256'] != selection_sha or clock['slides_sha256'] != slides_sha
+            or clock['recognition_sha256'] != exposition.file_sha256(raw_path)):
+        raise ValueError('Reviewed playback timing does not match its source and slides')
+    if len(pieces) != 1:
+        raise ValueError('A reviewed playback clock requires one contiguous source piece')
+    piece, = pieces
+    cues = {cue['index']: cue for cue in json.loads(raw_path.read_text())['entries']}
+    first, last = clock['raw_cue_range']
+    if first > last or first not in cues or last not in cues:
+        raise ValueError('Invalid reviewed recognition cue range')
+    begin, finish = cues[first]['start_ms'] / 1000, cues[last]['end_ms'] / 1000
+    start, end, body = piece['start'], piece['end'], piece['text']
+    if not (0 <= begin < finish <= duration and start < end and body):
+        raise ValueError('Invalid reviewed playback interval')
+    anchors = audio._align_recognition({'segments': [
+        {'text': body, 'start_index': first, 'end_index': last},
+    ]}, raw_path, SequenceMatcher)
+    timeline = [(0, begin), *((i, t) for i, t in anchors if 0 < i < len(body) and begin <= t <= finish),
+                (len(body), finish)]
+    if not anchors:
+        raise ValueError('Reviewed recognition cues could not be aligned')
+
+    def convert(seconds):
+        position = (seconds - start) / (end - start) * len(body)
+        return audio._at(timeline, max(0, min(position, len(body))))
+
+    diagram_times = {}
+    sentences = {line['id']: line for line in chapter_slides.sentences(pieces)}
+    for anchor in clock.get('diagrams', []):
+        slide_first, sentence, cue = anchor['slide_first'], anchor['sentence'], anchor['recognition_cue']
+        if (slides.get('diagram_timing', {}).get(slide_first, {}).get('sentence') != sentence
+                or sentence not in sentences or cue not in cues or not first <= cue <= last):
+            raise ValueError('Reviewed diagram timing does not match its sentence and cue')
+        slide = next((item for raw, item in zip(slides['slides'], timed, strict=True)
+                      if raw['first'] == slide_first and item.get('diagram')), None)
+        at = cues[cue]['start_ms'] / 1000
+        if slide is None or not convert(slide['diagram']['at']) - .011 <= at < convert(sentences[sentence]['end']):
+            raise ValueError('Reviewed diagram cue is outside its sentence')
+        key = (slide['title'], slide['diagram']['at'])
+        if key in diagram_times:
+            raise ValueError('Duplicate reviewed diagram timing')
+        diagram_times[key] = round(at, 2)
+    return {'retime': convert, 'diagram_times': diagram_times}
+
+
 def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -> dict:
     """Keep argument identity distinct from its possibly interrupted playback runs."""
     sections = []
@@ -195,6 +249,14 @@ def project(plan: dict, recordings: dict, unit_recordings: dict | None = None) -
                     raise ValueError('Retained audio ranges exclude the selected transcript')
                 row.update(stretches=clips, seconds=sum(clip['end'] - clip['start'] for clip in clips))
             row = align_playback_intervals(row)
+            for before, slide in zip(slides, row['slides'], strict=True):
+                if diagram := before.get('diagram'):
+                    at = recording.get('diagram_times', {}).get((before['title'], diagram['at']))
+                    if at is not None:
+                        if not (slide['at'] <= at < slide['at'] + slide['seconds']
+                                and any(clip['start'] <= at < clip['end'] for clip in row['stretches'])):
+                            raise ValueError('Reviewed diagram cue is outside the visible slide')
+                        slide['diagram']['at'] = at
             continued = sid in seen
             sections.append({'passage': f'{passage}-sub-{sid}-run-{run_index}',
                              'unit_id': str(unit['unit_number']),
@@ -220,7 +282,8 @@ def bundle_directory(root: Path, bundle: str) -> Path:
     return root / 'unit-supplements' / bundle
 
 
-def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, recording: dict) -> dict:
+def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, recording: dict,
+                            *, data_root: Path | None = None, timing_sha: str | None = None) -> dict:
     """Use a Unit's reviewed slides only for the matching original recording."""
     title, source = entry['lecture'], entry['source_id']
     selection_path = directory / f'{title}.selection.json'
@@ -236,10 +299,16 @@ def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, rec
             or selection['transcript_sha256'] != entry['source_sha256']
             or slides['decisions_sha256'] != exposition.file_sha256(selection_path)):
         raise ValueError('Unit slides do not match their source and selection')
+    legacy_clock = False
     if slides.get('semantic_eval'):
         from backend.pipeline.chapter_slide_eval import semantic_eval_problems
-        if problems := semantic_eval_problems(slides_path, selection_path, directory / f'{title}.semantic-eval.json'):
+        legacy_manifest = data_root / 'chapter_exposition' / 'published-slide-eval-shas.json' if data_root else None
+        legacy_shas = json.loads(legacy_manifest.read_text()) if legacy_manifest and legacy_manifest.is_file() else ()
+        receipt = directory / f'{title}.semantic-eval.json'
+        if problems := semantic_eval_problems(slides_path, selection_path, receipt,
+                                              published_legacy_sha256s=legacy_shas):
             raise ValueError(f'Unit slides failed semantic Eval: {problems}')
+        legacy_clock = bool(legacy_shas and exposition.file_sha256(receipt) in legacy_shas)
     else:
         review = json.loads((directory / f'{title}.review.json').read_text())
         if (review['slides_sha256'] != exposition.file_sha256(slides_path)
@@ -257,8 +326,25 @@ def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, rec
             raise ValueError('Unit reviewed selection differs from its planned source paragraphs')
     elif not slides.get('semantic_eval'):
         raise ValueError('A chapter-wide slide bundle requires a semantic Eval')
-    return {**recording, 'lines': chapter_slides.sentences(pieces),
-            'slides': chapter_slides.placed(selection, slides)[1]}
+    timed = chapter_slides.placed(selection, slides, legacy_diagram_clock=legacy_clock)[1]
+    timing = {}
+    if timing_sha is not None:
+        if data_root is None:
+            raise ValueError('Reviewed playback timing requires the recording data root')
+        timing = _reviewed_playback_clock(
+            data_root, directory, timing_sha, selection, exposition.file_sha256(selection_path),
+            slides, exposition.file_sha256(slides_path), pieces, timed, recording['media']['media_duration'])
+    return {**recording, **timing, 'lines': chapter_slides.sentences(pieces), 'slides': timed}
+
+
+def _legacy_sources(plan: dict) -> set:
+    sources = {item['source_id'] for item in plan.get('non_argument_exclusions', [])}
+    for unit in plan['units'].values():
+        if unit.get('reviewed_slide_bundle'):
+            continue
+        covered = {key for sub in unit['sub_units'] if sub.get('reviewed_slide_bundle') for key in sub['group_keys']}
+        sources.update(group['source_id'] for group in unit['groups'] if group['key'] not in covered)
+    return sources
 
 
 def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
@@ -268,9 +354,7 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     recordings = {}
     timing_corrections = []
     sermons = audio.Sermons(data_root)
-    using_legacy = {g['source_id'] for unit in plan['units'].values()
-                    if 'reviewed_slide_bundle' not in unit for g in unit['groups']}
-    using_legacy.update(item['source_id'] for item in plan.get('non_argument_exclusions', []))
+    using_legacy = _legacy_sources(plan)
     for entry in plan['inputs']:
         title, source = entry['lecture'], entry['source_id']
         transcript = data_root / 'script_published' / f'{title}.json'
@@ -286,8 +370,9 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
         recording = {'media': {k: sermon[k] for k in
                                ['source_id', 'transcript_id', 'title', 'media_kind', 'media_url', 'media_duration']},
                      'retime': audio.retimer(sermon, data_root)}
-        if bundle := entry.get('reviewed_chapter_bundle'):
-            recording = reviewed_unit_recording(bundle_directory(path.parent, bundle), None, entry, recording)
+        if source in using_legacy and (bundle := entry.get('reviewed_chapter_bundle')):
+            recording = reviewed_unit_recording(bundle_directory(path.parent, bundle), None, entry, recording,
+                                                data_root=data_root)
         elif source in using_legacy:
             selection = exposition.load_record(data_root, passage, title, entry['source_sha256'])
             slides = chapter_slides.load_record(data_root, passage, title)
@@ -319,19 +404,24 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
     unit_recordings = {}
     entries = {entry['source_id']: entry for entry in plan['inputs']}
     for unit_passage, unit in plan['units'].items():
-        scopes = [(None, unit, unit['groups'])] + [
+        reviewed_subunits = [sub for sub in unit['sub_units'] if sub.get('reviewed_slide_bundle')]
+        covered = {key for sub in reviewed_subunits for key in sub['group_keys']}
+        scopes = [(None, unit, [g for g in unit['groups'] if g['key'] not in covered])] + [
             (sub['id'], sub, [g for g in unit['groups'] if g['key'] in sub['group_keys']])
-            for sub in unit['sub_units'] if sub.get('reviewed_slide_bundle')
+            for sub in reviewed_subunits
         ]
         for sub_id, scope, groups in scopes:
             bundle = scope.get('reviewed_slide_bundle')
             if bundle is None:
                 continue
             directory = bundle_directory(path.parent, bundle)
+            # A partially superseded Unit bundle still covers the full original
+            # selection. Only load recordings actually used as a fallback.
             for source in {g['source_id'] for g in groups}:
                 key = (unit_passage, source, sub_id) if sub_id else (unit_passage, source)
                 unit_recordings[key] = reviewed_unit_recording(
-                    directory, {'groups': groups}, entries[source], recordings[source])
+                    directory, {'groups': groups if sub_id else unit['groups']}, entries[source], recordings[source],
+                    data_root=data_root, timing_sha=scope.get('reviewed_playback_timing_sha256'))
     result = project(plan, recordings, unit_recordings)
     from backend.api.scripture import format_chinese_reference
     result['passage'] = passage

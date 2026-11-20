@@ -155,6 +155,62 @@ def test_fractional_first_sentence_remains_inside_its_clip_after_audio_retiming(
     assert row['transcript'][0]['at'] == row['stretches'][0]['start'] == round(start * 10, 2)
 
 
+def test_reviewed_subunit_reads_its_own_audio_clock_and_diagram_cue(tmp_path):
+    from backend.pipeline import chapter_listening_units as units, chapter_slides
+    from backend.pipeline.chapter_exposition import file_sha256
+
+    plan, recordings, _ = example()
+    unit = plan['units']['mat-5-1-12']
+    unit['groups'] = unit['groups'][:1]
+    unit['playback_order'] = unit['playback_order'][:1]
+    unit['sub_units'] = unit['sub_units'][:1]
+    group, = unit['groups']
+    sub, = unit['sub_units']
+    sub['reviewed_slide_bundle'] = 'reviewed'
+    assert units._legacy_sources(plan) == set()
+    source = group['source_id']
+    plan['non_argument_exclusions'] = [{'source_id': source}]
+    assert units._legacy_sources(plan) == {source}
+    del plan['non_argument_exclusions']
+    coarse = unit['playback_order'][0]
+    pieces = [{'id': 'U001', **{k: coarse[k] for k in ('start', 'end')},
+               'text': '原聲的第一句。這裏講圖上的第二點。'}]
+    lines = chapter_slides.sentences(pieces)
+    selection = {'lecture': 'lecture', 'transcript_file': 'lecture.json'}
+    timed = [{**recordings[source]['slides'][0], 'diagram': {'at': lines[1]['start'], 'sha256': 'art'}}]
+    record = {'slides': [{'first': lines[0]['id']}],
+              'diagram_timing': {lines[0]['id']: {'sentence': lines[1]['id']}}}
+    raw = tmp_path / 'script' / 'lecture.json'
+    raw.parent.mkdir()
+    raw.write_text(json.dumps({'entries': [
+        {'index': 7, 'start_ms': 42000, 'end_ms': 50000, 'text': '原聲的第一句。'},
+        {'index': 8, 'start_ms': 50000, 'end_ms': 53000, 'text': '這裏講圖上的'},
+        {'index': 9, 'start_ms': 53000, 'end_ms': 59000, 'text': '第二點。'},
+    ]}))
+    clock_file = tmp_path / 'lecture.playback-timing.json'
+    clock_file.write_text(json.dumps({
+        'schema_version': 'chapter-reviewed-playback-clock.v1',
+        'selection_sha256': 'selection', 'slides_sha256': 'slides', 'recognition_sha256': file_sha256(raw),
+        'raw_cue_range': [7, 9], 'diagrams': [{'slide_first': lines[0]['id'],
+        'sentence': lines[1]['id'], 'recognition_cue': 9}],
+    }))
+    timing_sha = file_sha256(clock_file)
+
+    def clock():
+        return units._reviewed_playback_clock(tmp_path, tmp_path, timing_sha, selection, 'selection',
+                                             record, 'slides', pieces, timed, 100)
+
+    reviewed = {**recordings[source], **clock(), 'lines': lines, 'slides': timed}
+    row = project(plan, recordings, {('mat-5-1-12', source, sub['id']): reviewed})['sections'][0]['sermons'][0]
+    assert row['stretches'] == [{'start': 42, 'end': 59}]
+    assert row['slides'][0]['at'] == row['transcript'][0]['at'] == 42
+    assert row['slides'][0]['diagram']['at'] == 53
+    assert row['transcript'][1]['at'] == 49
+    raw.write_text(raw.read_text() + '\n')
+    with pytest.raises(ValueError, match='does not match'):
+        clock()
+
+
 def test_owner_timing_corrects_unique_quote_and_keeps_all_other_owner_cases_enforced(monkeypatch):
     from backend.pipeline.chapter_listening_units import owner_timing
     from backend.pipeline import chapter_slide_cases

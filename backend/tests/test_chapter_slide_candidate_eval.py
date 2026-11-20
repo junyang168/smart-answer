@@ -86,6 +86,26 @@ def test_saved_semantic_eval_requires_exact_complete_passing_candidate(tmp_path,
     assert bool(ev.semantic_eval_problems(candidate, selection, receipt)) == (invalid not in {"published", "none"})
 
 
+def test_historical_eval_accepts_only_the_exact_published_receipt(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text("{}")
+    slides = tmp_path / "slides.json"
+    slides.write_text(json.dumps({"slides": [{"first": "S0001"}]}))
+    receipt = tmp_path / "semantic-eval.json"
+    receipt.write_text(json.dumps({
+        "schema_version": ev.SEMANTIC_SCHEMA_VERSION,
+        "slides_sha256": ev.semantic_slide_sha256(slides),
+        "selection_sha256": chapter_exposition.file_sha256(selection),
+        "checks": [{"slide": "S0001", "criterion": criterion, "passed": True, "evidence": "saved review"}
+                   for criterion in ev.SEMANTIC_CRITERIA],
+    }))
+    published_shas = {chapter_exposition.file_sha256(receipt)}
+    assert ev.semantic_eval_problems(slides, selection, receipt)
+    assert not ev.semantic_eval_problems(slides, selection, receipt, published_legacy_sha256s=published_shas)
+    receipt.write_text(receipt.read_text() + "\n")
+    assert ev.semantic_eval_problems(slides, selection, receipt, published_legacy_sha256s=published_shas)
+
+
 def test_unit_reader_uses_the_exact_semantic_eval_without_a_second_review(tmp_path):
     from backend.pipeline.chapter_listening_units import reviewed_unit_recording
 

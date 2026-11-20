@@ -392,7 +392,28 @@ def _diagram_timing_problems(record):
     return []
 
 
-def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path) -> list[str]:
+def _receipt_checks(rows, expected):
+    seen = set()
+    problems = []
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return ["Semantic Eval checks must be a list of decisions"]
+    for row in rows:
+        key = (row.get("slide"), row.get("criterion"))
+        if (key not in expected or key in seen or not isinstance(row.get("passed"), bool)
+                or not isinstance(row.get("evidence"), str) or not row["evidence"].strip()):
+            return ["Semantic Eval has a duplicate, unknown or incomplete check"]
+        seen.add(key)
+        if not row["passed"]:
+            problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
+    if seen != expected:
+        problems.append("Semantic Eval must cover each criterion for every slide")
+        if any(criterion.startswith("argument-") for _, criterion in expected - seen):
+            problems.append("Semantic Eval must check each planned inference on its conclusion slide")
+    return problems
+
+
+def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path, *,
+                           published_legacy_sha256s=()) -> list[str]:
     """Read the single per-candidate semantic Eval with no model call."""
     from backend.pipeline.chapter_exposition import file_sha256
 
@@ -405,6 +426,12 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             or result.get("selection_sha256") != file_sha256(selection_path)):
         return ["Semantic Eval belongs to a different slide version or source selection"]
     record = json.loads(slide_path.read_text())
+    if published_legacy_sha256s and file_sha256(receipt_path) in published_legacy_sha256s:
+        # These exact receipts were already accepted in production before
+        # saved provider responses became mandatory. Replay that contract
+        # only for those published decks; new candidates take the path below.
+        expected = {(s["first"], key) for s in record["slides"] for key in SEMANTIC_CRITERIA}
+        return _receipt_checks(result.get("checks"), expected)
     # Owner 2026-11-18: a receipt the slide builder wrote by hand, reusing an older
     # verdict (「沿用…該項未變」), passed a point that appeared 12 s late. Only a
     # recorded run of a different model than the one that wrote the slides counts.
@@ -463,8 +490,6 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             expected.update((route["conclusion_slide"], route["id"]) for route in inferences)
         except (OSError, ValueError, TypeError, KeyError):
             return ["Missing or invalid source-bound argument requirements"]
-    seen = set()
-    problems = []
     rows = result.get("checks")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         return ["Semantic Eval checks must be a list of decisions"]
@@ -478,18 +503,7 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             return ["Semantic Eval verdicts differ from the recorded review and point timing evidence"]
     except (AttributeError, KeyError, TypeError, ValueError):
         return ["Missing or invalid recorded review or point timing evidence"]
-    for row in rows:
-        key = (row.get("slide"), row.get("criterion"))
-        if (key not in expected or key in seen or not isinstance(row.get("passed"), bool)
-                or not isinstance(row.get("evidence"), str) or not row["evidence"].strip()):
-            return ["Semantic Eval has a duplicate, unknown or incomplete check"]
-        seen.add(key)
-        if not row["passed"]:
-            problems.append(f"{key[0]} {key[1]}: {row['evidence']}")
-    if seen != expected:
-        problems.append("Semantic Eval must cover each criterion for every slide")
-        if any(criterion.startswith("argument-") for _, criterion in expected - seen):
-            problems.append("Semantic Eval must check each planned inference on its conclusion slide")
+    problems = _receipt_checks(rows, expected)
     if "adjustments" in result.get("point_timing", {}):
         from backend.pipeline.chapter_slide_point_timing import apply_adjustments
 

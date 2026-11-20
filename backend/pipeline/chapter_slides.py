@@ -834,7 +834,8 @@ def load_record(data_base_dir: Path, passage: str, lecture: str) -> dict[str, An
     return record
 
 
-def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings=None) -> dict[str, dict]:
+def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings=None, *,
+                   legacy_clock: bool = False) -> dict[str, dict]:
     """Resolve the one diagram selected for a slide and when it appears.
 
     New sub-unit bundles carry an explicit sentence located from the slide's
@@ -854,6 +855,16 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings
         for claim in claims:
             found = [d for d in claim.get("diagrams", []) if d["sha256"] == ref and "svg" in d]
             if not found:
+                continue
+            if timings is None and legacy_clock:
+                # Existing published bundles used the Claim or its point as the
+                # anchor. Evidence-based placement requires an explicit timing.
+                sentence = claim.get("stated")
+                if not on_slide(sentence):
+                    sentence = next((p["sentence"] for p in slide["points"]
+                                     if p.get("source") == claim["claim_id"]), None)
+                if sentence in by_id:
+                    matches.append((by_id[sentence], found[0]))
                 continue
             steps = {step.get("evidence_step_id") for step in claim.get("evidence_steps", [])} - {None}
             starts = [claim.get("stated")]
@@ -877,11 +888,12 @@ def timed_diagrams(slides: list[dict], lines: list[dict], context: dict, timings
         placed[slide["first"]] = {
             "at": at, "title": item["title"], "origin": item["origin"], "kind": item["kind"],
             "sha256": ref, "image_src": "data:image/svg+xml;base64," + image,
+            **({"layout": item["layout"], "labels": item["labels"]} if legacy_clock and item.get("layout") else {}),
         }
     return placed
 
 
-def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> tuple[
+def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any], *, legacy_diagram_clock: bool = False) -> tuple[
     dict[str, list[str]], list[dict[str, Any]]
 ]:
     """片段归哪张投影片的经节、每张投影片从第几秒开始、经文第几秒出现。
@@ -898,7 +910,7 @@ def placed(decisions_record: dict[str, Any], slides_record: dict[str, Any]) -> t
     piece_verses: dict[str, list[str]] = {}
     timed: list[dict[str, Any]] = []
     diagrams = timed_diagrams(slides, lines, slides_record.get("claim_context") or {},
-                              slides_record.get("diagram_timing"))
+                              slides_record.get("diagram_timing"), legacy_clock=legacy_diagram_clock)
     for slide in slides:
         own = lines[index[slide["first"]]:index[slide["last"]] + 1]
         for line in own:
