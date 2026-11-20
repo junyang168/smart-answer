@@ -21,6 +21,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from backend.pipeline.source_projection import SOFT_DELETION
 
 SCHEMA = 'chapter-listening-cuts.v2'
+AUDIO_BIT_RATE = 128000
 TOLERANCE = .08  # Encoder padding and media duration rounding, in seconds.
 SHORT_DELETION_SECONDS = 15
 
@@ -274,8 +275,9 @@ def _encode(source, output, clock, video):
     graph.append(''.join(inputs) + f'concat=n={len(clock)}:v={int(video)}:a=1' + ('[v][a]' if video else '[joined]'))
     if not video:
         graph.append('[joined]aformat=sample_fmts=s16p,asetnsamples=n=1152:p=1[a]')
+    # Browsers can report a successful seek while decoding the wrong position in a VBR MP3.
     codecs = (['-map', '[v]', '-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart']
-              if video else ['-c:a', 'libmp3lame', '-q:a', '2'])
+              if video else ['-c:a', 'libmp3lame', '-b:a', str(AUDIO_BIT_RATE)])
     subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-i', str(source), '-filter_complex', ';'.join(graph),
                     '-map', '[a]', *codecs, str(output)], check=True)
 
@@ -312,6 +314,8 @@ def prepare(data_root: Path, title: str, decisions_path: Path, install_root: Pat
              'media': None, 'clock': clock, 'caption_seams': seams, 'sync_windows': sync_windows,
              'decisions': [{k: v for k, v in d.items() if k not in ('evidence_file', 'candidate_interval')}
                            for d in decisions['decisions']]}
+    if not video and clock and (cuts or pending):
+        value['audio_bit_rate'] = AUDIO_BIT_RATE
     target = manifest(install_root, title)
     if target.exists():
         try:
@@ -328,6 +332,8 @@ def prepare(data_root: Path, title: str, decisions_path: Path, install_root: Pat
             expected = clock[-1]['media_start'] + clock[-1]['end'] - clock[-1]['start']
             if abs(rendered_seconds - expected) > TOLERANCE:
                 raise ValueError('Edited audio length differs from its playback clock')
+            if not video and int(rendered_streams['audio'].get('bit_rate', 0)) != AUDIO_BIT_RATE:
+                raise ValueError('Edited MP3 must use the listening bitrate')
             if video and ('video' not in rendered_streams or
                           abs(float(rendered_streams['audio']['duration']) -
                               float(rendered_streams['video']['duration'])) > TOLERANCE):

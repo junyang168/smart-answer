@@ -71,7 +71,14 @@ def test_rendition_removes_the_actual_middle_audio(tmp_path):
     cuts._encode(source, dest, cuts.retained_clock([(1, 2)], 3), False)
     decoded = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(dest), '-f', 's16le', '-'])
     assert max(abs(int.from_bytes(decoded[i:i+2], 'little', signed=True)) for i in range(0, len(decoded), 2)) < 128
-    assert abs(cuts._duration(dest)[0] - 2) < cuts.TOLERANCE
+    duration, streams = cuts._duration(dest)
+    assert abs(duration - 2) < cuts.TOLERANCE
+    assert int(streams['audio']['bit_rate']) == cuts.AUDIO_BIT_RATE
+    packets = subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'a',
+                                       '-show_entries', 'packet=size', '-of', 'csv=p=0', str(dest)], text=True)
+    # MPEG frame padding can vary by one byte even with a constant bitrate.
+    sizes = [int(line.split(',')[0]) for line in packets.splitlines() if line.strip(',')]
+    assert max(sizes) - min(sizes) <= 1
 
 def test_cut_tolerance_requires_a_verified_pause(tmp_path):
     proof = tmp_path / 'proof.json'
