@@ -378,6 +378,20 @@ def _assemble_checks(slides, checks, timing):
     ]
 
 
+def _diagram_timing_problems(record):
+    from backend.pipeline.chapter_slide_diagram_timing import project_plan
+
+    context = record.get("claim_context") or {}
+    if "diagram_spans" not in context:
+        return []
+    timings, problems = project_plan(record["slides"], context["diagram_spans"])
+    if problems:
+        return problems
+    if record.get("diagram_timing") != timings:
+        return ["Diagram timing does not match the recorded explanation span"]
+    return []
+
+
 def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path) -> list[str]:
     """Read the single per-candidate semantic Eval with no model call."""
     from backend.pipeline.chapter_exposition import file_sha256
@@ -415,14 +429,8 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             wanted = parse_reference(item["slug"])
             if not any(chapter_slides.scripture_covers(ref, wanted) for ref in displayed.get(item["sentence"], [])):
                 return ["Verified scripture is missing from its recorded source sentence"]
-    if "diagram_spans" in context:
-        from backend.pipeline.chapter_slide_diagram_timing import project_plan
-
-        timings, problems = project_plan(record["slides"], context["diagram_spans"])
-        if problems:
-            return problems
-        if record.get("diagram_timing") != timings:
-            return ["Diagram timing does not match the recorded explanation span"]
+    if diagram_problems := _diagram_timing_problems(record):
+        return diagram_problems
     timing = result.get("point_timing")
     if timing is not None and not isinstance(timing, dict):
         return ["Missing or invalid recorded review or point timing evidence"]
@@ -557,6 +565,8 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
     subunit = (record.get("claim_context") or {}).get("scope") == "subunit"
     if subunit and chapter_slide_point_timing.PLAN_KEY not in record:
         raise ValueError("Prepare and freeze point timing before semantic Eval")
+    if problems := _diagram_timing_problems(record):
+        raise ValueError("; ".join(problems))
     packet = semantic_packet(record, selection)
     row = {"type": "object", "additionalProperties": False, "required": ["slide", "criterion", "passed", "evidence"],
            "properties": {"slide": {"type": "string"}, "criterion": {"type": "string", "enum": list(packet["criteria"])},

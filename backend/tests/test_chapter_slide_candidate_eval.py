@@ -442,3 +442,23 @@ def test_gold_overlapping_scripture_replays_the_original_merge():
     assert not problems
     assert slides[0]["scriptures"] == on_fixture(case["known_good"]["scriptures"])
     assert slides[0]["scriptures"] != on_fixture(case["known_bad"]["scriptures"])
+
+
+def test_missing_diagram_timing_receipt_is_rejected_before_opus(tmp_path, monkeypatch):
+    from backend.pipeline.chapter_slide_point_timing import PLAN_KEY
+
+    source = tmp_path / "selection.json"
+    source.write_text(json.dumps({"pieces": [], "decisions": []}))
+    appendix = tmp_path / "slides.json"
+    appendix.write_text(json.dumps({
+        "lecture": "Lecture", "model": "writer", "decisions_sha256": chapter_exposition.file_sha256(source),
+        "claim_context": {"scope": "subunit", "diagram_spans": []}, PLAN_KEY: {},
+        "slides": [{"first": "S0001", "last": "S0001"}],
+    }))
+
+    def no_model(*_):
+        pytest.fail("An unfinished candidate must be rejected before opening the review transport")
+
+    monkeypatch.setattr(chapter_exposition, "chapter_client", no_model)
+    with pytest.raises(ValueError, match="Diagram timing does not match"):
+        ev.run_semantic_eval(appendix, source, tmp_path / "receipt.json", "reviewer")

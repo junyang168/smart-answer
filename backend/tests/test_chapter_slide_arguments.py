@@ -310,44 +310,37 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
     assert not mismatches, mismatches
 
 
-def test_jev_recovers_only_the_confirmed_adjacent_repeat():
-    source = [
-        {"id": "S0113", "text": "epithymeō那個字的意思跟thelō的意思完全一樣。"},
-        {"id": "S0115", "text": "thelō是will，意志。"},
-        {"id": "S0129", "text": "意志；boulēma也是意志。"},
-        {"id": "S0137", "text": "慾望就是意志，慾望包括意志在內。"},
-        {"id": "S0141", "text": "意志決定要跟這個女人發生關係，你已經犯罪了。"},
-    ]
-    slides = [
-        {"first": "S0113", "last": "S0115", "points": [
-            {"sentence": "S0113", "text": "渴望和意志的動詞意思相同"}]},
-        {"first": "S0129", "last": "S0137", "points": [
-            {"sentence": "S0129", "text": "彼得並論情慾與意志"},
-            {"sentence": "S0137", "text": "慾望包含意志的成分"}]},
-        {"first": "S0141", "last": "S0141", "points": [
-            {"sentence": "S0141", "text": "為要行淫而決意，未行也已犯罪"}]},
-    ]
-    requirements = [{
-        "id": "argument-1", "reason": "在這裡慾望包含意志決定",
-        "source_sentences": ["S0113", "S0115", "S0141"], "conclusion_sentence": "S0141",
-        "conclusion_slide": "S0141", "source_slides": {"S0113": "S0113", "S0115": "S0113", "S0141": "S0141"},
-    }]
-    original = [{"id": "argument-1", "point_sentences": ["S0113", "S0129", "S0137", "S0141"]}]
+REPEAT_CASES = json.loads(
+    (FIXTURE.parent / "subunit_argument_repeat_regressions.json").read_text()
+)
+
+
+@pytest.mark.parametrize("case", REPEAT_CASES, ids=lambda case: case["id"])
+def test_jev_recovers_only_the_confirmed_adjacent_repeat(case):
+    from backend.pipeline.evidence_refresh import MODEL, digest
+
+    source, slides = case["source"], case["slides"]
+    route = case["requirement"]
+    route_id = route["id"]
+    requirements = [route]
+    original = [case["original_binding"]]
+    control = case["same_topic_control"]
+    with_control = [{**original[0], "point_sentences": [*original[0]["point_sentences"], control]}]
     with pytest.raises(ValueError, match="source slides"):
         arg.bind_points(requirements, slides, original, recover_repeats=True)
 
     def ask(state, questions):
-        assert set(state["earlier_source"]) == {"S0113", "S0115"}
         assert "不能把別句說過的意思算在本句" in next(iter(questions.values()))["instructions"]
-        action = "same_reason" if state["sentence"] == "S0137" else "other"
-        return dict.fromkeys(questions, action)
+        saved = case["recorded_jev"][state["sentence"]]
+        assert digest({"model": MODEL, "state": state, "questions": questions}) == saved["sha256"]
+        return dict.fromkeys(questions, saved["answer"])
 
-    confirmed = arg.find_adjacent_repeats(requirements, slides, source, original, ask)
-    assert confirmed == {"argument-1": ["S0137"]}
+    confirmed = arg.find_adjacent_repeats(requirements, slides, source, with_control, ask)
+    assert confirmed == {route_id: [case["expected_repeat"]]}
     repaired = arg.apply_adjacent_repeats(requirements, slides, confirmed)
-    [bound] = arg.bind_points(repaired, slides, original, recover_repeats=True)
-    assert bound["writer_points"] == ["S0137", "S0141"]
+    [bound] = arg.bind_points(repaired, slides, with_control, recover_repeats=True)
+    assert bound["writer_points"] == case["expected_points"]
     with pytest.raises(ValueError, match="unconfirmed point"):
-        arg.bind_points(repaired, slides, [{"id": "argument-1", "point_sentences": ["S0129", "S0141"]}])
+        arg.bind_points(repaired, slides, [{"id": route_id, "point_sentences": [control, route["conclusion_sentence"]]}])
     with pytest.raises(ValueError, match="preceding slide"):
-        arg.apply_adjacent_repeats(requirements, slides, {"argument-1": ["S0113"]})
+        arg.apply_adjacent_repeats(requirements, slides, {route_id: [route["conclusion_sentence"]]})
