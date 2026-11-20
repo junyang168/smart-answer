@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 from decimal import Decimal
 from difflib import SequenceMatcher
 import fcntl
@@ -224,6 +225,26 @@ def _verify_evidence(report, folder):
     return seams
 
 
+def _sync_windows(report, folder, duration):
+    windows = []
+    for item in report.get('audio_alignment', []):
+        path = folder / item['file']
+        if file_sha(path) != item['sha256']:
+            raise ValueError('Edited paragraph timing evidence changed')
+        alignment = json.loads(path.read_text())
+        if any(alignment[key] != report[key] for key in ('transcript_sha256', 'audio_sha256')):
+            raise ValueError('Edited paragraph timing belongs to another source')
+        anchors = alignment['anchors']
+        if (len(anchors) < 2 or any(not (math.isfinite(old) and 0 <= aligned <= duration) for old, aligned in anchors)
+                or any(a[0] >= b[0] or a[1] >= b[1] for a, b in zip(anchors, anchors[1:]))):
+            raise ValueError('Edited paragraph timing is not increasing')
+        windows.append({'anchors': anchors, 'evidence_sha256': item['sha256']})
+    windows.sort(key=lambda window: window['anchors'][0][0])
+    if any(a['anchors'][-1][0] >= b['anchors'][0][0] for a, b in zip(windows, windows[1:])):
+        raise ValueError('Overlapping edited paragraph timings')
+    return windows
+
+
 def _duration(path):
     result = subprocess.run(['ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(path)],
                             check=True, capture_output=True)
@@ -280,6 +301,7 @@ def prepare(data_root: Path, title: str, decisions_path: Path, install_root: Pat
             if not start <= left < right <= end:
                 raise ValueError('Held interval does not cover the full candidate')
     seams = _verify_evidence(decisions, decisions_path.parent)
+    sync_windows = _sync_windows(decisions, decisions_path.parent, duration)
     clock = retained_clock([*cuts, *pending], duration)
     video = 'video' in streams
     video_root = install_root.parent / 'video'
@@ -287,7 +309,7 @@ def prepare(data_root: Path, title: str, decisions_path: Path, install_root: Pat
     value = {'schema_version': SCHEMA, 'title': title, 'source_duration': duration,
              'transcript_sha256': transcript_sha, 'audio_sha256': audio_sha, 'media_sha256': None,
              'recognition_sha256': recognition_sha, 'review_candidates': [list(key) for key in sorted(candidates)],
-             'media': None, 'clock': clock, 'caption_seams': seams,
+             'media': None, 'clock': clock, 'caption_seams': seams, 'sync_windows': sync_windows,
              'decisions': [{k: v for k, v in d.items() if k not in ('evidence_file', 'candidate_interval')}
                            for d in decisions['decisions']]}
     target = manifest(install_root, title)
@@ -433,7 +455,42 @@ def _split_captions(lines, seams):
     return lines, unresolved
 
 
+def _align_events(row, windows):
+    """Apply verified source-clock corrections before intersecting playback cuts."""
+    if not windows:
+        return row
+    from backend.pipeline.original_audio_index import _retimed
+
+    lines = row.get('transcript', [])
+    applicable = []
+    for window in windows:
+        anchors = window['anchors']
+        # The absolute anchors address the saved caption clock. The legacy
+        # reader can have a different clock even for the same audio asset.
+        if not any(abs(line['at'] - anchors[0][0]) <= .01 for line in lines):
+            continue
+        if not any(abs(line['end'] - anchors[-1][0]) <= .01 for line in lines):
+            continue
+        applicable.append(([point[0] for point in anchors], anchors))
+    if not applicable:
+        return row
+
+    def convert(seconds):
+        for old_times, anchors in applicable:
+            if old_times[0] <= seconds <= old_times[-1]:
+                i = min(bisect_right(old_times, seconds), len(anchors) - 1)
+                (a, first), (b, second) = anchors[i - 1:i + 1]
+                return first + (seconds - a) * (second - first) / (b - a)
+        return seconds
+
+    aligned = _retimed(convert, row)
+    # Editorial cutoffs concern the audible source selection. A corrected
+    # sentence timestamp does not implicitly trim additional source speech.
+    return {**aligned, 'stretches': row['stretches']}
+
+
 def _project_row(row, edit):
+    row = _align_events(row, edit.get('sync_windows', []))
     stretches = [{**stretch, 'start': start, 'end': end,
                   'media_start': clip['media_start'] + start - clip['start']}
                  for stretch in row['stretches'] for clip in edit['clock']

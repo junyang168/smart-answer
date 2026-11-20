@@ -186,3 +186,27 @@ def test_cut_threshold_uses_duration_instead_of_character_count(tmp_path):
         cuts._decision_intervals(transcript, report)
     candidate['decision'] = 'keep'
     assert cuts._decision_intervals(transcript, report) == ([], [])
+
+
+def test_retained_slide_and_scripture_follow_corrected_source_before_cut():
+    row = {
+        'media_url': '/original.mp3',
+        'stretches': [{'start': 3474.7, 'end': 3663.8}],
+        'transcript': [{'at': 3474.7, 'end': 3593.37, 'text': '開頭'},
+                       {'at': 3593.37, 'end': 3606.58, 'text': '經文'},
+                       {'at': 3606.58, 'end': 3663.8, 'text': '休書'}],
+        'slides': [{'at': 3474.7, 'seconds': 189.1, 'title': '再婚',
+                    'points': [{'at': 3606.58, 'text': '休書'}], 'scriptures': [{'at': 3593.37}]}],
+        'judgements': [],
+    }
+    edit = {'media': 'listening-cut-example.mp3', 'audio_sha256': 'source',
+            'excluded': [(3604.9, 3663.8)], 'clock': cuts.retained_clock([(3604.9, 3663.8)], 3663.8),
+            'sync_windows': [{'anchors': [[3474.7, 3479.985], [3593.37, 3554.985],
+                                         [3606.58, 3562.985], [3663.8, 3604.9]]}]}
+    result = cuts._project_row(row, edit)
+    last = result['transcript'][-1]
+    slide, = result['slides']
+    assert last['at'] == slide['points'][0]['at'] == pytest.approx(3562.985, abs=.011)
+    assert result['transcript'][1]['at'] == slide['scriptures'][0]['at'] == pytest.approx(3554.985, abs=.011)
+    assert last['end'] == result['stretches'][0]['end'] == 3604.9
+    assert result['stretches'][0]['start'] == 3474.7

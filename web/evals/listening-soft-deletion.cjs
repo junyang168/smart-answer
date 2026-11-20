@@ -31,9 +31,9 @@ async function evaluate(browser, viewport) {
         body: asset.subarray(start, end + 1),
       });
     });
-    const open = async (time) => {
+    const open = async (time, target = section) => {
       url.search = new URLSearchParams({
-        source: "紐約靈命進深會", section: section.passage, recording: sermon.source_id, at: String(time),
+        source: "紐約靈命進深會", section: target.passage, recording: sermon.source_id, at: String(time),
       }).toString();
       await page.goto(url.href);
     };
@@ -67,6 +67,19 @@ async function evaluate(browser, viewport) {
     await page.goto(withoutTimestamp.href);
     await waitForTime(right.media_start + bookmark.time - right.start);
     assert(await audio.evaluate((element) => element.paused));
+    const ending = index.sections.find((row) => row.sub_unit_id === "6.2");
+    const endingClip = ending.sermons[0].stretches.find((clip) => clip.start <= 3563 && clip.end > 3563);
+    const slides = page.locator("[data-slide-scroll]");
+    const finalPoint = slides.getByText("休書須准自由再婚，顯示當時視為當然", { exact: true });
+    await open(3560, ending);
+    await waitForTime(endingClip.media_start + 3560 - endingClip.start);
+    assert.equal(await finalPoint.count(), 0);
+    await open(3563.4, ending);
+    await waitForTime(endingClip.media_start + 3563.4 - endingClip.start);
+    await finalPoint.waitFor();
+    const currentCaption = await page.getByRole("button", { name: /還有古時候，我講，休書必須有這句話/ })
+      .first().getAttribute("class");
+    assert.match(currentCaption, /bg-amber-/);
     console.log(`${viewport.width}×${viewport.height}: source link, natural transition, captions, slide and resume passed`);
   } finally {
     await page.close();
