@@ -220,7 +220,15 @@ SEMANTIC_CRITERIA = {
 }
 
 
-SUBUNIT_COVERAGE = (
+ILLUSTRATION_COVERAGE = (
+    "生活類比或例證緊接著已講清的主論證時，看前一張與本張。"
+    "若前一張的標題或要點已交代主要理由和結論，本張用簡短要點標示類比即可。"
+    "讓原聲補充類比中逐一對應的人物、原因及例子細節。"
+    "只有類比承擔了其他要點沒有交代的必要推理，或簡寫使類比的意思改變，才判不通過。"
+)
+
+
+_PUBLISHED_SUBUNIT_COVERAGE_V1 = (
     "只問一邊聽原聲、一邊看投影片的人，能否跟上本張的主線。"
     "標題和要點要保留教授的主要回答、必要條件、否定、對比，以及省略後會改變意思或讓推論難以跟上的一步。"
     "判定缺漏前，說出讀者會因此誤解什麼，或在哪一步無法跟上。說不出具體影響就通過。"
@@ -228,6 +236,10 @@ SUBUNIT_COVERAGE = (
     "必要推論可由一句話或相鄰兩張清楚表達；不以字數、條數、連接詞或能否重建全段逐字稿判定。"
     "若額外文字令主要回答難以辨認，指出哪個無關或重複的要點蓋過主線，優先建議刪減。"
     "逐張檢查還要看標題、焦點和規劃漏掉的重點。已在指定推論的判定報告的同一缺口，不再重複報。"
+)
+
+SUBUNIT_COVERAGE = (
+    _PUBLISHED_SUBUNIT_COVERAGE_V1 + chapter_slide_arguments.EXPLICIT_PREMISE_RULE + ILLUSTRATION_COVERAGE
 )
 
 
@@ -413,7 +425,7 @@ def _receipt_checks(rows, expected):
 
 
 def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path: Path, *,
-                           published_legacy_sha256s=()) -> list[str]:
+                           published_legacy_sha256s=(), allow_published_policy=False) -> list[str]:
     """Read the single per-candidate semantic Eval with no model call."""
     from backend.pipeline.chapter_exposition import file_sha256
 
@@ -466,7 +478,18 @@ def semantic_eval_problems(slide_path: Path, selection_path: Path, receipt_path:
             selection = json.loads(selection_path.read_text())
             source = chapter_slides.sentences(chapter_slides.kept_pieces(selection))
             plan = chapter_slide_point_timing.verified_plan(record, source)
-            if timing != plan or run.get("packet_sha256") != _raw_sha256(semantic_packet(record, selection)):
+            packet = semantic_packet(record, selection)
+            allowed_packets = {_raw_sha256(packet)}
+            if allow_published_policy and context.get("scope") == "subunit":
+                # A policy wording change does not invalidate reviewed content.
+                # The rest of the packet and the raw verdicts still have to match.
+                criteria = run.get("criteria")
+                if criteria is None:
+                    criteria = {**packet["criteria"], "coverage": _PUBLISHED_SUBUNIT_COVERAGE_V1}
+                if (isinstance(criteria, dict) and criteria.keys() == packet["criteria"].keys()
+                        and all(isinstance(value, str) and value.strip() for value in criteria.values())):
+                    allowed_packets.add(_raw_sha256({**packet, "criteria": criteria}))
+            if timing != plan or run.get("packet_sha256") not in allowed_packets:
                 return ["Semantic Eval does not match the frozen timing or review packet"]
         except (OSError, ValueError, KeyError, TypeError):
             return ["Missing or invalid frozen point timing evidence"]
@@ -558,7 +581,7 @@ argument_requirements 是待核對的推論，不是逐項逐字展示清單。�
 source_slides 顯示理由、關係和結論各句在哪一張。可合寫，也可在相鄰張承接。
 writer_points 是作者指給你的要點，核對文字的實質意思；位置正確本身不能證明推論已保留。
 只在後一張才說出的內容不用搬到前一張；只寫在本張原文沒有支持它的其他張，不能算該結論已呈現。若缺的內容沒有原文支持，不要求作者補入。
-逐張 coverage 查標題、焦點和規劃漏列的重點，不在兩欄重複報同一缺口。忠實仍獨立檢查。"""
+逐張 coverage 查標題、焦點和規劃漏列的重點，不在兩欄重複報同一缺口。忠實仍獨立檢查。""" + "\n" + ILLUSTRATION_COVERAGE
 
 def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path, model: str,
                       *, opus_api_spend_root: Path | None = None) -> dict:
@@ -631,6 +654,7 @@ def run_semantic_eval(slide_path: Path, selection_path: Path, receipt_path: Path
                         "selection_sha256": source_sha, "checks": checks, **timing}, model, raw)
     if subunit:
         receipt["run"]["packet_sha256"] = _raw_sha256(packet)
+        receipt["run"]["criteria"] = packet["criteria"]
     if opus_api_spend_root is not None:
         receipt["run"].update(backend=client.backend, usage=raw.get("usage"))
     with NamedTemporaryFile(mode="w", encoding="utf-8", dir=receipt_path.parent, delete=False) as tmp:

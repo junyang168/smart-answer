@@ -264,6 +264,28 @@ def test_subunit_semantic_eval_checks_a_complete_summary_without_asking_for_spli
     assert receipt["point_timing"]["points"][0]["status"] == "correct"
     assert all(row["criterion"] != "timing" for row in receipt["run"]["raw_response"]["checks"])
 
+    with monkeypatch.context() as future_policy:
+        future_policy.setattr(ev, "SUBUNIT_COVERAGE", ev.SUBUNIT_COVERAGE + "新版規則。")
+        assert ev.semantic_eval_problems(slide_path, source, path)
+        assert ev.semantic_eval_problems(slide_path, source, path, allow_published_policy=True) == []
+
+    previous_path = tmp_path / "previous-eval.json"
+    with monkeypatch.context() as old_policy:
+        old_policy.setattr(ev, "SUBUNIT_COVERAGE", ev._PUBLISHED_SUBUNIT_COVERAGE_V1)
+        previous = ev.run_semantic_eval(slide_path, source, previous_path, "reviewer")
+    del previous["run"]["criteria"]
+    previous_path.write_text(json.dumps(previous))
+    assert previous["run"]["packet_sha256"] != receipt["run"]["packet_sha256"]
+    assert ev.semantic_eval_problems(slide_path, source, previous_path) == [
+        "Semantic Eval does not match the frozen timing or review packet"]
+    assert ev.semantic_eval_problems(slide_path, source, previous_path, allow_published_policy=True) == []
+
+    previous = json.loads(previous_path.read_text())
+    previous["checks"][0]["evidence"] = "modified after review"
+    previous_path.write_text(json.dumps(previous))
+    assert ev.semantic_eval_problems(slide_path, source, previous_path, allow_published_policy=True) == [
+        "Semantic Eval verdicts differ from the recorded review and point timing evidence"]
+
 
 def test_semantic_eval_can_use_billed_opus_without_subscription(tmp_path, monkeypatch):
     from backend.pipeline import claim_anthropic_api

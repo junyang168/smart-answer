@@ -203,6 +203,8 @@ def system_prompt(chapter: Chapter, lecture: str = "", *, subunit: bool = False)
                   .replace("sentence 寫開始讀它的那一句；ref 寫", "每條只填 ref，由程式定位朗讀。ref 寫")
                   .replace("完整與同步必須同時成立：不得為了把答案延後顯示而刪掉", "保留完整論證，不刪掉"))
         prompt += "\n\n" + SUBUNIT_LOCAL_DISTINCTION_RULE + "\n\n" + SUBUNIT_LOCAL_ANSWER_RULE
+        prompt += "\n\n" + chapter_slide_arguments.EXPLICIT_PREMISE_RULE
+        prompt += "同一句原文有完整對照時，可以合寫成一條要點，無須另加一條。"
     if scope:
         prompt += f"\n本單元的經文範圍為 {scope}。保留第六、七章之間的原有論證；引用作論據的經文在 scriptures 照實記錄。"
     notes = INLINE_NOTE_RULES

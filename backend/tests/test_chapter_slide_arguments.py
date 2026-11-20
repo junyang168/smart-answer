@@ -121,6 +121,31 @@ def test_subunit_prompt_preserves_the_local_object_of_a_negation():
     assert "因此不是看見便犯罪" not in prompt
 
 
+def test_subunit_writer_planner_and_eval_share_explicit_premise_rule():
+    from backend.pipeline.chapter_material import CHAPTERS
+
+    case = next(row for row in cases() if row["id"] == "ten-commandments-omitted-premise")
+    record, selection = packet_for(case, case["variants"][0])
+    chapter = CHAPTERS["mat-5-1-48"]
+    system = chapter_slides.system_prompt(chapter, subunit=True)
+    coverage = ev.semantic_packet(record, selection)["criteria"]["coverage"]
+
+    for prompt in (arg.PLAN_SYSTEM, system, coverage):
+        assert "不可用正面描述代替原文明說的否定" in prompt
+    assert "合寫成一條要點" in system
+    assert "省略重述和不影響推論的細節" in system
+    assert "已不在摩西律法之下，乃在基督律法之下" not in system
+
+
+def test_illustration_coverage_considers_the_preceding_slide():
+    case = next(row for row in cases() if row["id"] == "teaching-analogy-after-complete-argument")
+    record, selection = packet_for(case, case["variants"][0])
+    packet = ev.semantic_packet(record, selection)
+    assert len(packet["slides"]) == 2
+    assert ev.ILLUSTRATION_COVERAGE in packet["criteria"]["coverage"]
+    assert ev.ILLUSTRATION_COVERAGE in ev.ARGUMENT_REVIEW_SYSTEM
+
+
 def test_writer_must_map_every_inference_to_real_points_within_its_original_slides(tmp_path, monkeypatch):
     from backend.pipeline import chapter_exposition
     from backend.tests.test_chapter_slides import CHAPTER
@@ -216,7 +241,9 @@ def test_saved_counterexamples_and_positive_controls_follow_the_production_eval_
         assert req["conclusion_slide"] == variant["expected"]["conclusion_slide"]
         # Simulate provider responses to test receipt replay and the mandatory ruling.
         checks = [{"slide": slide["first"], "criterion": criterion,
-                   "passed": not (criterion == "faithfulness" and slide["first"] == variant["expected"].get("unfaithful_slide")),
+                   "passed": not ((criterion == "faithfulness" and slide["first"] == variant["expected"].get("unfaithful_slide"))
+                                  or (criterion == "coverage" and slide["first"] == variant.get("coverage_slide")
+                                      and not variant["expected"].get("coverage", True))),
                    "evidence": "Fixture evidence"}
                   for slide in record["slides"] for criterion in packet["criteria"]]
         checks.append({"slide": req["conclusion_slide"], "criterion": req["id"],
@@ -276,10 +303,12 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
                 allowed = set(initial_packet["argument_requirements"][0]["source_slides"].values())
                 record[arg.BINDINGS_KEY] = [{"id": "argument-1", "point_sentences": [
                     p["sentence"] for s in actual_slides if s["first"] in allowed for p in s["points"]]}]
-            items.append({"case_id": case_id, "packet": ev.semantic_packet(record, selection)})
+            items.append({"case_id": case_id, "packet": ev.semantic_packet(record, selection),
+                          **({"coverage_slide": variant["coverage_slide"]} if "coverage_slide" in variant else {})})
             expected[case_id] = variant["expected"]
-    checks = {f"{item['case_id']}-{kind}": (item["case_id"], kind)
-              for item in items for kind in ("argument", "faithfulness")}
+    checks = {f"{item['case_id']}-{kind}": (item["case_id"], kind) for item in items
+              for kind in (("argument", "faithfulness", "coverage") if "coverage_slide" in item
+                           else ("argument", "faithfulness"))}
     row = {"type": "object", "additionalProperties": False,
            "required": ["check_id", "passed", "evidence"],
            "properties": {"check_id": {"type": "string", "enum": list(checks)},
@@ -287,7 +316,8 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
     schema = {"type": "object", "additionalProperties": False, "required": ["results"],
               "properties": {"results": {"type": "array", "items": row}}}
     system = (ev.SEMANTIC_SYSTEM + "\n" + ev.ARGUMENT_REVIEW_SYSTEM
-              + "\n這次是批量試題。回兩筆獨立判定，check_id 分別為 case_id 加 -argument 和 -faithfulness。"
+              + "\n這次是批量試題。對每案回獨立判定，check_id 為 case_id 加 -argument 和 -faithfulness。"
+                "有 coverage_slide 時另外回 -coverage，按 coverage 只判這張是否漏掉必要內容，並核對相鄰張。"
                 "-argument 只判定唯一 argument_requirements 指明的推論，以 conclusion_slide 與來源為範圍。"
                 "-faithfulness 只判定所有呈現內容有沒有本張原文依據，有不忠實之處才不通過。"
                 "一筆的判定不能影響同個案例的另一筆；evidence 指出具體原話和投影片內容。")
@@ -299,7 +329,8 @@ def test_actual_model_distinguishes_the_saved_argument_regressions():
     for verdict in results:
         case_id, kind = checks[verdict["check_id"]]
         want = expected[case_id]
-        passes = want["passed"] if kind == "argument" else "unfaithful_slide" not in want
+        passes = (want["passed"] if kind == "argument" else want["coverage"] if kind == "coverage"
+                  else "unfaithful_slide" not in want)
         # Some true-but-weaker statements are also called unfaithful in a full review.
         # Their missing distinction must still independently fail the argument check.
         accepted = {passes}

@@ -282,6 +282,18 @@ def bundle_directory(root: Path, bundle: str) -> Path:
     return root / 'unit-supplements' / bundle
 
 
+def published_subunit_path(root: Path, sub_id: str) -> Path:
+    if not sub_id or Path(sub_id).name != sub_id or sub_id in {'.', '..'}:
+        raise ValueError('Invalid Sub-unit id')
+    return root / 'published-subunit-slides' / f'{sub_id}.json'
+
+
+def subunit_source_revision(unit_passage, sub, groups, entry):
+    value = [unit_passage, sub['id'], sub['title'], groups, entry['lecture'],
+             entry['source_sha256'], entry.get('changeset')]
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
 def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, recording: dict,
                             *, data_root: Path | None = None, timing_sha: str | None = None) -> dict:
     """Use a Unit's reviewed slides only for the matching original recording."""
@@ -306,7 +318,7 @@ def reviewed_unit_recording(directory: Path, unit: dict | None, entry: dict, rec
         legacy_shas = json.loads(legacy_manifest.read_text()) if legacy_manifest and legacy_manifest.is_file() else ()
         receipt = directory / f'{title}.semantic-eval.json'
         if problems := semantic_eval_problems(slides_path, selection_path, receipt,
-                                              published_legacy_sha256s=legacy_shas):
+                                              published_legacy_sha256s=legacy_shas, allow_published_policy=True):
             raise ValueError(f'Unit slides failed semantic Eval: {problems}')
         legacy_clock = bool(legacy_shas and exposition.file_sha256(receipt) in legacy_shas)
     else:
@@ -347,7 +359,8 @@ def _legacy_sources(plan: dict) -> set:
     return sources
 
 
-def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
+def build(data_root: Path, passage: str, *, plan: dict | None = None,
+          subunit_override: tuple[str, Path] | None = None) -> dict:
     path = data_root / 'chapter_exposition' / passage / 'listening-units.json'
     if plan is None:
         plan = json.loads(path.read_text())
@@ -422,6 +435,36 @@ def build(data_root: Path, passage: str, *, plan: dict | None = None) -> dict:
                 unit_recordings[key] = reviewed_unit_recording(
                     directory, {'groups': groups if sub_id else unit['groups']}, entries[source], recordings[source],
                     data_root=data_root, timing_sha=scope.get('reviewed_playback_timing_sha256'))
+        for sub in unit['sub_units']:
+            sub_id = sub['id']
+            pointer = published_subunit_path(path.parent, sub_id)
+            published = None
+            if subunit_override and subunit_override[0] == sub_id:
+                directory = subunit_override[1]
+            elif pointer.is_file():
+                published = json.loads(pointer.read_text())
+                directory = bundle_directory(path.parent, published['bundle'])
+            else:
+                continue
+            groups = [g for g in unit['groups'] if g['key'] in sub['group_keys']]
+            sources = {g['source_id'] for g in groups}
+            if len(sources) != 1:
+                if published is not None:
+                    continue
+                raise ValueError('Published Sub-unit slides must match one recording')
+            source, = sources
+            if published is not None and published.get('source_revision') != subunit_source_revision(
+                    unit_passage, sub, groups, entries[source]):
+                # A later selection or argument-layer release supersedes
+                # the overlay and uses the new plan's reviewed slides.
+                continue
+            key = (unit_passage, source, sub_id)
+            playback = unit_recordings.get(key) or unit_recordings.get((unit_passage, source)) or recordings[source]
+            reviewed = reviewed_unit_recording(directory, {'groups': groups}, entries[source], playback,
+                                               data_root=data_root)
+            # PPT can replace display events only. The lecture owns the
+            # selected caption lines, audio ranges, retimer and media URL.
+            unit_recordings[key] = {**playback, 'slides': reviewed['slides']}
     result = project(plan, recordings, unit_recordings)
     from backend.api.scripture import format_chinese_reference
     result['passage'] = passage
