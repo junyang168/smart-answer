@@ -255,3 +255,13 @@ def test_subunit_writer_only_supplies_content_evidence_and_reference():
         assert "sentence" not in shapes[key]["items"]["properties"]
     assert "不得借用前面的提問" not in prompt
     assert "一條要點只寫他在一處講出" not in prompt
+
+
+
+def test_subunit_writer_does_not_promote_untagged_backchannels_to_answers():
+    from backend.tests.test_chapter_slides import CHAPTER
+
+    prompt = chapter_slides.system_prompt(CHAPTER, subunit=True)
+    assert "若說話者未標明或附和的對象不清" in prompt
+    assert "不能作教授確認前一句問題的依據" in prompt
+    assert "保留聽眾的問句，再寫有明確歸屬的回答" in prompt
