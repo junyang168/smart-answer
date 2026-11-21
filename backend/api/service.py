@@ -1833,7 +1833,7 @@ def generate_sunday_service_ppt(date: str, *, output_path: Path | None = None, r
     if report_date:
         skeletons = maintain_skeletons(repository, Store(Path(os.environ['DATA_BASE_DIR']) / 'sunday-assistant'), report_date.date())
         incomplete = [f"{row['date']}：{'、'.join(row['missing'])}" for row in skeletons if not row['complete']]
-        if incomplete:
+        if incomplete and require_complete:
             future_dates = "、".join(row["date"] for row in skeletons)
             raise HTTPException(status_code=400, detail=(
                 f"{service.date} 的主日 PPT 尚未生成，因此沒有下載檔案。\n"

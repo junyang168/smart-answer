@@ -130,7 +130,7 @@ def test_report_generation_stops_when_next_two_required_skeletons_are_incomplete
     monkeypatch.setattr(service,'repository',agent.repository)
     monkeypatch.setattr(service,'get_sunday_service',lambda _:SundayServiceEntry(date='2026-11-01'))
     with pytest.raises(HTTPException,match='未來兩個主日') as error:
-        service.generate_sunday_service_ppt('2026-11-01')
+        service.generate_sunday_service_ppt('2026-11-01', require_complete=True)
     assert error.value.status_code==400
     assert '2026-11-01 的主日 PPT 尚未生成' in error.value.detail
     assert '沒有下載檔案' in error.value.detail
@@ -237,3 +237,25 @@ def test_no_repeat_rule_respects_availability_and_manual_assignments(agent):
     agent.store.put('auto_presider:2026-11-15', {'after': '李芳', 'status': 'confirmed_in_group'})
     maintain_skeletons(agent.repository, agent.store, date(2026, 11, 1))
     assert all(entry.presider == '李芳' for entry in agent.repository.services.values())
+
+
+def test_manual_ppt_generation_allows_missing_future_speakers_and_offering(agent, monkeypatch, tmp_path):
+    from backend.api import service
+    from backend.sunday_presenter import OneDrivePpts
+    monkeypatch.setattr(OneDrivePpts, 'configured', lambda: None)
+    monkeypatch.setattr(service, 'repository', agent.repository)
+    entry = SundayServiceEntry(date='2026-11-22', sermonSpeaker='陳牧師')
+    agent.repository.services[entry.date] = entry
+    template = tmp_path / 'template.pptx'
+    template.write_bytes(b'test template')
+    monkeypatch.setattr(service, 'PPT_TEMPLATE_FILE', template)
+    monkeypatch.setattr(service, '_fetch_scripture_sections', lambda _: [])
+    monkeypatch.setattr(service, 'list_fellowships', lambda: [])
+    def render(template, replacements, output, **kwargs):
+        assert replacements['donation'] == ''
+        assert replacements['sermonSpeaker2'] == ''
+        output.write_bytes(b'preview-pptx')
+    monkeypatch.setattr(service, 'generate_presentation_from_template', render)
+    output = tmp_path / 'preview.pptx'
+    assert service.generate_sunday_service_ppt(entry.date, output_path=output).read_bytes() == b'preview-pptx'
+    assert agent.repository.services[entry.date].donation_amount is None
