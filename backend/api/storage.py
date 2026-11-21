@@ -4,6 +4,8 @@ import json
 import shutil
 import re
 import uuid
+import hashlib
+from zoneinfo import ZoneInfo
 from datetime import datetime, timezone
 from pathlib import Path
 import git
@@ -508,6 +510,56 @@ class ArticleRepository:
 
 
     # Sunday worship service operations
+
+    @staticmethod
+    def _sunday_today() -> str:
+        return datetime.now(ZoneInfo("America/Chicago")).date().isoformat()
+
+    @sunday_write
+    def get_sunday_prayer(self) -> dict:
+        path = SUNDAY_SERVICE_FILE.with_name("sunday_prayer.json")
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        # One-time migration from the latest existing past/current prayer.
+        # Once the shared file exists, an intentionally empty value stays empty.
+        from backend.sunday_text import traditional
+        prior = [entry for entry in self._load_sunday_service_entries()
+                 if entry.date <= self._sunday_today() and (entry.health_prayer_markdown or "").strip()]
+        source = max(prior, key=lambda entry: entry.date, default=None)
+        text = traditional(source.health_prayer_markdown) if source else ""
+        return self.save_sunday_prayer(text, None, source_date=source.date if source else None)
+
+    @sunday_write
+    def save_sunday_prayer(self, markdown: str, expected_revision: str | None, *, source_date=None) -> dict:
+        from backend.sunday_text import traditional
+        path = SUNDAY_SERVICE_FILE.with_name("sunday_prayer.json")
+        if path.exists():
+            current = json.loads(path.read_text(encoding="utf-8"))
+            if expected_revision != current["revision"]:
+                raise ValueError("代禱事項已由其他同工更新，請重新載入後再儲存。")
+        text = traditional(markdown)
+        result = {"markdown": text, "revision": hashlib.sha256(text.encode()).hexdigest(),
+                  "updated_at": datetime.now(timezone.utc).isoformat()}
+        if source_date:
+            result["source_date"] = source_date
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(path)
+        # Save dated snapshots as well. Once a Sunday is past its content stays
+        # historical; current/future reads always prefer the shared authority.
+        entries = self._load_sunday_service_entries()
+        from backend.sunday_text import normalize_service
+        updated = [normalize_service(entry.model_copy(update={"health_prayer_markdown": text}))
+                   if entry.date >= self._sunday_today() else entry for entry in entries]
+        self._save_sunday_service_entries(updated)
+        return result
+
+    def _with_shared_prayer(self, entry: SundayServiceEntry) -> SundayServiceEntry:
+        if entry.date < self._sunday_today():
+            return entry
+        from backend.sunday_text import normalize_service
+        return normalize_service(entry.model_copy(update={"health_prayer_markdown": self.get_sunday_prayer()["markdown"]}))
+
     def _load_sunday_service_entries(self) -> list[SundayServiceEntry]:
         try:
             raw = json.loads(SUNDAY_SERVICE_FILE.read_text(encoding="utf-8"))
@@ -545,7 +597,7 @@ class ArticleRepository:
                     continue
             return datetime.min
 
-        return sorted(entries, key=lambda entry: parse_date(entry.date), reverse=True)
+        return [self._with_shared_prayer(entry) for entry in sorted(entries, key=lambda entry: parse_date(entry.date), reverse=True)]
 
     def _ensure_worker_availability(self, entry: SundayServiceEntry) -> None:
         date_text = (entry.date or "").strip()
@@ -574,6 +626,8 @@ class ArticleRepository:
 
     @sunday_write
     def create_sunday_service(self, entry: SundayServiceEntry) -> SundayServiceEntry:
+        from backend.sunday_text import normalize_service
+        entry = self._with_shared_prayer(normalize_service(entry))
         entry = self._apply_hymn_indices(entry)
         self._ensure_worker_availability(entry)
         entries = self._load_sunday_service_entries()
@@ -587,11 +641,13 @@ class ArticleRepository:
         entries = self._load_sunday_service_entries()
         for entry in entries:
             if entry.date == date:
-                return entry
+                return self._with_shared_prayer(entry)
         raise ValueError(f"Sunday service date {date} not found")
 
     @sunday_write
     def update_sunday_service(self, date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
+        from backend.sunday_text import normalize_service
+        entry = self._with_shared_prayer(normalize_service(entry))
         entry = self._apply_hymn_indices(entry)
         self._ensure_worker_availability(entry)
         entries = self._load_sunday_service_entries()

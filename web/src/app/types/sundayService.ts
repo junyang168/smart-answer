@@ -70,6 +70,7 @@ export interface SundayServiceEntry {
 }
 
 export interface SundayServiceResources {
+  displayLabels?: Record<string, string>;
   workers: SundayWorker[];
   songs: SundaySong[];
 }

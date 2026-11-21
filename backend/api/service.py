@@ -1709,7 +1709,12 @@ def delete_sunday_song(song_id: str) -> None:
 
 
 def sunday_service_resources() -> SundayServiceResources:
-    return SundayServiceResources(workers=list_sunday_workers(), songs=list_sunday_songs())
+    from backend.sunday_text import traditional
+    workers, songs = list_sunday_workers(), list_sunday_songs()
+    names = {worker.name for worker in workers} | {song.title for song in songs}
+    names.update(entry.sermon_speaker for entry in repository.list_sunday_services() if entry.sermon_speaker)
+    return SundayServiceResources(workers=workers, songs=songs,
+                                  displayLabels={name: traditional(name) for name in names})
 
 
 def get_hymn_metadata(index: int) -> HymnMetadata:

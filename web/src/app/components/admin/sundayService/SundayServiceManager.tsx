@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SundayPrayerSection } from "./SundayPrayerSection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -494,7 +495,6 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
     }
     const latest = services[0];
     const previousAnnouncements = latest.announcementsMarkdown ?? "";
-    const previousHealthPrayer = latest.health_prayer_markdown ?? "";
     setForm((prev) => {
       const next: Partial<FormState> = {};
       let changed = false;
@@ -502,13 +502,6 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
       if (!prev.announcementsMarkdown.trim()) {
         if (prev.announcementsMarkdown !== previousAnnouncements) {
           next.announcementsMarkdown = previousAnnouncements;
-          changed = true;
-        }
-      }
-
-      if (!prev.healthPrayerMarkdown.trim()) {
-        if (prev.healthPrayerMarkdown !== previousHealthPrayer) {
-          next.healthPrayerMarkdown = previousHealthPrayer;
           changed = true;
         }
       }
@@ -676,13 +669,15 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
     return set;
   }, [resources.workers, form.date]);
 
+  const displayLabel = (name: string | null | undefined) => name ? resources.displayLabels?.[name] ?? name : "-";
+
   const workerOptionLabel = (name: string): string => {
     const worker = workersByName.get(name);
     const ranges = worker ? getWorkerUnavailableRanges(worker)
       .filter((range) => isRangeActiveOnDate(range, form.date)) : [];
     return ranges.length > 0
-      ? `${name}（外出：${ranges.map((range) => `${range.startDate} 至 ${range.endDate}`).join("、")}）`
-      : name;
+      ? `${displayLabel(name)}（外出：${ranges.map((range) => `${range.startDate} 至 ${range.endDate}`).join("、")}）`
+      : displayLabel(name);
   };
 
   const unavailableAssignments = Array.from(new Set([
@@ -710,7 +705,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
   // Retain a saved value without making a retired worker a dropdown choice.
   const savedAssignmentOption = (value: string, names: string[]) =>
     value && !names.includes(value) ? (
-      <option value={value} hidden disabled>{value}</option>
+      <option value={value} hidden disabled>{displayLabel(value)}</option>
     ) : null;
 
   const handleInputChange = (field: keyof FormState) =>
@@ -1220,6 +1215,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
       </header>
 
       {view === "upcoming" && <SundayPresenterFolder />}
+      {view === "upcoming" && <SundayPrayerSection onSaved={() => { void loadServices(); }} />}
 
       {error && (
         <div className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1277,19 +1273,19 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">{displayLabel(entry.presider)}</td>
+                    <td className="px-3 py-2 text-gray-700">{displayLabel(entry.worshipLeader)}</td>
+                    <td className="px-3 py-2 text-gray-700">{displayLabel(entry.pianist)}</td>
                     <td className="px-3 py-2 text-gray-700">
                       <div className="flex flex-col">
-                        <span>{entry.hymn ?? "-"}</span>
-                        <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
+                        <span>{displayLabel(entry.hymn)}</span>
+                        <span className="text-xs text-gray-500">回應：{displayLabel(entry.responseHymn)}</span>
                         {(entry.hymnNotes || entry.responseHymnNotes) && <span className="text-xs text-amber-700">{[entry.hymnNotes, entry.responseHymnNotes].filter(Boolean).join("；")}</span>}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-gray-700">
                       <div className="flex flex-col">
-                        <span>{entry.sermonSpeaker ?? "-"}</span>
+                        <span>{displayLabel(entry.sermonSpeaker)}</span>
                         <span className="text-xs text-gray-500">{entry.sermonTitle ?? ""}</span>
                       </div>
                     </td>
@@ -1306,7 +1302,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
                     </td>
                     <td className="px-3 py-2 text-gray-700">
                       {(entry.scriptureReaders && entry.scriptureReaders.length > 0
-                        ? entry.scriptureReaders.join("、")
+                        ? entry.scriptureReaders.map(displayLabel).join("、")
                         : "-")}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-700">
@@ -1590,6 +1586,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">詩歌</label>
                 <SundaySongPicker
+                  displayLabels={resources.displayLabels}
                   value={form.hymn}
                   songs={songPickerSongs}
                   recentSongs={recentlyEnteredSongs}
@@ -1601,6 +1598,7 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">回應詩歌</label>
                 <SundaySongPicker
+                  displayLabels={resources.displayLabels}
                   value={form.responseHymn}
                   songs={songPickerSongs}
                   recentSongs={recentlyEnteredSongs}
@@ -1758,16 +1756,18 @@ export function SundayServiceManager({ view = "upcoming" }: { view?: "upcoming" 
                 placeholder="例：\n- 本週小組聚會時間為……"
               />
             </div>
+            {view === "history" ? (
             <div>
-              <label className="mb-1 block text-sm font-semibold text-gray-700">身體健康代祷</label>
+              <label className="mb-1 block text-sm font-semibold text-gray-700">歷史代禱事項</label>
               <textarea
                 className="h-32 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
                 value={form.healthPrayerMarkdown}
                 onChange={handleInputChange("healthPrayerMarkdown")}
                 disabled={saving}
-                placeholder="例：\n- 請為弟兄姊妹的身體健康代祷……"
+                placeholder="例：\n- 請為弟兄姊妹的身體健康代禱……"
               />
             </div>
+            ) : <p className="text-sm text-gray-600">代禱事項由頁面上方的<a className="ml-1 text-blue-700 underline" href="#sunday-prayer">代禱事項管理區</a>統一維護。</p>}
             <div className="flex justify-end gap-3">
               {editingDate && (
                 <button

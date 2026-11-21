@@ -355,6 +355,27 @@ def get_presenter_folder(response: Response) -> dict:
         raise HTTPException(503, str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
+class SundayPrayerUpdate(BaseModel):
+    markdown: str
+    revision: str
+
+
+@sunday_service_router.get("/prayer")
+def read_sunday_prayer(response: Response) -> dict:
+    from .service import repository
+    response.headers["Cache-Control"] = "no-store"
+    return repository.get_sunday_prayer()
+
+
+@sunday_service_router.put("/prayer")
+def write_sunday_prayer(payload: SundayPrayerUpdate) -> dict:
+    from .service import repository
+    try:
+        return repository.save_sunday_prayer(payload.markdown, payload.revision)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @sunday_service_router.get("", response_model=list[SundayServiceEntry])
 def get_sunday_services() -> list[SundayServiceEntry]:
     return list_sunday_services()
