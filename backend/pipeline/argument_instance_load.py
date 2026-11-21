@@ -39,16 +39,24 @@ def sha(path):
 def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces=None, shape_path=None):
     from backend.api.canonical_repository.postgres_store import normalize_package, record_content_sha
     from backend.pipeline.knowledge_package_merge import validate_merged_package
-    package = json.loads(Path(candidate_path).read_text())
-    receipt = json.loads(Path(receipt_path).read_text())
-    if receipt['corrected_sha256'] != sha(candidate_path):
-        raise ValueError('corrections receipt does not bind this candidate file')
-    fidelity = json.loads(Path(fidelity_path).read_text())
+    from backend.pipeline import argument_corrections, argument_fidelity, argument_shape
+    from backend.pipeline.argument_review_binding import require_binding, sha as raw_sha
+    candidate_raw = Path(candidate_path).read_bytes()
+    receipt_raw = Path(receipt_path).read_bytes()
+    receipt = json.loads(receipt_raw)
+    original_raw = argument_corrections.verify(candidate_raw, receipt)
+    original = json.loads(original_raw)
+    package = json.loads(candidate_raw)
+    fidelity_raw = Path(fidelity_path).read_bytes()
+    fidelity = json.loads(fidelity_raw)
+    require_binding(fidelity, original_raw, argument_fidelity.records(original), label='fidelity')
     open_items = [f['id'] for f in fidelity['findings'] + fidelity['needs_look'] if not f.get('ruling')]
     if open_items:
         raise ValueError(f'fidelity check has {len(open_items)} items without a ruling: {open_items[:5]}')
     if shape_path is not None:
-        shape = json.loads(Path(shape_path).read_text())
+        shape_raw = Path(shape_path).read_bytes()
+        shape = json.loads(shape_raw)
+        require_binding(shape, original_raw, argument_shape.rows(original), label='story')
         open_shape = [f['id'] for f in shape['findings'] + shape['needs_look'] if not f.get('ruling')]
         if open_shape:
             raise ValueError(f'story check has {len(open_shape)} Claims without a ruling: {open_shape[:5]}')
@@ -61,12 +69,14 @@ def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces
     if current != replaces:
         raise ValueError(f'{source_id} is held by {current}; pass replaces={current!r} to replace it'
                          if current else f'{source_id} is not in the instance; nothing to replace')
-    candidate_sha = sha(candidate_path)
+    candidate_sha = raw_sha(candidate_raw)
     change_set = f'argument-layer-{source_id}-{candidate_sha[:12]}'
     metadata = {'run_dir': str(run_dir), 'candidate_path': str(candidate_path), 'candidate_sha256': candidate_sha,
                 'gpt_candidate_sha256': receipt['candidate_sha256'], 'corrections_receipt': str(receipt_path),
-                'corrections_receipt_sha256': sha(receipt_path), 'fidelity_report': str(fidelity_path),
-                'fidelity_report_sha256': sha(fidelity_path), 'model_calls': 0}
+                'corrections_receipt_sha256': raw_sha(receipt_raw), 'fidelity_report': str(fidelity_path),
+                'fidelity_report_sha256': raw_sha(fidelity_raw), 'model_calls': 0}
+    if shape_path is not None:
+        metadata.update(shape_report=str(shape_path), shape_report_sha256=raw_sha(shape_raw))
     if replaces:
         metadata['replaces'] = replaces
     with conn.transaction():
@@ -103,6 +113,14 @@ def load(conn, candidate_path, *, receipt_path, fidelity_path, run_dir, replaces
         (change_set,)).fetchall())
     if back != written:
         raise ValueError(f'read-back differs: wrote {written}, read {back}')
+    if replaces:
+        leftovers = conn.execute('''SELECT o.collection,o.object_id FROM wang_knowledge.objects o
+            JOIN wang_knowledge.object_versions current USING(collection,object_id,revision)
+            WHERE o.retired_at IS NULL AND current.change_set_id<>%s AND EXISTS (
+                SELECT 1 FROM wang_knowledge.object_versions old WHERE old.collection=o.collection
+                AND old.object_id=o.object_id AND old.change_set_id=%s)''', (change_set, replaces)).fetchall()
+        if leftovers:
+            raise ValueError(f'read-back: old lecture still has live records: {leftovers[:5]}')
     if replaces and holder(conn, source_id) != change_set:
         raise ValueError('read-back: the source is not held by the new ChangeSet')
     out = {'change_set_id': change_set, 'source_id': source_id, 'written': written, 'read_back': 'matches'}
@@ -122,9 +140,10 @@ def holder(conn, source_id):
 def retire_lecture(conn, old_change_set, change_set, keep):
     """Retire every live record the old ChangeSet wrote, except those the new run rewrites."""
     from backend.api.canonical_repository.postgres_store import record_content_sha
-    rows = conn.execute('''SELECT o.collection, o.object_id, o.revision, o.payload FROM wang_knowledge.object_versions v
-        JOIN wang_knowledge.objects o USING (collection, object_id)
-        WHERE v.change_set_id=%s AND v.revision=1 AND o.retired_at IS NULL FOR UPDATE OF o''', (old_change_set,)).fetchall()
+    rows = conn.execute('''SELECT o.collection, o.object_id, o.revision, o.payload FROM wang_knowledge.objects o
+        WHERE o.retired_at IS NULL AND EXISTS (
+            SELECT 1 FROM wang_knowledge.object_versions v WHERE v.collection=o.collection AND v.object_id=o.object_id
+            AND v.change_set_id=%s) FOR UPDATE OF o''', (old_change_set,)).fetchall()
     retired = {}
     for col, oid, revision, payload in rows:
         if (col, oid) in keep:

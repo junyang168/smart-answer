@@ -23,6 +23,7 @@ Operations:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -104,18 +105,40 @@ def restate_claim(candidate, short, statement, basis_fragment_id):
 OPERATIONS = {'drop_claim': drop_claim, 'position_to_question': position_to_question, 'restate_claim': restate_claim}
 
 
-def apply(candidate_path, corrections_path, out_path):
-    raw = Path(candidate_path).read_bytes()
-    spec_raw = Path(corrections_path).read_bytes()
-    candidate = json.loads(raw)
-    spec = json.loads(spec_raw)
+def corrected(candidate, spec):
+    """Pure correction replay, shared by the writer and the loader."""
+    candidate = copy.deepcopy(candidate)
     done = []
     for c in spec['corrections']:
         if c['op'] == 'restate_claim' and not c.get('ruling', '').strip():
             raise ValueError('restate_claim writes reader-visible text: it needs the owner ruling')
         args = {k: v for k, v in c.items() if k not in ('op', 'ruling')}
         done.append({**c, 'result': OPERATIONS[c['op']](candidate, **args)})
-    out = json.dumps(candidate, ensure_ascii=False, indent=1).encode()
+    return json.dumps(candidate, ensure_ascii=False, indent=1).encode(), done
+
+
+def verify(candidate_raw, receipt):
+    """Prove the postimage comes from this original and this correction spec, without model calls."""
+    if receipt.get('corrected_sha256') != sha(candidate_raw):
+        raise ValueError('corrections receipt does not bind this candidate file')
+    try:
+        raw = Path(receipt['candidate']).read_bytes()
+        spec_raw = Path(receipt['corrections']).read_bytes()
+    except (KeyError, OSError) as exc:
+        raise ValueError('corrections receipt needs its saved original and correction spec') from exc
+    if sha(raw) != receipt.get('candidate_sha256') or sha(spec_raw) != receipt.get('corrections_sha256'):
+        raise ValueError('corrections receipt does not bind its original candidate and correction spec')
+    expected, done = corrected(json.loads(raw), json.loads(spec_raw))
+    if expected != candidate_raw or done != receipt.get('applied'):
+        raise ValueError('candidate or corrections receipt differs from the recorded corrections')
+    return raw
+
+
+def apply(candidate_path, corrections_path, out_path):
+    candidate_path, corrections_path, out_path = (Path(p).resolve() for p in (candidate_path, corrections_path, out_path))
+    raw = candidate_path.read_bytes()
+    spec_raw = corrections_path.read_bytes()
+    out, done = corrected(json.loads(raw), json.loads(spec_raw))
     Path(out_path).write_bytes(out)
     receipt = {'candidate': str(candidate_path), 'candidate_sha256': sha(raw), 'corrections': str(corrections_path),
                'corrections_sha256': sha(spec_raw), 'corrected': str(out_path), 'corrected_sha256': sha(out),

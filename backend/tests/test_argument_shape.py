@@ -54,14 +54,12 @@ def test_judge_refuses_an_answer_that_skips_a_claim(tmp_path):
 
 def test_the_loader_refuses_while_the_story_check_has_an_unruled_claim(tmp_path):
     import json
-    from backend.pipeline import argument_instance_load as L
-    cand = tmp_path / 'c.json'
-    cand.write_text('{}')
-    receipt = tmp_path / 'r.json'
-    receipt.write_text(json.dumps({'corrected_sha256': L.sha(cand)}))
-    ok = tmp_path / 'f.json'
-    ok.write_text(json.dumps({'findings': [], 'needs_look': []}))
-    shape = tmp_path / 's.json'
-    shape.write_text(json.dumps({'findings': [{'id': 'DK-x-CL0001'}], 'needs_look': []}))
+    from backend.tests.test_argument_review_binding import write_run, load_run
+    run = tmp_path / 'run'
+    write_run(run)
+    shape = run / 'shape/shape-final.json'
+    report = json.loads(shape.read_text())
+    report['findings'] = [{'id': 'DK-1-CL0001'}]
+    shape.write_text(json.dumps(report))
     with pytest.raises(ValueError, match='story check has 1 Claims without a ruling'):
-        L.load(None, cand, receipt_path=receipt, fidelity_path=ok, run_dir=tmp_path, shape_path=shape)
+        load_run(None, run)
