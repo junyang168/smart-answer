@@ -218,7 +218,7 @@ def test_checkpoint_failure_after_business_commit_preserves_receipt_and_sends_on
     else:
         model = ScriptModel(("read_worker_availability", {"names": ["王明"], "start": "2026-11-15", "end": "2026-11-15"}),
                             ("update_records", {"request": {"absence_changes": [{"worker": "王明", "start": "2026-11-15", "end": "2026-11-15", "evidence": msg.text}]}}))
-    monkeypatch.setattr(agent_graph, "ChatOpenAI", lambda **_: model)
+    monkeypatch.setattr(agent_graph, "SubscriptionToolModel", lambda **_: model)
     original_put = SqliteSaver.put
     def fail_after_commit(self, config, checkpoint, metadata, new_versions):
         if checkpoint.get("channel_values", {}).get("outcome"):
@@ -230,7 +230,7 @@ def test_checkpoint_failure_after_business_commit_preserves_receipt_and_sends_on
     assert len(agent.bridge.sent) == 1
     with agent.store.db() as db:
         db.execute("UPDATE messages SET status='processing' WHERE id=?", (msg.message_id,))
-    monkeypatch.setattr(agent_graph, "ChatOpenAI", lambda **_: pytest.fail("committed action must not invoke model again"))
+    monkeypatch.setattr(agent_graph, "SubscriptionToolModel", lambda **_: pytest.fail("committed action must not invoke model again"))
     agent.tick(datetime(2026, 11, 2, 18, tzinfo=timezone.utc))
     assert len(agent.bridge.sent) == 1
     assert agent.store.messages()[0]["status"] == ("waiting_reply" if question else "done")

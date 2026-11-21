@@ -28,15 +28,14 @@ class LyricLayout(BaseModel):
 
 
 def complete(schema, instruction, payload):
-    from backend.api.openai_client import get_openai_client, DEFAULT_OPENAI_GENERATION_MODEL
-    response = get_openai_client().with_options(timeout=45, max_retries=0).chat.completions.create(
-        model=os.getenv('SUNDAY_ASSISTANT_MODEL', DEFAULT_OPENAI_GENERATION_MODEL),
-        messages=[{'role': 'system', 'content': instruction}, {'role': 'user', 'content': dump(payload)}],
-        response_format={'type': 'json_schema', 'json_schema': {'name': schema.__name__, 'strict': False, 'schema': schema.model_json_schema()}},
+    from .subscription import structured_content
+    content = structured_content(
+        [{'role': 'system', 'content': instruction}, {'role': 'user', 'content': dump(payload)}],
+        {'type': 'json_schema', 'json_schema': {'name': schema.__name__, 'strict': False, 'schema': schema.model_json_schema()}},
     )
-    if response.choices[0].finish_reason != 'stop' or not response.choices[0].message.content:
+    if not content:
         raise ValueError('歌詞核對未完整返回，尚未匯入')
-    return schema.model_validate_json(response.choices[0].message.content)
+    return schema.model_validate_json(content)
 
 
 def normalize_lyric_words(text):

@@ -80,7 +80,7 @@ flowchart LR
    SUNDAY_WHATSAPP_CHROME=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
    ```
 
-   backend 要有既有的 `OPENAI_API_KEY`，模型沿用網站的 `OPENAI_GENERATION_MODEL`；可用 `SUNDAY_ASSISTANT_MODEL` 專門指定。此助理設定沒有預設 production 密鑰。
+   主日助理所有模型判讀均使用本機 Codex CLI 的 ChatGPT 訂閱登入，包含群消息、來源／身分核對、歌詞整理、團契及 Gmail。預設 `gpt-6.1-sol`，可用 `SUNDAY_CODEX_MODEL` 指定；背景程序需能讀取現有的 Codex 登入。子程序會移除 API key 與 API endpoint 環境變數；訂閱限額、登入失效或輸出錯誤會保留任務並交由既有故障監測處理。
 
 3. 使用與 `.python-version` 相符的 `backend/.venv` 啟動：
 
