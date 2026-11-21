@@ -415,6 +415,11 @@ def run_cvp_route_scope(
                     'qualifying source has a complete inference; identify a concrete unresolved identity/scope '
                     'problem if one remains. Prior approval does not prove this route set correct. '
                     'Keep the old verdict immutable; this continuation is not content approval.')}
+            if connection_seed['receipt'].get('review_scope_contract'):
+                review_packet['connection_continuation_context']['instruction'] = (
+                    '材料、成员和完整候选与旧审核相同。依据本次 route_review_scope_contract，独立区分'
+                    '当前结果无效与将来可补充上游成员；复核全部 targets 和旧异常。若当前确有错误仍报告，'
+                    '仅属完善建议则在 review.reason 保留具体建议与依据。旧判定不改写，本接续不是批准。')
         if recovery_seed:
             review_packet["input_recovery_context"] = {
                 "original_review": recovery_seed["review"],
