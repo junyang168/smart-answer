@@ -328,6 +328,20 @@ exports.run = async ({ stage, act, output, preparation, controller, toggleContro
     assert.equal(await endFrame.executeJavaScript('steps'), 1, 'advance after returning');
     assert.equal(await endFrame.executeJavaScript('exited'), false);
     stage.remove(ending.id); wc(ending).close();
+    if (process.argv.includes('--clicker-interactive')) {
+      const manual = await load('sermon'); await act('take', {deck:'sermon'});
+      console.log('CLICKER INTERACTIVE READY');
+      const capture = async () => {
+        const state = { clicker:clicker.snapshot(), outputFocused:output.isFocused(), controllerVisible:controller.isVisible(),
+          steps:await wc(manual).executeJavaScript('steps'), keys:await wc(manual).executeJavaScript('keyLog') };
+        fs.writeFileSync(path.join(evidence,'clicker-live.json'),JSON.stringify(state));
+      };
+      const deadline=Date.now()+300000;
+      while(Date.now()<deadline && !fs.existsSync(path.join(evidence,'clicker-done'))) {
+        await capture(); await new Promise(resolve=>setTimeout(resolve,200));
+      }
+      await capture();
+    }
     const result = { platform: process.platform, versions: process.versions,
       switches: 20, steps: [10, 10], stableOutput: true, popupOpener: true,
       fullscreenContained: true, sharedCookies: true, inactiveMuted: true,

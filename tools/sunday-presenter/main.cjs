@@ -36,6 +36,7 @@ function toggleControls() {
   // Recovery action is idempotent. Close/hide is an explicit panel action.
   if (!controller || controller.isDestroyed()) return;
   if (controller.isMinimized()) controller.restore();
+  clicker?.release();
   controller.show(); controller.moveTop(); controller.focus();
 }
 
@@ -441,6 +442,7 @@ async function act(action, args = {}) {
     case 'show-output': if (stage.active !== null) { controller.hide(); output.show(); output.focus(); stage.get(stage.active).view.webContents.focus(); } break;
     default: throw Error('Unknown action');
   }
+  syncClicker();
   return snapshot();
 }
 
@@ -587,8 +589,8 @@ app.whenReady().then(async () => {
     } });
   if (identityError) remoteControl.error = identityError;
   clicker = new Clicker({ shortcuts: globalShortcut, changed, send: (key, valid) => act('key', { key, valid }) });
-  controller.on('show', () => changed()); controller.on('hide', () => changed());
-  preparation.on('show', () => changed()); preparation.on('hide', () => changed());
+  controller.on('show', () => { clicker.release(); setImmediate(() => changed()); }); controller.on('hide', () => changed());
+  preparation.on('show', () => { clicker.release(); setImmediate(() => changed()); }); preparation.on('hide', () => changed());
   stage.layout();
   preparation.setPosition(...output.getPosition());
   if (!globalShortcut.register(controlShortcut, toggleControls)) {
@@ -669,7 +671,8 @@ app.on('second-instance', () => {
   if (controller && !controller.isDestroyed()) {
     app.focus({ steal: true });
     if (controller.isMinimized()) controller.restore();
-    controller.show(); controller.moveTop(); controller.focus();
+    clicker?.release();
+  controller.show(); controller.moveTop(); controller.focus();
   }
 });
 app.on('before-quit', event => {
