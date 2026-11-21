@@ -246,6 +246,57 @@ def test_clearer_validator_does_not_rewrite_dispatched_repair_input(tmp_path):
     assert files=={p.name:p.read_bytes() for p in tmp_path.glob('*.json')}
 
 
+def test_repair_remembers_repeated_findings_without_repeating_prior_answers(tmp_path):
+    from backend.pipeline.viewpoint_route_validation_repair import validate_changes, read_validated_changes, HISTORY
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    from backend.pipeline.viewpoint_route_decision_rubric import MARKER as RUBRIC
+    packet={'baseline':'original evidence'}
+    def answer(p,n):
+        history=p[HISTORY]
+        assert p[RUBRIC]['schema_version']=='wang_route_decision_rubric_v1'
+        if n==2:
+            assert history['repeated_findings']==['unknown evidence pair E022/F1']
+            assert len(history['prior_attempts'])==1
+            assert 'prior_invalid_response' not in json.dumps(history)
+            assert history['prior_attempts'][0]['response_sha256']
+        return {'fixed':n==2,'explanation':f'attempt {n}'}
+    pc=Client(answer);prop=proposer(pc);cache=tmp_path/'raw.json'
+    # Keep a real initial provider envelope, then use the normal repair path.
+    initial=Client(lambda p,n:{'fixed':False,'explanation':'initial'})
+    raw,_,_=call_model(proposer(initial),packet,cache)
+    def validate(raw):
+        if not raw['fixed']:raise ValueError('unknown evidence pair E022/F1')
+        return raw
+    state={'used':0,'attempts':[]}
+    fixed,_=validate_changes(raw,validate=validate,adapter=prop,packet=packet,cache=cache,state=state,max_repairs=2)
+    assert fixed['fixed'] and state['used']==2
+    assert read_validated_changes(prop,packet,cache)[0]==fixed
+    assert len(pc.packets)==2
+    # Tampering with even non-content failure history invalidates authentication.
+    request=tmp_path/'raw-validation-001-packet.json';value=json.loads(request.read_text())
+    value[HISTORY]['repeated_findings']=[];request.write_text(json.dumps(value))
+    with pytest.raises(ValueError,match='repair input changed'):
+        read_validated_changes(prop,packet,cache)
+
+
+def test_old_repair_without_history_or_rubric_does_not_acquire_new_input(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_route_validation_repair as repair
+    from backend.pipeline import viewpoint_route_decision_rubric as rubric
+    pc=Client(lambda p,n:{'fixed':True});prop=proposer(pc)
+    args=dict(raw={'fixed':False},adapter=prop,packet={'baseline':'same'},cache=tmp_path/'raw.json',max_repairs=1)
+    def validate(raw):
+        if not raw['fixed']:raise ValueError('old failure')
+        return raw
+    with monkeypatch.context() as m:
+        m.setattr(repair,'with_validation_history',lambda packet,*args:packet)
+        m.setattr(rubric,'with_decision_rubric',lambda packet:packet)
+        repair.validate_changes(**args,validate=validate,state={'used':0,'attempts':[]})
+    before={p.name:p.read_bytes() for p in tmp_path.glob('*.json')}
+    repair.validate_changes(**args,validate=validate,state={'used':0,'attempts':[]})
+    assert len(pc.packets)==1
+    assert before=={p.name:p.read_bytes() for p in tmp_path.glob('*.json')}
+
+
 def test_semantic_disagreement_does_not_trigger_program_repairs(tmp_path):
     pc=Client(lambda p,n:initial_edits(p))
     def review(p):
