@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 from backend.pipeline import argument_fidelity as af
+from backend.pipeline.argument_review_binding import bind_report, require_binding, require_unchanged
 
 SHAPE_RISK = 0.3
 JUDGE_BATCH = 6
@@ -140,12 +141,16 @@ def main():
         return
     if not a.candidate:
         raise SystemExit('--candidate is required')
-    items = rows(json.loads(Path(a.candidate).read_text()))
+    candidate_path = Path(a.candidate)
+    candidate_raw = candidate_path.read_bytes()
+    items = rows(json.loads(candidate_raw))
     if a.prefilter == a.judge:
         raise SystemExit('give exactly one of --prefilter and --judge')
     if a.prefilter:
         client = CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='medium', max_output_tokens=16000)
         report = prefilter_report(items, prefilter(items, out, Models(client, out)))
+        require_unchanged(candidate_path, candidate_raw)
+        report = bind_report(report, candidate_raw, items)
         out.mkdir(parents=True, exist_ok=True)
         (out / 'prefilter.json').write_text(json.dumps(report, ensure_ascii=False, indent=1))
         print(json.dumps({'claims': report['claims'], 'to_judge': len(report['needs_look'])}, ensure_ascii=False))
@@ -155,10 +160,12 @@ def main():
         raise SystemExit(f'{final} exists; it may hold the owner\'s rulings, not overwritten')
     from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
     pre = json.loads((out / 'prefilter.json').read_text())
+    require_binding(pre, candidate_raw, items, label='story')
     asked = {l['id'] for l in pre['needs_look']}
     client = ClaudeSubscriptionClient(model=af.JUDGE_MODEL, reasoning_effort='high')
     todo = [r for r in items if r['job_id'] in asked]
     report = judged_report(pre, items, judge(todo, out, client) if todo else {})
+    require_unchanged(candidate_path, candidate_raw)
     final.write_text(json.dumps(report, ensure_ascii=False, indent=1))
     print(json.dumps({'looks': len(asked), 'his_own': len(report['needs_look']), 'to_owner': len(report['findings'])}, ensure_ascii=False))
 

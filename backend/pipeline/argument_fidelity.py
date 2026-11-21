@@ -23,6 +23,8 @@ import argparse
 import json
 from pathlib import Path
 
+from backend.pipeline.argument_review_binding import bind_report, require_binding, require_unchanged
+
 RULE = ('他是口語講課，這不是法律條文：措辭、語氣、詳略、次序不同都不算。'
         '只問一件事：這句話有沒有改變他的判斷（說成相反、說得比他確定或更廣、換了對象），'
         '或加上一個他沒有說的判斷、理由或結論。引述別人的看法時，照實寫成別人的看法也不算改變。')
@@ -247,7 +249,9 @@ def main():
                    help="after --prefilter: Claude judges its looks; writes fidelity-final.json, findings left for the owner")
     a = p.parse_args()
     load_dotenv('.env')
-    candidate = json.loads(Path(a.candidate).read_text())
+    candidate_path = Path(a.candidate)
+    candidate_raw = candidate_path.read_bytes()
+    candidate = json.loads(candidate_raw)
     if a.judge:
         from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
         out = Path(a.out)
@@ -255,12 +259,15 @@ def main():
         if final.exists():
             raise SystemExit(f'{final} exists; it may hold owner rulings')
         pre = json.loads((out / 'prefilter.json').read_text())
+        all_rows = records(candidate)
+        require_binding(pre, candidate_raw, all_rows, label='fidelity')
         wanted = {look['id'] for look in pre['needs_look']}
-        rows = [r for r in records(candidate) if r['job_id'] in wanted]
+        rows = [r for r in all_rows if r['job_id'] in wanted]
         if {r['job_id'] for r in rows} != wanted:
             raise SystemExit('prefilter.json names records this candidate does not have')
         client = ClaudeSubscriptionClient(model=JUDGE_MODEL, reasoning_effort='high')
         result = judged_report(pre, rows, judge(rows, out, client))
+        require_unchanged(candidate_path, candidate_raw)
         final.write_text(json.dumps(result, ensure_ascii=False, indent=1))
         print(json.dumps({'looks': len(wanted), 'faithful': len(result['needs_look']),
                           'to_owner': [f['id'] for f in result['findings']]}, ensure_ascii=False))
@@ -276,6 +283,8 @@ def main():
     if a.prefilter:
         rows = records(candidate)
         result = prefilter_report(rows, prefilter(rows, a.out, ports))
+        require_unchanged(candidate_path, candidate_raw)
+        result = bind_report(result, candidate_raw, rows)
         result['usage'] = usage(a.out)
         Path(a.out).mkdir(parents=True, exist_ok=True)
         (Path(a.out) / 'prefilter.json').write_text(json.dumps(result, ensure_ascii=False, indent=1))
@@ -286,6 +295,9 @@ def main():
         earlier = json.loads(Path(a.recheck).read_text())
         only = {f['id'] for f in earlier['findings'] + earlier['needs_look']}
     result = check(candidate, a.out, ports, jev=not a.no_jev, only=only)
+    checked = [r for r in records(candidate) if only is None or r['job_id'] in only]
+    require_unchanged(candidate_path, candidate_raw)
+    result = bind_report(result, candidate_raw, checked)
     result['usage'] = usage(a.out)
     Path(a.out).mkdir(parents=True, exist_ok=True)
     (Path(a.out) / ('fidelity-recheck.json' if a.recheck else 'fidelity.json')).write_text(json.dumps(result, ensure_ascii=False, indent=1))
